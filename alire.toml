@@ -1,0 +1,10 @@
+name = "gnatevl"
+description = "Event-loop processes for the GNAT Ada runtime"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+website = ""
+tags = ["ada", "runtime", "event-loop", "concurrency"]

@@ -1,0 +1,344 @@
+--- a/s-taprop.adb
++++ b/s-taprop.adb
+@@ -43,0 +44 @@
++with System.Gnatevl.Scheduler;
+@@ -201,6 +201,9 @@
+   function To_Address is
+      new Ada.Unchecked_Conversion (Task_Id, System.Address);
+
++   function To_Task_Id is
++     new Ada.Unchecked_Conversion (System.Address, Task_Id);
++
+    function GNAT_pthread_condattr_setup
+      (attr : access pthread_condattr_t) return Interfaces.C.int;
+@@ -206,6 +209,54 @@
+   pragma Import (C,
+      GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
+
++   function Event_Initialize (Environment : System.Address)
++     return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Initialize;
++
++   function Event_Create
++     (T          : System.Address;
++      Stack_Size : Interfaces.C.size_t;
++      Priority   : Interfaces.C.int;
++      Wrapper    : System.Address) return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Create;
++
++   function Event_Is_Task (T : System.Address) return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Is_Event_Task;
++
++   function Event_Current return System.Address
++     renames System.Gnatevl.Scheduler.Current_Task;
++
++   function Event_Sleep
++     (Task_Lock : System.Address;
++      Deadline  : Duration;
++      Timed_Out : access Interfaces.C.int) return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Sleep;
++
++   function Event_Wake (T : System.Address) return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Wake;
++
++   function Event_Yield return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Yield;
++
++   function Event_Set_Priority
++     (T : System.Address; Priority : Interfaces.C.int)
++      return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Set_Priority;
++
++   function Event_Destroy (T : System.Address) return Interfaces.C.int
++     renames System.Gnatevl.Scheduler.Destroy;
++
++   function Is_Event_Task (T : Task_Id) return Boolean is
++     (Event_Is_Task (To_Address (T)) /= 0);
++
++   function Event_Deadline
++     (Time : Duration; Mode : ST.Delay_Modes) return Duration;
++
+    procedure Initialize_Lock
+@@ -276,29 +327,36 @@
+   procedure Stack_Guard (T : ST.Task_Id; On : Boolean) is
+-      Stack_Base : constant Address := Get_Stack_Base (T.Common.LL.Thread);
+-      Page_Size  : Address;
+-      Res        : Interfaces.C.int;
+-
+    begin
+-      if Stack_Base_Available then
++      --  Evented stacks are allocated with guard pages by GNATEVL.
++      if Is_Event_Task (T) then
++         return;
++      end if;
++
++      if Stack_Base_Available then
++         declare
++            Stack_Base : constant Address :=
++              Get_Stack_Base (T.Common.LL.Thread);
++            Page_Size  : Address;
++            Res        : Interfaces.C.int;
++         begin
+
+-         --  Compute the guard page address
++            --  Compute the guard page address
+
+-         Page_Size := Address (Get_Page_Size);
+-         Res :=
+-           mprotect
+-             (Stack_Base - (Stack_Base mod Page_Size) + Page_Size,
+-              Interfaces.C.size_t (Page_Size),
+-              prot => (if On then PROT_ON else PROT_OFF));
+-         pragma Assert (Res = 0);
++            Page_Size := Address (Get_Page_Size);
++            Res :=
++              mprotect
++                (Stack_Base - (Stack_Base mod Page_Size) + Page_Size,
++                 Interfaces.C.size_t (Page_Size),
++                 prot => (if On then PROT_ON else PROT_OFF));
++            pragma Assert (Res = 0);
++         end;
+       end if;
+    end Stack_Guard;
+@@ -300,7 +358,11 @@
+   function Get_Thread_Id (T : ST.Task_Id) return OSI.Thread_Id is
+    begin
+-      return T.Common.LL.Thread;
++      return
++        (if Is_Event_Task (T)
++         then Environment_Task_Id.Common.LL.Thread
++         else T.Common.LL.Thread);
+    end Get_Thread_Id;
+@@ -305,10 +367,17 @@
+    ----------
+    -- Self --
+    ----------
+
+-   function Self return Task_Id renames Specific.Self;
++   function Self return Task_Id is
++      Event_Self : constant System.Address := Event_Current;
++   begin
++      return
++        (if Event_Self = System.Null_Address
++         then Specific.Self
++         else To_Task_Id (Event_Self));
++   end Self;
+
+    ---------------------
+@@ -484,22 +553,31 @@
+   procedure Sleep
+      (Self_ID : Task_Id;
+       Reason  : System.Tasking.Task_States)
+    is
+       pragma Unreferenced (Reason);
+
+       Result : Interfaces.C.int;
++      Ignored : aliased Interfaces.C.int;
+
+    begin
+-      Result :=
+-        pthread_cond_wait
+-          (cond  => Self_ID.Common.LL.CV'Access,
+-           mutex => Self_ID.Common.LL.L'Access);
++      if Is_Event_Task (Self_ID) then
++         Result :=
++           Event_Sleep
++             (Self_ID.Common.LL.L'Address,
++              -1.0,
++              Ignored'Access);
++      else
++         Result :=
++           pthread_cond_wait
++             (cond  => Self_ID.Common.LL.CV'Access,
++              mutex => Self_ID.Common.LL.L'Access);
++      end if;
+
+       --  EINTR is not considered a failure
+@@ -511,14 +589,34 @@
+-   procedure Timed_Sleep
+-     (Self_ID  : Task_Id;
+-      Time     : Duration;
+-      Mode     : ST.Delay_Modes;
+-      Reason   : Task_States;
+-      Timedout : out Boolean;
+-      Yielded  : out Boolean) renames Monotonic.Timed_Sleep;
++   procedure Timed_Sleep
++     (Self_ID  : Task_Id;
++      Time     : Duration;
++      Mode     : ST.Delay_Modes;
++      Reason   : Task_States;
++      Timedout : out Boolean;
++      Yielded  : out Boolean)
++   is
++      Result       : Interfaces.C.int;
++      Event_Result : aliased Interfaces.C.int;
++   begin
++      if not Is_Event_Task (Self_ID) then
++         Monotonic.Timed_Sleep
++           (Self_ID, Time, Mode, Reason, Timedout, Yielded);
++         return;
++      end if;
++
++      Result :=
++        Event_Sleep
++          (Self_ID.Common.LL.L'Address,
++           Event_Deadline (Time, Mode),
++           Event_Result'Access);
++      pragma Assert (Result = 0);
++      Timedout := Event_Result /= 0;
++      Yielded := False;
++   end Timed_Sleep;
+@@ -526,10 +624,74 @@
+-   procedure Timed_Delay
+-     (Self_ID : Task_Id;
+-      Time    : Duration;
+-      Mode    : ST.Delay_Modes) renames Monotonic.Timed_Delay;
++   procedure Timed_Delay
++     (Self_ID : Task_Id;
++      Time    : Duration;
++      Mode    : ST.Delay_Modes)
++   is
++      Deadline     : Duration;
++      Event_Result : aliased Interfaces.C.int;
++      Result       : Interfaces.C.int;
++   begin
++      if not Is_Event_Task (Self_ID) then
++         Monotonic.Timed_Delay (Self_ID, Time, Mode);
++         return;
++      end if;
++
++      Write_Lock (Self_ID);
++      Deadline := Event_Deadline (Time, Mode);
++
++      if Deadline > Monotonic.Monotonic_Clock then
++         Self_ID.Common.State := Delay_Sleep;
++         loop
++            Result :=
++              Event_Sleep
++                (Self_ID.Common.LL.L'Address,
++                 Deadline,
++                 Event_Result'Access);
++            pragma Assert (Result = 0);
++            exit when Event_Result /= 0
++              or else Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
++         end loop;
++         Self_ID.Common.State := Runnable;
++      end if;
++
++      Unlock (Self_ID);
++      Result := Event_Yield;
++      pragma Assert (Result = 0);
++   end Timed_Delay;
++
++   function Event_Deadline
++     (Time : Duration; Mode : ST.Delay_Modes) return Duration
++   is
++      Now : constant Duration := Monotonic.Monotonic_Clock;
++   begin
++      if Mode = Relative then
++         return Duration'Min (Time, Max_Sensible_Delay) + Now;
++         pragma Warnings (Off);
++      elsif Mode = Absolute_RT
++        or else OSC.CLOCK_RT_Ada = OSC.CLOCK_REALTIME
++      then
++         pragma Warnings (On);
++         return Duration'Min (Now + Max_Sensible_Delay, Time);
++      else
++         return Duration'Min
++           (Now + Max_Sensible_Delay,
++            Time + Now - OS_Primitives.Clock);
++      end if;
++   end Event_Deadline;
+@@ -547,11 +709,15 @@
+   procedure Wakeup (T : Task_Id; Reason : System.Tasking.Task_States) is
+       pragma Unreferenced (Reason);
+       Result : Interfaces.C.int;
+    begin
+-      Result := pthread_cond_signal (T.Common.LL.CV'Access);
++      if Is_Event_Task (T) then
++         Result := Event_Wake (To_Address (T));
++      else
++         Result := pthread_cond_signal (T.Common.LL.CV'Access);
++      end if;
+       pragma Assert (Result = 0);
+    end Wakeup;
+@@ -559,11 +725,15 @@
+   procedure Yield (Do_Yield : Boolean := True) is
+       Result : Interfaces.C.int;
+       pragma Unreferenced (Result);
+    begin
+       if Do_Yield then
+-         Result := sched_yield;
++         if Event_Current /= System.Null_Address then
++            Result := Event_Yield;
++         else
++            Result := sched_yield;
++         end if;
+       end if;
+    end Yield;
+@@ -590,6 +760,16 @@
+   begin
+       T.Common.Current_Priority := Prio;
++
++      if Is_Event_Task (T) then
++         Result :=
++           Event_Set_Priority
++             (To_Address (T), Interfaces.C.int (Prio));
++         pragma Assert (Result = 0);
++         return;
++      end if;
++
+       Param.sched_priority := To_Target_Priority (Prio);
+@@ -654,7 +834,8 @@
+-   function Is_Valid_Task return Boolean renames Specific.Is_Valid_Task;
++   function Is_Valid_Task return Boolean is
++     (Event_Current /= System.Null_Address or else Specific.Is_Valid_Task);
+@@ -772,6 +953,18 @@
+   begin
++      if T.Common.Task_Info /= System.Task_Info.System_Scope then
++         Result :=
++           Event_Create
++             (To_Address (T),
++              Interfaces.C.size_t (Stack_Size + Alternate_Stack_Size),
++              Interfaces.C.int (Priority),
++              Wrapper);
++         Succeeded := Result = 0;
++         return;
++      end if;
++
+       Adjusted_Stack_Size :=
+          Interfaces.C.size_t (Stack_Size + Alternate_Stack_Size);
+@@ -863,6 +1056,11 @@
+   procedure Finalize_TCB (T : Task_Id) is
+       Result : Interfaces.C.int;
+
+    begin
++      if Is_Event_Task (T) then
++         Result := Event_Destroy (To_Address (T));
++         pragma Assert (Result = 0);
++      end if;
++
+       Result := pthread_mutex_destroy (T.Common.LL.L'Access);
+@@ -896,7 +1094,11 @@
+   procedure Abort_Task (T : Task_Id) is
+       Result : Interfaces.C.int;
+    begin
+-      if Abort_Handler_Installed then
++      if Is_Event_Task (T) then
++         Result := Event_Wake (To_Address (T));
++         pragma Assert (Result = 0);
++      elsif Abort_Handler_Installed then
+          Result :=
+            pthread_kill
+@@ -1071,6 +1273,9 @@
+      Enter_Task (Environment_Task);
++
++      Result := Event_Initialize (To_Address (Environment_Task));
++      pragma Assert (Result = 0);
++      Result :=
++        Event_Set_Priority
++          (To_Address (Environment_Task),
++           Interfaces.C.int (Environment_Task.Common.Current_Priority));
++      pragma Assert (Result = 0);
+
+       if State

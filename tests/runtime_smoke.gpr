@@ -1,0 +1,15 @@
+with "../gnatevl.gpr";
+
+project Runtime_Smoke is
+   for Languages use ("Ada");
+   for Source_Dirs use (".");
+   for Object_Dir use "obj/runtime_smoke";
+   for Exec_Dir use "bin";
+   for Main use ("runtime_smoke.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa");
+   end Compiler;
+end Runtime_Smoke;
