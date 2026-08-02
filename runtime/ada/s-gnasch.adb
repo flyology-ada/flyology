@@ -105,6 +105,7 @@ package body System.Gnatevl.Scheduler is
       Destroy_Requested : Boolean := False;
       Reaping     : Boolean := False;
       Can_Migrate : Boolean := True;
+      Thread_Pin_Count : Natural := 0;
       Group      : Loop_Group_Access;
       Migration_Target : Loop_Group_Access;
       Reserved_Group : Loop_Group_Access;
@@ -1264,6 +1265,16 @@ package body System.Gnatevl.Scheduler is
          return 0;
       end if;
 
+      --  Reject before lazily creating the destination. Only this fiber can
+      --  change its pin count, and it cannot run concurrently with this call.
+      Lock_Group (Source);
+      Item := Source.Current_Fiber;
+      if Item = null or else Item.Thread_Pin_Count /= 0 then
+         Unlock_Group (Source);
+         return -1;
+      end if;
+      Unlock_Group (Source);
+
       if Scheduling.Shared_Group (Group) then
          Target := Ensure_Group (Group, Dedicated => False);
       else
@@ -1289,6 +1300,7 @@ package body System.Gnatevl.Scheduler is
       if Item = null
         or else Item.Group /= Source
         or else Find (Current) /= Item
+        or else Item.Thread_Pin_Count /= 0
         or else
           not Scheduling.Migration_Allowed
             (Can_Migrate         => Item.Can_Migrate,
@@ -1311,6 +1323,100 @@ package body System.Gnatevl.Scheduler is
       Contexts.Switch (Item.Context, Source.Scheduler_Context);
       return 0;
    end Migrate;
+
+   function Pin_Current_Thread
+     (Owner : access System.Address) return C.int
+   is
+      Group : constant Loop_Group_Access := Thread_Group;
+      Item  : Fiber_Access;
+      Current : constant System.Address := Current_Task;
+   begin
+      if Owner = null then
+         return -1;
+      end if;
+      Owner.all := Current;
+
+      --  Native tasks are already permanently tied to their pthread. Treat
+      --  pinning as a successful no-op so code that calls foreign libraries
+      --  does not need a lane-specific branch.
+      if Current = System.Null_Address then
+         return 0;
+      end if;
+
+      Lock_Group (Group);
+      Item := Group.Current_Fiber;
+      if Item = null
+        or else Item.Group /= Group
+        or else Item.Thread_Pin_Count = Natural'Last
+      then
+         Unlock_Group (Group);
+         return -1;
+      end if;
+      Item.Thread_Pin_Count := Item.Thread_Pin_Count + 1;
+      Unlock_Group (Group);
+      return 0;
+   exception
+      when others =>
+         Fatal;
+   end Pin_Current_Thread;
+
+   function Unpin_Current_Thread
+     (Owner : System.Address) return C.int
+   is
+      Group : constant Loop_Group_Access := Thread_Group;
+      Item  : Fiber_Access;
+   begin
+      if Owner = System.Null_Address then
+         return 0;
+      elsif Current_Task /= Owner then
+         --  A scoped pin belongs to the Ada task that acquired it. Reject a
+         --  guard transferred to and finalized by another task instead of
+         --  accidentally decrementing that task's pin count.
+         return -1;
+      end if;
+
+      Lock_Group (Group);
+      Item := Group.Current_Fiber;
+      if Item = null
+        or else Item.Group /= Group
+        or else Item.Thread_Pin_Count = 0
+      then
+         Unlock_Group (Group);
+         return -1;
+      end if;
+      Item.Thread_Pin_Count := Item.Thread_Pin_Count - 1;
+      Unlock_Group (Group);
+      return 0;
+   exception
+      when others =>
+         Fatal;
+   end Unpin_Current_Thread;
+
+   function Current_Thread_Is_Pinned return C.int is
+      Group  : constant Loop_Group_Access := Thread_Group;
+      Item   : Fiber_Access;
+      Result : C.int;
+   begin
+      --  A native task cannot migrate, so its pthread identity is inherently
+      --  stable even though it has no scheduler pin counter.
+      if Current_Task = System.Null_Address then
+         return 1;
+      end if;
+
+      Lock_Group (Group);
+      Item := Group.Current_Fiber;
+      Result :=
+        (if Item /= null
+           and then Item.Group = Group
+           and then Item.Thread_Pin_Count /= 0
+         then 1
+         else 0);
+      Unlock_Group (Group);
+      return Result;
+   exception
+      when others =>
+         Fatal;
+   end Current_Thread_Is_Pinned;
 
    function In_Event_Task return C.int is
      (if Current_Task = System.Null_Address then 0 else 1);

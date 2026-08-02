@@ -113,6 +113,35 @@ identity, its stack, locals, exception state, master, or rendezvous semantics.
 The source scheduler performs the actual handoff only after the fiber has fully
 switched away, so two loops can never restore one context concurrently.
 
+Ada task identity is not OS-thread identity. Evented tasks in one group share
+that group's pthread and therefore also share C `pthread_key` values, signal
+masks, per-thread foreign-library caches, locale state, and other pthread-local
+state. A yield stays on the same group pthread, but migration changes all of
+that thread-local context even though the Ada task itself is unchanged.
+
+Code holding a thread-affine foreign resource can prevent that change with a
+scoped pin:
+
+```ada
+declare
+   Pin : Groups.Thread_Pin := Groups.Pin_To_Current_Thread;
+begin
+   Use_Thread_Affine_Handle;
+   --  A Groups.Migrate call to another group raises Migration_Error here.
+end; -- Pin is deterministically released, including during exception cleanup
+```
+
+Pins nest safely, and migration remains disabled until the outermost pin is
+finalized. A pin is owned by the Ada task that acquired it and must be finalized
+by that same task; the intended use is a task-local lexical scope as above. A
+pin stabilizes the event-loop pthread; it does not give the task exclusive use
+of that pthread, so unrelated fibers in the group still share its pthread-local
+state. Use a dedicated group as well when a foreign resource requires both
+stable identity and exclusive access. Native tasks accept the same API as an
+inherent no-op because GNARL already fixes each native task to its own pthread.
+`Is_Thread_Pinned` reports both explicit evented pins and this inherent native
+binding.
+
 A dedicated group is a reusable event loop reserved for one fiber. Operationally
 it gives that task an OS thread to itself, which is the safe live transition for
 temporarily blocking foreign work. A stock `Native_Thread` task remains fixed at
@@ -550,6 +579,9 @@ Current smoke coverage includes:
 
 - `CPU`-selected shared groups, same-group thread identity, cross-group live
   migration, reusable dedicated lanes, and native-task migration rejection;
+- real C pthread-local state shared by same-loop fibers and changed by
+  cross-group migration, plus nested scoped pinning, exception cleanup,
+  dedicated-group stability, and native pthread identity;
 - evented and native task activation, rendezvous, protected operations, and
   timers;
 - evented/native socket-pair transfer, simultaneous read/write watches on one
@@ -689,6 +721,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - A group identifies a stable loop pthread but is not currently hard-pinned to
   a physical core. Darwin lacks a public strict pinning API; Linux affinity can
   be added as an explicit policy.
+- Evented tasks in a group share pthread-local state. Scoped
+  `Gnatevl.Execution_Groups.Thread_Pin` objects prevent migration but do not
+  isolate that state from other tasks in the same group; use a dedicated group
+  when exclusive pthread-local ownership is required.
 - All loops, including group 0, are created lazily; each group's pthread and
   poller (`kqueue` or `epoll`) remain alive for the process lifetime. The table
   is bounded to 256 groups, and vacated dedicated loops are reserved and reused

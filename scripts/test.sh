@@ -51,6 +51,7 @@ for test_main in \
   ready_queue_smoke \
   runtime_smoke \
   stack_size_parity_smoke \
+  thread_affinity_smoke \
   timer_heap_smoke \
   tcp_native_smoke
 do

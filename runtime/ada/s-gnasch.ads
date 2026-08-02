@@ -38,6 +38,22 @@ package System.Gnatevl.Scheduler is
    function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, Migrate, "gnatevl_runtime_migrate");
 
+   function Pin_Current_Thread
+     (Owner : access System.Address) return Interfaces.C.int;
+   pragma Export
+     (C, Pin_Current_Thread, "gnatevl_runtime_pin_current_thread");
+
+   function Unpin_Current_Thread
+     (Owner : System.Address) return Interfaces.C.int;
+   pragma Export
+     (C, Unpin_Current_Thread, "gnatevl_runtime_unpin_current_thread");
+
+   function Current_Thread_Is_Pinned return Interfaces.C.int;
+   pragma Export
+     (C,
+      Current_Thread_Is_Pinned,
+      "gnatevl_runtime_current_thread_is_pinned");
+
    function Create_Dedicated_Group return Interfaces.C.int;
    pragma Export
      (C, Create_Dedicated_Group, "gnatevl_runtime_create_dedicated_group");
