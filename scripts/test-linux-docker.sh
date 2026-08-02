@@ -18,6 +18,39 @@ case "${FLYOLOGY_LINUX_ARCH:-$(uname -m)}" in
     ;;
 esac
 image=${FLYOLOGY_LINUX_IMAGE:-flyology-linux-test-$linux_arch}
+keep_image=${FLYOLOGY_KEEP_LINUX_IMAGE:-0}
+case "$keep_image" in
+  0|1)
+    ;;
+  *)
+    printf '%s\n' "FLYOLOGY_KEEP_LINUX_IMAGE must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+
+image_built=0
+cleanup_image() {
+  exit_status=$?
+  trap - EXIT
+
+  if [ "$image_built" -eq 1 ]; then
+    if [ "$keep_image" -eq 1 ]; then
+      printf 'Retaining Docker test image %s\n' "$image"
+    else
+      printf 'Removing Docker test image %s\n' "$image"
+      if ! docker image rm "$image" >/dev/null; then
+        printf 'warning: could not remove Docker test image %s\n' \
+          "$image" >&2
+      fi
+    fi
+  fi
+
+  exit "$exit_status"
+}
+trap cleanup_image EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 docker build \
   --platform "linux/$linux_arch" \
@@ -26,6 +59,7 @@ docker build \
   -f "$project_root/docker/linux/Dockerfile" \
   -t "$image" \
   "$project_root"
+image_built=1
 
 docker run --rm \
   --platform "linux/$linux_arch" \

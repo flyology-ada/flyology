@@ -1218,8 +1218,9 @@ denies `io_uring_setup` at the C bridge and asserts that a real lightweight file
 operation selected Linux native AIO. `FLYOLOGY_LINUX_ARCH=amd64` requests the
 x86-64 compatibility target explicitly; `FLYOLOGY_GNAT_VERSION` and
 `FLYOLOGY_GPRBUILD_VERSION` select another pair, and `FLYOLOGY_LINUX_IMAGE`
-overrides its local image name. To run every Alire release covered by the patch
-family:
+overrides its local image name. The script removes its test image when the run
+finishes, including after a test failure. Set `FLYOLOGY_KEEP_LINUX_IMAGE=1` to
+retain it for inspection. To run every Alire release covered by the patch family:
 
 ```sh
 ./scripts/test-alire-runtime-matrix.sh
