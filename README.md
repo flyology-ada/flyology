@@ -1560,3 +1560,20 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   rendezvous inheritance/loss ordering, but not full Real-Time Systems Annex
   dispatching, kernel-lock priority inheritance, or ceiling-violation
   conformance across OS schedulers.
+
+## License
+
+Original Flyology code in `src/`, `runtime/ada/`, `runtime/platform/`,
+`runtime/native/`, `tests/`, `showcases/`, `scripts/`, and `proof/` is
+available under either the MIT License or the Apache License 2.0, at your
+option. See `LICENSE-MIT` and `LICENSE-APACHE`.
+
+Files in `runtime/patches/` contain context derived from GNAT runtime sources.
+They are licensed under GPL-3.0-or-later with the GCC Runtime Library Exception
+3.1; see `runtime/patches/LICENSE`. `prepare-rts.sh` copies runtime sources from
+the user's installed GNAT toolchain at build time. Those complete sources are
+not part of this repository.
+
+Unless stated otherwise, contributions to the original-code portions are
+submitted under both MIT and Apache-2.0. Contributions to `runtime/patches/`
+are submitted under that directory's license.
