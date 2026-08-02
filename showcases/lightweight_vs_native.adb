@@ -1,6 +1,7 @@
 with Ada.Real_Time;
 with Ada.Text_IO;
 with Flyology;
+with Showcase_Support;
 
 procedure Lightweight_Vs_Native is
    use Ada.Real_Time;
@@ -43,12 +44,17 @@ procedure Lightweight_Vs_Native is
       Put_Line
         ("  pthreads:   " & Native_Elapsed'Image & " s");
       Put_Line
-        ("  native/event-loop time ratio:" & Ratio'Image & "x");
+        ("  native/event-loop time ratio: "
+         & Showcase_Support.Fixed_Image (Ratio, Decimals => 2) & "x");
       if Ratio >= 1.0 then
-         Put_Line ("  result: event loop is" & Ratio'Image & "x faster");
+         Put_Line
+           ("  result: event loop is "
+            & Showcase_Support.Fixed_Image (Ratio, Decimals => 2)
+            & "x faster");
       else
          Put_Line
-           ("  result: pthreads are" & Long_Float'Image (1.0 / Ratio)
+           ("  result: pthreads are "
+            & Showcase_Support.Fixed_Image (1.0 / Ratio, Decimals => 2)
             & "x faster");
       end if;
    end Report;
