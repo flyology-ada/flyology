@@ -51,6 +51,12 @@ then
   printf '%s\n' "unknown event-loop placement policy was accepted" >&2
   exit 1
 fi
+if GNATEVL_SANITIZER=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown sanitizer configuration was accepted" >&2
+  exit 1
+fi
 
 for test_main in \
   cancellation_wake_smoke \

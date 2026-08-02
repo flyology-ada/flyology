@@ -16,6 +16,7 @@ execution_default=${GNATEVL_DEFAULT:-native}
 loop_pool_size=${GNATEVL_LOOP_POOL_SIZE:-1}
 placement_policy=${GNATEVL_PLACEMENT:-round_robin}
 test_faults=${GNATEVL_TEST_FAULTS:-0}
+sanitizer=${GNATEVL_SANITIZER:-none}
 
 case "$execution_default" in
   native|evented) ;;
@@ -64,6 +65,20 @@ case "$test_faults" in
   *)
     printf '%s\n' \
       "GNATEVL_TEST_FAULTS must be '0' or '1', got: $test_faults" >&2
+    exit 1
+    ;;
+esac
+
+case "$sanitizer" in
+  none)
+    sanitizer_config=disabled
+    ;;
+  address)
+    sanitizer_config=enabled
+    ;;
+  *)
+    printf '%s\n' \
+      "GNATEVL_SANITIZER must be 'none' or 'address', got: $sanitizer" >&2
     exit 1
     ;;
 esac
@@ -126,6 +141,8 @@ sed \
   >"$generated_include/s-gnpoco.ads"
 cp "$project_root/runtime/config/faults/$fault_config"/s-gnafau.ad? \
   "$generated_include/"
+cp "$project_root/runtime/config/sanitizers/$sanitizer_config"/s-gnaasa.ad? \
+  "$generated_include/"
 
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
@@ -151,6 +168,7 @@ fi
   "$generated_include/s-gnpoco.ads" \
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \
+  "$generated_include/s-gnaasa.adb" \
   "$generated_include/s-gnafau.adb" \
   "$generated_include/s-gnfien.adb" \
   "$generated_include/s-gnapol.adb" \
@@ -161,6 +179,7 @@ fi
 
 cp \
   s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnatev.ali s-gnacon.ali \
+  s-gnaasa.ali \
   s-gnafau.ali s-gnfien.ali s-gnapol.ali \
   s-gnscpo.ali s-gnasch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
@@ -172,6 +191,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-gnpoco.o \
   s-gnatev.o \
   s-gnacon.o \
+  s-gnaasa.o \
   s-gnafau.o \
   s-gnfien.o \
   s-gnapol.o \

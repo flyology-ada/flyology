@@ -1,15 +1,21 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
+with System.Address_To_Access_Conversions;
+with System.Gnatevl.ASan;
 with System.Gnatevl.Faults;
 with System.Storage_Elements;
 
 package body System.Gnatevl.Contexts is
    package C renames Interfaces.C;
+   package ASan renames System.Gnatevl.ASan;
    package Faults renames System.Gnatevl.Faults;
    package SSE renames System.Storage_Elements;
+   package Context_Addresses is new System.Address_To_Access_Conversions
+     (Context);
 
    use type C.int;
    use type C.size_t;
+   use type Context_Addresses.Object_Pointer;
    use type SSE.Integer_Address;
    use System.Storage_Elements;
 
@@ -73,6 +79,9 @@ package body System.Gnatevl.Contexts is
    pragma Convention (C, Trampoline);
    pragma No_Return (Trampoline);
 
+   procedure Finish_Switch;
+   pragma No_Inline (Finish_Switch);
+
    procedure Set_Active_Context (Item : Context_Access) is
    begin
       --  Resolve the TLS slot on every call. A context may resume on a
@@ -80,6 +89,44 @@ package body System.Gnatevl.Contexts is
       --  Swap_Registers would write into the source thread's slot.
       Active_Context := Item;
    end Set_Active_Context;
+
+   procedure Finish_Switch is
+      Source         : Context_Addresses.Object_Pointer;
+      Source_Address : System.Address;
+      Source_Bottom  : System.Address;
+      Source_Size    : C.size_t;
+   begin
+      if ASan.Enabled then
+         --  ASan's package retains the source in pthread-local state, rather
+         --  than in the resumed context. This distinction matters when a task
+         --  resumes after a cross-group migration: the old Switch frame still
+         --  names its old scheduler, but ASan reports the new loop pthread.
+         ASan.Finish_Switch
+           (Source_Address, Source_Bottom, Source_Size);
+         Source := Context_Addresses.To_Pointer (Source_Address);
+         if Source = null then
+            raise Program_Error with
+              "GNATEVL ASan switch has no source context";
+         end if;
+         if Source_Bottom = System.Null_Address or else Source_Size = 0 then
+            raise Program_Error with
+              "GNATEVL ASan did not report the source stack";
+         end if;
+         if Source.Owns_Mapping then
+            if Source.Stack /= Source_Bottom or else Source.Size /= Source_Size
+            then
+               raise Program_Error with
+                 "GNATEVL ASan reported inconsistent task stack bounds";
+            end if;
+         else
+            --  Capture learns a scheduler pthread's native stack on the first
+            --  transfer away from it. Every later destination switch can then
+            --  provide ASan with exact scheduler-stack bounds.
+            Source.Stack := Source_Bottom;
+            Source.Size := Source_Size;
+         end if;
+      end if;
+   end Finish_Switch;
 
    function Round_Up
      (Value, Alignment : C.size_t) return C.size_t
@@ -162,8 +209,20 @@ package body System.Gnatevl.Contexts is
 
    procedure Switch (From, To : not null Context_Access) is
    begin
+      if ASan.Enabled then
+         if To.Stack = System.Null_Address or else To.Size = 0 then
+            raise Program_Error with
+              "GNATEVL ASan destination stack is unknown";
+         end if;
+         ASan.Start_Switch
+           (From.all'Address, To.Stack, To.Size);
+      end if;
       Set_Active_Context (To);
       Swap_Registers (From.Registers'Address, To.Registers'Address);
+      --  Complete ASan's pending transfer before doing work on the resumed
+      --  stack. In particular, this re-enables fake-stack allocation (though
+      --  GNATEVL intentionally does not preserve fake stacks across yields).
+      Finish_Switch;
       Set_Active_Context (From);
    end Switch;
 
@@ -196,6 +255,9 @@ package body System.Gnatevl.Contexts is
    procedure Trampoline is
       Item : constant Context_Access := Active_Context;
    begin
+      --  A fresh context does not return through Switch, so its first entry
+      --  must finish the scheduler-to-task transfer explicitly.
+      Finish_Switch;
       if Item = null or else Item.Start = System.Null_Address then
          raise Program_Error;
       end if;
