@@ -81,6 +81,7 @@ for test_main in \
   stack_size_parity_smoke \
   stall_watchdog_native_smoke \
   stall_watchdog_smoke \
+  structured_server_smoke \
   thread_affinity_smoke \
   timer_heap_smoke \
   tcp_native_smoke

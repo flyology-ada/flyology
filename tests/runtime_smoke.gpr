@@ -32,6 +32,7 @@ project Runtime_Smoke is
       "stack_size_parity_smoke.adb",
       "stall_watchdog_native_smoke.adb",
       "stall_watchdog_smoke.adb",
+      "structured_server_smoke.adb",
       "thread_affinity_smoke.adb",
       "timer_heap_smoke.adb",
       "tcp_native_smoke.adb");
