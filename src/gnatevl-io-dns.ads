@@ -1,3 +1,4 @@
+with Ada.Streams;
 with GNAT.Sockets;
 
 package Gnatevl.IO.DNS is
@@ -24,7 +25,9 @@ package Gnatevl.IO.DNS is
       Timeout     : Duration := 5.0;
       Interrupt_1 : Descriptor := Invalid_Descriptor;
       Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor) return Address_Array;
+      Interrupt_3 : Descriptor := Invalid_Descriptor;
+      Configuration_Path : String := "/etc/resolv.conf")
+      return Address_Array;
 
    --  Resolve through an explicit set of numeric DNS endpoints.  This form
    --  bypasses search-domain expansion but otherwise has identical transport,
@@ -44,5 +47,16 @@ package Gnatevl.IO.DNS is
    --  Remove all positive and negative entries. The cache is process-local,
    --  bounded, and owns no descriptors or background tasks.
    procedure Clear_Cache;
+
+private
+   --  Test-only child operations use these hooks to make transaction-ID
+   --  assertions deterministic. Production calls always use OS entropy.
+   procedure Use_Deterministic_Transaction_IDs (First : Natural);
+   procedure Use_OS_Transaction_IDs;
+   procedure Validate_Response_For_Testing
+     (Packet       : Ada.Streams.Stream_Element_Array;
+      Expected_ID  : Natural;
+      Expected_Name : String;
+      For_IPv6     : Boolean := False);
 
 end Gnatevl.IO.DNS;

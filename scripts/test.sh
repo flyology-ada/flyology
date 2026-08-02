@@ -63,6 +63,7 @@ for test_main in \
   connection_lifecycle_smoke \
   descriptor_ownership_smoke \
   dns_smoke \
+  dns_parser_smoke \
   execution_groups_smoke \
   fairness_smoke \
   files_smoke \
@@ -94,7 +95,7 @@ do
     -P tests/runtime_smoke.gpr \
     "$test_main.adb"
   case "$test_main" in
-    process_lifecycle_smoke|process_exit_live_task_smoke)
+    dns_smoke|process_lifecycle_smoke|process_exit_live_task_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$project_root/tests/bin/$test_main"
       ;;

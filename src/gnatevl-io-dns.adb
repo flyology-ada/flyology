@@ -1,26 +1,31 @@
 with Ada.Characters.Handling;
 with Ada.Real_Time;
-with Ada.Streams;
 with Ada.Strings.Fixed;
-with Ada.Text_IO;
+with Gnatevl.IO.Files;
 with Gnatevl.IO.Sockets;
 with Interfaces;
+with Interfaces.C;
+with System;
 
 package body Gnatevl.IO.DNS is
    package Sockets renames GNAT.Sockets;
    package Streams renames Ada.Streams;
    package U8 renames Interfaces;
+   package C renames Interfaces.C;
 
    use type Ada.Real_Time.Time;
    use type Descriptor;
    use type U8.Unsigned_32;
    use type Streams.Stream_Element_Offset;
+   use type Streams.Stream_Element;
    use type Sockets.Family_Type;
    use type Sockets.Socket_Type;
+   use type Gnatevl.IO.Files.File_Descriptor;
 
    Max_Name_Length      : constant := 253;
    Max_Packet_Length    : constant := 4_096;
    Max_TCP_Packet_Length : constant := 16_384;
+   Max_Config_Length     : constant := 16_384;
    Max_Name_Servers     : constant := 4;
    Max_Search_Domains   : constant := 6;
    Max_Addresses        : constant := 16;
@@ -97,7 +102,8 @@ package body Gnatevl.IO.DNS is
          Found    : out Boolean;
          Negative : out Boolean;
          Values   : out Raw_Address_Array;
-         Count    : out Natural);
+         Count    : out Natural;
+         TTL      : out Natural);
       procedure Store
         (Key      : String;
          Negative : Boolean;
@@ -116,13 +122,15 @@ package body Gnatevl.IO.DNS is
          Found    : out Boolean;
          Negative : out Boolean;
          Values   : out Raw_Address_Array;
-         Count    : out Natural)
+         Count    : out Natural;
+         TTL      : out Natural)
       is
          Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       begin
          Found := False;
          Negative := False;
          Count := 0;
+         TTL := 0;
          for Item of Entries loop
             if Item.Used
               and then Item.Key_Length = Key'Length
@@ -135,6 +143,9 @@ package body Gnatevl.IO.DNS is
                Found := True;
                Negative := Item.Negative;
                Count := Item.Count;
+               TTL := Natural'Max
+                 (1, Natural
+                    (Ada.Real_Time.To_Duration (Item.Expires - Now)));
                for Index in 1 .. Count loop
                   Values (Values'First + Index - 1) := Item.Values (Index);
                end loop;
@@ -216,18 +227,72 @@ package body Gnatevl.IO.DNS is
    end Cache;
 
    protected Transaction_IDs is
-      procedure Next (Value : out Natural);
+      procedure Next_Test (Used : out Boolean; Value : out Natural);
+      procedure Use_Deterministic (First : Natural);
+      procedure Use_OS;
    private
-      Current : Natural range 0 .. 65_535 := 16#4E41#;
+      Deterministic : Boolean := False;
+      Current       : Natural range 0 .. 65_535 := 0;
    end Transaction_IDs;
 
    protected body Transaction_IDs is
-      procedure Next (Value : out Natural) is
+      procedure Next_Test (Used : out Boolean; Value : out Natural) is
       begin
-         Current := (Current + 1) mod 65_536;
-         Value := Current;
-      end Next;
+         Used := Deterministic;
+         if Deterministic then
+            Value := Current;
+            Current := (Current + 1) mod 65_536;
+         else
+            Value := 0;
+         end if;
+      end Next_Test;
+
+      procedure Use_Deterministic (First : Natural) is
+      begin
+         Deterministic := True;
+         Current := First mod 65_536;
+      end Use_Deterministic;
+
+      procedure Use_OS is
+      begin
+         Deterministic := False;
+         Current := 0;
+      end Use_OS;
    end Transaction_IDs;
+
+   function Getentropy
+     (Buffer : System.Address; Length : C.size_t) return C.int;
+   pragma Import (C, Getentropy, "getentropy");
+
+   function Next_Transaction_ID return Natural is
+      Value : aliased Interfaces.Unsigned_16 := 0;
+      Used  : Boolean;
+      Test_Value : Natural;
+   begin
+      Transaction_IDs.Next_Test (Used, Test_Value);
+      if Used then
+         return Test_Value;
+      end if;
+      --  There is deliberately no cached PRNG state: getentropy is called for
+      --  every query, so forked children cannot repeat a parent-side stream.
+      if Getentropy
+        (Value'Address, C.size_t (Value'Size / System.Storage_Unit)) /= 0
+      then
+         raise Resolution_Failed with
+           "operating-system entropy unavailable for DNS transaction ID";
+      end if;
+      return Natural (Value);
+   end Next_Transaction_ID;
+
+   procedure Use_Deterministic_Transaction_IDs (First : Natural) is
+   begin
+      Transaction_IDs.Use_Deterministic (First);
+   end Use_Deterministic_Transaction_IDs;
+
+   procedure Use_OS_Transaction_IDs is
+   begin
+      Transaction_IDs.Use_OS;
+   end Use_OS_Transaction_IDs;
 
    protected Server_Rotation is
       procedure Next (Count : Positive; Offset : out Natural);
@@ -303,7 +368,11 @@ package body Gnatevl.IO.DNS is
          Value := Interfaces.Shift_Left (Value, 8)
            or U8.Unsigned_32 (Packet (Index));
       end loop;
-      return Natural'Min (Natural (Value), Natural'Last);
+      if Value > U8.Unsigned_32 (Natural'Last) then
+         return Natural'Last;
+      else
+         return Natural (Value);
+      end if;
    end U32_At;
 
    procedure Put_U16
@@ -652,6 +721,33 @@ package body Gnatevl.IO.DNS is
       return Result;
    end Parse_Response;
 
+   procedure Validate_Response_For_Testing
+     (Packet        : Streams.Stream_Element_Array;
+      Expected_ID   : Natural;
+      Expected_Name : String;
+      For_IPv6      : Boolean := False)
+   is
+      Parsed : Parse_Result;
+      pragma Unreferenced (Parsed);
+   begin
+      if Packet'Length = 0 then
+         raise Malformed_Response with "empty DNS response";
+      end if;
+      declare
+         Bytes : Byte_Array (0 .. Packet'Length - 1);
+      begin
+         for Index in Bytes'Range loop
+            Bytes (Index) := Byte
+              (Packet
+                 (Packet'First
+                  + Streams.Stream_Element_Offset (Index)));
+         end loop;
+         Parsed := Parse_Response
+           (Bytes, Expected_ID, To_Name (Expected_Name),
+            (if For_IPv6 then Type_AAAA else Type_A));
+      end;
+   end Validate_Response_For_Testing;
+
    function To_Public (Value : Raw_Address) return Sockets.Inet_Addr_Type is
    begin
       if Value.Family = Sockets.Family_Inet then
@@ -719,14 +815,8 @@ package body Gnatevl.IO.DNS is
      (Name : Name_Buffer; Kind : Natural; Servers : Name_Server_Array)
       return String
    is
-      type Server_Image is record
-         Length : Natural range 0 .. 96 := 0;
-         Data   : String (1 .. 96) := (others => ' ');
-      end record;
-      type Server_Image_Array is array (Positive range <>) of Server_Image;
       Result : String (1 .. Max_Cache_Key_Length) := (others => ' ');
       Length : Natural := 0;
-      Parts  : Server_Image_Array (1 .. Servers'Length);
       procedure Append (Value : String);
       procedure Append (Value : String) is
       begin
@@ -739,61 +829,73 @@ package body Gnatevl.IO.DNS is
    begin
       Append (Image (Name));
       Append ("/" & Natural'Image (Kind));
-      declare
-         Offset : Natural := 0;
-      begin
-         for Server of Servers loop
-            declare
-               Value : constant String := Sockets.Image (Server);
-            begin
-               if Value'Length > Parts (Offset + 1).Data'Length then
-                  raise Resolution_Failed with "DNS server address too long";
-               end if;
-               Parts (Offset + 1).Length := Value'Length;
-               Parts (Offset + 1).Data (1 .. Value'Length) := Value;
-               Offset := Offset + 1;
-            end;
-         end loop;
-      end;
-      for Left in Parts'Range loop
-         for Right in Left + 1 .. Parts'Last loop
-            if Parts (Right).Data (1 .. Parts (Right).Length)
-              < Parts (Left).Data (1 .. Parts (Left).Length)
-            then
-               declare
-                  Swap : constant Server_Image := Parts (Left);
-               begin
-                  Parts (Left) := Parts (Right);
-                  Parts (Right) := Swap;
-               end;
-            end if;
-         end loop;
-      end loop;
-      for Part of Parts loop
-         Append ("@" & Part.Data (1 .. Part.Length));
+      --  Server order is part of split-DNS policy: an NXDOMAIN or answer from
+      --  the first endpoint prevents consulting later endpoints. Preserve the
+      --  caller's order rather than sharing entries across reversed lists.
+      for Server of Servers loop
+         Append ("@" & Sockets.Image (Server));
       end loop;
       return Result (1 .. Length);
    end Cache_Key;
 
-   procedure Read_Config (Config : out Resolver_Config) is
-      File   : Ada.Text_IO.File_Type;
-      Buffer : String (1 .. 1_024);
-      Last   : Natural;
+   procedure Read_Config
+     (Config : out Resolver_Config; Path : String) is
+      File : Gnatevl.IO.Files.File_Descriptor :=
+        Gnatevl.IO.Files.Invalid_File;
+      Data : Streams.Stream_Element_Array (1 .. Max_Config_Length + 1);
+      Last : Streams.Stream_Element_Offset;
 
       procedure Add_Server (Text : String);
       procedure Add_Search (Text : String);
       procedure Parse_Options (Text : String);
+      procedure Parse_Line (Line : String);
 
       procedure Add_Server (Text : String) is
-         Address : constant Sockets.Inet_Addr_Type := Sockets.Inet_Addr (Text);
+         Address_First : Positive := Text'First;
+         Address_Last  : Natural := Text'Last;
+         Port_First    : Natural := 0;
+         Port          : Sockets.Port_Type := DNS_Port;
       begin
-         if Config.Server_Count < Max_Name_Servers then
-            Config.Server_Count := Config.Server_Count + 1;
-            Config.Servers (Config.Server_Count) :=
-              Sockets.Network_Socket_Address (Address, DNS_Port);
+         --  Bracketed IPv6 and IPv4 address:port are accepted as a GNATEVL
+         --  extension so deterministic tests and isolated deployments need
+         --  not bind the privileged DNS port.
+         if Text (Text'First) = '[' then
+            for Index in Text'First + 1 .. Text'Last loop
+               if Text (Index) = ']' then
+                  Address_First := Text'First + 1;
+                  Address_Last := Index - 1;
+                  if Index < Text'Last and then Text (Index + 1) = ':' then
+                     Port_First := Index + 2;
+                  end if;
+                  exit;
+               end if;
+            end loop;
+         elsif Ada.Strings.Fixed.Count (Text, ":") = 1
+           and then Ada.Strings.Fixed.Count (Text, ".") > 0
+         then
+            for Index in reverse Text'Range loop
+               if Text (Index) = ':' then
+                  Address_Last := Index - 1;
+                  Port_First := Index + 1;
+                  exit;
+               end if;
+            end loop;
          end if;
+         if Port_First /= 0 then
+            Port := Sockets.Port_Type'Value (Text (Port_First .. Text'Last));
+         end if;
+         declare
+            Address : constant Sockets.Inet_Addr_Type :=
+              Sockets.Inet_Addr (Text (Address_First .. Address_Last));
+         begin
+            if Config.Server_Count < Max_Name_Servers then
+               Config.Server_Count := Config.Server_Count + 1;
+               Config.Servers (Config.Server_Count) :=
+                 Sockets.Network_Socket_Address (Address, Port);
+            end if;
+         end;
       exception
-         when Sockets.Socket_Error => null;
+         when Sockets.Socket_Error | Constraint_Error => null;
       end Add_Server;
 
       procedure Add_Search (Text : String) is
@@ -864,6 +966,42 @@ package body Gnatevl.IO.DNS is
             Position := Stop + 1;
          end loop;
       end Parse_Words;
+
+      procedure Parse_Line (Line : String) is
+         Trimmed : constant String :=
+           Ada.Strings.Fixed.Trim (Line, Ada.Strings.Both);
+         Separator : Natural := 0;
+      begin
+         if Trimmed'Length = 0 or else Trimmed (Trimmed'First) = '#' then
+            return;
+         end if;
+         for Index in Trimmed'Range loop
+            if Trimmed (Index) in ' ' | ASCII.HT then
+               Separator := Index;
+               exit;
+            end if;
+         end loop;
+         if Separator = 0 then
+            return;
+         end if;
+         declare
+            Directive : constant String := Lower
+              (Trimmed (Trimmed'First .. Separator - 1));
+            Rest : constant String :=
+              Trimmed (Separator + 1 .. Trimmed'Last);
+         begin
+            if Directive = "nameserver" then
+               Parse_Words (Rest, Search => False);
+            elsif Directive = "search" then
+               Config.Search_Count := 0;
+               Parse_Words (Rest, Search => True);
+            elsif Directive = "domain" and then Config.Search_Count = 0 then
+               Parse_Words (Rest, Search => True);
+            elsif Directive = "options" then
+               Parse_Options (Rest);
+            end if;
+         end;
+      end Parse_Line;
    begin
       Config.Server_Count := 0;
       Config.Search_Count := 0;
@@ -871,48 +1009,50 @@ package body Gnatevl.IO.DNS is
       Config.Attempts := 2;
       Config.Per_Attempt := 2.0;
       Config.Rotate := False;
-      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/etc/resolv.conf");
-      while not Ada.Text_IO.End_Of_File (File) loop
-         Ada.Text_IO.Get_Line (File, Buffer, Last);
-         if Last > 0 then
-            declare
-               Line : constant String := Ada.Strings.Fixed.Trim
-                 (Buffer (1 .. Last), Ada.Strings.Both);
-               Separator : Natural := 0;
-            begin
-               for Index in Line'Range loop
-                  if Line (Index) in ' ' | ASCII.HT then
-                     Separator := Index;
-                     exit;
+      File := Gnatevl.IO.Files.Open (Path);
+      Gnatevl.IO.Files.Read_At (File, 0, Data, Last);
+      Gnatevl.IO.Files.Close (File);
+      if Last = Data'Last then
+         raise Resolution_Failed with "resolver configuration is too large";
+      end if;
+      if Last >= Data'First then
+         declare
+            Line_First : Streams.Stream_Element_Offset := Data'First;
+         begin
+            for Position in Data'First .. Last + 1 loop
+               if Position = Last + 1
+                 or else Data (Position) = Character'Pos (ASCII.LF)
+               then
+                  if Position > Line_First then
+                     declare
+                        Length : constant Natural :=
+                          Natural (Position - Line_First);
+                        Line : String (1 .. Length);
+                     begin
+                        for Index in Line'Range loop
+                           Line (Index) := Character'Val
+                             (Data
+                                (Line_First
+                                 + Streams.Stream_Element_Offset (Index - 1)));
+                        end loop;
+                        Parse_Line (Line);
+                     end;
                   end if;
-               end loop;
-               if Separator /= 0 then
-                  declare
-                     Directive : constant String := Lower
-                       (Line (Line'First .. Separator - 1));
-                     Rest : constant String := Line (Separator + 1 .. Line'Last);
-                  begin
-                     if Directive = "nameserver" then
-                        Parse_Words (Rest, Search => False);
-                     elsif Directive = "search" then
-                        Config.Search_Count := 0;
-                        Parse_Words (Rest, Search => True);
-                     elsif Directive = "domain" and then Config.Search_Count = 0 then
-                        Parse_Words (Rest, Search => True);
-                     elsif Directive = "options" then
-                        Parse_Options (Rest);
-                     end if;
-                  end;
+                  Line_First := Position + 1;
                end if;
-            end;
-         end if;
-      end loop;
-      Ada.Text_IO.Close (File);
+            end loop;
+         end;
+      end if;
    exception
       when others =>
-         if Ada.Text_IO.Is_Open (File) then
-            Ada.Text_IO.Close (File);
+         if File /= Gnatevl.IO.Files.Invalid_File then
+            begin
+               Gnatevl.IO.Files.Close (File);
+            exception
+               when others => null;
+            end;
          end if;
+         raise;
    end Read_Config;
 
    function To_Stream (Value : Byte_Array) return Streams.Stream_Element_Array is
@@ -1030,10 +1170,12 @@ package body Gnatevl.IO.DNS is
       Key      : constant String := Cache_Key (Name, Kind, Name_Servers);
       Cached   : Raw_Address_Array (1 .. Max_Addresses);
       Cached_Count : Natural;
+      Cached_TTL : Natural;
       Found, Negative : Boolean;
       Last_Error_Was_Malformed : Boolean := False;
    begin
-      Cache.Lookup (Key, Found, Negative, Cached, Cached_Count);
+      Cache.Lookup
+        (Key, Found, Negative, Cached, Cached_Count, Cached_TTL);
       if Found then
          if Negative then
             raise Name_Not_Found with Image (Name);
@@ -1043,7 +1185,7 @@ package body Gnatevl.IO.DNS is
             Addresses     => Cached,
             Address_Count => Cached_Count,
             Canonical     => Name,
-            TTL           => 1,
+            TTL           => Cached_TTL,
             Negative_TTL  => 30);
       end if;
 
@@ -1062,9 +1204,8 @@ package body Gnatevl.IO.DNS is
       for Attempt in 1 .. Attempts * Name_Servers'Length loop
          exit when not Infinite and then Remaining (Deadline, False) <= 0.0;
          declare
-            ID : Natural;
+            ID : constant Natural := Next_Transaction_ID;
          begin
-            Transaction_IDs.Next (ID);
             declare
                Query       : constant Byte_Array := Build_Query (Name, Kind, ID);
                Query_Data  : constant Streams.Stream_Element_Array :=
@@ -1175,7 +1316,8 @@ package body Gnatevl.IO.DNS is
                            if Parsed.Outcome = Truncated then
                               Parsed := Query_TCP
                                 (Selected_Server,
-                                 Query, ID, Name, Kind, Deadline, Infinite,
+                                 Query, ID, Name, Kind,
+                                 Attempt_Deadline, False,
                                  Interrupt_1, Interrupt_2, Interrupt_3);
                            end if;
                            Close_All;
@@ -1226,7 +1368,12 @@ package body Gnatevl.IO.DNS is
                               --  off-path datagrams; another configured
                               --  server or retry can still supply an answer.
                               Last_Error_Was_Malformed := True;
-                           when Sockets.Socket_Error =>
+                           when Timeout_Error
+                              | Device_Error
+                              | Sockets.Socket_Error =>
+                              --  TCP fallback is still one attempt against
+                              --  one server. A silent or broken TCP endpoint
+                              --  must not suppress a healthy later server.
                               null;
                         end;
                      end if;
@@ -1269,6 +1416,7 @@ package body Gnatevl.IO.DNS is
          else Started + Ada.Real_Time.To_Time_Span (Timeout));
       Values     : Raw_Address_Array (1 .. Max_Addresses);
       Count      : Natural := 0;
+      Transport_Failed : Boolean := False;
 
       procedure Append (Parsed : Parse_Result);
       procedure Append (Parsed : Parse_Result) is
@@ -1314,12 +1462,23 @@ package body Gnatevl.IO.DNS is
               (Normalized, Type_AAAA, Name_Servers, Attempts, Per_Attempt,
                Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
          when Any_Family =>
+            declare
+               AAAA_Deadline : constant Ada.Real_Time.Time :=
+                 (if Infinite then Deadline
+                  else Ada.Real_Time.Clock
+                    + Ada.Real_Time.To_Time_Span
+                      (Duration'Max
+                         (0.0, Remaining (Deadline, False) / 2.0)));
             begin
-               Append (Query_Kind
-                 (Normalized, Type_AAAA, Name_Servers, Attempts, Per_Attempt,
-                  Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
-            exception
-               when Name_Not_Found => null;
+               begin
+                  Append (Query_Kind
+                    (Normalized, Type_AAAA, Name_Servers, Attempts,
+                     Per_Attempt, AAAA_Deadline, Infinite,
+                     Interrupt_1, Interrupt_2, Interrupt_3));
+               exception
+                  when Name_Not_Found => null;
+                  when Timeout_Error => Transport_Failed := True;
+               end;
             end;
             begin
                Append (Query_Kind
@@ -1327,10 +1486,15 @@ package body Gnatevl.IO.DNS is
                   Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
             exception
                when Name_Not_Found => null;
+               when Timeout_Error => Transport_Failed := True;
             end;
       end case;
       if Count = 0 then
-         raise Name_Not_Found with Name;
+         if Transport_Failed then
+            raise Timeout_Error with "DNS resolution timed out";
+         else
+            raise Name_Not_Found with Name;
+         end if;
       end if;
       return To_Public (Values, Count);
    end Resolve_Core;
@@ -1359,7 +1523,9 @@ package body Gnatevl.IO.DNS is
       Timeout     : Duration := 5.0;
       Interrupt_1 : Descriptor := Invalid_Descriptor;
       Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor) return Address_Array
+      Interrupt_3 : Descriptor := Invalid_Descriptor;
+      Configuration_Path : String := "/etc/resolv.conf")
+      return Address_Array
    is
       Config : Resolver_Config;
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
@@ -1390,7 +1556,7 @@ package body Gnatevl.IO.DNS is
          end;
       end if;
 
-      Read_Config (Config);
+      Read_Config (Config, Configuration_Path);
       if Config.Server_Count = 0 then
          raise Resolution_Failed with
            "no numeric name server found in /etc/resolv.conf";

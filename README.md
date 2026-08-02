@@ -437,7 +437,7 @@ that compatibility layer must serialize descriptor lifetime themselves.
 caller-provided array of read/write interests. It allocates neither in the
 public library nor while registering an evented fiber, returns the exact array
 index that became ready, and returns zero on timeout. Repeated descriptors and
-separate read/write interests for one descriptor are valid; when equivalent
+separate read/write interests for one descriptor are valid; when multiple
 entries are ready together the lowest index wins. The fixed limit of 32 keeps
 per-fiber scheduler storage predictable and is intended for protocol engines,
 not as a replacement for ownership-aware connection APIs.
@@ -453,18 +453,29 @@ recomputed remaining monotonic deadline.
 `Gnatevl.IO.DNS.Resolve` is an in-tree Ada stub resolver. Numeric addresses and
 `localhost` return without opening a socket. Other names use numeric servers,
 search domains, `ndots`, attempt counts, timeouts, and rotation read from
-`/etc/resolv.conf`; `Resolve_Using` accepts explicit numeric endpoints for
+`/etc/resolv.conf` through `Gnatevl.IO.Files`, so an evented caller parks while
+the kernel-completion backend reads the configuration. `Resolve` accepts an
+alternate configuration path for isolated deployments and tests; numeric
+IPv4 `address:port` and bracketed IPv6 `[address]:port` server entries are a
+GNATEVL extension. `Resolve_Using` accepts explicit numeric endpoints for
 split-DNS applications and deterministic tests.
 
 Each attempt sends a nonblocking UDP query to one configured server and parks
 the calling task on the socket, deadline, and optional cancellation descriptors
 in one wait set. Replies must match the connected source, transaction ID,
-question name, type, and class. The bounded parser handles compressed names,
+question name, type, and class. Transaction IDs come directly from OS entropy
+for every query—there is no fork-repeated pseudo-random stream—and entropy
+failure stops resolution rather than weakening validation. The bounded parser
+handles compressed names,
 A/AAAA records, CNAME chains, NXDOMAIN/NODATA negative TTLs, malformed packets,
 and compression or alias loops. A truncated UDP reply retries the same query
-over task-aware TCP; cancellation also covers connect, send, and receive. A
+over task-aware TCP within that server's attempt budget, so a silent TCP
+primary does not hide a healthy secondary. Server order remains part of the
+split-DNS cache identity. `Any_Family` reserves finite-deadline time for A when
+AAAA transport is silent. Cancellation covers connect, send, and receive. A
 64-entry process-local LRU cache honors bounded positive and negative TTLs and
-owns no descriptors, tasks, or shutdown resources.
+owns no descriptors, tasks, or shutdown resources; cache hits retain remaining
+TTL when composing CNAME aliases.
 
 This is deliberately DNS, not libc `getaddrinfo` parity. It does not consult
 arbitrary NSS modules, LDAP, platform mDNS/Bonjour databases, or non-localhost
@@ -1153,7 +1164,15 @@ Current smoke coverage includes:
   abort during activation/delay/entry wait/finalization, and rendezvous in both
   directions across the native/evented boundary;
 - evented/native socket-pair transfer, simultaneous read/write watches on one
-  descriptor, and timeout behavior;
+  descriptor, bounded multi-descriptor waits, lowest-index simultaneous
+  readiness, partial-registration rollback, abort cleanup, descriptor reuse,
+  and timeout behavior;
+- native/evented local DNS resolution with source/question validation, OS
+  entropy and deterministic test injection, positive/negative cache TTLs,
+  ordered split-DNS identity, retry and TCP failover, AAAA-to-A deadline
+  fallback, task-aware resolver-configuration reads, cancellation, and a
+  bounded parser mutation corpus covering compression, record counts, and
+  RDLENGTH arithmetic;
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
   cancellation, RAII socket release, admission closure, accept cancellation,
   immediate pre-requested cancellation, timeout precedence, 64 idle evented
