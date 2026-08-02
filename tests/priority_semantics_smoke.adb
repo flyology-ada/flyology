@@ -359,6 +359,151 @@ procedure Priority_Semantics_Smoke is
       end if;
    end Check_Rendezvous_Inheritance;
 
+   procedure Check_Loss_Then_Block is
+      Blocker_Gate : STC.Suspension_Object;
+      Caller_Gate  : STC.Suspension_Object;
+      Caller_Done  : STC.Suspension_Object;
+      Peer_Gate    : STC.Suspension_Object;
+      Server_Gate  : STC.Suspension_Object;
+      Stop_Blocker : Boolean := False with Atomic;
+
+      protected Result is
+         procedure In_Accept;
+         procedure Rendezvous_Returned;
+         entry Await_Rendezvous;
+         procedure Blocker_Running;
+         entry Await_Blocker;
+         procedure Record_Run (Id : Positive);
+         entry Await_Done;
+         function Passed return Boolean;
+      private
+         Returned           : Boolean := False;
+         Blocker_Is_Running : Boolean := False;
+         Count              : Natural := 0;
+         First              : Positive := 1;
+      end Result;
+
+      protected body Result is
+         procedure In_Accept is
+         begin
+            null;
+         end In_Accept;
+
+         procedure Rendezvous_Returned is
+         begin
+            Returned := True;
+         end Rendezvous_Returned;
+
+         entry Await_Rendezvous when Returned is
+         begin
+            null;
+         end Await_Rendezvous;
+
+         procedure Blocker_Running is
+         begin
+            Blocker_Is_Running := True;
+         end Blocker_Running;
+
+         entry Await_Blocker when Blocker_Is_Running is
+         begin
+            null;
+         end Await_Blocker;
+
+         procedure Record_Run (Id : Positive) is
+         begin
+            Count := Count + 1;
+            if Count = 1 then
+               First := Id;
+            end if;
+         end Record_Run;
+
+         entry Await_Done when Count = 2 is
+         begin
+            null;
+         end Await_Done;
+
+         function Passed return Boolean is (First = 1);
+      end Result;
+
+      task Server with CPU => 4 is
+         pragma Priority (5);
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         entry Work;
+      end Server;
+
+      task Caller with CPU => 4 is
+         pragma Priority (20);
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Caller;
+
+      task Peer with CPU => 4 is
+         pragma Priority (5);
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Peer;
+
+      task Blocker with CPU => 4 is
+         pragma Priority (25);
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Blocker;
+
+      task body Server is
+      begin
+         accept Work do
+            --  Keep this as a full rendezvous so GNARL applies and later
+            --  removes the caller's inherited priority.
+            Result.In_Accept;
+         end Work;
+         --  The server has just lost the caller's inherited priority. It
+         --  blocks instead of yielding into its base-priority ready queue,
+         --  so its later wake must use ordinary FIFO tail placement.
+         STC.Suspend_Until_True (Server_Gate);
+         Result.Record_Run (2);
+      end Server;
+
+      task body Caller is
+      begin
+         STC.Suspend_Until_True (Caller_Gate);
+         Server.Work;
+         Result.Rendezvous_Returned;
+         STC.Suspend_Until_True (Caller_Done);
+      end Caller;
+
+      task body Peer is
+      begin
+         STC.Suspend_Until_True (Peer_Gate);
+         Result.Record_Run (1);
+      end Peer;
+
+      task body Blocker is
+      begin
+         STC.Suspend_Until_True (Blocker_Gate);
+         Result.Blocker_Running;
+         while not Stop_Blocker loop
+            null;
+         end loop;
+      end Blocker;
+   begin
+      Await_Group_State (4, 0, 4, 0);
+      STC.Set_True (Caller_Gate);
+      Result.Await_Rendezvous;
+      --  Returned proves the inherited-priority transition happened; this
+      --  snapshot proves Server and Caller both reached their following wait.
+      Await_Group_State (4, 0, 4, 0);
+
+      STC.Set_True (Blocker_Gate);
+      Result.Await_Blocker;
+      STC.Set_True (Peer_Gate);
+      STC.Set_True (Server_Gate);
+      Await_Group_State (4, 2, 1, 1);
+      Stop_Blocker := True;
+      Result.Await_Done;
+      STC.Set_True (Caller_Done);
+      if not Result.Passed then
+         raise Program_Error with
+           "loss-of-inheritance placement leaked across a blocking wait";
+      end if;
+   end Check_Loss_Then_Block;
+
    procedure Check_Migration_Priority is
       Blocker_Gate : STC.Suspension_Object;
       Local_Gate   : STC.Suspension_Object;
@@ -461,5 +606,6 @@ begin
    Check_Waiting_Priority_Change;
    Check_Running_Priority_Change;
    Check_Rendezvous_Inheritance;
+   Check_Loss_Then_Block;
    Check_Migration_Priority;
 end Priority_Semantics_Smoke;

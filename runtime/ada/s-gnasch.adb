@@ -1131,6 +1131,10 @@ package body System.Gnatevl.Scheduler is
          Fatal;
       end if;
 
+      --  Migration has its own target-loop enqueue operation. A queue-head
+      --  designation caused by a prior loss of inherited priority applies
+      --  only to yielding on the current loop and must not cross groups.
+      Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       while Position /= null and then Position /= Item loop
          Previous := Position;
@@ -1163,6 +1167,7 @@ package body System.Gnatevl.Scheduler is
       Item.Next_Group := Target.Fibers;
       Target.Fibers := Item;
       if Item.Destroy_Requested then
+         Item.Enqueue_At_Head := False;
          Item.State := Finished;
          Reap_Locked (Item);
          Wake_Target := False;
@@ -1629,6 +1634,7 @@ package body System.Gnatevl.Scheduler is
       end if;
 
       Item.Migration_Target := Target;
+      Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlock_Topology;
       Unlock_Registry_Shard (Shard);
@@ -1827,6 +1833,9 @@ package body System.Gnatevl.Scheduler is
          Unlock_Group (Group);
          return -1;
       end if;
+      --  A task that blocks never entered its lowered-priority ready queue.
+      --  Its eventual readiness event uses ordinary FIFO wake placement.
+      Item.Enqueue_At_Head := False;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
 
       return Item.IO_Result;
@@ -1897,6 +1906,7 @@ package body System.Gnatevl.Scheduler is
          end if;
       end if;
 
+      Item.Enqueue_At_Head := False;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
       Transferred.all := Item.File_Result;
       Error_Code.all := Item.File_Error;
@@ -2000,6 +2010,7 @@ package body System.Gnatevl.Scheduler is
          end if;
       end if;
 
+      Item.Enqueue_At_Head := False;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
 
       if Task_Lock /= System.Null_Address then
@@ -2106,6 +2117,7 @@ package body System.Gnatevl.Scheduler is
 
       Group := Item.Group;
       Lock_Group (Group);
+      Item.Enqueue_At_Head := False;
       Item.State := Finished;
       Item.Deadline := No_Deadline;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);

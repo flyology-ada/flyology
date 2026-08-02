@@ -252,7 +252,16 @@
        end if;
     end Yield;
  
-@@ -692,6 +858,18 @@
+@@ -675,8 +841,6 @@
+      (T                   : Task_Id;
+       Prio                : Any_Priority;
+       Loss_Of_Inheritance : Boolean := False)
+    is
+-      pragma Unreferenced (Loss_Of_Inheritance);
+-
+       Result : C.int;
+       Param  : aliased struct_sched_param;
+@@ -692,6 +856,18 @@
     begin
        T.Common.Current_Priority := Prio;
  
@@ -271,7 +280,7 @@
        Param.sched_priority := Prio_To_Linux_Prio (Prio);
  
        if Dispatching_Policy = 'R'
-@@ -824,7 +1002,8 @@
+@@ -824,7 +1000,8 @@
     -- Is_Valid_Task --
     -------------------
  
@@ -281,7 +290,7 @@
  
     -----------------------------
     -- Register_Foreign_Thread --
-@@ -906,6 +1085,18 @@
+@@ -906,6 +1083,18 @@
        use type Multiprocessors.CPU_Range, Interfaces.C.size_t;
  
     begin
@@ -307,7 +316,7 @@
        --  Check whether both Dispatching_Domain and CPU are specified for
        --  the task, and the CPU value is not contained within the range of
        --  processors for the domain.
-@@ -1054,6 +1245,13 @@
+@@ -1054,6 +1243,13 @@
        Result : C.int;
  
     begin
@@ -321,7 +330,7 @@
        Result := pthread_mutex_destroy (T.Common.LL.L'Access);
        pragma Assert (Result = 0);
  
-@@ -1088,7 +1286,12 @@
+@@ -1088,7 +1284,12 @@
        --  returns ESRCH, so we don't consider that to be an error.
  
     begin
@@ -335,7 +344,7 @@
           Result :=
             pthread_kill
               (T.Common.LL.Thread,
-@@ -1257,6 +1460,18 @@
+@@ -1257,6 +1458,18 @@
  
        Enter_Task (Environment_Task);
  
