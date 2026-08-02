@@ -5,6 +5,7 @@ with System.Gnatevl.Contexts;
 with System.Gnatevl.Poller;
 with System.Gnatevl.Scheduling_Policy;
 with System.OS_Constants;
+with System.Storage_Elements;
 
 package body System.Gnatevl.Scheduler is
    package C renames Interfaces.C;
@@ -13,6 +14,7 @@ package body System.Gnatevl.Scheduler is
    package Scheduling renames System.Gnatevl.Scheduling_Policy;
    package OSC renames System.OS_Constants;
    package OSI renames System.OS_Interface;
+   package SSE renames System.Storage_Elements;
 
    use type C.int;
    use type C.long_long;
@@ -23,6 +25,7 @@ package body System.Gnatevl.Scheduler is
    use type Pollers.Event_Kind;
    use type Pollers.Interest;
    use type Scheduling.Destruction_Plan;
+   use type SSE.Integer_Address;
 
    Scheduler_Stack_Size : constant C.size_t := 256 * 1_024;
    Timer_Check_Interval : constant := 64;
@@ -33,6 +36,14 @@ package body System.Gnatevl.Scheduler is
    Dedicated_First_Id  : constant C.int := Scheduling.First_Dedicated_Group;
    Maximum_Group_Id    : constant C.int := Scheduling.Last_Group;
    subtype Group_Index is Natural range 0 .. Natural (Maximum_Group_Id);
+
+   --  A prime-sized table avoids clustering when aligned ATCB allocations
+   --  advance by a regular stride. For the expected task populations,
+   --  separate chaining keeps lookup and removal constant-time on average
+   --  without introducing resize allocation into wake paths.
+   Registry_Bucket_Count : constant := 16_381;
+   subtype Registry_Bucket_Index is
+     Natural range 0 .. Registry_Bucket_Count - 1;
 
    type Fiber_State is (Running, Ready, Waiting, Migrating, Finished);
 
@@ -71,7 +82,8 @@ package body System.Gnatevl.Scheduler is
       Reserved_Group : Loop_Group_Access;
       Next_Ready : Fiber_Access;
       Next_Group : Fiber_Access;
-      Next_Global : Fiber_Access;
+      Next_Registry : Fiber_Access;
+      Registry_Bucket : Registry_Bucket_Index := 0;
    end record;
 
    type Loop_Group is limited record
@@ -92,6 +104,8 @@ package body System.Gnatevl.Scheduler is
    end record;
 
    type Group_Array is array (Group_Index) of Loop_Group_Access;
+   type Registry_Bucket_Array is
+     array (Registry_Bucket_Index) of Fiber_Access;
 
    function Fiber_To_Address is new Ada.Unchecked_Conversion
      (Fiber_Access, System.Address);
@@ -106,15 +120,15 @@ package body System.Gnatevl.Scheduler is
    procedure Free_Group is new Ada.Unchecked_Deallocation
      (Loop_Group, Loop_Group_Access);
 
-   --  Registry_Lock protects Groups, All_Fibers, group membership counts and
-   --  reservations, and each Fiber.Group ownership pointer. A group lock
+   --  Registry_Lock protects Groups, Fiber_Registry, group membership counts
+   --  and reservations, and each Fiber.Group ownership pointer. A group lock
    --  protects that group's fiber list, ready queue, timers, I/O state, and
    --  current fiber. Code needing both always takes registry then group; the
    --  migration handoff releases its source before taking its target.
    Registry_Lock  : aliased OSI.pthread_mutex_t;
    Initialized    : Boolean := False;
    Groups         : Group_Array := (others => null);
-   All_Fibers     : Fiber_Access;
+   Fiber_Registry : Registry_Bucket_Array := (others => null);
    Thread_Group   : Loop_Group_Access := null;
    pragma Thread_Local_Storage (Thread_Group);
 
@@ -144,7 +158,13 @@ package body System.Gnatevl.Scheduler is
    pragma No_Return (Fatal);
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
+   --  Registry operations require Registry_Lock after bootstrap publishes
+   --  Initialized; Initialize registers the environment task single-threaded.
+   function Registry_Bucket_For
+     (T : System.Address) return Registry_Bucket_Index;
    function Find (T : System.Address) return Fiber_Access;
+   procedure Register_Locked (Item : not null Fiber_Access);
+   procedure Unregister_Locked (Item : not null Fiber_Access);
    procedure Enqueue
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
@@ -287,6 +307,9 @@ package body System.Gnatevl.Scheduler is
          Unlock_Registry;
       end if;
 
+      --  This is a bounded, first-use-only startup wait. If called by an
+      --  evented task, its source loop remains occupied until the new group
+      --  thread publishes Started or Start_Failed under Registry_Lock.
       loop
          Lock_Registry;
          Ready := Group.Started;
@@ -302,14 +325,59 @@ package body System.Gnatevl.Scheduler is
       return (if Failed then null else Group);
    end Ensure_Group;
 
-   function Find (T : System.Address) return Fiber_Access is
-      Item : Fiber_Access := All_Fibers;
+   function Registry_Bucket_For
+     (T : System.Address) return Registry_Bucket_Index
+   is
+      --  Express the address in 16-byte allocation quanta before taking the
+      --  prime modulus; sub-quantum variation merely shares a collision chain.
+      Value : constant SSE.Integer_Address := SSE.To_Integer (T) / 16;
    begin
+      return Registry_Bucket_Index
+        (Value mod SSE.Integer_Address (Registry_Bucket_Count));
+   end Registry_Bucket_For;
+
+   function Find (T : System.Address) return Fiber_Access is
+      Item : Fiber_Access;
+   begin
+      if T = System.Null_Address then
+         return null;
+      end if;
+
+      Item := Fiber_Registry (Registry_Bucket_For (T));
       while Item /= null and then Item.T /= T loop
-         Item := Item.Next_Global;
+         Item := Item.Next_Registry;
       end loop;
       return Item;
    end Find;
+
+   procedure Register_Locked (Item : not null Fiber_Access) is
+      Bucket : constant Registry_Bucket_Index :=
+        Registry_Bucket_For (Item.T);
+   begin
+      Item.Registry_Bucket := Bucket;
+      Item.Next_Registry := Fiber_Registry (Bucket);
+      Fiber_Registry (Bucket) := Item;
+   end Register_Locked;
+
+   procedure Unregister_Locked (Item : not null Fiber_Access) is
+      Bucket   : constant Registry_Bucket_Index := Item.Registry_Bucket;
+      Position : Fiber_Access := Fiber_Registry (Bucket);
+      Previous : Fiber_Access;
+   begin
+      while Position /= null and then Position /= Item loop
+         Previous := Position;
+         Position := Position.Next_Registry;
+      end loop;
+
+      if Position = null then
+         Fatal;
+      elsif Previous = null then
+         Fiber_Registry (Bucket) := Item.Next_Registry;
+      else
+         Previous.Next_Registry := Item.Next_Registry;
+      end if;
+      Item.Next_Registry := null;
+   end Unregister_Locked;
 
    procedure Enqueue
      (Group : not null Loop_Group_Access;
@@ -363,8 +431,6 @@ package body System.Gnatevl.Scheduler is
    end Remove_From_Ready;
 
    procedure Reap_Locked (Item : not null Fiber_Access) is
-      Position_Global : Fiber_Access := All_Fibers;
-      Previous_Global : Fiber_Access;
       Position_Group  : Fiber_Access;
       Previous_Group  : Fiber_Access;
       Victim           : Fiber_Access := Item;
@@ -379,17 +445,7 @@ package body System.Gnatevl.Scheduler is
          Remove_From_Ready (Group, Item);
       end if;
 
-      while Position_Global /= null and then Position_Global /= Item loop
-         Previous_Global := Position_Global;
-         Position_Global := Position_Global.Next_Global;
-      end loop;
-      if Position_Global = null then
-         Fatal;
-      elsif Previous_Global = null then
-         All_Fibers := Item.Next_Global;
-      else
-         Previous_Global.Next_Global := Item.Next_Global;
-      end if;
+      Unregister_Locked (Item);
 
       Position_Group := Group.Fibers;
       while Position_Group /= null and then Position_Group /= Item loop
@@ -580,8 +636,7 @@ package body System.Gnatevl.Scheduler is
       Environment_Fiber.T := Environment;
       Environment_Fiber.State := Running;
       Environment_Fiber.Next_Group := null;
-      Environment_Fiber.Next_Global := null;
-      All_Fibers := Environment_Fiber;
+      Register_Locked (Environment_Fiber);
       Default_Group.Fibers := Environment_Fiber;
       Default_Group.Current_Fiber := Environment_Fiber;
       Default_Group.Member_Count := 1;
@@ -643,8 +698,7 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
       Lock_Group (Target);
-      Item.Next_Global := All_Fibers;
-      All_Fibers := Item;
+      Register_Locked (Item);
       Item.Next_Group := Target.Fibers;
       Target.Fibers := Item;
       Target.Member_Count := Target.Member_Count + 1;
@@ -835,6 +889,9 @@ package body System.Gnatevl.Scheduler is
       Remainder : C.long_long;
       Timeout   : Duration;
    begin
+      --  Only this group's event thread writes Current_Fiber while a fiber is
+      --  running; the unlocked read validates same-thread call context. The
+      --  state transition uses the locked read below.
       if not Is_Event_Thread
         or else Group.Current_Fiber = null
         or else Descriptor < 0
@@ -899,6 +956,8 @@ package body System.Gnatevl.Scheduler is
       Group : constant Loop_Group_Access := Thread_Group;
       Item  : Fiber_Access;
    begin
+      --  Current_Fiber is owned by this event thread while user code runs;
+      --  the unlocked test is validation, and the mutation is locked below.
       if not Is_Event_Thread or else Group.Current_Fiber = null then
          return -1;
       end if;
@@ -919,6 +978,8 @@ package body System.Gnatevl.Scheduler is
       Item   : Fiber_Access;
       Result : C.int;
    begin
+      --  Current_Fiber is owned by this event thread while user code runs;
+      --  the unlocked test is validation, and the mutation is locked below.
       if not Is_Event_Thread or else Group.Current_Fiber = null then
          return -1;
       end if;

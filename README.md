@@ -276,6 +276,7 @@ thread-pool runtime.
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
+| Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every evented task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
@@ -470,9 +471,9 @@ the development Apple Silicon machine produced:
 
 | Mode | Connections | OS threads while waiting | RSS increase | Virtual-memory increase | Setup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Evented scale | 10,000 | 1 | 617 MiB | 1.14 GiB | 0.77 s |
-| Evented comparison | 1,000 | 1 | 62.0 MiB | 129 MiB | 0.027 s |
-| Native comparison | 1,000 | 1,001 | 62.2 MiB | 181 MiB | 0.063 s |
+| Evented scale | 10,000 | 1 | 617 MiB | 1.10 GiB | 0.269 s |
+| Evented comparison | 1,000 | 1 | 62.2 MiB | 156 MiB | 0.027 s |
+| Native comparison | 1,000 | 1,001 | 62.5 MiB | 208 MiB | 0.054 s |
 
 The central win today is kernel-concurrency density: the evented version avoids
 one pthread per connection and can reach connection counts at which creating an
@@ -513,10 +514,15 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   poller (`kqueue` or `epoll`) remain alive for the process lifetime. The table
   is bounded to 256 groups, and vacated dedicated loops are reserved and reused
   by later callers.
+- First use of a loop waits synchronously for its pthread startup handshake. An
+  evented caller occupies its source loop during this bounded `sched_yield`
+  wait; subsequent use of the already-started loop does not wait.
 - Ready queues, fiber membership, timer scans, descriptor delivery, and dispatch
   use independent per-group locks and per-group fiber lists. A short-held
-  registry lock remains only for task lookup, group allocation, and ownership
-  handoff during cross-group wake, destruction, priority changes, or migration.
+  registry lock remains only for constant-time-average hashed task lookup,
+  group allocation, and ownership handoff during cross-group wake, destruction,
+  priority changes, or migration. Its fixed 16,381-bucket table uses collision
+  chains and never resizes in a wake path.
 - Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
   dedicated range and cannot be selected statically with the `CPU` aspect.
 - The environment task uses its pthread-owned initial stack and therefore
