@@ -1,9 +1,11 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
+with System.Gnatevl.Faults;
 with System.Storage_Elements;
 
 package body System.Gnatevl.Contexts is
    package C renames Interfaces.C;
+   package Faults renames System.Gnatevl.Faults;
    package SSE renames System.Storage_Elements;
 
    use type C.int;
@@ -113,6 +115,10 @@ package body System.Gnatevl.Contexts is
 
       Usable_Size := Round_Up (Stack_Size, Page_Size);
       Item.Mapping_Size := Usable_Size + 2 * Page_Size;
+      if Faults.Fail (Faults.Stack_Mapping) then
+         Free (Item);
+         return null;
+      end if;
       Item.Mapping :=
         Mmap
           (System.Null_Address,

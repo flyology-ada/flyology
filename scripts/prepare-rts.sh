@@ -9,6 +9,7 @@ alr=${ALR:-"$HOME/alr"}
 execution_default=${GNATEVL_DEFAULT:-native}
 loop_pool_size=${GNATEVL_LOOP_POOL_SIZE:-1}
 placement_policy=${GNATEVL_PLACEMENT:-round_robin}
+test_faults=${GNATEVL_TEST_FAULTS:-0}
 
 case "$execution_default" in
   native|evented) ;;
@@ -41,6 +42,16 @@ case "$placement_policy" in
     printf '%s\n' \
       "GNATEVL_PLACEMENT must be 'round_robin', got: $placement_policy" \
       >&2
+    exit 1
+    ;;
+esac
+
+case "$test_faults" in
+  0) fault_cflags= ;;
+  1) fault_cflags=-DGNATEVL_TEST_FAULTS ;;
+  *)
+    printf '%s\n' \
+      "GNATEVL_TEST_FAULTS must be '0' or '1', got: $test_faults" >&2
     exit 1
     ;;
 esac
@@ -107,7 +118,7 @@ git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
 
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
-cc -O2 -c "$project_root/runtime/native/platform.c" \
+cc -O2 $fault_cflags -c "$project_root/runtime/native/platform.c" \
   -o "$build_root/obj/platform.o"
 cd "$build_root/obj"
 if [ "$platform" = linux ]; then
@@ -122,6 +133,7 @@ fi
   "$generated_include/s-gnpoco.ads" \
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \
+  "$generated_include/s-gnafau.adb" \
   "$generated_include/s-gnfien.adb" \
   "$generated_include/s-gnapol.adb" \
   "$generated_include/s-gnscpo.adb" \
@@ -130,7 +142,8 @@ fi
   "$generated_include/s-tassta.adb"
 
 cp \
-  s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnatev.ali s-gnacon.ali s-gnfien.ali s-gnapol.ali \
+  s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnatev.ali s-gnacon.ali \
+  s-gnafau.ali s-gnfien.ali s-gnapol.ali \
   s-gnscpo.ali s-gnasch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$platform" = linux ]; then
@@ -141,6 +154,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-gnpoco.o \
   s-gnatev.o \
   s-gnacon.o \
+  s-gnafau.o \
   s-gnfien.o \
   s-gnapol.o \
   s-gnscpo.o \

@@ -1,10 +1,12 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
+with System.Gnatevl.Faults;
 with System.Gnatevl.Time_ABI;
 with System.OS_Interface;
 
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
+   package Faults renames System.Gnatevl.Faults;
    package Time_ABI renames System.Gnatevl.Time_ABI;
    package File_Engines renames System.Gnatevl.File_Engine;
    package OSI renames System.OS_Interface;
@@ -306,6 +308,9 @@ package body System.Gnatevl.Poller is
       Event        : aliased Epoll_Event;
       Result       : C.int;
    begin
+      if Faults.Fail (Faults.Poller_Watch) then
+         return False;
+      end if;
       if Watch_Item = null then
          Watch_Item :=
            new Watch_Record'(Descriptor => Descriptor, others => <>);
@@ -354,6 +359,10 @@ package body System.Gnatevl.Poller is
       Error_Code  : out C.int) return Boolean
    is
    begin
+      if Faults.Fail (Faults.File_Submission_Full) then
+         Error_Code := EAGAIN;
+         return False;
+      end if;
       return File_Engines.Submit
         (Item.File_State,
          Descriptor,
@@ -407,6 +416,11 @@ package body System.Gnatevl.Poller is
       Events :=
         (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
       Count := 0;
+      if Faults.Fail (Faults.Poller_Wait) then
+         return False;
+      elsif Faults.Fail (Faults.Poller_EINTR) then
+         return True;
+      end if;
       if not Drain_File_Events (Item, Events, Count) then
          return False;
       elsif Count > 0 then
@@ -501,6 +515,9 @@ package body System.Gnatevl.Poller is
       Value  : aliased C.unsigned_long_long := 1;
       Result : C.long;
    begin
+      if Faults.Fail (Faults.Poller_Wake) then
+         return False;
+      end if;
       loop
          Result :=
            Write

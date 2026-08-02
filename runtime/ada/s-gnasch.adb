@@ -1,6 +1,7 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.Gnatevl.Contexts;
+with System.Gnatevl.Faults;
 with System.Gnatevl.Poller;
 with System.Gnatevl.Pool_Config;
 with System.Gnatevl.Scheduling_Policy;
@@ -11,6 +12,7 @@ with System.Storage_Elements;
 package body System.Gnatevl.Scheduler is
    package C renames Interfaces.C;
    package Contexts renames System.Gnatevl.Contexts;
+   package Faults renames System.Gnatevl.Faults;
    package Pollers renames System.Gnatevl.Poller;
    package Pool_Config renames System.Gnatevl.Pool_Config;
    package Scheduling renames System.Gnatevl.Scheduling_Policy;
@@ -484,6 +486,10 @@ package body System.Gnatevl.Scheduler is
          end if;
          Unlock_Topology;
       else
+         if Faults.Fail (Faults.Group_Startup) then
+            Unlock_Topology;
+            return null;
+         end if;
          Group := new Loop_Group;
          Group.Id := Id;
          Group.Dedicated := Dedicated;
@@ -1216,6 +1222,9 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
+      if Faults.Fail (Faults.Fiber_Allocation) then
+         return -1;
+      end if;
       Item := new Fiber;
       Item.T := T;
       Item.Wrapper := Wrapper;

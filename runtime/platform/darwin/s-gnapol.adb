@@ -1,9 +1,11 @@
+with System.Gnatevl.Faults;
 with System.Gnatevl.Time_ABI;
 with System.OS_Interface;
 with System.Storage_Elements;
 
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
+   package Faults renames System.Gnatevl.Faults;
    package Time_ABI renames System.Gnatevl.Time_ABI;
    package File_Engines renames System.Gnatevl.File_Engine;
    package OSI renames System.OS_Interface;
@@ -124,6 +126,9 @@ package body System.Gnatevl.Poller is
          Udata  => 0,
          Ext    => (others => 0));
    begin
+      if Faults.Fail (Faults.Poller_Watch) then
+         return False;
+      end if;
       return Kevent
         (Item.Descriptor,
          Change'Address,
@@ -145,6 +150,10 @@ package body System.Gnatevl.Poller is
       Error_Code  : out C.int) return Boolean
    is
    begin
+      if Faults.Fail (Faults.File_Submission_Full) then
+         Error_Code := C.int (OSI.EAGAIN);
+         return False;
+      end if;
       return File_Engines.Submit
         (Item.File_State,
          Descriptor,
@@ -193,6 +202,11 @@ package body System.Gnatevl.Poller is
       Events :=
         (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
       Count := 0;
+      if Faults.Fail (Faults.Poller_Wait) then
+         return False;
+      elsif Faults.Fail (Faults.Poller_EINTR) then
+         return True;
+      end if;
       if Timeout < 0.0 then
          Result :=
            Kevent
@@ -269,6 +283,9 @@ package body System.Gnatevl.Poller is
          Udata  => 0,
          Ext    => (others => 0));
    begin
+      if Faults.Fail (Faults.Poller_Wake) then
+         return False;
+      end if;
       return Kevent
         (Item.Descriptor,
          Change'Address,
