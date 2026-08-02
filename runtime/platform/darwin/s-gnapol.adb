@@ -93,7 +93,7 @@ package body System.Gnatevl.Poller is
    end Finalize;
 
    function Watch
-     (Item       : Poller;
+     (Item       : in out Poller;
       Descriptor : C.int;
       Condition  : Interest) return Boolean
    is
@@ -116,7 +116,7 @@ package body System.Gnatevl.Poller is
    end Watch;
 
    function Wait
-     (Item                : Poller;
+     (Item                : in out Poller;
       Timeout             : Duration;
       Event               : out Poll_Event) return Boolean
    is
@@ -134,7 +134,7 @@ package body System.Gnatevl.Poller is
    end Wait;
 
    function Wait_Batch
-     (Item                : Poller;
+     (Item                : in out Poller;
       Timeout             : Duration;
       Events              : out Poll_Event_Array;
       Count               : out Natural) return Boolean

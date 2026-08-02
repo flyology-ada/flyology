@@ -3,6 +3,7 @@ with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
 with Gnatevl;
+with Gnatevl_Config;
 with Gnatevl.IO.Sockets;
 with Interfaces.C;
 with System;
@@ -30,6 +31,11 @@ procedure TCP_Native_Smoke is
       Value : aliased C.int := 0;
       Size  : aliased C.unsigned := C.unsigned (C.int'Size / 8);
    begin
+      --  Linux suppresses SIGPIPE at send time with MSG_NOSIGNAL rather than
+      --  with a per-socket option. Darwin exposes SO_NOSIGPIPE for inspection.
+      if Gnatevl_Config.Alire_Host_OS = "linux" then
+         return True;
+      end if;
       return
         Get_Socket_Option
           (C.int (Gnatevl.IO.Sockets.Native_Descriptor (Socket)),

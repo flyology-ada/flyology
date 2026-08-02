@@ -18,6 +18,7 @@ package body Gnatevl.IO.Sockets is
 
    function To_Descriptor is new Ada.Unchecked_Conversion
      (Sockets.Socket_Type, Interfaces.C.int);
+
    function To_Socket is new Ada.Unchecked_Conversion
      (Interfaces.C.int, Sockets.Socket_Type);
 
@@ -27,6 +28,8 @@ package body Gnatevl.IO.Sockets is
       Length  : System.Address) return Interfaces.C.int;
    pragma Import (C, C_Accept, "accept");
 
+   --  GNAT implements this as SO_NOSIGPIPE where the platform needs a socket
+   --  option and as the appropriate no-op/send-time policy elsewhere.
    procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
    pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
    function Native_Descriptor

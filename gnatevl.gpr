@@ -6,7 +6,12 @@ project Gnatevl is
    for Library_Name use "Gnatevl";
    for Library_Version use Project'Library_Name & ".so." & Gnatevl_Config.Crate_Version;
 
-   for Source_Dirs use ("src/", "config/");
+   case Gnatevl_Config.Alire_Host_OS is
+      when "linux" =>
+         for Source_Dirs use ("src/", "src/platform/linux/", "config/");
+      when others =>
+         for Source_Dirs use ("src/", "src/platform/darwin/", "config/");
+   end case;
    for Object_Dir use "obj/" & Gnatevl_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
    for Library_Dir use "lib";

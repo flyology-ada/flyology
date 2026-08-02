@@ -1049,7 +1049,11 @@ package body System.Gnatevl.Scheduler is
       Item    : Fiber_Access := Group.Fibers;
       Matches : Boolean;
    begin
-      if Event.Kind not in Pollers.Readable_Event | Pollers.Writable_Event then
+      if Event.Kind not in
+        Pollers.Readable_Event |
+        Pollers.Writable_Event |
+        Pollers.Read_Write_Event
+      then
          return;
       end if;
 
@@ -1059,10 +1063,11 @@ package body System.Gnatevl.Scheduler is
            and then Item.IO_Wait
            and then Item.IO_Descriptor = Event.Descriptor
            and then
-             ((Event.Kind = Pollers.Readable_Event
+             ((Event.Kind in Pollers.Readable_Event | Pollers.Read_Write_Event
                and then Item.IO_Interest = Pollers.Readable)
               or else
-                (Event.Kind = Pollers.Writable_Event
+                (Event.Kind in
+                   Pollers.Writable_Event | Pollers.Read_Write_Event
                  and then Item.IO_Interest = Pollers.Writable));
          if Matches then
             Item.Deadline := No_Deadline;

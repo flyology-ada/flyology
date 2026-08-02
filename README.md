@@ -10,9 +10,9 @@ masters, exceptions, and normal blocking-looking Ada control flow still come
 from GNARL. GNATEVL changes how a task is scheduled and adds I/O operations that
 cooperate with either execution mode.
 
-The current implementation is verified on macOS/AArch64 with GNAT 16.1. Its
-event backend is `kqueue`; other operating-system backends are portability work,
-not emulated by `ucontext` or another context API.
+The current implementation is verified with GNAT 16.1 on macOS/AArch64 and on
+Linux/x86-64 in Docker. The event backend is `kqueue` on macOS and `epoll` plus
+`eventfd` on Linux; neither is emulated by `ucontext` or another context API.
 
 ## Programming model
 
@@ -30,9 +30,13 @@ task Blocking_Worker is
 end Blocking_Worker;
 ```
 
-`Gnatevl.Event_Loop_Task` is the explicit spelling of the default. These two
-constants currently reuse GNAT's `Default_Scope` and `System_Scope` task-info
-values, preserving the compiler/runtime ABI and avoiding a compiler fork.
+`Gnatevl.Event_Loop_Task` is the explicit spelling of the default. GNAT's
+`Task_Info` representation is target-specific, so GNATEVL supplies a tiny
+platform-specific declaration: the stock system-scope value on Darwin and a
+normal all-CPU thread-attributes value on Linux. The runtime rule is the same:
+unspecified task info is evented and explicit `Gnatevl.Native_Thread` task info
+uses the stock pthread path. This preserves the compiler/runtime ABI and avoids
+a compiler fork.
 
 Both forms remain Ada tasks and can rendezvous, use protected objects, and wait
 on the same GNARL synchronization objects. The designation controls the task's
@@ -110,7 +114,7 @@ flowchart TB
     E[Evented groups: one scheduler pthread per group]
     N[Native lane: one pthread per designated task]
     Q[Per-group priority queues and timer deadlines]
-    K[Per-group kqueue readiness and cross-thread wake]
+    K[Per-group OS poller readiness and cross-thread wake]
     C[Guarded stackful task contexts]
     X[Small ABI-specific register swap]
     F[Four native Ada regular-file workers]
@@ -140,7 +144,8 @@ lanes:
   pthread; the default group uses the environment pthread.
 - `Native_Thread` tasks use the normal pthread-backed path.
 - Synchronization between the lanes still passes through GNARL. A native task
-  can wake the event-loop scheduler through a `kqueue` user event.
+  wakes the event-loop scheduler through `EVFILT_USER` on macOS or `eventfd` on
+  Linux.
 
 Keeping the integration below GNARL is what lets existing Ada task syntax and
 semantics survive. Reimplementing rendezvous or protected objects would create a
@@ -153,8 +158,8 @@ These are independent mechanisms with different jobs:
 
 | Mechanism | Purpose | Current implementation | Portability boundary |
 | --- | --- | --- | --- |
-| Context switching | Save one evented task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine | ABI and architecture |
-| Event polling | Sleep until a descriptor, timer, or cross-thread wake is ready | `kqueue` and `EVFILT_USER` | Operating system |
+| Context switching | Save one evented task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine for AArch64/macOS and x86-64/macOS or Linux | ABI and architecture |
+| Event polling | Sleep until a descriptor, timer, or cross-thread wake is ready | `kqueue`/`EVFILT_USER` on macOS; `epoll`/`eventfd` on Linux | Operating system |
 | Scheduling | Choose which runnable Ada task executes next | Ada priority-ready queue and deadline bookkeeping | Runtime policy |
 
 GNATEVL does not use `ucontext`. A context switch cannot tell whether a socket is
@@ -185,10 +190,10 @@ foreign libraries, or needs independent CPU execution.
 `delay 0.0` is an explicit cooperative yield for an evented task. A permanently
 runnable yielding task does not starve descriptors: after at most 64 dispatches,
 the scheduler promotes expired timers and drains up to 64 immediately available
-poll events in one batched `kevent` call before returning to the ready queue.
+poll events in one batched `kevent` or `epoll_wait` call before returning to the
+ready queue.
 Both budgets are explicit policy, keeping I/O moving without allowing a hot
-descriptor set to monopolize
-the loop in the opposite direction.
+descriptor set to monopolize the loop in the opposite direction.
 
 ## Task-aware I/O
 
@@ -211,7 +216,7 @@ sequenceDiagram
     participant T as Ada task
     participant O as Nonblocking OS call
     participant S as Scheduler
-    participant K as kqueue
+    participant K as kqueue / epoll
 
     T->>O: receive / send / accept / connect
     O-->>T: would block
@@ -235,9 +240,10 @@ decides whether another wait is needed. Exact reads and complete writes loop
 over partial progress while preserving a single deadline.
 
 Accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are exposed to
-the caller. This matches GNAT.Sockets' process-safety convention while retaining
-the raw nonblocking `accept(2)` retry path required by the event loop. Native
-`poll(2)` waits retry `EINTR` with a recomputed remaining monotonic deadline.
+the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
+process-safety convention while retaining the raw nonblocking `accept(2)` retry
+path required by the event loop. Native `poll(2)` waits retry `EINTR` with a
+recomputed remaining monotonic deadline.
 
 ### Timers
 
@@ -247,9 +253,9 @@ monotonic time, so wall-clock changes do not alter elapsed waits.
 
 ### Regular files
 
-Regular disk files are different from sockets: on the target platform,
-`kqueue` readiness does not make a potentially blocking `pread` or `pwrite`
-safe to execute on the event-loop thread.
+Regular disk files are different from sockets: readiness from `kqueue` or
+`epoll` does not make a potentially blocking `pread` or `pwrite` safe to execute
+on the event-loop thread.
 
 GNATEVL therefore uses a small pool of designated native Ada tasks for file
 operations. An evented caller rendezvous with a worker, suspends through normal
@@ -279,11 +285,12 @@ thread-pool runtime.
 
 ## Ada, C, and assembly boundary
 
-There are no C source files in the GNATEVL runtime. Ada implements scheduling,
-queues, timeouts, descriptor registration, stacks, task routing, I/O retry
-logic, and the regular-file worker protocol. It imports the platform primitives
-that the operating system exposes through its C ABI, including `kqueue`,
-`kevent`, `mmap`, `poll`, socket calls, and positional file calls.
+Ada implements scheduling, queues, timeouts, descriptor registration, stacks,
+task routing, I/O retry logic, and the regular-file worker protocol. It imports
+the platform primitives that the operating system exposes through its C ABI,
+including `kqueue`/`kevent`, `epoll`/`eventfd`, `mmap`, `poll`, socket calls, and
+positional file calls. One tiny C function exposes the target's
+`MAP_ANONYMOUS` value without duplicating a platform header constant in Ada.
 
 The only assembly is the minimal context swap needed to save and restore the
 callee-saved machine state. Rewriting a system-call declaration in Ada would
@@ -303,9 +310,9 @@ limit.
 Two more production policy units prove native `poll` and `accept` result
 classification, including `EINTR` retry and would-block handling, and regular
 file open validation and exact Darwin `O_RDONLY`/`O_WRONLY`/`O_RDWR`, `O_CREAT`,
-and `O_TRUNC` flag composition. The Ada import of variadic `open(2)` remains an
-ABI boundary; on AArch64 Darwin it deliberately uses GNAT's `C_Variadic_2`
-calling convention.
+and `O_TRUNC` flag composition for Darwin and Linux. The Ada import of variadic
+`open(2)` remains an ABI boundary and uses GNAT's `C_Variadic_2` calling
+convention.
 
 The runtime's production ready-queue comparator is also a SPARK unit. Its proof
 establishes that higher priorities sort first, equal priorities retain FIFO
@@ -325,7 +332,7 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
-The current run discharges 73 flow, functional-contract, termination, and
+The current run discharges 74 flow, functional-contract, termination, and
 run-time-safety checks across four production policy units, with zero unproved
 checks. Good next proof candidates are intrusive ready-list insertion/removal
 invariants, whole-list minimum-deadline selection, and descriptor wake matching.
@@ -336,14 +343,14 @@ from this Ada source tree.
 
 ## Portability boundaries
 
-| Area | macOS implementation | Likely next backend |
-| --- | --- | --- |
-| Descriptor poller | `kqueue` with `EVFILT_USER` wakeups | Linux `epoll` plus `eventfd`; Windows IOCP needs a completion-oriented adapter |
-| CPU placement | One pthread per logical execution group; Darwin provides no public hard-core pinning | Bind each loop pthread to its group CPU where the OS supports strict affinity |
-| Context switch | AArch64 and x86-64 ABI-specific assembly | One small implementation per architecture/ABI |
-| Stack allocation | `mmap` plus guard pages | Platform virtual-memory API |
-| OS calls | Thin Ada imports of Darwin/POSIX interfaces | Per-platform binding body |
-| GNARL hook | Patch against GNAT 16.1 task primitives | Rebase and verify for each GNAT runtime version |
+| Area | macOS | Linux | Remaining boundary |
+| --- | --- | --- | --- |
+| Descriptor poller | `kqueue` with `EVFILT_USER` | `epoll` with `eventfd` | Windows IOCP needs a completion-oriented adapter |
+| CPU placement | Stable group pthread; no public hard pinning | Stable group pthread; strict affinity is not yet applied | Optional platform binding policy |
+| Context switch | AArch64 and x86-64 assembly | x86-64 assembly | One small implementation per additional architecture/ABI |
+| Stack allocation | `mmap` plus guard pages | `mmap` plus guard pages | Platform virtual-memory API |
+| OS calls | Thin Ada imports of Darwin/POSIX interfaces | Thin Ada imports of Linux/POSIX interfaces | Per-platform binding body |
+| GNARL hook | Darwin GNAT 16.1 patch | Linux GNAT 16.1 patch | Rebase and verify for each GNAT runtime version |
 
 The scheduler and public I/O semantics are intended to remain Ada and
 platform-neutral. Pollers and context implementations are explicitly isolated
@@ -351,10 +358,13 @@ rather than hidden behind a claim of universal portability.
 
 ## Repository layout
 
-- [`runtime/ada`](runtime/ada): scheduler, context, stack, and `kqueue` runtime
-  units.
-- [`runtime/native`](runtime/native): ABI-specific context-switch assembly.
-- [`runtime/patches`](runtime/patches): GNARL task-primitives integration.
+- [`runtime/ada`](runtime/ada): platform-neutral scheduler, context, and poller
+  interfaces.
+- [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies.
+- [`runtime/native`](runtime/native): ABI-specific context-switch assembly and
+  the minimal platform-constant shim.
+- [`runtime/patches`](runtime/patches): Darwin and Linux GNARL task-primitives
+  integration.
 - [`src`](src): public task-aware I/O packages.
 - [`tests`](tests): runtime, socket, timeout, and native TCP smoke tests.
 - [`showcases`](showcases): side-by-side scheduling and I/O demonstrations.
@@ -382,13 +392,24 @@ Run the complete verification suite with:
 ./scripts/prove.sh
 ```
 
+On macOS, Docker can build the Linux/x86-64 target and run the same behavioral
+suite under emulation:
+
+```sh
+./scripts/test-linux-docker.sh
+```
+
+The image pins Ubuntu 24.04, Alire 2.1.0, GNAT 16.1, and GPRbuild 26.0.1. Set
+`GNATEVL_LINUX_IMAGE` to override its local image name.
+
 Current smoke coverage includes:
 
 - `CPU`-selected shared groups, same-group thread identity, cross-group live
   migration, reusable dedicated lanes, and native-task migration rejection;
 - evented and native task activation, rendezvous, protected operations, and
   timers;
-- evented/native socket-pair transfer and timeout behavior;
+- evented/native socket-pair transfer, simultaneous read/write watches on one
+  descriptor, and timeout behavior;
 - descriptor-readiness fairness under a continuously yielding evented task;
 - read/write/create/truncate file-open combinations and same-descriptor reads;
 - repeated evented-child teardown under a native master, exercising deferred
@@ -442,14 +463,17 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 
 ## Current constraints
 
-- Only macOS has a working event backend today.
+- Supported combinations are macOS/AArch64 and Linux/x86-64. The macOS/x86-64
+  context switch is implemented but is not part of the current automated run.
 - Each event group uses one scheduler pthread. Tasks within a group are
   cooperative, while separate groups can execute in parallel.
-- On macOS, a group identifies a stable loop pthread but is not a hard physical
-  core binding; Darwin exposes affinity hints rather than strict core pinning.
+- A group identifies a stable loop pthread but is not currently hard-pinned to
+  a physical core. Darwin lacks a public strict pinning API; Linux affinity can
+  be added as an explicit policy.
 - Shared and dedicated loops are created lazily; each group's pthread and
-  `kqueue` remain alive for the process lifetime. The table is bounded to 256
-  groups, and vacated dedicated loops are reserved and reused by later callers.
+  poller (`kqueue` or `epoll`) remain alive for the process lifetime. The table
+  is bounded to 256 groups, and vacated dedicated loops are reserved and reused
+  by later callers.
 - Ready queues, fiber membership, timer scans, descriptor delivery, and dispatch
   use independent per-group locks and per-group fiber lists. A short-held
   registry lock remains only for task lookup, group allocation, and ownership
@@ -474,6 +498,7 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   provides the required per-task designation without a compiler fork.
 - The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.
 
-The next architectural work is broader platform support, explicit cancellation,
-fairness/preemption policy, scalable timer management, and more complete stress
-and semantic-conformance testing across both execution lanes.
+The next architectural work is additional architectures and operating systems,
+explicit cancellation, fairness/preemption policy, scalable timer management,
+and more complete stress and semantic-conformance testing across both execution
+lanes.

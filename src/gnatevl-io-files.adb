@@ -33,8 +33,8 @@ package body Gnatevl.IO.Files is
       Offset : C.long_long) return C.long;
    pragma Import (C, C_Pwrite, "pwrite");
 
-   function Current_Errno return C.int;
-   pragma Import (C, Current_Errno, "__get_errno");
+   function Current_Errno return C.int is
+     (C.int (GNAT.OS_Lib.Errno));
 
    procedure Perform_Open
      (Path       : String;

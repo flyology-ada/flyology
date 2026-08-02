@@ -1,11 +1,9 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
-with System.OS_Interface;
 with System.Storage_Elements;
 
 package body System.Gnatevl.Contexts is
    package C renames Interfaces.C;
-   package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
 
    use type C.int;
@@ -14,7 +12,12 @@ package body System.Gnatevl.Contexts is
    use System.Storage_Elements;
 
    MAP_PRIVATE : constant := 16#0002#;
-   MAP_ANON    : constant := 16#1000#;
+   PROT_NONE   : constant := 0;
+   PROT_READ   : constant := 1;
+   PROT_WRITE  : constant := 2;
+
+   function Map_Anonymous return C.int;
+   pragma Import (C, Map_Anonymous, "gnatevl_map_anonymous");
 
    type Entry_Point is access procedure (Argument : System.Address);
    pragma Convention (C, Entry_Point);
@@ -36,6 +39,14 @@ package body System.Gnatevl.Contexts is
    function Munmap
      (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Munmap, "munmap");
+
+   function Get_Page_Size return C.int;
+   pragma Import (C, Get_Page_Size, "getpagesize");
+
+   function Mprotect
+     (Address : System.Address; Length : C.size_t; Prot : C.int)
+      return C.int;
+   pragma Import (C, Mprotect, "mprotect");
 
    procedure Initialize_Registers
      (Registers  : System.Address;
@@ -86,7 +97,7 @@ package body System.Gnatevl.Contexts is
       Argument   : System.Address;
       Return_To  : Context_Access) return Context_Access
    is
-      Page_Size   : constant C.size_t := C.size_t (OSI.Get_Page_Size);
+      Page_Size   : constant C.size_t := C.size_t (Get_Page_Size);
       Usable_Size : C.size_t;
       Item        : Context_Access := new Context;
       Result      : C.int;
@@ -106,8 +117,8 @@ package body System.Gnatevl.Contexts is
         Mmap
           (System.Null_Address,
            Item.Mapping_Size,
-           OSI.PROT_NONE,
-           MAP_PRIVATE + MAP_ANON,
+           PROT_NONE,
+           MAP_PRIVATE + Map_Anonymous,
            -1,
            0);
 
@@ -118,8 +129,7 @@ package body System.Gnatevl.Contexts is
 
       Item.Stack := Item.Mapping + SSE.Storage_Offset (Page_Size);
       Result :=
-        OSI.mprotect
-          (Item.Stack, Usable_Size, OSI.PROT_READ + OSI.PROT_WRITE);
+        Mprotect (Item.Stack, Usable_Size, PROT_READ + PROT_WRITE);
       if Result /= 0 then
          Result := Munmap (Item.Mapping, Item.Mapping_Size);
          Free (Item);

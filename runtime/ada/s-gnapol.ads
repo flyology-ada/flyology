@@ -6,7 +6,11 @@ package System.Gnatevl.Poller is
    type Poller is limited private;
    type Interest is (Readable, Writable);
    type Event_Kind is
-     (Wake_Event, Readable_Event, Writable_Event, Timeout_Event);
+     (Wake_Event,
+      Readable_Event,
+      Writable_Event,
+      Read_Write_Event,
+      Timeout_Event);
 
    type Poll_Event is record
       Kind       : Event_Kind := Timeout_Event;
@@ -20,13 +24,13 @@ package System.Gnatevl.Poller is
 
    --  Arm a one-shot readiness notification for Descriptor.
    function Watch
-     (Item       : Poller;
+     (Item       : in out Poller;
       Descriptor : Interfaces.C.int;
       Condition  : Interest) return Boolean;
 
    --  A negative timeout waits indefinitely. The result is false on error.
    function Wait
-     (Item                : Poller;
+     (Item                : in out Poller;
       Timeout             : Duration;
       Event               : out Poll_Event) return Boolean;
 
@@ -34,7 +38,7 @@ package System.Gnatevl.Poller is
    --  zero for a timeout or an interrupted wait. The result is false only for
    --  a real poller error.
    function Wait_Batch
-     (Item                : Poller;
+     (Item                : in out Poller;
       Timeout             : Duration;
       Events              : out Poll_Event_Array;
       Count               : out Natural) return Boolean
@@ -47,5 +51,7 @@ package System.Gnatevl.Poller is
 private
    type Poller is limited record
       Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Wake_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      State : System.Address := System.Null_Address;
    end record;
 end System.Gnatevl.Poller;

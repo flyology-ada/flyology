@@ -24,6 +24,16 @@ procedure IO_Smoke is
       Event_OK, Native_OK     : Boolean := False;
    end Results;
 
+   protected Duplex_Results is
+      procedure Reader_Passed (Value : Boolean);
+      procedure Writer_Passed (Value : Boolean);
+      entry Wait;
+      function Passed return Boolean;
+   private
+      Reader_Done, Writer_Done : Boolean := False;
+      Reader_OK, Writer_OK     : Boolean := False;
+   end Duplex_Results;
+
    protected body Results is
       procedure Event_Passed (Value : Boolean) is
       begin
@@ -44,6 +54,27 @@ procedure IO_Smoke is
 
       function Passed return Boolean is (Event_OK and Native_OK);
    end Results;
+
+   protected body Duplex_Results is
+      procedure Reader_Passed (Value : Boolean) is
+      begin
+         Reader_OK := Value;
+         Reader_Done := True;
+      end Reader_Passed;
+
+      procedure Writer_Passed (Value : Boolean) is
+      begin
+         Writer_OK := Value;
+         Writer_Done := True;
+      end Writer_Passed;
+
+      entry Wait when Reader_Done and Writer_Done is
+      begin
+         null;
+      end Wait;
+
+      function Passed return Boolean is (Reader_OK and Writer_OK);
+   end Duplex_Results;
 
 begin
    GNAT.Sockets.Create_Socket_Pair (Event_Socket, Native_Socket);
@@ -89,6 +120,52 @@ begin
    begin
       Results.Wait;
    end;
+
+   declare
+      task Read_Waiter;
+      task Write_Waiter;
+      task Native_Sender is
+         pragma Task_Info (Gnatevl.Native_Thread);
+      end Native_Sender;
+
+      task body Read_Waiter is
+         Incoming : Stream_Element_Array (1 .. 1);
+      begin
+         if Gnatevl.IO.Wait
+           (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+            Gnatevl.IO.For_Read,
+            Timeout => 1.0)
+         then
+            Gnatevl.IO.Sockets.Receive_Exactly
+              (Event_Socket, Incoming, Timeout => 1.0);
+            Duplex_Results.Reader_Passed (Incoming (1) = 42);
+         else
+            Duplex_Results.Reader_Passed (False);
+         end if;
+      end Read_Waiter;
+
+      task body Write_Waiter is
+      begin
+         Duplex_Results.Writer_Passed
+           (Gnatevl.IO.Wait
+              (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+               Gnatevl.IO.For_Write,
+               Timeout => 1.0));
+      end Write_Waiter;
+
+      task body Native_Sender is
+      begin
+         Gnatevl.IO.Timers.Sleep_For (0.020);
+         Gnatevl.IO.Sockets.Send_All
+           (Native_Socket, [1 => 42], Timeout => 1.0);
+      end Native_Sender;
+   begin
+      Duplex_Results.Wait;
+   end;
+
+   if not Duplex_Results.Passed then
+      raise Program_Error with "simultaneous read/write descriptor waits failed";
+   end if;
 
    declare
       Probe     : Stream_Element_Array (1 .. 1);

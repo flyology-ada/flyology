@@ -1,0 +1,10 @@
+.git
+alire
+build
+config
+lib
+obj
+showcases/bin
+showcases/obj
+tests/bin
+tests/obj

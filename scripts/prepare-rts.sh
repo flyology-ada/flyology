@@ -7,6 +7,18 @@ generated_include="$build_root/adainclude"
 generated_lib="$build_root/adalib"
 alr=${ALR:-"$HOME/alr"}
 
+case "$(uname -s)" in
+  Darwin)
+    platform=darwin
+    tasking_patch="$project_root/runtime/patches/s-taprop.adb.patch"
+    ;;
+  Linux)
+    platform=linux
+    tasking_patch="$project_root/runtime/patches/s-taprop-linux.adb.patch"
+    ;;
+  *) printf '%s\n' "unsupported GNATEVL host: $(uname -s)" >&2; exit 1 ;;
+esac
+
 source_include=$("$alr" exec -- gcc -print-file-name=adainclude)
 source_lib=$("$alr" exec -- gcc -print-file-name=adalib)
 
@@ -15,13 +27,16 @@ chmod -R u+w "$generated_include" "$generated_lib"
 cp -R "$source_include/." "$generated_include/"
 cp -R "$source_lib/." "$generated_lib/"
 cp "$project_root"/runtime/ada/s-*.ad? "$generated_include/"
+cp "$project_root"/runtime/platform/"$platform"/s-*.ad? "$generated_include/"
 
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
-  "$project_root/runtime/patches/s-taprop.adb.patch"
+  "$tasking_patch"
 
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
+cc -O2 -c "$project_root/runtime/native/platform.c" \
+  -o "$build_root/obj/platform.o"
 
 cd "$build_root/obj"
 "$alr" exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnata \
@@ -42,7 +57,8 @@ ar -r "$generated_lib/libgnarl.a" \
   s-gnscpo.o \
   s-gnasch.o \
   s-taprop.o \
-  context_switch.o
+  context_switch.o \
+  platform.o
 ranlib "$generated_lib/libgnarl.a"
 
 printf '%s\n' "$build_root"

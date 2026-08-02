@@ -1,8 +1,8 @@
 with Interfaces.C;
+with Gnatevl_Config;
 
 private package Gnatevl.File_Open_Policy
-  with Preelaborate,
-       SPARK_Mode
+  with SPARK_Mode
 is
    package C renames Interfaces.C;
 
@@ -10,11 +10,18 @@ is
 
    type Access_Mode is (Read_Only, Write_Only, Read_Write);
 
+   Is_Darwin : constant Boolean := Gnatevl_Config.Alire_Host_OS = "macos";
+   Is_Linux  : constant Boolean := Gnatevl_Config.Alire_Host_OS = "linux";
+   pragma Assert
+     (Is_Darwin or Is_Linux, "unsupported GNATEVL host OS");
+
    O_RDONLY : constant C.int := 16#0000#;
    O_WRONLY : constant C.int := 16#0001#;
    O_RDWR   : constant C.int := 16#0002#;
-   O_CREAT  : constant C.int := 16#0200#;
-   O_TRUNC  : constant C.int := 16#0400#;
+   O_CREAT  : constant C.int :=
+     (if Is_Linux then 16#0040# else 16#0200#);
+   O_TRUNC  : constant C.int :=
+     (if Is_Linux then 16#0200# else 16#0400#);
 
    function Valid
      (Mode     : Access_Mode;
