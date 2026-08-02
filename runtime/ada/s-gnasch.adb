@@ -214,6 +214,7 @@ package body System.Gnatevl.Scheduler is
       --  installing 32 KiB inside every evented task stack.
       Signal_Stack      : aliased SSE.Storage_Array
         (1 .. OSI.Alternate_Stack_Size);
+      Stop_Requested    : Boolean := False;
    end record;
 
    type Group_Array is array (Group_Index) of Loop_Group_Access;
@@ -248,6 +249,13 @@ package body System.Gnatevl.Scheduler is
    Initialized    : Boolean := False;
    Event_Runtime_Active : C.int := 0;
    pragma Atomic (Event_Runtime_Active);
+   --  0 dormant, 1 running, 2 finalizing, 3 stopped, 4 cleanup deferred.
+   Lifecycle_State : C.int := 0;
+   pragma Atomic (Lifecycle_State);
+   Created_Group_Count : C.int := 0;
+   pragma Atomic (Created_Group_Count);
+   Origin_Process : C.int := -1;
+   pragma Atomic (Origin_Process);
    Last_Fatal_Context : C.int := 0;
    pragma Atomic (Last_Fatal_Context);
    Groups         : Group_Array := (others => null);
@@ -262,10 +270,11 @@ package body System.Gnatevl.Scheduler is
    pragma Import (C, Mutex_Lock, "pthread_mutex_lock");
    function Sched_Yield return C.int;
    pragma Import (C, Sched_Yield, "sched_yield");
+   function Micro_Sleep (Microseconds : C.unsigned) return C.int;
+   pragma Import (C, Micro_Sleep, "usleep");
 
    procedure Scheduler_Main (Argument : System.Address);
    pragma Convention (C, Scheduler_Main);
-   pragma No_Return (Scheduler_Main);
 
    function Group_Thread (Argument : System.Address) return System.Address;
    pragma Convention (C, Group_Thread);
@@ -284,6 +293,7 @@ package body System.Gnatevl.Scheduler is
    Mutex_Failure       : constant C.int := 2;
    Poller_Failure      : constant C.int := 3;
    Context_Failure     : constant C.int := 4;
+   Fork_Child_Failure  : constant C.int := 5;
 
    procedure Fatal (Context : C.int := Scheduler_Invariant);
    pragma No_Return (Fatal);
@@ -352,6 +362,9 @@ package body System.Gnatevl.Scheduler is
      (Group : not null Loop_Group_Access;
       Event : Pollers.Poll_Event);
    procedure Poll_Ready_Events (Group : not null Loop_Group_Access);
+   function In_Fork_Child return Boolean;
+   function Group_Quiescent_Locked
+     (Group : not null Loop_Group_Access) return Boolean;
 
    procedure C_Abort;
    pragma Import (C, C_Abort, "abort");
@@ -363,6 +376,27 @@ package body System.Gnatevl.Scheduler is
       Count  : C.size_t) return C.long;
    pragma Import (C, C_Write, "write");
 
+   function Get_Process_Id return C.int;
+   pragma Import (C, Get_Process_Id, "getpid");
+
+   function Pthread_Join
+     (Thread : OSI.pthread_t; Value : System.Address) return C.int;
+   pragma Import (C, Pthread_Join, "pthread_join");
+
+   function In_Fork_Child return Boolean is
+     (Origin_Process > 0 and then Get_Process_Id /= Origin_Process);
+
+   function Group_Quiescent_Locked
+     (Group : not null Loop_Group_Access) return Boolean
+   is
+     (Group.Member_Count = 0
+      and then Group.Fibers = null
+      and then Group.Current_Fiber = null
+      and then Group.Ready_Count = 0
+      and then Group.Timer_Count = 0
+      and then Group.Pending_File_Head = null
+      and then Group.Pending_File_Tail = null);
+
    procedure Fatal (Context : C.int := Scheduler_Invariant) is
       Invariant_Message : aliased constant String :=
         "GNATEVL fatal: scheduler invariant" & ASCII.LF;
@@ -372,6 +406,8 @@ package body System.Gnatevl.Scheduler is
         "GNATEVL fatal: event poller" & ASCII.LF;
       Context_Message : aliased constant String :=
         "GNATEVL fatal: context switch" & ASCII.LF;
+      Fork_Message : aliased constant String :=
+        "GNATEVL fatal: event runtime used after fork" & ASCII.LF;
       Written : C.long;
    begin
       Last_Fatal_Context := Context;
@@ -384,6 +420,9 @@ package body System.Gnatevl.Scheduler is
       elsif Context = Context_Failure then
          Written := C_Write
            (2, Context_Message'Address, Context_Message'Length);
+      elsif Context = Fork_Child_Failure then
+         Written := C_Write
+           (2, Fork_Message'Address, Fork_Message'Length);
       else
          Written := C_Write
            (2, Invariant_Message'Address, Invariant_Message'Length);
@@ -393,9 +432,12 @@ package body System.Gnatevl.Scheduler is
    end Fatal;
 
    procedure Lock_Topology is
-      Result : constant C.int :=
-        OSI.pthread_mutex_lock (Topology_Lock.Value'Access);
+      Result : C.int;
    begin
+      if In_Fork_Child then
+         Fatal (Fork_Child_Failure);
+      end if;
+      Result := OSI.pthread_mutex_lock (Topology_Lock.Value'Access);
       if Result /= 0 then
          Fatal (Mutex_Failure);
       end if;
@@ -411,10 +453,13 @@ package body System.Gnatevl.Scheduler is
    end Unlock_Topology;
 
    procedure Lock_Registry_Shard (Shard : Registry_Shard_Index) is
-      Result : constant C.int :=
-        OSI.pthread_mutex_lock
-          (Registry_Shard_Locks (Shard).Value'Access);
+      Result : C.int;
    begin
+      if In_Fork_Child then
+         Fatal (Fork_Child_Failure);
+      end if;
+      Result := OSI.pthread_mutex_lock
+        (Registry_Shard_Locks (Shard).Value'Access);
       if Result /= 0 then
          Fatal (Mutex_Failure);
       end if;
@@ -431,9 +476,12 @@ package body System.Gnatevl.Scheduler is
    end Unlock_Registry_Shard;
 
    procedure Lock_Group (Group : not null Loop_Group_Access) is
-      Result : constant C.int :=
-        OSI.pthread_mutex_lock (Group.Lock.Value'Access);
+      Result : C.int;
    begin
+      if In_Fork_Child then
+         Fatal (Fork_Child_Failure);
+      end if;
+      Result := OSI.pthread_mutex_lock (Group.Lock.Value'Access);
       if Result /= 0 then
          Fatal (Mutex_Failure);
       end if;
@@ -472,6 +520,7 @@ package body System.Gnatevl.Scheduler is
       Unlock_Topology;
       Lock_Group (Group);
       Scheduler_Main (Argument);
+      return System.Null_Address;
    end Group_Thread;
 
    function Ensure_Group
@@ -483,6 +532,8 @@ package body System.Gnatevl.Scheduler is
       Failed : Boolean;
    begin
       if not Initialized or else not Scheduling.Valid_Group (Id) then
+         return null;
+      elsif Lifecycle_State not in 0 | 1 then
          return null;
       end if;
 
@@ -517,6 +568,8 @@ package body System.Gnatevl.Scheduler is
          end if;
 
          Groups (Group_Index (Id)) := Group;
+         Created_Group_Count := Created_Group_Count + 1;
+         Lifecycle_State := 1;
          Result :=
            OSI.pthread_create
              (Group.Event_Thread'Access,
@@ -528,6 +581,10 @@ package body System.Gnatevl.Scheduler is
          --  still held here, so readers cannot observe an uninitialized id.
          if Result /= 0 then
             Groups (Group_Index (Id)) := null;
+            Created_Group_Count := Created_Group_Count - 1;
+            if Created_Group_Count = 0 then
+               Lifecycle_State := 0;
+            end if;
             Pollers.Finalize (Group.Scheduler_Poller);
             Free_Group (Group);
             Unlock_Topology;
@@ -1253,8 +1310,180 @@ package body System.Gnatevl.Scheduler is
       --  designated evented task is activated. Until then native programs
       --  stay on the stock GNARL execution path.
       Initialized := True;
+      Origin_Process := Get_Process_Id;
+      Lifecycle_State := 0;
+      Created_Group_Count := 0;
       return 0;
    end Initialize;
+
+   procedure Finalize is
+      Target : Loop_Group_Access;
+      Item   : Fiber_Access;
+      Next   : Fiber_Access;
+      Result : C.int;
+      Safe   : Boolean := True;
+   begin
+      if In_Fork_Child then
+         return;
+      elsif not Initialized then
+         Lifecycle_State := 3;
+         return;
+      end if;
+
+      --  Prevent creation before inspecting the registry. GNARL calls this
+      --  only after global tasks and controlled library objects have been
+      --  finalized; taking every shard makes an unexpected live operation
+      --  finish before the quiescence decision.
+      Lifecycle_State := 2;
+      --  A terminating evented task notifies its Ada master immediately
+      --  before Fiber_Main switches back for its final scheduler-side reap.
+      --  Give that already-terminated wrapper a bounded opportunity to make
+      --  the registry quiescent. This is not a wait for live application
+      --  work: after at most 100 one-millisecond pauses cleanup is deferred
+      --  to exit. The pause matters when the environment task outranks its
+      --  loop pthread and sched_yield alone would immediately reschedule it.
+      for Attempt in 1 .. 100 loop
+         Safe := True;
+         for Shard in Registry_Shard_Index loop
+            Lock_Registry_Shard (Shard);
+         end loop;
+         Lock_Topology;
+
+         --  Static library-level ATCBs are not passed to Finalize_TCB even
+         --  after their wrappers finish. At this final GNARL boundary they
+         --  cannot run again, so release their Finished fiber records just as
+         --  Destroy does for dynamically allocated task objects.
+         for Index in Group_Index loop
+            Target := Groups (Index);
+            if Target /= null then
+               Lock_Group (Target);
+               Item := Target.Fibers;
+               while Item /= null loop
+                  Next := Item.Next_Group;
+                  if Item.State = Finished then
+                     Reap_Locked (Item);
+                  end if;
+                  Item := Next;
+               end loop;
+               Unlock_Group (Target);
+            end if;
+         end loop;
+
+         for Bucket in Registry_Bucket_Index loop
+            if Fiber_Registry (Bucket) /= null then
+               Safe := False;
+            end if;
+         end loop;
+         for Index in Group_Index loop
+            Target := Groups (Index);
+            if Target /= null then
+               Lock_Group (Target);
+               if not Group_Quiescent_Locked (Target) then
+                  Safe := False;
+               end if;
+               Unlock_Group (Target);
+            end if;
+         end loop;
+         exit when Safe or else Attempt = 100;
+
+         Unlock_Topology;
+         for Shard in reverse Registry_Shard_Index loop
+            Unlock_Registry_Shard (Shard);
+         end loop;
+         Result := Micro_Sleep (1_000);
+         if Result /= 0 then
+            Lifecycle_State := 4;
+            return;
+         end if;
+      end loop;
+
+      if not Safe then
+         Lifecycle_State := 4;
+         Unlock_Topology;
+         for Shard in reverse Registry_Shard_Index loop
+            Unlock_Registry_Shard (Shard);
+         end loop;
+         return;
+      end if;
+
+      for Index in Group_Index loop
+         Target := Groups (Index);
+         if Target /= null then
+            Lock_Group (Target);
+            Target.Stop_Requested := True;
+            Unlock_Group (Target);
+         end if;
+      end loop;
+      Unlock_Topology;
+      for Shard in reverse Registry_Shard_Index loop
+         Unlock_Registry_Shard (Shard);
+      end loop;
+
+      --  Wake every successful group before joining any one of them. A wake
+      --  failure must not turn finalization into an unbounded join.
+      for Index in Group_Index loop
+         Target := Groups (Index);
+         if Target /= null
+           and then Target.Started
+           and then not Pollers.Wake (Target.Scheduler_Poller)
+         then
+            Lifecycle_State := 4;
+            return;
+         end if;
+      end loop;
+
+      for Index in Group_Index loop
+         Target := Groups (Index);
+         if Target /= null then
+            Result := Pthread_Join
+              (Target.Event_Thread, System.Null_Address);
+            if Result /= 0 then
+               Lifecycle_State := 4;
+               return;
+            end if;
+         end if;
+      end loop;
+
+      --  Joined threads cannot race their group resources. Cleanup remains a
+      --  one-shot process-finalization operation; the runtime is not reset.
+      for Index in Group_Index loop
+         Target := Groups (Index);
+         if Target /= null then
+            Pollers.Finalize (Target.Scheduler_Poller);
+            Contexts.Destroy (Target.Scheduler_Context);
+            Free_Timer_Heap (Target.Timers);
+            Result := OSI.pthread_mutex_destroy (Target.Lock.Value'Access);
+            if Result /= 0 then
+               Lifecycle_State := 4;
+               return;
+            end if;
+            Free_Group (Target);
+            Groups (Index) := null;
+         end if;
+      end loop;
+      Created_Group_Count := 0;
+      Event_Runtime_Active := 0;
+
+      for Shard in Registry_Shard_Index loop
+         Result := OSI.pthread_mutex_destroy
+           (Registry_Shard_Locks (Shard).Value'Access);
+         if Result /= 0 then
+            Lifecycle_State := 4;
+            return;
+         end if;
+      end loop;
+      Result := OSI.pthread_mutex_destroy (Topology_Lock.Value'Access);
+      if Result /= 0 then
+         Lifecycle_State := 4;
+         return;
+      end if;
+
+      Initialized := False;
+      Lifecycle_State := 3;
+   exception
+      when others =>
+         Lifecycle_State := 4;
+   end Finalize;
 
    function Create
      (T          : System.Address;
@@ -1269,6 +1498,7 @@ package body System.Gnatevl.Scheduler is
       Group_Id : C.int := Group;
    begin
       if not Initialized
+        or else Lifecycle_State not in 0 | 1
         or else T = System.Null_Address
         or else Stack_Size = 0
         or else Wrapper = System.Null_Address
@@ -1560,6 +1790,12 @@ package body System.Gnatevl.Scheduler is
    end Observe_Group;
 
    function Observe_Last_Fatal return C.int is (Last_Fatal_Context);
+
+   function Observe_Lifecycle return C.int is
+     (if In_Fork_Child then 5 else Lifecycle_State);
+
+   function Observe_Created_Groups return C.int is
+     (if In_Fork_Child then 0 else Created_Group_Count);
 
    function Migrate (Group : C.int) return C.int is
       Item   : Fiber_Access;
@@ -2240,6 +2476,14 @@ package body System.Gnatevl.Scheduler is
       Count   : Natural;
    begin
       loop
+         if Group.Stop_Requested then
+            if not Group_Quiescent_Locked (Group) then
+               Fatal;
+            end if;
+            Group.Current_Fiber := null;
+            Unlock_Group (Group);
+            return;
+         end if;
          Timeout := No_Deadline;
          if Scheduling.Maintenance_Due
            (Ready_Present (Group), Dispatches_Until_Timer_Check)

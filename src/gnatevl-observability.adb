@@ -98,6 +98,8 @@ package body Gnatevl.Observability is
          when 1 => Scheduler_Invariant,
          when 2 => Mutex_Failure,
          when 3 => Poller_Failure,
-         when others => Context_Switch_Failure);
+         when 4 => Context_Switch_Failure,
+         when 5 => Fork_Child_Use,
+         when others => Scheduler_Invariant);
 
 end Gnatevl.Observability;

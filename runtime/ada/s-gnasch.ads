@@ -5,6 +5,7 @@ package System.Gnatevl.Scheduler is
    pragma Preelaborate;
 
    function Initialize (Environment : System.Address) return Interfaces.C.int;
+   procedure Finalize;
 
    function Create
      (T          : System.Address;
@@ -88,6 +89,18 @@ package System.Gnatevl.Scheduler is
    function Observe_Last_Fatal return Interfaces.C.int;
    pragma Export
      (C, Observe_Last_Fatal, "gnatevl_runtime_observe_last_fatal");
+
+   --  Process-lifecycle ABI. State is an atomic scalar and is safe to query
+   --  in the child immediately after fork; no scheduler lock is acquired.
+   function Observe_Lifecycle return Interfaces.C.int;
+   pragma Export
+     (C, Observe_Lifecycle, "gnatevl_runtime_observe_lifecycle");
+
+   function Observe_Created_Groups return Interfaces.C.int;
+   pragma Export
+     (C,
+      Observe_Created_Groups,
+      "gnatevl_runtime_observe_created_groups");
 
    --  ABI used by the public Gnatevl.IO package. A timeout below zero waits
    --  indefinitely; otherwise it is a relative count of nanoseconds.

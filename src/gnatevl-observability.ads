@@ -14,7 +14,8 @@ package Gnatevl.Observability with Preelaborate is
       Scheduler_Invariant,
       Mutex_Failure,
       Poller_Failure,
-      Context_Switch_Failure);
+      Context_Switch_Failure,
+      Fork_Child_Use);
 
    type Group_Snapshot is record
       Group                    : Group_Id;
