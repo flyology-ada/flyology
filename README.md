@@ -11,8 +11,9 @@ from GNARL. GNATEVL changes how a task is scheduled and adds I/O operations that
 cooperate with either execution mode.
 
 The current patch family covers exact Alire `gnat_native` releases from 13
-through 16. Linux supports 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0;
-macOS supports 13.2.2, 14.1.3, 14.2.1, and 16.1.0. The event backend is
+through 16. Linux/x86-64 supports 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1,
+and 16.1.0; Linux/AArch64 is validated with 16.1.0. macOS supports 13.2.2,
+14.1.3, 14.2.1, and 16.1.0. The event backend is
 `kqueue` on macOS and `epoll` plus `eventfd` on Linux. Evented tasks resume
 through the small ABI-specific context switch described below.
 
@@ -365,7 +366,7 @@ These are independent mechanisms with different jobs:
 
 | Mechanism | Purpose | Current implementation | Portability boundary |
 | --- | --- | --- | --- |
-| Context switching | Save one evented task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine for AArch64/macOS and x86-64/macOS or Linux | ABI and architecture |
+| Context switching | Save one evented task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine for AArch64 and x86-64 on macOS or Linux | ABI and architecture |
 | Event polling | Sleep until socket readiness, file completion, a timer deadline, or a cross-thread wake | `kqueue` with `EVFILT_AIO`/`EVFILT_USER` on macOS; `epoll` with `io_uring`/`eventfd` on Linux | Operating system |
 | Scheduling | Choose which runnable Ada task executes next | Ada priority-ready queue and deadline bookkeeping | Runtime policy |
 
@@ -690,6 +691,13 @@ actual kernel completion facility and suspends only the calling Ada task.
   `io_uring_setup` is unavailable or forbidden, the backend uses Linux native
   AIO with `IOCB_FLAG_RESFD` and the same eventfd completion path.
 
+Linux interfaces without ordinary libc functions cross a small typed C bridge.
+Its syscall wrappers select `SYS_*` numbers from the target headers, and its
+epoll wrappers translate the host's native `struct epoll_event` into an
+eight-byte Ada-neutral event record. This keeps both AArch64's aligned epoll
+record and x86-64's packed record out of Ada while leaving engine policy,
+submission, completion handling, and scheduling in Ada.
+
 Submission-queue saturation is explicit backpressure: the task remains
 suspended in a per-group FIFO until the scheduler can submit it. No Ada worker
 task, pthread pool, or blocking `pread`/`pwrite` call is hidden behind the
@@ -928,9 +936,9 @@ from this Ada source tree.
 | Descriptor poller | `kqueue` with `EVFILT_USER` | `epoll` with `eventfd` | Windows IOCP needs a completion-oriented adapter |
 | Regular-file completion | POSIX AIO with `EVFILT_AIO` | Per-group `io_uring`; Linux native AIO fallback | Windows overlapped I/O/IOCP adapter |
 | CPU placement | Stable pthread; capability-checked advisory tag only, with no physical-CPU claim | Stable pthread; optional verified one-CPU affinity mask | Windows processor-group adapter |
-| Context switch | AArch64 and x86-64 assembly | x86-64 assembly | One small implementation per additional architecture/ABI |
+| Context switch | AArch64 and x86-64 assembly | AArch64 and x86-64 assembly | One small implementation per additional architecture/ABI |
 | Stack allocation | `mmap` plus guard pages | `mmap` plus guard pages | Platform virtual-memory API |
-| OS calls | Thin Ada imports of Darwin/POSIX interfaces | Thin Ada imports of Linux/POSIX interfaces | Per-platform binding body |
+| OS calls | Thin Ada imports of Darwin/POSIX interfaces | Thin Ada imports plus header-derived C bridges for Linux syscall numbers and epoll record padding | Per-platform binding body |
 | GNARL hook | Versioned GNAT 13–16 Darwin patch | Versioned GNAT 13–16 Linux patch | Add and verify a new family when GNARL source changes |
 
 The scheduler and public I/O semantics are intended to remain Ada and
@@ -964,6 +972,7 @@ below:
 | Host | Releases |
 | --- | --- |
 | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
+| Linux/AArch64 | 16.1.0 |
 | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 
 The crate declares a generic `gnat >=13 & <17` dependency so Alire can select a
@@ -971,9 +980,10 @@ compiler; runtime preparation then checks the exact host/release pair against
 the versioned patch manifest and fails closed if it has not actually been
 verified. Alire's Darwin GNAT 15 packages bundle a different
 `s-taprop.adb` source shape and need a separate Darwin patch family before
-they can be enabled. macOS/AArch64 and Linux/x86-64 are the CI reference
-targets. The source also contains the x86-64 macOS context switch, but that
-host/ABI combination is not part of the hosted matrix.
+they can be enabled. macOS/AArch64 and Linux/x86-64 are the hosted CI reference
+targets; Linux/AArch64 is the native local Docker reference. The source also
+contains the x86-64 macOS context switch, but that host/ABI combination is not
+part of the hosted matrix.
 
 Scripts use `ALR` when set, otherwise `alr` from `PATH`, with `~/alr` retained
 as a compatibility fallback:
@@ -1153,17 +1163,21 @@ designations. `scripts/showcases.sh` selects the evented project default;
 `many_evented_tasks.adb` deliberately uses `Gnatevl.Project_Default`, while the
 mixed-lane showcases keep explicit overrides.
 
-On macOS, Docker can build the Linux/x86-64 target and run the same behavioral
-suite under emulation:
+Docker builds the host's native Linux architecture by default, so an Apple
+Silicon host validates Linux/AArch64 without emulation:
 
 ```sh
 ./scripts/test-linux-docker.sh
 ```
 
-The default image uses Ubuntu 24.04, Alire 2.1.0, GNAT 16.1, and GPRbuild
-26.0.1. `GNATEVL_GNAT_VERSION` and `GNATEVL_GPRBUILD_VERSION` select another
-pair; `GNATEVL_LINUX_IMAGE` overrides its local image name. To run every Alire
-release covered by the patch family:
+The default image uses Ubuntu 24.04, the matching official AArch64 or x86-64
+Alire 2.1.0 archive, GNAT 16.1, and GPRbuild 26.0.1. The test run deliberately
+denies `io_uring_setup` at the C bridge and asserts that a real evented file
+operation selected Linux native AIO. `GNATEVL_LINUX_ARCH=amd64` requests the
+x86-64 compatibility target explicitly; `GNATEVL_GNAT_VERSION` and
+`GNATEVL_GPRBUILD_VERSION` select another pair, and `GNATEVL_LINUX_IMAGE`
+overrides its local image name. To run every Alire release covered by the patch
+family:
 
 ```sh
 ./scripts/test-alire-runtime-matrix.sh
@@ -1453,7 +1467,8 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 
 ## Current constraints
 
-- Supported combinations are macOS/AArch64 and Linux/x86-64. The macOS/x86-64
+- Supported combinations are macOS/AArch64, Linux/AArch64, and Linux/x86-64.
+  Linux/AArch64 is currently validated with GNAT 16.1.0; the macOS/x86-64
   context switch is implemented but is not part of the current automated run.
 - Each event group uses one scheduler pthread. Tasks within a group are
   cooperative, while separate groups can execute in parallel.
