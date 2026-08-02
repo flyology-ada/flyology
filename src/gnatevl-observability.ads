@@ -85,8 +85,9 @@ package Gnatevl.Observability with Preelaborate is
    --  after all evented task objects are finalized; cumulative counters are
    --  retained for process-lifetime diagnostics. Shared_Stacks counts
    --  acquisitions placed into an existing arena, and Discarded_Stacks counts
-   --  successful physical-page discard requests on release. This query does
-   --  not create an event loop or allocate a stack.
+   --  release-time MADV_DONTNEED advice accepted by the kernel. The advice is
+   --  best-effort; slot protection and empty-arena unmapping do not depend on
+   --  it. This query does not create an event loop or allocate a stack.
    function Stack_Pool return Stack_Pool_Snapshot;
 
 end Gnatevl.Observability;

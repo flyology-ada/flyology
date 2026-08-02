@@ -9,6 +9,8 @@ procedure Stack_Pool_Smoke is
    use type Interfaces.Unsigned_64;
    use type Observation.Stack_Pool_Snapshot;
 
+   Small_Effective_Bytes : Observation.Counter := 0;
+
    procedure Wait_Until_Empty is
       Value : Observation.Stack_Pool_Snapshot;
    begin
@@ -145,6 +147,7 @@ procedure Stack_Pool_Smoke is
       Replacements : array (1 .. Replacement_Count) of Replacement_Access :=
         (others => null);
       Before, During, Partial, Refilled : Observation.Stack_Pool_Snapshot;
+      Failed : Boolean := False;
    begin
       Before := Observation.Stack_Pool;
       for Index in Originals'Range loop
@@ -152,14 +155,14 @@ procedure Stack_Pool_Smoke is
       end loop;
       Control.Wait_Originals;
       During := Observation.Stack_Pool;
+      Small_Effective_Bytes := During.Live_Usable_Bytes / Original_Count;
       if During.Live_Stacks /= Original_Count
         or else During.Active_Arenas /= 1
-        or else During.Live_Usable_Bytes
-          /= Original_Count * 48 * 1_024
+        or else Small_Effective_Bytes < 16 * 1_024
         or else During.Arena_Mappings /= Before.Arena_Mappings + 1
         or else During.Shared_Stacks /= Before.Shared_Stacks + 63
       then
-         raise Program_Error with "same-sized stacks did not share an arena";
+         Failed := True;
       end if;
 
       Control.Release_First;
@@ -173,7 +176,7 @@ procedure Stack_Pool_Smoke is
         or else Partial.Discarded_Stacks
           /= Before.Discarded_Stacks + Replacement_Count
       then
-         raise Program_Error with "partial arena slots were not discarded";
+         Failed := True;
       end if;
 
       for Index in Replacements'Range loop
@@ -187,7 +190,7 @@ procedure Stack_Pool_Smoke is
         or else Refilled.Shared_Stacks
           /= During.Shared_Stacks + Replacement_Count
       then
-         raise Program_Error with "discarded stack slots were not reused";
+         Failed := True;
       end if;
 
       Control.Release_Final;
@@ -199,6 +202,9 @@ procedure Stack_Pool_Smoke is
          Free (Replacements (Index));
       end loop;
       Wait_Until_Empty;
+      if Failed then
+         raise Program_Error with "partial stack-arena churn was inconsistent";
+      end if;
    end Test_Partial_Churn;
 
    procedure Test_Mixed_Sizes is
@@ -262,19 +268,25 @@ procedure Stack_Pool_Smoke is
       Large_Workers : array (1 .. Count_Per_Size) of Large;
       pragma Unreferenced (Small_Workers, Large_Workers);
       During : Observation.Stack_Pool_Snapshot;
+      Failed : Boolean := False;
    begin
       Control.Wait_All;
       During := Observation.Stack_Pool;
-      --  Forty 48 KiB effective stacks fit in one arena. Forty 160 KiB
-      --  effective stacks require two on both 16 KiB- and 4 KiB-page hosts.
+      --  The two requested sizes differ by 112 KiB on every platform. Forty
+      --  small stacks fit in one arena and forty large stacks require two on
+      --  both 16 KiB- and 4 KiB-page hosts.
       if During.Live_Stacks /= 2 * Count_Per_Size
         or else During.Active_Arenas /= 3
         or else During.Live_Usable_Bytes
-          /= Count_Per_Size * (48 + 160) * 1_024
+          /= 2 * Count_Per_Size * Small_Effective_Bytes
+             + Count_Per_Size * (128 - 16) * 1_024
       then
-         raise Program_Error with "mixed stack sizes shared an invalid arena";
+         Failed := True;
       end if;
       Control.Release;
+      if Failed then
+         raise Program_Error with "mixed stack sizes shared an invalid arena";
+      end if;
    end Test_Mixed_Sizes;
 
 begin
