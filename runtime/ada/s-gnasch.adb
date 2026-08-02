@@ -406,7 +406,7 @@ package body System.Gnatevl.Scheduler is
       Descriptor : C.int;
       Interest   : Pollers.Interest)
    is
-      Bucket : constant IO_Bucket_Index := IO_Bucket_For (Descriptor);
+      Bucket : IO_Bucket_Index;
    begin
       if Item.IO_Wait
         or else Item.Group /= Group
@@ -415,6 +415,7 @@ package body System.Gnatevl.Scheduler is
       then
          Fatal;
       end if;
+      Bucket := IO_Bucket_For (Descriptor);
       Item.IO_Wait := True;
       Item.IO_Descriptor := Descriptor;
       Item.IO_Interest := Interest;
