@@ -19,6 +19,7 @@ procedure Stress_Randomized is
    use type Ada.Real_Time.Time;
    use type Gnatevl.Execution_Groups.Group_Id;
    use type Gnatevl.IO.Files.File_Descriptor;
+   use type Gnatevl.IO.Wait_Outcome;
 
    package Groups renames Gnatevl.Execution_Groups;
    package Files renames Gnatevl.IO.Files;
@@ -175,6 +176,10 @@ begin
            (others => GNAT.Sockets.No_Socket);
          Peers   : Socket_Array (1 .. Width) :=
            (others => GNAT.Sockets.No_Socket);
+         Interrupt_Readers : Socket_Array (1 .. Width) :=
+           (others => GNAT.Sockets.No_Socket);
+         Interrupt_Peers : Socket_Array (1 .. Width) :=
+           (others => GNAT.Sockets.No_Socket);
          State : Progress (Width);
 
          type Natural_Array is array (Positive range <>) of Natural;
@@ -206,6 +211,8 @@ begin
               Groups.Shared_Group_Id (1 + (Plan + 1) mod 4);
             Rejected : Boolean := False;
             OK       : Boolean := True;
+            Outcome  : Gnatevl.IO.Wait_Outcome;
+            Will_Interrupt : constant Boolean := Plan mod 3 = 0;
          begin
             Ada.Dynamic_Priorities.Set_Priority (Changed);
             if Gnatevl.IO.Is_Evented_Task then
@@ -238,14 +245,29 @@ begin
             else
                delay 0.0;
             end if;
-            OK := OK and then not Gnatevl.IO.Wait
+            OK := OK and then Gnatevl.IO.Wait_Interruptibly
               (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
                Gnatevl.IO.For_Read,
-               Timeout => 0.0);
+               Timeout     => 0.0,
+               Interrupt_1 => Gnatevl.IO.Descriptor
+                 (GNAT.Sockets.To_C (Interrupt_Readers (Index))))
+              = Gnatevl.IO.Timed_Out;
             State.Started;
-            Gnatevl.IO.Sockets.Receive_Exactly
-              (Readers (Index), Incoming, Timeout => 2.0);
-            OK := OK and then Incoming (1) = Stream_Element (Plan mod 251);
+            Outcome := Gnatevl.IO.Wait_Interruptibly
+              (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
+               Gnatevl.IO.For_Read,
+               Timeout     => 2.0,
+               Interrupt_1 => Gnatevl.IO.Descriptor
+                 (GNAT.Sockets.To_C (Interrupt_Readers (Index))));
+            if Will_Interrupt then
+               OK := OK and then Outcome = Gnatevl.IO.Interrupted;
+            else
+               OK := OK and then Outcome = Gnatevl.IO.Ready;
+               Gnatevl.IO.Sockets.Receive_Exactly
+                 (Readers (Index), Incoming, Timeout => 2.0);
+               OK := OK
+                 and then Incoming (1) = Stream_Element (Plan mod 251);
+            end if;
 
             Files.Write_At
               (File,
@@ -268,6 +290,8 @@ begin
          for Index in 1 .. Width loop
             Plans (Index) := Random_Natural.Random (Generator) mod 100_000;
             GNAT.Sockets.Create_Socket_Pair (Readers (Index), Peers (Index));
+            GNAT.Sockets.Create_Socket_Pair
+              (Interrupt_Readers (Index), Interrupt_Peers (Index));
             Workers (Index) :=
               new Worker
                 (Index,
@@ -279,10 +303,15 @@ begin
 
          State.Await_Started;
          for Index in 1 .. Width loop
-            Gnatevl.IO.Sockets.Send_All
-              (Peers (Index),
-               [1 => Stream_Element (Plans (Index) mod 251)],
-               Timeout => 2.0);
+            if Plans (Index) mod 3 = 0 then
+               Gnatevl.IO.Sockets.Send_All
+                 (Interrupt_Peers (Index), [1 => 1], Timeout => 2.0);
+            else
+               Gnatevl.IO.Sockets.Send_All
+                 (Peers (Index),
+                  [1 => Stream_Element (Plans (Index) mod 251)],
+                  Timeout => 2.0);
+            end if;
          end loop;
          State.Await_Done;
          if not State.Passed then
@@ -297,6 +326,8 @@ begin
             Free_Worker (Workers (Index));
             GNAT.Sockets.Close_Socket (Readers (Index));
             GNAT.Sockets.Close_Socket (Peers (Index));
+            GNAT.Sockets.Close_Socket (Interrupt_Readers (Index));
+            GNAT.Sockets.Close_Socket (Interrupt_Peers (Index));
          end loop;
       end;
 

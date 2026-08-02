@@ -698,8 +698,8 @@ Run the bounded, reproducible concurrency and fault campaign with:
 The default short campaign reports every seed and runs four seeds through
 repeated evented/native task allocation and destruction, cross-lane
 rendezvous, priority changes, yield and delay, abort, group migration, pin
-rejection, readiness and timeout waits, concurrent kernel file submissions,
-and four active event groups. Override `GNATEVL_STRESS_SEEDS`,
+rejection, readiness, interrupt, and timeout waits, concurrent kernel file
+submissions, and four active event groups. Override `GNATEVL_STRESS_SEEDS`,
 `GNATEVL_STRESS_BATCHES`, `GNATEVL_STRESS_WIDTH`, or
 `GNATEVL_STRESS_TIMEOUT` to reproduce or resize a run. For example:
 
