@@ -166,9 +166,11 @@ package System.Flyology.Scheduler is
       Length      : Interfaces.C.size_t;
       Offset      : Interfaces.C.long_long;
       For_Write   : Interfaces.C.int;
+      Cancel_FD   : Interfaces.C.int;
+      Task_Lock   : System.Address;
       Transferred : access Interfaces.C.long_long;
-      Error_Code  : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Export (C, File_IO, "flyology_runtime_file_io");
+      Error_Code  : access Interfaces.C.int;
+      Cancelled   : access Interfaces.C.int) return Interfaces.C.int;
 
 private
    pragma Inline (Is_Lightweight_Task);

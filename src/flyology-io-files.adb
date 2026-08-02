@@ -39,12 +39,39 @@ package body Flyology.IO.Files is
       Length      : C.size_t;
       Offset      : C.long_long;
       For_Write   : C.int;
+      Cancel_FD   : C.int;
       Transferred : access C.long_long;
-      Error_Code  : access C.int) return C.int;
+      Error_Code  : access C.int;
+      Cancelled   : access C.int) return C.int;
    pragma Import (C, Event_File_IO, "flyology_runtime_file_io");
 
    function Current_Errno return C.int is
      (C.int (GNAT.OS_Lib.Errno));
+
+   procedure Cancellation_Source
+     (Token      : access Cancellation_Token;
+      Lightweight : Boolean;
+      Descriptor : out C.int)
+   is
+      Already_Requested : Boolean := False;
+   begin
+      if Token = null then
+         Descriptor := -1;
+      elsif not Lightweight then
+         --  Native file calls cannot be interrupted once inside pread/pwrite.
+         --  Observe an already-requested token without allocating an
+         --  event-loop wake source that this lane could never wait on.
+         Descriptor := -1;
+         if Token.Requested then
+            raise Operation_Cancelled;
+         end if;
+      else
+         Token.Wait_Source (Descriptor, Already_Requested);
+         if Already_Requested then
+            raise Operation_Cancelled;
+         end if;
+      end if;
+   end Cancellation_Source;
 
    procedure Raise_IO_Error (Operation : String; Error_Code : C.int) is
    begin
@@ -154,30 +181,43 @@ package body Flyology.IO.Files is
      (File   : File_Descriptor;
       Offset : File_Offset;
       Item   : out Ada.Streams.Stream_Element_Array;
-      Last   : out Ada.Streams.Stream_Element_Offset)
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Token  : access Cancellation_Token := null)
    is
       Transferred : aliased C.long_long := 0;
       Error_Code  : aliased C.int := 0;
+      Cancelled   : aliased C.int := 0;
       Status      : C.int := 0;
+      Cancel_FD   : C.int := -1;
    begin
       Last := Item'First - 1;
       if Item'Length = 0 then
          return;
-      elsif Is_Lightweight_Task then
-         Status :=
-           Event_File_IO
-             (C.int (File),
-              Item'Address,
-              C.size_t (Item'Length),
-              C.long_long (Offset),
-              0,
-              Transferred'Access,
-              Error_Code'Access);
-      else
-         Native_Read (File, Offset, Item, Transferred, Error_Code);
       end if;
+      declare
+         Lightweight : constant Boolean := Is_Lightweight_Task;
+      begin
+         Cancellation_Source (Token, Lightweight, Cancel_FD);
+         if Lightweight then
+            Status :=
+              Event_File_IO
+                (C.int (File),
+                 Item'Address,
+                 C.size_t (Item'Length),
+                 C.long_long (Offset),
+                 0,
+                 Cancel_FD,
+                 Transferred'Access,
+                 Error_Code'Access,
+                 Cancelled'Access);
+         else
+            Native_Read (File, Offset, Item, Transferred, Error_Code);
+         end if;
+      end;
       if Status /= 0 and then Error_Code = 0 then
          raise Device_Error with "lightweight pread submission failed";
+      elsif Cancelled /= 0 then
+         raise Operation_Cancelled;
       elsif Error_Code /= 0 then
          Raise_IO_Error ("pread", Error_Code);
       elsif Transferred < 0
@@ -194,30 +234,43 @@ package body Flyology.IO.Files is
      (File   : File_Descriptor;
       Offset : File_Offset;
       Item   : Ada.Streams.Stream_Element_Array;
-      Last   : out Ada.Streams.Stream_Element_Offset)
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Token  : access Cancellation_Token := null)
    is
       Transferred : aliased C.long_long := 0;
       Error_Code  : aliased C.int := 0;
+      Cancelled   : aliased C.int := 0;
       Status      : C.int := 0;
+      Cancel_FD   : C.int := -1;
    begin
       Last := Item'First - 1;
       if Item'Length = 0 then
          return;
-      elsif Is_Lightweight_Task then
-         Status :=
-           Event_File_IO
-             (C.int (File),
-              Item'Address,
-              C.size_t (Item'Length),
-              C.long_long (Offset),
-              1,
-              Transferred'Access,
-              Error_Code'Access);
-      else
-         Native_Write (File, Offset, Item, Transferred, Error_Code);
       end if;
+      declare
+         Lightweight : constant Boolean := Is_Lightweight_Task;
+      begin
+         Cancellation_Source (Token, Lightweight, Cancel_FD);
+         if Lightweight then
+            Status :=
+              Event_File_IO
+                (C.int (File),
+                 Item'Address,
+                 C.size_t (Item'Length),
+                 C.long_long (Offset),
+                 1,
+                 Cancel_FD,
+                 Transferred'Access,
+                 Error_Code'Access,
+                 Cancelled'Access);
+         else
+            Native_Write (File, Offset, Item, Transferred, Error_Code);
+         end if;
+      end;
       if Status /= 0 and then Error_Code = 0 then
          raise Device_Error with "lightweight pwrite submission failed";
+      elsif Cancelled /= 0 then
+         raise Operation_Cancelled;
       elsif Error_Code /= 0 then
          Raise_IO_Error ("pwrite", Error_Code);
       elsif Transferred < 0

@@ -14,7 +14,15 @@ package System.Flyology.Faults is
       Group_Startup,
       Stack_Protection,
       Stack_Discard,
-      Final_Reap_Window);
+      Final_Reap_Window,
+      File_Cancel_Not_Cancelable,
+      File_Cancel_Already_Completing,
+      File_Pre_Park,
+      File_Cancel_Delete_EINTR,
+      File_Cancel_Delete_Failure,
+      File_Cancel_Admin_Delay,
+      File_Cancel_Synthetic,
+      File_Cancel_Stale_Event);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -27,7 +35,15 @@ package System.Flyology.Faults is
       Group_Startup        => 8,
       Stack_Protection     => 9,
       Stack_Discard        => 10,
-      Final_Reap_Window    => 11);
+      Final_Reap_Window    => 11,
+      File_Cancel_Not_Cancelable   => 12,
+      File_Cancel_Already_Completing => 13,
+      File_Pre_Park                => 14,
+      File_Cancel_Delete_EINTR     => 15,
+      File_Cancel_Delete_Failure   => 16,
+      File_Cancel_Admin_Delay      => 17,
+      File_Cancel_Synthetic        => 18,
+      File_Cancel_Stale_Event      => 19);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);

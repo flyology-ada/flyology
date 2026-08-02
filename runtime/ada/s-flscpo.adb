@@ -1,6 +1,15 @@
 package body System.Flyology.Scheduling_Policy
   with SPARK_Mode
 is
+   function Plan_File_Cancel
+     (File_Waiting       : Boolean;
+      Submission_Pending : Boolean;
+      Already_Attempted  : Boolean) return File_Cancel_Plan
+   is
+     (if not File_Waiting or else Already_Attempted then Ignore_Cancel
+      elsif Submission_Pending then Complete_Pending
+      else Request_Kernel_Cancel);
+
    function Placement_After_Priority_Update
      (Loss_Of_Inheritance : Boolean) return Ready_Placement
    is

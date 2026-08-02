@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Flyology.Cancellation;
 with Interfaces.C;
 
 --  Provides positional file I/O with lane-specific blocking behavior.
@@ -7,6 +8,14 @@ with Interfaces.C;
 --
 --     File := Flyology.IO.Files.Open ("state.bin");
 package Flyology.IO.Files is
+
+   --  Raised only after a cancellation request reaches a terminal state and
+   --  the caller may safely reuse its I/O buffer.
+   Operation_Cancelled : exception renames
+     Flyology.Cancellation.Operation_Cancelled;
+
+   --  Shared one-shot token. The token must outlive every operation using it.
+   subtype Cancellation_Token is Flyology.Cancellation.Token;
 
    --  Owned operating-system file handle. This type is not controlled: the
    --  owning task must call Close. Concurrent operations require external
@@ -44,34 +53,51 @@ package Flyology.IO.Files is
    --  @exception Device_Error close(2) reports an error; File is invalidated
    procedure Close (File : in out File_Descriptor);
 
-   --  Read at Offset without changing the descriptor's file position.
-   --  Lightweight tasks suspend until the execution group's kernel completion
-   --  backend finishes the request. Native tasks block their thread in pread.
+   --  Read at Offset without changing the descriptor's file position. A
+   --  lightweight task suspends until kernel completion; a native task blocks
+   --  its thread in pread. A requested token is observed before native pread
+   --  starts, but cannot interrupt a native syscall already in progress. A
+   --  lightweight cancellation stays suspended until the kernel relinquishes
+   --  Item, so Operation_Cancelled is a terminal buffer-ownership handoff.
    --  @param File Open descriptor permitting reads
    --  @param Offset Starting byte position
    --  @param Item Destination buffer
    --  @param Last Last element written, or Item'First - 1 at end of file
+   --  @param Token Optional one-shot cancellation token
    --  @exception Device_Error Submission, completion, or pread reports failure
+   --  @exception Operation_Cancelled Token cancellation reaches a terminal
+   --     state
    procedure Read_At
      (File   : File_Descriptor;
       Offset : File_Offset;
       Item   : out Ada.Streams.Stream_Element_Array;
-      Last   : out Ada.Streams.Stream_Element_Offset);
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Token  : access Cancellation_Token := null);
 
    --  Write at Offset without changing the descriptor's file position. A
    --  single call may transfer fewer than Item'Length elements. Lightweight
-   --  tasks suspend for kernel completion; native tasks block in pwrite.
+   --  tasks suspend for kernel completion; native tasks block in pwrite. Token
+   --  and buffer-lifetime semantics match Read_At. Cancellation does not roll
+   --  back bytes already written. When Operation_Cancelled is raised, Last has
+   --  no defined application meaning and a blind retry may duplicate or
+   --  overwrite data; callers needing retry safety must provide an idempotent
+   --  protocol or track committed offsets independently.
    --  @param File Open descriptor permitting writes
    --  @param Offset Starting byte position
    --  @param Item Source buffer
-   --  @param Last Last element written, or Item'First - 1 if none
+   --  @param Last Last element written, or Item'First - 1 if none, meaningful
+   --     only on normal return
+   --  @param Token Optional one-shot cancellation token
    --  @exception Device_Error Submission, completion, or pwrite reports
    --     failure
+   --  @exception Operation_Cancelled Token cancellation reaches a terminal
+   --     state
    procedure Write_At
      (File   : File_Descriptor;
       Offset : File_Offset;
       Item   : Ada.Streams.Stream_Element_Array;
-      Last   : out Ada.Streams.Stream_Element_Offset);
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Token  : access Cancellation_Token := null);
 
 private
    type File_Descriptor is new Interfaces.C.int;

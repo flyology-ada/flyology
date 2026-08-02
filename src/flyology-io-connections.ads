@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Streams;
 with GNAT.Sockets;
+with Flyology.Cancellation;
 with Flyology.Wake_Sources;
 
 --  Adds ownership, admission control, and cancellation to socket connections.
@@ -13,30 +14,13 @@ package Flyology.IO.Connections is
    --  Raised when a Server no longer admits connections.
    Admission_Closed : exception;
    --  Raised when server shutdown, an explicit token, or concurrent Close
-   --  interrupts an operation.
-   Operation_Cancelled : exception;
+   --  interrupts an operation. This is the canonical cross-I/O exception.
+   Operation_Cancelled : exception renames
+     Flyology.Cancellation.Operation_Cancelled;
 
-   --  Thread-safe, one-shot cancellation source. Request is idempotent and no
-   --  reset operation exists. The token must outlive all operations using it.
-   --  Request raises Program_Error when its wake descriptor cannot be
-   --  signalled.
-   protected type Cancellation_Token is
-      --  Request cancellation and wake registered operations.
-      procedure Request;
-      --  Report the one-shot state.
-      --  @return True after Request
-      function Requested return Boolean;
-      --  Return the borrowed wake descriptor without consuming it.
-      --  @param FD Wake descriptor, or Invalid_Descriptor when already
-      --     requested
-      --  @param Already_Requested True when Request preceded this call
-      --  @exception Program_Error The wake descriptor cannot be created
-      procedure Wait_Source
-        (FD : out Flyology.IO.Descriptor; Already_Requested : out Boolean);
-   private
-      Is_Requested : Boolean := False;  --  One-shot cancellation state
-      Wake         : Flyology.Wake_Sources.Source;  --  Readiness source
-   end Cancellation_Token;
+   --  Canonical thread-safe one-shot cancellation source. Request is
+   --  idempotent. The token must outlive every operation using it.
+   subtype Cancellation_Token is Flyology.Cancellation.Token;
 
    --  Thread-safe connection admission controller. Acquire suspends when
    --  Capacity is full: lightweight tasks suspend cooperatively and native

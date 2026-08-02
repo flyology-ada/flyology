@@ -400,6 +400,43 @@ package body System.Flyology.Poller is
          Error_Code);
    end Submit_File;
 
+   function Cancel_File
+     (Item           : in out Poller;
+      Descriptor     : C.int;
+      Token          : System.Address;
+      Value          : out File_Engines.Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out C.int)
+      return File_Engines.Cancellation_Disposition
+   is
+   begin
+      if Faults.Enabled
+        and then Faults.Fail (Faults.File_Cancel_Not_Cancelable)
+      then
+         Value := (others => <>);
+         Has_Completion := False;
+         Error_Code := 0;
+         return File_Engines.Not_Cancelable;
+      elsif Faults.Enabled
+        and then Faults.Fail (Faults.File_Cancel_Already_Completing)
+      then
+         Value := (others => <>);
+         Has_Completion := False;
+         Error_Code := 0;
+         return File_Engines.Already_Completing;
+      end if;
+      return File_Engines.Cancel
+        (Item.File_State,
+         Descriptor,
+         Token,
+         Value,
+         Has_Completion,
+         Error_Code);
+   end Cancel_File;
+
+   function File_Quiescent (Item : Poller) return Boolean is
+     (File_Engines.Is_Quiescent (Item.File_State));
+
    function Wait
      (Item                : in out Poller;
       Timeout             : Duration;

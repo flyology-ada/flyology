@@ -53,6 +53,22 @@ package System.Flyology.Poller is
       Token       : System.Address;
       Error_Code  : out Interfaces.C.int) return Boolean;
 
+   --  Invoke the platform cancellation backend. The scheduler calls this
+   --  only from the event-loop thread that owns Item.File_State.
+   function Cancel_File
+     (Item           : in out Poller;
+      Descriptor     : Interfaces.C.int;
+      Token          : System.Address;
+      Value          : out System.Flyology.File_Engine.Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out Interfaces.C.int)
+      return System.Flyology.File_Engine.Cancellation_Disposition;
+
+   --  True when no file operation or cancellation completion still belongs
+   --  to the kernel. Terminal Darwin quarantine records are released when the
+   --  poller is destroyed and do not keep an otherwise idle group alive.
+   function File_Quiescent (Item : Poller) return Boolean;
+
    --  A negative timeout waits indefinitely. The result is false on error.
    function Wait
      (Item                : in out Poller;

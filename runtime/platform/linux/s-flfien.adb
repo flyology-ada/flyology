@@ -2,6 +2,7 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with Interfaces;
 with System.Atomic_Primitives;
+with System.Flyology.Faults;
 with System.Flyology.Time_ABI;
 with System.OS_Interface;
 with System.Storage_Elements;
@@ -9,6 +10,7 @@ with System.Storage_Elements;
 package body System.Flyology.File_Engine is
    package AP renames System.Atomic_Primitives;
    package C renames Interfaces.C;
+   package Faults renames System.Flyology.Faults;
    package Time_ABI renames System.Flyology.Time_ABI;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
@@ -30,12 +32,12 @@ package body System.Flyology.File_Engine is
    subtype S64 is Interfaces.Integer_64;
 
    Ring_Entries : constant U32 := 1_024;
-
    ENOSYS : constant C.int := 38;
    EPERM  : constant C.int := 1;
    EINVAL : constant C.int := 22;
    ENOMEM : constant C.int := 12;
    EAGAIN : constant C.int := 11;
+   ENOENT : constant C.int := 2;
 
    PROT_READ  : constant C.int := 1;
    PROT_WRITE : constant C.int := 2;
@@ -50,6 +52,7 @@ package body System.Flyology.File_Engine is
    IORING_REGISTER_EVENTFD_ASYNC : constant U32 := 7;
    IORING_OP_READ                : constant U8 := 22;
    IORING_OP_WRITE               : constant U8 := 23;
+   IORING_OP_ASYNC_CANCEL        : constant U8 := 14;
 
    IOCB_CMD_PREAD  : constant U16 := 0;
    IOCB_CMD_PWRITE : constant U16 := 1;
@@ -228,12 +231,36 @@ package body System.Flyology.File_Engine is
    type Native_AIO_Request is record
       Control   : aliased IOCB;
       Next_Free : Native_AIO_Request_Access;
+      Token     : System.Address;
+      Next_Active : Native_AIO_Request_Access;
    end record
-     with Size => 576, Alignment => 8;
+     with Size => 704, Alignment => 8;
    for Native_AIO_Request use record
       Control   at 0  range 0 .. 511;
       Next_Free at 64 range 0 .. 63;
+      Token     at 72 range 0 .. 63;
+      Next_Active at 80 range 0 .. 63;
    end record;
+
+   --  io_uring cancellation has two independent completions: one for the
+   --  data operation and one for the administrative cancel request. Keep a
+   --  request identity alive until both have arrived. A fiber address is not
+   --  a request identity because the fiber may submit another operation as
+   --  soon as the data completion resumes it.
+   type IO_Uring_Request;
+   type IO_Uring_Request_Access is access all IO_Uring_Request;
+
+   type IO_Uring_Request is record
+      Token             : System.Address;
+      Cancel_Submitted  : Boolean;
+      Operation_Complete : Boolean;
+      Admin_Complete    : Boolean;
+      Admin_Submit_Deferred : Boolean;
+      Next_Free         : IO_Uring_Request_Access;
+      Next_Active       : IO_Uring_Request_Access;
+      Next_Deferred     : IO_Uring_Request_Access;
+   end record
+     with Alignment => 8;
 
    type Backend_Kind is (IO_Uring, Native_AIO);
 
@@ -259,6 +286,11 @@ package body System.Flyology.File_Engine is
       CQ_Mask           : System.Address := System.Null_Address;
       CQEs              : System.Address := System.Null_Address;
       Free_Requests     : Native_AIO_Request_Access;
+      Active_Requests   : Native_AIO_Request_Access;
+      Active_Count      : Natural := 0 with Atomic;
+      Free_Uring_Requests   : IO_Uring_Request_Access;
+      Active_Uring_Requests : IO_Uring_Request_Access;
+      Deferred_Admin_Submit_Head : IO_Uring_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
 
@@ -276,6 +308,8 @@ package body System.Flyology.File_Engine is
      (Engine_State_Access, System.Address);
    function To_Native_Request is new Ada.Unchecked_Conversion
      (System.Address, Native_AIO_Request_Access);
+   function To_Uring_Request is new Ada.Unchecked_Conversion
+     (System.Address, IO_Uring_Request_Access);
    function To_Submission_Entry is new Ada.Unchecked_Conversion
      (System.Address, Submission_Entry_Access);
    function To_Completion_Entry is new Ada.Unchecked_Conversion
@@ -285,6 +319,8 @@ package body System.Flyology.File_Engine is
      (Engine_State, Engine_State_Access);
    procedure Free_Native_Request is new Ada.Unchecked_Deallocation
      (Native_AIO_Request, Native_AIO_Request_Access);
+   procedure Free_Uring_Request is new Ada.Unchecked_Deallocation
+     (IO_Uring_Request, IO_Uring_Request_Access);
 
    function Mmap
      (Address : System.Address;
@@ -324,6 +360,12 @@ package body System.Flyology.File_Engine is
       Timeout : System.Address) return C.long;
    pragma Import (C, Linux_IO_Getevents, "flyology_linux_io_getevents");
 
+   function Linux_IO_Cancel
+     (Context : C.unsigned_long;
+      Control : System.Address;
+      Event   : System.Address) return C.long;
+   pragma Import (C, Linux_IO_Cancel, "flyology_linux_io_cancel");
+
    function Linux_IO_Uring_Register
      (Descriptor : C.int;
       Opcode     : C.unsigned;
@@ -348,6 +390,40 @@ package body System.Flyology.File_Engine is
    procedure Note_Backend (Backend : C.int);
    pragma Import (C, Note_Backend, "flyology_linux_note_file_backend");
 
+   procedure Note_Cancellation
+     (Backend     : C.int;
+      Disposition : C.int;
+      Terminal    : C.int);
+   pragma Import
+     (C, Note_Cancellation, "flyology_test_note_file_cancel");
+
+   procedure Note_Uring_Identity (Reused : C.int);
+   pragma Import
+     (C, Note_Uring_Identity, "flyology_test_note_uring_identity");
+
+   procedure Note_Uring_Admin_Complete;
+   pragma Import
+     (C, Note_Uring_Admin_Complete,
+      "flyology_test_note_uring_admin_complete");
+
+   procedure Note
+     (State       : not null Engine_State_Access;
+      Disposition : Cancellation_Disposition;
+      Terminal    : Boolean);
+
+   procedure Note
+     (State       : not null Engine_State_Access;
+      Disposition : Cancellation_Disposition;
+      Terminal    : Boolean) is
+   begin
+      if Faults.Enabled then
+         Note_Cancellation
+           ((if State.Backend = IO_Uring then 2 else 3),
+            C.int (Cancellation_Disposition'Pos (Disposition) + 1),
+            Boolean'Pos (Terminal));
+      end if;
+   end Note;
+
    function Load
      (Address : System.Address;
       Model   : AP.Mem_Model := AP.Acquire) return U32;
@@ -369,6 +445,29 @@ package body System.Flyology.File_Engine is
    procedure Recycle_Request
      (State   : not null Engine_State_Access;
       Request : in out Native_AIO_Request_Access);
+
+   procedure Unlink_Active
+     (State   : not null Engine_State_Access;
+      Request : not null Native_AIO_Request_Access);
+
+   function Acquire_Uring_Request
+     (State : not null Engine_State_Access) return IO_Uring_Request_Access;
+
+   procedure Recycle_Uring_Request
+     (State   : not null Engine_State_Access;
+      Request : in out IO_Uring_Request_Access);
+
+   procedure Unlink_Active_Uring
+     (State   : not null Engine_State_Access;
+      Request : not null IO_Uring_Request_Access);
+
+   function Submit_Uring_Cancel
+     (State      : not null Engine_State_Access;
+      Request    : not null IO_Uring_Request_Access;
+      Error_Code : out C.int) return Boolean;
+
+   procedure Submit_Deferred_Admin
+     (State : not null Engine_State_Access);
 
    procedure Release_State (State : in out Engine_State_Access);
 
@@ -406,6 +505,7 @@ package body System.Flyology.File_Engine is
       end if;
       State.Free_Requests := Request.Next_Free;
       Request.Next_Free := null;
+      Request.Next_Active := null;
       return Request;
    end Acquire_Request;
 
@@ -419,13 +519,186 @@ package body System.Flyology.File_Engine is
       Request := null;
    end Recycle_Request;
 
+   procedure Unlink_Active
+     (State   : not null Engine_State_Access;
+      Request : not null Native_AIO_Request_Access)
+   is
+      Position : Native_AIO_Request_Access := State.Active_Requests;
+      Previous : Native_AIO_Request_Access;
+   begin
+      while Position /= null and then Position /= Request loop
+         Previous := Position;
+         Position := Position.Next_Active;
+      end loop;
+      if Position = null then
+         raise Program_Error with "unknown Linux native-AIO completion";
+      elsif Previous = null then
+         State.Active_Requests := Request.Next_Active;
+      else
+         Previous.Next_Active := Request.Next_Active;
+      end if;
+      Request.Next_Active := null;
+   end Unlink_Active;
+
+   function Acquire_Uring_Request
+     (State : not null Engine_State_Access) return IO_Uring_Request_Access
+   is
+      Request : constant IO_Uring_Request_Access := State.Free_Uring_Requests;
+   begin
+      if Request = null then
+         return new IO_Uring_Request;
+      end if;
+      State.Free_Uring_Requests := Request.Next_Free;
+      Request.Next_Free := null;
+      Request.Next_Active := null;
+      Request.Next_Deferred := null;
+      return Request;
+   end Acquire_Uring_Request;
+
+   procedure Recycle_Uring_Request
+     (State   : not null Engine_State_Access;
+      Request : in out IO_Uring_Request_Access)
+   is
+   begin
+      Request.Next_Free := State.Free_Uring_Requests;
+      State.Free_Uring_Requests := Request;
+      Request := null;
+   end Recycle_Uring_Request;
+
+   procedure Unlink_Active_Uring
+     (State   : not null Engine_State_Access;
+      Request : not null IO_Uring_Request_Access)
+   is
+      Position : IO_Uring_Request_Access := State.Active_Uring_Requests;
+      Previous : IO_Uring_Request_Access;
+   begin
+      while Position /= null and then Position /= Request loop
+         Previous := Position;
+         Position := Position.Next_Active;
+      end loop;
+      if Position = null then
+         raise Program_Error with "unknown Linux io_uring completion";
+      elsif Previous = null then
+         State.Active_Uring_Requests := Request.Next_Active;
+      else
+         Previous.Next_Active := Request.Next_Active;
+      end if;
+      Request.Next_Active := null;
+   end Unlink_Active_Uring;
+
+   function Submit_Uring_Cancel
+     (State      : not null Engine_State_Access;
+      Request    : not null IO_Uring_Request_Access;
+      Error_Code : out C.int) return Boolean
+   is
+      Target     : constant SSE.Integer_Address :=
+        SSE.To_Integer (Request.all'Address);
+      Head       : constant U32 := Load (State.SQ_Head, AP.Acquire);
+      Tail       : constant U32 := Load (State.SQ_Tail, AP.Relaxed);
+      Entries    : constant U32 := Load (State.SQ_Entries, AP.Acquire);
+      Mask       : constant U32 := Load (State.SQ_Mask, AP.Acquire);
+      Index      : U32;
+      Submission : Submission_Entry_Access;
+      Result     : C.long;
+   begin
+      if Target mod 2 /= 0 then
+         Error_Code := EINVAL;
+         return False;
+      elsif Tail - Head >= Entries then
+         Error_Code := EAGAIN;
+         return False;
+      end if;
+      Index := Tail and Mask;
+      Submission := To_Submission_Entry
+        (State.SQEs
+           + Storage_Offset (Index)
+               * Storage_Offset (Submission_Entry'Size / 8));
+      Submission.all :=
+        (Opcode       => IORING_OP_ASYNC_CANCEL,
+         Flags        => 0,
+         IO_Priority  => 0,
+         Descriptor   => -1,
+         Offset       => 0,
+         Buffer       => U64 (Target),
+         Length       => 0,
+         Read_Flags   => 0,
+         User_Data    => U64 (Target + 1),
+         Buffer_Index => 0,
+         Personality  => 0,
+         Input_FD     => 0,
+         Address_3    => 0,
+         Padding      => 0);
+      Store
+        (State.SQ_Array
+           + Storage_Offset (Index) * Storage_Offset (U32'Size / 8),
+         Index,
+         AP.Relaxed);
+      Store (State.SQ_Tail, Tail + 1, AP.Release);
+      loop
+         Result := Linux_IO_Uring_Enter
+           (State.Ring_FD,
+            1,
+            0,
+            0,
+            System.Null_Address,
+            0);
+         exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+      end loop;
+      if Result /= 1 then
+         Store (State.SQ_Tail, Tail, AP.Release);
+         Error_Code :=
+           (if Result < 0 then C.int (OSI.errno) else EAGAIN);
+         return False;
+      end if;
+      Error_Code := 0;
+      return True;
+   end Submit_Uring_Cancel;
+
+   procedure Submit_Deferred_Admin
+     (State : not null Engine_State_Access)
+   is
+      Request    : IO_Uring_Request_Access :=
+        State.Deferred_Admin_Submit_Head;
+      Error_Code : C.int;
+   begin
+      if Request = null
+        or else
+          (Faults.Enabled
+           and then Faults.Fail (Faults.File_Cancel_Admin_Delay))
+      then
+         return;
+      end if;
+      State.Deferred_Admin_Submit_Head := Request.Next_Deferred;
+      Request.Next_Deferred := null;
+      Request.Admin_Submit_Deferred := False;
+      if not Submit_Uring_Cancel (State, Request, Error_Code) then
+         --  This queue exists only in a fault-enabled runtime. If submitting
+         --  the deliberately delayed administrative request fails, there is
+         --  no administrative CQE to retain the identity for. The ordinary
+         --  data completion still determines when the user buffer is safe.
+         Request.Admin_Complete := True;
+         if Request.Operation_Complete then
+            Unlink_Active_Uring (State, Request);
+            State.Active_Count := State.Active_Count - 1;
+            Recycle_Uring_Request (State, Request);
+         end if;
+      end if;
+   end Submit_Deferred_Admin;
+
    procedure Release_State (State : in out Engine_State_Access) is
       Ignored : C.int;
       Result  : C.long;
       Request : Native_AIO_Request_Access;
+      Uring_Request : IO_Uring_Request_Access;
    begin
       if State = null then
          return;
+      elsif State.Active_Requests /= null
+        or else State.Active_Uring_Requests /= null
+        or else State.Deferred_Admin_Submit_Head /= null
+      then
+         raise Program_Error with
+           "FLYOLOGY finalized with active Linux file requests";
       elsif State.Backend = Native_AIO then
          if State.AIO_Context /= 0 then
             Result := Linux_IO_Destroy (State.AIO_Context);
@@ -456,6 +729,11 @@ package body System.Flyology.File_Engine is
          Request := State.Free_Requests;
          State.Free_Requests := Request.Next_Free;
          Free_Native_Request (Request);
+      end loop;
+      while State.Free_Uring_Requests /= null loop
+         Uring_Request := State.Free_Uring_Requests;
+         State.Free_Uring_Requests := Uring_Request.Next_Free;
+         Free_Uring_Request (Uring_Request);
       end loop;
       pragma Unreferenced (Ignored);
       Free_State (State);
@@ -647,8 +925,9 @@ package body System.Flyology.File_Engine is
       Token       : System.Address;
       Error_Code  : out C.int) return Boolean
    is
-      State   : constant Engine_State_Access := To_State (Item.State);
-      Result  : C.long;
+      State         : constant Engine_State_Access := To_State (Item.State);
+      Result        : C.long;
+      Uring_Request : IO_Uring_Request_Access;
    begin
       if State = null then
          Error_Code := EINVAL;
@@ -676,7 +955,9 @@ package body System.Flyology.File_Engine is
                   Reserved    => 0,
                   Flags       => IOCB_FLAG_RESFD,
                   Result_FD   => U32 (State.Wake_FD)),
-               Next_Free => null);
+               Next_Free => null,
+               Token => Token,
+               Next_Active => null);
             loop
                Result :=
                  Linux_IO_Submit
@@ -691,6 +972,9 @@ package body System.Flyology.File_Engine is
                Recycle_Request (State, Request);
                return False;
             end if;
+            Request.Next_Active := State.Active_Requests;
+            State.Active_Requests := Request;
+            State.Active_Count := State.Active_Count + 1;
             Error_Code := 0;
             return True;
          end;
@@ -709,9 +993,41 @@ package body System.Flyology.File_Engine is
          Index      : U32;
          Submission : Submission_Entry_Access;
          Entry_Addr : System.Address;
+         Identity   : SSE.Integer_Address;
+         Older      : IO_Uring_Request_Access;
       begin
+         Uring_Request := Acquire_Uring_Request (State);
+         Uring_Request.all :=
+           (Token              => Token,
+            Cancel_Submitted   => False,
+            Operation_Complete => False,
+            Admin_Complete     => False,
+            Admin_Submit_Deferred => False,
+            Next_Free          => null,
+            Next_Active        => null,
+            Next_Deferred      => null);
+         Identity := SSE.To_Integer (Uring_Request.all'Address);
+         if Faults.Enabled then
+            Older := State.Active_Uring_Requests;
+            while Older /= null loop
+               if Older.Operation_Complete
+                 and then Older.Cancel_Submitted
+                 and then not Older.Admin_Complete
+               then
+                  Note_Uring_Identity
+                    (Boolean'Pos
+                       (SSE.To_Integer (Older.all'Address) = Identity));
+               end if;
+               Older := Older.Next_Active;
+            end loop;
+         end if;
          if Tail - Head >= Entries then
             Error_Code := EAGAIN;
+            Recycle_Uring_Request (State, Uring_Request);
+            return False;
+         elsif Identity mod 2 /= 0 then
+            Error_Code := EINVAL;
+            Recycle_Uring_Request (State, Uring_Request);
             return False;
          end if;
          Index := Tail and Mask;
@@ -730,7 +1046,7 @@ package body System.Flyology.File_Engine is
             Buffer       => U64 (SSE.To_Integer (Buffer)),
             Length       => U32 (Length),
             Read_Flags   => 0,
-            User_Data    => U64 (SSE.To_Integer (Token)),
+            User_Data    => U64 (Identity),
             Buffer_Index => 0,
             Personality  => 0,
             Input_FD     => 0,
@@ -758,30 +1074,159 @@ package body System.Flyology.File_Engine is
             Store (State.SQ_Tail, Tail, AP.Release);
             Error_Code :=
               (if Result < 0 then C.int (OSI.errno) else EAGAIN);
+            Recycle_Uring_Request (State, Uring_Request);
             return False;
          end if;
+         Uring_Request.Next_Active := State.Active_Uring_Requests;
+         State.Active_Uring_Requests := Uring_Request;
+         State.Active_Count := State.Active_Count + 1;
+         Uring_Request := null;
       end;
       Error_Code := 0;
       return True;
    exception
       when Storage_Error =>
+         if Uring_Request /= null then
+            Recycle_Uring_Request (State, Uring_Request);
+         end if;
          Error_Code := ENOMEM;
          return False;
    end Submit;
+
+   function Cancel
+     (Item           : in out Engine;
+      Descriptor     : C.int;
+      Token          : System.Address;
+      Value          : out Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out C.int)
+      return Cancellation_Disposition
+   is
+      State  : constant Engine_State_Access := To_State (Item.State);
+      Result : C.long;
+   begin
+      pragma Unreferenced (Descriptor);
+      Value := (others => <>);
+      Has_Completion := False;
+      Error_Code := 0;
+      if State = null or else Token = System.Null_Address then
+         Error_Code := EINVAL;
+         return Cancellation_Failed;
+      elsif State.Backend = Native_AIO then
+         declare
+            Request : Native_AIO_Request_Access := State.Active_Requests;
+            Event   : aliased IO_Event;
+         begin
+            while Request /= null and then Request.Token /= Token loop
+               Request := Request.Next_Active;
+            end loop;
+            if Request = null then
+               Note (State, Already_Completing, False);
+               return Already_Completing;
+            end if;
+            loop
+               Result := Linux_IO_Cancel
+                 (State.AIO_Context,
+                  Request.Control'Address,
+                  Event'Address);
+               exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+            end loop;
+            if Result = 0 then
+               Value :=
+                 (Token      => Request.Token,
+                  Result     =>
+                    (if Event.Result >= 0
+                     then C.long_long (Event.Result)
+                     else 0),
+                  Error_Code =>
+                    (if Event.Result < 0
+                     then C.int (-Event.Result)
+                     elsif Event.Extra < 0
+                     then C.int (-Event.Extra)
+                     else 0));
+               Unlink_Active (State, Request);
+               State.Active_Count := State.Active_Count - 1;
+               Recycle_Request (State, Request);
+               Has_Completion := True;
+               Note (State, Cancellation_Submitted, True);
+               return Cancellation_Submitted;
+            elsif C.int (OSI.errno) in EAGAIN | ENOENT then
+               Note (State, Already_Completing, False);
+               return Already_Completing;
+            else
+               Error_Code := C.int (OSI.errno);
+               Note (State, Cancellation_Failed, False);
+               return Cancellation_Failed;
+            end if;
+         end;
+      end if;
+
+      --  io_uring cancellation is itself asynchronous. The aligned request
+      --  address is the operation identity and its odd neighbor identifies
+      --  the administrative CQE. The request remains allocated until both
+      --  CQEs have arrived, so a resumed fiber cannot reuse the target value.
+      declare
+         Request : IO_Uring_Request_Access := State.Active_Uring_Requests;
+      begin
+         while Request /= null and then Request.Token /= Token loop
+            Request := Request.Next_Active;
+         end loop;
+         if Request = null or else Request.Operation_Complete then
+            Note (State, Already_Completing, False);
+            return Already_Completing;
+         elsif Request.Cancel_Submitted then
+            Note (State, Already_Completing, False);
+            return Already_Completing;
+         end if;
+         if Faults.Enabled
+           and then Faults.Fail (Faults.File_Cancel_Admin_Delay)
+         then
+            --  Hold the administrative SQE itself, not a consumed CQE. This
+            --  creates a deterministic test window in which the operation has
+            --  completed but its request identity is still reserved.
+            Request.Cancel_Submitted := True;
+            Request.Admin_Submit_Deferred := True;
+            Request.Next_Deferred := State.Deferred_Admin_Submit_Head;
+            State.Deferred_Admin_Submit_Head := Request;
+         elsif not Submit_Uring_Cancel (State, Request, Error_Code) then
+            Note
+              (State,
+               (if Error_Code = EAGAIN
+                then Not_Cancelable
+                else Cancellation_Failed),
+               False);
+            return
+              (if Error_Code = EAGAIN
+               then Not_Cancelable
+               else Cancellation_Failed);
+         else
+            Request.Cancel_Submitted := True;
+         end if;
+      end;
+      Note (State, Cancellation_Submitted, False);
+      return Cancellation_Submitted;
+   end Cancel;
 
    function Complete_Event
      (Item            : in out Engine;
       Request_Address : System.Address;
       Kernel_Result   : C.long_long;
       Kernel_Error    : C.int;
-      Value           : out Completion) return Boolean
+      Value           : out Completion) return Event_Completion_Disposition
    is
    begin
       pragma Unreferenced
         (Item, Request_Address, Kernel_Result, Kernel_Error);
       Value := (others => <>);
-      return False;
+      return Completion_Failed;
    end Complete_Event;
+
+   function Is_Quiescent (Item : Engine) return Boolean is
+      State : constant Engine_State_Access := To_State (Item.State);
+   begin
+      return
+        State = null or else State.Active_Count = 0;
+   end Is_Quiescent;
 
    function Drain
      (Item   : in out Engine;
@@ -835,6 +1280,8 @@ package body System.Flyology.File_Engine is
                     (SSE.To_Address
                        (SSE.Integer_Address (Events (Index).Object)));
                begin
+                  Unlink_Active (State, Request);
+                  State.Active_Count := State.Active_Count - 1;
                   Recycle_Request (State, Request);
                end;
             end loop;
@@ -842,10 +1289,15 @@ package body System.Flyology.File_Engine is
          end;
       end if;
 
+      Submit_Deferred_Admin (State);
+
       declare
-         Head : U32 := Load (State.CQ_Head, AP.Relaxed);
-         Tail : constant U32 := Load (State.CQ_Tail, AP.Acquire);
-         Mask : constant U32 := Load (State.CQ_Mask, AP.Acquire);
+         Head : U32 :=
+           Load (State.CQ_Head, AP.Relaxed);
+         Tail : constant U32 :=
+           Load (State.CQ_Tail, AP.Acquire);
+         Mask : constant U32 :=
+           Load (State.CQ_Mask, AP.Acquire);
       begin
          while Head /= Tail and then Count < Values'Length loop
             declare
@@ -856,18 +1308,47 @@ package body System.Flyology.File_Engine is
                       + Storage_Offset (Index)
                           * Storage_Offset (Completion_Entry'Size / 8));
             begin
-               Count := Count + 1;
-               Values (Values'First + Count - 1) :=
-                 (Token => SSE.To_Address
-                    (SSE.Integer_Address (CQ_Item.User_Data)),
-                  Result =>
-                    (if CQ_Item.Result >= 0
-                     then C.long_long (CQ_Item.Result)
-                     else 0),
-                  Error_Code =>
-                    (if CQ_Item.Result < 0
-                     then C.int (-CQ_Item.Result)
-                     else 0));
+               declare
+                  Raw : constant SSE.Integer_Address :=
+                    SSE.Integer_Address (CQ_Item.User_Data);
+                  Administrative : constant Boolean := Raw mod 2 /= 0;
+                  Base : constant SSE.Integer_Address :=
+                    Raw - (if Administrative then 1 else 0);
+                  Request : IO_Uring_Request_Access :=
+                    To_Uring_Request (SSE.To_Address (Base));
+               begin
+                  if Administrative then
+                     Request.Admin_Complete := True;
+                     if Faults.Enabled then
+                        Note_Uring_Admin_Complete;
+                     end if;
+                     if Request.Operation_Complete then
+                        Unlink_Active_Uring (State, Request);
+                        State.Active_Count := State.Active_Count - 1;
+                        Recycle_Uring_Request (State, Request);
+                     end if;
+                  else
+                     Count := Count + 1;
+                     Values (Values'First + Count - 1) :=
+                       (Token => Request.Token,
+                        Result =>
+                          (if CQ_Item.Result >= 0
+                           then C.long_long (CQ_Item.Result)
+                           else 0),
+                        Error_Code =>
+                          (if CQ_Item.Result < 0
+                           then C.int (-CQ_Item.Result)
+                           else 0));
+                     Request.Operation_Complete := True;
+                     if not Request.Cancel_Submitted
+                       or else Request.Admin_Complete
+                     then
+                        Unlink_Active_Uring (State, Request);
+                        State.Active_Count := State.Active_Count - 1;
+                        Recycle_Uring_Request (State, Request);
+                     end if;
+                  end if;
+               end;
                Head := Head + 1;
             end;
          end loop;

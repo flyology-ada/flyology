@@ -8,18 +8,25 @@ with Fault_Control;
 with GNAT.Sockets;
 with Flyology;
 with Flyology.IO;
+with Flyology.IO.Connections;
 with Flyology.IO.Files;
 with Interfaces.C;
 
 procedure Fault_Injection_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Fault_Control.File_Cancel_Backend;
    use type Fault_Control.Point;
    use type GNAT.Sockets.Socket_Type;
    use type Interfaces.C.int;
 
    package IO renames Flyology.IO;
+   package Connections renames Flyology.IO.Connections;
    package Files renames Flyology.IO.Files;
+
+   function Selected_Linux_Backend return Interfaces.C.int;
+   pragma Import
+     (C, Selected_Linux_Backend, "flyology_linux_file_backend");
 
    Case_Name : constant String :=
      (if Ada.Command_Line.Argument_Count = 0
@@ -359,6 +366,871 @@ procedure Fault_Injection_Smoke is
          raise;
    end Test_File_Saturation;
 
+   procedure Test_Cross_Domain_Cancellation is
+      Path : constant String := "/tmp/flyology-cancel-file.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Reader : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Writer : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Manager : aliased Connections.Server (1);
+      Connection : Connections.Connection;
+      Token : aliased Connections.Cancellation_Token;
+
+      protected Progress is
+         procedure Done (Passed : Boolean);
+         entry Wait;
+         function Passed return Boolean;
+      private
+         Finished : Natural := 0;
+         All_OK   : Boolean := True;
+      end Progress;
+
+      protected body Progress is
+         procedure Done (Passed : Boolean) is
+         begin
+            Finished := Finished + 1;
+            All_OK := All_OK and Passed;
+         end Done;
+
+         entry Wait when Finished = 2 is
+         begin
+            null;
+         end Wait;
+
+         function Passed return Boolean is (All_OK);
+      end Progress;
+
+      task type File_Waiter is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end File_Waiter;
+
+      task body File_Waiter is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last, Token'Access);
+         Progress.Done (False);
+      exception
+         --  The connection-qualified compatibility name must catch the
+         --  canonical exception raised from the file package.
+         when Connections.Operation_Cancelled =>
+            Progress.Done (True);
+         when others =>
+            Progress.Done (False);
+      end File_Waiter;
+
+      task type Connection_Waiter is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Connection_Waiter;
+
+      task body Connection_Waiter is
+         Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Connections.Receive
+           (Connection,
+            Data,
+            Last,
+            Timeout => IO.Infinite,
+            Token   => Token'Access);
+         Progress.Done (False);
+      exception
+         --  The file-qualified compatibility name must catch cancellation
+         --  raised from the connection package.
+         when Files.Operation_Cancelled =>
+            Progress.Done (True);
+         when others =>
+            Progress.Done (False);
+      end Connection_Waiter;
+
+      type File_Waiter_Access is access File_Waiter;
+      type Connection_Waiter_Access is access Connection_Waiter;
+      procedure Free_File_Waiter is new Ada.Unchecked_Deallocation
+        (File_Waiter, File_Waiter_Access);
+      procedure Free_Connection_Waiter is new Ada.Unchecked_Deallocation
+        (Connection_Waiter, Connection_Waiter_Access);
+      File_Task : File_Waiter_Access;
+      Connection_Task : Connection_Waiter_Access;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+      Connections.Take (Manager, Reader, Connection);
+
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 100_000);
+      File_Task := new File_Waiter;
+      Connection_Task := new Connection_Waiter;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "file cancellation waiter never entered pending queue";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Token.Request;
+      Progress.Wait;
+      if not Progress.Passed then
+         raise Program_Error with
+           "shared token did not cancel both I/O domains";
+      end if;
+
+      while not File_Task.all'Terminated
+        or else not Connection_Task.all'Terminated
+      loop
+         delay 0.001;
+      end loop;
+      Free_File_Waiter (File_Task);
+      Free_Connection_Waiter (Connection_Task);
+
+      --  The same one-shot token also cancels both package surfaces before a
+      --  subsequent operation starts, without allocating another wake source.
+      declare
+         Data : Ada.Streams.Stream_Element_Array (1 .. 1) := [1 => 7];
+         Last : Ada.Streams.Stream_Element_Offset;
+         File_Caught : Boolean := False;
+         Connection_Caught : Boolean := False;
+      begin
+         begin
+            Files.Write_At (File, 0, Data, Last, Token'Access);
+         exception
+            when Connections.Operation_Cancelled => File_Caught := True;
+         end;
+         begin
+            Connections.Receive
+              (Connection,
+               Data,
+               Last,
+               Timeout => 0.01,
+               Token   => Token'Access);
+         exception
+            when Files.Operation_Cancelled => Connection_Caught := True;
+         end;
+         if not File_Caught or else not Connection_Caught then
+            raise Program_Error with
+              "shared token did not preserve serial cancellation identity";
+         end if;
+      end;
+
+      Fault_Control.Reset;
+      Connections.Close (Connection);
+      if Writer /= GNAT.Sockets.No_Socket then
+         GNAT.Sockets.Close_Socket (Writer);
+      end if;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Connections.Close (Connection);
+         if Reader /= GNAT.Sockets.No_Socket then
+            GNAT.Sockets.Close_Socket (Reader);
+         end if;
+         if Writer /= GNAT.Sockets.No_Socket then
+            GNAT.Sockets.Close_Socket (Writer);
+         end if;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Cross_Domain_Cancellation;
+
+   procedure Test_File_Task_Abort is
+      Path : constant String := "/tmp/flyology-abort-file.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 9];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 100_000);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "aborted file task never entered pending queue";
+            end if;
+            delay 0.001;
+         end loop;
+         abort Item.all;
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "aborted file task retained its caller buffer";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free (Item);
+
+      Fault_Control.Reset;
+      Files.Close (File);
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => False, Truncate => False);
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 10];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+         if Last /= Data'Last then
+            raise Program_Error with
+              "descriptor/request reuse failed after task abort";
+         end if;
+      end;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Task_Abort;
+
+   procedure Test_File_Pre_Park_Abort is
+      Path : constant String := "/tmp/flyology-pre-park-abort.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 11];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free_Writer is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+
+      task type Aborter (Target : not null Writer_Access);
+
+      task body Aborter is
+      begin
+         abort Target.all;
+      end Aborter;
+
+      type Aborter_Access is access Aborter;
+      procedure Free_Aborter is new Ada.Unchecked_Deallocation
+        (Aborter, Aborter_Access);
+
+      Item   : Writer_Access;
+      Killer : Aborter_Access;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Pre_Park, Count => 1_000_000_000);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Pre_Park) = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "file operation did not reach the pre-park gate";
+            end if;
+            delay 0.001;
+         end loop;
+
+         --  Aborter blocks on the task lock held across the pending-ATC check.
+         --  Releasing the gate forces the scheduler to publish Waiting before
+         --  that lock becomes available, so Wake cannot be lost while Running.
+         Killer := new Aborter (Item);
+         delay 0.010;
+         Fault_Control.Reset;
+         while not Item.all'Terminated or else not Killer.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "pre-park abort was lost before file suspension";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free_Aborter (Killer);
+      Free_Writer (Item);
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Pre_Park_Abort;
+
+   procedure Test_File_Backend_Cancel is
+      Path : constant String := "/tmp/flyology-backend-cancel.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Backend : Fault_Control.File_Cancel_Backend := Fault_Control.Darwin_AIO;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         type Data_Access is access Ada.Streams.Stream_Element_Array;
+         Data : constant Data_Access :=
+           new Ada.Streams.Stream_Element_Array'(1 .. 1_048_576 => 19);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data.all, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+
+      function Total return Natural is
+        (Fault_Control.File_Cancel_Count
+           (Backend, Fault_Control.Submitted, False)
+         + Fault_Control.File_Cancel_Count
+             (Backend, Fault_Control.Submitted, True)
+         + Fault_Control.File_Cancel_Count
+             (Backend, Fault_Control.Already_Completing, False)
+         + Fault_Control.File_Cancel_Count
+             (Backend, Fault_Control.Not_Cancelable, False)
+         + Fault_Control.File_Cancel_Count
+             (Backend, Fault_Control.Failed, False));
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.Poller_EINTR, Count => 1_000_000_000);
+      Item := new Writer;
+      case Selected_Linux_Backend is
+         when 0 =>
+            Backend := Fault_Control.Darwin_AIO;
+         when 1 =>
+            Backend := Fault_Control.Linux_IO_Uring;
+         when 2 =>
+            Backend := Fault_Control.Linux_Native_AIO;
+         when others =>
+            raise Program_Error with "unknown file cancellation backend";
+      end case;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "backend cancellation test did not submit file I/O";
+            end if;
+            delay 0.001;
+         end loop;
+         abort Item.all;
+         while Total = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "owning loop did not invoke the file cancel backend";
+            end if;
+            delay 0.001;
+         end loop;
+         Fault_Control.Disarm (Fault_Control.Poller_EINTR);
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "backend cancellation retained the file buffer";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+
+      --  Darwin may report AIO_CANCELED, AIO_NOTCANCELED, or AIO_ALLDONE
+      --  depending on whether the filesystem completed the request before
+      --  the aborter ran. Total above proves that aio_cancel itself ran; the
+      --  fallback tests exercise both nonterminal policy branches.
+      if Backend = Fault_Control.Linux_IO_Uring
+        and then
+          Fault_Control.File_Cancel_Count
+            (Backend, Fault_Control.Submitted, False) = 0
+      then
+         raise Program_Error with
+           "io_uring asynchronous cancellation was not submitted";
+      end if;
+
+      Free (Item);
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Backend_Cancel;
+
+   procedure Test_File_Cancel_Fallback
+     (Disposition : Fault_Control.Point)
+   is
+      Path : constant String := "/tmp/flyology-cancel-fallback.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array
+           (1 .. 64 * 1_024) := (others => 12);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      if Disposition not in
+        Fault_Control.File_Cancel_Not_Cancelable |
+        Fault_Control.File_Cancel_Already_Completing
+      then
+         raise Program_Error with "invalid cancellation fallback fault";
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      --  Hold completion delivery, not kernel progress, so abort deterministically
+      --  reaches the cancellation backend while the caller buffer is owned.
+      Fault_Control.Arm (Fault_Control.Poller_EINTR, Count => 100_000);
+      Fault_Control.Arm (Disposition);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "fallback test did not submit a kernel file request";
+            end if;
+            delay 0.001;
+         end loop;
+         abort Item.all;
+         while Fault_Control.Calls (Disposition) = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "owning loop did not exercise cancellation disposition";
+            end if;
+            delay 0.001;
+         end loop;
+         --  Whether cancellation is unsupported or completion has already
+         --  started, buffer ownership persists until the ordinary event.
+         Fault_Control.Disarm (Fault_Control.Poller_EINTR);
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "fallback cancellation resumed before terminal completion";
+            end if;
+            delay 0.001;
+         end loop;
+         if Fault_Control.Calls (Disposition) /= 1 then
+            raise Program_Error with
+              "cancellation disposition was attempted more than once";
+         end if;
+      end;
+      Free (Item);
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Cancel_Fallback;
+
+   procedure Test_Uring_Request_Identity is
+      Path  : constant String := "/tmp/flyology-uring-identity.data";
+      File  : Files.File_Descriptor := Files.Invalid_File;
+      Token : aliased Files.Cancellation_Token;
+      Stage : Natural := 0 with Atomic;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         type Data_Access is access Ada.Streams.Stream_Element_Array;
+         First_Data : constant Data_Access :=
+           new Ada.Streams.Stream_Element_Array'(1 .. 1_048_576 => 31);
+         Second_Data : constant Ada.Streams.Stream_Element_Array :=
+           [1 .. 4_096 => 47];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         begin
+            Files.Write_At (File, 0, First_Data.all, Last, Token'Access);
+            Stage := 90;
+         exception
+            when Files.Operation_Cancelled =>
+               Stage := 1;
+         end;
+         Files.Write_At (File, 1_048_576, Second_Data, Last);
+         Stage := (if Last = Second_Data'Last then 2 else 91);
+      exception
+         when others =>
+            Stage := 99;
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      --  This ordering exists only on io_uring: defer submitting the cancel
+      --  SQE, resume the fiber from operation one, and let that same fiber
+      --  submit operation two while request one still owns its user_data.
+      if Selected_Linux_Backend /= 1 then
+         return;
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.Poller_EINTR, Count => 1_000_000_000);
+      Fault_Control.Arm
+        (Fault_Control.File_Cancel_Admin_Delay,
+         Count => 1_000_000_000);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "io_uring operation was not submitted";
+            end if;
+            delay 0.001;
+         end loop;
+         Token.Request;
+         while Fault_Control.File_Cancel_Count
+           (Fault_Control.Linux_IO_Uring,
+            Fault_Control.Submitted,
+            False) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "io_uring cancel was not submitted";
+            end if;
+            delay 0.001;
+         end loop;
+         Fault_Control.Disarm (Fault_Control.Poller_EINTR);
+         while Fault_Control.Uring_Identity_Count (False) = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "io_uring follow-up did not overlap delayed cancellation";
+            end if;
+            delay 0.001;
+         end loop;
+         Fault_Control.Disarm (Fault_Control.File_Cancel_Admin_Delay);
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "same-fiber io_uring follow-up did not terminate";
+            end if;
+            delay 0.001;
+         end loop;
+         while Fault_Control.Uring_Admin_Complete_Count = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "delayed io_uring cancellation did not become terminal";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      if Stage /= 2
+        or else Fault_Control.Calls
+          (Fault_Control.File_Cancel_Admin_Delay) = 0
+        or else Fault_Control.Uring_Identity_Count (False) = 0
+        or else Fault_Control.Uring_Identity_Count (True) /= 0
+      then
+         raise Program_Error with
+           "io_uring reused an operation identity before cancel CQE terminality";
+      end if;
+      Free (Item);
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Uring_Request_Identity;
+
+   procedure Test_Uring_Last_Fiber_Admin is
+      Path  : constant String := "/tmp/flyology-uring-last-fiber.data";
+      File  : Files.File_Descriptor := Files.Invalid_File;
+      Token : aliased Files.Cancellation_Token;
+      Stage : Natural := 0 with Atomic;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         type Data_Access is access Ada.Streams.Stream_Element_Array;
+         Data : constant Data_Access :=
+           new Ada.Streams.Stream_Element_Array'(1 .. 1_048_576 => 61);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         begin
+            Files.Write_At (File, 0, Data.all, Last, Token'Access);
+            Stage := 90;
+         exception
+            when Files.Operation_Cancelled =>
+               Stage := 1;
+         end;
+      exception
+         when others =>
+            Stage := 99;
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      if Selected_Linux_Backend /= 1 then
+         return;
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.Poller_EINTR, Count => 1_000_000_000);
+      --  The first hit defers Cancel; the second keeps it deferred while the
+      --  data CQE resumes the only fiber. The idle loop must then submit and
+      --  drain the administrative request before becoming quiescent.
+      Fault_Control.Arm
+        (Fault_Control.File_Cancel_Admin_Delay, Count => 2);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "io_uring operation was not submitted";
+            end if;
+            delay 0.001;
+         end loop;
+         Token.Request;
+         while Fault_Control.File_Cancel_Count
+           (Fault_Control.Linux_IO_Uring,
+            Fault_Control.Submitted,
+            False) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "io_uring cancel was not deferred";
+            end if;
+            delay 0.001;
+         end loop;
+         Fault_Control.Disarm (Fault_Control.Poller_EINTR);
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "last io_uring fiber did not terminate";
+            end if;
+            delay 0.001;
+         end loop;
+         while Fault_Control.Uring_Admin_Complete_Count = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "idle loop did not drain late io_uring cancellation";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      if Stage /= 1
+        or else Fault_Control.Calls
+          (Fault_Control.File_Cancel_Admin_Delay) < 3
+      then
+         raise Program_Error with
+           "late io_uring cancellation did not cross last-fiber quiescence";
+      end if;
+      Free (Item);
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Uring_Last_Fiber_Admin;
+
+   procedure Test_Darwin_Cancel_Cleanup (Delete_Fault : Fault_Control.Point) is
+      Path : constant String := "/tmp/flyology-darwin-cancel-cleanup.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         type Data_Access is access Ada.Streams.Stream_Element_Array;
+         Data : constant Data_Access :=
+           new Ada.Streams.Stream_Element_Array'(1 .. 1_048_576 => 53);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data.all, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      if Selected_Linux_Backend /= 0 then
+         return;
+      elsif Delete_Fault not in
+        Fault_Control.File_Cancel_Delete_EINTR |
+        Fault_Control.File_Cancel_Delete_Failure
+      then
+         raise Program_Error with "invalid Darwin delete fault";
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.Poller_EINTR, Count => 1_000_000_000);
+      Fault_Control.Arm (Fault_Control.File_Cancel_Synthetic);
+      Fault_Control.Arm (Delete_Fault);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "Darwin AIO was not submitted";
+            end if;
+            delay 0.001;
+         end loop;
+         abort Item.all;
+         while Fault_Control.Calls (Delete_Fault) = 0 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "Darwin terminal cleanup fault was not exercised";
+            end if;
+            delay 0.001;
+         end loop;
+         Fault_Control.Disarm (Fault_Control.Poller_EINTR);
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "Darwin delete failure prevented terminal AIO reap";
+            end if;
+            delay 0.001;
+         end loop;
+         if Delete_Fault = Fault_Control.File_Cancel_Delete_Failure then
+            while Fault_Control.Calls
+              (Fault_Control.File_Cancel_Stale_Event) = 0
+            loop
+               if Ada.Real_Time.Clock >= Limit then
+                  raise Program_Error with
+                    "Darwin stale AIO event was not consumed";
+               end if;
+               delay 0.001;
+            end loop;
+         end if;
+      end;
+      Free (Item);
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Darwin_Cancel_Cleanup;
+
    procedure Trigger_Fatal (At_Point : Fault_Control.Point) is
       Item : Probe_Access;
    begin
@@ -410,6 +1282,28 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "file-cancellation" then
+      Test_Cross_Domain_Cancellation;
+   elsif Case_Name = "file-abort" then
+      Test_File_Task_Abort;
+   elsif Case_Name = "file-pre-park-abort" then
+      Test_File_Pre_Park_Abort;
+   elsif Case_Name = "file-backend-cancel" then
+      Test_File_Backend_Cancel;
+   elsif Case_Name = "file-cancel-fallback" then
+      Test_File_Cancel_Fallback
+        (Fault_Control.File_Cancel_Not_Cancelable);
+      Test_File_Cancel_Fallback
+        (Fault_Control.File_Cancel_Already_Completing);
+   elsif Case_Name = "file-uring-identity" then
+      Test_Uring_Request_Identity;
+   elsif Case_Name = "file-uring-last-fiber" then
+      Test_Uring_Last_Fiber_Admin;
+   elsif Case_Name = "file-darwin-cancel-cleanup" then
+      Test_Darwin_Cancel_Cleanup
+        (Fault_Control.File_Cancel_Delete_EINTR);
+      Test_Darwin_Cancel_Cleanup
+        (Fault_Control.File_Cancel_Delete_Failure);
    elsif Case_Name = "fatal-wake" then
       Trigger_Fatal (Fault_Control.Poller_Wake);
    elsif Case_Name = "fatal-wait" then

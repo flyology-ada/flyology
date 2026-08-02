@@ -36,6 +36,7 @@ project Flyology is
          --  normal scenario but are intentionally outside GNATdoc's scope.
          for Source_Files use
            ("flyology.ads",
+            "flyology-cancellation.ads",
             "flyology-execution_groups.ads",
             "flyology-fairness.ads",
             "flyology-io.ads",

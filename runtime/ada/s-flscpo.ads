@@ -13,6 +13,21 @@ is
    type Fiber_Phase is (Running, Ready, Waiting, Migrating, Finished);
    type Destruction_Plan is (Defer, Reap_Now);
    type Ready_Placement is (Queue_Head, Queue_Tail);
+   type File_Cancel_Plan is
+     (Ignore_Cancel, Complete_Pending, Request_Kernel_Cancel);
+
+   function Plan_File_Cancel
+     (File_Waiting       : Boolean;
+      Submission_Pending : Boolean;
+      Already_Attempted  : Boolean) return File_Cancel_Plan
+   with Inline,
+        Post =>
+          (if not File_Waiting or else Already_Attempted then
+              Plan_File_Cancel'Result = Ignore_Cancel
+           elsif Submission_Pending then
+              Plan_File_Cancel'Result = Complete_Pending
+           else
+              Plan_File_Cancel'Result = Request_Kernel_Cancel);
 
    function Placement_After_Priority_Update
      (Loss_Of_Inheritance : Boolean) return Ready_Placement

@@ -70,7 +70,10 @@ if [ "$run_faults" = 1 ]; then
 
   for fault_case in \
     fiber-allocation stack-map stack-protect stack-discard group-startup \
-    watch-error eintr file-saturation
+    watch-error eintr file-saturation \
+    file-cancellation file-abort file-pre-park-abort file-backend-cancel \
+    file-cancel-fallback file-uring-identity file-uring-last-fiber \
+    file-darwin-cancel-cleanup
   do
     printf '%s\n' "fault case=$fault_case"
     run_timed "$case_timeout" \

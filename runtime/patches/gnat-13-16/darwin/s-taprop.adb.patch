@@ -12,7 +12,7 @@
 +   function To_Task_Id is
 +     new Ada.Unchecked_Conversion (System.Address, Task_Id);
 +
-@@ -206,3 +209,53 @@
+@@ -206,3 +209,107 @@
    pragma Import (C,
       GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
 
@@ -60,23 +60,77 @@
 +   function Lightweight_Destroy (T : System.Address) return Interfaces.C.int
 +     renames System.Flyology.Scheduler.Destroy;
 +
++   function Lightweight_File_IO
++     (Descriptor  : Interfaces.C.int;
++      Buffer      : System.Address;
++      Length      : Interfaces.C.size_t;
++      Offset      : Interfaces.C.long_long;
++      For_Write   : Interfaces.C.int;
++      Cancel_FD   : Interfaces.C.int;
++      Transferred : access Interfaces.C.long_long;
++      Error_Code  : access Interfaces.C.int;
++      Cancelled   : access Interfaces.C.int) return Interfaces.C.int;
++   pragma Export
++     (C, Lightweight_File_IO, "flyology_runtime_file_io");
++
++   function Lightweight_File_IO
++     (Descriptor  : Interfaces.C.int;
++      Buffer      : System.Address;
++      Length      : Interfaces.C.size_t;
++      Offset      : Interfaces.C.long_long;
++      For_Write   : Interfaces.C.int;
++      Cancel_FD   : Interfaces.C.int;
++      Transferred : access Interfaces.C.long_long;
++      Error_Code  : access Interfaces.C.int;
++      Cancelled   : access Interfaces.C.int) return Interfaces.C.int
++   is
++      Self_ID : constant Task_Id := Self;
++      Result  : Interfaces.C.int;
++   begin
++      Write_Lock (Self_ID);
++      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         Unlock (Self_ID);
++         raise Standard'Abort_Signal;
++      end if;
++
++      Result :=
++        System.Flyology.Scheduler.File_IO
++          (Descriptor,
++           Buffer,
++           Length,
++           Offset,
++           For_Write,
++           Cancel_FD,
++           Self_ID.Common.LL.L'Address,
++           Transferred,
++           Error_Code,
++           Cancelled);
++
++      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         Unlock (Self_ID);
++         raise Standard'Abort_Signal;
++      end if;
++      Unlock (Self_ID);
++      return Result;
++   end Lightweight_File_IO;
++
 +   function Is_Lightweight_Task (T : Task_Id) return Boolean is
 +     (Lightweight_Is_Task (To_Address (T)) /= 0);
 +
 +   function Lightweight_Deadline
 +     (Time : Duration; Mode : ST.Delay_Modes) return Duration;
 +
-@@ -277 +330 @@
+@@ -277 +384 @@
 -      Stack_Base : constant Address := Get_Stack_Base (T.Common.LL.Thread);
 +      Stack_Base : Address;
-@@ -283,0 +337,6 @@
+@@ -283,0 +391,6 @@
 +      --  Lightweight stacks are allocated with guard pages by Flyology.
 +      if Is_Lightweight_Task (T) then
 +         return;
 +      end if;
 +
 +      Stack_Base := Get_Stack_Base (T.Common.LL.Thread);
-@@ -300,7 +360,11 @@
+@@ -300,7 +414,11 @@
    function Get_Thread_Id (T : ST.Task_Id) return OSI.Thread_Id is
     begin
 -      return T.Common.LL.Thread;
@@ -85,7 +139,7 @@
 +         then Lightweight_Task_Thread (To_Address (T))
 +         else T.Common.LL.Thread);
     end Get_Thread_Id;
-@@ -305,10 +369,17 @@
+@@ -305,10 +423,17 @@
     ----------
     -- Self --
     ----------
@@ -101,7 +155,7 @@
 +   end Self;
 
     ---------------------
-@@ -484,22 +555,31 @@
+@@ -484,22 +609,31 @@
    procedure Sleep
       (Self_ID : Task_Id;
        Reason  : System.Tasking.Task_States)
@@ -133,7 +187,7 @@
 +      end if;
 
        --  EINTR is not considered a failure
-@@ -511,14 +591,34 @@
+@@ -511,14 +645,34 @@
 -   procedure Timed_Sleep
 -     (Self_ID  : Task_Id;
 -      Time     : Duration;
@@ -174,7 +228,7 @@
 +      end if;
 +      Timedout := Lightweight_Result /= 0;
 +   end Timed_Sleep;
-@@ -526,10 +626,74 @@
+@@ -526,10 +680,74 @@
 -   procedure Timed_Delay
 -     (Self_ID : Task_Id;
 -      Time    : Duration;
@@ -241,7 +295,7 @@
 +            Time + Now - OS_Primitives.Clock);
 +      end if;
 +   end Lightweight_Deadline;
-@@ -547,11 +711,15 @@
+@@ -547,11 +765,15 @@
    procedure Wakeup (T : Task_Id; Reason : System.Tasking.Task_States) is
        pragma Unreferenced (Reason);
        Result : Interfaces.C.int;
@@ -257,7 +311,7 @@
 +      end if;
        pragma Assert (Result = 0);
     end Wakeup;
-@@ -559,11 +727,15 @@
+@@ -559,11 +781,15 @@
    procedure Yield (Do_Yield : Boolean := True) is
        Result : Interfaces.C.int;
 -      pragma Unreferenced (Result);
@@ -274,7 +328,7 @@
 +         end if;
        end if;
     end Yield;
-@@ -574,7 +746,5 @@
+@@ -574,7 +800,5 @@
        Prio                : System.Any_Priority;
        Loss_Of_Inheritance : Boolean := False)
     is
@@ -282,7 +336,7 @@
 -
        Result : Interfaces.C.int;
        Param  : aliased struct_sched_param;
-@@ -590,6 +760,18 @@
+@@ -590,6 +814,18 @@
    begin
        T.Common.Current_Priority := Prio;
 +
@@ -299,12 +353,12 @@
 +      end if;
 +
        Param.sched_priority := To_Target_Priority (Prio);
-@@ -654,7 +836,8 @@
+@@ -654,7 +890,8 @@
 -   function Is_Valid_Task return Boolean renames Specific.Is_Valid_Task;
 +   function Is_Valid_Task return Boolean is
 +     (Lightweight_Current /= System.Null_Address
 +      or else Specific.Is_Valid_Task);
-@@ -772,6 +955,18 @@
+@@ -772,6 +1009,18 @@
    begin
 +      if T.Common.Task_Info in System.Task_Info.Process_Scope
 +        or else
@@ -327,7 +381,7 @@
 +
        Adjusted_Stack_Size :=
           Interfaces.C.size_t (Stack_Size + Alternate_Stack_Size);
-@@ -863,6 +1058,11 @@
+@@ -863,6 +1112,11 @@
    procedure Finalize_TCB (T : Task_Id) is
        Result : Interfaces.C.int;
 
@@ -340,7 +394,7 @@
 +      end if;
 +
        Result := pthread_mutex_destroy (T.Common.LL.L'Access);
-@@ -896,7 +1096,11 @@
+@@ -896,7 +1150,11 @@
    procedure Abort_Task (T : Task_Id) is
        Result : Interfaces.C.int;
     begin
@@ -353,7 +407,7 @@
 +      elsif Abort_Handler_Installed then
           Result :=
             pthread_kill
-@@ -1071,6 +1275,9 @@
+@@ -1071,6 +1329,9 @@
       Enter_Task (Environment_Task);
 +
 +      Result := Lightweight_Initialize (To_Address (Environment_Task));

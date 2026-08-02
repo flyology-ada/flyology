@@ -15,6 +15,7 @@ project Runtime_Smoke is
       "execution_groups_smoke.adb",
       "fault_injection_smoke.adb",
       "fairness_smoke.adb",
+      "file_cancellation_smoke.adb",
       "files_smoke.adb",
       "io_smoke.adb",
       "io_starvation_smoke.adb",

@@ -137,6 +137,7 @@ for test_main in \
   dns_parser_smoke \
   execution_groups_smoke \
   fairness_smoke \
+  file_cancellation_smoke \
   files_smoke \
   io_smoke \
   io_starvation_smoke \

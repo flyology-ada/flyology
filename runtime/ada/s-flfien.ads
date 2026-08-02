@@ -13,6 +13,17 @@ package System.Flyology.File_Engine is
 
    type Completion_Array is array (Positive range <>) of Completion;
 
+   type Cancellation_Disposition is
+     (Cancellation_Submitted,
+      Already_Completing,
+      Not_Cancelable,
+      Cancellation_Failed);
+
+   type Event_Completion_Disposition is
+     (Completion_Produced,
+      Completion_Ignored,
+      Completion_Failed);
+
    function Initialize
      (Item      : in out Engine;
       Poller_FD : Interfaces.C.int;
@@ -30,6 +41,21 @@ package System.Flyology.File_Engine is
       Token       : System.Address;
       Error_Code  : out Interfaces.C.int) return Boolean;
 
+   --  Ask the kernel to cancel the operation identified by Token. A submitted
+   --  cancellation is not normally terminal: callers continue retaining the
+   --  buffer until ordinary completion. Darwin AIO_CANCELED is reaped with
+   --  aio_return here, and native Linux io_cancel returns its terminal event
+   --  directly; Has_Completion identifies either safe-to-resume case. Only
+   --  the owning event-loop thread may call this operation.
+   function Cancel
+     (Item           : in out Engine;
+      Descriptor     : Interfaces.C.int;
+      Token          : System.Address;
+      Value          : out Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out Interfaces.C.int)
+      return Cancellation_Disposition;
+
    --  Darwin completes one AIO request from the payload carried by kevent64.
    --  Other platforms return False because they drain their own completion
    --  queue instead.
@@ -38,7 +64,13 @@ package System.Flyology.File_Engine is
       Request_Address : System.Address;
       Kernel_Result   : Interfaces.C.long_long;
       Kernel_Error    : Interfaces.C.int;
-      Value           : out Completion) return Boolean;
+      Value           : out Completion) return Event_Completion_Disposition;
+
+   --  True when the engine has no kernel-owned operation or administrative
+   --  completion that must be drained before its poller can be destroyed.
+   --  Darwin quarantine entries are terminal and remain owned by the poller,
+   --  so they do not prevent quiescence.
+   function Is_Quiescent (Item : Engine) return Boolean;
 
    --  Linux drains io_uring or native-AIO completions. Darwin returns an
    --  empty batch because its completions are delivered directly by kqueue.

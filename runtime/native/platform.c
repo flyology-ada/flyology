@@ -276,7 +276,9 @@ int flyology_in_fork_child(void) {
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 11
+#define FLYOLOGY_FAULT_POINT_COUNT 19
+#define FLYOLOGY_FILE_CANCEL_BACKENDS 3
+#define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
 struct flyology_fault_plan {
     atomic_uint calls;
@@ -287,6 +289,55 @@ struct flyology_fault_plan {
 static struct flyology_fault_plan
     flyology_faults[FLYOLOGY_FAULT_POINT_COUNT + 1];
 static atomic_uint flyology_final_reap_state;
+static atomic_uint flyology_file_cancel_counts
+    [FLYOLOGY_FILE_CANCEL_BACKENDS + 1]
+    [FLYOLOGY_FILE_CANCEL_DISPOSITIONS + 1][2];
+static atomic_uint flyology_uring_identity_counts[2];
+static atomic_uint flyology_uring_admin_completions;
+
+void flyology_test_note_uring_identity(int reused) {
+    atomic_fetch_add_explicit(&flyology_uring_identity_counts[reused != 0], 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_uring_identity_count(int reused) {
+    return atomic_load_explicit(&flyology_uring_identity_counts[reused != 0],
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_uring_admin_complete(void) {
+    atomic_fetch_add_explicit(&flyology_uring_admin_completions, 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_uring_admin_complete_count(void) {
+    return atomic_load_explicit(&flyology_uring_admin_completions,
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_file_cancel(int backend, int disposition,
+                                    int terminal) {
+    if (backend < 1 || backend > FLYOLOGY_FILE_CANCEL_BACKENDS ||
+        disposition < 1 ||
+        disposition > FLYOLOGY_FILE_CANCEL_DISPOSITIONS) {
+        return;
+    }
+    atomic_fetch_add_explicit(
+        &flyology_file_cancel_counts[backend][disposition][terminal != 0], 1,
+        memory_order_relaxed);
+}
+
+unsigned flyology_test_file_cancel_count(int backend, int disposition,
+                                         int terminal) {
+    if (backend < 1 || backend > FLYOLOGY_FILE_CANCEL_BACKENDS ||
+        disposition < 1 ||
+        disposition > FLYOLOGY_FILE_CANCEL_DISPOSITIONS) {
+        return 0;
+    }
+    return atomic_load_explicit(
+        &flyology_file_cancel_counts[backend][disposition][terminal != 0],
+        memory_order_relaxed);
+}
 
 int flyology_test_faults_enabled(void) {
     return 1;
@@ -294,6 +345,8 @@ int flyology_test_faults_enabled(void) {
 
 void flyology_test_fault_reset(void) {
     unsigned point;
+    unsigned backend;
+    unsigned disposition;
 
     for (point = 1; point <= FLYOLOGY_FAULT_POINT_COUNT; ++point) {
         atomic_store_explicit(&flyology_faults[point].calls, 0,
@@ -305,6 +358,24 @@ void flyology_test_fault_reset(void) {
     }
     atomic_store_explicit(&flyology_final_reap_state, 0,
                           memory_order_release);
+    for (backend = 1; backend <= FLYOLOGY_FILE_CANCEL_BACKENDS; ++backend) {
+        for (disposition = 1;
+             disposition <= FLYOLOGY_FILE_CANCEL_DISPOSITIONS;
+             ++disposition) {
+            atomic_store_explicit(
+                &flyology_file_cancel_counts[backend][disposition][0], 0,
+                memory_order_relaxed);
+            atomic_store_explicit(
+                &flyology_file_cancel_counts[backend][disposition][1], 0,
+                memory_order_relaxed);
+        }
+    }
+    atomic_store_explicit(&flyology_uring_identity_counts[0], 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_uring_identity_counts[1], 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_uring_admin_completions, 0,
+                          memory_order_relaxed);
 }
 
 int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
@@ -316,6 +387,15 @@ int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
     atomic_store_explicit(&flyology_faults[point].first, first,
                           memory_order_relaxed);
     atomic_store_explicit(&flyology_faults[point].count, count,
+                          memory_order_release);
+    return 0;
+}
+
+int flyology_test_fault_disarm(int point) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
+        return -1;
+    }
+    atomic_store_explicit(&flyology_faults[point].count, 0,
                           memory_order_release);
     return 0;
 }
@@ -369,6 +449,37 @@ void flyology_test_release_final_reaper(void) {
     }
 }
 #else
+void flyology_test_note_uring_identity(int reused) {
+    (void)reused;
+}
+
+unsigned flyology_test_uring_identity_count(int reused) {
+    (void)reused;
+    return 0;
+}
+
+void flyology_test_note_uring_admin_complete(void) {
+}
+
+unsigned flyology_test_uring_admin_complete_count(void) {
+    return 0;
+}
+
+void flyology_test_note_file_cancel(int backend, int disposition,
+                                    int terminal) {
+    (void)backend;
+    (void)disposition;
+    (void)terminal;
+}
+
+unsigned flyology_test_file_cancel_count(int backend, int disposition,
+                                         int terminal) {
+    (void)backend;
+    (void)disposition;
+    (void)terminal;
+    return 0;
+}
+
 int flyology_test_faults_enabled(void) {
     return 0;
 }
@@ -380,6 +491,11 @@ int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
     (void)point;
     (void)first;
     (void)count;
+    return -1;
+}
+
+int flyology_test_fault_disarm(int point) {
+    (void)point;
     return -1;
 }
 

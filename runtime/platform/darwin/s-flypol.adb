@@ -14,6 +14,7 @@ package body System.Flyology.Poller is
    use type C.int;
    use type C.short;
    use type C.unsigned_short;
+   use type SSE.Integer_Address;
 
    EVFILT_USER : constant C.short := C.short (-10);
    EVFILT_AIO  : constant C.short := C.short (-3);
@@ -193,6 +194,43 @@ package body System.Flyology.Poller is
          Error_Code);
    end Submit_File;
 
+   function Cancel_File
+     (Item           : in out Poller;
+      Descriptor     : C.int;
+      Token          : System.Address;
+      Value          : out File_Engines.Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out C.int)
+      return File_Engines.Cancellation_Disposition
+   is
+   begin
+      if Faults.Enabled
+        and then Faults.Fail (Faults.File_Cancel_Not_Cancelable)
+      then
+         Value := (others => <>);
+         Has_Completion := False;
+         Error_Code := 0;
+         return File_Engines.Not_Cancelable;
+      elsif Faults.Enabled
+        and then Faults.Fail (Faults.File_Cancel_Already_Completing)
+      then
+         Value := (others => <>);
+         Has_Completion := False;
+         Error_Code := 0;
+         return File_Engines.Already_Completing;
+      end if;
+      return File_Engines.Cancel
+        (Item.File_State,
+         Descriptor,
+         Token,
+         Value,
+         Has_Completion,
+         Error_Code);
+   end Cancel_File;
+
+   function File_Quiescent (Item : Poller) return Boolean is
+     (File_Engines.Is_Quiescent (Item.File_State));
+
    function Wait
      (Item                : in out Poller;
       Timeout             : Duration;
@@ -224,8 +262,11 @@ package body System.Flyology.Poller is
       Limit         : aliased Time_ABI.Timespec;
       Result        : C.int;
       Completion    : File_Engines.Completion;
+      Completion_Status : File_Engines.Event_Completion_Disposition;
       Kernel_Event  : Kevent_Record;
       Output_Event  : Poll_Event;
+      Output_Count  : Natural := 0;
+      Emit          : Boolean;
    begin
       Events :=
         (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
@@ -258,34 +299,60 @@ package body System.Flyology.Poller is
               Limit'Address);
       end if;
       if Result > 0 then
-         Count := Natural (Result);
-         for Index in 1 .. Count loop
+         for Index in 1 .. Natural (Result) loop
             Kernel_Event :=
               Kernel_Events (Kernel_Events'First + Index - 1);
+            Emit := True;
             Output_Event :=
               (Kind       => Timeout_Event,
                Descriptor => -1,
                others     => <>);
             if Kernel_Event.Filter = EVFILT_USER
             then
-               Output_Event.Kind := Wake_Event;
-               Output_Event.Descriptor := C.int (Kernel_Event.Ident);
+               if Faults.Enabled and then Kernel_Event.Udata /= 0 then
+                  Completion_Status := File_Engines.Complete_Event
+                    (Item.File_State,
+                     SSE.To_Address (Kernel_Event.Udata),
+                     0,
+                     0,
+                     Completion);
+                  case Completion_Status is
+                     when File_Engines.Completion_Produced =>
+                        Output_Event :=
+                          (Kind       => File_Event,
+                           Descriptor => -1,
+                           Token      => Completion.Token,
+                           Result     => Completion.Result,
+                           Error_Code => Completion.Error_Code);
+                     when File_Engines.Completion_Ignored =>
+                        Emit := False;
+                     when File_Engines.Completion_Failed =>
+                        return False;
+                  end case;
+               else
+                  Output_Event.Kind := Wake_Event;
+                  Output_Event.Descriptor := C.int (Kernel_Event.Ident);
+               end if;
             elsif Kernel_Event.Filter = EVFILT_AIO then
-               if not File_Engines.Complete_Event
+               Completion_Status := File_Engines.Complete_Event
                  (Item.File_State,
                   SSE.To_Address (Kernel_Event.Ident),
                   Kernel_Event.Ext (2),
                   C.int (Kernel_Event.Ext (1)),
-                  Completion)
-               then
-                  return False;
-               end if;
-               Output_Event :=
-                 (Kind       => File_Event,
-                  Descriptor => -1,
-                  Token      => Completion.Token,
-                  Result     => Completion.Result,
-                  Error_Code => Completion.Error_Code);
+                  Completion);
+               case Completion_Status is
+                  when File_Engines.Completion_Produced =>
+                     Output_Event :=
+                       (Kind       => File_Event,
+                        Descriptor => -1,
+                        Token      => Completion.Token,
+                        Result     => Completion.Result,
+                        Error_Code => Completion.Error_Code);
+                  when File_Engines.Completion_Ignored =>
+                     Emit := False;
+                  when File_Engines.Completion_Failed =>
+                     return False;
+               end case;
             elsif Kernel_Event.Filter = EVFILT_READ
             then
                Output_Event.Kind := Readable_Event;
@@ -295,8 +362,12 @@ package body System.Flyology.Poller is
                Output_Event.Kind := Writable_Event;
                Output_Event.Descriptor := C.int (Kernel_Event.Ident);
             end if;
-            Events (Events'First + Index - 1) := Output_Event;
+            if Emit then
+               Output_Count := Output_Count + 1;
+               Events (Events'First + Output_Count - 1) := Output_Event;
+            end if;
          end loop;
+         Count := Output_Count;
       end if;
       return Result >= 0 or else OSI.errno = OSI.EINTR;
    end Wait_Batch;

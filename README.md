@@ -592,6 +592,14 @@ tasks observe it in `poll`, while lightweight tasks observe it through their loo
 the connection descriptor and without periodic timer wakeups. One signal wakes
 all operations registered with that source.
 
+`Flyology.Cancellation.Token` is the canonical one-shot token shared by
+connection and file I/O. `Connections.Cancellation_Token` and
+`Files.Cancellation_Token` are source-compatible subtypes of it, and both
+packages rename the same canonical `Operation_Cancelled` exception. A
+structured handler can therefore pass its existing connection token into a
+file operation, and either package-qualified exception name catches cancellation
+from either I/O domain.
+
 `Cancellation_Quantum` remains in the API for source compatibility but is no
 longer a polling interval and is ignored. Cancellation tokens and servers must
 outlive operations waiting on their wake sources. `Request_Shutdown` also closes
@@ -727,10 +735,42 @@ task, pthread pool, or blocking `pread`/`pwrite` call is hidden behind the
 lightweight API. Native-designated callers use direct positional syscalls. Explicit
 offsets avoid shared file-position races in both lanes.
 
+`Read_At` and `Write_At` accept the same shared optional cancellation token.
+Cancellation is terminal rather than optimistic: the call never raises
+`Operation_Cancelled` while the kernel can still access the caller's buffer.
+It is not transactional. A cancelled `Write_At` may already have changed the
+file; its `Last` out parameter is not meaningful when the exception propagates,
+and blindly retrying can duplicate or overwrite data. Applications that retry
+writes need their own idempotence or committed-offset protocol.
+The scheduler serializes cancellation and ordinary completion under the owning
+group lock and applies these states:
+
+| State when cancellation is observed | Action | Safe resumption point |
+| --- | --- | --- |
+| Token already requested | No request is submitted | Immediate |
+| Waiting for kernel queue capacity | Remove the request from the per-group FIFO | Immediate |
+| Darwin POSIX AIO submitted | Call `aio_cancel`; distinguish `AIO_CANCELED`, `AIO_NOTCANCELED`, and `AIO_ALLDONE` | Immediate `EVFILT_AIO` deletion and `aio_return` for `AIO_CANCELED`; otherwise the normal terminal event |
+| Linux `io_uring` submitted | Submit `IORING_OP_ASYNC_CANCEL`; consume its administrative CQE separately | The original operation's terminal CQE |
+| Linux native AIO submitted | Call `io_cancel` | Its returned terminal `io_event` on success, otherwise the normal completion event |
+| Cancellation unsupported, already completing, or not cancelable | Record the disposition and retain ownership | The normal completion event |
+
+Completion and cancellation can become ready in the same poll batch. Whichever
+the scheduler observes first selects the public result; in either order exactly
+one terminal path wakes the fiber and exactly one path recycles the backend
+request. Ada task abort uses the same cancellation state machine. Native tasks
+retain their direct `pread`/`pwrite` behavior: a token is checked before the
+syscall, but an already-running native syscall is not interrupted by a hidden
+worker or polling thread.
+
 `Open` and `Close` are still direct metadata syscalls because neither supported
 platform provides an equivalent portable completion operation for them. They
 normally complete quickly on local filesystems, but applications should isolate
 potentially slow remote-filesystem metadata operations on a native task.
+`File_Descriptor` remains a low-level scalar owner: callers must not invoke
+`Close` concurrently with an operation and must retain the token, descriptor,
+and buffer until the call has returned. The cancellation guarantee makes it
+safe to join the operation and then close or reuse the descriptor; it does not
+turn raw file descriptors into generation-tagged connection owners.
 
 ## Runtime observability
 
@@ -878,7 +918,7 @@ async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 | Select ASan fiber annotations at RTS build time | AddressSanitizer must learn the real source and destination stack around a custom assembly transfer | Sanitized builds use LLVM's fiber interface; ordinary builds compile out every hook and sanitizer TLS object |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
-| Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code and bounded submission queues |
+| Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code, bounded submission queues, and backend-specific cancellation handshakes |
 | Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Generation-tagged limited owners cancel and drain the exact active operation before releasing an OS descriptor for reuse |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require a matching installed runtime from the tested GNAT 13–16 family |
@@ -1303,6 +1343,9 @@ Current smoke coverage includes:
   does not eagerly start a loop;
 - read/write/create/truncate file-open combinations plus 64 concurrent
   positional operations through the kernel-completion path;
+- shared cross-domain cancellation identity, pre-submission and queued file
+  cancellation, completion-versus-cancel races in both task lanes, task abort,
+  not-cancelable/already-completing fallbacks, and descriptor/request reuse;
 - repeated lightweight-child teardown under a native master, exercising deferred
   fiber destruction and ATCB-address reuse;
 - 16 KiB `Storage_Size` parity across lightweight and native tasks, including
@@ -1544,9 +1587,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   combinations and does not guarantee asynchronous execution for every target.
 - File `Open` and `Close` remain direct metadata syscalls and may briefly occupy
   an event loop, particularly on remote or unhealthy filesystems.
-- A submitted file buffer remains owned by the kernel until completion. An
-  abort request therefore wakes that task only after the outstanding operation
-  completes; cancellable file-operation handles are not yet a public API.
+- A submitted file buffer remains owned by the kernel until terminal
+  completion. Token cancellation and Ada task abort request backend
+  cancellation, but deliberately keep the task suspended when the kernel says
+  the operation is already completing, unsupported, or not cancelable.
 - `Flyology.IO.Connections` provides scheduler-driven cancellation and
   generation-safe concurrent close without periodic readiness timeouts. Its
   intentionally exclusive operation gate means a single connection does not

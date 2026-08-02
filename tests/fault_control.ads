@@ -13,7 +13,15 @@ package Fault_Control is
       Group_Startup,
       Stack_Protection,
       Stack_Discard,
-      Final_Reap_Window);
+      Final_Reap_Window,
+      File_Cancel_Not_Cancelable,
+      File_Cancel_Already_Completing,
+      File_Pre_Park,
+      File_Cancel_Delete_EINTR,
+      File_Cancel_Delete_Failure,
+      File_Cancel_Admin_Delay,
+      File_Cancel_Synthetic,
+      File_Cancel_Stale_Event);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -26,7 +34,15 @@ package Fault_Control is
       Group_Startup        => 8,
       Stack_Protection     => 9,
       Stack_Discard        => 10,
-      Final_Reap_Window    => 11);
+      Final_Reap_Window    => 11,
+      File_Cancel_Not_Cancelable   => 12,
+      File_Cancel_Already_Completing => 13,
+      File_Pre_Park                => 14,
+      File_Cancel_Delete_EINTR     => 15,
+      File_Cancel_Delete_Failure   => 16,
+      File_Cancel_Admin_Delay      => 17,
+      File_Cancel_Synthetic        => 18,
+      File_Cancel_Stale_Event      => 19);
 
    function Enabled return Boolean;
    procedure Reset;
@@ -34,7 +50,26 @@ package Fault_Control is
      (At_Point : Point;
       First    : Natural := 0;
       Count    : Positive := 1);
+   procedure Disarm (At_Point : Point);
    function Calls (At_Point : Point) return Natural;
+
+   type File_Cancel_Backend is (Darwin_AIO, Linux_IO_Uring, Linux_Native_AIO);
+   for File_Cancel_Backend use
+     (Darwin_AIO => 1, Linux_IO_Uring => 2, Linux_Native_AIO => 3);
+
+   type File_Cancel_Disposition is
+     (Submitted, Already_Completing, Not_Cancelable, Failed);
+   for File_Cancel_Disposition use
+     (Submitted => 1, Already_Completing => 2,
+      Not_Cancelable => 3, Failed => 4);
+
+   function File_Cancel_Count
+     (Backend     : File_Cancel_Backend;
+      Disposition : File_Cancel_Disposition;
+      Terminal    : Boolean) return Natural;
+
+   function Uring_Identity_Count (Reused : Boolean) return Natural;
+   function Uring_Admin_Complete_Count return Natural;
 
 private
    function C_Enabled return Interfaces.C.int;
@@ -49,7 +84,27 @@ private
       Count    : Interfaces.C.unsigned) return Interfaces.C.int;
    pragma Import (C, C_Arm, "flyology_test_fault_arm");
 
+   function C_Disarm (At_Point : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import (C, C_Disarm, "flyology_test_fault_disarm");
+
    function C_Calls
      (At_Point : Interfaces.C.int) return Interfaces.C.unsigned;
    pragma Import (C, C_Calls, "flyology_test_fault_calls");
+
+   function C_File_Cancel_Count
+     (Backend     : Interfaces.C.int;
+      Disposition : Interfaces.C.int;
+      Terminal    : Interfaces.C.int) return Interfaces.C.unsigned;
+   pragma Import
+     (C, C_File_Cancel_Count, "flyology_test_file_cancel_count");
+
+   function C_Uring_Identity_Count
+     (Reused : Interfaces.C.int) return Interfaces.C.unsigned;
+   pragma Import
+     (C, C_Uring_Identity_Count, "flyology_test_uring_identity_count");
+
+   function C_Uring_Admin_Complete_Count return Interfaces.C.unsigned;
+   pragma Import
+     (C, C_Uring_Admin_Complete_Count,
+      "flyology_test_uring_admin_complete_count");
 end Fault_Control;
