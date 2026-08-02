@@ -57,6 +57,12 @@ then
   printf '%s\n' "unknown sanitizer configuration was accepted" >&2
   exit 1
 fi
+if GNATEVL_TEST_DENY_IO_URING=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown io_uring test denial setting was accepted" >&2
+  exit 1
+fi
 if GNATEVL_LOOP_PLACEMENT=unknown \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
@@ -107,6 +113,16 @@ case "$(uname -s):$(uname -m)" in
     fi
     ;;
 esac
+
+if [ "$(uname -s)" = Linux ]; then
+  mkdir -p "$project_root/build/tests"
+  cc -Wall -Wextra -Werror \
+    "$project_root/tests/probes/linux_abi_probe.c" \
+    "$project_root/runtime/native/platform.c" \
+    -pthread \
+    -o "$project_root/build/tests/linux_syscall_probe"
+  "$project_root/build/tests/linux_syscall_probe"
+fi
 
 for test_main in \
   cancellation_wake_smoke \

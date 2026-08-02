@@ -31,17 +31,6 @@ package body System.Gnatevl.File_Engine is
 
    Ring_Entries : constant U32 := 1_024;
 
-   --  GNATEVL's supported Linux target is x86-64. These are the stable
-   --  x86-64 syscall numbers from asm/unistd_64.h; the io_uring UAPI record
-   --  layouts below come from linux/io_uring.h and linux/aio_abi.h.
-   SYS_IO_Setup          : constant C.long := 206;
-   SYS_IO_Destroy        : constant C.long := 207;
-   SYS_IO_Getevents      : constant C.long := 208;
-   SYS_IO_Submit         : constant C.long := 209;
-   SYS_IO_Uring_Setup    : constant C.long := 425;
-   SYS_IO_Uring_Enter    : constant C.long := 426;
-   SYS_IO_Uring_Register : constant C.long := 427;
-
    ENOSYS : constant C.int := 38;
    EPERM  : constant C.int := 1;
    EINVAL : constant C.int := 22;
@@ -313,48 +302,51 @@ package body System.Gnatevl.File_Engine is
    function Close (Descriptor : C.int) return C.int;
    pragma Import (C, Close, "close");
 
-   function Syscall_Setup
-     (Number : C.long; Entries : C.unsigned; Parameters : System.Address)
+   function Linux_IO_Setup
+     (Entries : C.unsigned; Context : System.Address)
       return C.long;
-   pragma Import (C_Variadic_1, Syscall_Setup, "syscall");
+   pragma Import (C, Linux_IO_Setup, "gnatevl_linux_io_setup");
 
-   function Syscall_Destroy
-     (Number : C.long; Context : C.unsigned_long) return C.long;
-   pragma Import (C_Variadic_1, Syscall_Destroy, "syscall");
+   function Linux_IO_Destroy (Context : C.unsigned_long) return C.long;
+   pragma Import (C, Linux_IO_Destroy, "gnatevl_linux_io_destroy");
 
-   function Syscall_Submit
-     (Number   : C.long;
-      Context  : C.unsigned_long;
+   function Linux_IO_Submit
+     (Context  : C.unsigned_long;
       Count    : C.long;
       Controls : System.Address) return C.long;
-   pragma Import (C_Variadic_1, Syscall_Submit, "syscall");
+   pragma Import (C, Linux_IO_Submit, "gnatevl_linux_io_submit");
 
-   function Syscall_Getevents
-     (Number  : C.long;
-      Context : C.unsigned_long;
+   function Linux_IO_Getevents
+     (Context : C.unsigned_long;
       Minimum : C.long;
       Count   : C.long;
       Events  : System.Address;
       Timeout : System.Address) return C.long;
-   pragma Import (C_Variadic_1, Syscall_Getevents, "syscall");
+   pragma Import (C, Linux_IO_Getevents, "gnatevl_linux_io_getevents");
 
-   function Syscall_Uring_Register
-     (Number     : C.long;
-      Descriptor : C.int;
+   function Linux_IO_Uring_Register
+     (Descriptor : C.int;
       Opcode     : C.unsigned;
       Argument   : System.Address;
       Count      : C.unsigned) return C.long;
-   pragma Import (C_Variadic_1, Syscall_Uring_Register, "syscall");
+   pragma Import
+     (C, Linux_IO_Uring_Register, "gnatevl_linux_io_uring_register");
 
-   function Syscall_Uring_Enter
-     (Number       : C.long;
-      Descriptor   : C.int;
+   function Linux_IO_Uring_Enter
+     (Descriptor   : C.int;
       To_Submit    : C.unsigned;
       Minimum      : C.unsigned;
       Flags        : C.unsigned;
       Signal_Mask  : System.Address;
       Signal_Size  : C.size_t) return C.long;
-   pragma Import (C_Variadic_1, Syscall_Uring_Enter, "syscall");
+   pragma Import (C, Linux_IO_Uring_Enter, "gnatevl_linux_io_uring_enter");
+
+   function Linux_IO_Uring_Setup
+     (Entries : C.unsigned; Parameters : System.Address) return C.long;
+   pragma Import (C, Linux_IO_Uring_Setup, "gnatevl_linux_io_uring_setup");
+
+   procedure Note_Backend (Backend : C.int);
+   pragma Import (C, Note_Backend, "gnatevl_linux_note_file_backend");
 
    function Load
      (Address : System.Address;
@@ -436,7 +428,7 @@ package body System.Gnatevl.File_Engine is
          return;
       elsif State.Backend = Native_AIO then
          if State.AIO_Context /= 0 then
-            Result := Syscall_Destroy (SYS_IO_Destroy, State.AIO_Context);
+            Result := Linux_IO_Destroy (State.AIO_Context);
             pragma Unreferenced (Result);
          end if;
       else
@@ -506,9 +498,8 @@ package body System.Gnatevl.File_Engine is
       State := new Engine_State;
       State.Wake_FD := Wake_FD;
       Result :=
-        Syscall_Setup
-          (SYS_IO_Uring_Setup,
-           C.unsigned (Ring_Entries),
+        Linux_IO_Uring_Setup
+          (C.unsigned (Ring_Entries),
            Parameters'Address);
       if Result < 0 then
          if C.int (OSI.errno) not in ENOSYS | EPERM then
@@ -518,15 +509,15 @@ package body System.Gnatevl.File_Engine is
          State.Backend := Native_AIO;
          State.AIO_Context := 0;
          Result :=
-           Syscall_Setup
-             (SYS_IO_Setup,
-              C.unsigned (Ring_Entries),
+           Linux_IO_Setup
+             (C.unsigned (Ring_Entries),
               State.AIO_Context'Address);
          if Result < 0 then
             Release_State (State);
             return False;
          end if;
          Item.State := State_Address (State);
+         Note_Backend (2);
          return True;
       end if;
 
@@ -612,17 +603,15 @@ package body System.Gnatevl.File_Engine is
         (State.CQ_Mapping, Parameters.CQ_Offsets.CQEs);
 
       Result :=
-        Syscall_Uring_Register
-          (SYS_IO_Uring_Register,
-           State.Ring_FD,
+        Linux_IO_Uring_Register
+          (State.Ring_FD,
            C.unsigned (IORING_REGISTER_EVENTFD_ASYNC),
            Wake_Copy'Address,
            1);
       if Result < 0 and then C.int (OSI.errno) = EINVAL then
          Result :=
-           Syscall_Uring_Register
-             (SYS_IO_Uring_Register,
-              State.Ring_FD,
+           Linux_IO_Uring_Register
+             (State.Ring_FD,
               C.unsigned (IORING_REGISTER_EVENTFD),
               Wake_Copy'Address,
               1);
@@ -633,6 +622,7 @@ package body System.Gnatevl.File_Engine is
       end if;
 
       Item.State := State_Address (State);
+      Note_Backend (1);
       return True;
    exception
       when Storage_Error =>
@@ -689,9 +679,8 @@ package body System.Gnatevl.File_Engine is
                Next_Free => null);
             loop
                Result :=
-                 Syscall_Submit
-                   (SYS_IO_Submit,
-                    State.AIO_Context,
+                 Linux_IO_Submit
+                   (State.AIO_Context,
                     1,
                     Controls'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
@@ -756,9 +745,8 @@ package body System.Gnatevl.File_Engine is
 
          loop
             Result :=
-              Syscall_Uring_Enter
-                (SYS_IO_Uring_Enter,
-                 State.Ring_FD,
+              Linux_IO_Uring_Enter
+                (State.Ring_FD,
                  1,
                  0,
                  0,
@@ -816,9 +804,8 @@ package body System.Gnatevl.File_Engine is
          begin
             loop
                Result :=
-                 Syscall_Getevents
-                   (SYS_IO_Getevents,
-                    State.AIO_Context,
+                 Linux_IO_Getevents
+                   (State.AIO_Context,
                     0,
                     C.long (Values'Length),
                     Events'Address,

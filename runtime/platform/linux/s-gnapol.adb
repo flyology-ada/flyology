@@ -33,14 +33,10 @@ package body System.Gnatevl.Poller is
    ENOENT       : constant C.int := 2;
 
    type Epoll_Event is record
-      Events : C.unsigned;
-      Data   : C.unsigned_long_long;
+      Events     : C.unsigned;
+      Descriptor : C.int;
    end record
-     with Convention => C, Size => 96, Alignment => 1;
-   for Epoll_Event use record
-      Events at 0 range 0 .. 31;
-      Data   at 4 range 0 .. 63;
-   end record;
+     with Convention => C, Size => 64, Alignment => 4;
 
    type Epoll_Event_Array is array (Positive range <>) of Epoll_Event
      with Convention => C;
@@ -68,15 +64,15 @@ package body System.Gnatevl.Poller is
      (Epoll_FD : C.int;
       Operation : C.int;
       FD         : C.int;
-      Event      : System.Address) return C.int;
-   pragma Import (C, Epoll_Ctl, "epoll_ctl");
+      Events     : C.unsigned) return C.int;
+   pragma Import (C, Epoll_Ctl, "gnatevl_linux_epoll_ctl");
 
    function Epoll_Wait
      (Epoll_FD  : C.int;
       Events    : System.Address;
       Max_Events : C.int;
       Timeout_MS : C.int) return C.int;
-   pragma Import (C, Epoll_Wait, "epoll_wait");
+   pragma Import (C, Epoll_Wait, "gnatevl_linux_epoll_wait");
 
    function Eventfd (Initial_Value : C.unsigned; Flags : C.int) return C.int;
    pragma Import (C, Eventfd, "eventfd");
@@ -142,12 +138,6 @@ package body System.Gnatevl.Poller is
 
    function Has (Mask, Flag : C.unsigned) return Boolean is
      ((Mask and Flag) /= 0);
-
-   function Descriptor_Event
-     (Watch_Item : Watch_Access) return Epoll_Event
-   is
-     ((Events => Mask_For (Watch_Item),
-       Data   => C.unsigned_long_long (Watch_Item.Descriptor)));
 
    procedure Remove
      (Item : in out Poller; Watch_Item : not null Watch_Access)
@@ -221,7 +211,6 @@ package body System.Gnatevl.Poller is
    end Drain_File_Events;
 
    function Initialize (Item : in out Poller) return Boolean is
-      Event  : aliased Epoll_Event;
       Result : C.int;
    begin
       Item.Descriptor := Epoll_Create1 (0);
@@ -239,15 +228,12 @@ package body System.Gnatevl.Poller is
          return False;
       end if;
 
-      Event :=
-        (Events => EPOLLIN,
-         Data   => C.unsigned_long_long (Item.Wake_Descriptor));
       Result :=
         Epoll_Ctl
           (Item.Descriptor,
            EPOLL_CTL_ADD,
            Item.Wake_Descriptor,
-           Event'Address);
+           EPOLLIN);
       if Result /= 0 then
          Result := Close (Item.Wake_Descriptor);
          Result := Close (Item.Descriptor);
@@ -306,7 +292,6 @@ package body System.Gnatevl.Poller is
       Created      : Boolean := False;
       Was_Readable : Boolean;
       Was_Writable : Boolean;
-      Event        : aliased Epoll_Event;
       Result       : C.int;
    begin
       if Faults.Enabled and then Faults.Fail (Faults.Poller_Watch) then
@@ -328,13 +313,12 @@ package body System.Gnatevl.Poller is
          Watch_Item.Writable := True;
       end if;
 
-      Event := Descriptor_Event (Watch_Item);
       Result :=
         Epoll_Ctl
           (Item.Descriptor,
            (if Created then EPOLL_CTL_ADD else EPOLL_CTL_MOD),
            Descriptor,
-           Event'Address);
+           Mask_For (Watch_Item));
       if Result /= 0 then
          Watch_Item.Readable := Was_Readable;
          Watch_Item.Writable := Was_Writable;
@@ -355,7 +339,6 @@ package body System.Gnatevl.Poller is
       Condition  : Interest) return Boolean
    is
       Watch_Item : constant Watch_Access := Find (Item, Descriptor);
-      Event      : aliased Epoll_Event;
       Result     : C.int;
    begin
       if Watch_Item = null then
@@ -367,12 +350,14 @@ package body System.Gnatevl.Poller is
       end if;
 
       if Watch_Item.Readable or else Watch_Item.Writable then
-         Event := Descriptor_Event (Watch_Item);
          Result := Epoll_Ctl
-           (Item.Descriptor, EPOLL_CTL_MOD, Descriptor, Event'Address);
+           (Item.Descriptor,
+            EPOLL_CTL_MOD,
+            Descriptor,
+            Mask_For (Watch_Item));
       else
          Result := Epoll_Ctl
-           (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, System.Null_Address);
+           (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
          if Result = 0 or else OSI.errno = ENOENT then
             Remove (Item, Watch_Item);
             return True;
@@ -449,7 +434,6 @@ package body System.Gnatevl.Poller is
       Error_Event   : Boolean;
       Read_Ready    : Boolean;
       Write_Ready   : Boolean;
-      Control_Event : aliased Epoll_Event;
       Result        : C.int;
       Read_Result   : C.long;
       Wake_Value    : aliased C.unsigned_long_long;
@@ -479,7 +463,7 @@ package body System.Gnatevl.Poller is
 
       for Index in 1 .. Natural (Kernel_Count) loop
          Descriptor :=
-           C.int (Kernel_Events (Kernel_Events'First + Index - 1).Data);
+           Kernel_Events (Kernel_Events'First + Index - 1).Descriptor;
          Mask := Kernel_Events (Kernel_Events'First + Index - 1).Events;
 
          if Descriptor = Item.Wake_Descriptor then
@@ -516,20 +500,19 @@ package body System.Gnatevl.Poller is
                end if;
 
                if Watch_Item.Readable or else Watch_Item.Writable then
-                  Control_Event := Descriptor_Event (Watch_Item);
                   Result :=
                     Epoll_Ctl
                       (Item.Descriptor,
                        EPOLL_CTL_MOD,
                        Descriptor,
-                       Control_Event'Address);
+                       Mask_For (Watch_Item));
                else
                   Result :=
                     Epoll_Ctl
                       (Item.Descriptor,
                        EPOLL_CTL_DEL,
                        Descriptor,
-                       System.Null_Address);
+                       0);
                   Remove (Item, Watch_Item);
                end if;
                if Result /= 0 then

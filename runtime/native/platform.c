@@ -10,9 +10,125 @@
 
 #if defined(__linux__)
 #include <sched.h>
+#include <sys/epoll.h>
+#include <sys/syscall.h>
 #elif defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
+#endif
+
+#if defined(__linux__)
+static int gnatevl_linux_selected_file_backend;
+
+void gnatevl_linux_note_file_backend(int backend) {
+    __atomic_store_n(&gnatevl_linux_selected_file_backend, backend,
+                     __ATOMIC_RELAXED);
+}
+
+int gnatevl_linux_file_backend(void) {
+    return __atomic_load_n(&gnatevl_linux_selected_file_backend,
+                           __ATOMIC_RELAXED);
+}
+
+struct gnatevl_epoll_event {
+    uint32_t events;
+    int descriptor;
+};
+_Static_assert(sizeof(struct gnatevl_epoll_event) == 8,
+               "Ada epoll translation record must remain eight bytes");
+
+/* Translate through libc's native struct epoll_event so ABI-dependent
+   padding never leaks into Ada.  x86-64 uses a packed 12-byte kernel record;
+   AArch64 uses a naturally aligned 16-byte record. */
+int gnatevl_linux_epoll_ctl(int epoll_fd, int operation, int descriptor,
+                            uint32_t events) {
+    struct epoll_event item = { .events = events };
+
+    item.data.fd = descriptor;
+    return epoll_ctl(epoll_fd, operation, descriptor,
+                     operation == EPOLL_CTL_DEL ? NULL : &item);
+}
+
+int gnatevl_linux_epoll_wait(int epoll_fd,
+                             struct gnatevl_epoll_event *events,
+                             int max_events, int timeout_ms) {
+    struct epoll_event native_events[64];
+    int count;
+    int index;
+
+    if (events == NULL || max_events < 1 || max_events > 64) {
+        errno = EINVAL;
+        return -1;
+    }
+    count = epoll_wait(epoll_fd, native_events, max_events, timeout_ms);
+    if (count < 0) {
+        return -1;
+    }
+    for (index = 0; index < count; ++index) {
+        events[index].events = native_events[index].events;
+        events[index].descriptor = native_events[index].data.fd;
+    }
+    return count;
+}
+
+/*
+ * Keep Linux syscall-number selection in C, where the target system headers
+ * describe the active ABI.  The scheduler and file-engine policy stay in Ada;
+ * these wrappers are only a typed bridge for interfaces that glibc does not
+ * expose as ordinary functions.  syscall(2) preserves its normal convention:
+ * -1 on failure with errno set, and a nonnegative kernel result on success.
+ */
+long gnatevl_linux_io_setup(unsigned entries, unsigned long *context) {
+    return syscall(SYS_io_setup, entries, context);
+}
+
+long gnatevl_linux_io_destroy(unsigned long context) {
+    return syscall(SYS_io_destroy, context);
+}
+
+long gnatevl_linux_io_submit(unsigned long context, long count,
+                             void *controls) {
+    return syscall(SYS_io_submit, context, count, controls);
+}
+
+long gnatevl_linux_io_cancel(unsigned long context, void *control,
+                             void *result) {
+    return syscall(SYS_io_cancel, context, control, result);
+}
+
+long gnatevl_linux_io_getevents(unsigned long context, long minimum,
+                                long count, void *events, void *timeout) {
+    return syscall(SYS_io_getevents, context, minimum, count, events, timeout);
+}
+
+long gnatevl_linux_io_uring_setup(unsigned entries, void *parameters) {
+#if defined(GNATEVL_TEST_DENY_IO_URING)
+    (void)entries;
+    (void)parameters;
+    errno = EPERM;
+    return -1;
+#else
+    return syscall(SYS_io_uring_setup, entries, parameters);
+#endif
+}
+
+long gnatevl_linux_io_uring_enter(int descriptor, unsigned to_submit,
+                                  unsigned minimum, unsigned flags,
+                                  void *signal_mask, size_t signal_size) {
+    return syscall(SYS_io_uring_enter, descriptor, to_submit, minimum, flags,
+                   signal_mask, signal_size);
+}
+
+long gnatevl_linux_io_uring_register(int descriptor, unsigned opcode,
+                                     void *argument, unsigned count) {
+    return syscall(SYS_io_uring_register, descriptor, opcode, argument, count);
+}
+#endif
+
+#if !defined(__linux__)
+int gnatevl_linux_file_backend(void) {
+    return 0;
+}
 #endif
 
 #define GNATEVL_PLACEMENT_STRICT 1

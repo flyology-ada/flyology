@@ -1,12 +1,20 @@
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Streams;
+with Ada.Text_IO;
 with Gnatevl;
 with Gnatevl.IO;
 with Gnatevl.IO.Files;
+with Interfaces.C;
 
 procedure Files_Smoke is
    use Ada.Streams;
    use type Gnatevl.IO.Files.File_Descriptor;
+   use type Interfaces.C.int;
+
+   function Selected_Linux_Backend return Interfaces.C.int;
+   pragma Import
+     (C, Selected_Linux_Backend, "gnatevl_linux_file_backend");
 
    Path : constant String := "/tmp/gnatevl-files-smoke.data";
    Data : constant Stream_Element_Array (1 .. 4) := [10, 20, 30, 40];
@@ -164,6 +172,16 @@ begin
    end if;
 
    Remove_Test_File;
+   if Ada.Environment_Variables.Value
+     ("GNATEVL_EXPECT_FILE_BACKEND", "") = "native-aio"
+   then
+      if Selected_Linux_Backend /= 2 then
+         raise Program_Error with
+           "expected Linux native-AIO backend, got" &
+           Interfaces.C.int'Image (Selected_Linux_Backend);
+      end if;
+      Ada.Text_IO.Put_Line ("linux file backend: native-aio");
+   end if;
 exception
    when others =>
       if File /= Gnatevl.IO.Files.Invalid_File then

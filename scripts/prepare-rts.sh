@@ -18,6 +18,7 @@ placement_policy=${GNATEVL_PLACEMENT:-round_robin}
 loop_placement=${GNATEVL_LOOP_PLACEMENT:-none}
 loop_placement_map=${GNATEVL_LOOP_PLACEMENT_MAP:-}
 test_faults=${GNATEVL_TEST_FAULTS:-0}
+deny_io_uring=${GNATEVL_TEST_DENY_IO_URING:-0}
 sanitizer=${GNATEVL_SANITIZER:-none}
 
 case "$execution_default" in
@@ -139,6 +140,20 @@ case "$test_faults" in
   *)
     printf '%s\n' \
       "GNATEVL_TEST_FAULTS must be '0' or '1', got: $test_faults" >&2
+    exit 1
+    ;;
+esac
+
+case "$deny_io_uring" in
+  0)
+    io_uring_test_cflags=
+    ;;
+  1)
+    io_uring_test_cflags=-DGNATEVL_TEST_DENY_IO_URING
+    ;;
+  *)
+    printf '%s\n' \
+      "GNATEVL_TEST_DENY_IO_URING must be '0' or '1', got: $deny_io_uring" >&2
     exit 1
     ;;
 esac
@@ -282,7 +297,8 @@ git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
 
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
-cc -O2 $fault_cflags -c "$project_root/runtime/native/platform.c" \
+cc -O2 $fault_cflags $io_uring_test_cflags \
+  -c "$project_root/runtime/native/platform.c" \
   -o "$build_root/obj/platform.o"
 cd "$build_root/obj"
 if [ "$platform" = linux ]; then
