@@ -42,7 +42,10 @@ package Gnatevl.IO.Connections is
    --  it unnecessary and its value is ignored.
 
    --  Server must outlive every Connection admitted through it. On success,
-   --  Socket becomes No_Socket and Item becomes its sole closing owner.
+   --  Socket becomes No_Socket and Item becomes its sole closing owner. One
+   --  operation at a time is admitted per Connection; this deliberate
+   --  exclusivity prevents a readiness event from waking an unbounded set of
+   --  waiters on the same descriptor.
    procedure Take
      (Manager : aliased in out Server;
       Socket  : in out GNAT.Sockets.Socket_Type;
@@ -91,9 +94,35 @@ package Gnatevl.IO.Connections is
 private
    type Server_Access is access all Server;
 
+   type Descriptor_Generation is mod 2 ** 64;
+
+   protected type Descriptor_Controller is
+      procedure Adopt (FD : Gnatevl.IO.Descriptor);
+      entry Acquire
+        (FD           : out Gnatevl.IO.Descriptor;
+         Generation   : out Descriptor_Generation;
+         Close_Source : out Gnatevl.IO.Descriptor);
+      procedure Release (Generation : Descriptor_Generation);
+      procedure Begin_Close
+        (FD         : out Gnatevl.IO.Descriptor;
+         Generation : out Descriptor_Generation;
+         Leader     : out Boolean);
+      entry Await_Drained;
+      entry Await_Closed;
+      procedure Finish_Close (Generation : Descriptor_Generation);
+      function Is_Open_State return Boolean;
+   private
+      Current_FD         : Gnatevl.IO.Descriptor := Invalid_Descriptor;
+      Current_Generation : Descriptor_Generation := 0;
+      Active             : Boolean := False;
+      Closing            : Boolean := False;
+      Close_Wake         : Gnatevl.Wake_Sources.Source;
+   end Descriptor_Controller;
+
    type Connection is new Ada.Finalization.Limited_Controlled with record
       Socket : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
       Owner  : Server_Access := null;
+      Controller : Descriptor_Controller;
    end record;
 
    overriding procedure Finalize (Item : in out Connection);

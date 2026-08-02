@@ -10,6 +10,9 @@ package Gnatevl.Wake_Sources is
    --  by a protected object, which serializes initialization and signalling.
    procedure Ensure (Item : in out Source);
    procedure Signal (Item : in out Source);
+   --  Release both ends after the owning controller has drained all waiters.
+   --  A later Ensure starts a new descriptor generation.
+   procedure Release (Item : in out Source);
    function Descriptor (Item : Source) return Interfaces.C.int;
 
 private

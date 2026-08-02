@@ -357,6 +357,11 @@ Descriptor registrations are one-shot so the resumed task owns the retry and
 decides whether another wait is needed. Exact reads and complete writes loop
 over partial progress while preserving a single deadline.
 
+`Gnatevl.IO.Wait` and `Gnatevl.IO.Wait_Interruptibly` deliberately remain raw
+integer-descriptor primitives. They do not own the descriptor or prevent a
+concurrent `close(2)` from releasing its number for reuse; callers choosing
+that compatibility layer must serialize descriptor lifetime themselves.
+
 Accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are exposed to
 the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
 process-safety convention while retaining the raw nonblocking `accept(2)` retry
@@ -382,7 +387,18 @@ Owned.Send_All (Response);
 
 The limited owner cannot be copied and closes its socket while releasing the
 admission permit during explicit `Close`, normal scope exit, or exception
-unwinding. The `Server` object must outlive its admitted owners.
+unwinding. Each adoption receives a monotonically wrapping generation tag. A
+concurrent `Close` signals that generation's private wake source, waits for its
+active operation to remove every poller registration, and only then releases
+the OS descriptor. The kernel therefore cannot reuse an integer while an old
+generation can still act on its readiness. An in-flight operation interrupted
+by close raises `Operation_Cancelled` in both native and evented lanes.
+
+A connection admits one socket operation at a time. Additional operations queue
+at the owner rather than registering duplicate waits, which gives
+same-descriptor waiting bounded, exclusive semantics instead of a thundering
+herd. Independent connections remain fully concurrent. The `Server` object
+must outlive its admitted owners.
 
 Operations register both an optional per-operation `Cancellation_Token` and the
 server shutdown source in the same kernel wait as the socket. A token request
@@ -399,8 +415,9 @@ admission, releases tasks queued at the capacity gate with `Admission_Closed`,
 and causes active lifecycle I/O to raise `Operation_Cancelled`;
 `Await_Drained` returns after all owners release. Raw `Gnatevl.IO.Sockets`
 remains the lower-level mechanism when an application needs different ownership
-or cancellation policy. Its optional interrupt descriptors are a low-level
-building block; callers retain their ownership and lifetime responsibility.
+or cancellation policy. Its optional interrupt descriptors and the raw
+descriptor-wait APIs are unsafe lifetime building blocks: callers retain their
+ownership, close serialization, and wake-source lifetime responsibility.
 
 ### Timers
 
@@ -555,7 +572,7 @@ a crash handler or debugger and querying it takes no scheduler lock.
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
 | Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code and bounded submission queues |
-| Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Limited owners release permits automatically; persistent wake descriptors cancel idle operations without polling or concurrent socket close |
+| Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Generation-tagged limited owners cancel and drain the exact active operation before releasing an OS descriptor for reuse |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require a matching installed runtime from the tested GNAT 13–16 family |
 
@@ -777,6 +794,9 @@ Current smoke coverage includes:
   cancellation, RAII socket release, admission closure, accept cancellation,
   immediate pre-requested cancellation, timeout precedence, 64 idle evented
   connections, and blocked native parity despite a ten-second legacy quantum;
+- generation-tagged connection close under forced descriptor-number reuse,
+  simultaneous cancellation/close, readiness/timeout races in both lanes,
+  exclusive same-descriptor waiters, and removal of all poller registrations;
 - descriptor-readiness fairness under a continuously yielding evented task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;
@@ -1011,11 +1031,13 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - A submitted file buffer remains owned by the kernel until completion. An
   abort request therefore wakes that task only after the outstanding operation
   completes; cancellable file-operation handles are not yet a public API.
-- `Gnatevl.IO.Connections` provides scheduler-driven cancellation without
-  concurrent descriptor close or periodic readiness timeouts. Raw socket
-  operations do not infer descriptor ownership; closing a raw descriptor
-  concurrently with an indefinite wait remains outside that lower-level API's
-  guarantees. Generation-tagged descriptor ownership remains future work.
+- `Gnatevl.IO.Connections` provides scheduler-driven cancellation and
+  generation-safe concurrent close without periodic readiness timeouts. Its
+  intentionally exclusive operation gate means a single connection does not
+  support simultaneous full-duplex calls; applications needing concurrent
+  read/write lanes must coordinate them above the owner or use the raw API with
+  explicit lifetime serialization. Raw socket operations do not infer
+  descriptor ownership, so concurrent close remains outside their guarantees.
 - Fiber guard pages make stack overflow fail fast. Each loop pthread has an
   alternate signal stack on which GNARL can translate the guard fault into Ada
   `Storage_Error`; this stack is thread state and is intentionally not stored

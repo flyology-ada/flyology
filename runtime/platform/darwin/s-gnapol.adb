@@ -20,8 +20,10 @@ package body System.Gnatevl.Poller is
    EVFILT_READ : constant C.short := C.short (-1);
    EVFILT_WRITE : constant C.short := C.short (-2);
    EV_ADD      : constant C.unsigned_short := 16#0001#;
+   EV_DELETE   : constant C.unsigned_short := 16#0002#;
    EV_ONESHOT  : constant C.unsigned_short := 16#0010#;
    EV_CLEAR    : constant C.unsigned_short := 16#0020#;
+   ENOENT      : constant C.int := 2;
    NOTE_TRIGGER : constant C.unsigned := 16#0100_0000#;
    Wake_Ident   : constant SSE.Integer_Address := 1;
 
@@ -138,6 +140,30 @@ package body System.Gnatevl.Poller is
          0,
          System.Null_Address) = 0;
    end Watch;
+
+   function Cancel
+     (Item       : in out Poller;
+      Descriptor : C.int;
+      Condition  : Interest) return Boolean
+   is
+      Change : aliased Kevent_Record :=
+        (Ident  => SSE.Integer_Address (Descriptor),
+         Filter =>
+           (if Condition = Readable then EVFILT_READ else EVFILT_WRITE),
+         Flags  => EV_DELETE,
+         Fflags => 0,
+         Data   => 0,
+         Udata  => 0,
+         Ext    => (others => 0));
+   begin
+      if Kevent
+        (Item.Descriptor, Change'Address, 1, System.Null_Address, 0, 0,
+         System.Null_Address) = 0
+      then
+         return True;
+      end if;
+      return OSI.errno = ENOENT;
+   end Cancel;
 
    function Submit_File
      (Item        : in out Poller;

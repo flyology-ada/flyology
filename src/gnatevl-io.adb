@@ -28,7 +28,8 @@ package body Gnatevl.IO is
       For_Write           : C.int;
       Timeout_Nanoseconds : C.long_long;
       Interrupt_1         : C.int;
-      Interrupt_2         : C.int) return C.int;
+      Interrupt_2         : C.int;
+      Interrupt_3         : C.int) return C.int;
    pragma Import (C, Runtime_Wait_IO, "gnatevl_runtime_wait_io");
 
    function Poll
@@ -82,7 +83,8 @@ package body Gnatevl.IO is
       Condition   : Wait_Kind;
       Timeout     : Duration := Infinite;
       Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor) return Wait_Outcome
+      Interrupt_2 : Descriptor := Invalid_Descriptor;
+      Interrupt_3 : Descriptor := Invalid_Descriptor) return Wait_Outcome
    is
       type Poll_Descriptor_Array is
         array (Positive range <>) of aliased Poll_Descriptor
@@ -102,7 +104,8 @@ package body Gnatevl.IO is
               (if Condition = For_Write then 1 else 0),
               Time_Math.To_Nanoseconds (Timeout),
               Interrupt_1,
-              Interrupt_2);
+              Interrupt_2,
+              Interrupt_3);
          if Result < 0 then
             raise Device_Error with "event-loop readiness wait failed";
          end if;
@@ -110,7 +113,7 @@ package body Gnatevl.IO is
            (case Result is
               when 0      => Ready,
               when 1      => Timed_Out,
-              when 2 | 3  => Interrupted,
+              when 2 | 3 | 4 => Interrupted,
               when others => raise Device_Error with
                 "invalid event-loop readiness result");
       end if;
@@ -119,6 +122,9 @@ package body Gnatevl.IO is
          Count := Count + 1;
       end if;
       if Interrupt_2 >= 0 then
+         Count := Count + 1;
+      end if;
+      if Interrupt_3 >= 0 then
          Count := Count + 1;
       end if;
 
@@ -143,6 +149,11 @@ package body Gnatevl.IO is
             if Interrupt_2 >= 0 then
                Items (Next) :=
                  (FD => Interrupt_2, Events => POLLIN, Returned_Events => 0);
+               Next := Next + 1;
+            end if;
+            if Interrupt_3 >= 0 then
+               Items (Next) :=
+                 (FD => Interrupt_3, Events => POLLIN, Returned_Events => 0);
             end if;
             Result :=
               Poll

@@ -21,7 +21,7 @@ package Gnatevl.IO with Preelaborate is
       Condition : Wait_Kind;
       Timeout   : Duration := Infinite) return Boolean;
 
-   --  Wait for Descriptor or either optional one-shot interrupt source.
+   --  Wait for Descriptor or any optional one-shot interrupt source.
    --  Interrupt descriptors are observed for readability and are not read or
    --  closed here. This is the low-level primitive used by cancellable
    --  connection operations.
@@ -30,6 +30,7 @@ package Gnatevl.IO with Preelaborate is
       Condition   : Wait_Kind;
       Timeout     : Duration := Infinite;
       Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor) return Wait_Outcome;
+      Interrupt_2 : Descriptor := Invalid_Descriptor;
+      Interrupt_3 : Descriptor := Invalid_Descriptor) return Wait_Outcome;
 
 end Gnatevl.IO;

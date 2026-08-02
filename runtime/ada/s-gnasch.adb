@@ -80,7 +80,8 @@ package body System.Gnatevl.Scheduler is
       Tail : Fiber_Access;
    end record;
    type Ready_Bucket_Array is array (Ready_Priority) of Ready_Bucket;
-   type IO_Link_Kind is (Primary_IO, First_Interrupt, Second_Interrupt);
+   type IO_Link_Kind is
+     (Primary_IO, First_Interrupt, Second_Interrupt, Third_Interrupt);
    type IO_Wait_Link;
    type IO_Wait_Link_Access is access all IO_Wait_Link;
    type IO_Wait_Link is record
@@ -294,6 +295,10 @@ package body System.Gnatevl.Scheduler is
    procedure Register_Locked (Item : not null Fiber_Access);
    procedure Unregister_Locked (Item : not null Fiber_Access);
    function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index;
+   function IO_Interest_Registered_Locked
+     (Group      : not null Loop_Group_Access;
+      Descriptor : C.int;
+      Interest   : Pollers.Interest) return Boolean;
    procedure Register_IO_Wait_Locked
      (Group      : not null Loop_Group_Access;
       Item       : not null Fiber_Access;
@@ -633,6 +638,26 @@ package body System.Gnatevl.Scheduler is
    function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index is
      (IO_Bucket_Index (Natural (Descriptor) mod IO_Bucket_Count));
 
+   function IO_Interest_Registered_Locked
+     (Group      : not null Loop_Group_Access;
+      Descriptor : C.int;
+      Interest   : Pollers.Interest) return Boolean
+   is
+      Position : IO_Wait_Link_Access :=
+        Group.IO_Waiters (IO_Bucket_For (Descriptor));
+   begin
+      while Position /= null loop
+         if Position.Registered
+           and then Position.Descriptor = Descriptor
+           and then Position.Interest = Interest
+         then
+            return True;
+         end if;
+         Position := Position.Next;
+      end loop;
+      return False;
+   end IO_Interest_Registered_Locked;
+
    procedure Register_IO_Wait_Locked
      (Group      : not null Loop_Group_Access;
       Item       : not null Fiber_Access;
@@ -695,9 +720,26 @@ package body System.Gnatevl.Scheduler is
             end if;
             Link.Next := null;
             Link.Registered := False;
-            Link.Owner := null;
-            Link.Descriptor := -1;
          end if;
+      end loop;
+
+      --  Removing one fiber can orphan several one-shot kernel interests.
+      --  The source that triggered this wake may already have been consumed
+      --  by kevent/epoll; Cancel is deliberately idempotent for that case.
+      --  Duplicate links are harmless: the first cancellation removes the
+      --  interest and later duplicates observe it as already absent.
+      for Kind in IO_Link_Kind loop
+         Link := Item.IO_Links (Kind)'Unchecked_Access;
+         if Link.Descriptor >= 0
+           and then not IO_Interest_Registered_Locked
+             (Group, Link.Descriptor, Link.Interest)
+           and then not Pollers.Cancel
+             (Group.Scheduler_Poller, Link.Descriptor, Link.Interest)
+         then
+            Fatal (Poller_Failure);
+         end if;
+         Link.Owner := null;
+         Link.Descriptor := -1;
       end loop;
       Item.IO_Wait := False;
    end Remove_IO_Waits_Locked;
@@ -1675,7 +1717,8 @@ package body System.Gnatevl.Scheduler is
       For_Write           : C.int;
       Timeout_Nanoseconds : C.long_long;
       Interrupt_1         : C.int;
-      Interrupt_2         : C.int) return C.int
+      Interrupt_2         : C.int;
+      Interrupt_3         : C.int) return C.int
    is
       Group     : constant Loop_Group_Access := Thread_Group;
       Item      : Fiber_Access;
@@ -1684,6 +1727,39 @@ package body System.Gnatevl.Scheduler is
       Whole     : C.long_long;
       Remainder : C.long_long;
       Timeout   : Duration;
+      function Arm
+        (FD       : C.int;
+         Interest : Pollers.Interest;
+         Kind     : IO_Link_Kind) return Boolean;
+
+      procedure Roll_Back_Watches;
+
+      function Arm
+        (FD       : C.int;
+         Interest : Pollers.Interest;
+         Kind     : IO_Link_Kind) return Boolean
+      is
+         Needs_Kernel_Watch : Boolean;
+      begin
+         if FD < 0 then
+            return True;
+         end if;
+         Needs_Kernel_Watch :=
+           not IO_Interest_Registered_Locked (Group, FD, Interest);
+         if Needs_Kernel_Watch
+           and then not Pollers.Watch
+             (Group.Scheduler_Poller, FD, Interest)
+         then
+            return False;
+         end if;
+         Register_IO_Wait_Locked (Group, Item, FD, Interest, Kind);
+         return True;
+      end Arm;
+
+      procedure Roll_Back_Watches is
+      begin
+         Remove_IO_Waits_Locked (Group, Item);
+      end Roll_Back_Watches;
    begin
       --  Only this group's event thread writes Current_Fiber while a fiber is
       --  running; the unlocked read validates same-thread call context. The
@@ -1716,31 +1792,19 @@ package body System.Gnatevl.Scheduler is
          Item.Deadline := No_Deadline;
          Unlock_Group (Group);
          return -1;
-      elsif not Pollers.Watch
-        (Group.Scheduler_Poller, Descriptor, Condition)
-        or else
-          (Interrupt_1 >= 0
-           and then not Pollers.Watch
-             (Group.Scheduler_Poller, Interrupt_1, Pollers.Readable))
-        or else
-          (Interrupt_2 >= 0
-           and then not Pollers.Watch
-             (Group.Scheduler_Poller, Interrupt_2, Pollers.Readable))
+      elsif not Arm (Descriptor, Condition, Primary_IO)
+        or else not Arm
+          (Interrupt_1, Pollers.Readable, First_Interrupt)
+        or else not Arm
+          (Interrupt_2, Pollers.Readable, Second_Interrupt)
+        or else not Arm
+          (Interrupt_3, Pollers.Readable, Third_Interrupt)
       then
+         Roll_Back_Watches;
          Remove_Timer_Locked (Group, Item);
          Item.State := Running;
          Unlock_Group (Group);
          return -1;
-      end if;
-      Register_IO_Wait_Locked
-        (Group, Item, Descriptor, Condition, Primary_IO);
-      if Interrupt_1 >= 0 then
-         Register_IO_Wait_Locked
-           (Group, Item, Interrupt_1, Pollers.Readable, First_Interrupt);
-      end if;
-      if Interrupt_2 >= 0 then
-         Register_IO_Wait_Locked
-           (Group, Item, Interrupt_2, Pollers.Readable, Second_Interrupt);
       end if;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
 
@@ -2080,7 +2144,8 @@ package body System.Gnatevl.Scheduler is
               (case Link.Kind is
                  when Primary_IO       => 0,
                  when First_Interrupt  => 2,
-                 when Second_Interrupt => 3);
+                 when Second_Interrupt => 3,
+                 when Third_Interrupt  => 4);
             Remove_Timer_Locked (Group, Item);
             Item.Timed_Out := False;
             Item.IO_Result := Outcome;

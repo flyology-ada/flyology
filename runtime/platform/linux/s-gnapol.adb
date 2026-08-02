@@ -30,6 +30,7 @@ package body System.Gnatevl.Poller is
    EFD_NONBLOCK : constant C.int := 16#0000_0800#;
    EFD_CLOEXEC  : constant C.int := 16#0008_0000#;
    EAGAIN       : constant C.int := 11;
+   ENOENT       : constant C.int := 2;
 
    type Epoll_Event is record
       Events : C.unsigned;
@@ -347,6 +348,44 @@ package body System.Gnatevl.Poller is
       when Storage_Error =>
          return False;
    end Watch;
+
+   function Cancel
+     (Item       : in out Poller;
+      Descriptor : C.int;
+      Condition  : Interest) return Boolean
+   is
+      Watch_Item : constant Watch_Access := Find (Item, Descriptor);
+      Event      : aliased Epoll_Event;
+      Result     : C.int;
+   begin
+      if Watch_Item = null then
+         return True;
+      elsif Condition = Readable then
+         Watch_Item.Readable := False;
+      else
+         Watch_Item.Writable := False;
+      end if;
+
+      if Watch_Item.Readable or else Watch_Item.Writable then
+         Event := Descriptor_Event (Watch_Item);
+         Result := Epoll_Ctl
+           (Item.Descriptor, EPOLL_CTL_MOD, Descriptor, Event'Address);
+      else
+         Result := Epoll_Ctl
+           (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, System.Null_Address);
+         if Result = 0 or else OSI.errno = ENOENT then
+            Remove (Item, Watch_Item);
+            return True;
+         end if;
+      end if;
+      if Result = 0 then
+         return True;
+      elsif OSI.errno = ENOENT then
+         Remove (Item, Watch_Item);
+         return True;
+      end if;
+      return False;
+   end Cancel;
 
    function Submit_File
      (Item        : in out Poller;

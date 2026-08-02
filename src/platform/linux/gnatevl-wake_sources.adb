@@ -50,7 +50,7 @@ package body Gnatevl.Wake_Sources is
 
    function Descriptor (Item : Source) return C.int is (Item.Read_End);
 
-   overriding procedure Finalize (Item : in out Source) is
+   procedure Release (Item : in out Source) is
       Ignored : C.int;
    begin
       if Item.Read_End >= 0 then
@@ -61,5 +61,10 @@ package body Gnatevl.Wake_Sources is
          Ignored := Close (Item.Write_End);
          Item.Write_End := -1;
       end if;
+   end Release;
+
+   overriding procedure Finalize (Item : in out Source) is
+   begin
+      Release (Item);
    end Finalize;
 end Gnatevl.Wake_Sources;

@@ -1,13 +1,100 @@
 with Ada.Real_Time;
 with Gnatevl.IO.Sockets;
 with Gnatevl.Time_Math;
+with Interfaces.C;
 
 package body Gnatevl.IO.Connections is
    package Sockets renames GNAT.Sockets;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Interfaces.C.int;
    use type Sockets.Socket_Type;
+
+   protected body Descriptor_Controller is
+      procedure Adopt (FD : Descriptor) is
+      begin
+         if FD < 0
+           or else Current_FD >= 0
+           or else Active
+           or else Closing
+         then
+            raise Program_Error with
+              "descriptor controller already owns a resource";
+         end if;
+         Wake_Sources.Ensure (Close_Wake);
+         Current_FD := FD;
+         Current_Generation := Current_Generation + 1;
+      end Adopt;
+
+      entry Acquire
+        (FD           : out Descriptor;
+         Generation   : out Descriptor_Generation;
+         Close_Source : out Descriptor)
+        when not Active
+      is
+      begin
+         if Current_FD < 0 or else Closing then
+            raise Program_Error with "connection is not open";
+         end if;
+         Active := True;
+         FD := Current_FD;
+         Generation := Current_Generation;
+         Close_Source := Wake_Sources.Descriptor (Close_Wake);
+      end Acquire;
+
+      procedure Release (Generation : Descriptor_Generation) is
+      begin
+         if not Active or else Generation /= Current_Generation then
+            raise Program_Error with "stale descriptor operation release";
+         end if;
+         Active := False;
+      end Release;
+
+      procedure Begin_Close
+        (FD         : out Descriptor;
+         Generation : out Descriptor_Generation;
+         Leader     : out Boolean)
+      is
+      begin
+         FD := Current_FD;
+         Generation := Current_Generation;
+         Leader := Current_FD >= 0 and then not Closing;
+         if Leader then
+            Closing := True;
+            if Active then
+               Wake_Sources.Signal (Close_Wake);
+            end if;
+         end if;
+      end Begin_Close;
+
+      entry Await_Drained when not Active is
+      begin
+         null;
+      end Await_Drained;
+
+      entry Await_Closed when not Closing is
+      begin
+         null;
+      end Await_Closed;
+
+      procedure Finish_Close (Generation : Descriptor_Generation) is
+      begin
+         if not Closing
+           or else Active
+           or else Generation /= Current_Generation
+         then
+            raise Program_Error with "stale descriptor close completion";
+         end if;
+         Current_FD := Invalid_Descriptor;
+         Wake_Sources.Release (Close_Wake);
+         Closing := False;
+      end Finish_Close;
+
+      function Is_Open_State return Boolean is
+        (Current_FD >= 0 and then not Closing);
+
+   end Descriptor_Controller;
 
    protected body Cancellation_Token is
       procedure Request is
@@ -117,13 +204,6 @@ package body Gnatevl.IO.Connections is
       end if;
    end Interrupt_Sources;
 
-   procedure Check_Open (Item : Connection) is
-   begin
-      if Item.Socket = Sockets.No_Socket or else Item.Owner = null then
-         raise Program_Error with "connection is not open";
-      end if;
-   end Check_Open;
-
    procedure Reserve
      (Manager : aliased in out Server;
       Owner   : out Server_Access)
@@ -151,9 +231,17 @@ package body Gnatevl.IO.Connections is
       end if;
 
       Reserve (Manager, Owner);
-      Item.Owner := Owner;
-      Item.Socket := Socket;
-      Socket := Sockets.No_Socket;
+      begin
+         Item.Controller.Adopt
+           (Gnatevl.IO.Sockets.Native_Descriptor (Socket));
+         Item.Owner := Owner;
+         Item.Socket := Socket;
+         Socket := Sockets.No_Socket;
+      exception
+         when others =>
+            Owner.Release;
+            raise;
+      end;
    end Take;
 
    procedure Accept_Connection
@@ -202,6 +290,8 @@ package body Gnatevl.IO.Connections is
       then
          raise Operation_Cancelled;
       end if;
+      Item.Controller.Adopt
+        (Gnatevl.IO.Sockets.Native_Descriptor (Socket));
       Item.Owner := Owner;
       Item.Socket := Socket;
       Reserved := False;
@@ -217,9 +307,26 @@ package body Gnatevl.IO.Connections is
    end Accept_Connection;
 
    procedure Close (Item : in out Connection) is
-      Socket : constant Sockets.Socket_Type := Item.Socket;
-      Owner  : constant Server_Access := Item.Owner;
+      FD         : Descriptor;
+      Generation : Descriptor_Generation;
+      Leader     : Boolean;
+      Socket     : Sockets.Socket_Type;
+      Owner      : Server_Access;
    begin
+      Item.Controller.Begin_Close (FD, Generation, Leader);
+      if not Leader then
+         if FD >= 0 then
+            Item.Controller.Await_Closed;
+         end if;
+         return;
+      end if;
+
+      --  The exact generation remains allocated until its sole operation has
+      --  observed Close_Wake and acknowledged release. Only then may the OS
+      --  recycle the integer descriptor.
+      Item.Controller.Await_Drained;
+      Socket := Item.Socket;
+      Owner := Item.Owner;
       Item.Socket := Sockets.No_Socket;
       Item.Owner := null;
       if Socket /= Sockets.No_Socket then
@@ -227,19 +334,21 @@ package body Gnatevl.IO.Connections is
             Sockets.Close_Socket (Socket);
          exception
             when others =>
+               Item.Controller.Finish_Close (Generation);
                if Owner /= null then
                   Owner.Release;
                end if;
                raise;
          end;
       end if;
+      Item.Controller.Finish_Close (Generation);
       if Owner /= null then
          Owner.Release;
       end if;
    end Close;
 
    function Is_Open (Item : Connection) return Boolean is
-     (Item.Socket /= Sockets.No_Socket and then Item.Owner /= null);
+     (Item.Controller.Is_Open_State);
 
    procedure Receive
      (Item                 : in out Connection;
@@ -251,17 +360,29 @@ package body Gnatevl.IO.Connections is
    is
       Interrupt_1 : Descriptor;
       Interrupt_2 : Descriptor;
+      Close_Interrupt : Descriptor;
+      FD : Descriptor;
+      Generation : Descriptor_Generation;
+      Socket : Sockets.Socket_Type;
       pragma Unreferenced (Cancellation_Quantum);
    begin
-      Check_Open (Item);
-      Interrupt_Sources (Item, Token, Interrupt_1, Interrupt_2);
+      Item.Controller.Acquire (FD, Generation, Close_Interrupt);
+      Socket := Item.Socket;
+      pragma Assert (FD = Gnatevl.IO.Sockets.Native_Descriptor (Socket));
       begin
+         Interrupt_Sources (Item, Token, Interrupt_1, Interrupt_2);
          Gnatevl.IO.Sockets.Receive
-           (Item.Socket, Data, Last, Timeout, Interrupt_1, Interrupt_2);
+           (Socket, Data, Last, Timeout,
+            Close_Interrupt, Interrupt_1, Interrupt_2);
       exception
          when Gnatevl.IO.Sockets.Operation_Interrupted =>
+            Item.Controller.Release (Generation);
             raise Operation_Cancelled;
+         when others =>
+            Item.Controller.Release (Generation);
+            raise;
       end;
+      Item.Controller.Release (Generation);
    end Receive;
 
    procedure Receive_Exactly
@@ -275,7 +396,6 @@ package body Gnatevl.IO.Connections is
       First   : Ada.Streams.Stream_Element_Offset := Data'First;
       Last    : Ada.Streams.Stream_Element_Offset;
    begin
-      Check_Open (Item);
       while First <= Data'Last loop
          Receive
            (Item,
@@ -303,28 +423,40 @@ package body Gnatevl.IO.Connections is
       Last    : Ada.Streams.Stream_Element_Offset;
       Interrupt_1 : Descriptor;
       Interrupt_2 : Descriptor;
+      Close_Interrupt : Descriptor;
+      FD : Descriptor;
+      Generation : Descriptor_Generation;
+      Socket : Sockets.Socket_Type;
       pragma Unreferenced (Cancellation_Quantum);
    begin
-      Check_Open (Item);
-      while First <= Data'Last loop
-         Interrupt_Sources (Item, Token, Interrupt_1, Interrupt_2);
-         begin
+      Item.Controller.Acquire (FD, Generation, Close_Interrupt);
+      Socket := Item.Socket;
+      pragma Assert (FD = Gnatevl.IO.Sockets.Native_Descriptor (Socket));
+      begin
+         while First <= Data'Last loop
+            Interrupt_Sources (Item, Token, Interrupt_1, Interrupt_2);
             Gnatevl.IO.Sockets.Send
-              (Item.Socket,
+              (Socket,
                Data (First .. Data'Last),
                Last,
                Remaining (Started, Timeout),
+               Close_Interrupt,
                Interrupt_1,
                Interrupt_2);
             if Last < First then
                raise Device_Error with "connection closed while sending";
             end if;
             First := Last + 1;
-         exception
-            when Gnatevl.IO.Sockets.Operation_Interrupted =>
-               raise Operation_Cancelled;
-         end;
-      end loop;
+         end loop;
+      exception
+         when Gnatevl.IO.Sockets.Operation_Interrupted =>
+            Item.Controller.Release (Generation);
+            raise Operation_Cancelled;
+         when others =>
+            Item.Controller.Release (Generation);
+            raise;
+      end;
+      Item.Controller.Release (Generation);
    end Send_All;
 
    overriding procedure Finalize (Item : in out Connection) is

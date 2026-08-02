@@ -9,12 +9,14 @@ with GNAT.Sockets;
 with Gnatevl;
 with Gnatevl.IO;
 with Gnatevl.IO.Files;
+with Interfaces.C;
 
 procedure Fault_Injection_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Fault_Control.Point;
    use type GNAT.Sockets.Socket_Type;
+   use type Interfaces.C.int;
 
    package IO renames Gnatevl.IO;
    package Files renames Gnatevl.IO.Files;
@@ -143,6 +145,100 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_Watch_Error;
+
+   procedure Test_Multi_Watch_Rollback is
+      type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
+      Readers : Socket_Array (1 .. 4) := (others => GNAT.Sockets.No_Socket);
+      Writers : Socket_Array (Readers'Range) :=
+        (others => GNAT.Sockets.No_Socket);
+      Failed : Boolean := False with Atomic;
+      Retry_Ready : Boolean := False with Atomic;
+      Reused_FD : IO.Descriptor;
+
+      task type Failed_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Failed_Waiter;
+      task body Failed_Waiter is
+         Outcome : IO.Wait_Outcome;
+         pragma Unreferenced (Outcome);
+      begin
+         begin
+            Outcome := IO.Wait_Interruptibly
+              (IO.Descriptor (GNAT.Sockets.To_C (Readers (1))),
+               IO.For_Read,
+               0.1,
+               IO.Descriptor (GNAT.Sockets.To_C (Readers (2))),
+               IO.Descriptor (GNAT.Sockets.To_C (Readers (3))),
+               IO.Descriptor (GNAT.Sockets.To_C (Readers (4))));
+         exception
+            when IO.Device_Error =>
+               Failed := True;
+         end;
+      end Failed_Waiter;
+
+      type Failed_Waiter_Access is access Failed_Waiter;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Failed_Waiter, Failed_Waiter_Access);
+      Item : Failed_Waiter_Access;
+   begin
+      for Index in Readers'Range loop
+         GNAT.Sockets.Create_Socket_Pair (Readers (Index), Writers (Index));
+      end loop;
+      Reused_FD := IO.Descriptor (GNAT.Sockets.To_C (Readers (1)));
+      Fault_Control.Reset;
+      --  Let the primary and first interrupt arm, then fail the second
+      --  interrupt. Both earlier kernel watches must be rolled back.
+      Fault_Control.Arm (Fault_Control.Poller_Watch, First => 2);
+      Item := new Failed_Waiter;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Item /= null and then not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "later-watch fault waiter did not terminate";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free (Item);
+      if not Failed or else Fault_Control.Calls
+        (Fault_Control.Poller_Watch) < 3
+      then
+         raise Program_Error with "later watch failure was not surfaced";
+      end if;
+      for Index in Readers'Range loop
+         GNAT.Sockets.Close_Socket (Readers (Index));
+         GNAT.Sockets.Close_Socket (Writers (Index));
+      end loop;
+
+      Fault_Control.Reset;
+      GNAT.Sockets.Create_Socket_Pair (Readers (1), Writers (1));
+      if IO.Descriptor (GNAT.Sockets.To_C (Readers (1))) /= Reused_FD then
+         raise Program_Error with "descriptor reuse precondition failed";
+      end if;
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
+           (1 => 1);
+         Last : Ada.Streams.Stream_Element_Offset;
+         task Retry is
+            pragma Task_Info (Gnatevl.Event_Loop_Task);
+         end Retry;
+         task body Retry is
+         begin
+            Retry_Ready := IO.Wait
+              (Reused_FD, IO.For_Read, Timeout => 0.1);
+         end Retry;
+      begin
+         GNAT.Sockets.Send_Socket (Writers (1), Data, Last);
+      end;
+      if not Retry_Ready then
+         raise Program_Error with "rolled-back descriptor poisoned reuse";
+      end if;
+      GNAT.Sockets.Close_Socket (Readers (1));
+      GNAT.Sockets.Close_Socket (Writers (1));
+   end Test_Multi_Watch_Rollback;
 
    procedure Test_EINTR is
       Item : Probe_Access;
@@ -279,6 +375,7 @@ begin
       Expect_Activation_Failure (Fault_Control.Group_Startup);
    elsif Case_Name = "watch-error" then
       Test_Watch_Error;
+      Test_Multi_Watch_Rollback;
    elsif Case_Name = "eintr" then
       Test_EINTR;
    elsif Case_Name = "file-saturation" then

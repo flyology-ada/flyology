@@ -33,6 +33,13 @@ package System.Gnatevl.Poller is
       Descriptor : Interfaces.C.int;
       Condition  : Interest) return Boolean;
 
+   --  Roll back an armed interest that has no scheduler waiters. This is used
+   --  transactionally when a later member of a multi-source wait cannot arm.
+   function Cancel
+     (Item       : in out Poller;
+      Descriptor : Interfaces.C.int;
+      Condition  : Interest) return Boolean;
+
    --  Enqueue positional file I/O and arrange for a File_Event carrying Token
    --  to be returned by Wait_Batch. The buffer must remain valid until that
    --  completion is delivered.
