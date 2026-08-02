@@ -1,0 +1,10 @@
+project Runtime_Policy is
+   for Languages use ("Ada");
+   for Source_Dirs use ("../runtime/ada");
+   for Object_Dir use "../obj/runtime_policy_proof";
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-gnat2022", "-gnatg");
+   end Compiler;
+end Runtime_Policy;

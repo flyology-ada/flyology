@@ -28,15 +28,17 @@ cd "$build_root/obj"
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \
   "$generated_include/s-gnapol.adb" \
+  "$generated_include/s-gnscpo.adb" \
   "$generated_include/s-gnasch.adb" \
   "$generated_include/s-taprop.adb"
 
-cp s-gnatev.ali s-gnacon.ali s-gnapol.ali s-gnasch.ali \
+cp s-gnatev.ali s-gnacon.ali s-gnapol.ali s-gnscpo.ali s-gnasch.ali \
   s-taprop.ali "$generated_lib/"
 ar -r "$generated_lib/libgnarl.a" \
   s-gnatev.o \
   s-gnacon.o \
   s-gnapol.o \
+  s-gnscpo.o \
   s-gnasch.o \
   s-taprop.o \
   context_switch.o

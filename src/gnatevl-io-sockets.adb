@@ -1,5 +1,6 @@
 with Ada.Real_Time;
 with Ada.Unchecked_Conversion;
+with Gnatevl.Time_Math;
 with Interfaces.C;
 with System;
 
@@ -53,7 +54,7 @@ package body Gnatevl.IO.Sockets is
       end if;
 
       Elapsed := Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started);
-      return Duration'Max (0.0, Timeout - Elapsed);
+      return Time_Math.Remaining (Timeout, Elapsed);
    end Remaining;
 
    procedure Wait_For

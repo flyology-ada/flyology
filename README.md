@@ -224,6 +224,39 @@ callee-saved machine state. Rewriting a system-call declaration in Ada would
 not make the kernel implementation Ada; the useful boundary is to keep policy
 and coordination in Ada while treating the OS ABI as a narrow platform layer.
 
+## SPARK proof boundary
+
+SPARK can cover the deterministic policy kernels without pretending that the
+entire task runtime is currently proofable. The first proved production unit is
+`Gnatevl.Time_Math`, which implements the timeout clamp used by socket retry
+loops and the nanosecond/millisecond conversions used by event-loop and native
+descriptor waits. Its contracts cover the infinite-timeout sentinel,
+non-expired timeout, expiration, remaining-time cases, rounding up to poll
+milliseconds, and saturation at the `poll(2)` integer limit.
+
+The runtime's production ready-queue comparator is also a SPARK unit. Its proof
+establishes that higher priorities sort first, equal priorities retain FIFO
+sequence order, and the resulting relation is irreflexive, asymmetric, and
+transitive. The same unit proves scheduler deadline classification and safe
+calculation of the next poll timeout. The intrusive linked-list updates use
+these proved decisions but remain outside SPARK until pointer ownership is
+factored from scheduler locking.
+
+Run the proof through the Alire-provided GNATprove toolchain:
+
+```sh
+./scripts/prove.sh
+```
+
+The current run discharges 39 flow, functional-contract, termination, and
+run-time-safety checks across the two production proof targets. Good next proof
+candidates are intrusive ready-list insertion/removal invariants, scheduler
+state-transition legality, minimum-deadline selection over the fiber set, and
+descriptor wake matching. The GNARL tasking integration, imported system calls,
+address conversions, assembly register swap, and kernel behavior remain trusted
+boundaries. These can be wrapped in contracts, but GNATprove cannot establish
+their implementations from this Ada source tree.
+
 ## Portability boundaries
 
 | Area | macOS implementation | Likely next backend |
@@ -267,6 +300,7 @@ Run the complete verification suite with:
 
 ```sh
 ./scripts/test.sh
+./scripts/prove.sh
 ```
 
 Current smoke coverage includes:

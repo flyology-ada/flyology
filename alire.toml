@@ -8,3 +8,6 @@ maintainers-logins = ["yrashk"]
 licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
 website = ""
 tags = ["ada", "runtime", "event-loop", "concurrency"]
+
+[[depends-on]]
+gnatprove = "^16.1.0"

@@ -3,6 +3,7 @@ with Ada.Unchecked_Deallocation;
 with System.C_Time;
 with System.Gnatevl.Contexts;
 with System.Gnatevl.Poller;
+with System.Gnatevl.Scheduling_Policy;
 with System.OS_Constants;
 with System.OS_Interface;
 
@@ -10,6 +11,7 @@ package body System.Gnatevl.Scheduler is
    package C renames Interfaces.C;
    package Contexts renames System.Gnatevl.Contexts;
    package Pollers renames System.Gnatevl.Poller;
+   package Scheduling renames System.Gnatevl.Scheduling_Policy;
    package OSC renames System.OS_Constants;
    package OSI renames System.OS_Interface;
 
@@ -24,7 +26,7 @@ package body System.Gnatevl.Scheduler is
 
    Scheduler_Stack_Size : constant C.size_t := 256 * 1_024;
    Timer_Check_Interval : constant := 64;
-   No_Deadline          : constant Duration := -1.0;
+   No_Deadline          : constant Duration := Scheduling.No_Deadline;
 
    type Fiber_State is (Running, Ready, Waiting, Finished);
    type Fiber;
@@ -118,11 +120,9 @@ package body System.Gnatevl.Scheduler is
       Item.Next_Ready := null;
 
       while Position /= null
-        and then
-          (Position.Priority > Item.Priority
-           or else
-             (Position.Priority = Item.Priority
-              and then Position.Sequence < Item.Sequence))
+        and then Scheduling.Before
+          ((Priority => Position.Priority, Sequence => Position.Sequence),
+           (Priority => Item.Priority, Sequence => Item.Sequence))
       loop
          Previous := Position;
          Position := Position.Next_Ready;
@@ -172,20 +172,25 @@ package body System.Gnatevl.Scheduler is
       Item    : Fiber_Access := All_Fibers;
    begin
       while Item /= null loop
-         if Item.State = Waiting and then Item.Deadline >= 0.0 then
-            if Item.Deadline <= Now then
-               Item.Timed_Out := True;
-               Item.IO_Wait := False;
-               Item.IO_Descriptor := -1;
-               Enqueue (Item);
-            elsif Nearest < 0.0 or else Item.Deadline < Nearest then
-               Nearest := Item.Deadline;
-            end if;
+         if Item.State = Waiting then
+            case Scheduling.Classify_Deadline (Item.Deadline, Now) is
+               when Scheduling.No_Deadline_Set =>
+                  null;
+               when Scheduling.Expired =>
+                  Item.Timed_Out := True;
+                  Item.IO_Wait := False;
+                  Item.IO_Descriptor := -1;
+                  Enqueue (Item);
+               when Scheduling.Pending =>
+                  if Nearest < 0.0 or else Item.Deadline < Nearest then
+                     Nearest := Item.Deadline;
+                  end if;
+            end case;
          end if;
          Item := Item.Next_All;
       end loop;
 
-      return (if Nearest < 0.0 then No_Deadline else Nearest - Now);
+      return Scheduling.Time_Until (Nearest, Now);
    end Promote_Expired_Timers;
 
    function Initialize (Environment : System.Address) return C.int is
