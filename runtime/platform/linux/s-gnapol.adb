@@ -2,13 +2,12 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.C_Time;
 with System.OS_Interface;
-with System.Storage_Elements;
 
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
    package C_Time renames System.C_Time;
+   package File_Engines renames System.Gnatevl.File_Engine;
    package OSI renames System.OS_Interface;
-   package SSE renames System.Storage_Elements;
 
    use type C.int;
    use type C.long;
@@ -42,18 +41,6 @@ package body System.Gnatevl.Poller is
 
    type Epoll_Event_Array is array (Positive range <>) of Epoll_Event
      with Convention => C;
-
-   type File_Completion is record
-      Token      : SSE.Integer_Address;
-      Result     : C.long_long;
-      Error_Code : C.int;
-      Reserved   : C.int;
-   end record
-     with Convention => C;
-
-   type File_Completion_Array is
-     array (Positive range <>) of aliased File_Completion
-       with Convention => C;
 
    type Watch_Record;
    type Watch_Access is access all Watch_Record;
@@ -101,34 +88,6 @@ package body System.Gnatevl.Poller is
 
    function Close (Descriptor : C.int) return C.int;
    pragma Import (C, Close, "close");
-
-   function File_Engine_Create
-     (Poller_FD, Wake_FD : C.int) return System.Address;
-   pragma Import
-     (C, File_Engine_Create, "gnatevl_file_engine_create");
-
-   procedure File_Engine_Destroy (Engine : System.Address);
-   pragma Import
-     (C, File_Engine_Destroy, "gnatevl_file_engine_destroy");
-
-   function File_Engine_Submit
-     (Engine      : System.Address;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Offset      : C.long_long;
-      For_Write   : C.int;
-      Token       : SSE.Integer_Address;
-      Error_Code  : access C.int) return C.int;
-   pragma Import
-     (C, File_Engine_Submit, "gnatevl_file_engine_submit");
-
-   function File_Engine_Drain
-     (Engine      : System.Address;
-      Completions : System.Address;
-      Capacity    : C.unsigned) return C.int;
-   pragma Import
-     (C, File_Engine_Drain, "gnatevl_file_engine_drain");
 
    procedure Set_Head (Item : in out Poller; Value : Watch_Access);
 
@@ -233,27 +192,25 @@ package body System.Gnatevl.Poller is
       Count  : in out Natural) return Boolean
    is
       Available   : constant Natural := Events'Length - Count;
-      Completions : aliased File_Completion_Array
+      Completions : File_Engines.Completion_Array
         (1 .. Natural'Max (1, Available));
-      Drained     : C.int;
+      Drained     : Natural;
    begin
       if Available = 0 then
          return True;
       end if;
-      Drained :=
-        File_Engine_Drain
-          (Item.File_State,
-           Completions'Address,
-           C.unsigned (Available));
-      if Drained < 0 or else Natural (Drained) > Available then
+      if not File_Engines.Drain
+        (Item.File_State, Completions, Drained)
+        or else Drained > Available
+      then
          return False;
       end if;
-      for Index in 1 .. Natural (Drained) loop
+      for Index in 1 .. Drained loop
          Count := Count + 1;
          Events (Events'First + Count - 1) :=
            (Kind       => File_Event,
             Descriptor => -1,
-            Token      => SSE.To_Address (Completions (Index).Token),
+            Token      => Completions (Index).Token,
             Result     => Completions (Index).Result,
             Error_Code => Completions (Index).Error_Code);
       end loop;
@@ -295,9 +252,9 @@ package body System.Gnatevl.Poller is
          Item.Descriptor := -1;
          return False;
       end if;
-      Item.File_State :=
-        File_Engine_Create (Item.Descriptor, Item.Wake_Descriptor);
-      if Item.File_State = System.Null_Address then
+      if not File_Engines.Initialize
+        (Item.File_State, Item.Descriptor, Item.Wake_Descriptor)
+      then
          Result := Close (Item.Wake_Descriptor);
          Result := Close (Item.Descriptor);
          Item.Wake_Descriptor := -1;
@@ -319,10 +276,7 @@ package body System.Gnatevl.Poller is
       end loop;
       Item.State := System.Null_Address;
 
-      if Item.File_State /= System.Null_Address then
-         File_Engine_Destroy (Item.File_State);
-         Item.File_State := System.Null_Address;
-      end if;
+      File_Engines.Finalize (Item.File_State);
 
       if Item.Wake_Descriptor >= 0 then
          Result := Close (Item.Wake_Descriptor);
@@ -399,21 +353,16 @@ package body System.Gnatevl.Poller is
       Token       : System.Address;
       Error_Code  : out C.int) return Boolean
    is
-      Error  : aliased C.int := 0;
-      Result : C.int;
    begin
-      Result :=
-        File_Engine_Submit
-          (Item.File_State,
-           Descriptor,
-           Buffer,
-           Length,
-           Offset,
-           (if For_Write then 1 else 0),
-           SSE.To_Integer (Token),
-           Error'Access);
-      Error_Code := Error;
-      return Result = 0;
+      return File_Engines.Submit
+        (Item.File_State,
+         Descriptor,
+         Buffer,
+         Length,
+         Offset,
+         For_Write,
+         Token,
+         Error_Code);
    end Submit_File;
 
    function Wait

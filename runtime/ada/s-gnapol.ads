@@ -1,4 +1,5 @@
 with Interfaces.C;
+with System.Gnatevl.File_Engine;
 
 package System.Gnatevl.Poller is
    pragma Preelaborate;
@@ -70,6 +71,6 @@ private
       Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       Wake_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       State : System.Address := System.Null_Address;
-      File_State : System.Address := System.Null_Address;
+      File_State : System.Gnatevl.File_Engine.Engine;
    end record;
 end System.Gnatevl.Poller;

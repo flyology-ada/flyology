@@ -368,10 +368,15 @@ potentially slow remote-filesystem metadata operations on a native task.
 Ada implements scheduling, queues, timeout and backpressure policy, descriptor
 registration, stacks, task routing, and I/O retry logic. It imports the platform
 primitives exposed through the C ABI, including `kqueue`/`kevent64`,
-`epoll`/`eventfd`, `mmap`, `poll`, and socket calls. A narrow C file-engine shim
-owns only the kernel ABI objects that are impractical to model safely in Ada:
-Darwin `aiocb` allocations and Linux `io_uring` mappings or native-AIO control
-blocks. It creates no threads and contains no scheduling policy.
+`epoll`/`eventfd`, `mmap`, `poll`, POSIX AIO, `syscall`, and socket calls. The
+file engine itself is Ada: platform bodies define explicit representation
+clauses for Darwin `aiocb` and Linux `io_uring`/native-AIO UAPI records, own the
+mapped rings and control blocks, submit operations, and drain completions.
+
+The shared Linux rings require acquire/release ordering against the kernel.
+GNATEVL uses GNAT's `System.Atomic_Primitives` for those accesses; that unit maps
+directly to compiler `__atomic_load_n` and `__atomic_store_n` intrinsics, so no C
+atomics wrapper or worker runtime is involved.
 
 The only assembly is the minimal context swap needed to save and restore the
 callee-saved machine state. Rewriting a system-call declaration in Ada would
@@ -442,9 +447,10 @@ rather than hidden behind a claim of universal portability.
 
 - [`runtime/ada`](runtime/ada): platform-neutral scheduler, context, and poller
   interfaces.
-- [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies.
+- [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies,
+  plus the Ada platform file-engine implementations.
 - [`runtime/native`](runtime/native): ABI-specific context-switch assembly,
-  minimal platform constants, and the thread-free kernel file-completion shim.
+  and the minimal platform-constant shim.
 - [`runtime/patches`](runtime/patches): Darwin and Linux GNARL task-primitives
   integration.
 - [`src`](src): public task-aware I/O packages.

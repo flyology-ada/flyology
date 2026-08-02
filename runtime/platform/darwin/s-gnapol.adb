@@ -5,6 +5,7 @@ with System.Storage_Elements;
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
    package C_Time renames System.C_Time;
+   package File_Engines renames System.Gnatevl.File_Engine;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
 
@@ -35,44 +36,6 @@ package body System.Gnatevl.Poller is
       Ext    : Extension_Array;
    end record;
    pragma Convention (C, Kevent_Record);
-
-   type File_Completion is record
-      Token      : SSE.Integer_Address;
-      Result     : C.long_long;
-      Error_Code : C.int;
-      Reserved   : C.int;
-   end record;
-   pragma Convention (C, File_Completion);
-
-   function File_Engine_Create
-     (Poller_FD, Wake_FD : C.int) return System.Address;
-   pragma Import
-     (C, File_Engine_Create, "gnatevl_file_engine_create");
-
-   procedure File_Engine_Destroy (Engine : System.Address);
-   pragma Import
-     (C, File_Engine_Destroy, "gnatevl_file_engine_destroy");
-
-   function File_Engine_Submit
-     (Engine      : System.Address;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Offset      : C.long_long;
-      For_Write   : C.int;
-      Token       : SSE.Integer_Address;
-      Error_Code  : access C.int) return C.int;
-   pragma Import
-     (C, File_Engine_Submit, "gnatevl_file_engine_submit");
-
-   function File_Engine_Complete
-     (Engine          : System.Address;
-      Request_Address : SSE.Integer_Address;
-      Result          : C.long_long;
-      Error_Code      : C.int;
-      Completion      : access File_Completion) return C.int;
-   pragma Import
-     (C, File_Engine_Complete, "gnatevl_file_engine_complete");
 
    function Kqueue return C.int;
    pragma Import (C, Kqueue, "kqueue");
@@ -123,9 +86,9 @@ package body System.Gnatevl.Poller is
          end if;
          return False;
       end if;
-      Item.File_State :=
-        File_Engine_Create (Item.Descriptor, -1);
-      if Item.File_State = System.Null_Address then
+      if not File_Engines.Initialize
+        (Item.File_State, Item.Descriptor, -1)
+      then
          Result := Close (Item.Descriptor);
          Item.Descriptor := -1;
          return False;
@@ -136,10 +99,7 @@ package body System.Gnatevl.Poller is
    procedure Finalize (Item : in out Poller) is
       Result : C.int;
    begin
-      if Item.File_State /= System.Null_Address then
-         File_Engine_Destroy (Item.File_State);
-         Item.File_State := System.Null_Address;
-      end if;
+      File_Engines.Finalize (Item.File_State);
       if Item.Descriptor >= 0 then
          Result := Close (Item.Descriptor);
          Item.Descriptor := -1;
@@ -184,21 +144,16 @@ package body System.Gnatevl.Poller is
       Token       : System.Address;
       Error_Code  : out C.int) return Boolean
    is
-      Error  : aliased C.int := 0;
-      Result : C.int;
    begin
-      Result :=
-        File_Engine_Submit
-          (Item.File_State,
-           Descriptor,
-           Buffer,
-           Length,
-           Offset,
-           (if For_Write then 1 else 0),
-           SSE.To_Integer (Token),
-           Error'Access);
-      Error_Code := Error;
-      return Result = 0;
+      return File_Engines.Submit
+        (Item.File_State,
+         Descriptor,
+         Buffer,
+         Length,
+         Offset,
+         For_Write,
+         Token,
+         Error_Code);
    end Submit_File;
 
    function Wait
@@ -231,7 +186,7 @@ package body System.Gnatevl.Poller is
       Kernel_Events : aliased Kevent_Array (Events'Range);
       Limit         : aliased C_Time.timespec;
       Result        : C.int;
-      Completion    : aliased File_Completion;
+      Completion    : File_Engines.Completion;
       Kernel_Event  : Kevent_Record;
       Output_Event  : Poll_Event;
    begin
@@ -274,19 +229,19 @@ package body System.Gnatevl.Poller is
                Output_Event.Kind := Wake_Event;
                Output_Event.Descriptor := C.int (Kernel_Event.Ident);
             elsif Kernel_Event.Filter = EVFILT_AIO then
-               if File_Engine_Complete
+               if not File_Engines.Complete_Event
                  (Item.File_State,
-                  Kernel_Event.Ident,
+                  SSE.To_Address (Kernel_Event.Ident),
                   Kernel_Event.Ext (2),
                   C.int (Kernel_Event.Ext (1)),
-                  Completion'Access) /= 0
+                  Completion)
                then
                   return False;
                end if;
                Output_Event :=
                  (Kind       => File_Event,
                   Descriptor => -1,
-                  Token      => SSE.To_Address (Completion.Token),
+                  Token      => Completion.Token,
                   Result     => Completion.Result,
                   Error_Code => Completion.Error_Code);
             elsif Kernel_Event.Filter = EVFILT_READ
