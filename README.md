@@ -1,14 +1,27 @@
 # Flyology
 
-Flyology is an experimental GNAT runtime that can run designated ordinary Ada
-tasks as lightweight tasks on an event loop while leaving undesignated tasks
-as native tasks backed by pthreads.
+Flyology lets ordinary Ada tasks run as lightweight tasks on event loops. They
+keep Ada rendezvous, protected objects, exceptions, task activation, masters,
+and normal blocking-looking control flow. Undesignated tasks remain native by
+default, and either execution model can be selected explicitly. Flyology adds no
+`async` dialect; the closest familiar comparison is an opt-in Ada analogue of
+Java virtual threads.
 
-It is an augmentation of the existing GNAT runtime, not a new async language or
-a replacement tasking model. Rendezvous, protected objects, task activation,
-masters, exceptions, and normal blocking-looking Ada control flow still come
-from GNARL. Flyology changes how a task is scheduled and adds I/O operations that
-cooperate with either execution mode.
+The name comes from Ada Lovelace's 1828 study of flight. Her letters from that
+year describe examining bird anatomy, making wings from paper, silk, and
+feathers, and planning a book she called *Flyology*. This history is documented
+in a [study of Lovelace's early education](https://doi.org/10.1080/17498430.2017.1325297)
+based on the surviving correspondence.
+
+## Status
+
+Flyology is experimental. This checkout is verified on macOS/AArch64 with
+Alire `gnat_native` 16.1.0. Linux/AArch64 and Linux/x86-64 backends are present;
+the repository CI configuration includes Linux jobs, while the native Docker
+runner uses Linux/AArch64 by default on an Apple Silicon host. Hosted validation
+status is reported by Actions. Runtime preparation is pinned to the exact host
+and GNAT releases listed under [Build and test](#build-and-test) and fails closed
+for an unverified combination.
 
 The current patch family covers exact Alire `gnat_native` releases from 13
 through 16. Linux/x86-64 supports 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1,
@@ -26,7 +39,7 @@ behavior expected by existing GNAT applications:
 task Worker;
 ```
 
-Event-loop execution is an explicit per-task designation:
+Lightweight execution is an explicit per-task designation:
 
 ```ada
 task Connection is
@@ -109,7 +122,7 @@ end Writer;
 ```
 
 Shared group identifiers are `0 .. 127`. Values `128 .. 255` are reserved for
-runtime-created dedicated groups, so applying `CPU => 128` or greater to an
+runtime-created dedicated groups, so applying `CPU => 128` or greater to a
 lightweight task fails activation with `Tasking_Error` rather than selecting a CPU.
 The automatic pool is likewise limited to 128 shared groups. This interpretation
 applies only after event-loop designation: an Ada `CPU` aspect on a native task
@@ -989,12 +1002,13 @@ Scripts use `ALR` when set, otherwise `alr` from `PATH`, with `~/alr` retained
 as a compatibility fallback:
 
 ```sh
+alr build
 ./scripts/prepare-rts.sh                       # native project default
 FLYOLOGY_DEFAULT=lightweight ./scripts/prepare-rts.sh
 FLYOLOGY_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
 FLYOLOGY_LOOP_PLACEMENT=strict \
 FLYOLOGY_LOOP_PLACEMENT_MAP=0:2,1:4 ./scripts/prepare-rts.sh  # Linux
-~/alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
+alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
 
 The build script detects the exact active compiler release, selects its versioned patch
@@ -1383,51 +1397,26 @@ creating 10,000 pthreads, a full head-to-head can be requested explicitly:
 ./showcases/run_connection_density.sh 10000 10000
 ```
 
-A representative run on the development Apple Silicon machine, after adding
-the ATCB and descriptor-wait indexes and moving alternate signal-stack storage
-from each fiber to its event-loop pthread, produced:
+The following same-load run was recorded on the development Apple Silicon host
+with Alire GNAT 16.1.0. Values are one run, not fixed performance guarantees:
 
-| Mode | Connections | OS threads at sample | RSS increase | Virtual-memory increase | Setup | Release all |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Lightweight | 10,000 | 2 | 462 MiB | 1.13 GiB | 0.219 s | 0.028 s |
-| Native | 10,000 | 10,001 | 617 MiB | 1.17 GiB | 7.736 s | 0.137 s |
+| Mode | Connections | OS threads at sample | RSS increase | Peak RSS | Virtual-memory increase | Setup | Release all |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Lightweight | 10,000 | 2 | 464.047 MiB | 466.000 MiB | 1,252.000 MiB | 0.226659 s | 0.032340 s |
+| Native | 10,000 | 10,001 | 340.172 MiB | 464.547 MiB | 1,152.500 MiB | 8.801629 s | 0.152476 s |
 
-The central win today is kernel-concurrency density: the lightweight version avoids
-one pthread per connection and can reach connection counts at which creating an
-equal number of pthreads commonly exceeds host limits. In this run it also used
-about 155 MiB (25%) less incremental resident memory, reserved less address
-space, set up 35 times faster, and drained readiness 4.8 times faster. The RSS
-change comes from no longer touching pages for a dead 32 KiB alternate-stack
-local in every fiber; both lanes still request the same user stack size. Native
-release latency can still win at other loads because pthreads run in parallel;
-the showcase reports the result rather than assuming either outcome.
+In this run the lightweight lane created the tasks about 38.8 times faster and
+released all waits about 4.7 times faster. It used one event-loop pthread in
+addition to the main thread instead of one pthread per connection. The native
+lane had the lower waiting-sample RSS and virtual-memory increase; peak RSS was
+nearly equal. The useful distinction is the resource shape, not a claim that
+one lane always uses less memory or finishes faster.
 
-The scaling changes identify the data structures responsible. Hashing ATCB
-addresses changed 10,000-task lightweight setup from roughly 0.76 seconds to 0.31
-seconds. Hashing descriptor waiters per group then changed the 10,000-connection
-release drain from roughly 0.41 seconds to 0.065 seconds. Both formerly
-quadratic lookup components now take expected linear total work for the
-one-descriptor-per-connection load.
-
-Stack-pool telemetry printed by the showcase separates Flyology's exact stack
-reservation from noisier process-wide virtual-memory accounting. A fresh 10,000
-connection before/after run on the same Apple Silicon host measured:
-
-| Allocator | Requested stack | Effective usable stack | Stack arenas | Exact stack reservation | RSS increase | Process virtual increase |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| One mapping per task | 16 KiB | 48 KiB | 10,000 | 781.25 MiB | 463.42 MiB | 1,529.80 MiB |
-| Shared-guard arenas | 16 KiB | 48 KiB | 157 | 630.45 MiB | 463.41 MiB | 1,235.00 MiB |
-
-The exact runtime-controlled reservation falls by 150.80 MiB (19%) solely by
-sharing interior guards. RSS is intentionally unchanged: the parked receive
-path already touches only one 16 KiB stack page, and guard or untouched
-headroom pages have no resident backing. At this scale the remaining roughly
-32 KiB of resident cost per connection is predominantly GNARL/Ada task state
-common to both lanes, not the sub-KiB Flyology fiber/context records. Total
-virtual-memory readings can vary with the system allocator;
-`Flyology.Observability.Stack_Pool` reports the stable active-arena, live-stack,
-exact-reservation, mapping, unmapping, sharing, and accepted page-discard advice
-counters.
+The lightweight stack-pool counters reported 157 active arenas, 10,000 live
+stacks, 48 KiB of effective usable stack per task, and 630.453 MiB of exact
+runtime-controlled reservation. Process RSS and virtual size also include Ada
+task state, allocator behavior, socket storage, and other process resources, so
+they should be measured on the deployment host.
 
 The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
@@ -1453,12 +1442,12 @@ a fixed performance ratio.
 
 ## Performance snapshot
 
-Five-run medians on the development Apple Silicon machine:
+One run on the development Apple Silicon machine during this verification:
 
 | Workload | Lightweight tasks | Native tasks | Result |
 | --- | ---: | ---: | --- |
-| 256 tasks × 100 yields | 25.910 ms | 17.935 ms | pthreads 1.44× faster |
-| 2,048 tasks × 20 ms wait | 83.675 ms | 308.056 ms | lightweight 3.68× faster |
+| 256 tasks × 100 yields | 12.812 ms | 8.600 ms | pthreads 1.49× faster |
+| 2,048 tasks × 20 ms wait | 79.377 ms | 307.338 ms | lightweight 3.87× faster |
 
 This is the intended tradeoff, not a claim that event loops always win. Native
 threads are very competitive at modest concurrency and can run CPU work in
@@ -1492,18 +1481,13 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   lifetime and are joined at safe GNARL process finalization. The table is
   bounded to 256 groups, and vacated dedicated loops are reserved and reused by
   later callers.
-- First use of a loop waits synchronously for its pthread startup handshake. An
+- First use of a loop waits synchronously for its pthread startup handshake. A
   lightweight caller occupies its source loop during this bounded `sched_yield`
   wait; subsequent use of the already-started loop does not wait.
-- Ready queues, fiber membership, timer heaps, descriptor delivery, and dispatch
-  use independent per-group locks, per-group fiber lists, and an 8,191-bucket
-  descriptor-wait index. On the supported 64-bit targets, each lazily created
-  loop therefore carries about 64 KiB of fixed descriptor-index storage. The
-  fixed 16,381-bucket task table uses collision chains, never resizes in a wake
-  path, and is protected by 64 independent shard locks. Ordinary wakeups and
-  priority changes take only the relevant shard and destination-group lock.
-  Group allocation, dedicated reservations, migration, and destruction also
-  use a short-held topology lock; topology changes remain globally serialized.
+- Each lazily created loop carries about 64 KiB of fixed descriptor-index
+  storage on the supported 64-bit targets. Group allocation, dedicated
+  reservations, migration, and destruction use a short-held topology lock, so
+  topology changes remain globally serialized.
 - Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
   dedicated range and cannot be selected statically with the `CPU` aspect.
 - The environment task always remains on its native pthread-owned initial stack
@@ -1526,12 +1510,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   path.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
-- Lightweight regular-file data operations use bounded kernel completion queues;
-  queue saturation suspends and retries the Ada task without creating workers.
-  Linux prefers `io_uring` and falls back to native AIO when the syscall is
-  unavailable or forbidden. The fallback is still kernel completion I/O, but
-  filesystem support and true asynchronous behavior are more limited than with
-  `io_uring`.
+- Linux prefers `io_uring` and falls back to native AIO when the syscall is
+  unavailable or forbidden. Native AIO supports fewer filesystem and file-type
+  combinations and does not guarantee asynchronous execution for every target.
 - File `Open` and `Close` remain direct metadata syscalls and may briefly occupy
   an event loop, particularly on remote or unhealthy filesystems.
 - A submitted file buffer remains owned by the kernel until completion. An
@@ -1579,7 +1560,3 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   rendezvous inheritance/loss ordering, but not full Real-Time Systems Annex
   dispatching, kernel-lock priority inheritance, or ceiling-violation
   conformance across OS schedulers.
-
-The next architectural work is additional architectures and operating systems,
-optional CPU-affinity policy, and separate TSan/Valgrind integration where
-their lifecycle contracts can be preserved across cross-pthread migration.
