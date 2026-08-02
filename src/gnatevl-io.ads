@@ -35,7 +35,8 @@ package Gnatevl.IO with Preelaborate is
 
    --  Wait until any requested descriptor is ready.  The return value is the
    --  exact index in Requests, or 0 on timeout.  Duplicate descriptors and a
-   --  read/write pair for the same descriptor are supported.  No descriptor
+   --  read/write pair for the same descriptor are supported.  If multiple
+   --  entries are ready together, the lowest caller index wins. No descriptor
    --  is read, closed, or otherwise consumed by this operation.
    function Wait_Any
      (Requests : Wait_Request_Array;

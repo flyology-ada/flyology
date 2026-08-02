@@ -11,6 +11,7 @@ package body Gnatevl.IO is
 
    POLLIN  : constant C.short := 16#0001#;
    POLLOUT : constant C.short := 16#0004#;
+   POLLNVAL : constant C.short := 16#0020#;
 
    type Poll_Descriptor is record
       FD      : C.int;
@@ -114,6 +115,34 @@ package body Gnatevl.IO is
          Runtime_Items : Runtime_Wait_Request_Array (1 .. Requests'Length);
          Poll_Items    : Poll_Descriptor_Array (1 .. Requests'Length);
          Position      : Positive := 1;
+
+         function Lowest_Ready return Natural;
+
+         function Lowest_Ready return Natural is
+         begin
+            for Index in Poll_Items'Range loop
+               if Poll_Items (Index).Returned_Events /= 0 then
+                  if Natural (Poll_Items (Index).Returned_Events)
+                    / Natural (POLLNVAL) mod 2 = 1
+                  then
+                     raise Device_Error with "invalid descriptor";
+                  end if;
+                  --  Some poll implementations report only one entry when
+                  --  the same descriptor/event pair appears repeatedly.
+                  --  Normalize that platform detail to the documented
+                  --  lowest-index rule.
+                  for Earlier in Poll_Items'First .. Index loop
+                     if Poll_Items (Earlier).FD = Poll_Items (Index).FD
+                       and then Poll_Items (Earlier).Events =
+                         Poll_Items (Index).Events
+                     then
+                        return Requests'First + Earlier - 1;
+                     end if;
+                  end loop;
+               end if;
+            end loop;
+            return 0;
+         end Lowest_Ready;
       begin
          for Index in Requests'Range loop
             if Requests (Index).FD < 0 then
@@ -147,6 +176,34 @@ package body Gnatevl.IO is
             elsif Result = 0 then
                return 0;
             else
+               --  kqueue/epoll may deliver distinct ready descriptors in an
+               --  order unrelated to the caller's array. Probe the whole set
+               --  after resumption to normalize simultaneous readiness to
+               --  the lowest caller index, matching native poll semantics.
+               for Index in Poll_Items'Range loop
+                  Poll_Items (Index).Returned_Events := 0;
+               end loop;
+               declare
+                  Probe : constant C.int := Poll
+                    (Poll_Items'Address,
+                     C.unsigned (Poll_Items'Length), 0);
+                  Lowest : Natural;
+               begin
+                  if Probe > 0 then
+                     Lowest := Lowest_Ready;
+                     if Lowest /= 0 then
+                        return Lowest;
+                     end if;
+                  elsif Probe < 0
+                    and then C.int (GNAT.OS_Lib.Errno) /=
+                      C.int (System.OS_Constants.EINTR)
+                  then
+                     raise Device_Error with "readiness probe failed";
+                  end if;
+               end;
+               --  Edge-triggered readiness can disappear between scheduler
+               --  delivery and this level probe. Preserve the kernel result
+               --  in that case rather than manufacturing a timeout.
                return Requests'First + Natural (Result) - 1;
             end if;
          end if;
@@ -167,22 +224,13 @@ package body Gnatevl.IO is
             end;
 
             if Result > 0 then
-               for Index in Poll_Items'Range loop
-                  if Poll_Items (Index).Returned_Events /= 0 then
-                     --  Some poll implementations report only one entry when
-                     --  the same descriptor/event pair appears repeatedly.
-                     --  Normalize that platform detail to the documented
-                     --  lowest-index rule.
-                     for Earlier in Poll_Items'First .. Index loop
-                        if Poll_Items (Earlier).FD = Poll_Items (Index).FD
-                          and then Poll_Items (Earlier).Events =
-                            Poll_Items (Index).Events
-                        then
-                           return Requests'First + Earlier - 1;
-                        end if;
-                     end loop;
+               declare
+                  Lowest : constant Natural := Lowest_Ready;
+               begin
+                  if Lowest /= 0 then
+                     return Lowest;
                   end if;
-               end loop;
+               end;
             end if;
 
             case Wait_Policy.Classify
