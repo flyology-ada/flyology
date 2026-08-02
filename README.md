@@ -427,17 +427,17 @@ and `O_TRUNC` flag composition for Darwin and Linux. The Ada import of variadic
 `open(2)` remains an ABI boundary and uses GNAT's `C_Variadic_2` calling
 convention.
 
-The runtime's production ready-queue comparator is also a SPARK unit. Its proof
-establishes that higher priorities sort first, equal priorities retain FIFO
-sequence order, and the resulting relation is irreflexive, asymmetric, and
-transitive. The same unit proves scheduler deadline classification and safe
-calculation of the next poll timeout. It now also proves earliest-deadline
-selection, maintenance cadence, dispatch-counter safety, and the distinction
-between immediate and deferred fiber destruction, including the in-flight
-`Migrating` phase. Shared/dedicated group classification, dedicated-lane
-availability, and migration admission are exact contracted functions used by
-the production scheduler. The intrusive linked-list updates, lock ownership,
-and actual context handoff use these proved decisions but remain outside SPARK.
+The scheduler policy unit proves deadline classification and safe calculation
+of the next poll timeout. It also proves earliest-deadline selection,
+maintenance cadence, dispatch-counter safety, and the distinction between
+immediate and deferred fiber destruction, including the in-flight `Migrating`
+phase. Shared/dedicated group classification, dedicated-lane availability, and
+migration admission are exact contracted functions used by the production
+scheduler. Ready tasks live in one FIFO bucket per bounded Ada priority: append,
+removal, and priority changes are constant-time, while choosing the next
+non-empty priority scans only the fixed `System.Any_Priority` range. Those
+intrusive bucket updates, lock ownership, and actual context handoff remain
+outside SPARK.
 
 Run the proof through the Alire-provided GNATprove toolchain:
 
@@ -445,10 +445,10 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
-The current run discharges 74 flow, functional-contract, termination, and
+The current run discharges 66 flow, functional-contract, termination, and
 run-time-safety checks across four production policy units, with zero unproved
-checks. Good next proof candidates are intrusive ready-list insertion/removal
-invariants, whole-list minimum-deadline selection, and descriptor wake matching.
+checks. Good next proof candidates are ready-bucket insertion/removal invariants
+and descriptor wake matching.
 The GNARL tasking integration, imported system calls, address conversions,
 assembly register swap, and kernel behavior remain trusted boundaries. These
 can be wrapped in contracts, but GNATprove cannot establish their implementations

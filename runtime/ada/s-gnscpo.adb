@@ -89,16 +89,4 @@ is
       end if;
    end Time_Until;
 
-   function Before (Left, Right : Ready_Key) return Boolean is
-     (Left.Priority > Right.Priority
-      or else
-        (Left.Priority = Right.Priority
-         and then Left.Sequence < Right.Sequence));
-
-   procedure Lemma_Irreflexive (Key : Ready_Key) is null;
-
-   procedure Lemma_Asymmetric (Left, Right : Ready_Key) is null;
-
-   procedure Lemma_Transitive (Left, Middle, Right : Ready_Key) is null;
-
 end System.Gnatevl.Scheduling_Policy;

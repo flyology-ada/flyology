@@ -32,6 +32,7 @@ for test_main in \
   io_smoke \
   io_starvation_smoke \
   lifecycle_smoke \
+  ready_queue_smoke \
   runtime_smoke \
   stack_size_parity_smoke \
   timer_heap_smoke \

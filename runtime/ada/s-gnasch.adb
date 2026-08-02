@@ -19,7 +19,6 @@ package body System.Gnatevl.Scheduler is
    use type C.int;
    use type C.long_long;
    use type C.size_t;
-   use type C.unsigned_long;
    use type Contexts.Context_Access;
    use type OSI.pthread_t;
    use type Pollers.Event_Kind;
@@ -69,6 +68,14 @@ package body System.Gnatevl.Scheduler is
    type Fiber_Access is access all Fiber;
    type Loop_Group;
    type Loop_Group_Access is access all Loop_Group;
+   subtype Ready_Priority is C.int range
+     C.int (System.Any_Priority'First) ..
+     C.int (System.Any_Priority'Last);
+   type Ready_Bucket is record
+      Head : Fiber_Access;
+      Tail : Fiber_Access;
+   end record;
+   type Ready_Bucket_Array is array (Ready_Priority) of Ready_Bucket;
    type IO_Bucket_Array is array (IO_Bucket_Index) of Fiber_Access;
    type Timer_Heap_Array is array (Positive range <>) of Fiber_Access;
    type Timer_Heap_Access is access Timer_Heap_Array;
@@ -78,7 +85,6 @@ package body System.Gnatevl.Scheduler is
       Context    : Contexts.Context_Access;
       Wrapper    : System.Address := System.Null_Address;
       Priority   : C.int := 0;
-      Sequence   : C.unsigned_long := 0;
       Deadline   : Duration := No_Deadline;
       Timer_Index : Natural := 0;
       Timed_Out  : Boolean := False;
@@ -102,6 +108,7 @@ package body System.Gnatevl.Scheduler is
       Group      : Loop_Group_Access;
       Migration_Target : Loop_Group_Access;
       Reserved_Group : Loop_Group_Access;
+      Previous_Ready : Fiber_Access;
       Next_Ready : Fiber_Access;
       Next_Group : Fiber_Access;
       Next_IO    : Fiber_Access;
@@ -121,8 +128,10 @@ package body System.Gnatevl.Scheduler is
       Scheduler_Context : Contexts.Context_Access;
       Scheduler_Poller  : Pollers.Poller;
       Current_Fiber     : Fiber_Access;
-      Ready_Head        : Fiber_Access;
-      Next_Sequence     : C.unsigned_long := 0;
+      Ready_Buckets     : Ready_Bucket_Array :=
+        (others => (Head => null, Tail => null));
+      Ready_Count       : Natural := 0;
+      Highest_Ready     : Ready_Priority := Ready_Priority'First;
       Fibers            : Fiber_Access;
       IO_Waiters        : IO_Bucket_Array := (others => null);
       Pending_File_Head : Fiber_Access;
@@ -240,6 +249,10 @@ package body System.Gnatevl.Scheduler is
    procedure Remove_From_Ready
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
+   function Ready_Present
+     (Group : not null Loop_Group_Access) return Boolean;
+   function Dequeue
+     (Group : not null Loop_Group_Access) return Fiber_Access;
    procedure Reap_Locked (Item : not null Fiber_Access);
    procedure Reap_From_Scheduler
      (Group : not null Loop_Group_Access;
@@ -741,52 +754,95 @@ package body System.Gnatevl.Scheduler is
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access)
    is
-      Position : Fiber_Access := Group.Ready_Head;
-      Previous : Fiber_Access;
+      Priority : constant Ready_Priority := Ready_Priority (Item.Priority);
+      Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
    begin
       Item.State := Ready;
-      Group.Next_Sequence := Group.Next_Sequence + 1;
-      Item.Sequence := Group.Next_Sequence;
+      Item.Previous_Ready := Bucket.Tail;
       Item.Next_Ready := null;
 
-      while Position /= null
-        and then Scheduling.Before
-          ((Priority => Position.Priority, Sequence => Position.Sequence),
-           (Priority => Item.Priority, Sequence => Item.Sequence))
-      loop
-         Previous := Position;
-         Position := Position.Next_Ready;
-      end loop;
-
-      Item.Next_Ready := Position;
-      if Previous = null then
-         Group.Ready_Head := Item;
+      if Bucket.Tail = null then
+         Bucket.Head := Item;
       else
-         Previous.Next_Ready := Item;
+         Bucket.Tail.Next_Ready := Item;
       end if;
+      Bucket.Tail := Item;
+
+      if Group.Ready_Count = 0 or else Priority > Group.Highest_Ready then
+         Group.Highest_Ready := Priority;
+      end if;
+      Group.Ready_Count := Group.Ready_Count + 1;
    end Enqueue;
 
    procedure Remove_From_Ready
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access)
    is
-      Position : Fiber_Access := Group.Ready_Head;
-      Previous : Fiber_Access;
+      Priority : constant Ready_Priority := Ready_Priority (Item.Priority);
+      Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
    begin
-      while Position /= null loop
-         if Position = Item then
-            if Previous = null then
-               Group.Ready_Head := Position.Next_Ready;
-            else
-               Previous.Next_Ready := Position.Next_Ready;
-            end if;
-            Position.Next_Ready := null;
-            return;
+      if Item.Previous_Ready = null then
+         if Bucket.Head /= Item then
+            Fatal;
          end if;
-         Previous := Position;
-         Position := Position.Next_Ready;
-      end loop;
+         Bucket.Head := Item.Next_Ready;
+      else
+         Item.Previous_Ready.Next_Ready := Item.Next_Ready;
+      end if;
+
+      if Item.Next_Ready = null then
+         if Bucket.Tail /= Item then
+            Fatal;
+         end if;
+         Bucket.Tail := Item.Previous_Ready;
+      else
+         Item.Next_Ready.Previous_Ready := Item.Previous_Ready;
+      end if;
+
+      Item.Previous_Ready := null;
+      Item.Next_Ready := null;
+      if Group.Ready_Count = 0 then
+         Fatal;
+      end if;
+      Group.Ready_Count := Group.Ready_Count - 1;
+
+      if Group.Ready_Count = 0 then
+         Group.Highest_Ready := Ready_Priority'First;
+      elsif Priority = Group.Highest_Ready and then Bucket.Head = null then
+         while Group.Highest_Ready > Ready_Priority'First
+           and then
+             Group.Ready_Buckets (Group.Highest_Ready).Head = null
+         loop
+            Group.Highest_Ready :=
+              Ready_Priority'Pred (Group.Highest_Ready);
+         end loop;
+         if Group.Ready_Buckets (Group.Highest_Ready).Head = null then
+            Fatal;
+         end if;
+      end if;
    end Remove_From_Ready;
+
+   function Ready_Present
+     (Group : not null Loop_Group_Access) return Boolean
+   is
+     (Group.Ready_Count /= 0);
+
+   function Dequeue
+     (Group : not null Loop_Group_Access) return Fiber_Access
+   is
+      Item : Fiber_Access;
+   begin
+      if not Ready_Present (Group) then
+         return null;
+      end if;
+
+      Item := Group.Ready_Buckets (Group.Highest_Ready).Head;
+      if Item = null then
+         Fatal;
+      end if;
+      Remove_From_Ready (Group, Item);
+      return Item;
+   end Dequeue;
 
    procedure Reap_Locked (Item : not null Fiber_Access) is
       Position_Group  : Fiber_Access;
@@ -1708,11 +1764,11 @@ package body System.Gnatevl.Scheduler is
       loop
          Timeout := No_Deadline;
          if Scheduling.Maintenance_Due
-           (Group.Ready_Head /= null, Dispatches_Until_Timer_Check)
+           (Ready_Present (Group), Dispatches_Until_Timer_Check)
          then
             Timeout := Promote_Expired_Timers (Group);
             Dispatches_Until_Timer_Check := Timer_Check_Interval;
-            if Group.Ready_Head /= null then
+            if Ready_Present (Group) then
                Poll_Ready_Events (Group);
             end if;
          end if;
@@ -1728,10 +1784,11 @@ package body System.Gnatevl.Scheduler is
             Timeout := 0.001;
          end if;
 
-         if Group.Ready_Head /= null then
-            Next := Group.Ready_Head;
-            Group.Ready_Head := Next.Next_Ready;
-            Next.Next_Ready := null;
+         if Ready_Present (Group) then
+            Next := Dequeue (Group);
+            if Next = null then
+               Fatal;
+            end if;
             Next.State := Running;
             Group.Current_Fiber := Next;
             if Dispatches_Until_Timer_Check = 0 then

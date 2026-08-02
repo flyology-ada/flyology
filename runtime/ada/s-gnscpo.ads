@@ -7,13 +7,6 @@ is
    package C renames Interfaces.C;
 
    use type C.int;
-   use type C.unsigned_long;
-
-   type Ready_Key is record
-      Priority : C.int;
-      Sequence : C.unsigned_long;
-   end record;
-
    No_Deadline : constant Duration := -1.0;
    type Deadline_Status is (No_Deadline_Set, Expired, Pending);
 
@@ -130,31 +123,5 @@ is
          Time_Until'Result = 0.0
       else
          Time_Until'Result = Deadline - Now);
-
-   function Before (Left, Right : Ready_Key) return Boolean
-   with Inline,
-        Post =>
-          Before'Result =
-            (Left.Priority > Right.Priority
-             or else
-               (Left.Priority = Right.Priority
-                and then Left.Sequence < Right.Sequence));
-
-   procedure Lemma_Irreflexive (Key : Ready_Key)
-   with Ghost,
-        Global => null,
-        Post   => not Before (Key, Key);
-
-   procedure Lemma_Asymmetric (Left, Right : Ready_Key)
-   with Ghost,
-        Global => null,
-        Pre    => Before (Left, Right),
-        Post   => not Before (Left => Right, Right => Left);
-
-   procedure Lemma_Transitive (Left, Middle, Right : Ready_Key)
-   with Ghost,
-        Global => null,
-        Pre    => Before (Left, Middle) and then Before (Middle, Right),
-        Post   => Before (Left, Right);
 
 end System.Gnatevl.Scheduling_Policy;

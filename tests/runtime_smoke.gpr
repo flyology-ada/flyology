@@ -14,6 +14,7 @@ project Runtime_Smoke is
       "io_smoke.adb",
       "io_starvation_smoke.adb",
       "lifecycle_smoke.adb",
+      "ready_queue_smoke.adb",
       "runtime_smoke.adb",
       "stack_size_parity_smoke.adb",
       "timer_heap_smoke.adb",
