@@ -414,12 +414,36 @@ procedure Structured_Server_Smoke is
          pragma Assert
            (Structured.Current (Item).Accepted_Connections = 0);
       end Run_Concurrent_Idle_Shutdown_And_Reuse;
+
+      procedure Run_Pre_Requested_Shutdown is
+         Item     : aliased Structured.Server (Capacity => 4);
+         State    : aliased Context := (Mode => Draining_Read, others => <>);
+         Listener : Sockets.Socket_Type;
+         Address  : Sockets.Sock_Addr_Type;
+      begin
+         Open_Listener (Listener, Address);
+         Structured.Request_Shutdown (Item);
+         Structured.Request_Shutdown (Item);
+         Structured.Serve
+           (Item, Listener, State, Drain_Timeout => 0.1);
+         pragma Assert (Listener = Sockets.No_Socket);
+         declare
+            Sample : constant Structured.Snapshot := Structured.Current (Item);
+         begin
+            pragma Assert (not Sample.Running);
+            pragma Assert (Sample.Shutdown_Requested);
+            pragma Assert (Sample.Accepted_Connections = 0);
+            pragma Assert (Sample.Active_Handlers = 0);
+            pragma Assert (not Sample.Forced_Cancellation);
+         end;
+      end Run_Pre_Requested_Shutdown;
    begin
       Run_Overload;
       Run_Graceful_Drain;
       Run_Deadline_Cancel;
       Run_Failure;
       Run_Concurrent_Idle_Shutdown_And_Reuse;
+      Run_Pre_Requested_Shutdown;
    end Run_Lane;
 
    procedure Run_Evented is new Run_Lane (Gnatevl.Event_Loop_Task);

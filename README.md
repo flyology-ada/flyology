@@ -521,6 +521,13 @@ pthread tasks; an evented instantiation creates fibers on the configured loop
 pool. The designation belongs to the instantiated task type and never changes
 during a connection.
 
+The handler context is one shared limited object, not one copy per connection.
+With `Capacity > 1`, callbacks may use it concurrently and native handlers may
+do so in parallel on different pthreads. Mutable context therefore belongs
+behind protected operations, atomics, or an application-defined lock. The pool
+is eager for the duration of `Serve`: even an idle server owns `Capacity` tasks,
+so the bound is also an explicit resource choice (especially for native tasks).
+
 Shutdown has two explicit phases. `Request_Shutdown` is idempotent and wakes
 idle accepts without cancelling admitted connections. Existing handlers drain
 normally until the `Serve` call's monotonic `Drain_Timeout`. If that deadline
@@ -530,6 +537,11 @@ connection manager; tasks blocked in connection I/O resume with
 the token's `Requested` query at its own safe points. The listener is closed
 only after every accept has left the poller and every handler has terminated,
 so its descriptor cannot be reused by a stale waiter.
+
+A shutdown request made before the one allowed `Serve` call is retained. That
+call still takes and safely closes the listener, creates and joins its bounded
+task scope, and admits no connections; a `Server` object is deliberately
+one-shot rather than restartable.
 
 A handler or admission exception stops further admission, is retained in the
 server snapshot and `First_Failure_Information`, and is re-raised to the

@@ -3,6 +3,9 @@ with GNAT.Sockets;
 with Gnatevl.IO.Connections;
 
 generic
+   --  One Context object is shared by every concurrent Handle invocation and
+   --  may also be observed by the Serve caller. Its mutable state must use
+   --  protected operations, atomics, or another synchronization discipline.
    type Handler_Context (<>) is limited private;
 
    with procedure Handle
@@ -33,9 +36,10 @@ package Gnatevl.IO.Structured_Servers is
    end record;
 
    --  Capacity is both the maximum number of accepted connections and the
-   --  number of handler tasks. The handler task type is fixed by this generic
-   --  instance: it is never converted between native and event-loop execution
-   --  after activation.
+   --  eagerly created number of handler tasks, including while no connection
+   --  is active. The handler task type is fixed by this generic instance: it
+   --  is never converted between native and event-loop execution after
+   --  activation.
    type Server (Capacity : Positive) is limited private;
 
    --  Take ownership of an already-bound, listening socket and serve until
@@ -58,6 +62,8 @@ package Gnatevl.IO.Structured_Servers is
 
    --  Idempotently stop new accepts. Active handlers are allowed to drain
    --  according to the Drain_Timeout of the concurrent Serve call.
+   --  Requesting before the one allowed Serve call makes that call take and
+   --  close the listener without admitting any connection.
    procedure Request_Shutdown (Item : in out Server);
 
    function Current (Item : Server) return Snapshot;
