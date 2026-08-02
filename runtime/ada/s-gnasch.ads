@@ -49,6 +49,41 @@ package System.Gnatevl.Scheduler is
    pragma Export
      (C, Configured_Placement, "gnatevl_runtime_configured_placement");
 
+   function Placement_Supported
+     (Mode : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C, Placement_Supported, "gnatevl_runtime_placement_supported");
+
+   function Placement_Value_Available
+     (Mode  : Interfaces.C.int;
+      Value : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C,
+      Placement_Value_Available,
+      "gnatevl_runtime_placement_value_available");
+
+   function Configure_Group_Placement
+     (Group : Interfaces.C.int;
+      Mode  : Interfaces.C.int;
+      Value : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C,
+      Configure_Group_Placement,
+      "gnatevl_runtime_configure_group_placement");
+
+   function Query_Group_Placement
+     (Group       : Interfaces.C.int;
+      Status      : System.Address;
+      Status_Size : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export
+     (C,
+      Query_Group_Placement,
+      "gnatevl_runtime_query_group_placement");
+
+   function Current_Processor return Interfaces.C.int;
+   pragma Export
+     (C, Current_Processor, "gnatevl_runtime_current_processor");
+
    function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, Migrate, "gnatevl_runtime_migrate");
 

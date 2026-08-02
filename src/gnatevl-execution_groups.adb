@@ -5,6 +5,14 @@ package body Gnatevl.Execution_Groups is
 
    use type C.int;
 
+   type Runtime_Placement_Status is record
+      Mode       : C.int;
+      Value      : C.int;
+      State      : C.int;
+      Error_Code : C.int;
+   end record;
+   pragma Convention (C, Runtime_Placement_Status);
+
    function Runtime_Current_Group return C.int;
    pragma Import
      (C, Runtime_Current_Group, "gnatevl_runtime_current_group");
@@ -20,6 +28,37 @@ package body Gnatevl.Execution_Groups is
      (C,
       Runtime_Configured_Placement,
       "gnatevl_runtime_configured_placement");
+
+   function Runtime_Placement_Supported (Mode : C.int) return C.int;
+   pragma Import
+     (C, Runtime_Placement_Supported, "gnatevl_runtime_placement_supported");
+
+   function Runtime_Placement_Value_Available
+     (Mode : C.int; Value : C.int) return C.int;
+   pragma Import
+     (C,
+      Runtime_Placement_Value_Available,
+      "gnatevl_runtime_placement_value_available");
+
+   function Runtime_Configure_Loop_Thread
+     (Group : C.int; Mode : C.int; Value : C.int) return C.int;
+   pragma Import
+     (C,
+      Runtime_Configure_Loop_Thread,
+      "gnatevl_runtime_configure_group_placement");
+
+   function Runtime_Loop_Thread_Status
+     (Group       : C.int;
+      Status      : System.Address;
+      Status_Size : C.size_t) return C.int;
+   pragma Import
+     (C,
+      Runtime_Loop_Thread_Status,
+      "gnatevl_runtime_query_group_placement");
+
+   function Runtime_Current_Processor return C.int;
+   pragma Import
+     (C, Runtime_Current_Processor, "gnatevl_runtime_current_processor");
 
    function Runtime_Create_Dedicated_Group return C.int;
    pragma Import
@@ -119,6 +158,81 @@ package body Gnatevl.Execution_Groups is
 
    function In_Configured_Pool (Group : Group_Id) return Boolean is
      (Group < Group_Id (Configured_Pool_Size));
+
+   function Mode_Of (Kind : Loop_Thread_Placement) return C.int is
+     (case Kind is
+         when No_Placement => 0,
+         when Strict_CPU   => 1,
+         when Advisory_Tag => 2);
+
+   function Placement_Supported
+     (Kind : Loop_Thread_Placement) return Boolean
+   is (Runtime_Placement_Supported (Mode_Of (Kind)) /= 0);
+
+   function Placement_Value_Available
+     (Kind  : Loop_Thread_Placement;
+      Value : Placement_Value) return Boolean
+   is (Runtime_Placement_Value_Available
+         (Mode_Of (Kind), C.int (Value)) /= 0);
+
+   function Configure_Loop_Thread
+     (Group : Group_Id;
+      Kind  : Loop_Thread_Placement;
+      Value : Placement_Value := 0) return Placement_Configuration_Result
+   is
+      Result : constant C.int := Runtime_Configure_Loop_Thread
+        (C.int (Group), Mode_Of (Kind), C.int (Value));
+   begin
+      case Result is
+         when 0 => return Configured;
+         when 1 => return Unchanged;
+         when 2 => return Unsupported;
+         when 3 => return Invalid_Value;
+         when 4 => return Group_Already_Started;
+         when 5 => return Runtime_Unavailable;
+         when others =>
+            raise Group_Error with "unknown loop-thread configuration result";
+      end case;
+   end Configure_Loop_Thread;
+
+   function Loop_Thread_Status (Group : Group_Id) return Placement_Status is
+      Raw    : aliased Runtime_Placement_Status;
+      Result : C.int;
+      Kind   : Loop_Thread_Placement;
+      State  : Placement_State;
+   begin
+      Result := Runtime_Loop_Thread_Status
+        (C.int (Group), Raw'Address, C.size_t (Raw'Size / 8));
+      if Result /= 0
+        or else Raw.Value < 0
+      then
+         raise Group_Error with "cannot query loop-thread placement";
+      end if;
+      case Raw.Mode is
+         when 0 => Kind := No_Placement;
+         when 1 => Kind := Strict_CPU;
+         when 2 => Kind := Advisory_Tag;
+         when others =>
+            raise Group_Error with "unknown loop-thread placement mode";
+      end case;
+      case Raw.State is
+         when 0 => State := Not_Requested;
+         when 1 => State := Pending_Startup;
+         when 2 => State := Applied;
+         when 3 => State := Failed;
+         when 4 => State := Unavailable;
+         when others =>
+            raise Group_Error with "unknown loop-thread placement state";
+      end case;
+      return
+        (Kind       => Kind,
+         Value      => Placement_Value (Raw.Value),
+         State      => State,
+         Error_Code => Integer (Raw.Error_Code));
+   end Loop_Thread_Status;
+
+   function Current_Processor return Integer is
+     (Integer (Runtime_Current_Processor));
 
    function Create_Dedicated return Dedicated_Group_Id is
       Result : constant C.int := Runtime_Create_Dedicated_Group;

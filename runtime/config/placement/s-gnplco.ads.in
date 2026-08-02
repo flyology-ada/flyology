@@ -1,0 +1,19 @@
+with Interfaces.C;
+
+package System.Gnatevl.Placement_Config is
+   pragma Preelaborate;
+
+   type Placement_Request is record
+      Mode  : Interfaces.C.int;
+      Value : Interfaces.C.int;
+   end record;
+   type Placement_Request_Array is
+     array (Natural range 0 .. 255) of Placement_Request;
+
+   --  Generated from validated build-time settings. Mode uses the scheduler
+   --  ABI representation: 0 = none, 1 = strict CPU, 2 = advisory tag.
+   pragma Style_Checks (Off);
+   Requests : constant Placement_Request_Array := @PLACEMENT_REQUESTS@;
+   pragma Style_Checks (On);
+   Any_Request : constant Boolean := @PLACEMENT_ANY@;
+end System.Gnatevl.Placement_Config;

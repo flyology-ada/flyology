@@ -21,6 +21,8 @@ project Runtime_Smoke is
       "lazy_event_start_smoke.adb",
       "lifecycle_smoke.adb",
       "loop_pool_smoke.adb",
+      "loop_thread_placement_smoke.adb",
+      "loop_thread_project_placement_smoke.adb",
       "observability_native_smoke.adb",
       "observability_smoke.adb",
       "priority_semantics_smoke.adb",

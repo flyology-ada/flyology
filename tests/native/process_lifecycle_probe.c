@@ -35,6 +35,15 @@ struct runtime_group_snapshot {
 };
 extern int gnatevl_runtime_observe_group(
     int group, struct runtime_group_snapshot *snapshot, size_t size);
+extern int gnatevl_runtime_placement_supported(int mode);
+struct runtime_placement_status {
+    int mode;
+    int value;
+    int state;
+    int error_code;
+};
+extern int gnatevl_runtime_query_group_placement(
+    int group, struct runtime_placement_status *status, size_t size);
 
 static int expected_state;
 static int expected_groups;
@@ -110,7 +119,13 @@ int gnatevl_test_fork_exec(const char *program) {
         return -1;
     }
     if (child == 0) {
-        if (gnatevl_runtime_observe_lifecycle() != 5) {
+        struct runtime_placement_status placement;
+
+        if (gnatevl_runtime_observe_lifecycle() != 5 ||
+            gnatevl_runtime_placement_supported(1) != 0 ||
+            gnatevl_runtime_query_group_placement(
+                0, &placement, sizeof(placement)) != 0 ||
+            placement.state != 4) {
             _Exit(91);
         }
         execl(program, program, (char *)NULL);

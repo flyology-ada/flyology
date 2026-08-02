@@ -4,6 +4,7 @@ with System.Address_To_Access_Conversions;
 with System.Gnatevl.Contexts;
 with System.Gnatevl.Faults;
 with System.Gnatevl.Poller;
+with System.Gnatevl.Placement_Config;
 with System.Gnatevl.Pool_Config;
 with System.Gnatevl.Scheduling_Policy;
 with System.Gnatevl.Time_ABI;
@@ -15,6 +16,7 @@ package body System.Gnatevl.Scheduler is
    package Contexts renames System.Gnatevl.Contexts;
    package Faults renames System.Gnatevl.Faults;
    package Pollers renames System.Gnatevl.Poller;
+   package Placement_Config renames System.Gnatevl.Placement_Config;
    package Pool_Config renames System.Gnatevl.Pool_Config;
    package Scheduling renames System.Gnatevl.Scheduling_Policy;
    package Time_ABI renames System.Gnatevl.Time_ABI;
@@ -43,6 +45,24 @@ package body System.Gnatevl.Scheduler is
    Dedicated_First_Id  : constant C.int := Scheduling.First_Dedicated_Group;
    Maximum_Group_Id    : constant C.int := Scheduling.Last_Group;
    subtype Group_Index is Natural range 0 .. Natural (Maximum_Group_Id);
+
+   No_Placement_Mode       : constant C.int := 0;
+   Strict_CPU_Mode         : constant C.int := 1;
+   Advisory_Tag_Mode       : constant C.int := 2;
+   subtype Placement_Request is Placement_Config.Placement_Request;
+   subtype Placement_Request_Array is Placement_Config.Placement_Request_Array;
+
+   type Runtime_Placement_Status is record
+      Mode       : C.int;
+      Value      : C.int;
+      State      : C.int;
+      Error_Code : C.int;
+   end record;
+   pragma Convention (C, Runtime_Placement_Status);
+   type Runtime_Placement_Status_Access is
+     access all Runtime_Placement_Status;
+   function To_Runtime_Placement_Status is new Ada.Unchecked_Conversion
+     (System.Address, Runtime_Placement_Status_Access);
 
    --  A prime-sized table avoids clustering when aligned ATCB allocations
    --  advance by a regular stride. For the expected task populations,
@@ -215,6 +235,10 @@ package body System.Gnatevl.Scheduler is
       Started     : Boolean := False with Volatile;
       Start_Failed : Boolean := False with Volatile;
       Event_Thread : aliased OSI.pthread_t;
+      Placement_Mode    : C.int := No_Placement_Mode;
+      Placement_Value   : C.int := 0;
+      Placement_Result  : C.int := 0;
+      Placement_Applied : Boolean := False;
       Scheduler_Context : Contexts.Context_Access;
       Scheduler_Poller  : Pollers.Poller;
       Current_Fiber     : Fiber_Access;
@@ -250,6 +274,10 @@ package body System.Gnatevl.Scheduler is
      array (Registry_Bucket_Index) of Fiber_Access;
    type Registry_Shard_Lock_Array is
      array (Registry_Shard_Index) of Scheduler_Mutex;
+
+   Placement_Requests : Placement_Request_Array;
+   Placement_Platform_Initialized : Boolean := False;
+   Placement_Initialization_Result : C.int := 0;
 
    function Fiber_To_Address is new Ada.Unchecked_Conversion
      (Fiber_Access, System.Address);
@@ -301,6 +329,30 @@ package body System.Gnatevl.Scheduler is
    function Micro_Sleep (Microseconds : C.unsigned) return C.int;
    pragma Import (C, Micro_Sleep, "usleep");
 
+   function Initialize_Thread_Placement return C.int;
+   pragma Import
+     (C,
+      Initialize_Thread_Placement,
+      "gnatevl_thread_placement_initialize");
+   function Thread_Placement_Supported (Mode : C.int) return C.int;
+   pragma Import
+     (C,
+      Thread_Placement_Supported,
+      "gnatevl_thread_placement_supported");
+   function Validate_Thread_Placement
+     (Mode : C.int; Value : C.int) return C.int;
+   pragma Import
+     (C,
+      Validate_Thread_Placement,
+      "gnatevl_thread_placement_validate");
+   function Apply_Thread_Placement
+     (Mode : C.int; Value : C.int) return C.int;
+   pragma Import
+     (C, Apply_Thread_Placement, "gnatevl_thread_placement_apply");
+   function Thread_Current_Processor return C.int;
+   pragma Import
+     (C, Thread_Current_Processor, "gnatevl_thread_current_processor");
+
    procedure Scheduler_Main (Argument : System.Address);
    pragma Convention (C, Scheduler_Main);
 
@@ -327,6 +379,7 @@ package body System.Gnatevl.Scheduler is
    pragma No_Return (Fatal);
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
+   function Ensure_Placement_Platform return C.int;
    function Select_Automatic_Group return C.int;
    --  Registry operations require the bucket's shard lock after bootstrap
    --  publishes Initialized. The environment task is deliberately absent
@@ -529,6 +582,18 @@ package body System.Gnatevl.Scheduler is
       end if;
    end Unlock_Group;
 
+   function Ensure_Placement_Platform return C.int is
+   begin
+      --  Callers serialize this lazy initialization with Topology_Lock, except
+      --  for Initialize itself before the runtime is published. Keeping the
+      --  call lazy preserves a syscall-free native-only/default path.
+      if not Placement_Platform_Initialized then
+         Placement_Initialization_Result := Initialize_Thread_Placement;
+         Placement_Platform_Initialized := True;
+      end if;
+      return Placement_Initialization_Result;
+   end Ensure_Placement_Platform;
+
    function Group_Thread (Argument : System.Address) return System.Address is
       Group : constant Loop_Group_Access := Address_To_Group (Argument);
       Stack : aliased OSI.stack_t :=
@@ -538,11 +603,20 @@ package body System.Gnatevl.Scheduler is
       Result : C.int;
    begin
       Thread_Group := Group;
-      Result := OSI.sigaltstack (Stack'Access, null);
+      Lock_Topology;
+      if Group.Placement_Mode /= No_Placement_Mode then
+         Result := Apply_Thread_Placement
+           (Group.Placement_Mode, Group.Placement_Value);
+         Group.Placement_Result := Result;
+         Group.Placement_Applied := Result = 0;
+      else
+         Result := 0;
+      end if;
+      if Result = 0 then
+         Result := OSI.sigaltstack (Stack'Access, null);
+      end if;
       Group.Scheduler_Context :=
         (if Result = 0 then Contexts.Capture else null);
-
-      Lock_Topology;
       Group.Started := Group.Scheduler_Context /= null;
       Group.Start_Failed := not Group.Started;
       if Group.Start_Failed then
@@ -588,6 +662,17 @@ package body System.Gnatevl.Scheduler is
          Group := new Loop_Group;
          Group.Id := Id;
          Group.Dedicated := Dedicated;
+         Group.Placement_Mode :=
+           Placement_Requests (Group_Index (Id)).Mode;
+         Group.Placement_Value :=
+           Placement_Requests (Group_Index (Id)).Value;
+         if Group.Placement_Mode /= No_Placement_Mode
+           and then Ensure_Placement_Platform /= 0
+         then
+            Free_Group (Group);
+            Unlock_Topology;
+            return null;
+         end if;
          Result := OSI.pthread_mutex_init (Group.Lock.Value'Access, null);
          if Result /= 0 then
             Free_Group (Group);
@@ -1371,6 +1456,14 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
+      Placement_Platform_Initialized := False;
+      Placement_Initialization_Result := 0;
+      Placement_Requests := Placement_Config.Requests;
+      if Placement_Config.Any_Request then
+         Placement_Initialization_Result := Initialize_Thread_Placement;
+         Placement_Platform_Initialized := True;
+      end if;
+
       --  Do not allocate a group, poller, context, stack, or pthread here.
       --  Ensure_Group creates the complete event machinery when the first
       --  designated evented task is activated. Until then native programs
@@ -1673,6 +1766,146 @@ package body System.Gnatevl.Scheduler is
      (C.int (Pool_Config.Automatic_Pool_Size));
 
    function Configured_Placement return C.int is (0);
+
+   function Placement_Supported (Mode : C.int) return C.int is
+   begin
+      if In_Fork_Child or else not Initialized then
+         return 0;
+      elsif Mode in Strict_CPU_Mode | Advisory_Tag_Mode then
+         return Thread_Placement_Supported (Mode);
+      else
+         return (if Mode = No_Placement_Mode then 1 else 0);
+      end if;
+   end Placement_Supported;
+
+   function Placement_Value_Available
+     (Mode  : C.int;
+      Value : C.int) return C.int
+   is
+      Result : C.int;
+   begin
+      if Mode = No_Placement_Mode then
+         return (if Value = 0 then 1 else 0);
+      end if;
+      if In_Fork_Child
+        or else not Initialized
+        or else Mode not in Strict_CPU_Mode | Advisory_Tag_Mode
+        or else Thread_Placement_Supported (Mode) = 0
+      then
+         return 0;
+      end if;
+      Lock_Topology;
+      Result := Ensure_Placement_Platform;
+      if Result = 0 then
+         Result := Validate_Thread_Placement (Mode, Value);
+      end if;
+      Unlock_Topology;
+      return (if Result = 0 then 1 else 0);
+   end Placement_Value_Available;
+
+   function Configure_Group_Placement
+     (Group : C.int;
+      Mode  : C.int;
+      Value : C.int) return C.int
+   is
+      Target  : Loop_Group_Access;
+      Current : Placement_Request;
+      Result  : C.int;
+   begin
+      if In_Fork_Child or else not Initialized then
+         return 5;
+      elsif not Scheduling.Valid_Group (Group)
+        or else Mode not in No_Placement_Mode |
+          Strict_CPU_Mode | Advisory_Tag_Mode
+        or else (Mode = No_Placement_Mode and then Value /= 0)
+      then
+         return 3;
+      elsif Mode /= No_Placement_Mode
+        and then Thread_Placement_Supported (Mode) = 0
+      then
+         return 2;
+      end if;
+
+      Lock_Topology;
+      Current := Placement_Requests (Group_Index (Group));
+      Target := Groups (Group_Index (Group));
+      if Target /= null then
+         if Target.Placement_Mode = Mode
+           and then Target.Placement_Value = Value
+         then
+            Result := 1;
+         else
+            Result := 4;
+         end if;
+      elsif Current.Mode = Mode and then Current.Value = Value then
+         Result := 1;
+      elsif Mode /= No_Placement_Mode
+        and then Ensure_Placement_Platform /= 0
+      then
+         Result := 5;
+      elsif Mode /= No_Placement_Mode
+        and then Validate_Thread_Placement (Mode, Value) /= 0
+      then
+         Result := 3;
+      else
+         Placement_Requests (Group_Index (Group)) :=
+           (Mode => Mode, Value => Value);
+         Result := 0;
+      end if;
+      Unlock_Topology;
+      return Result;
+   end Configure_Group_Placement;
+
+   function Query_Group_Placement
+     (Group       : C.int;
+      Status      : System.Address;
+      Status_Size : C.size_t) return C.int
+   is
+      Output  : Runtime_Placement_Status_Access;
+      Target  : Loop_Group_Access;
+      Request : Placement_Request;
+   begin
+      if Status = System.Null_Address
+        or else Status_Size /= Runtime_Placement_Status'Size / 8
+        or else not Scheduling.Valid_Group (Group)
+      then
+         return -1;
+      end if;
+      Output := To_Runtime_Placement_Status (Status);
+      if In_Fork_Child or else not Initialized then
+         Output.all :=
+           (Mode => No_Placement_Mode, Value => 0, State => 4,
+            Error_Code => 0);
+         return 0;
+      end if;
+
+      Lock_Topology;
+      Target := Groups (Group_Index (Group));
+      Request := Placement_Requests (Group_Index (Group));
+      if Target = null then
+         Output.all :=
+           (Mode       => Request.Mode,
+            Value      => Request.Value,
+            State      =>
+              (if Request.Mode = No_Placement_Mode then 0 else 1),
+            Error_Code => 0);
+      else
+         Output.all :=
+           (Mode       => Target.Placement_Mode,
+            Value      => Target.Placement_Value,
+            State      =>
+              (if Target.Placement_Mode = No_Placement_Mode then 0
+               elsif Target.Placement_Applied then 2
+               elsif Target.Placement_Result /= 0 then 3
+               else 1),
+            Error_Code => Target.Placement_Result);
+      end if;
+      Unlock_Topology;
+      return 0;
+   end Query_Group_Placement;
+
+   function Current_Processor return C.int is
+     (Thread_Current_Processor);
 
    function Create_Dedicated_Group return C.int is
       Id      : C.int;

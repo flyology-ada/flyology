@@ -12,6 +12,31 @@ package Gnatevl.Execution_Groups with Preelaborate is
    subtype Loop_Pool_Size is Positive range 1 .. 128;
    type Automatic_Placement_Policy is (Round_Robin);
 
+   --  Placement of the scheduler pthread is independent from placement of an
+   --  Ada task into an execution group. Strict_CPU is a verifiable one-CPU
+   --  mask on Linux. Advisory_Tag is Darwin's THREAD_AFFINITY_POLICY cache
+   --  locality hint; it is not a physical-CPU request.
+   type Loop_Thread_Placement is
+     (No_Placement, Strict_CPU, Advisory_Tag);
+   subtype Placement_Value is Natural range 0 .. 2_147_483_647;
+   type Placement_Configuration_Result is
+     (Configured,
+      Unchanged,
+      Unsupported,
+      Invalid_Value,
+      Group_Already_Started,
+      Runtime_Unavailable);
+   type Placement_State is
+     (Not_Requested, Pending_Startup, Applied, Failed, Unavailable);
+   type Placement_Status is record
+      Kind       : Loop_Thread_Placement := No_Placement;
+      Value      : Placement_Value := 0;
+      State      : Placement_State := Not_Requested;
+      Error_Code : Integer := 0;
+   end record;
+
+   No_Processor : constant Integer := -1;
+
    Group_Error     : exception;
    Migration_Error : exception;
 
@@ -45,6 +70,31 @@ package Gnatevl.Execution_Groups with Preelaborate is
    function Configured_Pool_Size return Loop_Pool_Size;
    function Configured_Placement return Automatic_Placement_Policy;
    function In_Configured_Pool (Group : Group_Id) return Boolean;
+
+   --  Configure a scheduler pthread before Group starts. The same request is
+   --  idempotent, including after startup; changing or clearing it after the
+   --  group has entered lazy creation reports Group_Already_Started. A strict
+   --  CPU value is a zero-based Linux OS logical-CPU id in the process
+   --  leader's allowed affinity set. It is a separate namespace from an Ada
+   --  CPU aspect, which selects a GNATEVL group. Advisory tags must be
+   --  positive. No_Placement requires Value = 0.
+   function Configure_Loop_Thread
+     (Group : Group_Id;
+      Kind  : Loop_Thread_Placement;
+      Value : Placement_Value := 0) return Placement_Configuration_Result;
+
+   --  These capability/value queries do not start a group. Value_Available
+   --  may lazily snapshot Linux's inherited affinity allowance, but creates no
+   --  pthread, poller, stack, or scheduler context.
+   function Placement_Supported (Kind : Loop_Thread_Placement) return Boolean;
+   function Placement_Value_Available
+     (Kind  : Loop_Thread_Placement;
+      Value : Placement_Value) return Boolean;
+   function Loop_Thread_Status (Group : Group_Id) return Placement_Status;
+
+   --  Return the calling pthread's current logical processor where the host
+   --  provides a stable public query (Linux), otherwise No_Processor.
+   function Current_Processor return Integer;
 
    --  Reserve an empty reusable group for the calling evented task. Migrating
    --  out consumes the reservation so the lane can be reused; call this again

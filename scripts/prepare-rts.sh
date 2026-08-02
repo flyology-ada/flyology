@@ -15,6 +15,8 @@ alr=$("$project_root/scripts/find-alr.sh")
 execution_default=${GNATEVL_DEFAULT:-native}
 loop_pool_size=${GNATEVL_LOOP_POOL_SIZE:-1}
 placement_policy=${GNATEVL_PLACEMENT:-round_robin}
+loop_placement=${GNATEVL_LOOP_PLACEMENT:-none}
+loop_placement_map=${GNATEVL_LOOP_PLACEMENT_MAP:-}
 test_faults=${GNATEVL_TEST_FAULTS:-0}
 sanitizer=${GNATEVL_SANITIZER:-none}
 
@@ -52,6 +54,78 @@ case "$placement_policy" in
     exit 1
     ;;
 esac
+
+case "$loop_placement" in
+  none)
+    placement_mode=0
+    if [ -n "$loop_placement_map" ]; then
+      printf '%s\n' \
+        "GNATEVL_LOOP_PLACEMENT_MAP requires strict or advisory placement" \
+        >&2
+      exit 1
+    fi
+    ;;
+  strict)
+    placement_mode=1
+    ;;
+  advisory)
+    placement_mode=2
+    ;;
+  *)
+    printf '%s\n' \
+      "GNATEVL_LOOP_PLACEMENT must be 'none', 'strict', or 'advisory', got: $loop_placement" \
+      >&2
+    exit 1
+    ;;
+esac
+
+if [ "$loop_placement" != none ]; then
+  if [ -z "$loop_placement_map" ]; then
+    printf '%s\n' \
+      "GNATEVL_LOOP_PLACEMENT_MAP must list group:value pairs for $loop_placement placement" \
+      >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$loop_placement_map" | awk '
+    BEGIN { FS = ","; valid = 1 }
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i !~ /^[0-9]+:[0-9]+$/) { valid = 0; continue }
+        split($i, pair, ":")
+        group = pair[1] + 0
+        value = pair[2] + 0
+        if (group < 0 || group > 255 || value > 2147483647) valid = 0
+        if (mode == "advisory" && value == 0) valid = 0
+        if (seen[group]++) valid = 0
+      }
+    }
+    END { exit valid ? 0 : 1 }
+  ' mode="$loop_placement"; then
+    printf '%s\n' \
+      "GNATEVL_LOOP_PLACEMENT_MAP must contain unique GROUP:VALUE pairs (group 0..255, value 0..2147483647), got: $loop_placement_map" \
+      >&2
+    exit 1
+  fi
+fi
+
+if [ "$loop_placement" = none ]; then
+  placement_requests='(others => (Mode => 0, Value => 0))'
+  placement_any=False
+else
+  placement_requests=$(printf '%s\n' "$loop_placement_map" | awk \
+    -v mode="$placement_mode" '
+      BEGIN { FS = ","; printf "(" }
+      {
+        for (i = 1; i <= NF; i++) {
+          split($i, pair, ":")
+          printf "%s%s => (Mode => %s, Value => %s)",
+            (i == 1 ? "" : ", "), pair[1], mode, pair[2]
+        }
+      }
+      END { print ", others => (Mode => 0, Value => 0))" }
+    ')
+  placement_any=True
+fi
 
 case "$test_faults" in
   0)
@@ -94,6 +168,56 @@ case "$(uname -s)" in
     ;;
   *) printf '%s\n' "unsupported GNATEVL host: $(uname -s)" >&2; exit 1 ;;
 esac
+
+if [ "$loop_placement" = strict ] && [ "$platform" != linux ]; then
+  printf '%s\n' \
+    "strict event-loop CPU placement is unsupported on $platform" \
+    "Darwin offers no hard-core binding; some hosts support advisory tags" >&2
+  exit 1
+fi
+if [ "$loop_placement" = advisory ] && [ "$platform" != darwin ]; then
+  printf '%s\n' \
+    "advisory event-loop affinity tags are unsupported on $platform" >&2
+  exit 1
+fi
+if [ "$loop_placement" = advisory ] \
+  && [ "$platform" = darwin ] \
+  && [ "$(uname -m)" = arm64 ]; then
+  printf '%s\n' \
+    "Darwin THREAD_AFFINITY_POLICY is unavailable on this arm64 host" \
+    "event-loop affinity tags are advisory and cannot be configured here" >&2
+  exit 1
+fi
+
+if [ "$loop_placement" = strict ]; then
+  allowed_cpus=$(awk '/Cpus_allowed_list:/ { print $2; exit }' /proc/self/status)
+  if ! printf '%s\n' "$loop_placement_map" | awk \
+    -v allowed="$allowed_cpus" '
+      function permitted(cpu, count, ranges, i, ends, low, high) {
+        count = split(allowed, ranges, ",")
+        for (i = 1; i <= count; i++) {
+          split(ranges[i], ends, "-")
+          low = ends[1] + 0
+          high = (ends[2] == "" ? low : ends[2] + 0)
+          if (cpu >= low && cpu <= high) return 1
+        }
+        return 0
+      }
+      BEGIN { FS = ","; valid = 1 }
+      {
+        for (i = 1; i <= NF; i++) {
+          split($i, pair, ":")
+          if (!permitted(pair[2] + 0)) valid = 0
+        }
+      }
+      END { exit valid ? 0 : 1 }
+    '; then
+    printf '%s\n' \
+      "GNATEVL_LOOP_PLACEMENT_MAP requests a CPU outside this process's allowed Linux set: $allowed_cpus" \
+      >&2
+    exit 1
+  fi
+fi
 
 case "$platform:$compiler_release" in
   darwin:13.2.2|darwin:14.1.3|darwin:14.2.1|\
@@ -139,6 +263,11 @@ sed \
   "s/@AUTOMATIC_POOL_SIZE@/$loop_pool_size/g" \
   "$project_root/runtime/config/pool/s-gnpoco.ads.in" \
   >"$generated_include/s-gnpoco.ads"
+sed \
+  -e "s/@PLACEMENT_REQUESTS@/$placement_requests/g" \
+  -e "s/@PLACEMENT_ANY@/$placement_any/g" \
+  "$project_root/runtime/config/placement/s-gnplco.ads.in" \
+  >"$generated_include/s-gnplco.ads"
 cp "$project_root/runtime/config/faults/$fault_config"/s-gnafau.ad? \
   "$generated_include/"
 cp "$project_root/runtime/config/sanitizers/$sanitizer_config"/s-gnaasa.ad? \
@@ -166,6 +295,7 @@ fi
   "$generated_include/s-gntiab.ads" \
   "$generated_include/s-gndeex.ads" \
   "$generated_include/s-gnpoco.ads" \
+  "$generated_include/s-gnplco.ads" \
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \
   "$generated_include/s-gnaasa.adb" \
@@ -178,7 +308,7 @@ fi
   "$generated_include/s-tassta.adb"
 
 cp \
-  s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnatev.ali s-gnacon.ali \
+  s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnplco.ali s-gnatev.ali s-gnacon.ali \
   s-gnaasa.ali \
   s-gnafau.ali s-gnfien.ali s-gnapol.ali \
   s-gnscpo.ali s-gnasch.ali s-taprop.ali s-tassta.ali \
@@ -189,6 +319,7 @@ fi
 ar -r "$generated_lib/libgnarl.a" \
   s-gndeex.o \
   s-gnpoco.o \
+  s-gnplco.o \
   s-gnatev.o \
   s-gnacon.o \
   s-gnaasa.o \
