@@ -934,11 +934,14 @@ GNATprove is a dependency of the nested `proof` development crate, not of the
 published Flyology library. Applications therefore do not download proof tooling
 merely because they depend on the runtime API.
 
-The current run discharges 64 flow, functional-contract, termination, and
-run-time-safety checks across four production policy units, with zero unproved
-checks. This includes the loss-of-inherited-priority queue-placement choice.
-Good next proof candidates are ready-bucket insertion/removal invariants and
-descriptor wake matching.
+[scripts/prove.sh](scripts/prove.sh) prints the authoritative check totals in its two GNATprove
+success summaries; the totals change as contracts and policy units evolve. A
+successful run proves every selected flow, functional-contract, termination,
+and run-time-safety check with zero unproved checks. The current boundary
+includes the loss-of-inherited-priority queue-placement choice. Good next proof
+candidates are ready-bucket insertion/removal invariants and descriptor wake
+matching.
+
 The GNARL tasking integration, imported system calls, address conversions,
 assembly register swap, and kernel behavior remain trusted boundaries. These
 can be wrapped in contracts, but GNATprove cannot establish their implementations
@@ -968,16 +971,21 @@ rather than hidden behind a claim of universal portability.
   automatic loop-pool policy selected while preparing the RTS.
 - [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies,
   plus the Ada platform file-engine implementations.
-- [`runtime/native`](runtime/native): ABI-specific context-switch assembly,
-  and the minimal platform-constant shim.
+- [`runtime/native`](runtime/native): ABI-specific context-switch assembly and
+  narrow C bridges for Linux syscall numbers and `epoll` record translation,
+  thread placement, fork detection, virtual-memory operations, test fault
+  hooks, and the GNAT 13 atomic-store compatibility shim.
 - [`runtime/compat`](runtime/compat): version-selected bindings for runtime ABI
   differences such as the GNAT 16 `timespec` move.
 - [`runtime/patches`](runtime/patches): versioned Darwin/Linux GNARL
   task-primitives integration and its tested-release manifest.
 - [`src`](src): public task-aware I/O packages.
-- [`tests`](tests): runtime, socket, timeout, and native TCP smoke tests.
+- [`tests`](tests): behavioral and semantic-parity programs covering tasking,
+  I/O, lifecycle, stress, fault injection, sanitizers, and observability; the
+  detailed scope is listed under [CI and releases](#ci-and-releases).
 - [`showcases`](showcases): side-by-side scheduling and I/O demonstrations.
 - [`scripts`](scripts): custom RTS construction, verification, and test runners.
+- [`docker`](docker): native-architecture Linux validation Dockerfile.
 
 ## Build and test
 
@@ -1012,6 +1020,16 @@ FLYOLOGY_LOOP_PLACEMENT=strict \
 FLYOLOGY_LOOP_PLACEMENT_MAP=0:2,1:4 ./scripts/prepare-rts.sh  # Linux
 alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
+
+Generate the public API reference with:
+
+```sh
+./scripts/docs.sh
+```
+
+The [documentation script](scripts/docs.sh) runs GNATdoc with
+undocumented-entity warnings enabled and writes the ignored HTML output to
+`docs/api/index.html`.
 
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,
@@ -1305,6 +1323,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/connection_lifecycle
 ./showcases/bin/cancellation_density lightweight 1000
 ./showcases/bin/hybrid_blocking_bridge
+./showcases/bin/structured_http
 ./showcases/bin/lightweight_vs_native
 ./showcases/bin/lightweight_io
 ./showcases/bin/lightweight_file_io
