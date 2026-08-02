@@ -2,6 +2,7 @@ with Ada.Real_Time;
 with Ada.Text_IO;
 with Gnatevl;
 with Gnatevl.Fairness;
+with Showcase_Support;
 
 procedure Cooperative_Fairness is
    use Ada.Real_Time;
@@ -125,10 +126,11 @@ begin
      ("  100 us budget: pulse=" & Cooperative_Pulse'Image
       & " s, work=" & Cooperative_Work'Image & " s");
    Put_Line
-     ("  pulse-latency improvement:"
-      & Long_Float'Image
+     ("  pulse-latency improvement: "
+      & Showcase_Support.Fixed_Image
           (Long_Float (Uncooperative_Pulse) /
-           Long_Float (Cooperative_Pulse))
+           Long_Float (Cooperative_Pulse),
+           Decimals => 2)
       & "x");
    Put_Line
      ("checkpoints preserve cooperative safety; they do not preempt arbitrary"
