@@ -2,7 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=/Users/yrashk/alr
+alr=${ALR:-"$HOME/alr"}
 
 cd "$project_root"
 "$project_root/scripts/prepare-rts.sh" >/dev/null

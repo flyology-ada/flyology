@@ -1,5 +1,6 @@
 with System;
 with GNAT.OS_Lib;
+with Gnatevl.File_Open_Policy;
 
 package body Gnatevl.IO.Files is
    package C renames Interfaces.C;
@@ -7,9 +8,16 @@ package body Gnatevl.IO.Files is
    use type Ada.Streams.Stream_Element_Offset;
    use type C.int;
    use type C.long;
-   use type GNAT.OS_Lib.File_Descriptor;
 
    Worker_Count : constant := 4;
+
+   function C_Open
+     (Path        : System.Address;
+      Flags       : C.int;
+      Permissions : C.int) return C.int;
+   --  open(2)'s third parameter is variadic.  That distinction matters on
+   --  AArch64 Darwin, where variadic arguments use a different ABI.
+   pragma Import (C_Variadic_2, C_Open, "open");
 
    function C_Pread
      (FD     : C.int;
@@ -153,21 +161,23 @@ package body Gnatevl.IO.Files is
       File       : out File_Descriptor;
       Error_Code : out C.int)
    is
-      Result : GNAT.OS_Lib.File_Descriptor;
+      C_Path : aliased String (1 .. Path'Length + 1);
+      Policy_Mode : constant File_Open_Policy.Access_Mode :=
+        (case Mode is
+           when Read_Only  => File_Open_Policy.Read_Only,
+           when Write_Only => File_Open_Policy.Write_Only,
+           when Read_Write => File_Open_Policy.Read_Write);
+      Flags  : constant C.int :=
+        File_Open_Policy.Compose
+          (Policy_Mode, Create, Truncate);
+      Result : C.int;
    begin
-      if Create and then Truncate then
-         Result := GNAT.OS_Lib.Create_File (Path, GNAT.OS_Lib.Binary);
-      elsif Mode = Read_Only then
-         Result := GNAT.OS_Lib.Open_Read (Path, GNAT.OS_Lib.Binary);
-      else
-         Result := GNAT.OS_Lib.Open_Read_Write (Path, GNAT.OS_Lib.Binary);
-         if Result = GNAT.OS_Lib.Invalid_FD and then Create then
-            Result := GNAT.OS_Lib.Create_New_File (Path, GNAT.OS_Lib.Binary);
-         end if;
-      end if;
+      C_Path (1 .. Path'Length) := Path;
+      C_Path (C_Path'Last) := ASCII.NUL;
+      Result := C_Open (C_Path'Address, Flags, 8#666#);
       File := File_Descriptor (Result);
       Error_Code :=
-        (if Result = GNAT.OS_Lib.Invalid_FD then Current_Errno else 0);
+        (if Result < 0 then Current_Errno else 0);
    end Perform_Open;
 
    procedure Perform_Close
@@ -252,6 +262,17 @@ package body Gnatevl.IO.Files is
       Error_Code : C.int;
       Worker     : Positive;
    begin
+      if not File_Open_Policy.Valid
+        ((case Mode is
+            when Read_Only  => File_Open_Policy.Read_Only,
+            when Write_Only => File_Open_Policy.Write_Only,
+            when Read_Write => File_Open_Policy.Read_Write),
+         Truncate)
+      then
+         raise Device_Error with
+           "open failed: Truncate requires Write_Only or Read_Write mode";
+      end if;
+
       if Is_Evented_Task then
          Router.Choose (Worker);
          Workers (Worker).Open

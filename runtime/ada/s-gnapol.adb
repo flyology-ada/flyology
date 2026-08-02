@@ -71,8 +71,10 @@ package body System.Gnatevl.Poller is
            System.Null_Address);
       if Result /= 0 then
          Result := Close (Item.Descriptor);
-         pragma Assert (Result = 0);
          Item.Descriptor := -1;
+         if Result /= 0 then
+            raise Program_Error with "GNATEVL poller cleanup failed";
+         end if;
          return False;
       end if;
       return True;
@@ -83,8 +85,10 @@ package body System.Gnatevl.Poller is
    begin
       if Item.Descriptor >= 0 then
          Result := Close (Item.Descriptor);
-         pragma Unreferenced (Result);
          Item.Descriptor := -1;
+         if Result /= 0 then
+            raise Program_Error with "GNATEVL poller close failed";
+         end if;
       end if;
    end Finalize;
 

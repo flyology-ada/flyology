@@ -2,14 +2,20 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=/Users/yrashk/alr
+alr=${ALR:-"$HOME/alr"}
 
 cd "$project_root"
 
 "$alr" build
 
 "$project_root/scripts/prepare-rts.sh" >/dev/null
-for test_main in io_smoke runtime_smoke tcp_native_smoke
+for test_main in \
+  files_smoke \
+  io_smoke \
+  io_starvation_smoke \
+  lifecycle_smoke \
+  runtime_smoke \
+  tcp_native_smoke
 do
   "$alr" exec -- gprbuild \
     --RTS="$project_root/build/rts" \

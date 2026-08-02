@@ -17,6 +17,50 @@ is
    No_Deadline : constant Duration := -1.0;
    type Deadline_Status is (No_Deadline_Set, Expired, Pending);
 
+   type Fiber_Phase is (Running, Ready, Waiting, Finished);
+   type Destruction_Plan is (Defer, Reap_Now);
+
+   function Plan_Destroy (Phase : Fiber_Phase) return Destruction_Plan
+   with Inline,
+        Post =>
+          (if Phase = Running then
+              Plan_Destroy'Result = Defer
+           else
+              Plan_Destroy'Result = Reap_Now);
+
+   function Should_Reap_After_Switch
+     (Phase             : Fiber_Phase;
+      Destroy_Requested : Boolean) return Boolean
+   with Inline,
+        Post =>
+          Should_Reap_After_Switch'Result =
+            (Phase = Finished and then Destroy_Requested);
+
+   function Maintenance_Due
+     (Ready_Present              : Boolean;
+      Dispatches_Until_Check     : Natural) return Boolean
+   with Inline,
+        Post =>
+          Maintenance_Due'Result =
+            (not Ready_Present or else Dispatches_Until_Check = 0);
+
+   function After_Dispatch
+     (Dispatches_Until_Check : Positive) return Natural
+   with Inline,
+        Post =>
+          After_Dispatch'Result = Dispatches_Until_Check - 1;
+
+   function Earlier_Deadline (Left, Right : Duration) return Duration
+   with Post =>
+     (if Left < 0.0 then
+         Earlier_Deadline'Result = Right
+      elsif Right < 0.0 then
+         Earlier_Deadline'Result = Left
+      elsif Left <= Right then
+         Earlier_Deadline'Result = Left
+      else
+         Earlier_Deadline'Result = Right);
+
    function Classify_Deadline
      (Deadline : Duration;
       Now      : Duration) return Deadline_Status

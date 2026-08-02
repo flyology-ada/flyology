@@ -1,7 +1,14 @@
+with GNAT.OS_Lib;
 with Gnatevl.Time_Math;
+with Gnatevl.Wait_Policy;
+with System.C_Time;
+with System.OS_Constants;
+with System.OS_Interface;
 
 package body Gnatevl.IO is
    package C renames Interfaces.C;
+   package C_Time renames System.C_Time;
+   package OSI renames System.OS_Interface;
 
    use type C.int;
 
@@ -31,6 +38,19 @@ package body Gnatevl.IO is
       Timeout_MS  : C.int) return C.int;
    pragma Import (C, Poll, "poll");
 
+   function Clock return Duration is
+      Now    : aliased C_Time.timespec;
+      Result : C.int;
+   begin
+      Result :=
+        OSI.clock_gettime
+          (OSI.clockid_t (System.OS_Constants.CLOCK_RT_Ada), Now'Access);
+      if Result /= 0 then
+         raise Device_Error with "monotonic clock failed";
+      end if;
+      return C_Time.To_Duration (Now);
+   end Clock;
+
    function Is_Evented_Task return Boolean is
      (Runtime_In_Event_Task /= 0);
 
@@ -39,7 +59,8 @@ package body Gnatevl.IO is
       Condition : Wait_Kind;
       Timeout   : Duration := Infinite) return Boolean
    is
-      Result : C.int;
+      Started : constant Duration := Clock;
+      Result  : C.int;
    begin
       if FD < 0 then
          raise Device_Error with "invalid descriptor";
@@ -57,19 +78,39 @@ package body Gnatevl.IO is
          return Result = 0;
       end if;
 
-      declare
-         Item : aliased Poll_Descriptor :=
-           (FD              => FD,
-            Events          =>
-              (if Condition = For_Read then POLLIN else POLLOUT),
-            Returned_Events => 0);
-      begin
-         Result := Poll (Item'Access, 1, Time_Math.To_Milliseconds (Timeout));
-      end;
-      if Result < 0 then
-         raise Device_Error with "poll failed";
-      end if;
-      return Result > 0;
+      loop
+         declare
+            Elapsed : constant Duration := Clock - Started;
+            Remaining : constant Duration :=
+              Time_Math.Remaining (Timeout, Elapsed);
+            Item : aliased Poll_Descriptor :=
+              (FD              => FD,
+               Events          =>
+                 (if Condition = For_Read then POLLIN else POLLOUT),
+               Returned_Events => 0);
+         begin
+            Result :=
+              Poll
+                (Item'Access,
+                 1,
+                 Time_Math.To_Milliseconds (Remaining));
+         end;
+
+         case Wait_Policy.Classify
+           (Result,
+            (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0),
+            C.int (System.OS_Constants.EINTR))
+         is
+            when Wait_Policy.Return_Ready =>
+               return True;
+            when Wait_Policy.Return_Timeout =>
+               return False;
+            when Wait_Policy.Retry =>
+               null;
+            when Wait_Policy.Fail =>
+               raise Device_Error with "poll failed";
+         end case;
+      end loop;
    end Wait;
 
 end Gnatevl.IO;

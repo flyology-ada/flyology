@@ -110,8 +110,11 @@ package body System.Gnatevl.Contexts is
           (Item.Stack, Usable_Size, OSI.PROT_READ + OSI.PROT_WRITE);
       if Result /= 0 then
          Result := Munmap (Item.Mapping, Item.Mapping_Size);
-         pragma Unreferenced (Result);
          Free (Item);
+         if Result /= 0 then
+            raise Program_Error with
+              "GNATEVL failed to release unusable task stack";
+         end if;
          return null;
       end if;
 
@@ -149,7 +152,9 @@ package body System.Gnatevl.Contexts is
 
       if Item.Owns_Mapping then
          Result := Munmap (Item.Mapping, Item.Mapping_Size);
-         pragma Assert (Result = 0);
+         if Result /= 0 then
+            raise Program_Error with "GNATEVL task stack release failed";
+         end if;
       end if;
       Free (Item);
    end Destroy;

@@ -23,12 +23,24 @@ package body System.Gnatevl.Scheduler is
    use type OSI.pthread_t;
    use type Pollers.Event_Kind;
    use type Pollers.Interest;
+   use type Scheduling.Destruction_Plan;
 
    Scheduler_Stack_Size : constant C.size_t := 256 * 1_024;
    Timer_Check_Interval : constant := 64;
+   Poll_Event_Budget    : constant := 64;
    No_Deadline          : constant Duration := Scheduling.No_Deadline;
 
    type Fiber_State is (Running, Ready, Waiting, Finished);
+
+   function Phase_Of
+     (State : Fiber_State) return Scheduling.Fiber_Phase
+   is
+     (case State is
+         when Running  => Scheduling.Running,
+         when Ready    => Scheduling.Ready,
+         when Waiting  => Scheduling.Waiting,
+         when Finished => Scheduling.Finished);
+
    type Fiber;
    type Fiber_Access is access all Fiber;
 
@@ -44,6 +56,7 @@ package body System.Gnatevl.Scheduler is
       IO_Wait    : Boolean := False;
       IO_Descriptor : C.int := -1;
       IO_Interest : Pollers.Interest := Pollers.Readable;
+      Destroy_Requested : Boolean := False;
       Next_Ready : Fiber_Access;
       Next_All   : Fiber_Access;
    end record;
@@ -82,23 +95,29 @@ package body System.Gnatevl.Scheduler is
    function Find (T : System.Address) return Fiber_Access;
    procedure Enqueue (Item : not null Fiber_Access);
    procedure Remove_From_Ready (Item : not null Fiber_Access);
+   procedure Reap (Item : not null Fiber_Access);
    function Clock return Duration;
    function Promote_Expired_Timers return Duration;
    function Is_Event_Thread return Boolean;
    procedure Handle_Poll_Event (Event : Pollers.Poll_Event);
+   procedure Poll_Ready_Events;
 
    procedure Lock is
       Result : constant C.int :=
         OSI.pthread_mutex_lock (Scheduler_Lock'Access);
    begin
-      pragma Assert (Result = 0);
+      if Result /= 0 then
+         raise Program_Error with "GNATEVL scheduler lock failed";
+      end if;
    end Lock;
 
    procedure Unlock is
       Result : constant C.int :=
         OSI.pthread_mutex_unlock (Scheduler_Lock'Access);
    begin
-      pragma Assert (Result = 0);
+      if Result /= 0 then
+         raise Program_Error with "GNATEVL scheduler unlock failed";
+      end if;
    end Unlock;
 
    function Find (T : System.Address) return Fiber_Access is
@@ -155,6 +174,39 @@ package body System.Gnatevl.Scheduler is
       end loop;
    end Remove_From_Ready;
 
+   procedure Reap (Item : not null Fiber_Access) is
+      Position : Fiber_Access := All_Fibers;
+      Previous : Fiber_Access;
+      Victim   : Fiber_Access := Item;
+   begin
+      if Scheduling.Plan_Destroy (Phase_Of (Item.State)) = Scheduling.Defer
+      then
+         raise Program_Error with "attempt to reap a running GNATEVL task";
+      end if;
+
+      if Item.State = Ready then
+         Remove_From_Ready (Item);
+      end if;
+
+      while Position /= null and then Position /= Item loop
+         Previous := Position;
+         Position := Position.Next_All;
+      end loop;
+      if Position = null then
+         raise Program_Error with "GNATEVL task missing from scheduler";
+      elsif Previous = null then
+         All_Fibers := Item.Next_All;
+      else
+         Previous.Next_All := Item.Next_All;
+      end if;
+
+      if Current_Fiber = Item then
+         Current_Fiber := null;
+      end if;
+      Contexts.Destroy (Item.Context);
+      Free (Victim);
+   end Reap;
+
    function Clock return Duration is
       Now    : aliased System.C_Time.timespec;
       Result : C.int;
@@ -162,7 +214,9 @@ package body System.Gnatevl.Scheduler is
       Result :=
         OSI.clock_gettime
           (OSI.clockid_t (OSC.CLOCK_RT_Ada), Now'Access);
-      pragma Assert (Result = 0);
+      if Result /= 0 then
+         raise Program_Error with "GNATEVL monotonic clock failed";
+      end if;
       return System.C_Time.To_Duration (Now);
    end Clock;
 
@@ -182,9 +236,8 @@ package body System.Gnatevl.Scheduler is
                   Item.IO_Descriptor := -1;
                   Enqueue (Item);
                when Scheduling.Pending =>
-                  if Nearest < 0.0 or else Item.Deadline < Nearest then
-                     Nearest := Item.Deadline;
-                  end if;
+                  Nearest :=
+                    Scheduling.Earlier_Deadline (Nearest, Item.Deadline);
             end case;
          end if;
          Item := Item.Next_All;
@@ -281,12 +334,18 @@ package body System.Gnatevl.Scheduler is
       All_Fibers := Item;
       Enqueue (Item);
       Unlock;
-      return (if Pollers.Wake (Scheduler_Poller) then 0 else -1);
+      if not Pollers.Wake (Scheduler_Poller) then
+         raise Program_Error with "GNATEVL create wake failed";
+      end if;
+      return 0;
    end Create;
 
    function Is_Event_Task (T : System.Address) return C.int is
       Result : C.int;
    begin
+      if not Initialized or else T = System.Null_Address then
+         return 0;
+      end if;
       Lock;
       Result := (if Find (T) = null then 0 else 1);
       Unlock;
@@ -408,14 +467,18 @@ package body System.Gnatevl.Scheduler is
 
       if Task_Lock /= System.Null_Address then
          Result := Mutex_Unlock (Task_Lock);
-         pragma Assert (Result = 0);
+         if Result /= 0 then
+            raise Program_Error with "GNATEVL task unlock failed";
+         end if;
       end if;
 
       Contexts.Switch (Item.Context, Scheduler_Context);
 
       if Task_Lock /= System.Null_Address then
          Result := Mutex_Lock (Task_Lock);
-         pragma Assert (Result = 0);
+         if Result /= 0 then
+            raise Program_Error with "GNATEVL task relock failed";
+         end if;
       end if;
       if Timed_Out /= null then
          Timed_Out.all := (if Item.Timed_Out then 1 else 0);
@@ -444,39 +507,40 @@ package body System.Gnatevl.Scheduler is
       end if;
       Unlock;
 
-      return
-        (if not Made_Ready or else Pollers.Wake (Scheduler_Poller)
-         then 0
-         else -1);
+      if Made_Ready and then not Pollers.Wake (Scheduler_Poller) then
+         raise Program_Error with "GNATEVL task wake failed";
+      end if;
+      return 0;
    end Wake;
 
    function Destroy (T : System.Address) return C.int is
-      Item     : Fiber_Access;
-      Position : Fiber_Access;
-      Previous : Fiber_Access;
+      Item : Fiber_Access;
    begin
+      if not Initialized or else T = System.Null_Address then
+         return -1;
+      end if;
+
       Lock;
       Item := Find (T);
-      if Item = null or else Item.State /= Finished then
+      if Item = null then
          Unlock;
          return -1;
       end if;
 
-      Position := All_Fibers;
-      while Position /= Item loop
-         Previous := Position;
-         Position := Position.Next_All;
-      end loop;
-      if Previous = null then
-         All_Fibers := Item.Next_All;
-      else
-         Previous.Next_All := Item.Next_All;
-      end if;
-      Unlock;
+      --  Detach the ATCB identity immediately. Finalize_TCB may free and reuse
+      --  that address before a running fiber reaches its final switch.
+      Item.T := System.Null_Address;
+      Item.Destroy_Requested := True;
 
-      Contexts.Destroy (Item.Context);
-      Free (Item);
-      return 0;
+      case Scheduling.Plan_Destroy (Phase_Of (Item.State)) is
+         when Scheduling.Defer =>
+            Unlock;
+            return 0;
+         when Scheduling.Reap_Now =>
+            Reap (Item);
+            Unlock;
+            return 0;
+      end case;
    end Destroy;
 
    procedure Fiber_Main (Argument : System.Address) is
@@ -525,6 +589,25 @@ package body System.Gnatevl.Scheduler is
       end loop;
    end Handle_Poll_Event;
 
+   procedure Poll_Ready_Events is
+      Waited : Boolean;
+      Event  : Pollers.Poll_Event;
+   begin
+      --  Poll with a bounded budget while runnable fibers exist. This keeps
+      --  descriptor readiness moving without allowing a hot I/O set to starve
+      --  the ready queue in the opposite direction.
+      for Count in 1 .. Poll_Event_Budget loop
+         Unlock;
+         Waited := Pollers.Wait (Scheduler_Poller, 0.0, Event);
+         Lock;
+         if not Waited then
+            raise Program_Error with "GNATEVL readiness poll failed";
+         end if;
+         exit when Event.Kind = Pollers.Timeout_Event;
+         Handle_Poll_Event (Event);
+      end loop;
+   end Poll_Ready_Events;
+
    procedure Scheduler_Main (Argument : System.Address) is
       pragma Unreferenced (Argument);
       Dispatches_Until_Timer_Check : Natural := 0;
@@ -535,9 +618,14 @@ package body System.Gnatevl.Scheduler is
    begin
       loop
          Timeout := No_Deadline;
-         if Ready_Head = null or else Dispatches_Until_Timer_Check = 0 then
+         if Scheduling.Maintenance_Due
+           (Ready_Head /= null, Dispatches_Until_Timer_Check)
+         then
             Timeout := Promote_Expired_Timers;
             Dispatches_Until_Timer_Check := Timer_Check_Interval;
+            if Ready_Head /= null then
+               Poll_Ready_Events;
+            end if;
          end if;
 
          if Ready_Head /= null then
@@ -546,16 +634,28 @@ package body System.Gnatevl.Scheduler is
             Next.Next_Ready := null;
             Next.State := Running;
             Current_Fiber := Next;
+            if Dispatches_Until_Timer_Check = 0 then
+               raise Program_Error with
+                 "GNATEVL scheduler maintenance counter invariant failed";
+            end if;
             Dispatches_Until_Timer_Check :=
-              Dispatches_Until_Timer_Check - 1;
+              Scheduling.After_Dispatch
+                (Positive (Dispatches_Until_Timer_Check));
             Unlock;
             Contexts.Switch (Scheduler_Context, Next.Context);
+            if Scheduling.Should_Reap_After_Switch
+              (Phase_Of (Next.State), Next.Destroy_Requested)
+            then
+               Reap (Next);
+            end if;
          else
             Current_Fiber := null;
             Unlock;
             Waited := Pollers.Wait (Scheduler_Poller, Timeout, Event);
-            pragma Assert (Waited);
             Lock;
+            if not Waited then
+               raise Program_Error with "GNATEVL readiness wait failed";
+            end if;
             Handle_Poll_Event (Event);
          end if;
       end loop;

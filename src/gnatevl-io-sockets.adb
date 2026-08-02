@@ -1,14 +1,14 @@
 with Ada.Real_Time;
 with Ada.Unchecked_Conversion;
+with GNAT.OS_Lib;
 with Gnatevl.Time_Math;
+with Gnatevl.Wait_Policy;
 with Interfaces.C;
 with System;
+with System.OS_Constants;
 
 package body Gnatevl.IO.Sockets is
    package Sockets renames GNAT.Sockets;
-
-   EINTR        : constant := 4;
-   EWOULDBLOCK  : constant := 35;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
@@ -27,9 +27,8 @@ package body Gnatevl.IO.Sockets is
       Length  : System.Address) return Interfaces.C.int;
    pragma Import (C, C_Accept, "accept");
 
-   function Current_Errno return Interfaces.C.int;
-   pragma Import (C, Current_Errno, "__get_errno");
-
+   procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
+   pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
    function Native_Descriptor
      (Socket : Sockets.Socket_Type) return Descriptor
    is
@@ -43,6 +42,18 @@ package body Gnatevl.IO.Sockets is
       Condition : Wait_Kind;
       Started   : Ada.Real_Time.Time;
       Timeout   : Duration);
+
+   procedure Receive_Prepared
+     (Socket  : Sockets.Socket_Type;
+      Item    : out Ada.Streams.Stream_Element_Array;
+      Last    : out Ada.Streams.Stream_Element_Offset;
+      Timeout : Duration);
+
+   procedure Send_Prepared
+     (Socket  : Sockets.Socket_Type;
+      Item    : Ada.Streams.Stream_Element_Array;
+      Last    : out Ada.Streams.Stream_Element_Offset;
+      Timeout : Duration);
 
    function Remaining
      (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration
@@ -84,9 +95,19 @@ package body Gnatevl.IO.Sockets is
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := Infinite)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
       Prepare (Socket);
+      Receive_Prepared (Socket, Item, Last, Timeout);
+   end Receive;
+
+   procedure Receive_Prepared
+     (Socket  : Sockets.Socket_Type;
+      Item    : out Ada.Streams.Stream_Element_Array;
+      Last    : out Ada.Streams.Stream_Element_Offset;
+      Timeout : Duration)
+   is
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+   begin
       loop
          begin
             Sockets.Receive_Socket (Socket, Item, Last);
@@ -103,7 +124,7 @@ package body Gnatevl.IO.Sockets is
                end case;
          end;
       end loop;
-   end Receive;
+   end Receive_Prepared;
 
    procedure Receive_Exactly
      (Socket  : Sockets.Socket_Type;
@@ -116,7 +137,7 @@ package body Gnatevl.IO.Sockets is
    begin
       Prepare (Socket);
       while First <= Item'Last loop
-         Receive
+         Receive_Prepared
            (Socket,
             Item (First .. Item'Last),
             Last,
@@ -134,9 +155,19 @@ package body Gnatevl.IO.Sockets is
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := Infinite)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
       Prepare (Socket);
+      Send_Prepared (Socket, Item, Last, Timeout);
+   end Send;
+
+   procedure Send_Prepared
+     (Socket  : Sockets.Socket_Type;
+      Item    : Ada.Streams.Stream_Element_Array;
+      Last    : out Ada.Streams.Stream_Element_Offset;
+      Timeout : Duration)
+   is
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+   begin
       loop
          begin
             Sockets.Send_Socket (Socket, Item, Last);
@@ -153,7 +184,7 @@ package body Gnatevl.IO.Sockets is
                end case;
          end;
       end loop;
-   end Send;
+   end Send_Prepared;
 
    procedure Send_All
      (Socket  : Sockets.Socket_Type;
@@ -166,7 +197,7 @@ package body Gnatevl.IO.Sockets is
    begin
       Prepare (Socket);
       while First <= Item'Last loop
-         Send
+         Send_Prepared
            (Socket,
             Item (First .. Item'Last),
             Last,
@@ -190,47 +221,44 @@ package body Gnatevl.IO.Sockets is
    begin
       Prepare (Server);
       loop
+         declare
+            Result : constant Interfaces.C.int :=
+              C_Accept
+                (To_Descriptor (Server),
+                 System.Null_Address,
+                 System.Null_Address);
+            Error_Code : Integer;
          begin
-            declare
-               Result : constant Interfaces.C.int :=
-                 C_Accept
-                   (To_Descriptor (Server),
-                    System.Null_Address,
-                    System.Null_Address);
-               Error_Code : Interfaces.C.int;
-            begin
-               if Result < 0 then
-                  Error_Code := Current_Errno;
-                  if Error_Code = EWOULDBLOCK then
+            if Result < 0 then
+               Error_Code := GNAT.OS_Lib.Errno;
+               case Wait_Policy.Classify_Error
+                 (Interfaces.C.int (Error_Code),
+                  Interfaces.C.int (System.OS_Constants.EWOULDBLOCK),
+                  Interfaces.C.int (System.OS_Constants.EINTR))
+               is
+                  when Wait_Policy.Wait_For_Ready =>
                      Wait_For (Server, For_Read, Started, Timeout);
-                  elsif Error_Code = EINTR then
+                  when Wait_Policy.Retry_Operation =>
                      null;
-                  else
+                  when Wait_Policy.Fail_Operation =>
                      raise Sockets.Socket_Error with
                        "accept failed, errno=" & Error_Code'Image;
-                  end if;
-               else
-                  Accepted := To_Socket (Result);
-                  Peer := Sockets.Get_Peer_Name (Accepted);
-               end if;
-            end;
-
-            if Accepted /= Sockets.No_Socket then
+               end case;
+            else
+               Accepted := To_Socket (Result);
+               Disable_SIGPIPE (Result);
+               Peer := Sockets.Get_Peer_Name (Accepted);
                Prepare (Accepted);
                Socket := Accepted;
                Address := Peer;
                return;
             end if;
          exception
-            when Occurrence : Sockets.Socket_Error =>
-               case Sockets.Resolve_Exception (Occurrence) is
-                  when Sockets.Resource_Temporarily_Unavailable =>
-                     Wait_For (Server, For_Read, Started, Timeout);
-                  when Sockets.Interrupted_System_Call =>
-                     null;
-                  when others =>
-                     raise;
-               end case;
+            when others =>
+               if Accepted /= Sockets.No_Socket then
+                  Sockets.Close_Socket (Accepted);
+               end if;
+               raise;
          end;
       end loop;
    end Accept_Connection;

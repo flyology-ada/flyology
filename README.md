@@ -131,6 +131,13 @@ runtime suspension or yield point; otherwise it owns the loop. A native task is
 the intended designation for code that blocks unpredictably, invokes blocking
 foreign libraries, or needs independent CPU execution.
 
+`delay 0.0` is an explicit cooperative yield for an evented task. A permanently
+runnable yielding task does not starve descriptors: after at most 64 dispatches,
+the scheduler promotes expired timers and drains up to 64 immediately available
+poll events before returning to the ready queue. Both budgets are explicit
+policy, keeping I/O moving without allowing a hot descriptor set to monopolize
+the loop in the opposite direction.
+
 ## Task-aware I/O
 
 GNATEVL exposes synchronous-looking operations in:
@@ -174,6 +181,11 @@ event-loop thread.
 Descriptor registrations are one-shot so the resumed task owns the retry and
 decides whether another wait is needed. Exact reads and complete writes loop
 over partial progress while preserving a single deadline.
+
+Accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are exposed to
+the caller. This matches GNAT.Sockets' process-safety convention while retaining
+the raw nonblocking `accept(2)` retry path required by the event loop. Native
+`poll(2)` waits retry `EINTR` with a recomputed remaining monotonic deadline.
 
 ### Timers
 
@@ -227,20 +239,29 @@ and coordination in Ada while treating the OS ABI as a narrow platform layer.
 ## SPARK proof boundary
 
 SPARK can cover the deterministic policy kernels without pretending that the
-entire task runtime is currently proofable. The first proved production unit is
-`Gnatevl.Time_Math`, which implements the timeout clamp used by socket retry
-loops and the nanosecond/millisecond conversions used by event-loop and native
-descriptor waits. Its contracts cover the infinite-timeout sentinel,
-non-expired timeout, expiration, remaining-time cases, rounding up to poll
-milliseconds, and saturation at the `poll(2)` integer limit.
+entire task runtime is currently proofable. `Gnatevl.Time_Math` implements the
+timeout clamp used by socket retry loops and the nanosecond/millisecond
+conversions used by event-loop and native descriptor waits. Its contracts cover
+the infinite-timeout sentinel, non-expired timeout, expiration, remaining-time
+cases, rounding up to poll milliseconds, and saturation at the `poll(2)` integer
+limit.
+
+Two more production policy units prove native `poll` and `accept` result
+classification, including `EINTR` retry and would-block handling, and regular
+file open validation and exact Darwin `O_RDONLY`/`O_WRONLY`/`O_RDWR`, `O_CREAT`,
+and `O_TRUNC` flag composition. The Ada import of variadic `open(2)` remains an
+ABI boundary; on AArch64 Darwin it deliberately uses GNAT's `C_Variadic_2`
+calling convention.
 
 The runtime's production ready-queue comparator is also a SPARK unit. Its proof
 establishes that higher priorities sort first, equal priorities retain FIFO
 sequence order, and the resulting relation is irreflexive, asymmetric, and
 transitive. The same unit proves scheduler deadline classification and safe
-calculation of the next poll timeout. The intrusive linked-list updates use
-these proved decisions but remain outside SPARK until pointer ownership is
-factored from scheduler locking.
+calculation of the next poll timeout. It now also proves earliest-deadline
+selection, maintenance cadence, dispatch-counter safety, and the distinction
+between immediate and deferred fiber destruction. The intrusive linked-list
+updates and actual context handoff use these proved decisions but remain outside
+SPARK until pointer ownership is factored from scheduler locking.
 
 Run the proof through the Alire-provided GNATprove toolchain:
 
@@ -248,14 +269,14 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
-The current run discharges 39 flow, functional-contract, termination, and
-run-time-safety checks across the two production proof targets. Good next proof
-candidates are intrusive ready-list insertion/removal invariants, scheduler
-state-transition legality, minimum-deadline selection over the fiber set, and
-descriptor wake matching. The GNARL tasking integration, imported system calls,
-address conversions, assembly register swap, and kernel behavior remain trusted
-boundaries. These can be wrapped in contracts, but GNATprove cannot establish
-their implementations from this Ada source tree.
+The current run discharges 63 flow, functional-contract, termination, and
+run-time-safety checks across four production policy units, with zero unproved
+checks. Good next proof candidates are intrusive ready-list insertion/removal
+invariants, whole-list minimum-deadline selection, and descriptor wake matching.
+The GNARL tasking integration, imported system calls, address conversions,
+assembly register swap, and kernel behavior remain trusted boundaries. These
+can be wrapped in contracts, but GNATprove cannot establish their implementations
+from this Ada source tree.
 
 ## Portability boundaries
 
@@ -284,7 +305,8 @@ rather than hidden behind a claim of universal portability.
 
 ## Build and test
 
-The project expects Alire at `~/alr` and an installed GNAT 16.1 toolchain:
+The project expects Alire at `~/alr` and an installed GNAT 16.1 toolchain. Set
+`ALR` to override the executable location:
 
 ```sh
 ./scripts/prepare-rts.sh
@@ -308,7 +330,12 @@ Current smoke coverage includes:
 - evented and native task activation, rendezvous, protected operations, and
   timers;
 - evented/native socket-pair transfer and timeout behavior;
-- native TCP connect, accept, send, and receive behavior.
+- descriptor-readiness fairness under a continuously yielding evented task;
+- read/write/create/truncate file-open combinations and same-descriptor reads;
+- repeated evented-child teardown under a native master, exercising deferred
+  fiber destruction and ATCB-address reuse;
+- native TCP connect, accept, send, and receive behavior, including verification
+  that accepted sockets suppress `SIGPIPE`.
 
 ## Showcases
 
@@ -343,8 +370,8 @@ Five-run medians on the development Apple Silicon machine:
 
 | Workload | Evented tasks | pthread tasks | Result |
 | --- | ---: | ---: | --- |
-| 256 tasks × 100 yields | 19.584 ms | 14.966 ms | pthreads 1.31× faster |
-| 2,048 tasks × 20 ms wait | 76.902 ms | 306.634 ms | evented 3.99× faster |
+| 256 tasks × 100 yields | 25.910 ms | 17.935 ms | pthreads 1.44× faster |
+| 2,048 tasks × 20 ms wait | 83.675 ms | 308.056 ms | evented 3.68× faster |
 
 This is the intended tradeoff, not a claim that event loops always win. Native
 threads are very competitive at modest concurrency and can run CPU work in
@@ -365,6 +392,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   cancellation protocol yet; finite deadlines are safer.
 - Timer expiration currently scans scheduler state rather than using a more
   scalable deadline heap.
+- Fiber guard pages make stack overflow fail fast, but the evented stack does
+  not yet have an alternate signal stack that translates the fault into Ada
+  `Storage_Error`; overflow currently terminates the process.
 - `Task_Info` produces an obsolete-feature warning in current GNAT, but it
   provides the required per-task designation without a compiler fork.
 - The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.

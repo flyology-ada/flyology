@@ -5,9 +5,10 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build_root="$project_root/build/rts"
 generated_include="$build_root/adainclude"
 generated_lib="$build_root/adalib"
+alr=${ALR:-"$HOME/alr"}
 
-source_include=$(/Users/yrashk/alr exec -- gcc -print-file-name=adainclude)
-source_lib=$(/Users/yrashk/alr exec -- gcc -print-file-name=adalib)
+source_include=$("$alr" exec -- gcc -print-file-name=adainclude)
+source_lib=$("$alr" exec -- gcc -print-file-name=adalib)
 
 mkdir -p "$generated_include" "$generated_lib" "$build_root/obj"
 chmod -R u+w "$generated_include" "$generated_lib"
@@ -23,7 +24,7 @@ cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
 
 cd "$build_root/obj"
-/Users/yrashk/alr exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnatp \
+"$alr" exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnata \
   -I "$generated_include" \
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \

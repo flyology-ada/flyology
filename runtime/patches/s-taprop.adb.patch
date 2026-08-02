@@ -146,6 +146,9 @@
 +             (Self_ID.Common.LL.L'Address,
 +              -1.0,
 +              Ignored'Access);
++         if Result /= 0 then
++            raise Program_Error with "GNATEVL sleep failed";
++         end if;
 +      else
 +         Result :=
 +           pthread_cond_wait
@@ -179,14 +182,21 @@
 +         return;
 +      end if;
 +
++      Timedout := True;
++      Yielded := False;
++      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         return;
++      end if;
++
 +      Result :=
 +        Event_Sleep
 +          (Self_ID.Common.LL.L'Address,
 +           Event_Deadline (Time, Mode),
 +           Event_Result'Access);
-+      pragma Assert (Result = 0);
++      if Result /= 0 then
++         raise Program_Error with "GNATEVL timed sleep failed";
++      end if;
 +      Timedout := Event_Result /= 0;
-+      Yielded := False;
 +   end Timed_Sleep;
 @@ -526,10 +624,74 @@
 -   procedure Timed_Delay
@@ -210,7 +220,9 @@
 +      Write_Lock (Self_ID);
 +      Deadline := Event_Deadline (Time, Mode);
 +
-+      if Deadline > Monotonic.Monotonic_Clock then
++      if Deadline > Monotonic.Monotonic_Clock
++        and then Self_ID.Pending_ATC_Level >= Self_ID.ATC_Nesting_Level
++      then
 +         Self_ID.Common.State := Delay_Sleep;
 +         loop
 +            Result :=
@@ -218,7 +230,9 @@
 +                (Self_ID.Common.LL.L'Address,
 +                 Deadline,
 +                 Event_Result'Access);
-+            pragma Assert (Result = 0);
++            if Result /= 0 then
++               raise Program_Error with "GNATEVL timed delay failed";
++            end if;
 +            exit when Event_Result /= 0
 +              or else Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
 +         end loop;
@@ -227,7 +241,9 @@
 +
 +      Unlock (Self_ID);
 +      Result := Event_Yield;
-+      pragma Assert (Result = 0);
++      if Result /= 0 then
++         raise Program_Error with "GNATEVL delay yield failed";
++      end if;
 +   end Timed_Delay;
 +
 +   function Event_Deadline
@@ -257,6 +273,9 @@
 -      Result := pthread_cond_signal (T.Common.LL.CV'Access);
 +      if Is_Event_Task (T) then
 +         Result := Event_Wake (To_Address (T));
++         if Result /= 0 then
++            raise Program_Error with "GNATEVL wake failed";
++         end if;
 +      else
 +         Result := pthread_cond_signal (T.Common.LL.CV'Access);
 +      end if;
@@ -265,12 +284,15 @@
 @@ -559,11 +725,15 @@
    procedure Yield (Do_Yield : Boolean := True) is
        Result : Interfaces.C.int;
-       pragma Unreferenced (Result);
+-      pragma Unreferenced (Result);
     begin
        if Do_Yield then
 -         Result := sched_yield;
 +         if Event_Current /= System.Null_Address then
 +            Result := Event_Yield;
++            if Result /= 0 then
++               raise Program_Error with "GNATEVL yield failed";
++            end if;
 +         else
 +            Result := sched_yield;
 +         end if;
@@ -284,7 +306,9 @@
 +         Result :=
 +           Event_Set_Priority
 +             (To_Address (T), Interfaces.C.int (Prio));
-+         pragma Assert (Result = 0);
++         if Result /= 0 then
++            raise Program_Error with "GNATEVL priority update failed";
++         end if;
 +         return;
 +      end if;
 +
@@ -315,7 +339,9 @@
     begin
 +      if Is_Event_Task (T) then
 +         Result := Event_Destroy (To_Address (T));
-+         pragma Assert (Result = 0);
++         if Result /= 0 then
++            raise Program_Error with "GNATEVL task destruction failed";
++         end if;
 +      end if;
 +
        Result := pthread_mutex_destroy (T.Common.LL.L'Access);
@@ -326,7 +352,9 @@
 -      if Abort_Handler_Installed then
 +      if Is_Event_Task (T) then
 +         Result := Event_Wake (To_Address (T));
-+         pragma Assert (Result = 0);
++         if Result /= 0 then
++            raise Program_Error with "GNATEVL abort wake failed";
++         end if;
 +      elsif Abort_Handler_Installed then
           Result :=
             pthread_kill
@@ -334,11 +362,15 @@
       Enter_Task (Environment_Task);
 +
 +      Result := Event_Initialize (To_Address (Environment_Task));
-+      pragma Assert (Result = 0);
++      if Result /= 0 then
++         raise Program_Error with "GNATEVL initialization failed";
++      end if;
 +      Result :=
 +        Event_Set_Priority
 +          (To_Address (Environment_Task),
 +           Interfaces.C.int (Environment_Task.Common.Current_Priority));
-+      pragma Assert (Result = 0);
++      if Result /= 0 then
++         raise Program_Error with "GNATEVL initial priority failed";
++      end if;
 
        if State

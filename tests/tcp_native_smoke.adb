@@ -4,9 +4,41 @@ with Ada.Text_IO;
 with GNAT.Sockets;
 with Gnatevl;
 with Gnatevl.IO.Sockets;
+with Interfaces.C;
+with System;
 
 procedure TCP_Native_Smoke is
    use Ada.Streams;
+
+   package C renames Interfaces.C;
+   use type C.int;
+
+   SOL_SOCKET   : constant C.int := 16#FFFF#;
+   SO_NOSIGPIPE : constant C.int := 16#1022#;
+
+   function Get_Socket_Option
+     (Socket     : C.int;
+      Level      : C.int;
+      Option     : C.int;
+      Value      : System.Address;
+      Value_Size : access C.unsigned) return C.int;
+   pragma Import (C, Get_Socket_Option, "getsockopt");
+
+   function SIGPIPE_Is_Disabled
+     (Socket : GNAT.Sockets.Socket_Type) return Boolean
+   is
+      Value : aliased C.int := 0;
+      Size  : aliased C.unsigned := C.unsigned (C.int'Size / 8);
+   begin
+      return
+        Get_Socket_Option
+          (C.int (Gnatevl.IO.Sockets.Native_Descriptor (Socket)),
+           SOL_SOCKET,
+           SO_NOSIGPIPE,
+           Value'Address,
+           Size'Access) = 0
+        and then Value = 1;
+   end SIGPIPE_Is_Disabled;
 
    Listener : GNAT.Sockets.Socket_Type;
    Address  : GNAT.Sockets.Sock_Addr_Type;
@@ -59,16 +91,24 @@ begin
          From : GNAT.Sockets.Sock_Addr_Type;
          Data : Stream_Element_Array (1 .. 1);
          Last : Stream_Element_Offset;
+         Stage : Natural := 0;
       begin
+         Stage := 1;
          Gnatevl.IO.Sockets.Accept_Connection
            (Listener, Peer, From, Timeout => 1.0);
+         Stage := 2;
          Gnatevl.IO.Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
-         Results.Report (Last = Data'Last and then Data (1) = 42);
+         Stage := 3;
+         Results.Report
+           (Last = Data'Last
+            and then Data (1) = 42
+            and then SIGPIPE_Is_Disabled (Peer));
+         Stage := 4;
          GNAT.Sockets.Close_Socket (Peer);
       exception
          when Occurrence : others =>
             Ada.Text_IO.Put_Line
-              ("native server failed: "
+              ("native server failed at stage" & Stage'Image & ": "
                & Ada.Exceptions.Exception_Information (Occurrence));
             Results.Report (False);
       end Server;
@@ -76,21 +116,27 @@ begin
       task body Client is
          Data : constant Stream_Element_Array (1 .. 1) := [1 => 42];
          Last : Stream_Element_Offset;
+         Stage : Natural := 0;
       begin
+         Stage := 1;
          delay 0.020;
          declare
             Socket : GNAT.Sockets.Socket_Type;
          begin
             GNAT.Sockets.Create_Socket (Socket);
+            Stage := 2;
             Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
+            Stage := 3;
             Gnatevl.IO.Sockets.Send (Socket, Data, Last, Timeout => 1.0);
+            Stage := 4;
             Results.Report (Last = Data'Last);
+            Stage := 5;
             GNAT.Sockets.Close_Socket (Socket);
          end;
       exception
          when Occurrence : others =>
             Ada.Text_IO.Put_Line
-              ("native client failed: "
+              ("native client failed at stage" & Stage'Image & ": "
                & Ada.Exceptions.Exception_Information (Occurrence));
             Results.Report (False);
       end Client;
