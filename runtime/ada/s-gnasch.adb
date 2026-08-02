@@ -44,6 +44,9 @@ package body System.Gnatevl.Scheduler is
    Registry_Bucket_Count : constant := 16_381;
    subtype Registry_Bucket_Index is
      Natural range 0 .. Registry_Bucket_Count - 1;
+   Registry_Shard_Count : constant := 64;
+   subtype Registry_Shard_Index is
+     Natural range 0 .. Registry_Shard_Count - 1;
    --  Readiness is local to a loop, so each group owns a smaller prime-sized
    --  descriptor table. Collision chains also represent legitimate fan-out
    --  when several tasks wait on the same descriptor and direction.
@@ -95,6 +98,7 @@ package body System.Gnatevl.Scheduler is
       Next_IO    : Fiber_Access;
       Next_Registry : Fiber_Access;
       Registry_Bucket : Registry_Bucket_Index := 0;
+      Registry_Shard  : Registry_Shard_Index := 0;
    end record;
 
    type Loop_Group is limited record
@@ -121,6 +125,8 @@ package body System.Gnatevl.Scheduler is
    type Group_Array is array (Group_Index) of Loop_Group_Access;
    type Registry_Bucket_Array is
      array (Registry_Bucket_Index) of Fiber_Access;
+   type Registry_Shard_Lock_Array is
+     array (Registry_Shard_Index) of aliased OSI.pthread_mutex_t;
 
    function Fiber_To_Address is new Ada.Unchecked_Conversion
      (Fiber_Access, System.Address);
@@ -137,12 +143,14 @@ package body System.Gnatevl.Scheduler is
    procedure Free_Timer_Heap is new Ada.Unchecked_Deallocation
      (Timer_Heap_Array, Timer_Heap_Access);
 
-   --  Registry_Lock protects Groups, Fiber_Registry, group membership counts
-   --  and reservations, and each Fiber.Group ownership pointer. A group lock
-   --  protects that group's fiber list, ready queue, timers, I/O state, and
-   --  current fiber. Code needing both always takes registry then group; the
-   --  migration handoff releases its source before taking its target.
-   Registry_Lock  : aliased OSI.pthread_mutex_t;
+   --  Each registry shard protects its hash chains, fiber lifetime, and the
+   --  Fiber.Group ownership pointer. Topology_Lock protects the group table,
+   --  startup state, and dedicated reservations. A group lock protects that
+   --  group's membership count, fiber list, ready queue, timers, I/O state,
+   --  and current fiber. Code needing all three takes shard, topology, group.
+   --  Hot Wake and Set_Priority paths take only one shard and one group.
+   Topology_Lock  : aliased OSI.pthread_mutex_t;
+   Registry_Shard_Locks : Registry_Shard_Lock_Array;
    Initialized    : Boolean := False;
    Groups         : Group_Array := (others => null);
    Fiber_Registry : Registry_Bucket_Array := (others => null);
@@ -167,18 +175,23 @@ package body System.Gnatevl.Scheduler is
    pragma Convention (C, Fiber_Main);
    pragma No_Return (Fiber_Main);
 
-   procedure Lock_Registry;
-   procedure Unlock_Registry;
+   procedure Lock_Topology;
+   procedure Unlock_Topology;
+   procedure Lock_Registry_Shard (Shard : Registry_Shard_Index);
+   procedure Unlock_Registry_Shard (Shard : Registry_Shard_Index);
    procedure Lock_Group (Group : not null Loop_Group_Access);
    procedure Unlock_Group (Group : not null Loop_Group_Access);
    procedure Fatal;
    pragma No_Return (Fatal);
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
-   --  Registry operations require Registry_Lock after bootstrap publishes
-   --  Initialized; Initialize registers the environment task single-threaded.
+   --  Registry operations require the bucket's shard lock after bootstrap
+   --  publishes Initialized; Initialize registers the environment task
+   --  single-threaded.
    function Registry_Bucket_For
      (T : System.Address) return Registry_Bucket_Index;
+   function Registry_Shard_For
+     (T : System.Address) return Registry_Shard_Index;
    function Find (T : System.Address) return Fiber_Access;
    procedure Register_Locked (Item : not null Fiber_Access);
    procedure Unregister_Locked (Item : not null Fiber_Access);
@@ -230,23 +243,41 @@ package body System.Gnatevl.Scheduler is
       C_Abort;
    end Fatal;
 
-   procedure Lock_Registry is
+   procedure Lock_Topology is
       Result : constant C.int :=
-        OSI.pthread_mutex_lock (Registry_Lock'Access);
+        OSI.pthread_mutex_lock (Topology_Lock'Access);
    begin
       if Result /= 0 then
          Fatal;
       end if;
-   end Lock_Registry;
+   end Lock_Topology;
 
-   procedure Unlock_Registry is
+   procedure Unlock_Topology is
       Result : constant C.int :=
-        OSI.pthread_mutex_unlock (Registry_Lock'Access);
+        OSI.pthread_mutex_unlock (Topology_Lock'Access);
    begin
       if Result /= 0 then
          Fatal;
       end if;
-   end Unlock_Registry;
+   end Unlock_Topology;
+
+   procedure Lock_Registry_Shard (Shard : Registry_Shard_Index) is
+      Result : constant C.int :=
+        OSI.pthread_mutex_lock (Registry_Shard_Locks (Shard)'Access);
+   begin
+      if Result /= 0 then
+         Fatal;
+      end if;
+   end Lock_Registry_Shard;
+
+   procedure Unlock_Registry_Shard (Shard : Registry_Shard_Index) is
+      Result : constant C.int :=
+        OSI.pthread_mutex_unlock (Registry_Shard_Locks (Shard)'Access);
+   begin
+      if Result /= 0 then
+         Fatal;
+      end if;
+   end Unlock_Registry_Shard;
 
    procedure Lock_Group (Group : not null Loop_Group_Access) is
       Result : constant C.int := OSI.pthread_mutex_lock (Group.Lock'Access);
@@ -270,15 +301,15 @@ package body System.Gnatevl.Scheduler is
       Thread_Group := Group;
       Group.Scheduler_Context := Contexts.Capture;
 
-      Lock_Registry;
+      Lock_Topology;
       Group.Started := Group.Scheduler_Context /= null;
       Group.Start_Failed := not Group.Started;
       if Group.Start_Failed then
-         Unlock_Registry;
+         Unlock_Topology;
          return System.Null_Address;
       end if;
 
-      Unlock_Registry;
+      Unlock_Topology;
       Lock_Group (Group);
       Scheduler_Main (Argument);
    end Group_Thread;
@@ -295,16 +326,16 @@ package body System.Gnatevl.Scheduler is
          return null;
       end if;
 
-      Lock_Registry;
+      Lock_Topology;
       Group := Groups (Group_Index (Id));
       if Group /= null then
          if Group.Dedicated /= Dedicated
            and then Scheduling.Dedicated_Group (Id)
          then
-            Unlock_Registry;
+            Unlock_Topology;
             return null;
          end if;
-         Unlock_Registry;
+         Unlock_Topology;
       else
          Group := new Loop_Group;
          Group.Id := Id;
@@ -312,12 +343,12 @@ package body System.Gnatevl.Scheduler is
          Result := OSI.pthread_mutex_init (Group.Lock'Access, null);
          if Result /= 0 then
             Free_Group (Group);
-            Unlock_Registry;
+            Unlock_Topology;
             return null;
          end if;
          if not Pollers.Initialize (Group.Scheduler_Poller) then
             Free_Group (Group);
-            Unlock_Registry;
+            Unlock_Topology;
             return null;
          end if;
 
@@ -329,26 +360,26 @@ package body System.Gnatevl.Scheduler is
               Group_Thread'Access,
               Group_To_Address (Group));
          --  pthread_create is the sole writer of Event_Thread. The new thread
-         --  cannot publish Started until it acquires Registry_Lock, which is
+         --  cannot publish Started until it acquires Topology_Lock, which is
          --  still held here, so readers cannot observe an uninitialized id.
          if Result /= 0 then
             Groups (Group_Index (Id)) := null;
             Pollers.Finalize (Group.Scheduler_Poller);
             Free_Group (Group);
-            Unlock_Registry;
+            Unlock_Topology;
             return null;
          end if;
-         Unlock_Registry;
+         Unlock_Topology;
       end if;
 
       --  This is a bounded, first-use-only startup wait. If called by an
       --  evented task, its source loop remains occupied until the new group
-      --  thread publishes Started or Start_Failed under Registry_Lock.
+      --  thread publishes Started or Start_Failed under Topology_Lock.
       loop
-         Lock_Registry;
+         Lock_Topology;
          Ready := Group.Started;
          Failed := Group.Start_Failed;
-         Unlock_Registry;
+         Unlock_Topology;
          exit when Ready or else Failed;
          Result := Sched_Yield;
          if Result /= 0 then
@@ -370,6 +401,14 @@ package body System.Gnatevl.Scheduler is
         (Value mod SSE.Integer_Address (Registry_Bucket_Count));
    end Registry_Bucket_For;
 
+   function Registry_Shard_For
+     (T : System.Address) return Registry_Shard_Index
+   is
+   begin
+      return Registry_Shard_Index
+        (Registry_Bucket_For (T) mod Registry_Shard_Count);
+   end Registry_Shard_For;
+
    function Find (T : System.Address) return Fiber_Access is
       Item : Fiber_Access;
    begin
@@ -389,6 +428,8 @@ package body System.Gnatevl.Scheduler is
         Registry_Bucket_For (Item.T);
    begin
       Item.Registry_Bucket := Bucket;
+      Item.Registry_Shard := Registry_Shard_Index
+        (Bucket mod Registry_Shard_Count);
       Item.Next_Registry := Fiber_Registry (Bucket);
       Fiber_Registry (Bucket) := Item;
    end Register_Locked;
@@ -701,13 +742,16 @@ package body System.Gnatevl.Scheduler is
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access)
    is
+      Shard : constant Registry_Shard_Index := Item.Registry_Shard;
    begin
       Item.Reaping := True;
       Unlock_Group (Group);
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
+      Lock_Topology;
       Lock_Group (Group);
       Reap_Locked (Item);
-      Unlock_Registry;
+      Unlock_Topology;
+      Unlock_Registry_Shard (Shard);
    end Reap_From_Scheduler;
 
    procedure Transfer
@@ -715,6 +759,7 @@ package body System.Gnatevl.Scheduler is
       Source : not null Loop_Group_Access)
    is
       Target : constant Loop_Group_Access := Item.Migration_Target;
+      Shard : constant Registry_Shard_Index := Item.Registry_Shard;
       Position : Fiber_Access := Source.Fibers;
       Previous : Fiber_Access;
       Wake_Target : Boolean := True;
@@ -737,11 +782,12 @@ package body System.Gnatevl.Scheduler is
       end if;
       Item.Next_Group := null;
       Source.Current_Fiber := null;
+      Source.Member_Count := Source.Member_Count - 1;
       Unlock_Group (Source);
 
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
+      Lock_Topology;
       Lock_Group (Target);
-      Source.Member_Count := Source.Member_Count - 1;
       if Source.Dedicated then
          Source.Reserved_For := System.Null_Address;
          Item.Reserved_Group := null;
@@ -759,7 +805,8 @@ package body System.Gnatevl.Scheduler is
          Enqueue (Target, Item);
       end if;
       Unlock_Group (Target);
-      Unlock_Registry;
+      Unlock_Topology;
+      Unlock_Registry_Shard (Shard);
 
       if Wake_Target and then not Pollers.Wake (Target.Scheduler_Poller) then
          Fatal;
@@ -818,10 +865,17 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Result := OSI.pthread_mutex_init (Registry_Lock'Access, null);
+      Result := OSI.pthread_mutex_init (Topology_Lock'Access, null);
       if Result /= 0 then
          return -1;
       end if;
+      for Shard in Registry_Shard_Index loop
+         Result := OSI.pthread_mutex_init
+           (Registry_Shard_Locks (Shard)'Access, null);
+         if Result /= 0 then
+            return -1;
+         end if;
+      end loop;
 
       Default_Group := new Loop_Group;
       Default_Group.Id := Default_Group_Id;
@@ -877,6 +931,7 @@ package body System.Gnatevl.Scheduler is
    is
       Item   : Fiber_Access;
       Target : Loop_Group_Access;
+      Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
       Group_Id : constant C.int :=
         (if Group < 0 then Default_Group_Id else Group);
    begin
@@ -910,9 +965,9 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
       if Find (T) /= null then
-         Unlock_Registry;
+         Unlock_Registry_Shard (Shard);
          Contexts.Destroy (Item.Context);
          Free_Fiber (Item);
          return -1;
@@ -924,7 +979,7 @@ package body System.Gnatevl.Scheduler is
       Target.Member_Count := Target.Member_Count + 1;
       Enqueue (Target, Item);
       Unlock_Group (Target);
-      Unlock_Registry;
+      Unlock_Registry_Shard (Shard);
       if not Pollers.Wake (Target.Scheduler_Poller) then
          Fatal;
       end if;
@@ -933,13 +988,15 @@ package body System.Gnatevl.Scheduler is
 
    function Is_Event_Task (T : System.Address) return C.int is
       Result : C.int;
+      Shard  : Registry_Shard_Index;
    begin
       if not Initialized or else T = System.Null_Address then
          return 0;
       end if;
-      Lock_Registry;
+      Shard := Registry_Shard_For (T);
+      Lock_Registry_Shard (Shard);
       Result := (if Find (T) = null then 0 else 1);
-      Unlock_Registry;
+      Unlock_Registry_Shard (Shard);
       return Result;
    end Is_Event_Task;
 
@@ -958,12 +1015,13 @@ package body System.Gnatevl.Scheduler is
    is
       Item   : Fiber_Access;
       Result : OSI.Thread_Id;
+      Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
       Item := Find (T);
       Result :=
         (if Item = null then OSI.pthread_self else Item.Group.Event_Thread);
-      Unlock_Registry;
+      Unlock_Registry_Shard (Shard);
       return Result;
    end Task_Thread;
 
@@ -975,6 +1033,9 @@ package body System.Gnatevl.Scheduler is
       Group   : Loop_Group_Access;
       Item    : Fiber_Access;
       Current : constant System.Address := Current_Task;
+      Shard   : constant Registry_Shard_Index :=
+        Registry_Shard_For (Current);
+      Available : Boolean;
    begin
       if not Initialized or else Current = System.Null_Address then
          return -1;
@@ -982,12 +1043,14 @@ package body System.Gnatevl.Scheduler is
 
       for Attempt in 1 .. Natural (Maximum_Group_Id - Dedicated_First_Id + 1)
       loop
-         Lock_Registry;
+         Lock_Registry_Shard (Shard);
+         Lock_Topology;
          Item := Find (Current);
          if Item = null or else not Item.Can_Migrate
            or else Item.Reserved_Group /= null
          then
-            Unlock_Registry;
+            Unlock_Topology;
+            Unlock_Registry_Shard (Shard);
             return -1;
          end if;
 
@@ -995,25 +1058,31 @@ package body System.Gnatevl.Scheduler is
          Group := null;
          while Id <= Maximum_Group_Id loop
             Group := Groups (Group_Index (Id));
-            exit when Group = null
-              or else
-                (Group.Dedicated
-                 and then
-                   Scheduling.Dedicated_Available
-                     (Group.Member_Count,
-                      Group.Reserved_For /= System.Null_Address));
+            exit when Group = null;
+            Available := False;
+            if Group.Dedicated then
+               Lock_Group (Group);
+               Available := Scheduling.Dedicated_Available
+                 (Group.Member_Count,
+                  Group.Reserved_For /= System.Null_Address);
+               Unlock_Group (Group);
+            end if;
+            exit when Available;
             Id := Id + 1;
          end loop;
          if Id > Maximum_Group_Id then
-            Unlock_Registry;
+            Unlock_Topology;
+            Unlock_Registry_Shard (Shard);
             return -1;
          elsif Group /= null then
             Group.Reserved_For := Current;
             Item.Reserved_Group := Group;
-            Unlock_Registry;
+            Unlock_Topology;
+            Unlock_Registry_Shard (Shard);
             return Id;
          end if;
-         Unlock_Registry;
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
 
          Group := Ensure_Group (Id, Dedicated => True);
          if Group = null then
@@ -1033,10 +1102,10 @@ package body System.Gnatevl.Scheduler is
       if not Initialized or else not Scheduling.Valid_Group (Group) then
          return 0;
       end if;
-      Lock_Registry;
+      Lock_Topology;
       Item := Groups (Group_Index (Group));
       Result := (if Item /= null and then Item.Dedicated then 1 else 0);
-      Unlock_Registry;
+      Unlock_Topology;
       return Result;
    end Is_Dedicated_Group;
 
@@ -1044,8 +1113,13 @@ package body System.Gnatevl.Scheduler is
       Item   : Fiber_Access;
       Source : Loop_Group_Access;
       Target : Loop_Group_Access;
+      Current : constant System.Address := Current_Task;
+      Shard : constant Registry_Shard_Index :=
+        Registry_Shard_For (Current);
+      Target_Member_Count : Natural := 0;
+      Reservation_Matches : Boolean := False;
    begin
-      if Current_Task = System.Null_Address
+      if Current = System.Null_Address
         or else not Scheduling.Valid_Group (Group)
       then
          return -1;
@@ -1059,36 +1133,47 @@ package body System.Gnatevl.Scheduler is
       if Scheduling.Shared_Group (Group) then
          Target := Ensure_Group (Group, Dedicated => False);
       else
-         Lock_Registry;
+         Lock_Topology;
          Target := Groups (Group_Index (Group));
-         Unlock_Registry;
+         Unlock_Topology;
       end if;
       if Target = null then
          return -1;
       end if;
 
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
+      Lock_Topology;
+      if Target.Dedicated then
+         Lock_Group (Target);
+         Target_Member_Count := Target.Member_Count;
+         Unlock_Group (Target);
+         Reservation_Matches :=
+           Target.Reserved_For = Current;
+      end if;
       Lock_Group (Source);
       Item := Source.Current_Fiber;
       if Item = null
         or else Item.Group /= Source
+        or else Find (Current) /= Item
         or else
           not Scheduling.Migration_Allowed
             (Can_Migrate         => Item.Can_Migrate,
              Target_Dedicated    => Target.Dedicated,
-             Target_Member_Count => Target.Member_Count,
+             Target_Member_Count => Target_Member_Count,
              Reservation_Matches =>
-               Target.Reserved_For = Item.T
+               Reservation_Matches
                and then Item.Reserved_Group = Target)
       then
          Unlock_Group (Source);
-         Unlock_Registry;
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
          return -1;
       end if;
 
       Item.Migration_Target := Target;
       Item.State := Migrating;
-      Unlock_Registry;
+      Unlock_Topology;
+      Unlock_Registry_Shard (Shard);
       Contexts.Switch (Item.Context, Source.Scheduler_Context);
       return 0;
    end Migrate;
@@ -1157,11 +1242,12 @@ package body System.Gnatevl.Scheduler is
      (T : System.Address; Priority : C.int) return C.int
    is
       Item : Fiber_Access;
+      Shard : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
       Item := Find (T);
       if Item = null then
-         Unlock_Registry;
+         Unlock_Registry_Shard (Shard);
          return -1;
       end if;
       Lock_Group (Item.Group);
@@ -1174,7 +1260,7 @@ package body System.Gnatevl.Scheduler is
          Item.Priority := Priority;
       end if;
       Unlock_Group (Item.Group);
-      Unlock_Registry;
+      Unlock_Registry_Shard (Shard);
       return 0;
    end Set_Priority;
 
@@ -1251,11 +1337,12 @@ package body System.Gnatevl.Scheduler is
       Item       : Fiber_Access;
       Group      : Loop_Group_Access;
       Made_Ready : Boolean := False;
+      Shard      : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
-      Lock_Registry;
+      Lock_Registry_Shard (Shard);
       Item := Find (T);
       if Item = null then
-         Unlock_Registry;
+         Unlock_Registry_Shard (Shard);
          return -1;
       end if;
 
@@ -1269,7 +1356,7 @@ package body System.Gnatevl.Scheduler is
          Made_Ready := True;
       end if;
       Unlock_Group (Group);
-      Unlock_Registry;
+      Unlock_Registry_Shard (Shard);
 
       if Made_Ready and then not Pollers.Wake (Group.Scheduler_Poller) then
          Fatal;
@@ -1279,22 +1366,27 @@ package body System.Gnatevl.Scheduler is
 
    function Destroy (T : System.Address) return C.int is
       Item : Fiber_Access;
+      Shard : Registry_Shard_Index;
    begin
       if not Initialized or else T = System.Null_Address then
          return -1;
       end if;
 
-      Lock_Registry;
+      Shard := Registry_Shard_For (T);
+      Lock_Registry_Shard (Shard);
+      Lock_Topology;
       Item := Find (T);
       if Item = null then
-         Unlock_Registry;
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
          return -1;
       end if;
       Lock_Group (Item.Group);
 
       if Item.Reaping then
          Unlock_Group (Item.Group);
-         Unlock_Registry;
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
          return 0;
       end if;
 
@@ -1304,7 +1396,8 @@ package body System.Gnatevl.Scheduler is
       case Scheduling.Plan_Destroy (Phase_Of (Item.State)) is
          when Scheduling.Defer =>
             Unlock_Group (Item.Group);
-            Unlock_Registry;
+            Unlock_Topology;
+            Unlock_Registry_Shard (Shard);
             return 0;
          when Scheduling.Reap_Now =>
             declare
@@ -1313,7 +1406,8 @@ package body System.Gnatevl.Scheduler is
                Reap_Locked (Item);
                Unlock_Group (Group);
             end;
-            Unlock_Registry;
+            Unlock_Topology;
+            Unlock_Registry_Shard (Shard);
             return 0;
       end case;
    end Destroy;

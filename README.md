@@ -291,6 +291,7 @@ thread-pool runtime.
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
 | Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every evented task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
+| Shard the task registry | Independent loops and native wake sources should not serialize every lookup on one process-wide mutex | 64 shard locks isolate ordinary wake and priority paths; group creation, reservations, migration, and destruction still coordinate through a short-held topology lock |
 | Hash descriptor waiters per group | Readiness delivery must not scan every fiber once for every ready descriptor | Delivery is constant-time on average while collision chains retain same-descriptor reader/writer fan-out |
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
@@ -553,14 +554,15 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - First use of a loop waits synchronously for its pthread startup handshake. An
   evented caller occupies its source loop during this bounded `sched_yield`
   wait; subsequent use of the already-started loop does not wait.
-- Ready queues, fiber membership, timer scans, descriptor delivery, and dispatch
+- Ready queues, fiber membership, timer heaps, descriptor delivery, and dispatch
   use independent per-group locks, per-group fiber lists, and an 8,191-bucket
   descriptor-wait index. On the supported 64-bit targets, each lazily created
-  loop therefore carries about 64 KiB of fixed descriptor-index storage. A
-  short-held registry lock remains only for constant-time-average hashed lookup,
-  group allocation, and ownership handoff during cross-group wake, destruction,
-  priority changes, or migration. Its fixed 16,381-bucket table uses collision
-  chains and never resizes in a wake path.
+  loop therefore carries about 64 KiB of fixed descriptor-index storage. The
+  fixed 16,381-bucket task table uses collision chains, never resizes in a wake
+  path, and is protected by 64 independent shard locks. Ordinary wakeups and
+  priority changes take only the relevant shard and destination-group lock.
+  Group allocation, dedicated reservations, migration, and destruction also
+  use a short-held topology lock; topology changes remain globally serialized.
 - Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
   dedicated range and cannot be selected statically with the `CPU` aspect.
 - The environment task uses its pthread-owned initial stack and therefore
@@ -582,6 +584,5 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.
 
 The next architectural work is additional architectures and operating systems,
-explicit cancellation, fairness/preemption policy, scalable timer management,
-and more complete stress and semantic-conformance testing across both execution
-lanes.
+higher-level connection lifecycle APIs, fairness controls, and more complete
+stress and semantic-conformance testing across both execution lanes.
