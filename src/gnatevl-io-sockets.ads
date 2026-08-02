@@ -62,6 +62,9 @@ package Gnatevl.IO.Sockets is
    procedure Connect
      (Socket  : GNAT.Sockets.Socket_Type;
       Server  : GNAT.Sockets.Sock_Addr_Type;
-      Timeout : Duration := Infinite);
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor;
+      Interrupt_3 : Descriptor := Invalid_Descriptor);
 
 end Gnatevl.IO.Sockets;

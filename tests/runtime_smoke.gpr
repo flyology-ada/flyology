@@ -9,6 +9,7 @@ project Runtime_Smoke is
      ("cancellation_wake_smoke.adb",
       "connection_lifecycle_smoke.adb",
       "descriptor_ownership_smoke.adb",
+      "dns_smoke.adb",
       "default_policy_smoke.adb",
       "execution_groups_smoke.adb",
       "fault_injection_smoke.adb",

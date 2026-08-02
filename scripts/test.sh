@@ -62,6 +62,7 @@ for test_main in \
   cancellation_wake_smoke \
   connection_lifecycle_smoke \
   descriptor_ownership_smoke \
+  dns_smoke \
   execution_groups_smoke \
   fairness_smoke \
   files_smoke \

@@ -10,6 +10,7 @@ project Showcases is
       "connection_density.adb",
       "connection_lifecycle.adb",
       "cooperative_fairness.adb",
+      "dns_resolution.adb",
       "execution_groups.adb",
       "evented_file_io.adb",
       "evented_io.adb",

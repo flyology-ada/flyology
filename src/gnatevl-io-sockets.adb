@@ -324,7 +324,10 @@ package body Gnatevl.IO.Sockets is
    procedure Connect
      (Socket  : Sockets.Socket_Type;
       Server  : Sockets.Sock_Addr_Type;
-      Timeout : Duration := Infinite)
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor;
+      Interrupt_3 : Descriptor := Invalid_Descriptor)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Pending : Boolean := False;
@@ -349,7 +352,7 @@ package body Gnatevl.IO.Sockets is
       if Pending then
          Wait_For
            (Socket, For_Write, Started, Timeout,
-            Invalid_Descriptor, Invalid_Descriptor, Invalid_Descriptor);
+            Interrupt_1, Interrupt_2, Interrupt_3);
          declare
             Result : constant Sockets.Option_Type :=
               Sockets.Get_Socket_Option

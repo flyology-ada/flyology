@@ -390,6 +390,8 @@ GNATEVL exposes synchronous-looking operations in:
 - `Gnatevl.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
 - `Gnatevl.IO.Files`: open, close, positional read, and positional write.
+- `Gnatevl.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
+  resolver worker thread.
 - `Gnatevl.IO`: descriptor waits and task-mode detection used by the packages
   above.
 
@@ -445,6 +447,32 @@ the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
 process-safety convention while retaining the raw nonblocking `accept(2)` retry
 path required by the event loop. Native `poll(2)` waits retry `EINTR` with a
 recomputed remaining monotonic deadline.
+
+### DNS resolution
+
+`Gnatevl.IO.DNS.Resolve` is an in-tree Ada stub resolver. Numeric addresses and
+`localhost` return without opening a socket. Other names use numeric servers,
+search domains, `ndots`, attempt counts, timeouts, and rotation read from
+`/etc/resolv.conf`; `Resolve_Using` accepts explicit numeric endpoints for
+split-DNS applications and deterministic tests.
+
+Each attempt sends a nonblocking UDP query to one configured server and parks
+the calling task on the socket, deadline, and optional cancellation descriptors
+in one wait set. Replies must match the connected source, transaction ID,
+question name, type, and class. The bounded parser handles compressed names,
+A/AAAA records, CNAME chains, NXDOMAIN/NODATA negative TTLs, malformed packets,
+and compression or alias loops. A truncated UDP reply retries the same query
+over task-aware TCP; cancellation also covers connect, send, and receive. A
+64-entry process-local LRU cache honors bounded positive and negative TTLs and
+owns no descriptors, tasks, or shutdown resources.
+
+This is deliberately DNS, not libc `getaddrinfo` parity. It does not consult
+arbitrary NSS modules, LDAP, platform mDNS/Bonjour databases, or non-localhost
+`/etc/hosts` entries, and it does not validate DNSSEC. The resolver accepts up
+to four configured name servers, returns up to sixteen addresses, bounds UDP
+packets to 4096 bytes and TCP replies to 16 KiB, and caps cached TTLs at one day.
+Applications that require platform identity-service semantics should perform
+that lookup on an explicitly native task.
 
 ### Connection lifecycle
 
@@ -1166,6 +1194,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/evented_pipeline
 ./showcases/bin/many_evented_tasks
 ./showcases/bin/cooperative_fairness
+./showcases/bin/dns_resolution example.com
 ./showcases/bin/priority_scheduling
 ./showcases/bin/connection_lifecycle
 ./showcases/bin/cancellation_density evented 1000
@@ -1195,6 +1224,8 @@ The examples demonstrate:
   measurement and immediate release from a deliberately ten-second legacy
   quantum;
 - evented coordination with native CPU workers;
+- the same synchronous DNS API on native and evented tasks, backed by UDP/TCP
+  readiness rather than a resolver worker pool;
 - `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
   one-task thread, and rejection of unsafe live stock-native conversion;
 - evented versus pthread-backed tasks under identical source-level work;
