@@ -2,6 +2,7 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
 with System.Gnatevl.Contexts;
+with System.Gnatevl.File_Engine;
 with System.Gnatevl.Faults;
 with System.Gnatevl.Poller;
 with System.Gnatevl.Pool_Config;
@@ -13,6 +14,7 @@ with System.Storage_Elements;
 package body System.Gnatevl.Scheduler is
    package C renames Interfaces.C;
    package Contexts renames System.Gnatevl.Contexts;
+   package File_Engines renames System.Gnatevl.File_Engine;
    package Faults renames System.Gnatevl.Faults;
    package Pollers renames System.Gnatevl.Poller;
    package Pool_Config renames System.Gnatevl.Pool_Config;
@@ -178,6 +180,10 @@ package body System.Gnatevl.Scheduler is
       File_Length : C.size_t := 0;
       File_Offset : C.long_long := 0;
       File_For_Write : Boolean := False;
+      File_Cancel_Descriptor : C.int := -1;
+      File_Cancel_Requested : Boolean := False;
+      File_Cancel_Disposition : C.int := 0;
+      File_Cancel_Error : C.int := 0;
       Destroy_Requested : Boolean := False;
       Reaping     : Boolean := False;
       Can_Migrate : Boolean := True;
@@ -359,6 +365,18 @@ package body System.Gnatevl.Scheduler is
    procedure Queue_Pending_File_Locked
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
+   procedure Remove_Pending_File_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access);
+   procedure Complete_File_Locked
+     (Group     : not null Loop_Group_Access;
+      Item      : not null Fiber_Access;
+      Result    : C.long_long;
+      Error     : C.int;
+      Cancelled : Boolean);
+   function Request_File_Cancel_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access) return Boolean;
    procedure Submit_Pending_Files_Locked
      (Group : not null Loop_Group_Access);
    function Ensure_Timer_Capacity
@@ -886,6 +904,113 @@ package body System.Gnatevl.Scheduler is
       Group.Pending_File_Tail := Item;
    end Queue_Pending_File_Locked;
 
+   procedure Remove_Pending_File_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access)
+   is
+      Position : Fiber_Access := Group.Pending_File_Head;
+      Previous : Fiber_Access := null;
+   begin
+      if not Item.File_Pending then
+         return;
+      end if;
+      while Position /= null and then Position /= Item loop
+         Previous := Position;
+         Position := Position.Next_File;
+      end loop;
+      if Position = null then
+         Fatal;
+      elsif Previous = null then
+         Group.Pending_File_Head := Item.Next_File;
+      else
+         Previous.Next_File := Item.Next_File;
+      end if;
+      if Group.Pending_File_Tail = Item then
+         Group.Pending_File_Tail := Previous;
+      end if;
+      Item.Next_File := null;
+      Item.File_Pending := False;
+   end Remove_Pending_File_Locked;
+
+   procedure Complete_File_Locked
+     (Group     : not null Loop_Group_Access;
+      Item      : not null Fiber_Access;
+      Result    : C.long_long;
+      Error     : C.int;
+      Cancelled : Boolean)
+   is
+   begin
+      if Item.Group /= Group
+        or else Item.State /= Waiting
+        or else not Item.File_Wait
+      then
+         Fatal;
+      end if;
+      Remove_Pending_File_Locked (Group, Item);
+      Remove_IO_Waits_Locked (Group, Item);
+      Item.File_Result := Result;
+      Item.File_Error := Error;
+      Item.File_Wait := False;
+      Item.File_Descriptor := -1;
+      Item.File_Buffer := System.Null_Address;
+      Item.File_Length := 0;
+      Item.File_Offset := 0;
+      Item.File_For_Write := False;
+      Item.File_Cancel_Descriptor := -1;
+      Item.File_Cancel_Requested := Cancelled;
+      Enqueue (Group, Item);
+   end Complete_File_Locked;
+
+   function Request_File_Cancel_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access) return Boolean
+   is
+      Completion     : File_Engines.Completion;
+      Has_Completion : Boolean;
+      Error          : C.int;
+      Disposition    : File_Engines.Cancellation_Disposition;
+   begin
+      if Item.Group /= Group or else not Item.File_Wait then
+         return False;
+      elsif Item.File_Cancel_Requested then
+         return False;
+      end if;
+
+      Item.File_Cancel_Requested := True;
+      Remove_IO_Waits_Locked (Group, Item);
+      Item.File_Cancel_Descriptor := -1;
+      if Item.File_Pending then
+         Complete_File_Locked (Group, Item, 0, 0, True);
+         return True;
+      end if;
+
+      Disposition := Pollers.Cancel_File
+        (Group.Scheduler_Poller,
+         Item.File_Descriptor,
+         Fiber_To_Address (Item),
+         Completion,
+         Has_Completion,
+         Error);
+      Item.File_Cancel_Disposition :=
+        C.int (File_Engines.Cancellation_Disposition'Pos (Disposition) + 1);
+      Item.File_Cancel_Error := Error;
+      if Has_Completion then
+         Complete_File_Locked
+           (Group,
+            Item,
+            Completion.Result,
+            Completion.Error_Code,
+            True);
+         Submit_Pending_Files_Locked (Group);
+         return True;
+      end if;
+
+      --  Submitted, already completing, and not-cancelable requests all keep
+      --  ownership of the caller buffer until their ordinary completion. A
+      --  cancellation transport failure has the same safe fallback.
+      return False;
+   end Request_File_Cancel_Locked;
+
    procedure Submit_Pending_Files_Locked
      (Group : not null Loop_Group_Access)
    is
@@ -923,15 +1048,7 @@ package body System.Gnatevl.Scheduler is
             end if;
             Item.Next_File := null;
             Item.File_Pending := False;
-            Item.File_Wait := False;
-            Item.File_Result := 0;
-            Item.File_Error := Error;
-            Item.File_Descriptor := -1;
-            Item.File_Buffer := System.Null_Address;
-            Item.File_Length := 0;
-            Item.File_Offset := 0;
-            Item.File_For_Write := False;
-            Enqueue (Group, Item);
+            Complete_File_Locked (Group, Item, 0, Error, False);
          end if;
       end loop;
    end Submit_Pending_Files_Locked;
@@ -2273,8 +2390,10 @@ package body System.Gnatevl.Scheduler is
       Length      : C.size_t;
       Offset      : C.long_long;
       For_Write   : C.int;
+      Cancel_FD   : C.int;
       Transferred : access C.long_long;
-      Error_Code  : access C.int) return C.int
+      Error_Code  : access C.int;
+      Cancelled   : access C.int) return C.int
    is
       Group : constant Loop_Group_Access := Thread_Group;
       Item  : Fiber_Access;
@@ -2289,6 +2408,8 @@ package body System.Gnatevl.Scheduler is
         or else Buffer = System.Null_Address
         or else Transferred = null
         or else Error_Code = null
+        or else Cancelled = null
+        or else Cancel_FD < -1
       then
          return -1;
       end if;
@@ -2305,6 +2426,37 @@ package body System.Gnatevl.Scheduler is
       Item.File_Length := Length;
       Item.File_Offset := Offset;
       Item.File_For_Write := For_Write /= 0;
+      Item.File_Cancel_Descriptor := Cancel_FD;
+      Item.File_Cancel_Requested := False;
+      Item.File_Cancel_Disposition := 0;
+      Item.File_Cancel_Error := 0;
+      Item.Active_IO_Links := null;
+      Item.Active_IO_Link_Count := 0;
+      if Cancel_FD >= 0 then
+         Item.Active_IO_Links :=
+           Item.Inline_IO_Links (Primary_IO)'Unchecked_Access;
+         Item.Active_IO_Link_Count := 1;
+         if not IO_Interest_Registered_Locked
+           (Group, Cancel_FD, Pollers.Readable)
+           and then not Pollers.Watch
+             (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable)
+         then
+            Item.File_Wait := False;
+            Item.File_Cancel_Descriptor := -1;
+            Item.Active_IO_Links := null;
+            Item.Active_IO_Link_Count := 0;
+            Item.State := Running;
+            Unlock_Group (Group);
+            return -1;
+         end if;
+         Register_IO_Wait_Locked
+           (Group,
+            Item,
+            Cancel_FD,
+            Pollers.Readable,
+            Primary_IO,
+            0);
+      end if;
       if not Pollers.Submit_File
         (Group.Scheduler_Poller,
          Descriptor,
@@ -2325,6 +2477,10 @@ package body System.Gnatevl.Scheduler is
             Item.File_Length := 0;
             Item.File_Offset := 0;
             Item.File_For_Write := False;
+            Item.File_Cancel_Descriptor := -1;
+            Remove_IO_Waits_Locked (Group, Item);
+            Item.Active_IO_Links := null;
+            Item.Active_IO_Link_Count := 0;
             Unlock_Group (Group);
             Error_Code.all := Error;
             Transferred.all := 0;
@@ -2336,6 +2492,12 @@ package body System.Gnatevl.Scheduler is
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
       Transferred.all := Item.File_Result;
       Error_Code.all := Item.File_Error;
+      Cancelled.all := (if Item.File_Cancel_Requested then 1 else 0);
+      Item.File_Cancel_Requested := False;
+      Item.File_Cancel_Disposition := 0;
+      Item.File_Cancel_Error := 0;
+      Item.Active_IO_Links := null;
+      Item.Active_IO_Link_Count := 0;
       return 0;
    end File_IO;
 
@@ -2466,7 +2628,12 @@ package body System.Gnatevl.Scheduler is
 
       Group := Item.Group;
       Lock_Group (Group);
-      if Item.State = Waiting and then not Item.File_Wait then
+      if Item.State = Waiting and then Item.File_Wait then
+         Made_Ready := Request_File_Cancel_Locked (Group, Item);
+         if Made_Ready then
+            Group.Wakeups := Group.Wakeups + 1;
+         end if;
+      elsif Item.State = Waiting then
          Remove_Timer_Locked (Group, Item);
          Item.Timed_Out := False;
          Remove_IO_Waits_Locked (Group, Item);
@@ -2572,15 +2739,12 @@ package body System.Gnatevl.Scheduler is
          then
             Fatal;
          end if;
-         Item.File_Result := Event.Result;
-         Item.File_Error := Event.Error_Code;
-         Item.File_Wait := False;
-         Item.File_Descriptor := -1;
-         Item.File_Buffer := System.Null_Address;
-         Item.File_Length := 0;
-         Item.File_Offset := 0;
-         Item.File_For_Write := False;
-         Enqueue (Group, Item);
+         Complete_File_Locked
+           (Group,
+            Item,
+            Event.Result,
+            Event.Error_Code,
+            Item.File_Cancel_Requested);
          Submit_Pending_Files_Locked (Group);
          return;
       end if;
@@ -2615,16 +2779,25 @@ package body System.Gnatevl.Scheduler is
                    Pollers.Writable_Event | Pollers.Read_Write_Event
                  and then Link.Interest = Pollers.Writable));
          if Matches then
-            Outcome := Link.Outcome;
-            Remove_Timer_Locked (Group, Item);
-            Item.Timed_Out := False;
-            Item.IO_Result := Outcome;
-            Remove_IO_Waits_Locked (Group, Item);
-            Enqueue (Group, Item);
-            --  Removing all of Item's links may have changed this bucket at
-            --  any position, so restart from its head. Each pass wakes one
-            --  fiber and therefore makes bounded progress.
-            Link := Group.IO_Waiters (Bucket);
+            if Item.File_Wait
+              and then Link.Descriptor = Item.File_Cancel_Descriptor
+            then
+               if Request_File_Cancel_Locked (Group, Item) then
+                  Submit_Pending_Files_Locked (Group);
+               end if;
+               Link := Group.IO_Waiters (Bucket);
+            else
+               Outcome := Link.Outcome;
+               Remove_Timer_Locked (Group, Item);
+               Item.Timed_Out := False;
+               Item.IO_Result := Outcome;
+               Remove_IO_Waits_Locked (Group, Item);
+               Enqueue (Group, Item);
+               --  Removing all of Item's links may have changed this bucket at
+               --  any position, so restart from its head. Each pass wakes one
+               --  fiber and therefore makes bounded progress.
+               Link := Group.IO_Waiters (Bucket);
+            end if;
          else
             Link := Link.Next;
          end if;

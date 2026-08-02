@@ -96,31 +96,6 @@ package body Gnatevl.IO.Connections is
 
    end Descriptor_Controller;
 
-   protected body Cancellation_Token is
-      procedure Request is
-      begin
-         if not Is_Requested then
-            Wake_Sources.Signal (Wake);
-            Is_Requested := True;
-         end if;
-      end Request;
-
-      function Requested return Boolean is (Is_Requested);
-
-      procedure Wait_Source
-        (FD : out Descriptor; Already_Requested : out Boolean)
-      is
-      begin
-         Already_Requested := Is_Requested;
-         if Is_Requested then
-            FD := Invalid_Descriptor;
-         else
-            Wake_Sources.Ensure (Wake);
-            FD := Wake_Sources.Descriptor (Wake);
-         end if;
-      end Wait_Source;
-   end Cancellation_Token;
-
    protected body Server is
       entry Acquire (Accepted : out Boolean)
         when Stopping or else Active_Count < Capacity

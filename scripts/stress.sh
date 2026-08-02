@@ -64,7 +64,8 @@ if [ "$run_faults" = 1 ]; then
     -f -P tests/runtime_smoke.gpr fault_injection_smoke.adb
 
   for fault_case in \
-    fiber-allocation stack-map group-startup watch-error eintr file-saturation
+    fiber-allocation stack-map group-startup watch-error eintr file-saturation \
+    file-cancellation file-abort file-cancel-fallback
   do
     printf '%s\n' "fault case=$fault_case"
     run_timed "$case_timeout" \

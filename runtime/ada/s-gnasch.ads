@@ -130,8 +130,10 @@ package System.Gnatevl.Scheduler is
       Length      : Interfaces.C.size_t;
       Offset      : Interfaces.C.long_long;
       For_Write   : Interfaces.C.int;
+      Cancel_FD   : Interfaces.C.int;
       Transferred : access Interfaces.C.long_long;
-      Error_Code  : access Interfaces.C.int) return Interfaces.C.int;
+      Error_Code  : access Interfaces.C.int;
+      Cancelled   : access Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, File_IO, "gnatevl_runtime_file_io");
 
 private

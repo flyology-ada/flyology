@@ -53,6 +53,15 @@ package System.Gnatevl.Poller is
       Token       : System.Address;
       Error_Code  : out Interfaces.C.int) return Boolean;
 
+   function Cancel_File
+     (Item           : in out Poller;
+      Descriptor     : Interfaces.C.int;
+      Token          : System.Address;
+      Value          : out System.Gnatevl.File_Engine.Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out Interfaces.C.int)
+      return System.Gnatevl.File_Engine.Cancellation_Disposition;
+
    --  A negative timeout waits indefinitely. The result is false on error.
    function Wait
      (Item                : in out Poller;

@@ -7,6 +7,7 @@ package body System.Gnatevl.File_Engine is
    package OSI renames System.OS_Interface;
 
    use type C.int;
+   use type C.long;
    use type C.long_long;
 
    SIGEV_KEVENT : constant C.int := 4;
@@ -54,17 +55,20 @@ package body System.Gnatevl.File_Engine is
       Control : aliased AIO_Control_Block;
       Token   : System.Address;
       Next_Free : AIO_Request_Access;
+      Next_Active : AIO_Request_Access;
    end record
-     with Size => 768, Alignment => 8;
+     with Size => 832, Alignment => 8;
    for AIO_Request use record
       Control   at 0  range 0 .. 639;
       Token     at 80 range 0 .. 63;
       Next_Free at 88 range 0 .. 63;
+      Next_Active at 96 range 0 .. 63;
    end record;
 
    type Engine_State is record
       Kqueue_FD    : C.int := -1;
       Free_Requests : AIO_Request_Access;
+      Active_Requests : AIO_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
 
@@ -86,6 +90,10 @@ package body System.Gnatevl.File_Engine is
      (State   : not null Engine_State_Access;
       Request : in out AIO_Request_Access);
 
+   procedure Unlink_Active
+     (State   : not null Engine_State_Access;
+      Request : not null AIO_Request_Access);
+
    function Acquire_Request
      (State : not null Engine_State_Access) return AIO_Request_Access
    is
@@ -96,6 +104,7 @@ package body System.Gnatevl.File_Engine is
       end if;
       State.Free_Requests := Request.Next_Free;
       Request.Next_Free := null;
+      Request.Next_Active := null;
       return Request;
    end Acquire_Request;
 
@@ -109,11 +118,44 @@ package body System.Gnatevl.File_Engine is
       Request := null;
    end Recycle_Request;
 
+   procedure Unlink_Active
+     (State   : not null Engine_State_Access;
+      Request : not null AIO_Request_Access)
+   is
+      Position : AIO_Request_Access := State.Active_Requests;
+      Previous : AIO_Request_Access;
+   begin
+      while Position /= null and then Position /= Request loop
+         Previous := Position;
+         Position := Position.Next_Active;
+      end loop;
+      if Position = null then
+         raise Program_Error with "unknown Darwin AIO completion";
+      elsif Previous = null then
+         State.Active_Requests := Request.Next_Active;
+      else
+         Previous.Next_Active := Request.Next_Active;
+      end if;
+      Request.Next_Active := null;
+   end Unlink_Active;
+
    function AIO_Read (Control : access AIO_Control_Block) return C.int;
    pragma Import (C, AIO_Read, "aio_read");
 
    function AIO_Write (Control : access AIO_Control_Block) return C.int;
    pragma Import (C, AIO_Write, "aio_write");
+
+   function AIO_Cancel
+     (Descriptor : C.int; Control : access AIO_Control_Block) return C.int;
+   pragma Import (C, AIO_Cancel, "aio_cancel");
+
+   function AIO_Return (Control : access AIO_Control_Block) return C.long;
+   pragma Import (C, AIO_Return, "aio_return");
+
+   --  Darwin's values are bit flags, unlike several other POSIX targets.
+   AIO_ALLDONE     : constant C.int := 16#1#;
+   AIO_CANCELED    : constant C.int := 16#2#;
+   AIO_NOTCANCELED : constant C.int := 16#4#;
 
    function Initialize
      (Item      : in out Engine;
@@ -126,7 +168,8 @@ package body System.Gnatevl.File_Engine is
       State :=
         new Engine_State'
           (Kqueue_FD     => Poller_FD,
-           Free_Requests => null);
+           Free_Requests => null,
+           Active_Requests => null);
       Item.State := To_Address (State);
       return True;
    exception
@@ -139,6 +182,10 @@ package body System.Gnatevl.File_Engine is
       Request : AIO_Request_Access;
    begin
       if State /= null then
+         if State.Active_Requests /= null then
+            raise Program_Error with
+              "GNATEVL finalized with active Darwin AIO requests";
+         end if;
          while State.Free_Requests /= null loop
             Request := State.Free_Requests;
             State.Free_Requests := Request.Next_Free;
@@ -184,7 +231,8 @@ package body System.Gnatevl.File_Engine is
                Notify_Attributes => System.Null_Address),
             List_Opcode => 0),
          Token     => Token,
-         Next_Free => null);
+         Next_Free => null,
+         Next_Active => null);
       Result :=
         (if For_Write
          then AIO_Write (Request.Control'Access)
@@ -194,6 +242,8 @@ package body System.Gnatevl.File_Engine is
          Recycle_Request (State, Request);
          return False;
       end if;
+      Request.Next_Active := State.Active_Requests;
+      State.Active_Requests := Request;
       Error_Code := 0;
       return True;
    exception
@@ -201,6 +251,55 @@ package body System.Gnatevl.File_Engine is
          Error_Code := C.int (OSI.ENOMEM);
          return False;
    end Submit;
+
+   function Cancel
+     (Item           : in out Engine;
+      Descriptor     : C.int;
+      Token          : System.Address;
+      Value          : out Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out C.int)
+      return Cancellation_Disposition
+   is
+      State   : constant Engine_State_Access := To_State (Item.State);
+      Request : AIO_Request_Access;
+      Result  : C.int;
+   begin
+      Value := (others => <>);
+      Has_Completion := False;
+      Error_Code := 0;
+      if State = null or else Token = System.Null_Address then
+         Error_Code := C.int (OSI.EINVAL);
+         return Cancellation_Failed;
+      end if;
+
+      Request := State.Active_Requests;
+      while Request /= null
+        and then
+          (Request.Token /= Token
+           or else Request.Control.Descriptor /= Descriptor)
+      loop
+         Request := Request.Next_Active;
+      end loop;
+      if Request = null then
+         return Already_Completing;
+      end if;
+
+      Result := AIO_Cancel (Descriptor, Request.Control'Access);
+      case Result is
+         when AIO_CANCELED =>
+            --  POSIX still requires the normal completion/aio_return path;
+            --  the kqueue event is therefore the terminal ownership handoff.
+            return Cancellation_Submitted;
+         when AIO_NOTCANCELED =>
+            return Not_Cancelable;
+         when AIO_ALLDONE =>
+            return Already_Completing;
+         when others =>
+            Error_Code := C.int (OSI.errno);
+            return Cancellation_Failed;
+      end case;
+   end Cancel;
 
    function Complete_Event
      (Item            : in out Engine;
@@ -211,14 +310,32 @@ package body System.Gnatevl.File_Engine is
    is
       State   : constant Engine_State_Access := To_State (Item.State);
       Request : AIO_Request_Access := To_Request (Request_Address);
+      Result  : C.long;
    begin
       if State = null or else Request = null then
          return False;
       end if;
+      --  kevent is the readiness notification, but aio_return is the one
+      --  mandatory reap operation that relinquishes Darwin's kernel AIO
+      --  resources. It must happen exactly once before this aiocb is reused.
+      Result := AIO_Return (Request.Control'Access);
+      --  Darwin's SIGEV_KEVENT path may reap the request while producing the
+      --  event; aio_return then reports EINVAL and ext[1..2] carry the saved
+      --  errno/result. Other completion paths return the result directly.
       Value :=
         (Token      => Request.Token,
-         Result     => (if Kernel_Result >= 0 then Kernel_Result else 0),
-         Error_Code => Kernel_Error);
+         Result     =>
+           (if Result >= 0 then C.long_long (Result)
+            elsif C.int (OSI.errno) = C.int (OSI.EINVAL)
+            and then Kernel_Result >= 0
+            then Kernel_Result
+            else 0),
+         Error_Code =>
+           (if Result >= 0 then 0
+            elsif C.int (OSI.errno) = C.int (OSI.EINVAL)
+            then Kernel_Error
+            else C.int (OSI.errno)));
+      Unlink_Active (State, Request);
       Recycle_Request (State, Request);
       return True;
    end Complete_Event;

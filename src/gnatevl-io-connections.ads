@@ -1,22 +1,16 @@
 with Ada.Finalization;
 with Ada.Streams;
 with GNAT.Sockets;
+with Gnatevl.Cancellation;
 with Gnatevl.Wake_Sources;
 
 package Gnatevl.IO.Connections is
 
    Admission_Closed : exception;
-   Operation_Cancelled : exception;
+   Operation_Cancelled : exception renames
+     Gnatevl.Cancellation.Operation_Cancelled;
 
-   protected type Cancellation_Token is
-      procedure Request;
-      function Requested return Boolean;
-      procedure Wait_Source
-        (FD : out Gnatevl.IO.Descriptor; Already_Requested : out Boolean);
-   private
-      Is_Requested : Boolean := False;
-      Wake         : Gnatevl.Wake_Sources.Source;
-   end Cancellation_Token;
+   subtype Cancellation_Token is Gnatevl.Cancellation.Token;
 
    protected type Server (Capacity : Positive) is
       entry Acquire (Accepted : out Boolean);

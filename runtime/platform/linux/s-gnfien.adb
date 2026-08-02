@@ -38,6 +38,7 @@ package body System.Gnatevl.File_Engine is
    SYS_IO_Destroy        : constant C.long := 207;
    SYS_IO_Getevents      : constant C.long := 208;
    SYS_IO_Submit         : constant C.long := 209;
+   SYS_IO_Cancel         : constant C.long := 210;
    SYS_IO_Uring_Setup    : constant C.long := 425;
    SYS_IO_Uring_Enter    : constant C.long := 426;
    SYS_IO_Uring_Register : constant C.long := 427;
@@ -47,6 +48,7 @@ package body System.Gnatevl.File_Engine is
    EINVAL : constant C.int := 22;
    ENOMEM : constant C.int := 12;
    EAGAIN : constant C.int := 11;
+   ENOENT : constant C.int := 2;
 
    PROT_READ  : constant C.int := 1;
    PROT_WRITE : constant C.int := 2;
@@ -61,6 +63,7 @@ package body System.Gnatevl.File_Engine is
    IORING_REGISTER_EVENTFD_ASYNC : constant U32 := 7;
    IORING_OP_READ                : constant U8 := 22;
    IORING_OP_WRITE               : constant U8 := 23;
+   IORING_OP_ASYNC_CANCEL        : constant U8 := 14;
 
    IOCB_CMD_PREAD  : constant U16 := 0;
    IOCB_CMD_PWRITE : constant U16 := 1;
@@ -239,11 +242,15 @@ package body System.Gnatevl.File_Engine is
    type Native_AIO_Request is record
       Control   : aliased IOCB;
       Next_Free : Native_AIO_Request_Access;
+      Token     : System.Address;
+      Next_Active : Native_AIO_Request_Access;
    end record
-     with Size => 576, Alignment => 8;
+     with Size => 704, Alignment => 8;
    for Native_AIO_Request use record
       Control   at 0  range 0 .. 511;
       Next_Free at 64 range 0 .. 63;
+      Token     at 72 range 0 .. 63;
+      Next_Active at 80 range 0 .. 63;
    end record;
 
    type Backend_Kind is (IO_Uring, Native_AIO);
@@ -270,6 +277,7 @@ package body System.Gnatevl.File_Engine is
       CQ_Mask           : System.Address := System.Null_Address;
       CQEs              : System.Address := System.Null_Address;
       Free_Requests     : Native_AIO_Request_Access;
+      Active_Requests   : Native_AIO_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
 
@@ -338,6 +346,13 @@ package body System.Gnatevl.File_Engine is
       Timeout : System.Address) return C.long;
    pragma Import (C_Variadic_1, Syscall_Getevents, "syscall");
 
+   function Syscall_Cancel
+     (Number  : C.long;
+      Context : C.unsigned_long;
+      Control : System.Address;
+      Event   : System.Address) return C.long;
+   pragma Import (C_Variadic_1, Syscall_Cancel, "syscall");
+
    function Syscall_Uring_Register
      (Number     : C.long;
       Descriptor : C.int;
@@ -378,6 +393,10 @@ package body System.Gnatevl.File_Engine is
      (State   : not null Engine_State_Access;
       Request : in out Native_AIO_Request_Access);
 
+   procedure Unlink_Active
+     (State   : not null Engine_State_Access;
+      Request : not null Native_AIO_Request_Access);
+
    procedure Release_State (State : in out Engine_State_Access);
 
    function Failed_Mapping return System.Address is
@@ -414,6 +433,7 @@ package body System.Gnatevl.File_Engine is
       end if;
       State.Free_Requests := Request.Next_Free;
       Request.Next_Free := null;
+      Request.Next_Active := null;
       return Request;
    end Acquire_Request;
 
@@ -427,6 +447,27 @@ package body System.Gnatevl.File_Engine is
       Request := null;
    end Recycle_Request;
 
+   procedure Unlink_Active
+     (State   : not null Engine_State_Access;
+      Request : not null Native_AIO_Request_Access)
+   is
+      Position : Native_AIO_Request_Access := State.Active_Requests;
+      Previous : Native_AIO_Request_Access;
+   begin
+      while Position /= null and then Position /= Request loop
+         Previous := Position;
+         Position := Position.Next_Active;
+      end loop;
+      if Position = null then
+         raise Program_Error with "unknown Linux native-AIO completion";
+      elsif Previous = null then
+         State.Active_Requests := Request.Next_Active;
+      else
+         Previous.Next_Active := Request.Next_Active;
+      end if;
+      Request.Next_Active := null;
+   end Unlink_Active;
+
    procedure Release_State (State : in out Engine_State_Access) is
       Ignored : C.int;
       Result  : C.long;
@@ -434,6 +475,9 @@ package body System.Gnatevl.File_Engine is
    begin
       if State = null then
          return;
+      elsif State.Active_Requests /= null then
+         raise Program_Error with
+           "GNATEVL finalized with active Linux native-AIO requests";
       elsif State.Backend = Native_AIO then
          if State.AIO_Context /= 0 then
             Result := Syscall_Destroy (SYS_IO_Destroy, State.AIO_Context);
@@ -686,7 +730,9 @@ package body System.Gnatevl.File_Engine is
                   Reserved    => 0,
                   Flags       => IOCB_FLAG_RESFD,
                   Result_FD   => U32 (State.Wake_FD)),
-               Next_Free => null);
+               Next_Free => null,
+               Token => Token,
+               Next_Active => null);
             loop
                Result :=
                  Syscall_Submit
@@ -702,6 +748,8 @@ package body System.Gnatevl.File_Engine is
                Recycle_Request (State, Request);
                return False;
             end if;
+            Request.Next_Active := State.Active_Requests;
+            State.Active_Requests := Request;
             Error_Code := 0;
             return True;
          end;
@@ -781,6 +829,135 @@ package body System.Gnatevl.File_Engine is
          return False;
    end Submit;
 
+   function Cancel
+     (Item           : in out Engine;
+      Descriptor     : C.int;
+      Token          : System.Address;
+      Value          : out Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out C.int)
+      return Cancellation_Disposition
+   is
+      State  : constant Engine_State_Access := To_State (Item.State);
+      Result : C.long;
+   begin
+      pragma Unreferenced (Descriptor);
+      Value := (others => <>);
+      Has_Completion := False;
+      Error_Code := 0;
+      if State = null or else Token = System.Null_Address then
+         Error_Code := EINVAL;
+         return Cancellation_Failed;
+      elsif State.Backend = Native_AIO then
+         declare
+            Request : Native_AIO_Request_Access := State.Active_Requests;
+            Event   : aliased IO_Event;
+         begin
+            while Request /= null and then Request.Token /= Token loop
+               Request := Request.Next_Active;
+            end loop;
+            if Request = null then
+               return Already_Completing;
+            end if;
+            loop
+               Result := Syscall_Cancel
+                 (SYS_IO_Cancel,
+                  State.AIO_Context,
+                  Request.Control'Address,
+                  Event'Address);
+               exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+            end loop;
+            if Result = 0 then
+               Value :=
+                 (Token      => Request.Token,
+                  Result     =>
+                    (if Event.Result >= 0
+                     then C.long_long (Event.Result)
+                     else 0),
+                  Error_Code =>
+                    (if Event.Result < 0
+                     then C.int (-Event.Result)
+                     elsif Event.Extra < 0
+                     then C.int (-Event.Extra)
+                     else 0));
+               Unlink_Active (State, Request);
+               Recycle_Request (State, Request);
+               Has_Completion := True;
+               return Cancellation_Submitted;
+            elsif C.int (OSI.errno) in EAGAIN | ENOENT then
+               return Already_Completing;
+            else
+               Error_Code := C.int (OSI.errno);
+               return Cancellation_Failed;
+            end if;
+         end;
+      end if;
+
+      --  io_uring cancellation is itself asynchronous. Tag its administrative
+      --  CQE in the otherwise-aligned user_data value; Drain consumes that
+      --  CQE without exposing it as a file completion.
+      declare
+         Target     : constant SSE.Integer_Address := SSE.To_Integer (Token);
+         Head       : constant U32 := Load (State.SQ_Head, AP.Acquire);
+         Tail       : constant U32 := Load (State.SQ_Tail, AP.Relaxed);
+         Entries    : constant U32 := Load (State.SQ_Entries, AP.Acquire);
+         Mask       : constant U32 := Load (State.SQ_Mask, AP.Acquire);
+         Index      : U32;
+         Submission : Submission_Entry_Access;
+      begin
+         if Target mod 2 /= 0 then
+            Error_Code := EINVAL;
+            return Cancellation_Failed;
+         elsif Tail - Head >= Entries then
+            return Not_Cancelable;
+         end if;
+         Index := Tail and Mask;
+         Submission := To_Submission_Entry
+           (State.SQEs
+              + Storage_Offset (Index)
+                  * Storage_Offset (Submission_Entry'Size / 8));
+         Submission.all :=
+           (Opcode       => IORING_OP_ASYNC_CANCEL,
+            Flags        => 0,
+            IO_Priority  => 0,
+            Descriptor   => -1,
+            Offset       => 0,
+            Buffer       => U64 (Target),
+            Length       => 0,
+            Read_Flags   => 0,
+            User_Data    => U64 (Target + 1),
+            Buffer_Index => 0,
+            Personality  => 0,
+            Input_FD     => 0,
+            Address_3    => 0,
+            Padding      => 0);
+         Store
+           (State.SQ_Array
+              + Storage_Offset (Index) * Storage_Offset (U32'Size / 8),
+            Index,
+            AP.Relaxed);
+         Store (State.SQ_Tail, Tail + 1, AP.Release);
+         loop
+            Result := Syscall_Uring_Enter
+              (SYS_IO_Uring_Enter,
+               State.Ring_FD,
+               1,
+               0,
+               0,
+               System.Null_Address,
+               0);
+            exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+         end loop;
+         if Result /= 1 then
+            Store (State.SQ_Tail, Tail, AP.Release);
+            Error_Code :=
+              (if Result < 0 then C.int (OSI.errno) else EAGAIN);
+            return Cancellation_Failed;
+         end if;
+      end;
+      return Cancellation_Submitted;
+   end Cancel;
+
    function Complete_Event
      (Item            : in out Engine;
       Request_Address : System.Address;
@@ -848,6 +1025,7 @@ package body System.Gnatevl.File_Engine is
                     (SSE.To_Address
                        (SSE.Integer_Address (Events (Index).Object)));
                begin
+                  Unlink_Active (State, Request);
                   Recycle_Request (State, Request);
                end;
             end loop;
@@ -869,18 +1047,20 @@ package body System.Gnatevl.File_Engine is
                       + Storage_Offset (Index)
                           * Storage_Offset (Completion_Entry'Size / 8));
             begin
-               Count := Count + 1;
-               Values (Values'First + Count - 1) :=
-                 (Token => SSE.To_Address
-                    (SSE.Integer_Address (CQ_Item.User_Data)),
-                  Result =>
-                    (if CQ_Item.Result >= 0
-                     then C.long_long (CQ_Item.Result)
-                     else 0),
-                  Error_Code =>
-                    (if CQ_Item.Result < 0
-                     then C.int (-CQ_Item.Result)
-                     else 0));
+               if SSE.Integer_Address (CQ_Item.User_Data) mod 2 = 0 then
+                  Count := Count + 1;
+                  Values (Values'First + Count - 1) :=
+                    (Token => SSE.To_Address
+                       (SSE.Integer_Address (CQ_Item.User_Data)),
+                     Result =>
+                       (if CQ_Item.Result >= 0
+                        then C.long_long (CQ_Item.Result)
+                        else 0),
+                     Error_Code =>
+                       (if CQ_Item.Result < 0
+                        then C.int (-CQ_Item.Result)
+                        else 0));
+               end if;
                Head := Head + 1;
             end;
          end loop;

@@ -8,6 +8,7 @@ with Fault_Control;
 with GNAT.Sockets;
 with Gnatevl;
 with Gnatevl.IO;
+with Gnatevl.IO.Connections;
 with Gnatevl.IO.Files;
 with Interfaces.C;
 
@@ -19,6 +20,7 @@ procedure Fault_Injection_Smoke is
    use type Interfaces.C.int;
 
    package IO renames Gnatevl.IO;
+   package Connections renames Gnatevl.IO.Connections;
    package Files renames Gnatevl.IO.Files;
 
    Case_Name : constant String :=
@@ -345,6 +347,344 @@ procedure Fault_Injection_Smoke is
          raise;
    end Test_File_Saturation;
 
+   procedure Test_Cross_Domain_Cancellation is
+      Path : constant String := "/tmp/gnatevl-cancel-file.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Reader : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Writer : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Manager : aliased Connections.Server (1);
+      Connection : Connections.Connection;
+      Token : aliased Connections.Cancellation_Token;
+
+      protected Progress is
+         procedure Done (Passed : Boolean);
+         entry Wait;
+         function Passed return Boolean;
+      private
+         Finished : Natural := 0;
+         All_OK   : Boolean := True;
+      end Progress;
+
+      protected body Progress is
+         procedure Done (Passed : Boolean) is
+         begin
+            Finished := Finished + 1;
+            All_OK := All_OK and Passed;
+         end Done;
+
+         entry Wait when Finished = 2 is
+         begin
+            null;
+         end Wait;
+
+         function Passed return Boolean is (All_OK);
+      end Progress;
+
+      task type File_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end File_Waiter;
+
+      task body File_Waiter is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last, Token'Access);
+         Progress.Done (False);
+      exception
+         --  The connection-qualified legacy name must catch the canonical
+         --  exception raised from the file package.
+         when Connections.Operation_Cancelled =>
+            Progress.Done (True);
+         when others =>
+            Progress.Done (False);
+      end File_Waiter;
+
+      task type Connection_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Connection_Waiter;
+
+      task body Connection_Waiter is
+         Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Connections.Receive
+           (Connection,
+            Data,
+            Last,
+            Timeout => IO.Infinite,
+            Token   => Token'Access);
+         Progress.Done (False);
+      exception
+         --  And the file-qualified legacy name must catch cancellation raised
+         --  from the connection package.
+         when Files.Operation_Cancelled =>
+            Progress.Done (True);
+         when others =>
+            Progress.Done (False);
+      end Connection_Waiter;
+
+      type File_Waiter_Access is access File_Waiter;
+      type Connection_Waiter_Access is access Connection_Waiter;
+      procedure Free_File_Waiter is new Ada.Unchecked_Deallocation
+        (File_Waiter, File_Waiter_Access);
+      procedure Free_Connection_Waiter is new Ada.Unchecked_Deallocation
+        (Connection_Waiter, Connection_Waiter_Access);
+      File_Task : File_Waiter_Access;
+      Connection_Task : Connection_Waiter_Access;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+      Connections.Take (Manager, Reader, Connection);
+
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 100_000);
+      File_Task := new File_Waiter;
+      Connection_Task := new Connection_Waiter;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "file cancellation waiter never entered pending queue";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Token.Request;
+      Progress.Wait;
+      if not Progress.Passed then
+         raise Program_Error with
+           "shared token did not cancel both I/O domains";
+      end if;
+
+      while not File_Task.all'Terminated
+        or else not Connection_Task.all'Terminated
+      loop
+         delay 0.001;
+      end loop;
+      Free_File_Waiter (File_Task);
+      Free_Connection_Waiter (Connection_Task);
+
+      --  The same one-shot token also cancels both legacy surfaces before a
+      --  subsequent operation starts, without allocating another wake source.
+      declare
+         Data : Ada.Streams.Stream_Element_Array (1 .. 1) := [1 => 7];
+         Last : Ada.Streams.Stream_Element_Offset;
+         File_Caught : Boolean := False;
+         Connection_Caught : Boolean := False;
+      begin
+         begin
+            Files.Write_At (File, 0, Data, Last, Token'Access);
+         exception
+            when Connections.Operation_Cancelled => File_Caught := True;
+         end;
+         begin
+            Connections.Receive
+              (Connection,
+               Data,
+               Last,
+               Timeout => 0.01,
+               Token   => Token'Access);
+         exception
+            when Files.Operation_Cancelled => Connection_Caught := True;
+         end;
+         if not File_Caught or else not Connection_Caught then
+            raise Program_Error with
+              "shared token did not preserve serial cancellation identity";
+         end if;
+      end;
+
+      Fault_Control.Reset;
+      Connections.Close (Connection);
+      if Writer /= GNAT.Sockets.No_Socket then
+         GNAT.Sockets.Close_Socket (Writer);
+      end if;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Connections.Close (Connection);
+         if Reader /= GNAT.Sockets.No_Socket then
+            GNAT.Sockets.Close_Socket (Reader);
+         end if;
+         if Writer /= GNAT.Sockets.No_Socket then
+            GNAT.Sockets.Close_Socket (Writer);
+         end if;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Cross_Domain_Cancellation;
+
+   procedure Test_File_Task_Abort is
+      Path : constant String := "/tmp/gnatevl-abort-file.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+
+      task type Writer is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 9];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 100_000);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "aborted file task never entered pending queue";
+            end if;
+            delay 0.001;
+         end loop;
+         abort Item.all;
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "aborted file task retained its caller buffer";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free (Item);
+
+      Fault_Control.Reset;
+      Files.Close (File);
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => False, Truncate => False);
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 10];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+         if Last /= Data'Last then
+            raise Program_Error with
+              "descriptor/request reuse failed after task abort";
+         end if;
+      end;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Task_Abort;
+
+   procedure Test_File_Cancel_Fallback
+     (Disposition : Fault_Control.Point)
+   is
+      Path : constant String := "/tmp/gnatevl-cancel-fallback.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+
+      task type Writer is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array
+           (1 .. 64 * 1_024) := (others => 12);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 0, Data, Last);
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access;
+   begin
+      if Disposition not in
+        Fault_Control.File_Cancel_Not_Cancelable |
+        Fault_Control.File_Cancel_Already_Completing
+      then
+         raise Program_Error with "invalid cancellation fallback fault";
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      --  Hold completion delivery, not kernel progress, so abort deterministically
+      --  reaches the cancellation backend while the caller buffer is owned.
+      Fault_Control.Arm (Fault_Control.Poller_EINTR, Count => 100_000);
+      Fault_Control.Arm (Disposition);
+      Item := new Writer;
+      declare
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.File_Submission_Full) = 0
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "fallback test did not submit a kernel file request";
+            end if;
+            delay 0.001;
+         end loop;
+         abort Item.all;
+         if Fault_Control.Calls (Disposition) /= 1 then
+            raise Program_Error with
+              "requested cancellation disposition was not exercised";
+         end if;
+         --  Whether cancellation is unsupported or completion has already
+         --  started, buffer ownership persists until the ordinary event.
+         Fault_Control.Reset;
+         while not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with
+                 "fallback cancellation resumed before terminal completion";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free (Item);
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Cancel_Fallback;
+
    procedure Trigger_Fatal (At_Point : Fault_Control.Point) is
       Item : Probe_Access;
    begin
@@ -380,6 +720,15 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "file-cancellation" then
+      Test_Cross_Domain_Cancellation;
+   elsif Case_Name = "file-abort" then
+      Test_File_Task_Abort;
+   elsif Case_Name = "file-cancel-fallback" then
+      Test_File_Cancel_Fallback
+        (Fault_Control.File_Cancel_Not_Cancelable);
+      Test_File_Cancel_Fallback
+        (Fault_Control.File_Cancel_Already_Completing);
    elsif Case_Name = "fatal-wake" then
       Trigger_Fatal (Fault_Control.Poller_Wake);
    elsif Case_Name = "fatal-wait" then

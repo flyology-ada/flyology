@@ -13,6 +13,12 @@ package System.Gnatevl.File_Engine is
 
    type Completion_Array is array (Positive range <>) of Completion;
 
+   type Cancellation_Disposition is
+     (Cancellation_Submitted,
+      Already_Completing,
+      Not_Cancelable,
+      Cancellation_Failed);
+
    function Initialize
      (Item      : in out Engine;
       Poller_FD : Interfaces.C.int;
@@ -29,6 +35,20 @@ package System.Gnatevl.File_Engine is
       For_Write   : Boolean;
       Token       : System.Address;
       Error_Code  : out Interfaces.C.int) return Boolean;
+
+   --  Ask the kernel to cancel the operation identified by Token. A submitted
+   --  cancellation is not itself terminal: callers must continue retaining
+   --  the buffer until the ordinary completion is delivered. Native Linux
+   --  AIO is the exception because io_cancel returns the terminal event
+   --  directly; Has_Completion reports that safe-to-resume case.
+   function Cancel
+     (Item           : in out Engine;
+      Descriptor     : Interfaces.C.int;
+      Token          : System.Address;
+      Value          : out Completion;
+      Has_Completion : out Boolean;
+      Error_Code     : out Interfaces.C.int)
+      return Cancellation_Disposition;
 
    --  Darwin completes one AIO request from the payload carried by kevent64.
    --  Other platforms return False because they drain their own completion

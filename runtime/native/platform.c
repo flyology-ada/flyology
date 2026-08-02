@@ -19,7 +19,7 @@ int gnatevl_install_fork_guard(void *flag) {
 #ifdef GNATEVL_TEST_FAULTS
 #include <stdatomic.h>
 
-#define GNATEVL_FAULT_POINT_COUNT 8
+#define GNATEVL_FAULT_POINT_COUNT 10
 
 struct gnatevl_fault_plan {
     atomic_uint calls;
