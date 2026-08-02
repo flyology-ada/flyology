@@ -16,7 +16,8 @@ project Showcases is
       "evented_vs_threads.adb",
       "hybrid_blocking_bridge.adb",
       "many_evented_tasks.adb",
-      "runtime_observability.adb");
+      "runtime_observability.adb",
+      "stall_watchdog.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

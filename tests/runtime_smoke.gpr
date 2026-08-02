@@ -21,6 +21,8 @@ project Runtime_Smoke is
       "runtime_smoke.adb",
       "semantic_parity_smoke.adb",
       "stack_size_parity_smoke.adb",
+      "stall_watchdog_native_smoke.adb",
+      "stall_watchdog_smoke.adb",
       "thread_affinity_smoke.adb",
       "timer_heap_smoke.adb",
       "tcp_native_smoke.adb");

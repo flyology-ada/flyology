@@ -54,6 +54,8 @@ for test_main in \
   runtime_smoke \
   semantic_parity_smoke \
   stack_size_parity_smoke \
+  stall_watchdog_native_smoke \
+  stall_watchdog_smoke \
   thread_affinity_smoke \
   timer_heap_smoke \
   tcp_native_smoke

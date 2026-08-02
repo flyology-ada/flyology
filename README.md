@@ -445,8 +445,46 @@ reset because groups are permanent.
 no dispatch or poll progress over the sampling interval is a useful loop-lag
 signal; an empty waiting group with no progress is merely idle. This sampled
 design avoids adding a monotonic-clock read to every dispatch. A policy-driven
-stall watchdog can be layered on these observations, but is deliberately not a
-runtime scheduling policy.
+stall watchdog is provided as an opt-in layer on these observations and is
+deliberately not a runtime scheduling policy.
+
+### Sampled stall watchdog
+
+`Gnatevl.Observability.Stall_Watchdogs` can monitor one group from a dedicated
+native Ada task. Merely declaring a `Watchdog` is inert. `Start` creates the
+native monitor, but observing a group that does not exist still does not create
+that group or any event-runtime resource. `Stop` waits for the monitor to exit;
+the limited controlled object also stops it during finalization, and a stopped
+object can be restarted.
+
+```ada
+declare
+   Monitor : Gnatevl.Observability.Stall_Watchdogs.Watchdog;
+begin
+   Gnatevl.Observability.Stall_Watchdogs.Start
+     (Monitor,
+      (Group           => 0,
+       Sample_Interval => 0.050,
+       Stall_Threshold => 0.250));
+   --  Poll Latest_Report from a service health or diagnostics task.
+   Gnatevl.Observability.Stall_Watchdogs.Stop (Monitor);
+end;
+```
+
+Reports distinguish an absent or starting group, an empty idle group, a group
+whose members are waiting, an advancing group, runnable work that has not yet
+crossed the threshold, a suspected stall, a failed event thread, and a stopped
+or failed monitor. A suspected stall requires runnable or running work plus no
+change to dispatch or polling progress for the configured threshold. Its
+episode count is latched so a service can observe a transient stall after the
+loop resumes.
+
+This is a sampled diagnosis, not proof of deadlock. Each snapshot is coherent,
+but work can arrive, yield, or finish between samples; detection latency is
+quantized by `Sample_Interval`. The watchdog does not interrupt, migrate,
+reprioritize, or otherwise preempt a monopolizing task. Sampling also retains
+the snapshot operation's `O(group members)` cost and brief scheduler-lock hold,
+so intervals should be diagnostic rather than per-request scale.
 
 Fatal invariant paths retain a small `Last_Fatal` classification and write the
 same category directly to standard error before `abort`. A live process normally
@@ -678,6 +716,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/evented_file_io
 ./showcases/bin/execution_groups
 ./showcases/bin/runtime_observability
+./showcases/bin/stall_watchdog
 ./showcases/run_connection_density.sh
 ```
 
@@ -699,6 +738,8 @@ The examples demonstrate:
   count sampled before their kernel-completion writes are released;
 - periodic per-group diagnostics showing parked load, idle progress, dispatch,
   poll, and wakeup counters before and after releasing 128 tasks;
+- native-thread sampling that distinguishes normally waiting and idle groups
+  from a sustained, runnable event loop that is not making progress;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
 
