@@ -850,6 +850,26 @@ package body Gnatevl.IO.DNS is
       procedure Parse_Options (Text : String);
       procedure Parse_Line (Line : String);
 
+      function Trim_Config_Line (Line : String) return String is
+         First : Positive := Line'First;
+         Last  : Natural := Line'Last;
+      begin
+         while First <= Line'Last
+           and then Line (First) in ' ' | ASCII.HT | ASCII.CR
+         loop
+            First := First + 1;
+         end loop;
+         if First > Line'Last then
+            return "";
+         end if;
+         while Last >= First
+           and then Line (Last) in ' ' | ASCII.HT | ASCII.CR
+         loop
+            Last := Last - 1;
+         end loop;
+         return Line (First .. Last);
+      end Trim_Config_Line;
+
       procedure Add_Server (Text : String) is
          Address_First : Positive := Text'First;
          Address_Last  : Natural := Text'Last;
@@ -968,8 +988,7 @@ package body Gnatevl.IO.DNS is
       end Parse_Words;
 
       procedure Parse_Line (Line : String) is
-         Trimmed : constant String :=
-           Ada.Strings.Fixed.Trim (Line, Ada.Strings.Both);
+         Trimmed : constant String := Trim_Config_Line (Line);
          Separator : Natural := 0;
       begin
          if Trimmed'Length = 0 or else Trimmed (Trimmed'First) = '#' then

@@ -69,8 +69,10 @@ procedure DNS_Smoke is
          File : Gnatevl.IO.Files.File_Descriptor :=
            Gnatevl.IO.Files.Invalid_File;
          Text : constant String :=
-           "nameserver " & Sockets.Image (Server) & ASCII.LF
-           & "options attempts:1 timeout:1" & ASCII.LF;
+           ASCII.HT & "nameserver" & ASCII.HT
+           & Sockets.Image (Server) & ASCII.HT & ASCII.LF
+           & ASCII.HT & "options" & ASCII.HT
+           & "attempts:1 timeout:1" & ASCII.HT & ASCII.LF;
          Data : Streams.Stream_Element_Array
            (1 .. Streams.Stream_Element_Offset (Text'Length));
          Last : Streams.Stream_Element_Offset;
