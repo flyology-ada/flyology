@@ -386,7 +386,9 @@ GNATEVL exposes synchronous-looking operations in:
 - `Gnatevl.IO.Sockets`: connect, accept, partial/exact receive, and partial/all
   send operations.
 - `Gnatevl.IO.Connections`: bounded admission, single-owner sockets,
-  cancellation tokens, and graceful server draining.
+  cancellation tokens, and descriptor-generation-safe close.
+- `Gnatevl.IO.Structured_Servers`: scoped listener ownership, bounded handler
+  task pools, graceful drain, deadline cancellation, and failure propagation.
 - `Gnatevl.IO.Files`: open, close, positional read, and positional write.
 - `Gnatevl.IO`: descriptor waits and task-mode detection used by the packages
   above.
@@ -485,6 +487,62 @@ remains the lower-level mechanism when an application needs different ownership
 or cancellation policy. Its optional interrupt descriptors and the raw
 descriptor-wait APIs are unsafe lifetime building blocks: callers retain their
 ownership, close serialization, and wake-source lifetime responsibility.
+
+### Structured servers
+
+`Gnatevl.IO.Structured_Servers` is the application-facing orchestration layer
+above `Connections`. It is generic over a limited handler context, a typed
+handler procedure, and the handler task type's execution designation:
+
+```ada
+procedure Handle
+  (State        : in out App_State;
+   Connection   : in out Gnatevl.IO.Connections.Connection;
+   Peer         : GNAT.Sockets.Sock_Addr_Type;
+   Cancellation : not null access
+     Gnatevl.IO.Connections.Cancellation_Token);
+
+package HTTP is new Gnatevl.IO.Structured_Servers
+  (Handler_Context => App_State,
+   Handle          => Handle,
+   Handler_Model   => Gnatevl.Event_Loop_Task);
+
+Server : aliased HTTP.Server (Capacity => 256);
+HTTP.Serve (Server, Listener, State, Drain_Timeout => 5.0);
+```
+
+`Serve` takes ownership of an already-bound listening socket and sets the
+caller's value to `No_Socket`. It creates exactly `Capacity` dependent Ada
+handler tasks in a lexical task scope; each task accepts at most one connection
+at a time, so accepted work cannot exceed the bound and overload remains in the
+kernel listen backlog. There is no detached task, hidden worker thread, or
+user-space connection queue. A native instantiation creates ordinary GNARL
+pthread tasks; an evented instantiation creates fibers on the configured loop
+pool. The designation belongs to the instantiated task type and never changes
+during a connection.
+
+Shutdown has two explicit phases. `Request_Shutdown` is idempotent and wakes
+idle accepts without cancelling admitted connections. Existing handlers drain
+normally until the `Serve` call's monotonic `Drain_Timeout`. If that deadline
+expires, the package signals both the handler cancellation token and the
+connection manager; tasks blocked in connection I/O resume with
+`Operation_Cancelled`. Arbitrary CPU code remains cooperative and must inspect
+the token's `Requested` query at its own safe points. The listener is closed
+only after every accept has left the poller and every handler has terminated,
+so its descriptor cannot be reused by a stale waiter.
+
+A handler or admission exception stops further admission, is retained in the
+server snapshot and `First_Failure_Information`, and is re-raised to the
+`Serve` caller as `Server_Failed` after the whole scope is joined and the
+listener is closed. The snapshot also reports active, accepted, completed, and
+cancelled counts plus whether deadline cancellation was needed. Thus no handler
+outlives `Serve`, its context, the server object, or their Ada master.
+
+The structured guarantee applies to `Serve`. Direct use of `Connections`, raw
+socket operations, interrupt descriptors, and descriptor waits remains
+deliberately unstructured: those APIs are compatibility/building blocks whose
+callers own task scopes, wake-source lifetime, shutdown ordering, and close
+serialization themselves.
 
 ### Timers
 
@@ -1043,6 +1101,10 @@ Current smoke coverage includes:
 - generation-tagged connection close under forced descriptor-number reuse,
   simultaneous cancellation/close, readiness/timeout races in both lanes,
   exclusive same-descriptor waiters, and removal of all poller registrations;
+- structured listener ownership and bounded handler pools in both lanes,
+  overload backpressure, handler-failure propagation, concurrent idempotent
+  shutdown, accept cancellation, graceful drain, deadline cancellation,
+  final scope joining, and listener descriptor reuse;
 - descriptor-readiness fairness under a continuously yielding evented task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;
@@ -1094,6 +1156,9 @@ The examples demonstrate:
   on the same event loop;
 - bounded connection admission followed by cancellation and a fully drained
   graceful shutdown, including automatic socket ownership cleanup;
+- a deterministic HTTP/1.0-style server run with the same scoped API over
+  event-loop and native handler task types, with bounded admission, listener
+  ownership, client-driven completion, and signal-independent shutdown;
 - cancellation-enabled connection density with one second of idle process-CPU
   measurement and immediate release from a deliberately ten-second legacy
   quantum;
@@ -1296,6 +1361,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   read/write lanes must coordinate them above the owner or use the raw API with
   explicit lifetime serialization. Raw socket operations do not infer
   descriptor ownership, so concurrent close remains outside their guarantees.
+- `Gnatevl.IO.Structured_Servers` deadline cancellation can promptly stop a
+  handler suspended in GNATEVL connection I/O. It cannot forcibly preempt an
+  arbitrary callback that loops in CPU code or blocks in an unrelated foreign
+  call; such a handler must inspect its cancellation token or use explicit
+  fairness/native boundaries.
 - Fiber guard pages make stack overflow fail fast. Each loop pthread has an
   alternate signal stack on which GNARL can translate the guard fault into Ada
   `Storage_Error`; this stack is thread state and is intentionally not stored
@@ -1323,6 +1393,5 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   conformance across OS schedulers.
 
 The next architectural work is additional architectures and operating systems,
-optional CPU-affinity policy, structured listener/worker orchestration, and
-separate TSan/Valgrind integration where their lifecycle contracts can be
-preserved across cross-pthread migration.
+optional CPU-affinity policy, and separate TSan/Valgrind integration where
+their lifecycle contracts can be preserved across cross-pthread migration.

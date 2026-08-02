@@ -20,7 +20,8 @@ project Showcases is
       "many_evented_tasks.adb",
       "priority_scheduling.adb",
       "runtime_observability.adb",
-      "stall_watchdog.adb");
+      "stall_watchdog.adb",
+      "structured_http.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

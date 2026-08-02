@@ -19,6 +19,7 @@ for showcase in \
   hybrid_blocking_bridge \
   many_evented_tasks \
   priority_scheduling \
+  structured_http \
   evented_vs_threads
 do
   printf '\n== %s ==\n' "$showcase"
