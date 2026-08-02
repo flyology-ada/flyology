@@ -10,6 +10,7 @@ cd "$project_root"
 
 "$project_root/scripts/prepare-rts.sh" >/dev/null
 for test_main in \
+  connection_lifecycle_smoke \
   execution_groups_smoke \
   fairness_smoke \
   files_smoke \

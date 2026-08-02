@@ -221,6 +221,8 @@ GNATEVL exposes synchronous-looking operations in:
 - `Gnatevl.IO.Timers`: relative and absolute sleeps.
 - `Gnatevl.IO.Sockets`: connect, accept, partial/exact receive, and partial/all
   send operations.
+- `Gnatevl.IO.Connections`: bounded admission, single-owner sockets,
+  cancellation tokens, and graceful server draining.
 - `Gnatevl.IO.Files`: open, close, positional read, and positional write.
 - `Gnatevl.IO`: descriptor waits and task-mode detection used by the packages
   above.
@@ -263,6 +265,36 @@ the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
 process-safety convention while retaining the raw nonblocking `accept(2)` retry
 path required by the event loop. Native `poll(2)` waits retry `EINTR` with a
 recomputed remaining monotonic deadline.
+
+### Connection lifecycle
+
+`Gnatevl.IO.Connections.Server` puts a bounded admission gate in front of
+socket ownership. `Take` transfers an existing socket into a limited
+`Connection`; `Accept_Connection` acquires capacity before accepting from the
+listener, so overload remains in the kernel backlog instead of becoming an
+unbounded user-space task or socket queue.
+
+```ada
+Manager : aliased Gnatevl.IO.Connections.Server (Capacity => 256);
+Owned   : Gnatevl.IO.Connections.Connection;
+
+Manager.Accept_Connection (Listener, Owned, Peer);
+Owned.Receive_Exactly (Request);
+Owned.Send_All (Response);
+```
+
+The limited owner cannot be copied and closes its socket while releasing the
+admission permit during explicit `Close`, normal scope exit, or exception
+unwinding. The `Server` object must outlive its admitted owners.
+
+Operations check both an optional per-operation `Cancellation_Token` and the
+server shutdown state between bounded readiness waits. The default 50 ms
+quantum bounds cancellation observation without closing a descriptor from a
+different task. `Request_Shutdown` closes admission, releases tasks queued at
+the capacity gate with `Admission_Closed`, and causes active lifecycle I/O to
+raise `Operation_Cancelled`; `Await_Drained` returns after all owners release.
+Raw `Gnatevl.IO.Sockets` remains the lower-level mechanism when an application
+needs a different ownership or cancellation policy.
 
 ### Timers
 
@@ -318,6 +350,7 @@ thread-pool runtime.
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
 | Offload regular-file I/O | Disk operations must not stall the single event loop | An adaptive idle-executor pool introduces bounded parallelism and explicit acquisition backpressure |
+| Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Limited owners release permits automatically; cancellation latency is bounded by a configurable readiness quantum |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require the matching installed GNAT 16.1 runtime sources |
 
@@ -448,6 +481,8 @@ Current smoke coverage includes:
   timers;
 - evented/native socket-pair transfer, simultaneous read/write watches on one
   descriptor, and timeout behavior;
+- bounded connection admission, one-shot cancellation, shutdown-driven I/O
+  cancellation, RAII socket release, admission closure, and accept cancellation;
 - descriptor-readiness fairness under a continuously yielding evented task;
 - read/write/create/truncate file-open combinations and same-descriptor reads;
 - repeated evented-child teardown under a native master, exercising deferred
@@ -469,6 +504,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/evented_pipeline
 ./showcases/bin/many_evented_tasks
 ./showcases/bin/cooperative_fairness
+./showcases/bin/connection_lifecycle
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/evented_vs_threads
 ./showcases/bin/evented_io
@@ -482,6 +518,8 @@ The examples demonstrate:
 - fan-out timers and protected aggregation;
 - uncooperative CPU monopolization versus time-budgeted cooperative checkpoints
   on the same event loop;
+- bounded connection admission followed by cancellation and a fully drained
+  graceful shutdown, including automatic socket ownership cleanup;
 - evented coordination with native CPU workers;
 - `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
   one-task thread, and rejection of unsafe live stock-native conversion;
@@ -599,8 +637,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - Regular-file operations use an adaptive native executor pool rather than
   kernel asynchronous file I/O. Linux `io_uring` and platform-native completion
   backends are not implemented yet.
-- Closing a descriptor concurrently with an indefinite wait has no general
-  cancellation protocol yet; finite deadlines are safer.
+- `Gnatevl.IO.Connections` provides cooperative cancellation without concurrent
+  descriptor close, bounded by its readiness quantum. Raw socket operations do
+  not infer descriptor ownership; closing a raw descriptor concurrently with
+  an indefinite wait remains outside that lower-level API's guarantees.
 - Fiber guard pages make stack overflow fail fast, but the evented stack does
   not yet have an alternate signal stack that translates the fault into Ada
   `Storage_Error`; overflow currently terminates the process.
@@ -609,5 +649,6 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.
 
 The next architectural work is additional architectures and operating systems,
-higher-level connection lifecycle APIs, fairness controls, and more complete
-stress and semantic-conformance testing across both execution lanes.
+optional CPU-affinity policy, structured listener/worker orchestration, and
+more complete stress and semantic-conformance testing across both execution
+lanes.
