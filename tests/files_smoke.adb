@@ -40,6 +40,75 @@ begin
    if Last /= Incoming'Last or else Incoming /= Data then
       raise Program_Error with "read/write create returned a write-only fd";
    end if;
+
+   declare
+      Batch_Size : constant Positive :=
+        Positive'Min (64, Gnatevl.IO.Files.Executor_Width * 2);
+
+      protected Progress is
+         procedure Finished (Passed : Boolean);
+         entry Wait;
+         function Passed return Boolean;
+      private
+         Completed : Natural := 0;
+         All_OK    : Boolean := True;
+      end Progress;
+
+      protected body Progress is
+         procedure Finished (Passed : Boolean) is
+         begin
+            Completed := Completed + 1;
+            All_OK := All_OK and Passed;
+         end Finished;
+
+         entry Wait when Completed = Batch_Size is
+         begin
+            null;
+         end Wait;
+
+         function Passed return Boolean is (All_OK);
+      end Progress;
+
+      task type Parallel_Writer (Index : Positive);
+
+      task body Parallel_Writer is
+         Item : constant Stream_Element_Array :=
+           [1 => Stream_Element (Index mod 251)];
+         Written : Stream_Element_Offset;
+      begin
+         Gnatevl.IO.Files.Write_At
+           (File, Gnatevl.IO.Files.File_Offset (Index - 1), Item, Written);
+         Progress.Finished (Written = Item'Last);
+      exception
+         when others =>
+            Progress.Finished (False);
+      end Parallel_Writer;
+
+      type Writer_Access is access Parallel_Writer;
+      Writers : array (1 .. Batch_Size) of Writer_Access;
+      Batch   : Stream_Element_Array
+        (1 .. Stream_Element_Offset (Batch_Size));
+   begin
+      for Index in Writers'Range loop
+         Writers (Index) := new Parallel_Writer (Index);
+      end loop;
+      Progress.Wait;
+      if not Progress.Passed then
+         raise Program_Error with "parallel file executor write failed";
+      end if;
+
+      Gnatevl.IO.Files.Read_At (File, 0, Batch, Last);
+      if Last /= Batch'Last then
+         raise Program_Error with "parallel file executor read was short";
+      end if;
+      for Index in Writers'Range loop
+         if Batch (Stream_Element_Offset (Index)) /=
+           Stream_Element (Index mod 251)
+         then
+            raise Program_Error with "parallel positional write corrupted data";
+         end if;
+      end loop;
+   end;
    Gnatevl.IO.Files.Close (File);
 
    File :=

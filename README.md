@@ -117,7 +117,7 @@ flowchart TB
     K[Per-group OS poller readiness and cross-thread wake]
     C[Guarded stackful task contexts]
     X[Small ABI-specific register swap]
-    F[Four native Ada regular-file workers]
+    F[Adaptive native Ada regular-file executors]
     O[Operating system]
 
     A --> G --> R
@@ -257,11 +257,19 @@ Regular disk files are different from sockets: readiness from `kqueue` or
 `epoll` does not make a potentially blocking `pread` or `pwrite` safe to execute
 on the event-loop thread.
 
-GNATEVL therefore uses a small pool of designated native Ada tasks for file
-operations. An evented caller rendezvous with a worker, suspends through normal
-GNARL machinery, and resumes when the result is available. A native caller can
-execute the same positional operation directly. Explicit offsets avoid shared
-file-position races.
+GNATEVL therefore uses designated native Ada executors for file operations. An
+evented caller acquires the next executor that is actually idle, rendezvous with
+it, suspends through normal GNARL machinery, and resumes when the result is
+available. Waiting for an executor is the bounded backpressure point; it no
+longer assigns a request round-robin to a busy worker while another is idle. A
+native caller can execute the same positional operation directly. Explicit
+offsets avoid shared file-position races.
+
+The default executor width is twice the host CPU count, clamped to `4 .. 32`.
+`GNATEVL_FILE_WORKERS` can override it in `1 .. 128`, and
+`Gnatevl.IO.Files.Executor_Width` reports the selected value. This is a scalable
+completion bridge, not a claim to use Linux `io_uring`; a real `io_uring`
+backend remains separate platform work.
 
 This worker bridge is intentionally written as Ada tasking, not as a separate C
 thread-pool runtime.
@@ -281,7 +289,7 @@ thread-pool runtime.
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
-| Offload regular-file I/O | Disk operations must not stall the single event loop | The fixed worker pool introduces bounded parallelism and possible backpressure |
+| Offload regular-file I/O | Disk operations must not stall the single event loop | An adaptive idle-executor pool introduces bounded parallelism and explicit acquisition backpressure |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require the matching installed GNAT 16.1 runtime sources |
 
@@ -554,7 +562,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   point can monopolize the loop.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
-- The regular-file pool is fixed at four native workers.
+- Regular-file operations use an adaptive native executor pool rather than
+  kernel asynchronous file I/O. Linux `io_uring` and platform-native completion
+  backends are not implemented yet.
 - Closing a descriptor concurrently with an indefinite wait has no general
   cancellation protocol yet; finite deadlines are safer.
 - Timer expiration currently scans scheduler state rather than using a more

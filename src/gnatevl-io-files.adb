@@ -1,4 +1,6 @@
+with Ada.Environment_Variables;
 with System;
+with System.Multiprocessors;
 with GNAT.OS_Lib;
 with Gnatevl.File_Open_Policy;
 
@@ -9,7 +11,35 @@ package body Gnatevl.IO.Files is
    use type C.int;
    use type C.long;
 
-   Worker_Count : constant := 4;
+   Maximum_Workers : constant := 128;
+
+   function Select_Executor_Width return Positive;
+
+   function Select_Executor_Width return Positive is
+      CPU_Count : constant Natural :=
+        Natural (System.Multiprocessors.Number_Of_CPUs);
+      Default   : constant Positive :=
+        Positive (Natural'Min (32, Natural'Max (4, CPU_Count * 2)));
+   begin
+      if Ada.Environment_Variables.Exists ("GNATEVL_FILE_WORKERS") then
+         declare
+            Requested : constant Positive :=
+              Positive'Value
+                (Ada.Environment_Variables.Value ("GNATEVL_FILE_WORKERS"));
+         begin
+            return Positive'Min (Maximum_Workers, Requested);
+         end;
+      end if;
+      return Default;
+   exception
+      when Constraint_Error =>
+         return Default;
+   end Select_Executor_Width;
+
+   Configured_Executor_Width : constant Positive := Select_Executor_Width;
+   subtype Worker_Index is Positive range 1 .. Configured_Executor_Width;
+   type Worker_Index_Array is array (Worker_Index) of Worker_Index;
+   type Availability_Array is array (Worker_Index) of Boolean;
 
    function C_Open
      (Path        : System.Address;
@@ -61,7 +91,42 @@ package body Gnatevl.IO.Files is
       Last       : out Ada.Streams.Stream_Element_Offset;
       Error_Code : out C.int);
 
-   task type File_Worker is
+   --  Callers take the next executor that is actually idle. This avoids the
+   --  deterministic head-of-line blocking of round-robin assignment: when all
+   --  executors are occupied, the protected entry queue is the bounded
+   --  backpressure point and evented callers suspend through normal GNARL.
+   protected Idle_Executors is
+      entry Acquire (Index : out Worker_Index);
+      procedure Release (Index : Worker_Index);
+   private
+      Idle      : Worker_Index_Array;
+      Available : Availability_Array := (others => False);
+      Count     : Natural range 0 .. Configured_Executor_Width := 0;
+   end Idle_Executors;
+
+   protected body Idle_Executors is
+      entry Acquire (Index : out Worker_Index) when Count > 0 is
+      begin
+         Index := Idle (Worker_Index (Count));
+         Count := Count - 1;
+         if not Available (Index) then
+            raise Program_Error with "file executor availability corrupted";
+         end if;
+         Available (Index) := False;
+      end Acquire;
+
+      procedure Release (Index : Worker_Index) is
+      begin
+         if Available (Index) or else Count = Configured_Executor_Width then
+            raise Program_Error with "file executor released twice";
+         end if;
+         Count := Count + 1;
+         Idle (Worker_Index (Count)) := Index;
+         Available (Index) := True;
+      end Release;
+   end Idle_Executors;
+
+   task type File_Worker (Index : Worker_Index) is
       pragma Task_Info (Gnatevl.Native_Thread);
 
       entry Open
@@ -92,6 +157,7 @@ package body Gnatevl.IO.Files is
 
    task body File_Worker is
    begin
+      Idle_Executors.Release (Index);
       loop
          select
             accept Open
@@ -134,24 +200,13 @@ package body Gnatevl.IO.Files is
          or
             terminate;
          end select;
+         Idle_Executors.Release (Index);
       end loop;
    end File_Worker;
 
-   Workers : array (Positive range 1 .. Worker_Count) of File_Worker;
-
-   protected Router is
-      procedure Choose (Index : out Positive);
-   private
-      Next : Positive := Workers'First;
-   end Router;
-
-   protected body Router is
-      procedure Choose (Index : out Positive) is
-      begin
-         Index := Next;
-         Next := (if Next = Workers'Last then Workers'First else Next + 1);
-      end Choose;
-   end Router;
+   type File_Worker_Access is access File_Worker;
+   type Worker_Array is array (Worker_Index) of File_Worker_Access;
+   Workers : Worker_Array;
 
    procedure Perform_Open
      (Path       : String;
@@ -252,6 +307,8 @@ package body Gnatevl.IO.Files is
       raise Device_Error with Operation & " failed, errno=" & Error_Code'Image;
    end Raise_IO_Error;
 
+   function Executor_Width return Positive is (Configured_Executor_Width);
+
    function Open
      (Path     : String;
       Mode     : Open_Mode := Read_Only;
@@ -260,7 +317,7 @@ package body Gnatevl.IO.Files is
    is
       File       : File_Descriptor;
       Error_Code : C.int;
-      Worker     : Positive;
+      Worker     : Worker_Index;
    begin
       if not File_Open_Policy.Valid
         ((case Mode is
@@ -274,7 +331,7 @@ package body Gnatevl.IO.Files is
       end if;
 
       if Is_Evented_Task then
-         Router.Choose (Worker);
+         Idle_Executors.Acquire (Worker);
          Workers (Worker).Open
            (Path, Mode, Create, Truncate, File, Error_Code);
       else
@@ -288,13 +345,13 @@ package body Gnatevl.IO.Files is
 
    procedure Close (File : in out File_Descriptor) is
       Error_Code : C.int;
-      Worker     : Positive;
+      Worker     : Worker_Index;
    begin
       if File = Invalid_File then
          return;
       end if;
       if Is_Evented_Task then
-         Router.Choose (Worker);
+         Idle_Executors.Acquire (Worker);
          Workers (Worker).Close (File, Error_Code);
       else
          Perform_Close (File, Error_Code);
@@ -312,10 +369,10 @@ package body Gnatevl.IO.Files is
       Last   : out Ada.Streams.Stream_Element_Offset)
    is
       Error_Code : C.int;
-      Worker     : Positive;
+      Worker     : Worker_Index;
    begin
       if Is_Evented_Task then
-         Router.Choose (Worker);
+         Idle_Executors.Acquire (Worker);
          Workers (Worker).Read_At (File, Offset, Item, Last, Error_Code);
       else
          Perform_Read (File, Offset, Item, Last, Error_Code);
@@ -332,10 +389,10 @@ package body Gnatevl.IO.Files is
       Last   : out Ada.Streams.Stream_Element_Offset)
    is
       Error_Code : C.int;
-      Worker     : Positive;
+      Worker     : Worker_Index;
    begin
       if Is_Evented_Task then
-         Router.Choose (Worker);
+         Idle_Executors.Acquire (Worker);
          Workers (Worker).Write_At (File, Offset, Item, Last, Error_Code);
       else
          Perform_Write (File, Offset, Item, Last, Error_Code);
@@ -345,4 +402,8 @@ package body Gnatevl.IO.Files is
       end if;
    end Write_At;
 
+begin
+   for Index in Worker_Index loop
+      Workers (Index) := new File_Worker (Index);
+   end loop;
 end Gnatevl.IO.Files;

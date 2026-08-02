@@ -9,6 +9,11 @@ package Gnatevl.IO.Files is
    type Open_Mode is (Read_Only, Write_Only, Read_Write);
    type File_Offset is range 0 .. Interfaces.C.long_long'Last;
 
+   --  Number of native executors serving evented file operations. The default
+   --  is derived from the host CPU count and can be overridden before program
+   --  start with GNATEVL_FILE_WORKERS (clamped to 1 .. 128).
+   function Executor_Width return Positive;
+
    function Open
      (Path     : String;
       Mode     : Open_Mode := Read_Only;
