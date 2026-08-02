@@ -1173,6 +1173,7 @@ package body Gnatevl.IO.DNS is
       Cached_TTL : Natural;
       Found, Negative : Boolean;
       Last_Error_Was_Malformed : Boolean := False;
+      Last_Transport_Failed : Boolean := False;
    begin
       Cache.Lookup
         (Key, Found, Negative, Cached, Cached_Count, Cached_TTL);
@@ -1343,13 +1344,15 @@ package body Gnatevl.IO.DNS is
                                             Attempts, Per_Attempt, Deadline,
                                             Infinite, Interrupt_1, Interrupt_2,
                                             Interrupt_3, CNAME_Depth + 1);
+                                       Composed : Parse_Result := Alias_Result;
                                     begin
+                                       Composed.TTL := Natural'Min
+                                         (Parsed.TTL, Alias_Result.TTL);
                                        Cache.Store
-                                         (Key, False, Alias_Result.Addresses,
-                                          Alias_Result.Address_Count,
-                                          Natural'Min
-                                            (Parsed.TTL, Alias_Result.TTL));
-                                       return Alias_Result;
+                                         (Key, False, Composed.Addresses,
+                                          Composed.Address_Count,
+                                          Composed.TTL);
+                                       return Composed;
                                     end;
                                  end if;
                                  Cache.Store
@@ -1384,6 +1387,11 @@ package body Gnatevl.IO.DNS is
                when Gnatevl.IO.Sockets.Operation_Interrupted =>
                   Close_All;
                   raise Operation_Cancelled;
+               when Timeout_Error
+                  | Device_Error
+                  | Sockets.Socket_Error =>
+                  Close_All;
+                  Last_Transport_Failed := True;
                when others =>
                   Close_All;
                   raise;
@@ -1393,6 +1401,8 @@ package body Gnatevl.IO.DNS is
 
       if Last_Error_Was_Malformed then
          raise Malformed_Response with "no valid DNS response received";
+      elsif Last_Transport_Failed then
+         raise Timeout_Error with "DNS transport failed";
       end if;
       raise Timeout_Error with "DNS resolution timed out";
    end Query_Kind;
@@ -1417,6 +1427,7 @@ package body Gnatevl.IO.DNS is
       Values     : Raw_Address_Array (1 .. Max_Addresses);
       Count      : Natural := 0;
       Transport_Failed : Boolean := False;
+      Malformed_Failed : Boolean := False;
 
       procedure Append (Parsed : Parse_Result);
       procedure Append (Parsed : Parse_Result) is
@@ -1477,7 +1488,11 @@ package body Gnatevl.IO.DNS is
                      Interrupt_1, Interrupt_2, Interrupt_3));
                exception
                   when Name_Not_Found => null;
-                  when Timeout_Error => Transport_Failed := True;
+                  when Malformed_Response => Malformed_Failed := True;
+                  when Timeout_Error
+                     | Device_Error
+                     | Sockets.Socket_Error =>
+                     Transport_Failed := True;
                end;
             end;
             begin
@@ -1486,11 +1501,18 @@ package body Gnatevl.IO.DNS is
                   Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
             exception
                when Name_Not_Found => null;
-               when Timeout_Error => Transport_Failed := True;
+               when Malformed_Response => Malformed_Failed := True;
+               when Timeout_Error
+                  | Device_Error
+                  | Sockets.Socket_Error =>
+                  Transport_Failed := True;
             end;
       end case;
       if Count = 0 then
-         if Transport_Failed then
+         if Malformed_Failed then
+            raise Malformed_Response with
+              "no usable address after malformed DNS response";
+         elsif Transport_Failed then
             raise Timeout_Error with "DNS resolution timed out";
          else
             raise Name_Not_Found with Name;

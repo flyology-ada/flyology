@@ -95,7 +95,11 @@ do
     -P tests/runtime_smoke.gpr \
     "$test_main.adb"
   case "$test_main" in
-    dns_smoke|process_lifecycle_smoke|process_exit_live_task_smoke)
+    dns_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$project_root/tests/bin/$test_main"
+      ;;
+    process_lifecycle_smoke|process_exit_live_task_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$project_root/tests/bin/$test_main"
       ;;

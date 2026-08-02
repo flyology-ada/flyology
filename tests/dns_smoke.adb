@@ -37,6 +37,8 @@ procedure DNS_Smoke is
          function A_Queries return Natural;
          procedure Alias_Query;
          function Alias_Queries return Natural;
+         procedure Chain_Query;
+         function Chain_Queries return Natural;
          procedure Finished (Passed : Boolean);
          entry Wait_Finished (Passed : out Boolean);
       private
@@ -49,6 +51,7 @@ procedure DNS_Smoke is
          Missing_Count : Natural := 0;
          A_Count : Natural := 0;
          Alias_Count : Natural := 0;
+         Chain_Count : Natural := 0;
          Is_Finished : Boolean := False;
          All_OK : Boolean := False;
       end Control;
@@ -145,6 +148,11 @@ procedure DNS_Smoke is
             Alias_Count := Alias_Count + 1;
          end Alias_Query;
          function Alias_Queries return Natural is (Alias_Count);
+         procedure Chain_Query is
+         begin
+            Chain_Count := Chain_Count + 1;
+         end Chain_Query;
+         function Chain_Queries return Natural is (Chain_Count);
          procedure Finished (Passed : Boolean) is
          begin
             All_OK := Passed;
@@ -258,6 +266,7 @@ procedure DNS_Smoke is
             NXDOMAIN   : Boolean := False;
             Truncated  : Boolean := False;
             Malformed  : Boolean := False;
+            TTL        : Natural := 60;
             Socket     : Sockets.Socket_Type := Sockets.No_Socket)
          is
             Response : Streams.Stream_Element_Array (1 .. 512) := (others => 0);
@@ -300,7 +309,7 @@ procedure DNS_Smoke is
                if CNAME'Length /= 0 then
                   Put_U16 (Response, Position, 5);
                   Put_U16 (Response, Position, 1);
-                  Put_U32 (Response, Position, 60);
+                  Put_U32 (Response, Position, TTL);
                   declare
                      Length_Position : constant Streams.Stream_Element_Offset := Position;
                      Data_Start : Streams.Stream_Element_Offset;
@@ -317,7 +326,7 @@ procedure DNS_Smoke is
                     (Response, Position,
                      (if IPv6'Length = 0 then 1 else 28));
                   Put_U16 (Response, Position, 1);
-                  Put_U32 (Response, Position, 60);
+                  Put_U32 (Response, Position, TTL);
                   if IPv6'Length = 0 then
                      Put_U16 (Response, Position, 4);
                      Address := Sockets.Inet_Addr (IPv4);
@@ -390,6 +399,16 @@ procedure DNS_Smoke is
                   Send_Response (Name, CNAME => "target.test");
                elsif Name = "target.test" then
                   Send_Response (Name, IPv4 => "203.0.113.7");
+               elsif Name = "chain-a.test" then
+                  Control.Chain_Query;
+                  Send_Response
+                    (Name, CNAME => "chain-b.test", TTL => 5);
+               elsif Name = "chain-b.test" then
+                  Send_Response
+                    (Name, CNAME => "chain-c.test", TTL => 1);
+               elsif Name = "chain-c.test" then
+                  Send_Response
+                    (Name, IPv4 => "203.0.113.88", TTL => 100);
                elsif Name = "missing.test" then
                   Control.Missing_Query;
                   Send_Response (Name, NXDOMAIN => True);
@@ -451,6 +470,13 @@ procedure DNS_Smoke is
                elsif Name = "dual.test" then
                   if Query_Type = 1 then
                      Send_Response (Name, IPv4 => "192.0.2.66");
+                  end if;
+               elsif Name = "dual-malformed.test" then
+                  if Query_Type = 28 then
+                     Send_Response
+                       (Name, IPv6 => "2001:db8::bad", Malformed => True);
+                  else
+                     Send_Response (Name, IPv4 => "192.0.2.67");
                   end if;
                elsif Name = "order.test" then
                   Send_Response (Name, IPv4 => "192.0.2.20");
@@ -652,6 +678,10 @@ procedure DNS_Smoke is
          delay 1.1;
          Expect ("alias.test", "203.0.113.7");
          OK := OK and then Control.Alias_Queries = 1;
+         Expect ("chain-a.test", "203.0.113.88");
+         delay 1.1;
+         Expect ("chain-a.test", "203.0.113.88");
+         OK := OK and then Control.Chain_Queries = 2;
          Expect ("malformed.test", "192.0.2.2");
          Expect ("retry.test", "198.51.100.4");
          Expect ("tcp.test", "198.51.100.9");
@@ -686,6 +716,14 @@ procedure DNS_Smoke is
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.66";
+         end;
+         declare
+            Values : constant DNS.Address_Array := DNS.Resolve_Using
+              ("dual-malformed.test", Servers, DNS.Any_Family,
+               Timeout => 0.6, Attempts => 1, Retry_Interval => 0.1);
+         begin
+            OK := OK and then Values'Length = 1
+              and then Sockets.Image (Values (Values'First)) = "192.0.2.67";
          end;
          declare
             Values : constant DNS.Address_Array := DNS.Resolve
