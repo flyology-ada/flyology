@@ -1,7 +1,9 @@
+with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Gnatevl;
 with Gnatevl.Observability;
 with Interfaces;
+with Interfaces.C;
 
 procedure Stack_Pool_Smoke is
    package Observation renames Gnatevl.Observability;
@@ -10,6 +12,51 @@ procedure Stack_Pool_Smoke is
    use type Observation.Stack_Pool_Snapshot;
 
    Small_Effective_Bytes : Observation.Counter := 0;
+   Large_Effective_Bytes : Observation.Counter := 0;
+   Arena_Slot_Limit      : constant Observation.Counter := 64;
+   Maximum_Arena_Bytes   : constant Observation.Counter := 4 * 1_024 * 1_024;
+
+   function Get_Page_Size return Interfaces.C.int;
+   pragma Import (C, Get_Page_Size, "getpagesize");
+
+   function Arena_Capacity
+     (Usable_Bytes : Observation.Counter) return Observation.Counter
+   is
+      Stride : constant Observation.Counter :=
+        Usable_Bytes + Observation.Counter (Get_Page_Size);
+   begin
+      if Stride >= Maximum_Arena_Bytes then
+         return 1;
+      end if;
+      return Observation.Counter'Min
+        (Arena_Slot_Limit, Maximum_Arena_Bytes / Stride);
+   end Arena_Capacity;
+
+   function Arena_Count
+     (Stack_Count, Usable_Bytes : Observation.Counter)
+      return Observation.Counter
+   is
+      Capacity : constant Observation.Counter := Arena_Capacity (Usable_Bytes);
+   begin
+      return (Stack_Count + Capacity - 1) / Capacity;
+   end Arena_Count;
+
+   procedure Print_Snapshot
+     (Label : String; Value : Observation.Stack_Pool_Snapshot)
+   is
+      use Ada.Text_IO;
+   begin
+      Put_Line
+        (Label
+         & " arenas=" & Value.Active_Arenas'Image
+         & " live=" & Value.Live_Stacks'Image
+         & " usable=" & Value.Live_Usable_Bytes'Image
+         & " reserved=" & Value.Reserved_Bytes'Image
+         & " maps=" & Value.Arena_Mappings'Image
+         & " unmaps=" & Value.Arena_Unmappings'Image
+         & " shared=" & Value.Shared_Stacks'Image
+         & " discarded=" & Value.Discarded_Stacks'Image);
+   end Print_Snapshot;
 
    procedure Wait_Until_Empty is
       Value : Observation.Stack_Pool_Snapshot;
@@ -157,10 +204,13 @@ procedure Stack_Pool_Smoke is
       During := Observation.Stack_Pool;
       Small_Effective_Bytes := During.Live_Usable_Bytes / Original_Count;
       if During.Live_Stacks /= Original_Count
-        or else During.Active_Arenas /= 1
+        or else During.Active_Arenas
+          /= Arena_Count (Original_Count, Small_Effective_Bytes)
         or else Small_Effective_Bytes < 16 * 1_024
-        or else During.Arena_Mappings /= Before.Arena_Mappings + 1
-        or else During.Shared_Stacks /= Before.Shared_Stacks + 63
+        or else During.Arena_Mappings
+          /= Before.Arena_Mappings + During.Active_Arenas
+        or else During.Shared_Stacks
+          /= Before.Shared_Stacks + Original_Count - During.Active_Arenas
       then
          Failed := True;
       end if;
@@ -172,7 +222,13 @@ procedure Stack_Pool_Smoke is
       end loop;
       Partial := Observation.Stack_Pool;
       if Partial.Live_Stacks /= Replacement_Count
-        or else Partial.Active_Arenas /= 1
+        or else Partial.Active_Arenas
+          /= During.Active_Arenas
+             - Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
+        or else Partial.Arena_Mappings /= During.Arena_Mappings
+        or else Partial.Arena_Unmappings
+          /= Before.Arena_Unmappings
+             + Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
         or else Partial.Discarded_Stacks
           /= Before.Discarded_Stacks + Replacement_Count
       then
@@ -185,10 +241,14 @@ procedure Stack_Pool_Smoke is
       Control.Wait_Replacements;
       Refilled := Observation.Stack_Pool;
       if Refilled.Live_Stacks /= Original_Count
-        or else Refilled.Active_Arenas /= 1
-        or else Refilled.Arena_Mappings /= During.Arena_Mappings
+        or else Refilled.Active_Arenas /= During.Active_Arenas
+        or else Refilled.Arena_Mappings
+          /= During.Arena_Mappings
+             + During.Active_Arenas - Partial.Active_Arenas
+        or else Refilled.Arena_Unmappings /= Partial.Arena_Unmappings
         or else Refilled.Shared_Stacks
           /= During.Shared_Stacks + Replacement_Count
+             - (Refilled.Arena_Mappings - During.Arena_Mappings)
       then
          Failed := True;
       end if;
@@ -203,6 +263,10 @@ procedure Stack_Pool_Smoke is
       end loop;
       Wait_Until_Empty;
       if Failed then
+         Print_Snapshot ("before:", Before);
+         Print_Snapshot ("during:", During);
+         Print_Snapshot ("partial:", Partial);
+         Print_Snapshot ("refilled:", Refilled);
          raise Program_Error with "partial stack-arena churn was inconsistent";
       end if;
    end Test_Partial_Churn;
@@ -290,7 +354,7 @@ procedure Stack_Pool_Smoke is
 
       task type Head is
          pragma Task_Info (Gnatevl.Event_Loop_Task);
-         pragma Storage_Size (128 * 1_024);
+         pragma Storage_Size (512 * 1_024);
       end Head;
 
       task body Older is
@@ -325,9 +389,12 @@ procedure Stack_Pool_Smoke is
       Head_Worker := new Head;
       Control.Wait_Both;
       During := Observation.Stack_Pool;
+      Large_Effective_Bytes :=
+        During.Live_Usable_Bytes - Small_Effective_Bytes;
       if During.Live_Stacks /= 2
         or else During.Active_Arenas /= 2
         or else During.Arena_Mappings /= Before.Arena_Mappings + 2
+        or else Large_Effective_Bytes <= Small_Effective_Bytes
       then
          Failed := True;
       end if;
@@ -351,6 +418,9 @@ procedure Stack_Pool_Smoke is
       Free (Older_Worker);
       Wait_Until_Empty;
       if Failed then
+         Print_Snapshot ("before head cleanup:", Before);
+         Print_Snapshot ("during head cleanup:", During);
+         Print_Snapshot ("after head cleanup:", After_Head);
          raise Program_Error with "head stack-arena cleanup was inconsistent";
       end if;
    end Test_Head_Arena_Cleanup;
@@ -397,7 +467,7 @@ procedure Stack_Pool_Smoke is
 
       task type Large is
          pragma Task_Info (Gnatevl.Event_Loop_Task);
-         pragma Storage_Size (128 * 1_024);
+         pragma Storage_Size (512 * 1_024);
       end Large;
 
       task body Small is
@@ -420,14 +490,16 @@ procedure Stack_Pool_Smoke is
    begin
       Control.Wait_All;
       During := Observation.Stack_Pool;
-      --  The two requested sizes differ by 112 KiB on every platform. Forty
-      --  small stacks fit in one arena and forty large stacks require two on
-      --  both 16 KiB- and 4 KiB-page hosts.
+      --  Effective sizes include GNARL's platform-specific minimum and task
+      --  wrapper overhead. Measure both sizes before deriving how many of
+      --  each fit in a four-MiB arena.
       if During.Live_Stacks /= 2 * Count_Per_Size
-        or else During.Active_Arenas /= 3
+        or else During.Active_Arenas
+          /= Arena_Count (Count_Per_Size, Small_Effective_Bytes)
+             + Arena_Count (Count_Per_Size, Large_Effective_Bytes)
         or else During.Live_Usable_Bytes
-          /= 2 * Count_Per_Size * Small_Effective_Bytes
-             + Count_Per_Size * (128 - 16) * 1_024
+          /= Count_Per_Size
+             * (Small_Effective_Bytes + Large_Effective_Bytes)
       then
          Failed := True;
       end if;
