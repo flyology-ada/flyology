@@ -16,6 +16,7 @@ if ! command -v gnatdoc >/dev/null 2>&1; then
 fi
 
 cd "$project_root"
+"$alr" build --stop-after=generation
 export FLYOLOGY_DOCUMENTATION=true
 "$alr" exec -- gnatdoc \
   --backend=html \
