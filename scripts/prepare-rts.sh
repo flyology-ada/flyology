@@ -68,9 +68,11 @@ case "$test_faults" in
     ;;
 esac
 
-compiler_version=$("$alr" exec -- gcc -dumpfullversion)
+compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$alr")
+compiler=$("$alr" exec -- sh -c 'command -v gcc' | tail -n 1)
+compiler_version=$("$compiler" -dumpfullversion)
 
-case "$compiler_version" in
+case "$compiler_release" in
   13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
     patch_family=gnat-13-16
     compat_family=gnat-legacy
@@ -82,7 +84,8 @@ case "$compiler_version" in
   *)
     printf '%s\n' \
       "unsupported GNAT runtime version: $compiler_version" \
-      "verified releases: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
+      "selected Alire release: $compiler_release" \
+      "verified gnat_native releases: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
     exit 1
     ;;
 esac
@@ -102,8 +105,8 @@ esac
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
 
-source_include=$("$alr" exec -- gcc -print-file-name=adainclude)
-source_lib=$("$alr" exec -- gcc -print-file-name=adalib)
+source_include=$("$compiler" -print-file-name=adainclude)
+source_lib=$("$compiler" -print-file-name=adalib)
 
 mkdir -p "$generated_include" "$generated_lib" "$build_root/obj"
 chmod -R u+w "$generated_include" "$generated_lib"
@@ -136,11 +139,11 @@ cc -O2 $fault_cflags -c "$project_root/runtime/native/platform.c" \
   -o "$build_root/obj/platform.o"
 cd "$build_root/obj"
 if [ "$platform" = linux ]; then
-  "$alr" exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnata \
+  "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
     -I "$generated_include" \
     "$generated_include/s-gnlimo.ads"
 fi
-"$alr" exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnata \
+"$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
   -I "$generated_include" \
   "$generated_include/s-gntiab.ads" \
   "$generated_include/s-gndeex.ads" \
