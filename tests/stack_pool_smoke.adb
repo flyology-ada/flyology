@@ -207,6 +207,154 @@ procedure Stack_Pool_Smoke is
       end if;
    end Test_Partial_Churn;
 
+   procedure Test_Head_Arena_Cleanup is
+      protected Control is
+         procedure Arrived;
+         procedure Finished (Head : Boolean);
+         procedure Release_Head;
+         procedure Release_Older;
+         entry Wait_Older;
+         entry Wait_Both;
+         entry Wait_Head_Finished;
+         entry Wait_Older_Finished;
+         entry Head_Gate;
+         entry Older_Gate;
+      private
+         Arrivals       : Natural := 0;
+         Head_Done      : Boolean := False;
+         Older_Done     : Boolean := False;
+         Head_Open      : Boolean := False;
+         Older_Open     : Boolean := False;
+      end Control;
+
+      protected body Control is
+         procedure Arrived is
+         begin
+            Arrivals := Arrivals + 1;
+         end Arrived;
+
+         procedure Finished (Head : Boolean) is
+         begin
+            if Head then
+               Head_Done := True;
+            else
+               Older_Done := True;
+            end if;
+         end Finished;
+
+         procedure Release_Head is
+         begin
+            Head_Open := True;
+         end Release_Head;
+
+         procedure Release_Older is
+         begin
+            Older_Open := True;
+         end Release_Older;
+
+         entry Wait_Older when Arrivals >= 1 is
+         begin
+            null;
+         end Wait_Older;
+
+         entry Wait_Both when Arrivals >= 2 is
+         begin
+            null;
+         end Wait_Both;
+
+         entry Wait_Head_Finished when Head_Done is
+         begin
+            null;
+         end Wait_Head_Finished;
+
+         entry Wait_Older_Finished when Older_Done is
+         begin
+            null;
+         end Wait_Older_Finished;
+
+         entry Head_Gate when Head_Open is
+         begin
+            null;
+         end Head_Gate;
+
+         entry Older_Gate when Older_Open is
+         begin
+            null;
+         end Older_Gate;
+      end Control;
+
+      task type Older is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Storage_Size (16 * 1_024);
+      end Older;
+
+      task type Head is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Storage_Size (128 * 1_024);
+      end Head;
+
+      task body Older is
+      begin
+         Control.Arrived;
+         Control.Older_Gate;
+         Control.Finished (Head => False);
+      end Older;
+
+      task body Head is
+      begin
+         Control.Arrived;
+         Control.Head_Gate;
+         Control.Finished (Head => True);
+      end Head;
+
+      type Older_Access is access Older;
+      type Head_Access is access Head;
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Older, Older_Access);
+      procedure Free is new Ada.Unchecked_Deallocation
+        (Head, Head_Access);
+
+      Older_Worker : Older_Access;
+      Head_Worker  : Head_Access;
+      Before, During, After_Head : Observation.Stack_Pool_Snapshot;
+      Failed : Boolean := False;
+   begin
+      Before := Observation.Stack_Pool;
+      Older_Worker := new Older;
+      Control.Wait_Older;
+      Head_Worker := new Head;
+      Control.Wait_Both;
+      During := Observation.Stack_Pool;
+      if During.Live_Stacks /= 2
+        or else During.Active_Arenas /= 2
+        or else During.Arena_Mappings /= Before.Arena_Mappings + 2
+      then
+         Failed := True;
+      end if;
+
+      --  The differently sized Head stack owns the newest list element.
+      --  Destroy it while the older arena remains live, exercising the
+      --  no-predecessor removal path rather than whole-pool cleanup.
+      Control.Release_Head;
+      Control.Wait_Head_Finished;
+      Free (Head_Worker);
+      After_Head := Observation.Stack_Pool;
+      if After_Head.Live_Stacks /= 1
+        or else After_Head.Active_Arenas /= 1
+        or else After_Head.Arena_Unmappings /= Before.Arena_Unmappings + 1
+      then
+         Failed := True;
+      end if;
+
+      Control.Release_Older;
+      Control.Wait_Older_Finished;
+      Free (Older_Worker);
+      Wait_Until_Empty;
+      if Failed then
+         raise Program_Error with "head stack-arena cleanup was inconsistent";
+      end if;
+   end Test_Head_Arena_Cleanup;
+
    procedure Test_Mixed_Sizes is
       Count_Per_Size : constant := 40;
 
@@ -305,6 +453,7 @@ begin
    end if;
 
    Test_Partial_Churn;
+   Test_Head_Arena_Cleanup;
    Test_Mixed_Sizes;
    Wait_Until_Empty;
 end Stack_Pool_Smoke;

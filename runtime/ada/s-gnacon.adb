@@ -348,7 +348,7 @@ package body System.Gnatevl.Contexts is
       Stack : System.Address)
    is
       Position : Stack_Arena_Access;
-      Previous : Stack_Arena_Access;
+      Previous : Stack_Arena_Access := null;
       Victim   : Stack_Arena_Access := Arena;
       Result   : C.int;
       Expected : System.Address;
@@ -372,8 +372,8 @@ package body System.Gnatevl.Contexts is
       end if;
 
       --  Protect first so a stale task pointer faults before this slot can be
-      --  reused. Discarding the now-inaccessible pages returns their physical
-      --  backing while preserving both neighboring guard pages.
+      --  reused. Best-effort discard advice may let the kernel reclaim the
+      --  now-inaccessible pages; guard safety does not depend on that advice.
       Result :=
         (if Faults.Enabled and then Faults.Fail (Faults.Stack_Protection)
          then -1
