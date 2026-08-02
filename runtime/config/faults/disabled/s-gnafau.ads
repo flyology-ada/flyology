@@ -1,11 +1,8 @@
-with Interfaces.C;
-
 package System.Gnatevl.Faults is
    pragma Preelaborate;
 
-   --  Stable identifiers shared with runtime/native/platform.c. Faults are
-   --  disabled in ordinary runtime builds; test builds arm deterministic
-   --  call ranges through the exported C test interface.
+   Enabled : constant Boolean := False;
+
    type Fault_Point is
      (Fiber_Allocation,
       Stack_Mapping,
@@ -27,8 +24,5 @@ package System.Gnatevl.Faults is
       Group_Startup        => 8);
 
    function Fail (Point : Fault_Point) return Boolean;
-
-private
-   function Test_Fault_Hit (Point : Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, Test_Fault_Hit, "gnatevl_test_fault_hit");
+   pragma Inline_Always (Fail);
 end System.Gnatevl.Faults;

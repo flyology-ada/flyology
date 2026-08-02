@@ -486,7 +486,7 @@ package body System.Gnatevl.Scheduler is
          end if;
          Unlock_Topology;
       else
-         if Faults.Fail (Faults.Group_Startup) then
+         if Faults.Enabled and then Faults.Fail (Faults.Group_Startup) then
             Unlock_Topology;
             return null;
          end if;
@@ -1222,7 +1222,7 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      if Faults.Fail (Faults.Fiber_Allocation) then
+      if Faults.Enabled and then Faults.Fail (Faults.Fiber_Allocation) then
          return -1;
       end if;
       Item := new Fiber;

@@ -126,7 +126,7 @@ package body System.Gnatevl.Poller is
          Udata  => 0,
          Ext    => (others => 0));
    begin
-      if Faults.Fail (Faults.Poller_Watch) then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_Watch) then
          return False;
       end if;
       return Kevent
@@ -150,7 +150,9 @@ package body System.Gnatevl.Poller is
       Error_Code  : out C.int) return Boolean
    is
    begin
-      if Faults.Fail (Faults.File_Submission_Full) then
+      if Faults.Enabled
+        and then Faults.Fail (Faults.File_Submission_Full)
+      then
          Error_Code := C.int (OSI.EAGAIN);
          return False;
       end if;
@@ -202,9 +204,9 @@ package body System.Gnatevl.Poller is
       Events :=
         (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
       Count := 0;
-      if Faults.Fail (Faults.Poller_Wait) then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_Wait) then
          return False;
-      elsif Faults.Fail (Faults.Poller_EINTR) then
+      elsif Faults.Enabled and then Faults.Fail (Faults.Poller_EINTR) then
          return True;
       end if;
       if Timeout < 0.0 then
@@ -283,7 +285,7 @@ package body System.Gnatevl.Poller is
          Udata  => 0,
          Ext    => (others => 0));
    begin
-      if Faults.Fail (Faults.Poller_Wake) then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_Wake) then
          return False;
       end if;
       return Kevent

@@ -714,8 +714,10 @@ group startup, poller watch/wait/wake, interrupted poll waits, and file-queue
 saturation. Recoverable failures must surface to Ada and permit a subsequent
 task to run; poller failures that violate scheduler progress must terminate the
 isolated subprocess with `SIGABRT`. The runner restores a normal, fault-disabled
-RTS before exiting. Production builds compile the same narrow boundary calls
-to a no-op and contain no random decision logic.
+RTS before exiting. The selected production configuration exposes a compile-time
+false constant, so fault conditions and their cross-language hook calls are
+eliminated from scheduler, poller, and context objects; production contains no
+random decision logic or fault-hook call overhead.
 
 The longer campaign is deliberately opt-in:
 

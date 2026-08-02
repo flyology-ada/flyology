@@ -115,7 +115,7 @@ package body System.Gnatevl.Contexts is
 
       Usable_Size := Round_Up (Stack_Size, Page_Size);
       Item.Mapping_Size := Usable_Size + 2 * Page_Size;
-      if Faults.Fail (Faults.Stack_Mapping) then
+      if Faults.Enabled and then Faults.Fail (Faults.Stack_Mapping) then
          Free (Item);
          return null;
       end if;

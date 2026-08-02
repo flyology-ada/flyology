@@ -308,7 +308,7 @@ package body System.Gnatevl.Poller is
       Event        : aliased Epoll_Event;
       Result       : C.int;
    begin
-      if Faults.Fail (Faults.Poller_Watch) then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_Watch) then
          return False;
       end if;
       if Watch_Item = null then
@@ -359,7 +359,9 @@ package body System.Gnatevl.Poller is
       Error_Code  : out C.int) return Boolean
    is
    begin
-      if Faults.Fail (Faults.File_Submission_Full) then
+      if Faults.Enabled
+        and then Faults.Fail (Faults.File_Submission_Full)
+      then
          Error_Code := EAGAIN;
          return False;
       end if;
@@ -416,9 +418,9 @@ package body System.Gnatevl.Poller is
       Events :=
         (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
       Count := 0;
-      if Faults.Fail (Faults.Poller_Wait) then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_Wait) then
          return False;
-      elsif Faults.Fail (Faults.Poller_EINTR) then
+      elsif Faults.Enabled and then Faults.Fail (Faults.Poller_EINTR) then
          return True;
       end if;
       if not Drain_File_Events (Item, Events, Count) then
@@ -515,7 +517,7 @@ package body System.Gnatevl.Poller is
       Value  : aliased C.unsigned_long_long := 1;
       Result : C.long;
    begin
-      if Faults.Fail (Faults.Poller_Wake) then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_Wake) then
          return False;
       end if;
       loop

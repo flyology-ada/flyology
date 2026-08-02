@@ -47,8 +47,14 @@ case "$placement_policy" in
 esac
 
 case "$test_faults" in
-  0) fault_cflags= ;;
-  1) fault_cflags=-DGNATEVL_TEST_FAULTS ;;
+  0)
+    fault_cflags=
+    fault_config=disabled
+    ;;
+  1)
+    fault_cflags=-DGNATEVL_TEST_FAULTS
+    fault_config=enabled
+    ;;
   *)
     printf '%s\n' \
       "GNATEVL_TEST_FAULTS must be '0' or '1', got: $test_faults" >&2
@@ -108,6 +114,8 @@ sed \
   "s/@AUTOMATIC_POOL_SIZE@/$loop_pool_size/g" \
   "$project_root/runtime/config/pool/s-gnpoco.ads.in" \
   >"$generated_include/s-gnpoco.ads"
+cp "$project_root/runtime/config/faults/$fault_config"/s-gnafau.ad? \
+  "$generated_include/"
 
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
