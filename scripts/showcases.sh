@@ -5,7 +5,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=${ALR:-"$HOME/alr"}
 
 cd "$project_root"
-"$project_root/scripts/prepare-rts.sh" >/dev/null
+GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
 "$alr" exec -- gprbuild \
   --RTS="$project_root/build/rts" \
   -f \

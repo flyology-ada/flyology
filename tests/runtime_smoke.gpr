@@ -7,6 +7,7 @@ project Runtime_Smoke is
    for Exec_Dir use "bin";
    for Main use
      ("connection_lifecycle_smoke.adb",
+      "default_policy_smoke.adb",
       "execution_groups_smoke.adb",
       "fairness_smoke.adb",
       "files_smoke.adb",
@@ -21,6 +22,6 @@ project Runtime_Smoke is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa");
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
    end Compiler;
 end Runtime_Smoke;

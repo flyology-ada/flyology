@@ -16,27 +16,49 @@ Linux/x86-64 in Docker. The event backend is `kqueue` on macOS and `epoll` plus
 
 ## Programming model
 
-An ordinary Ada task is evented by default:
+An undesignated Ada task uses a native thread by default, preserving the
+behavior expected by existing GNAT applications:
 
 ```ada
 task Worker;
 ```
 
-A task that must own an operating-system thread is explicitly designated:
+Event-loop execution is an explicit per-task designation:
 
 ```ada
-task Blocking_Worker is
-   pragma Task_Info (Gnatevl.Native_Thread);
-end Blocking_Worker;
+task Connection is
+   pragma Task_Info (Gnatevl.Event_Loop_Task);
+end Connection;
 ```
 
-`Gnatevl.Event_Loop_Task` is the explicit spelling of the default. GNAT's
-`Task_Info` representation is target-specific, so GNATEVL supplies a tiny
-platform-specific declaration: the stock system-scope value on Darwin and a
-normal all-CPU thread-attributes value on Linux. The runtime rule is the same:
-unspecified task info is evented and explicit `Gnatevl.Native_Thread` task info
-uses the stock pthread path. This preserves the compiler/runtime ABI and avoids
-a compiler fork.
+The prepared runtime has a project-wide default. Compatibility-oriented builds
+omit the setting or select `native`; evented applications can opt in once for
+the whole project:
+
+```sh
+GNATEVL_DEFAULT=native  ./scripts/prepare-rts.sh  # default when omitted
+GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
+```
+
+An explicit `Gnatevl.Event_Loop_Task` or `Gnatevl.Native_Thread` always
+overrides that project default. `Gnatevl.Project_Default` explicitly requests
+the prepared default and is useful as a task-type discriminant:
+
+```ada
+task type Worker (Model : Gnatevl.Execution_Model) is
+   pragma Task_Info (Model);
+end Worker;
+
+Evented : Worker (Gnatevl.Event_Loop_Task);
+Native  : Worker (Gnatevl.Native_Thread);
+Default : Worker (Gnatevl.Project_Default);
+```
+
+The designation is captured when each task object is created. GNAT's
+`Task_Info` representation is target-specific, so GNATEVL supplies distinct
+platform-specific values for explicit evented, explicit native, and project
+default selection. This preserves the compiler/runtime ABI and avoids a
+compiler fork.
 
 Both forms remain Ada tasks and can rendezvous, use protected objects, and wait
 on the same GNARL synchronization objects. The designation controls the task's
@@ -49,8 +71,13 @@ created. Tasks with the same value share one loop pthread; different values use
 different loop pthreads and can therefore execute in parallel:
 
 ```ada
-task Parser with CPU => 1;
-task Writer with CPU => 2;
+task Parser with CPU => 1 is
+   pragma Task_Info (Gnatevl.Event_Loop_Task);
+end Parser;
+
+task Writer with CPU => 2 is
+   pragma Task_Info (Gnatevl.Event_Loop_Task);
+end Writer;
 ```
 
 Shared group identifiers are `0 .. 127`. Values `128 .. 255` are reserved for
@@ -120,8 +147,8 @@ flowchart TB
     O[Operating system]
 
     A --> G --> R
-    R -->|default| E
-    R -->|Native_Thread| N
+    R -->|Event_Loop_Task or evented project default| E
+    R -->|Native_Thread or native project default| N
     E --> Q
     E --> K
     E --> C --> X
@@ -345,7 +372,7 @@ potentially slow remote-filesystem metadata operations on a native task.
 | Decision | Rationale | Consequence |
 | --- | --- | --- |
 | Keep ordinary Ada task syntax | Existing programs and GNARL semantics remain recognizable | No separate `async`/`await`, callback, or future API is required |
-| Make evented execution the default | Large numbers of mostly-waiting tasks should not require one pthread each | CPU-bound or blocking code must be identified and isolated |
+| Default to native execution, with a project-wide evented option | Existing tasking code keeps its blocking and parallelism assumptions while high-I/O projects can opt in once | Evented examples and mixed projects must designate their intended lane |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
@@ -447,6 +474,8 @@ rather than hidden behind a claim of universal portability.
 
 - [`runtime/ada`](runtime/ada): platform-neutral scheduler, context, and poller
   interfaces.
+- [`runtime/config`](runtime/config): native and evented project-default policy
+  units selected while preparing the RTS.
 - [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies,
   plus the Ada platform file-engine implementations.
 - [`runtime/native`](runtime/native): ABI-specific context-switch assembly,
@@ -464,14 +493,18 @@ The project expects Alire at `~/alr` and an installed GNAT 16.1 toolchain. Set
 `ALR` to override the executable location:
 
 ```sh
-./scripts/prepare-rts.sh
+./scripts/prepare-rts.sh                       # native project default
+GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
 ~/alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
 
-The build script copies the matching installed runtime sources, applies the
-GNATEVL patch, adds the runtime units, and builds a static RTS. It checks source
-compatibility by applying the source patch under `set -e`, so an incompatible
-runtime source tree fails the build rather than being silently accepted.
+The build script copies the matching installed runtime sources, selects the
+project execution default, applies the GNATEVL patch, adds the runtime units,
+and builds a static RTS. `GNATEVL_DEFAULT` accepts only `native` or `evented`;
+the generated policy is compiled into the RTS, so it is deterministic during
+library elaboration and task activation. The script checks source compatibility
+by applying the source patch under `set -e`, so an incompatible runtime source
+tree fails rather than being silently accepted.
 
 Run the complete verification suite with:
 
@@ -479,6 +512,12 @@ Run the complete verification suite with:
 ./scripts/test.sh
 ./scripts/prove.sh
 ```
+
+`scripts/test.sh` verifies both project defaults, then runs the behavioral suite
+with the compatibility-oriented native default and explicit evented/native task
+designations. `scripts/showcases.sh` selects the evented project default;
+`many_evented_tasks.adb` deliberately uses `Gnatevl.Project_Default`, while the
+mixed-lane showcases keep explicit overrides.
 
 On macOS, Docker can build the Linux/x86-64 target and run the same behavioral
 suite under emulation:
@@ -679,7 +718,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   `Storage_Error`; this stack is thread state and is intentionally not stored
   in an individual fiber's task wrapper.
 - `Task_Info` produces an obsolete-feature warning in current GNAT, but it
-  provides the required per-task designation without a compiler fork.
+  provides the required per-task and per-task-type designation without a
+  compiler fork. GNATEVL's test and showcase projects use `-gnatwJ` to suppress
+  that specific warning class while retaining the other `-gnatwa` diagnostics.
 - The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.
 
 The next architectural work is additional architectures and operating systems,

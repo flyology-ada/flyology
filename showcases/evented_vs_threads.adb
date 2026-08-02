@@ -65,7 +65,9 @@ begin
    Started := Clock;
    declare
       Completion : Completion_Counter (Yield_Workers);
-      task type Evented_Worker;
+      task type Evented_Worker is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Evented_Worker;
 
       task body Evented_Worker is
       begin
@@ -113,7 +115,9 @@ begin
    Started := Clock;
    declare
       Completion : Completion_Counter (Wait_Workers);
-      task type Evented_Waiter;
+      task type Evented_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Evented_Waiter;
 
       task body Evented_Waiter is
       begin

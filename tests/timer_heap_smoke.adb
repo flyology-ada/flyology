@@ -1,4 +1,5 @@
 with Ada.Real_Time;
+with Gnatevl;
 
 procedure Timer_Heap_Smoke is
    use Ada.Real_Time;
@@ -38,7 +39,9 @@ procedure Timer_Heap_Smoke is
 
 begin
    declare
-      task type Timed_Worker (Index : Positive);
+      task type Timed_Worker (Index : Positive) is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Timed_Worker;
 
       task body Timed_Worker is
          Delay_For : constant Duration :=
@@ -64,7 +67,9 @@ begin
    end;
 
    declare
-      task type Cancelled_Timer;
+      task type Cancelled_Timer is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Cancelled_Timer;
 
       task body Cancelled_Timer is
       begin

@@ -1,5 +1,6 @@
 with Ada.Directories;
 with Ada.Streams;
+with Gnatevl;
 with Gnatevl.IO;
 with Gnatevl.IO.Files;
 
@@ -68,7 +69,9 @@ begin
          function Passed return Boolean is (All_OK);
       end Progress;
 
-      task type Parallel_Writer (Index : Positive);
+      task type Parallel_Writer (Index : Positive) is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Parallel_Writer;
 
       task body Parallel_Writer is
          Item : constant Stream_Element_Array :=

@@ -110,15 +110,28 @@ procedure Execution_Groups_Smoke is
       function Passed return Boolean is (OK);
    end Results;
 
-   task Group_One_A with CPU => 1;
-   task Group_One_B with CPU => 1;
-   task Group_Two with CPU => 2;
-   task Migrator with CPU => 1;
+   task Group_One_A with CPU => 1 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Group_One_A;
+
+   task Group_One_B with CPU => 1 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Group_One_B;
+
+   task Group_Two with CPU => 2 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Group_Two;
+
+   task Migrator with CPU => 1 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Migrator;
    task Native is
       pragma Task_Info (Gnatevl.Native_Thread);
    end Native;
 
-   task type Ping_Pong_Mover;
+   task type Ping_Pong_Mover is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Ping_Pong_Mover;
 
    task body Ping_Pong_Mover is
       Dedicated : Groups.Dedicated_Group_Id;

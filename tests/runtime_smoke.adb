@@ -63,6 +63,7 @@ procedure Runtime_Smoke is
    end Results;
 
    task Evented is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
       entry Called_From_Native;
    end Evented;
 

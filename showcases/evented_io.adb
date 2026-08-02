@@ -122,20 +122,26 @@ begin
       & " at " & GNAT.Sockets.Image (Server_Address));
 
    declare
-      task Socket_Server;
+      task Socket_Server is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Socket_Server;
 
       task Native_Client is
          pragma Task_Info (Gnatevl.Native_Thread);
       end Native_Client;
 
-      task Ticker;
+      task Ticker is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Ticker;
 
       task Native_File_Reader is
          pragma Task_Info (Gnatevl.Native_Thread);
          entry Start;
       end Native_File_Reader;
 
-      task File_Writer;
+      task File_Writer is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end File_Writer;
 
       task body Socket_Server is
          Peer    : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;

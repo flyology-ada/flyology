@@ -1,6 +1,7 @@
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
+with Gnatevl;
 with Gnatevl.IO.Connections;
 
 procedure Connection_Lifecycle is
@@ -76,7 +77,9 @@ begin
    end loop;
 
    declare
-      task type Worker (Index : Positive);
+      task type Worker (Index : Positive) is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Worker;
 
       task body Worker is
          Owned    : Connections.Connection;

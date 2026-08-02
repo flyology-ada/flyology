@@ -1,20 +1,25 @@
 with Ada.Text_IO;
+with Gnatevl;
 with Showcase_Support;
 
 procedure Evented_Pipeline is
    use Ada.Text_IO;
 
    task Sink is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
       entry Put (Value : Positive);
       entry Finish;
    end Sink;
 
    task Transform is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
       entry Put (Value : Positive);
       entry Finish;
    end Transform;
 
-   task Producer;
+   task Producer is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Producer;
 
    task body Sink is
    begin

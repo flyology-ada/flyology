@@ -82,8 +82,13 @@ begin
    GNAT.Sockets.Create_Socket_Pair (Spare_Server, Spare_Peer);
 
    declare
-      task First;
-      task Second;
+      task First is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end First;
+
+      task Second is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Second;
 
       task body First is
          Owned : Connections.Connection;
@@ -128,7 +133,9 @@ begin
    pragma Assert (Manager.Active = 0);
 
    declare
-      task Third;
+      task Third is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Third;
 
       task body Third is
          Owned    : Connections.Connection;
@@ -209,7 +216,9 @@ begin
       GNAT.Sockets.Listen_Socket (Listener);
 
       declare
-         task Acceptor;
+         task Acceptor is
+            pragma Task_Info (Gnatevl.Event_Loop_Task);
+         end Acceptor;
 
          task body Acceptor is
             Owned : Connections.Connection;

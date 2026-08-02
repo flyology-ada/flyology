@@ -52,8 +52,13 @@ begin
    GNAT.Sockets.Create_Socket_Pair (Reader_Socket, Writer_Socket);
 
    declare
-      task Spinner;
-      task Reader;
+      task Spinner is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Spinner;
+
+      task Reader is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Reader;
       task Writer is
          pragma Task_Info (Gnatevl.Native_Thread);
       end Writer;

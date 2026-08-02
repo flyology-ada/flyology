@@ -79,10 +79,21 @@ procedure Execution_Groups is
          & " pthread=" & Showcase_Support.Thread_Image);
    end Show;
 
-   task Group_One_Peer with CPU => 1;
-   task Group_Two_Peer with CPU => 2;
-   task Heartbeat with CPU => 2;
-   task Migrator with CPU => 1;
+   task Group_One_Peer with CPU => 1 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Group_One_Peer;
+
+   task Group_Two_Peer with CPU => 2 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Group_Two_Peer;
+
+   task Heartbeat with CPU => 2 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Heartbeat;
+
+   task Migrator with CPU => 1 is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Migrator;
    task Native_Task is
       pragma Task_Info (Gnatevl.Native_Thread);
    end Native_Task;

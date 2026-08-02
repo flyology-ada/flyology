@@ -33,7 +33,9 @@ procedure Lifecycle_Smoke is
    begin
       for Round in 1 .. 200 loop
          declare
-            task type Evented_Child;
+            task type Evented_Child is
+               pragma Task_Info (Gnatevl.Event_Loop_Task);
+            end Evented_Child;
 
             task body Evented_Child is
             begin

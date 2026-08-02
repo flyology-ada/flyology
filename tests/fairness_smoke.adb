@@ -1,4 +1,5 @@
 with Ada.Real_Time;
+with Gnatevl;
 with Gnatevl.Fairness;
 
 procedure Fairness_Smoke is
@@ -56,8 +57,13 @@ procedure Fairness_Smoke is
         (Pulsed_At - Armed_At);
    end State;
 
-   task CPU_Work;
-   task Pulse;
+   task CPU_Work is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end CPU_Work;
+
+   task Pulse is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Pulse;
 
    task body CPU_Work is
       Budget  : Gnatevl.Fairness.Yield_Budget;

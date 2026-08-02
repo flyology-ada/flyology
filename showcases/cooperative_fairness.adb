@@ -1,5 +1,6 @@
 with Ada.Real_Time;
 with Ada.Text_IO;
+with Gnatevl;
 with Gnatevl.Fairness;
 
 procedure Cooperative_Fairness is
@@ -63,8 +64,13 @@ procedure Cooperative_Fairness is
          function Finished_At return Time is (Work_At);
       end State;
 
-      task CPU_Work;
-      task Pulse;
+      task CPU_Work is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end CPU_Work;
+
+      task Pulse is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Pulse;
 
       task body CPU_Work is
          Budget  : Gnatevl.Fairness.Yield_Budget;

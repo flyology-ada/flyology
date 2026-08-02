@@ -1,4 +1,5 @@
 with Ada.Text_IO;
+with Gnatevl;
 with Showcase_Support;
 
 procedure Many_Evented_Tasks is
@@ -52,7 +53,11 @@ procedure Many_Evented_Tasks is
       function Same_Thread return Boolean is (All_Matched);
    end Completion;
 
-   task type Worker;
+   task type Worker is
+      --  showcases.sh selects the evented project default. This task type
+      --  deliberately follows it instead of hard-coding a lane.
+      pragma Task_Info (Gnatevl.Project_Default);
+   end Worker;
 
    task body Worker is
       Id : Positive;
@@ -68,7 +73,7 @@ procedure Many_Evented_Tasks is
 begin
    Put_Line
      ("starting" & Worker_Count'Image
-      & " timed Ada tasks; environment thread="
+      & " project-default timed Ada tasks; environment thread="
       & Showcase_Support.Thread_Image);
    Completion.Wait;
 

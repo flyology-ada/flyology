@@ -1,9 +1,11 @@
 --- a/s-taprop.adb
 +++ b/s-taprop.adb
-@@ -36,6 +36,7 @@
+@@ -36,6 +36,9 @@
  
  with Interfaces.C;
  
++with System.Gnatevl.Default_Execution;
++with System.Gnatevl.Linux_Models;
 +with System.Gnatevl.Scheduler;
  with System.Interrupt_Management;
  with System.Multiprocessors;
@@ -285,7 +287,12 @@
        use type Multiprocessors.CPU_Range, Interfaces.C.size_t;
  
     begin
-+      if T.Common.Task_Info = null then
++      if (T.Common.Task_Info = null
++          and then System.Gnatevl.Default_Execution.Evented)
++        or else
++          T.Common.Task_Info =
++            System.Gnatevl.Linux_Models.Event_Loop_Attributes'Access
++      then
 +         Result :=
 +           Event_Create
 +             (To_Address (T),

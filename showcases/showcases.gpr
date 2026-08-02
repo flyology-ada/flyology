@@ -20,7 +20,7 @@ project Showcases is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa");
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
       for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
    end Compiler;
 end Showcases;

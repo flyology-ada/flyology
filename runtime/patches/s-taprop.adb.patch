@@ -1,6 +1,7 @@
 --- a/s-taprop.adb
 +++ b/s-taprop.adb
-@@ -43,0 +44 @@
+@@ -43,0 +44,2 @@
++with System.Gnatevl.Default_Execution;
 +with System.Gnatevl.Scheduler;
 @@ -201,6 +201,9 @@
    function To_Address is
@@ -324,7 +325,12 @@
 +     (Event_Current /= System.Null_Address or else Specific.Is_Valid_Task);
 @@ -772,6 +953,18 @@
    begin
-+      if T.Common.Task_Info in System.Task_Info.Unspecified_Task_Info then
++      if T.Common.Task_Info in System.Task_Info.Process_Scope
++        or else
++          (System.Gnatevl.Default_Execution.Evented
++           and then T.Common.Task_Info in
++             System.Task_Info.Unspecified_Task_Info)
++      then
 +         Result :=
 +           Event_Create
 +             (To_Address (T),

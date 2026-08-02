@@ -117,7 +117,9 @@ begin
    GNAT.Sockets.Create_Socket_Pair (Event_Socket, Native_Socket);
 
    declare
-      task Evented;
+      task Evented is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Evented;
 
       task Native is
          pragma Task_Info (Gnatevl.Native_Thread);
@@ -159,8 +161,13 @@ begin
    end;
 
    declare
-      task Read_Waiter;
-      task Write_Waiter;
+      task Read_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Read_Waiter;
+
+      task Write_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Write_Waiter;
       task Native_Sender is
          pragma Task_Info (Gnatevl.Native_Thread);
       end Native_Sender;
@@ -205,7 +212,9 @@ begin
    end if;
 
    declare
-      task type Read_Waiter;
+      task type Read_Waiter is
+         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      end Read_Waiter;
       task Sender is
          pragma Task_Info (Gnatevl.Native_Thread);
       end Sender;

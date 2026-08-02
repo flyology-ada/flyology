@@ -8,7 +8,22 @@ cd "$project_root"
 
 "$alr" build
 
-"$project_root/scripts/prepare-rts.sh" >/dev/null
+GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
+"$alr" exec -- gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  default_policy_smoke.adb
+"$project_root/tests/bin/default_policy_smoke" evented
+
+GNATEVL_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
+"$alr" exec -- gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  default_policy_smoke.adb
+"$project_root/tests/bin/default_policy_smoke" native
+
 for test_main in \
   connection_lifecycle_smoke \
   execution_groups_smoke \

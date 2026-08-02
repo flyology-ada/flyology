@@ -6,10 +6,13 @@ procedure Hybrid_Blocking_Bridge is
    use Ada.Text_IO;
 
    task Inbox is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
       entry Deliver (Value : Integer);
    end Inbox;
 
-   task Ticker;
+   task Ticker is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Ticker;
 
    task Blocking_Worker is
       pragma Task_Info (Gnatevl.Native_Thread);

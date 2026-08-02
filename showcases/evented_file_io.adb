@@ -2,6 +2,7 @@ with Ada.Directories;
 with Ada.Streams;
 with Ada.Text_IO;
 with Interfaces.C;
+with Gnatevl;
 with Gnatevl.IO.Files;
 
 procedure Evented_File_IO is
@@ -71,7 +72,9 @@ procedure Evented_File_IO is
    File : Gnatevl.IO.Files.File_Descriptor :=
      Gnatevl.IO.Files.Invalid_File;
 
-   task type Writer (Index : Positive);
+   task type Writer (Index : Positive) is
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Writer;
 
    task body Writer is
       Item : constant Stream_Element_Array :=
