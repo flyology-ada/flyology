@@ -6,7 +6,8 @@ project Runtime_Smoke is
    for Object_Dir use "obj/runtime_smoke";
    for Exec_Dir use "bin";
    for Main use
-     ("files_smoke.adb",
+     ("execution_groups_smoke.adb",
+      "files_smoke.adb",
       "io_smoke.adb",
       "io_starvation_smoke.adb",
       "lifecycle_smoke.adb",

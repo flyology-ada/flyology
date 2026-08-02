@@ -38,6 +38,46 @@ Both forms remain Ada tasks and can rendezvous, use protected objects, and wait
 on the same GNARL synchronization objects. The designation controls the task's
 execution resource; it does not create a second tasking language.
 
+### Execution groups and live migration
+
+The standard Ada `CPU` aspect selects a shared event-loop group when a task is
+created. Tasks with the same value share one loop pthread; different values use
+different loop pthreads and can therefore execute in parallel:
+
+```ada
+task Parser with CPU => 1;
+task Writer with CPU => 2;
+```
+
+`Gnatevl.Execution_Groups` also provides an explicit safe-point migration API:
+
+```ada
+declare
+   package Groups renames Gnatevl.Execution_Groups;
+   Home      : constant Groups.Group_Id := Groups.Current;
+   Dedicated : Groups.Dedicated_Group_Id;
+begin
+   Groups.Migrate (Groups.For_CPU (2));
+
+   Dedicated := Groups.Create_Dedicated;
+   Groups.Migrate (Dedicated);
+   Blocking_Foreign_Call;  --  this task now owns the loop pthread
+
+   Groups.Migrate (Home);
+end;
+```
+
+Migration returns on the destination pthread without changing Ada task
+identity, its stack, locals, exception state, master, or rendezvous semantics.
+The source scheduler performs the actual handoff only after the fiber has fully
+switched away, so two loops can never restore one context concurrently.
+
+A dedicated group is a reusable event loop reserved for one fiber. Operationally
+it gives that task an OS thread to itself, which is the safe live transition for
+temporarily blocking foreign work. A stock `Native_Thread` task remains fixed at
+creation: its continuation lives on a pthread-owned stack and cannot be
+teleported into a fiber without replacing GNARL task identity and lifecycle.
+
 The same GNATEVL I/O call also works from either kind of task:
 
 ```ada
@@ -59,10 +99,10 @@ flowchart TB
     A[Application: ordinary Ada tasks and Gnatevl.IO]
     G[Existing GNARL task semantics]
     R{Task-primitives routing}
-    E[Evented lane: one scheduler pthread]
+    E[Evented groups: one scheduler pthread per group]
     N[Native lane: one pthread per designated task]
-    Q[Priority-ready queue and timer deadlines]
-    K[kqueue descriptor readiness and cross-thread wake]
+    Q[Per-group priority queues and timer deadlines]
+    K[Per-group kqueue readiness and cross-thread wake]
     C[Guarded stackful task contexts]
     X[Small ABI-specific register swap]
     F[Four native Ada regular-file workers]
@@ -87,8 +127,9 @@ GNATEVL integrates at `System.Task_Primitives.Operations`, below GNARL's task
 semantics. The patched task primitives route each task to one of two execution
 lanes:
 
-- Evented tasks receive a guarded stack and a resumable execution context. A
-  priority-aware ready queue multiplexes them onto one scheduler pthread.
+- Evented tasks receive a guarded stack and a resumable execution context. Each
+  execution group has a priority-aware ready queue, poller, and scheduler
+  pthread; the default group uses the environment pthread.
 - `Native_Thread` tasks use the normal pthread-backed path.
 - Synchronization between the lanes still passes through GNARL. A native task
   can wake the event-loop scheduler through a `kqueue` user event.
@@ -215,6 +256,8 @@ thread-pool runtime.
 | Keep ordinary Ada task syntax | Existing programs and GNARL semantics remain recognizable | No separate `async`/`await`, callback, or future API is required |
 | Make evented execution the default | Large numbers of mostly-waiting tasks should not require one pthread each | CPU-bound or blocking code must be identified and isolated |
 | Keep native threads as a task designation | Some foreign calls, disk work, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
+| Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
+| Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
@@ -283,6 +326,7 @@ from this Ada source tree.
 | Area | macOS implementation | Likely next backend |
 | --- | --- | --- |
 | Descriptor poller | `kqueue` with `EVFILT_USER` wakeups | Linux `epoll` plus `eventfd`; Windows IOCP needs a completion-oriented adapter |
+| CPU placement | One pthread per logical execution group; Darwin provides no public hard-core pinning | Bind each loop pthread to its group CPU where the OS supports strict affinity |
 | Context switch | AArch64 and x86-64 ABI-specific assembly | One small implementation per architecture/ABI |
 | Stack allocation | `mmap` plus guard pages | Platform virtual-memory API |
 | OS calls | Thin Ada imports of Darwin/POSIX interfaces | Per-platform binding body |
@@ -327,6 +371,8 @@ Run the complete verification suite with:
 
 Current smoke coverage includes:
 
+- `CPU`-selected shared groups, same-group thread identity, cross-group live
+  migration, reusable dedicated lanes, and native-task migration rejection;
 - evented and native task activation, rendezvous, protected operations, and
   timers;
 - evented/native socket-pair transfer and timeout behavior;
@@ -353,6 +399,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/evented_vs_threads
 ./showcases/bin/evented_io
+./showcases/bin/execution_groups
 ```
 
 The examples demonstrate:
@@ -360,6 +407,8 @@ The examples demonstrate:
 - a producer/transform/sink pipeline using entry calls;
 - fan-out timers and protected aggregation;
 - evented coordination with native CPU workers;
+- `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
+  one-task thread, and rejection of unsafe live stock-native conversion;
 - evented versus pthread-backed tasks under identical source-level work;
 - a real loopback TCP exchange, positional file I/O, and timers through the
   task-aware I/O API.
@@ -381,8 +430,18 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 ## Current constraints
 
 - Only macOS has a working event backend today.
-- The evented lane currently uses one scheduler pthread, so it does not provide
-  parallel CPU execution by itself.
+- Each event group uses one scheduler pthread. Tasks within a group are
+  cooperative, while separate groups can execute in parallel.
+- On macOS, a group identifies a stable loop pthread but is not a hard physical
+  core binding; Darwin exposes affinity hints rather than strict core pinning.
+- Shared and dedicated loops are created lazily and their pthreads remain alive
+  for the process lifetime. Vacated dedicated loops are reserved and reused by
+  later callers.
+- Scheduler metadata currently uses one short-held global lock across groups;
+  queues, timers, pollers, and task execution are per-group, but very high
+  cross-group wake or migration rates may contend on this lock.
+- The environment task uses its pthread-owned initial stack and therefore
+  cannot migrate; child evented tasks use guarded runtime-owned stacks and can.
 - Cooperative scheduling means an evented task that never reaches a suspension
   point can monopolize the loop.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use

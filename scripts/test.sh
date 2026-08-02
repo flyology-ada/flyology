@@ -10,6 +10,7 @@ cd "$project_root"
 
 "$project_root/scripts/prepare-rts.sh" >/dev/null
 for test_main in \
+  execution_groups_smoke \
   files_smoke \
   io_smoke \
   io_starvation_smoke \

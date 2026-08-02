@@ -12,6 +12,7 @@ cd "$project_root"
   -P showcases/showcases.gpr
 
 for showcase in \
+  execution_groups \
   evented_io \
   evented_pipeline \
   hybrid_blocking_bridge \

@@ -1,4 +1,5 @@
 with Interfaces.C;
+with System.OS_Interface;
 
 package System.Gnatevl.Scheduler is
    pragma Preelaborate;
@@ -9,10 +10,13 @@ package System.Gnatevl.Scheduler is
      (T          : System.Address;
       Stack_Size : Interfaces.C.size_t;
       Priority   : Interfaces.C.int;
-      Wrapper    : System.Address) return Interfaces.C.int;
+      Wrapper    : System.Address;
+      Group      : Interfaces.C.int) return Interfaces.C.int;
 
    function Is_Event_Task (T : System.Address) return Interfaces.C.int;
    function Current_Task return System.Address;
+   function Task_Thread
+     (T : System.Address) return System.OS_Interface.Thread_Id;
 
    function Sleep
      (Task_Lock : System.Address;
@@ -27,6 +31,21 @@ package System.Gnatevl.Scheduler is
       return Interfaces.C.int;
 
    function Destroy (T : System.Address) return Interfaces.C.int;
+
+   function Current_Group return Interfaces.C.int;
+   pragma Export (C, Current_Group, "gnatevl_runtime_current_group");
+
+   function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export (C, Migrate, "gnatevl_runtime_migrate");
+
+   function Create_Dedicated_Group return Interfaces.C.int;
+   pragma Export
+     (C, Create_Dedicated_Group, "gnatevl_runtime_create_dedicated_group");
+
+   function Is_Dedicated_Group
+     (Group : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C, Is_Dedicated_Group, "gnatevl_runtime_is_dedicated_group");
 
    --  ABI used by the public Gnatevl.IO package. A timeout below zero waits
    --  indefinitely; otherwise it is a relative count of nanoseconds.

@@ -50,11 +50,23 @@ package body System.Gnatevl.Contexts is
 
    procedure Free is new Ada.Unchecked_Deallocation (Context, Context_Access);
 
-   Active_Context : Context_Access;
+   Active_Context : Context_Access := null;
+   pragma Thread_Local_Storage (Active_Context);
+
+   procedure Set_Active_Context (Item : Context_Access);
+   pragma No_Inline (Set_Active_Context);
 
    procedure Trampoline;
    pragma Convention (C, Trampoline);
    pragma No_Return (Trampoline);
+
+   procedure Set_Active_Context (Item : Context_Access) is
+   begin
+      --  Resolve the TLS slot on every call. A context may resume on a
+      --  different pthread, so retaining the pre-switch TLS address across
+      --  Swap_Registers would write into the source thread's slot.
+      Active_Context := Item;
+   end Set_Active_Context;
 
    function Round_Up
      (Value, Alignment : C.size_t) return C.size_t
@@ -64,7 +76,7 @@ package body System.Gnatevl.Contexts is
    function Capture return Context_Access is
       Item : constant Context_Access := new Context;
    begin
-      Active_Context := Item;
+      Set_Active_Context (Item);
       return Item;
    end Capture;
 
@@ -134,9 +146,9 @@ package body System.Gnatevl.Contexts is
 
    procedure Switch (From, To : not null Context_Access) is
    begin
-      Active_Context := To;
+      Set_Active_Context (To);
       Swap_Registers (From.Registers'Address, To.Registers'Address);
-      Active_Context := From;
+      Set_Active_Context (From);
    end Switch;
 
    procedure Destroy (Item : in out Context_Access) is
