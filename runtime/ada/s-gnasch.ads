@@ -28,6 +28,18 @@ package System.Gnatevl.Scheduler is
 
    function Destroy (T : System.Address) return Interfaces.C.int;
 
+   --  ABI used by the public Gnatevl.IO package. A timeout below zero waits
+   --  indefinitely; otherwise it is a relative count of nanoseconds.
+   function In_Event_Task return Interfaces.C.int;
+   pragma Export (C, In_Event_Task, "gnatevl_runtime_in_event_task");
+
+   function Wait_IO
+     (Descriptor          : Interfaces.C.int;
+      For_Write           : Interfaces.C.int;
+      Timeout_Nanoseconds : Interfaces.C.long_long)
+      return Interfaces.C.int;
+   pragma Export (C, Wait_IO, "gnatevl_runtime_wait_io");
+
 private
    pragma Inline (Is_Event_Task);
    pragma Inline (Current_Task);

@@ -5,7 +5,8 @@ project Runtime_Smoke is
    for Source_Dirs use (".");
    for Object_Dir use "obj/runtime_smoke";
    for Exec_Dir use "bin";
-   for Main use ("runtime_smoke.adb");
+   for Main use
+     ("io_smoke.adb", "runtime_smoke.adb", "tcp_native_smoke.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

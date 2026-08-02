@@ -9,8 +9,12 @@ cd "$project_root"
 "$alr" build
 
 "$project_root/scripts/prepare-rts.sh" >/dev/null
-"$alr" exec -- gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr
-"$project_root/tests/bin/runtime_smoke"
+for test_main in io_smoke runtime_smoke tcp_native_smoke
+do
+  "$alr" exec -- gprbuild \
+    --RTS="$project_root/build/rts" \
+    -f \
+    -P tests/runtime_smoke.gpr \
+    "$test_main.adb"
+  "$project_root/tests/bin/$test_main"
+done

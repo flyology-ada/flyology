@@ -43,7 +43,7 @@ flowchart TD
     G --> R{Task_Info designation}
     R -->|default / Event_Loop_Task| E[Ada fiber scheduler]
     R -->|Native_Thread| P[pthread]
-    E --> K[kqueue: timers and cross-thread wakeups]
+    E --> K[kqueue: socket readiness, deadlines, and cross-thread wakeups]
     E --> C[guarded mmap stack]
     C --> S[small ABI register swap in assembly]
     P --> O[blocking OS / foreign work]
@@ -62,6 +62,37 @@ The verified backend targets macOS on AArch64 and x86-64. An `epoll`/`eventfd`
 poller and the corresponding Linux packaging are the next platform backend;
 IOCP remains a future Windows backend. None of those choices leaks into Ada
 task syntax.
+
+## Cooperative I/O
+
+`Gnatevl.IO` presents synchronous-looking operations to either execution
+model. Event-loop tasks suspend their fiber; designated native tasks block
+their pthread. Callers use the same return values, out parameters, timeouts,
+and exceptions in both cases.
+
+```ada
+Gnatevl.IO.Timers.Sleep_For (0.050);
+
+Gnatevl.IO.Sockets.Receive_Exactly
+  (Socket, Message, Timeout => 2.0);
+
+Gnatevl.IO.Files.Read_At
+  (File, Offset => 0, Item => Buffer, Last => Last);
+```
+
+- Timers use the runtime's task-model-aware delay path.
+- Sockets are nonblocking. Evented tasks register one-shot read/write interest
+  with `kqueue`; native tasks wait with `poll`. The syscall is retried after
+  readiness because readiness does not itself carry the data.
+- Regular files cannot be made reliably nonblocking with `kqueue`. An evented
+  caller therefore rendezvouses with a four-thread native file-worker pool;
+  a native caller performs the operation directly. The API currently exposes
+  explicit-offset `Read_At` and `Write_At`, avoiding shared file-position races.
+
+The socket package includes partial and exact receive, partial and complete
+send, nonblocking connect, and readiness-based accept operations. Closing a
+descriptor concurrently with an infinite wait is not yet a cancellation API;
+use finite timeouts when another task owns descriptor lifetime.
 
 ## Current status
 
@@ -99,6 +130,9 @@ Build and run all showcases against the custom runtime:
 
 - `evented_pipeline` passes values through three ordinary Ada tasks using
   rendezvous; every stage prints the same underlying thread.
+- `evented_io` runs evented timers and a `kqueue` TCP server while an evented
+  file operation crosses the native worker pool and designated native tasks
+  act as the TCP client and file reader.
 - `hybrid_blocking_bridge` runs a designated native worker alongside evented
   timer ticks, then rendezvouses from the pthread into an evented task.
 - `many_evented_tasks` starts 64 independently timed Ada tasks and verifies

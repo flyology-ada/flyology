@@ -9,10 +9,14 @@ package body System.Gnatevl.Poller is
    package SSE renames System.Storage_Elements;
 
    use type C.int;
+   use type C.short;
    use type C.unsigned_short;
 
    EVFILT_USER : constant C.short := C.short (-10);
+   EVFILT_READ : constant C.short := C.short (-1);
+   EVFILT_WRITE : constant C.short := C.short (-2);
    EV_ADD      : constant C.unsigned_short := 16#0001#;
+   EV_ONESHOT  : constant C.unsigned_short := 16#0010#;
    EV_CLEAR    : constant C.unsigned_short := 16#0020#;
    NOTE_TRIGGER : constant C.unsigned := 16#0100_0000#;
    Wake_Ident   : constant SSE.Integer_Address := 1;
@@ -84,21 +88,46 @@ package body System.Gnatevl.Poller is
       end if;
    end Finalize;
 
+   function Watch
+     (Item       : Poller;
+      Descriptor : C.int;
+      Condition  : Interest) return Boolean
+   is
+      Change : aliased Kevent_Record :=
+        (Ident  => SSE.Integer_Address (Descriptor),
+         Filter =>
+           (if Condition = Readable then EVFILT_READ else EVFILT_WRITE),
+         Flags  => EV_ADD + EV_ONESHOT,
+         Fflags => 0,
+         Data   => 0,
+         Udata  => System.Null_Address);
+   begin
+      return Kevent
+        (Item.Descriptor,
+         Change'Address,
+         1,
+         System.Null_Address,
+         0,
+         System.Null_Address) = 0;
+   end Watch;
+
    function Wait
      (Item                : Poller;
-      Timeout             : Duration) return Boolean
+      Timeout             : Duration;
+      Event               : out Poll_Event) return Boolean
    is
-      Event   : aliased Kevent_Record;
-      Limit   : aliased C_Time.timespec;
-      Result  : C.int;
+      Kernel_Event : aliased Kevent_Record;
+      Limit        : aliased C_Time.timespec;
+      Result       : C.int;
    begin
+      Event := (Kind => Timeout_Event, Descriptor => -1);
       if Timeout < 0.0 then
          Result :=
            Kevent
              (Item.Descriptor,
               System.Null_Address,
               0,
-              Event'Address,
+              Kernel_Event'Address,
               1,
               System.Null_Address);
       else
@@ -108,9 +137,19 @@ package body System.Gnatevl.Poller is
              (Item.Descriptor,
               System.Null_Address,
               0,
-              Event'Address,
+              Kernel_Event'Address,
               1,
               Limit'Address);
+      end if;
+      if Result > 0 then
+         Event.Descriptor := C.int (Kernel_Event.Ident);
+         if Kernel_Event.Filter = EVFILT_USER then
+            Event.Kind := Wake_Event;
+         elsif Kernel_Event.Filter = EVFILT_READ then
+            Event.Kind := Readable_Event;
+         elsif Kernel_Event.Filter = EVFILT_WRITE then
+            Event.Kind := Writable_Event;
+         end if;
       end if;
       return Result >= 0 or else OSI.errno = OSI.EINTR;
    end Wait;

@@ -14,10 +14,13 @@ package body System.Gnatevl.Scheduler is
    package OSI renames System.OS_Interface;
 
    use type C.int;
+   use type C.long_long;
    use type C.size_t;
    use type C.unsigned_long;
    use type Contexts.Context_Access;
    use type OSI.pthread_t;
+   use type Pollers.Event_Kind;
+   use type Pollers.Interest;
 
    Scheduler_Stack_Size : constant C.size_t := 256 * 1_024;
    Timer_Check_Interval : constant := 64;
@@ -36,6 +39,9 @@ package body System.Gnatevl.Scheduler is
       Deadline   : Duration := No_Deadline;
       Timed_Out  : Boolean := False;
       State      : Fiber_State := Waiting;
+      IO_Wait    : Boolean := False;
+      IO_Descriptor : C.int := -1;
+      IO_Interest : Pollers.Interest := Pollers.Readable;
       Next_Ready : Fiber_Access;
       Next_All   : Fiber_Access;
    end record;
@@ -77,6 +83,7 @@ package body System.Gnatevl.Scheduler is
    function Clock return Duration;
    function Promote_Expired_Timers return Duration;
    function Is_Event_Thread return Boolean;
+   procedure Handle_Poll_Event (Event : Pollers.Poll_Event);
 
    procedure Lock is
       Result : constant C.int :=
@@ -168,6 +175,8 @@ package body System.Gnatevl.Scheduler is
          if Item.State = Waiting and then Item.Deadline >= 0.0 then
             if Item.Deadline <= Now then
                Item.Timed_Out := True;
+               Item.IO_Wait := False;
+               Item.IO_Descriptor := -1;
                Enqueue (Item);
             elsif Nearest < 0.0 or else Item.Deadline < Nearest then
                Nearest := Item.Deadline;
@@ -287,6 +296,56 @@ package body System.Gnatevl.Scheduler is
       then Current_Fiber.T
       else System.Null_Address);
 
+   function In_Event_Task return C.int is
+     (if Current_Task = System.Null_Address then 0 else 1);
+
+   function Wait_IO
+     (Descriptor          : C.int;
+      For_Write           : C.int;
+      Timeout_Nanoseconds : C.long_long) return C.int
+   is
+      Item      : Fiber_Access;
+      Condition : constant Pollers.Interest :=
+        (if For_Write = 0 then Pollers.Readable else Pollers.Writable);
+      Whole     : C.long_long;
+      Remainder : C.long_long;
+      Timeout   : Duration;
+   begin
+      if not Is_Event_Thread
+        or else Current_Fiber = null
+        or else Descriptor < 0
+      then
+         return -1;
+      end if;
+
+      if Timeout_Nanoseconds < 0 then
+         Timeout := No_Deadline;
+      else
+         Whole := Timeout_Nanoseconds / 1_000_000_000;
+         Remainder := Timeout_Nanoseconds mod 1_000_000_000;
+         Timeout := Duration (Whole)
+           + Duration (Remainder) / 1_000_000_000;
+      end if;
+
+      Lock;
+      if not Pollers.Watch (Scheduler_Poller, Descriptor, Condition) then
+         Unlock;
+         return -1;
+      end if;
+
+      Item := Current_Fiber;
+      Item.Deadline :=
+        (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
+      Item.Timed_Out := False;
+      Item.IO_Wait := True;
+      Item.IO_Descriptor := Descriptor;
+      Item.IO_Interest := Condition;
+      Item.State := Waiting;
+      Contexts.Switch (Item.Context, Scheduler_Context);
+
+      return (if Item.Timed_Out then 1 else 0);
+   end Wait_IO;
+
    function Set_Priority
      (T : System.Address; Priority : C.int) return C.int
    is
@@ -373,6 +432,8 @@ package body System.Gnatevl.Scheduler is
       if Item.State = Waiting then
          Item.Deadline := No_Deadline;
          Item.Timed_Out := False;
+         Item.IO_Wait := False;
+         Item.IO_Descriptor := -1;
          Enqueue (Item);
          Made_Ready := True;
       end if;
@@ -429,12 +490,43 @@ package body System.Gnatevl.Scheduler is
       raise Program_Error;
    end Fiber_Main;
 
+   procedure Handle_Poll_Event (Event : Pollers.Poll_Event) is
+      Item : Fiber_Access := All_Fibers;
+      Matches : Boolean;
+   begin
+      if Event.Kind not in Pollers.Readable_Event | Pollers.Writable_Event then
+         return;
+      end if;
+
+      while Item /= null loop
+         Matches :=
+           Item.State = Waiting
+           and then Item.IO_Wait
+           and then Item.IO_Descriptor = Event.Descriptor
+           and then
+             ((Event.Kind = Pollers.Readable_Event
+               and then Item.IO_Interest = Pollers.Readable)
+              or else
+                (Event.Kind = Pollers.Writable_Event
+                 and then Item.IO_Interest = Pollers.Writable));
+         if Matches then
+            Item.Deadline := No_Deadline;
+            Item.Timed_Out := False;
+            Item.IO_Wait := False;
+            Item.IO_Descriptor := -1;
+            Enqueue (Item);
+         end if;
+         Item := Item.Next_All;
+      end loop;
+   end Handle_Poll_Event;
+
    procedure Scheduler_Main (Argument : System.Address) is
       pragma Unreferenced (Argument);
       Dispatches_Until_Timer_Check : Natural := 0;
       Timeout                      : Duration;
       Next                         : Fiber_Access;
       Waited                       : Boolean;
+      Event                        : Pollers.Poll_Event;
    begin
       loop
          Timeout := No_Deadline;
@@ -456,9 +548,10 @@ package body System.Gnatevl.Scheduler is
          else
             Current_Fiber := null;
             Unlock;
-            Waited := Pollers.Wait (Scheduler_Poller, Timeout);
+            Waited := Pollers.Wait (Scheduler_Poller, Timeout, Event);
             pragma Assert (Waited);
             Lock;
+            Handle_Poll_Event (Event);
          end if;
       end loop;
    end Scheduler_Main;
