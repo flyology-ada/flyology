@@ -556,6 +556,13 @@ deliberately unstructured: those APIs are compatibility/building blocks whose
 callers own task scopes, wake-source lifetime, shutdown ordering, and close
 serialization themselves.
 
+The structured smoke program is also compiled and linked against the
+ASan-aware RTS. It is not executed under ASan on Darwin because orderly server
+shutdown necessarily propagates and catches `Operation_Cancelled` on an evented
+stack, which crosses the fully instrumented Ada exception-propagation boundary
+called out in [AddressSanitizer builds](#addresssanitizer-builds). Ordinary
+macOS and Linux runs exercise those exception paths in both handler lanes.
+
 ### Timers
 
 An evented sleep records a scheduler deadline and suspends the current context.
