@@ -689,6 +689,44 @@ Run the complete verification suite with:
 ./scripts/prove.sh
 ```
 
+Run the bounded, reproducible concurrency and fault campaign with:
+
+```sh
+./scripts/stress.sh
+```
+
+The default short campaign reports every seed and runs four seeds through
+repeated evented/native task allocation and destruction, cross-lane
+rendezvous, priority changes, yield and delay, abort, group migration, pin
+rejection, readiness and timeout waits, concurrent kernel file submissions,
+and four active event groups. Override `GNATEVL_STRESS_SEEDS`,
+`GNATEVL_STRESS_BATCHES`, `GNATEVL_STRESS_WIDTH`, or
+`GNATEVL_STRESS_TIMEOUT` to reproduce or resize a run. For example:
+
+```sh
+GNATEVL_STRESS_SEEDS="42" GNATEVL_STRESS_BATCHES=50 \
+  GNATEVL_STRESS_WIDTH=64 ./scripts/stress.sh
+```
+
+The same runner rebuilds a test-only RTS with `GNATEVL_TEST_FAULTS=1` and
+exercises deterministic failure counters for fiber allocation, stack mapping,
+group startup, poller watch/wait/wake, interrupted poll waits, and file-queue
+saturation. Recoverable failures must surface to Ada and permit a subsequent
+task to run; poller failures that violate scheduler progress must terminate the
+isolated subprocess with `SIGABRT`. The runner restores a normal, fault-disabled
+RTS before exiting. Production builds compile the same narrow boundary calls
+to a no-op and contain no random decision logic.
+
+The longer campaign is deliberately opt-in:
+
+```sh
+GNATEVL_LONG_SOAK=1 ./scripts/stress-soak.sh
+```
+
+Its defaults execute 16 fixed seeds, 250 batches per seed, and 64 workers per
+batch. All sizing and seed variables remain overrideable. A failure log's seed,
+batch count, and width are sufficient to replay the exact operation plan.
+
 `scripts/test.sh` verifies both project defaults, then runs the behavioral suite
 with the compatibility-oriented native default and explicit evented/native task
 designations. `scripts/showcases.sh` selects the evented project default;
@@ -748,6 +786,9 @@ Current smoke coverage includes:
   task-aware socket suspension and resumption;
 - native TCP connect, accept, send, and receive behavior, including verification
   that accepted sockets suppress `SIGPIPE`.
+- deterministic short/soak stress for mixed-lane lifecycle, cross-group and
+  cross-lane concurrency, descriptor and file completion, abort, priority, and
+  ATCB reuse, plus isolated boundary fault injection with per-case timeouts.
 
 ## Showcases
 
@@ -993,4 +1034,4 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 
 The next architectural work is additional architectures and operating systems,
 optional CPU-affinity policy, structured listener/worker orchestration, and
-more complete randomized stress testing across both execution lanes.
+sanitizer-aware fiber switch annotations for memory-sanitizer campaigns.
