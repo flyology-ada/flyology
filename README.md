@@ -251,6 +251,12 @@ An evented sleep records a scheduler deadline and suspends the current context.
 A native sleep blocks only its pthread. Timer calls share one public API and use
 monotonic time, so wall-clock changes do not alter elapsed waits.
 
+Each loop stores finite deadlines in an indexed binary min-heap. Insertion and
+cancellation are `O(log n)`, the next poll deadline is available in `O(1)`, and
+expiration removes the minimum repeatedly without scanning unrelated fibers.
+The index stored in each fiber also lets readiness, abort wakeups, and reaping
+remove that fiber's deadline directly.
+
 ### Regular files
 
 Regular disk files are different from sockets: readiness from `kqueue` or
@@ -286,6 +292,7 @@ thread-pool runtime.
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
 | Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every evented task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
 | Hash descriptor waiters per group | Readiness delivery must not scan every fiber once for every ready descriptor | Delivery is constant-time on average while collision chains retain same-descriptor reader/writer fan-out |
+| Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
@@ -567,8 +574,6 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   backends are not implemented yet.
 - Closing a descriptor concurrently with an indefinite wait has no general
   cancellation protocol yet; finite deadlines are safer.
-- Timer expiration currently scans scheduler state rather than using a more
-  scalable deadline heap.
 - Fiber guard pages make stack overflow fail fast, but the evented stack does
   not yet have an alternate signal stack that translates the fault into Ada
   `Storage_Error`; overflow currently terminates the process.

@@ -67,6 +67,8 @@ package body System.Gnatevl.Scheduler is
    type Loop_Group;
    type Loop_Group_Access is access all Loop_Group;
    type IO_Bucket_Array is array (IO_Bucket_Index) of Fiber_Access;
+   type Timer_Heap_Array is array (Positive range <>) of Fiber_Access;
+   type Timer_Heap_Access is access Timer_Heap_Array;
 
    type Fiber is record
       T          : System.Address := System.Null_Address;
@@ -75,6 +77,7 @@ package body System.Gnatevl.Scheduler is
       Priority   : C.int := 0;
       Sequence   : C.unsigned_long := 0;
       Deadline   : Duration := No_Deadline;
+      Timer_Index : Natural := 0;
       Timed_Out  : Boolean := False;
       State      : Fiber_State := Waiting;
       IO_Wait    : Boolean := False;
@@ -108,6 +111,9 @@ package body System.Gnatevl.Scheduler is
       Next_Sequence     : C.unsigned_long := 0;
       Fibers            : Fiber_Access;
       IO_Waiters        : IO_Bucket_Array := (others => null);
+      Timers            : Timer_Heap_Access;
+      Timer_Count       : Natural := 0;
+      Timer_Capacity    : Natural := 0;
       Member_Count      : Natural := 0;
       Reserved_For      : System.Address := System.Null_Address;
    end record;
@@ -128,6 +134,8 @@ package body System.Gnatevl.Scheduler is
      (Fiber, Fiber_Access);
    procedure Free_Group is new Ada.Unchecked_Deallocation
      (Loop_Group, Loop_Group_Access);
+   procedure Free_Timer_Heap is new Ada.Unchecked_Deallocation
+     (Timer_Heap_Array, Timer_Heap_Access);
 
    --  Registry_Lock protects Groups, Fiber_Registry, group membership counts
    --  and reservations, and each Fiber.Group ownership pointer. A group lock
@@ -181,6 +189,14 @@ package body System.Gnatevl.Scheduler is
       Descriptor : C.int;
       Interest   : Pollers.Interest);
    procedure Remove_IO_Wait_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access);
+   function Ensure_Timer_Capacity
+     (Group : not null Loop_Group_Access) return Boolean;
+   function Register_Timer_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access) return Boolean;
+   procedure Remove_Timer_Locked
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
    procedure Enqueue
@@ -455,6 +471,134 @@ package body System.Gnatevl.Scheduler is
       Item.IO_Descriptor := -1;
    end Remove_IO_Wait_Locked;
 
+   function Ensure_Timer_Capacity
+     (Group : not null Loop_Group_Access) return Boolean
+   is
+      New_Capacity : Natural;
+      Replacement  : Timer_Heap_Access;
+      Previous     : Timer_Heap_Access;
+   begin
+      if Group.Timer_Count < Group.Timer_Capacity then
+         return True;
+      elsif Group.Timer_Capacity = 0 then
+         New_Capacity := 16;
+      elsif Group.Timer_Capacity > Natural'Last / 2 then
+         return False;
+      else
+         New_Capacity := Group.Timer_Capacity * 2;
+      end if;
+
+      Replacement := new Timer_Heap_Array (1 .. New_Capacity);
+      for Index in 1 .. Group.Timer_Count loop
+         Replacement (Index) := Group.Timers (Index);
+      end loop;
+      Previous := Group.Timers;
+      Group.Timers := Replacement;
+      Group.Timer_Capacity := New_Capacity;
+      if Previous /= null then
+         Free_Timer_Heap (Previous);
+      end if;
+      return True;
+   exception
+      when Storage_Error =>
+         return False;
+   end Ensure_Timer_Capacity;
+
+   function Register_Timer_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access) return Boolean
+   is
+      Position : Natural;
+      Parent   : Natural;
+      Parent_Item : Fiber_Access;
+   begin
+      if Item.Deadline < 0.0 then
+         return True;
+      elsif Item.Group /= Group or else Item.Timer_Index /= 0 then
+         Fatal;
+      elsif not Ensure_Timer_Capacity (Group) then
+         return False;
+      end if;
+
+      Group.Timer_Count := Group.Timer_Count + 1;
+      Position := Group.Timer_Count;
+      while Position > 1 loop
+         Parent := Position / 2;
+         Parent_Item := Group.Timers (Parent);
+         exit when Parent_Item.Deadline <= Item.Deadline;
+         Group.Timers (Position) := Parent_Item;
+         Parent_Item.Timer_Index := Position;
+         Position := Parent;
+      end loop;
+      Group.Timers (Position) := Item;
+      Item.Timer_Index := Position;
+      return True;
+   end Register_Timer_Locked;
+
+   procedure Remove_Timer_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access)
+   is
+      Position : Natural := Item.Timer_Index;
+      Parent   : Natural;
+      Child    : Natural;
+      Last     : Fiber_Access;
+   begin
+      if Position = 0 then
+         return;
+      elsif Item.Group /= Group
+        or else Position > Group.Timer_Count
+        or else Group.Timers (Position) /= Item
+      then
+         Fatal;
+      end if;
+
+      Last := Group.Timers (Group.Timer_Count);
+      Group.Timers (Group.Timer_Count) := null;
+      Group.Timer_Count := Group.Timer_Count - 1;
+      Item.Timer_Index := 0;
+      Item.Deadline := No_Deadline;
+      if Position > Group.Timer_Count then
+         return;
+      end if;
+
+      Group.Timers (Position) := Last;
+      Last.Timer_Index := Position;
+      if Position > 1 then
+         Parent := Position / 2;
+      end if;
+      if Position > 1
+        and then Last.Deadline < Group.Timers (Parent).Deadline
+      then
+         while Position > 1 loop
+            Parent := Position / 2;
+            exit when Group.Timers (Parent).Deadline <= Last.Deadline;
+            Group.Timers (Position) := Group.Timers (Parent);
+            Group.Timers (Position).Timer_Index := Position;
+            Position := Parent;
+         end loop;
+         Group.Timers (Position) := Last;
+         Last.Timer_Index := Position;
+      else
+         loop
+            exit when Position > Group.Timer_Count / 2;
+            Child := Position * 2;
+            if Child < Group.Timer_Count
+              and then Group.Timers (Child + 1).Deadline <
+                Group.Timers (Child).Deadline
+            then
+               Child := Child + 1;
+            end if;
+            exit when Last.Deadline <= Group.Timers (Child).Deadline;
+            Group.Timers (Position) := Group.Timers (Child);
+            Group.Timers (Position).Timer_Index := Position;
+            Position := Child;
+         end loop;
+         Group.Timers (Position) := Last;
+         Last.Timer_Index := Position;
+      end if;
+   end Remove_Timer_Locked;
+
    procedure Enqueue
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access)
@@ -520,6 +664,7 @@ package body System.Gnatevl.Scheduler is
       if Item.State = Ready then
          Remove_From_Ready (Group, Item);
       end if;
+      Remove_Timer_Locked (Group, Item);
       Remove_IO_Wait_Locked (Group, Item);
 
       Unregister_Locked (Item);
@@ -641,28 +786,27 @@ package body System.Gnatevl.Scheduler is
    function Promote_Expired_Timers
      (Group : not null Loop_Group_Access) return Duration
    is
-      Now     : constant Duration := Clock;
-      Nearest : Duration := No_Deadline;
-      Item    : Fiber_Access := Group.Fibers;
+      Now  : constant Duration := Clock;
+      Item : Fiber_Access;
    begin
-      while Item /= null loop
-         if Item.State = Waiting then
-            case Scheduling.Classify_Deadline (Item.Deadline, Now) is
-               when Scheduling.No_Deadline_Set =>
-                  null;
-               when Scheduling.Expired =>
-                  Item.Timed_Out := True;
-                  Remove_IO_Wait_Locked (Group, Item);
-                  Enqueue (Group, Item);
-               when Scheduling.Pending =>
-                  Nearest :=
-                    Scheduling.Earlier_Deadline (Nearest, Item.Deadline);
-            end case;
+      while Group.Timer_Count > 0 loop
+         Item := Group.Timers (1);
+         if Item.State /= Waiting or else Item.Timer_Index /= 1 then
+            Fatal;
          end if;
-         Item := Item.Next_Group;
+         case Scheduling.Classify_Deadline (Item.Deadline, Now) is
+            when Scheduling.No_Deadline_Set =>
+               Fatal;
+            when Scheduling.Expired =>
+               Remove_Timer_Locked (Group, Item);
+               Item.Timed_Out := True;
+               Remove_IO_Wait_Locked (Group, Item);
+               Enqueue (Group, Item);
+            when Scheduling.Pending =>
+               return Scheduling.Time_Until (Item.Deadline, Now);
+         end case;
       end loop;
-
-      return Scheduling.Time_Until (Nearest, Now);
+      return Scheduling.Time_Until (No_Deadline, Now);
    end Promote_Expired_Timers;
 
    function Initialize (Environment : System.Address) return C.int is
@@ -985,16 +1129,24 @@ package body System.Gnatevl.Scheduler is
       end if;
 
       Lock_Group (Group);
-      if not Pollers.Watch (Group.Scheduler_Poller, Descriptor, Condition) then
-         Unlock_Group (Group);
-         return -1;
-      end if;
-
       Item := Group.Current_Fiber;
       Item.Deadline :=
         (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
       Item.Timed_Out := False;
       Item.State := Waiting;
+      if not Register_Timer_Locked (Group, Item) then
+         Item.State := Running;
+         Item.Deadline := No_Deadline;
+         Unlock_Group (Group);
+         return -1;
+      elsif not Pollers.Watch
+        (Group.Scheduler_Poller, Descriptor, Condition)
+      then
+         Remove_Timer_Locked (Group, Item);
+         Item.State := Running;
+         Unlock_Group (Group);
+         return -1;
+      end if;
       Register_IO_Wait_Locked (Group, Item, Descriptor, Condition);
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
 
@@ -1064,9 +1216,17 @@ package body System.Gnatevl.Scheduler is
       Item.Timed_Out := False;
       Item.State := Waiting;
 
+      if not Register_Timer_Locked (Group, Item) then
+         Item.Deadline := No_Deadline;
+         Item.State := Running;
+         Unlock_Group (Group);
+         return -1;
+      end if;
+
       if Task_Lock /= System.Null_Address then
          Result := Mutex_Unlock (Task_Lock);
          if Result /= 0 then
+            Remove_Timer_Locked (Group, Item);
             Item.State := Running;
             Unlock_Group (Group);
             return -1;
@@ -1102,7 +1262,7 @@ package body System.Gnatevl.Scheduler is
       Group := Item.Group;
       Lock_Group (Group);
       if Item.State = Waiting then
-         Item.Deadline := No_Deadline;
+         Remove_Timer_Locked (Group, Item);
          Item.Timed_Out := False;
          Remove_IO_Wait_Locked (Group, Item);
          Enqueue (Group, Item);
@@ -1219,7 +1379,7 @@ package body System.Gnatevl.Scheduler is
                Previous.Next_IO := Next;
             end if;
             Item.Next_IO := null;
-            Item.Deadline := No_Deadline;
+            Remove_Timer_Locked (Group, Item);
             Item.Timed_Out := False;
             Item.IO_Wait := False;
             Item.IO_Descriptor := -1;

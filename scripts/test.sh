@@ -16,6 +16,7 @@ for test_main in \
   io_starvation_smoke \
   lifecycle_smoke \
   runtime_smoke \
+  timer_heap_smoke \
   tcp_native_smoke
 do
   "$alr" exec -- gprbuild \
