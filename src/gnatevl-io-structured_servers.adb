@@ -180,7 +180,7 @@ package body Gnatevl.IO.Structured_Servers is
       Listener := Sockets.No_Socket;
 
       declare
-         task type Worker is
+         task type Worker with CPU => Handler_CPU is
             pragma Task_Info (Handler_Model);
          end Worker;
 

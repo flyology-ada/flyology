@@ -505,7 +505,8 @@ procedure Handle
 package HTTP is new Gnatevl.IO.Structured_Servers
   (Handler_Context => App_State,
    Handle          => Handle,
-   Handler_Model   => Gnatevl.Event_Loop_Task);
+   Handler_Model   => Gnatevl.Event_Loop_Task,
+   Handler_CPU     => System.Multiprocessors.Not_A_Specific_CPU);
 
 Server : aliased HTTP.Server (Capacity => 256);
 HTTP.Serve (Server, Listener, State, Drain_Timeout => 5.0);
@@ -519,7 +520,10 @@ kernel listen backlog. There is no detached task, hidden worker thread, or
 user-space connection queue. A native instantiation creates ordinary GNARL
 pthread tasks; an evented instantiation creates fibers on the configured loop
 pool. The designation belongs to the instantiated task type and never changes
-during a connection.
+during a connection. `Handler_CPU` is also a task-type property: an explicit
+value chooses an event group for evented handlers (or keeps normal Ada CPU
+semantics for native handlers), while `Not_A_Specific_CPU` uses the configured
+automatic event-loop pool or stock native placement.
 
 The handler context is one shared limited object, not one copy per connection.
 With `Capacity > 1`, callbacks may use it concurrently and native handlers may

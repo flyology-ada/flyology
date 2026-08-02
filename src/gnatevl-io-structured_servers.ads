@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with GNAT.Sockets;
 with Gnatevl.IO.Connections;
+with System.Multiprocessors;
 
 generic
    --  One Context object is shared by every concurrent Handle invocation and
@@ -16,6 +17,8 @@ generic
         Gnatevl.IO.Connections.Cancellation_Token);
 
    Handler_Model : Gnatevl.Execution_Model := Gnatevl.Project_Default;
+   Handler_CPU   : System.Multiprocessors.CPU_Range :=
+     System.Multiprocessors.Not_A_Specific_CPU;
 
 package Gnatevl.IO.Structured_Servers is
 
@@ -39,7 +42,10 @@ package Gnatevl.IO.Structured_Servers is
    --  eagerly created number of handler tasks, including while no connection
    --  is active. The handler task type is fixed by this generic instance: it
    --  is never converted between native and event-loop execution after
-   --  activation.
+   --  activation. Handler_CPU uses the normal GNATEVL meaning: an explicit
+   --  value selects an event group for evented handlers and retains stock Ada
+   --  CPU semantics for native handlers; Not_A_Specific_CPU uses automatic
+   --  event-loop pool placement or stock native placement.
    type Server (Capacity : Positive) is limited private;
 
    --  Take ownership of an already-bound, listening socket and serve until

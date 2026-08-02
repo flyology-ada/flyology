@@ -2,9 +2,11 @@ with Ada.Real_Time;
 with Ada.Streams;
 with GNAT.Sockets;
 with Gnatevl;
+with Gnatevl.Execution_Groups;
 with Gnatevl.IO.Connections;
 with Gnatevl.IO.Sockets;
 with Gnatevl.IO.Structured_Servers;
+with System.Multiprocessors;
 
 procedure Structured_Server_Smoke is
    package Connections renames Gnatevl.IO.Connections;
@@ -13,6 +15,8 @@ procedure Structured_Server_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Array;
    use type Gnatevl.IO.Descriptor;
+   use type Gnatevl.Execution_Groups.Group_Id;
+   use type Gnatevl.Execution_Model;
    use type Sockets.Socket_Type;
 
    procedure Open_Listener
@@ -36,6 +40,7 @@ procedure Structured_Server_Smoke is
 
    generic
       Model : Gnatevl.Execution_Model;
+      CPU   : System.Multiprocessors.CPU_Range;
    procedure Run_Lane;
 
    procedure Run_Lane is
@@ -93,6 +98,11 @@ procedure Structured_Server_Smoke is
          Data : Ada.Streams.Stream_Element_Array (1 .. 1);
          pragma Unreferenced (Peer);
       begin
+         if Model = Gnatevl.Event_Loop_Task then
+            pragma Assert
+              (Gnatevl.Execution_Groups.Current =
+                 Gnatevl.Execution_Groups.Group_Id (CPU));
+         end if;
          State.State.Handler_Entered;
          case State.Mode is
             when Gated_Echo =>
@@ -112,7 +122,8 @@ procedure Structured_Server_Smoke is
       package Structured is new Gnatevl.IO.Structured_Servers
         (Handler_Context => Context,
          Handle          => Handle,
-         Handler_Model   => Model);
+         Handler_Model   => Model,
+         Handler_CPU     => CPU);
 
       use type Structured.Failure_Origin;
 
@@ -446,8 +457,12 @@ procedure Structured_Server_Smoke is
       Run_Pre_Requested_Shutdown;
    end Run_Lane;
 
-   procedure Run_Evented is new Run_Lane (Gnatevl.Event_Loop_Task);
-   procedure Run_Native is new Run_Lane (Gnatevl.Native_Thread);
+   procedure Run_Evented is new Run_Lane
+     (Model => Gnatevl.Event_Loop_Task,
+      CPU   => 1);
+   procedure Run_Native is new Run_Lane
+     (Model => Gnatevl.Native_Thread,
+      CPU   => System.Multiprocessors.Not_A_Specific_CPU);
 begin
    Run_Evented;
    Run_Native;
