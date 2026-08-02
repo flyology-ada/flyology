@@ -44,3 +44,15 @@ for execution_default in native evented; do
     -P external_consumer.gpr
   "$consumer_root/build/bin/external_consumer" "$execution_default"
 done
+
+# Preparing a consumer-owned RTS must never leave runtime objects in the
+# dependency checkout. A compiler invoked after changing directories must be
+# resolved before that change; this check makes regressions fail visibly.
+leaked_objects=$(find "$project_root" -maxdepth 1 -type f \
+  \( -name 's-*.o' -o -name 's-*.ali' \) -print)
+if [ -n "$leaked_objects" ]; then
+  printf '%s\n' \
+    'runtime preparation leaked generated objects into the GNATEVL root:' \
+    "$leaked_objects" >&2
+  exit 1
+fi

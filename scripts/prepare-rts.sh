@@ -69,28 +69,6 @@ case "$test_faults" in
 esac
 
 compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$alr")
-compiler=$("$alr" exec -- sh -c 'command -v gcc' | tail -n 1)
-compiler_version=$("$compiler" -dumpfullversion)
-
-case "$compiler_release" in
-  13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
-    patch_family=gnat-13-16
-    compat_family=gnat-legacy
-    ;;
-  16.1.0)
-    patch_family=gnat-13-16
-    compat_family=gnat-16
-    ;;
-  *)
-    printf '%s\n' \
-      "unsupported GNAT runtime version: $compiler_version" \
-      "selected Alire release: $compiler_release" \
-      "verified gnat_native releases: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
-    exit 1
-    ;;
-esac
-
-patch_root="$project_root/runtime/patches/$patch_family"
 
 case "$(uname -s)" in
   Darwin)
@@ -101,6 +79,29 @@ case "$(uname -s)" in
     ;;
   *) printf '%s\n' "unsupported GNATEVL host: $(uname -s)" >&2; exit 1 ;;
 esac
+
+case "$platform:$compiler_release" in
+  darwin:13.2.2|darwin:14.1.3|darwin:14.2.1|\
+  linux:13.2.2|linux:14.1.3|linux:14.2.1|linux:15.1.2|linux:15.3.1)
+    patch_family=gnat-13-16
+    compat_family=gnat-legacy
+    ;;
+  darwin:16.1.0|linux:16.1.0)
+    patch_family=gnat-13-16
+    compat_family=gnat-16
+    ;;
+  *)
+    printf '%s\n' \
+      "unsupported GNATEVL host/compiler pair: $platform / gnat_native $compiler_release" \
+      "selected Alire release: $compiler_release" \
+      "verified on Darwin: 13.2.2, 14.1.3, 14.2.1, 16.1.0" \
+      "verified on Linux: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
+    exit 1
+    ;;
+esac
+
+compiler=$("$alr" exec -- sh -c 'command -v gcc' | tail -n 1)
+patch_root="$project_root/runtime/patches/$patch_family"
 
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
 task_state_patch="$patch_root/common/s-tassta.adb.patch"

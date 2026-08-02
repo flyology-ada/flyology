@@ -10,9 +10,9 @@ masters, exceptions, and normal blocking-looking Ada control flow still come
 from GNARL. GNATEVL changes how a task is scheduled and adds I/O operations that
 cooperate with either execution mode.
 
-The current patch family covers Alire's available `gnat_native` 13 through 16
-releases: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0. It is tested on
-macOS/AArch64 and through a Linux/x86-64 Docker matrix. The event backend is
+The current patch family covers exact Alire `gnat_native` releases from 13
+through 16. Linux supports 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0;
+macOS supports 13.2.2, 14.1.3, 14.2.1, and 16.1.0. The event backend is
 `kqueue` on macOS and `epoll` plus `eventfd` on Linux. Evented tasks resume
 through the small ABI-specific context switch described below.
 
@@ -783,14 +783,22 @@ rather than hidden behind a claim of universal portability.
 
 ## Build and test
 
-GNATEVL supports Alire 2.1 or newer with the exact `gnat_native` releases
-13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0. The crate declares a
-generic `gnat >=13 & <17` dependency so Alire can select a compatible compiler;
-runtime preparation then checks the exact release against the versioned patch
-manifest and fails closed if it has not actually been verified. macOS/AArch64
-and Linux/x86-64 are the CI reference targets. The source also contains the
-x86-64 macOS context switch, but that host/ABI combination is not part of the
-hosted matrix.
+GNATEVL supports Alire 2.1 or newer with the exact `gnat_native` releases shown
+below:
+
+| Host | Releases |
+| --- | --- |
+| macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
+| Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
+
+The crate declares a generic `gnat >=13 & <17` dependency so Alire can select a
+compiler; runtime preparation then checks the exact host/release pair against
+the versioned patch manifest and fails closed if it has not actually been
+verified. Alire's Darwin GNAT 15 packages bundle a different
+`s-taprop.adb` source shape and need a separate Darwin patch family before
+they can be enabled. macOS/AArch64 and Linux/x86-64 are the CI reference
+targets. The source also contains the x86-64 macOS context switch, but that
+host/ABI combination is not part of the hosted matrix.
 
 Scripts use `ALR` when set, otherwise `alr` from `PATH`, with `~/alr` retained
 as a compatibility fallback:
@@ -929,8 +937,8 @@ release covered by the patch family:
 `.github/workflows/ci.yml` runs three independent gates without
 `continue-on-error` fallbacks:
 
-- a macOS/AArch64 and Linux/x86-64 compatibility matrix for every exact GNAT
-  release above, compiling the crate in release mode and running the external
+- a platform-specific compatibility matrix for every exact GNAT release in the
+  table above, compiling the crate in release mode and running the external
   consumer in native-default and evented-default configurations;
 - the full behavioral suite on both platforms with GNAT 16.1; and
 - the SPARK proof crate on both platforms with GNATprove 16.1.
@@ -1243,8 +1251,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   compiler fork. GNATEVL's test and showcase projects use `-gnatwJ` to suppress
   that specific warning class while retaining the other `-gnatwa` diagnostics.
 - The custom RTS patch is tied deliberately to the versioned GNAT 13–16 source
-  family. An unsupported compiler release or a changed source hunk fails runtime
-  preparation instead of falling back to a nearby patch.
+  family and its platform-specific release map. An unsupported host/release
+  pair or a changed source hunk fails runtime preparation instead of falling
+  back to a nearby patch.
 - The semantic differential suite checks language-level outcomes and ordering
   only where the Ada rules determine them; it deliberately does not compare
   scheduling traces or elapsed-time ordering between lanes. It covers a
