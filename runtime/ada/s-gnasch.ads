@@ -84,7 +84,9 @@ package System.Gnatevl.Scheduler is
    function Wait_IO
      (Descriptor          : Interfaces.C.int;
       For_Write           : Interfaces.C.int;
-      Timeout_Nanoseconds : Interfaces.C.long_long)
+      Timeout_Nanoseconds : Interfaces.C.long_long;
+      Interrupt_1         : Interfaces.C.int;
+      Interrupt_2         : Interfaces.C.int)
       return Interfaces.C.int;
    pragma Export (C, Wait_IO, "gnatevl_runtime_wait_io");
 

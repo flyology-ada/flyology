@@ -44,19 +44,25 @@ package body Gnatevl.IO.Sockets is
      (Socket    : Sockets.Socket_Type;
       Condition : Wait_Kind;
       Started   : Ada.Real_Time.Time;
-      Timeout   : Duration);
+      Timeout   : Duration;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor);
 
    procedure Receive_Prepared
      (Socket  : Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration);
+      Timeout : Duration;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor);
 
    procedure Send_Prepared
      (Socket  : Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration);
+      Timeout : Duration;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor);
 
    function Remaining
      (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration
@@ -75,14 +81,22 @@ package body Gnatevl.IO.Sockets is
      (Socket    : Sockets.Socket_Type;
       Condition : Wait_Kind;
       Started   : Ada.Real_Time.Time;
-      Timeout   : Duration)
+      Timeout   : Duration;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor)
    is
+      Outcome : constant Wait_Outcome :=
+        Wait_Interruptibly
+          (To_Descriptor (Socket), Condition, Remaining (Started, Timeout),
+           Interrupt_1, Interrupt_2);
    begin
-      if not Wait
-        (To_Descriptor (Socket), Condition, Remaining (Started, Timeout))
-      then
-         raise Timeout_Error with "socket operation timed out";
-      end if;
+      case Outcome is
+         when Ready => null;
+         when Timed_Out =>
+            raise Timeout_Error with "socket operation timed out";
+         when Interrupted =>
+            raise Operation_Interrupted with "socket operation interrupted";
+      end case;
    end Wait_For;
 
    procedure Prepare (Socket : Sockets.Socket_Type) is
@@ -96,18 +110,23 @@ package body Gnatevl.IO.Sockets is
      (Socket  : Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration := Infinite)
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor)
    is
    begin
       Prepare (Socket);
-      Receive_Prepared (Socket, Item, Last, Timeout);
+      Receive_Prepared
+        (Socket, Item, Last, Timeout, Interrupt_1, Interrupt_2);
    end Receive;
 
    procedure Receive_Prepared
      (Socket  : Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration)
+      Timeout : Duration;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
@@ -119,7 +138,9 @@ package body Gnatevl.IO.Sockets is
             when Occurrence : Sockets.Socket_Error =>
                case Sockets.Resolve_Exception (Occurrence) is
                   when Sockets.Resource_Temporarily_Unavailable =>
-                     Wait_For (Socket, For_Read, Started, Timeout);
+                     Wait_For
+                       (Socket, For_Read, Started, Timeout,
+                        Interrupt_1, Interrupt_2);
                   when Sockets.Interrupted_System_Call =>
                      null;
                   when others =>
@@ -132,7 +153,9 @@ package body Gnatevl.IO.Sockets is
    procedure Receive_Exactly
      (Socket  : Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite)
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First   : Ada.Streams.Stream_Element_Offset := Item'First;
@@ -144,7 +167,9 @@ package body Gnatevl.IO.Sockets is
            (Socket,
             Item (First .. Item'Last),
             Last,
-            Remaining (Started, Timeout));
+            Remaining (Started, Timeout),
+            Interrupt_1,
+            Interrupt_2);
          if Last < First then
             raise Device_Error with "socket closed while receiving";
          end if;
@@ -156,18 +181,23 @@ package body Gnatevl.IO.Sockets is
      (Socket  : Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration := Infinite)
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor)
    is
    begin
       Prepare (Socket);
-      Send_Prepared (Socket, Item, Last, Timeout);
+      Send_Prepared
+        (Socket, Item, Last, Timeout, Interrupt_1, Interrupt_2);
    end Send;
 
    procedure Send_Prepared
      (Socket  : Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration)
+      Timeout : Duration;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
@@ -179,7 +209,9 @@ package body Gnatevl.IO.Sockets is
             when Occurrence : Sockets.Socket_Error =>
                case Sockets.Resolve_Exception (Occurrence) is
                   when Sockets.Resource_Temporarily_Unavailable =>
-                     Wait_For (Socket, For_Write, Started, Timeout);
+                     Wait_For
+                       (Socket, For_Write, Started, Timeout,
+                        Interrupt_1, Interrupt_2);
                   when Sockets.Interrupted_System_Call =>
                      null;
                   when others =>
@@ -192,7 +224,9 @@ package body Gnatevl.IO.Sockets is
    procedure Send_All
      (Socket  : Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite)
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First   : Ada.Streams.Stream_Element_Offset := Item'First;
@@ -204,7 +238,9 @@ package body Gnatevl.IO.Sockets is
            (Socket,
             Item (First .. Item'Last),
             Last,
-            Remaining (Started, Timeout));
+            Remaining (Started, Timeout),
+            Interrupt_1,
+            Interrupt_2);
          if Last < First then
             raise Device_Error with "socket closed while sending";
          end if;
@@ -216,7 +252,9 @@ package body Gnatevl.IO.Sockets is
      (Server  : Sockets.Socket_Type;
       Socket  : out Sockets.Socket_Type;
       Address : out Sockets.Sock_Addr_Type;
-      Timeout : Duration := Infinite)
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor)
    is
       Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Accepted : Sockets.Socket_Type := Sockets.No_Socket;
@@ -240,7 +278,9 @@ package body Gnatevl.IO.Sockets is
                   Interfaces.C.int (System.OS_Constants.EINTR))
                is
                   when Wait_Policy.Wait_For_Ready =>
-                     Wait_For (Server, For_Read, Started, Timeout);
+                     Wait_For
+                       (Server, For_Read, Started, Timeout,
+                        Interrupt_1, Interrupt_2);
                   when Wait_Policy.Retry_Operation =>
                      null;
                   when Wait_Policy.Fail_Operation =>
@@ -292,7 +332,9 @@ package body Gnatevl.IO.Sockets is
       end;
 
       if Pending then
-         Wait_For (Socket, For_Write, Started, Timeout);
+         Wait_For
+           (Socket, For_Write, Started, Timeout,
+            Invalid_Descriptor, Invalid_Descriptor);
          declare
             Result : constant Sockets.Option_Type :=
               Sockets.Get_Socket_Option

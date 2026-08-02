@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Streams;
 with GNAT.Sockets;
+with Gnatevl.Wake_Sources;
 
 package Gnatevl.IO.Connections is
 
@@ -10,8 +11,11 @@ package Gnatevl.IO.Connections is
    protected type Cancellation_Token is
       procedure Request;
       function Requested return Boolean;
+      procedure Wait_Source
+        (FD : out Gnatevl.IO.Descriptor; Already_Requested : out Boolean);
    private
       Is_Requested : Boolean := False;
+      Wake         : Gnatevl.Wake_Sources.Source;
    end Cancellation_Token;
 
    protected type Server (Capacity : Positive) is
@@ -22,12 +26,20 @@ package Gnatevl.IO.Connections is
       function Shutdown_Requested return Boolean;
       function Active return Natural;
       function Waiting return Natural;
+      procedure Wait_Source
+        (FD : out Gnatevl.IO.Descriptor; Already_Requested : out Boolean);
    private
       Active_Count : Natural := 0;
       Stopping     : Boolean := False;
+      Wake         : Gnatevl.Wake_Sources.Source;
    end Server;
 
    type Connection is new Ada.Finalization.Limited_Controlled with private;
+
+   --  Cancellation_Token and Server are one-shot wake sources. They must
+   --  outlive operations using them. Cancellation_Quantum is retained on the
+   --  operations below for source compatibility; scheduler-driven wakeups make
+   --  it unnecessary and its value is ignored.
 
    --  Server must outlive every Connection admitted through it. On success,
    --  Socket becomes No_Socket and Item becomes its sole closing owner.

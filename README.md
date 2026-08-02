@@ -351,14 +351,23 @@ The limited owner cannot be copied and closes its socket while releasing the
 admission permit during explicit `Close`, normal scope exit, or exception
 unwinding. The `Server` object must outlive its admitted owners.
 
-Operations check both an optional per-operation `Cancellation_Token` and the
-server shutdown state between bounded readiness waits. The default 50 ms
-quantum bounds cancellation observation without closing a descriptor from a
-different task. `Request_Shutdown` closes admission, releases tasks queued at
-the capacity gate with `Admission_Closed`, and causes active lifecycle I/O to
-raise `Operation_Cancelled`; `Await_Drained` returns after all owners release.
-Raw `Gnatevl.IO.Sockets` remains the lower-level mechanism when an application
-needs a different ownership or cancellation policy.
+Operations register both an optional per-operation `Cancellation_Token` and the
+server shutdown source in the same kernel wait as the socket. A token request
+or `Request_Shutdown` writes a persistent nonblocking wake descriptor: native
+tasks observe it in `poll`, while evented tasks observe it through their loop's
+`kqueue`/`epoll` poller. The suspended call resumes immediately without closing
+the connection descriptor and without periodic timer wakeups. One signal wakes
+all operations registered with that source.
+
+`Cancellation_Quantum` remains in the API for source compatibility but is no
+longer a polling interval and is ignored. Cancellation tokens and servers must
+outlive operations waiting on their wake sources. `Request_Shutdown` also closes
+admission, releases tasks queued at the capacity gate with `Admission_Closed`,
+and causes active lifecycle I/O to raise `Operation_Cancelled`;
+`Await_Drained` returns after all owners release. Raw `Gnatevl.IO.Sockets`
+remains the lower-level mechanism when an application needs different ownership
+or cancellation policy. Its optional interrupt descriptors are a low-level
+building block; callers retain their ownership and lifetime responsibility.
 
 ### Timers
 
@@ -511,7 +520,7 @@ a crash handler or debugger and querying it takes no scheduler lock.
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
 | Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code and bounded submission queues |
-| Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Limited owners release permits automatically; cancellation latency is bounded by a configurable readiness quantum |
+| Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Limited owners release permits automatically; persistent wake descriptors cancel idle operations without polling or concurrent socket close |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require a matching installed runtime from the tested GNAT 13–16 family |
 
@@ -682,7 +691,9 @@ Current smoke coverage includes:
 - evented/native socket-pair transfer, simultaneous read/write watches on one
   descriptor, and timeout behavior;
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
-  cancellation, RAII socket release, admission closure, and accept cancellation;
+  cancellation, RAII socket release, admission closure, accept cancellation,
+  immediate pre-requested cancellation, timeout precedence, and 128 idle
+  native/evented connections cancelled despite a ten-second legacy quantum;
 - descriptor-readiness fairness under a continuously yielding evented task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;
@@ -710,6 +721,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/many_evented_tasks
 ./showcases/bin/cooperative_fairness
 ./showcases/bin/connection_lifecycle
+./showcases/bin/cancellation_density evented 1000
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/evented_vs_threads
 ./showcases/bin/evented_io
@@ -728,6 +740,9 @@ The examples demonstrate:
   on the same event loop;
 - bounded connection admission followed by cancellation and a fully drained
   graceful shutdown, including automatic socket ownership cleanup;
+- cancellation-enabled connection density with one second of idle process-CPU
+  measurement and immediate release from a deliberately ten-second legacy
+  quantum;
 - evented coordination with native CPU workers;
 - `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
   one-task thread, and rejection of unsafe live stock-native conversion;
@@ -801,6 +816,24 @@ The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
 connections. Results vary with the OS, compiler, allocator, and resource limits.
 
+### Cancellation-density showcase
+
+`cancellation_density` parks real socket-owning connections with cancellation
+enabled, samples process CPU across one idle second, then requests a shared
+token and reports the time to drain every connection. Each operation passes a
+ten-second `Cancellation_Quantum`: cancellation completing promptly demonstrates
+that the value is compatibility-only and no periodic quantum drives progress.
+
+```sh
+./showcases/bin/cancellation_density evented 1000
+./showcases/bin/cancellation_density native 1000
+```
+
+The evented lane should remain close to idle process CPU with one loop thread;
+the native lane blocks a pthread per connection. Absolute CPU and cancellation
+latency vary by host, so the showcase reports measurements rather than asserting
+a fixed performance ratio.
+
 ## Performance snapshot
 
 Five-run medians on the development Apple Silicon machine:
@@ -867,10 +900,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - A submitted file buffer remains owned by the kernel until completion. An
   abort request therefore wakes that task only after the outstanding operation
   completes; cancellable file-operation handles are not yet a public API.
-- `Gnatevl.IO.Connections` provides cooperative cancellation without concurrent
-  descriptor close, bounded by its readiness quantum. Raw socket operations do
-  not infer descriptor ownership; closing a raw descriptor concurrently with
-  an indefinite wait remains outside that lower-level API's guarantees.
+- `Gnatevl.IO.Connections` provides scheduler-driven cancellation without
+  concurrent descriptor close or periodic readiness timeouts. Raw socket
+  operations do not infer descriptor ownership; closing a raw descriptor
+  concurrently with an indefinite wait remains outside that lower-level API's
+  guarantees. Generation-tagged descriptor ownership remains future work.
 - Fiber guard pages make stack overflow fail fast. Each loop pthread has an
   alternate signal stack on which GNARL can translate the guard fault into Ada
   `Storage_Error`; this stack is thread state and is intentionally not stored

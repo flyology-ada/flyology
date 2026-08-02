@@ -77,7 +77,21 @@ package body System.Gnatevl.Scheduler is
       Tail : Fiber_Access;
    end record;
    type Ready_Bucket_Array is array (Ready_Priority) of Ready_Bucket;
-   type IO_Bucket_Array is array (IO_Bucket_Index) of Fiber_Access;
+   type IO_Link_Kind is (Primary_IO, First_Interrupt, Second_Interrupt);
+   type IO_Wait_Link;
+   type IO_Wait_Link_Access is access all IO_Wait_Link;
+   type IO_Wait_Link is record
+      Owner      : Fiber_Access := null;
+      Descriptor : C.int := -1;
+      Interest   : Pollers.Interest := Pollers.Readable;
+      Kind       : IO_Link_Kind := Primary_IO;
+      Bucket     : IO_Bucket_Index := 0;
+      Registered : Boolean := False;
+      Next       : IO_Wait_Link_Access := null;
+   end record;
+   type IO_Wait_Link_Array is
+     array (IO_Link_Kind) of aliased IO_Wait_Link;
+   type IO_Bucket_Array is array (IO_Bucket_Index) of IO_Wait_Link_Access;
    type Timer_Heap_Array is array (Positive range <>) of Fiber_Access;
    type Timer_Heap_Access is access Timer_Heap_Array;
 
@@ -119,9 +133,8 @@ package body System.Gnatevl.Scheduler is
       Timed_Out  : Boolean := False;
       State      : Fiber_State := Waiting;
       IO_Wait    : Boolean := False;
-      IO_Descriptor : C.int := -1;
-      IO_Interest : Pollers.Interest := Pollers.Readable;
-      IO_Bucket  : IO_Bucket_Index := 0;
+      IO_Result  : C.int := 0;
+      IO_Links   : IO_Wait_Link_Array;
       File_Wait  : Boolean := False;
       File_Pending : Boolean := False;
       File_Result : C.long_long := 0;
@@ -141,7 +154,6 @@ package body System.Gnatevl.Scheduler is
       Previous_Ready : Fiber_Access;
       Next_Ready : Fiber_Access;
       Next_Group : Fiber_Access;
-      Next_IO    : Fiber_Access;
       Next_File  : Fiber_Access;
       Next_Registry : Fiber_Access;
       Registry_Bucket : Registry_Bucket_Index := 0;
@@ -280,8 +292,9 @@ package body System.Gnatevl.Scheduler is
      (Group      : not null Loop_Group_Access;
       Item       : not null Fiber_Access;
       Descriptor : C.int;
-      Interest   : Pollers.Interest);
-   procedure Remove_IO_Wait_Locked
+      Interest   : Pollers.Interest;
+      Kind       : IO_Link_Kind);
+   procedure Remove_IO_Waits_Locked
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
    procedure Queue_Pending_File_Locked
@@ -594,32 +607,39 @@ package body System.Gnatevl.Scheduler is
      (Group      : not null Loop_Group_Access;
       Item       : not null Fiber_Access;
       Descriptor : C.int;
-      Interest   : Pollers.Interest)
+      Interest   : Pollers.Interest;
+      Kind       : IO_Link_Kind)
    is
       Bucket : IO_Bucket_Index;
+      Link   : IO_Wait_Link_Access;
    begin
-      if Item.IO_Wait
-        or else Item.Group /= Group
+      if Item.Group /= Group
         or else Item.State /= Waiting
         or else Descriptor < 0
+        or else Item.IO_Links (Kind).Registered
       then
          Fatal;
       end if;
       Bucket := IO_Bucket_For (Descriptor);
+      Link := Item.IO_Links (Kind)'Unchecked_Access;
       Item.IO_Wait := True;
-      Item.IO_Descriptor := Descriptor;
-      Item.IO_Interest := Interest;
-      Item.IO_Bucket := Bucket;
-      Item.Next_IO := Group.IO_Waiters (Bucket);
-      Group.IO_Waiters (Bucket) := Item;
+      Link.Owner := Item;
+      Link.Descriptor := Descriptor;
+      Link.Interest := Interest;
+      Link.Kind := Kind;
+      Link.Bucket := Bucket;
+      Link.Registered := True;
+      Link.Next := Group.IO_Waiters (Bucket);
+      Group.IO_Waiters (Bucket) := Link;
    end Register_IO_Wait_Locked;
 
-   procedure Remove_IO_Wait_Locked
+   procedure Remove_IO_Waits_Locked
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access)
    is
-      Position : Fiber_Access;
-      Previous : Fiber_Access;
+      Position : IO_Wait_Link_Access;
+      Previous : IO_Wait_Link_Access;
+      Link     : IO_Wait_Link_Access;
    begin
       if not Item.IO_Wait then
          return;
@@ -627,23 +647,30 @@ package body System.Gnatevl.Scheduler is
          Fatal;
       end if;
 
-      Position := Group.IO_Waiters (Item.IO_Bucket);
-      while Position /= null and then Position /= Item loop
-         Previous := Position;
-         Position := Position.Next_IO;
+      for Kind in IO_Link_Kind loop
+         Link := Item.IO_Links (Kind)'Unchecked_Access;
+         if Link.Registered then
+            Position := Group.IO_Waiters (Link.Bucket);
+            Previous := null;
+            while Position /= null and then Position /= Link loop
+               Previous := Position;
+               Position := Position.Next;
+            end loop;
+            if Position = null then
+               Fatal;
+            elsif Previous = null then
+               Group.IO_Waiters (Link.Bucket) := Link.Next;
+            else
+               Previous.Next := Link.Next;
+            end if;
+            Link.Next := null;
+            Link.Registered := False;
+            Link.Owner := null;
+            Link.Descriptor := -1;
+         end if;
       end loop;
-      if Position = null then
-         Fatal;
-      elsif Previous = null then
-         Group.IO_Waiters (Item.IO_Bucket) := Item.Next_IO;
-      else
-         Previous.Next_IO := Item.Next_IO;
-      end if;
-
-      Item.Next_IO := null;
       Item.IO_Wait := False;
-      Item.IO_Descriptor := -1;
-   end Remove_IO_Wait_Locked;
+   end Remove_IO_Waits_Locked;
 
    procedure Queue_Pending_File_Locked
      (Group : not null Loop_Group_Access;
@@ -951,7 +978,7 @@ package body System.Gnatevl.Scheduler is
          Remove_From_Ready (Group, Item);
       end if;
       Remove_Timer_Locked (Group, Item);
-      Remove_IO_Wait_Locked (Group, Item);
+      Remove_IO_Waits_Locked (Group, Item);
 
       Unregister_Locked (Item);
 
@@ -1094,7 +1121,10 @@ package body System.Gnatevl.Scheduler is
             when Scheduling.Expired =>
                Remove_Timer_Locked (Group, Item);
                Item.Timed_Out := True;
-               Remove_IO_Wait_Locked (Group, Item);
+               if Item.IO_Wait then
+                  Item.IO_Result := 1;
+               end if;
+               Remove_IO_Waits_Locked (Group, Item);
                Enqueue (Group, Item);
             when Scheduling.Pending =>
                return Scheduling.Time_Until (Item.Deadline, Now);
@@ -1594,7 +1624,9 @@ package body System.Gnatevl.Scheduler is
    function Wait_IO
      (Descriptor          : C.int;
       For_Write           : C.int;
-      Timeout_Nanoseconds : C.long_long) return C.int
+      Timeout_Nanoseconds : C.long_long;
+      Interrupt_1         : C.int;
+      Interrupt_2         : C.int) return C.int
    is
       Group     : constant Loop_Group_Access := Thread_Group;
       Item      : Fiber_Access;
@@ -1628,6 +1660,7 @@ package body System.Gnatevl.Scheduler is
       Item.Deadline :=
         (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
       Item.Timed_Out := False;
+      Item.IO_Result := 0;
       Item.State := Waiting;
       if not Register_Timer_Locked (Group, Item) then
          Item.State := Running;
@@ -1636,16 +1669,33 @@ package body System.Gnatevl.Scheduler is
          return -1;
       elsif not Pollers.Watch
         (Group.Scheduler_Poller, Descriptor, Condition)
+        or else
+          (Interrupt_1 >= 0
+           and then not Pollers.Watch
+             (Group.Scheduler_Poller, Interrupt_1, Pollers.Readable))
+        or else
+          (Interrupt_2 >= 0
+           and then not Pollers.Watch
+             (Group.Scheduler_Poller, Interrupt_2, Pollers.Readable))
       then
          Remove_Timer_Locked (Group, Item);
          Item.State := Running;
          Unlock_Group (Group);
          return -1;
       end if;
-      Register_IO_Wait_Locked (Group, Item, Descriptor, Condition);
+      Register_IO_Wait_Locked
+        (Group, Item, Descriptor, Condition, Primary_IO);
+      if Interrupt_1 >= 0 then
+         Register_IO_Wait_Locked
+           (Group, Item, Interrupt_1, Pollers.Readable, First_Interrupt);
+      end if;
+      if Interrupt_2 >= 0 then
+         Register_IO_Wait_Locked
+           (Group, Item, Interrupt_2, Pollers.Readable, Second_Interrupt);
+      end if;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
 
-      return (if Item.Timed_Out then 1 else 0);
+      return Item.IO_Result;
    end Wait_IO;
 
    function File_IO
@@ -1832,7 +1882,7 @@ package body System.Gnatevl.Scheduler is
       if Item.State = Waiting and then not Item.File_Wait then
          Remove_Timer_Locked (Group, Item);
          Item.Timed_Out := False;
-         Remove_IO_Wait_Locked (Group, Item);
+         Remove_IO_Waits_Locked (Group, Item);
          Enqueue (Group, Item);
          Made_Ready := True;
          Group.Wakeups := Group.Wakeups + 1;
@@ -1918,9 +1968,9 @@ package body System.Gnatevl.Scheduler is
    is
       Bucket  : IO_Bucket_Index;
       Item    : Fiber_Access;
-      Next    : Fiber_Access;
-      Previous : Fiber_Access;
+      Link    : IO_Wait_Link_Access;
       Matches : Boolean;
+      Outcome : C.int;
    begin
       if Event.Kind = Pollers.File_Event then
          if Event.Token = System.Null_Address then
@@ -1959,36 +2009,41 @@ package body System.Gnatevl.Scheduler is
          Fatal;
       end if;
       Bucket := IO_Bucket_For (Event.Descriptor);
-      Item := Group.IO_Waiters (Bucket);
-      while Item /= null loop
-         Next := Item.Next_IO;
+      Link := Group.IO_Waiters (Bucket);
+      while Link /= null loop
+         Item := Link.Owner;
          Matches :=
+           Item /= null
+           and then Link.Registered
+           and then
            Item.State = Waiting
            and then Item.IO_Wait
-           and then Item.IO_Descriptor = Event.Descriptor
+           and then Link.Descriptor = Event.Descriptor
            and then
              ((Event.Kind in Pollers.Readable_Event | Pollers.Read_Write_Event
-               and then Item.IO_Interest = Pollers.Readable)
+               and then Link.Interest = Pollers.Readable)
               or else
                 (Event.Kind in
                    Pollers.Writable_Event | Pollers.Read_Write_Event
-                 and then Item.IO_Interest = Pollers.Writable));
+                 and then Link.Interest = Pollers.Writable));
          if Matches then
-            if Previous = null then
-               Group.IO_Waiters (Bucket) := Next;
-            else
-               Previous.Next_IO := Next;
-            end if;
-            Item.Next_IO := null;
+            Outcome :=
+              (case Link.Kind is
+                 when Primary_IO       => 0,
+                 when First_Interrupt  => 2,
+                 when Second_Interrupt => 3);
             Remove_Timer_Locked (Group, Item);
             Item.Timed_Out := False;
-            Item.IO_Wait := False;
-            Item.IO_Descriptor := -1;
+            Item.IO_Result := Outcome;
+            Remove_IO_Waits_Locked (Group, Item);
             Enqueue (Group, Item);
+            --  Removing all of Item's links may have changed this bucket at
+            --  any position, so restart from its head. Each pass wakes one
+            --  fiber and therefore makes bounded progress.
+            Link := Group.IO_Waiters (Bucket);
          else
-            Previous := Item;
+            Link := Link.Next;
          end if;
-         Item := Next;
       end loop;
    end Handle_Poll_Event;
 

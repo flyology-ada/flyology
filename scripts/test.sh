@@ -40,6 +40,7 @@ run_gprbuild \
 "$project_root/tests/bin/default_policy_smoke" native
 
 for test_main in \
+  cancellation_wake_smoke \
   connection_lifecycle_smoke \
   execution_groups_smoke \
   fairness_smoke \

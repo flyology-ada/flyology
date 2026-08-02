@@ -3,6 +3,12 @@ with GNAT.Sockets;
 
 package Gnatevl.IO.Sockets is
 
+   Operation_Interrupted : exception;
+
+   --  Interrupt descriptors are optional readable one-shot wake sources. The
+   --  operation raises Operation_Interrupted when either becomes ready; it
+   --  never reads or closes them. Ordinary callers can omit both parameters.
+
    function Native_Descriptor
      (Socket : GNAT.Sockets.Socket_Type) return Descriptor;
 
@@ -14,29 +20,39 @@ package Gnatevl.IO.Sockets is
      (Socket  : GNAT.Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration := Infinite);
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor);
 
    procedure Receive_Exactly
      (Socket  : GNAT.Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite);
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor);
 
    procedure Send
      (Socket  : GNAT.Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
-      Timeout : Duration := Infinite);
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor);
 
    procedure Send_All
      (Socket  : GNAT.Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite);
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor);
 
    procedure Accept_Connection
      (Server  : GNAT.Sockets.Socket_Type;
       Socket  : out GNAT.Sockets.Socket_Type;
       Address : out GNAT.Sockets.Sock_Addr_Type;
-      Timeout : Duration := Infinite);
+      Timeout : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor);
 
    procedure Connect
      (Socket  : GNAT.Sockets.Socket_Type;

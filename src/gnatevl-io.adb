@@ -7,6 +7,7 @@ package body Gnatevl.IO is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type C.short;
 
    POLLIN  : constant C.short := 16#0001#;
    POLLOUT : constant C.short := 16#0004#;
@@ -25,11 +26,13 @@ package body Gnatevl.IO is
    function Runtime_Wait_IO
      (FD                  : C.int;
       For_Write           : C.int;
-      Timeout_Nanoseconds : C.long_long) return C.int;
+      Timeout_Nanoseconds : C.long_long;
+      Interrupt_1         : C.int;
+      Interrupt_2         : C.int) return C.int;
    pragma Import (C, Runtime_Wait_IO, "gnatevl_runtime_wait_io");
 
    function Poll
-     (Descriptors : access Poll_Descriptor;
+     (Descriptors : System.Address;
       Count       : C.unsigned;
       Timeout_MS  : C.int) return C.int;
    pragma Import (C, Poll, "poll");
@@ -68,8 +71,25 @@ package body Gnatevl.IO is
       Condition : Wait_Kind;
       Timeout   : Duration := Infinite) return Boolean
    is
+      Outcome : constant Wait_Outcome :=
+        Wait_Interruptibly (FD, Condition, Timeout);
+   begin
+      return Outcome = Ready;
+   end Wait;
+
+   function Wait_Interruptibly
+     (FD          : Descriptor;
+      Condition   : Wait_Kind;
+      Timeout     : Duration := Infinite;
+      Interrupt_1 : Descriptor := Invalid_Descriptor;
+      Interrupt_2 : Descriptor := Invalid_Descriptor) return Wait_Outcome
+   is
+      type Poll_Descriptor_Array is
+        array (Positive range <>) of aliased Poll_Descriptor
+        with Convention => C;
       Started : constant Duration := Clock;
       Result  : C.int;
+      Count   : Positive := 1;
    begin
       if FD < 0 then
          raise Device_Error with "invalid descriptor";
@@ -78,13 +98,28 @@ package body Gnatevl.IO is
       if Is_Evented_Task then
          Result :=
            Runtime_Wait_IO
-             (FD,
+              (FD,
               (if Condition = For_Write then 1 else 0),
-              Time_Math.To_Nanoseconds (Timeout));
+              Time_Math.To_Nanoseconds (Timeout),
+              Interrupt_1,
+              Interrupt_2);
          if Result < 0 then
             raise Device_Error with "event-loop readiness wait failed";
          end if;
-         return Result = 0;
+         return
+           (case Result is
+              when 0      => Ready,
+              when 1      => Timed_Out,
+              when 2 | 3  => Interrupted,
+              when others => raise Device_Error with
+                "invalid event-loop readiness result");
+      end if;
+
+      if Interrupt_1 >= 0 then
+         Count := Count + 1;
+      end if;
+      if Interrupt_2 >= 0 then
+         Count := Count + 1;
       end if;
 
       loop
@@ -92,17 +127,38 @@ package body Gnatevl.IO is
             Elapsed : constant Duration := Clock - Started;
             Remaining : constant Duration :=
               Time_Math.Remaining (Timeout, Elapsed);
-            Item : aliased Poll_Descriptor :=
+            Items : Poll_Descriptor_Array (1 .. Count);
+            Next  : Positive := 2;
+         begin
+            Items (1) :=
               (FD              => FD,
                Events          =>
                  (if Condition = For_Read then POLLIN else POLLOUT),
                Returned_Events => 0);
-         begin
+            if Interrupt_1 >= 0 then
+               Items (Next) :=
+                 (FD => Interrupt_1, Events => POLLIN, Returned_Events => 0);
+               Next := Next + 1;
+            end if;
+            if Interrupt_2 >= 0 then
+               Items (Next) :=
+                 (FD => Interrupt_2, Events => POLLIN, Returned_Events => 0);
+            end if;
             Result :=
               Poll
-                (Item'Access,
-                 1,
+                (Items'Address,
+                 C.unsigned (Count),
                  Time_Math.To_Milliseconds (Remaining));
+            if Result > 0 then
+               if Items (1).Returned_Events /= 0 then
+                  return Ready;
+               end if;
+               for Index in 2 .. Count loop
+                  if Items (Index).Returned_Events /= 0 then
+                     return Interrupted;
+                  end if;
+               end loop;
+            end if;
          end;
 
          case Wait_Policy.Classify
@@ -111,15 +167,16 @@ package body Gnatevl.IO is
             C.int (System.OS_Constants.EINTR))
          is
             when Wait_Policy.Return_Ready =>
-               return True;
+               --  Readiness was classified above so this cannot be reached.
+               raise Device_Error with "poll returned no matching event";
             when Wait_Policy.Return_Timeout =>
-               return False;
+               return Timed_Out;
             when Wait_Policy.Retry =>
                null;
             when Wait_Policy.Fail =>
                raise Device_Error with "poll failed";
          end case;
       end loop;
-   end Wait;
+   end Wait_Interruptibly;
 
 end Gnatevl.IO;

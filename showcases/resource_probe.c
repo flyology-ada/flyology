@@ -112,3 +112,15 @@ int gnatevl_thread_count(void) {
     return -1;
 #endif
 }
+
+double gnatevl_process_cpu_seconds(void) {
+    struct rusage usage;
+
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+        return -1.0;
+    }
+    return (double)usage.ru_utime.tv_sec +
+           (double)usage.ru_utime.tv_usec / 1000000.0 +
+           (double)usage.ru_stime.tv_sec +
+           (double)usage.ru_stime.tv_usec / 1000000.0;
+}

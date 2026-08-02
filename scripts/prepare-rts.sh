@@ -59,6 +59,7 @@ mkdir -p "$generated_include" "$generated_lib" "$build_root/obj"
 chmod -R u+w "$generated_include" "$generated_lib"
 cp -R "$source_include/." "$generated_include/"
 cp -R "$source_lib/." "$generated_lib/"
+chmod -R u+w "$generated_include" "$generated_lib"
 cp "$project_root"/runtime/ada/s-*.ad? "$generated_include/"
 cp "$project_root"/runtime/platform/"$platform"/s-*.ad? "$generated_include/"
 cp "$project_root/runtime/compat/$compat_family/s-gntiab.ads" \

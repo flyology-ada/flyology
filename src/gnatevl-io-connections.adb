@@ -12,10 +12,26 @@ package body Gnatevl.IO.Connections is
    protected body Cancellation_Token is
       procedure Request is
       begin
-         Is_Requested := True;
+         if not Is_Requested then
+            Wake_Sources.Signal (Wake);
+            Is_Requested := True;
+         end if;
       end Request;
 
       function Requested return Boolean is (Is_Requested);
+
+      procedure Wait_Source
+        (FD : out Descriptor; Already_Requested : out Boolean)
+      is
+      begin
+         Already_Requested := Is_Requested;
+         if Is_Requested then
+            FD := Invalid_Descriptor;
+         else
+            Wake_Sources.Ensure (Wake);
+            FD := Wake_Sources.Descriptor (Wake);
+         end if;
+      end Wait_Source;
    end Cancellation_Token;
 
    protected body Server is
@@ -39,7 +55,10 @@ package body Gnatevl.IO.Connections is
 
       procedure Request_Shutdown is
       begin
-         Stopping := True;
+         if not Stopping then
+            Wake_Sources.Signal (Wake);
+            Stopping := True;
+         end if;
       end Request_Shutdown;
 
       entry Await_Drained when Stopping and then Active_Count = 0 is
@@ -50,6 +69,19 @@ package body Gnatevl.IO.Connections is
       function Shutdown_Requested return Boolean is (Stopping);
       function Active return Natural is (Active_Count);
       function Waiting return Natural is (Acquire'Count);
+
+      procedure Wait_Source
+        (FD : out Descriptor; Already_Requested : out Boolean)
+      is
+      begin
+         Already_Requested := Stopping;
+         if Stopping then
+            FD := Invalid_Descriptor;
+         else
+            Wake_Sources.Ensure (Wake);
+            FD := Wake_Sources.Descriptor (Wake);
+         end if;
+      end Wait_Source;
    end Server;
 
    function Remaining
@@ -65,38 +97,25 @@ package body Gnatevl.IO.Connections is
          Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
    end Remaining;
 
-   function Window
-     (Started : Ada.Real_Time.Time;
-      Timeout : Duration;
-      Quantum : Duration) return Duration
+   procedure Interrupt_Sources
+     (Item        : Connection;
+      Token       : access Cancellation_Token;
+      Interrupt_1 : out Descriptor;
+      Interrupt_2 : out Descriptor)
    is
-      Left : constant Duration := Remaining (Started, Timeout);
+      Shutdown : Boolean;
+      Cancel   : Boolean := False;
    begin
-      if Left < 0.0 then
-         return Quantum;
+      Item.Owner.Wait_Source (Interrupt_1, Shutdown);
+      if Token = null then
+         Interrupt_2 := Invalid_Descriptor;
       else
-         return Duration'Min (Left, Quantum);
+         Token.Wait_Source (Interrupt_2, Cancel);
       end if;
-   end Window;
-
-   function Cancelled
-     (Item  : Connection;
-      Token : access Cancellation_Token) return Boolean
-   is
-   begin
-      return (Item.Owner /= null and then Item.Owner.Shutdown_Requested)
-        or else (Token /= null and then Token.Requested);
-   end Cancelled;
-
-   procedure Check_Cancellation
-     (Item  : Connection;
-      Token : access Cancellation_Token)
-   is
-   begin
-      if Cancelled (Item, Token) then
+      if Shutdown or else Cancel then
          raise Operation_Cancelled;
       end if;
-   end Check_Cancellation;
+   end Interrupt_Sources;
 
    procedure Check_Open (Item : Connection) is
    begin
@@ -146,10 +165,14 @@ package body Gnatevl.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Owner    : Server_Access;
       Socket   : Sockets.Socket_Type := Sockets.No_Socket;
       Reserved : Boolean := False;
+      Shutdown : Boolean;
+      Cancel   : Boolean := False;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor;
+      pragma Unreferenced (Cancellation_Quantum);
    begin
       if Is_Open (Item) then
          raise Program_Error with "connection already owns a socket";
@@ -157,35 +180,31 @@ package body Gnatevl.IO.Connections is
       Reserve (Manager, Owner);
       Reserved := True;
 
-      loop
-         if Manager.Shutdown_Requested
-           or else (Token /= null and then Token.Requested)
-         then
+      Manager.Wait_Source (Interrupt_1, Shutdown);
+      if Token = null then
+         Interrupt_2 := Invalid_Descriptor;
+      else
+         Token.Wait_Source (Interrupt_2, Cancel);
+      end if;
+      if Shutdown or else Cancel then
+         raise Operation_Cancelled;
+      end if;
+
+      begin
+         Gnatevl.IO.Sockets.Accept_Connection
+           (Listener, Socket, Address, Timeout, Interrupt_1, Interrupt_2);
+      exception
+         when Gnatevl.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
-         end if;
-         begin
-            Gnatevl.IO.Sockets.Accept_Connection
-              (Listener,
-               Socket,
-               Address,
-               Window (Started, Timeout, Cancellation_Quantum));
-            if Manager.Shutdown_Requested
-              or else (Token /= null and then Token.Requested)
-            then
-               raise Operation_Cancelled;
-            end if;
-            Item.Owner := Owner;
-            Item.Socket := Socket;
-            Reserved := False;
-            return;
-         exception
-            when Timeout_Error =>
-               if Timeout >= 0.0 and then Remaining (Started, Timeout) = 0.0
-               then
-                  raise;
-               end if;
-         end;
-      end loop;
+      end;
+      if Manager.Shutdown_Requested
+        or else (Token /= null and then Token.Requested)
+      then
+         raise Operation_Cancelled;
+      end if;
+      Item.Owner := Owner;
+      Item.Socket := Socket;
+      Reserved := False;
    exception
       when others =>
          if Socket /= Sockets.No_Socket then
@@ -230,27 +249,19 @@ package body Gnatevl.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor;
+      pragma Unreferenced (Cancellation_Quantum);
    begin
       Check_Open (Item);
-      loop
-         Check_Cancellation (Item, Token);
-         begin
-            Gnatevl.IO.Sockets.Receive
-              (Item.Socket,
-               Data,
-               Last,
-               Window (Started, Timeout, Cancellation_Quantum));
-            return;
-         exception
-            when Timeout_Error =>
-               Check_Cancellation (Item, Token);
-               if Timeout >= 0.0 and then Remaining (Started, Timeout) = 0.0
-               then
-                  raise;
-               end if;
-         end;
-      end loop;
+      Interrupt_Sources (Item, Token, Interrupt_1, Interrupt_2);
+      begin
+         Gnatevl.IO.Sockets.Receive
+           (Item.Socket, Data, Last, Timeout, Interrupt_1, Interrupt_2);
+      exception
+         when Gnatevl.IO.Sockets.Operation_Interrupted =>
+            raise Operation_Cancelled;
+      end;
    end Receive;
 
    procedure Receive_Exactly
@@ -290,27 +301,28 @@ package body Gnatevl.IO.Connections is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First   : Ada.Streams.Stream_Element_Offset := Data'First;
       Last    : Ada.Streams.Stream_Element_Offset;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor;
+      pragma Unreferenced (Cancellation_Quantum);
    begin
       Check_Open (Item);
       while First <= Data'Last loop
-         Check_Cancellation (Item, Token);
+         Interrupt_Sources (Item, Token, Interrupt_1, Interrupt_2);
          begin
             Gnatevl.IO.Sockets.Send
               (Item.Socket,
                Data (First .. Data'Last),
                Last,
-               Window (Started, Timeout, Cancellation_Quantum));
+               Remaining (Started, Timeout),
+               Interrupt_1,
+               Interrupt_2);
             if Last < First then
                raise Device_Error with "connection closed while sending";
             end if;
             First := Last + 1;
          exception
-            when Timeout_Error =>
-               Check_Cancellation (Item, Token);
-               if Timeout >= 0.0 and then Remaining (Started, Timeout) = 0.0
-               then
-                  raise;
-               end if;
+            when Gnatevl.IO.Sockets.Operation_Interrupted =>
+               raise Operation_Cancelled;
          end;
       end loop;
    end Send_All;

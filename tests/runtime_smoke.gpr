@@ -6,7 +6,8 @@ project Runtime_Smoke is
    for Object_Dir use "obj/runtime_smoke";
    for Exec_Dir use "bin";
    for Main use
-     ("connection_lifecycle_smoke.adb",
+     ("cancellation_wake_smoke.adb",
+      "connection_lifecycle_smoke.adb",
       "default_policy_smoke.adb",
       "execution_groups_smoke.adb",
       "fairness_smoke.adb",
