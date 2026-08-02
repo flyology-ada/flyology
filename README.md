@@ -12,7 +12,8 @@ cooperate with either execution mode.
 
 The current implementation is verified with GNAT 16.1 on macOS/AArch64 and on
 Linux/x86-64 in Docker. The event backend is `kqueue` on macOS and `epoll` plus
-`eventfd` on Linux; neither is emulated by `ucontext` or another context API.
+`eventfd` on Linux. Evented tasks resume through the small ABI-specific context
+switch described below.
 
 ## Programming model
 
@@ -190,10 +191,10 @@ These are independent mechanisms with different jobs:
 | Event polling | Sleep until socket readiness, file completion, a timer deadline, or a cross-thread wake | `kqueue` with `EVFILT_AIO`/`EVFILT_USER` on macOS; `epoll` with `io_uring`/`eventfd` on Linux | Operating system |
 | Scheduling | Choose which runnable Ada task executes next | Ada priority-ready queue and deadline bookkeeping | Runtime policy |
 
-GNATEVL does not use `ucontext`. A context switch cannot tell whether a socket is
-readable, and `kqueue` cannot preserve an Ada task's suspended call stack. Both
-pieces are necessary: the poller discovers readiness; the context machinery
-makes suspension and resumption look like an ordinary procedure call.
+The poller discovers readiness; the context machinery preserves a suspended
+Ada task's call stack and makes resumption look like an ordinary procedure
+return. Scheduling connects those two mechanisms without exposing either one
+in application code.
 
 The scheduler state transition is:
 
