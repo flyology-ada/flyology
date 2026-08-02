@@ -199,6 +199,61 @@ task, they may block only that task's pthread. Values, `out` parameters, local
 variables, exception propagation, and call stacks behave like normal
 synchronous Ada code in both cases.
 
+## Priority and real-time contract
+
+Task priorities retain two deliberately different implementation domains. An
+undesignated or explicitly `Native_Thread` task stays on stock GNARL's pthread
+path: GNATEVL does not intercept its kernel scheduling policy, priority, CPU
+affinity, or priority-change calls. The host GNAT runtime and operating system
+therefore keep their normal behavior, permissions, and limitations.
+
+For an evented task, Ada active priority orders fibers **within its current
+execution group**. Every group selects the highest non-empty priority bucket;
+tasks of equal priority run FIFO. The state transitions are precise:
+
+| Priority change while the evented task is… | Scheduler effect |
+| --- | --- |
+| Ready | Remove from the old bucket and append to the new bucket in constant time |
+| Waiting | Record the active priority; the next wake enters that priority's bucket |
+| Running | Record the active priority; it takes effect at the next suspension or yield |
+| Migrating | Preserve the active priority and use it when the target loop accepts the task |
+| Losing rendezvous-inherited priority | Put the task at the head of its base-priority bucket at the next handoff, as required by RM D.2.2(9) |
+
+`Ada.Dynamic_Priorities.Set_Priority` remains the standard public operation. A
+self-change reaches GNARL's normal dispatching point, which yields the evented
+task after the runtime update. GNARL's rendezvous priority boost is also routed
+into the evented scheduler, so a low-base-priority acceptor runs at the caller's
+inherited active priority and returns with the specified loss-of-inheritance
+queue placement. The deterministic `priority_semantics_smoke` test covers
+ready, waiting, running, rendezvous, and cross-group migration cases; the
+`priority_scheduling` showcase prints the visible highest-priority/FIFO trace.
+
+This is fixed-priority cooperative scheduling, not a hard-real-time claim:
+
+- Priorities do not preempt arbitrary evented instructions. A task that does
+  not suspend or yield can delay even a newly ready higher-priority peer.
+- Priority order is local to one loop. Separate groups execute on separate
+  pthreads, so there is no process-wide total order between their ready queues.
+- The loop pthread is not raised and lowered to mirror each fiber's active
+  priority. `FIFO_Within_Priorities` and `Round_Robin_Within_Priorities` kernel
+  policies, deadline dispatching, budget enforcement, and bounded preemption
+  are not implemented for evented tasks.
+- `CPU` chooses an event-loop group but does not currently pin that group's
+  pthread to a physical processor. Native-task CPU affinity remains stock.
+- Protected-object mutual exclusion and language-level rendezvous still come
+  from GNARL. Successful maximum-ceiling protected actions are covered by the
+  native/evented semantic suite, but kernel priority-ceiling violation checks,
+  priority inheritance through arbitrary pthread/foreign locks, and bounded
+  priority inversion are not an evented guarantee. Potentially blocking work
+  remains unsuitable inside a protected action.
+
+Applications needing OS `SCHED_FIFO`/`SCHED_RR`, physical affinity, a
+preemption bound, or certified ceiling behavior should keep those tasks native
+and validate the target GNAT/OS real-time configuration. Evented priorities are
+useful for deterministic service preference among cooperative tasks on one
+loop, especially at high I/O concurrency; they are not a substitute for that
+configuration.
+
 ## Architecture
 
 ```mermaid
@@ -631,10 +686,11 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
-The current run discharges 62 flow, functional-contract, termination, and
+The current run discharges 64 flow, functional-contract, termination, and
 run-time-safety checks across four production policy units, with zero unproved
-checks. Good next proof candidates are ready-bucket insertion/removal invariants
-and descriptor wake matching.
+checks. This includes the loss-of-inherited-priority queue-placement choice.
+Good next proof candidates are ready-bucket insertion/removal invariants and
+descriptor wake matching.
 The GNARL tasking integration, imported system calls, address conversions,
 assembly register swap, and kernel behavior remain trusted boundaries. These
 can be wrapped in contracts, but GNATprove cannot establish their implementations
@@ -826,6 +882,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/evented_pipeline
 ./showcases/bin/many_evented_tasks
 ./showcases/bin/cooperative_fairness
+./showcases/bin/priority_scheduling
 ./showcases/bin/connection_lifecycle
 ./showcases/bin/cancellation_density evented 1000
 ./showcases/bin/hybrid_blocking_bridge
@@ -1018,6 +1075,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   point can monopolize the loop. `Gnatevl.Fairness.Yield_Budget` makes explicit
   time-budgeted checkpoints reusable but cannot force unmodified CPU loops to
   yield safely.
+- Evented priorities order ready fibers within one cooperative group but do not
+  provide kernel FIFO/RR scheduling, deadline dispatching, bounded preemption,
+  or a cross-group total order. Native tasks retain the stock GNARL/OS priority
+  path.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
 - Evented regular-file data operations use bounded kernel completion queues;
@@ -1052,9 +1113,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - The semantic differential suite checks language-level outcomes and ordering
   only where the Ada rules determine them; it deliberately does not compare
   scheduling traces or elapsed-time ordering between lanes. It covers a
-  successful dynamic-priority/maximum-ceiling protected interaction under the
-  project's locking policy, but not full Real-Time Systems Annex dispatching,
-  priority-inheritance, or ceiling-violation conformance across OS schedulers.
+  successful dynamic-priority/maximum-ceiling protected interaction. A focused
+  evented suite additionally covers per-group priority queues and GNARL
+  rendezvous inheritance/loss ordering, but not full Real-Time Systems Annex
+  dispatching, kernel-lock priority inheritance, or ceiling-violation
+  conformance across OS schedulers.
 
 The next architectural work is additional architectures and operating systems,
 optional CPU-affinity policy, structured listener/worker orchestration, and

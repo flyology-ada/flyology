@@ -21,6 +21,7 @@ project Runtime_Smoke is
       "loop_pool_smoke.adb",
       "observability_native_smoke.adb",
       "observability_smoke.adb",
+      "priority_semantics_smoke.adb",
       "ready_queue_smoke.adb",
       "runtime_smoke.adb",
       "stress_randomized.adb",

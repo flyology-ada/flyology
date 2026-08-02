@@ -65,6 +65,7 @@ for test_main in \
   lifecycle_smoke \
   observability_native_smoke \
   observability_smoke \
+  priority_semantics_smoke \
   ready_queue_smoke \
   runtime_smoke \
   semantic_parity_smoke \

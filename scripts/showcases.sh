@@ -18,6 +18,7 @@ for showcase in \
   evented_pipeline \
   hybrid_blocking_bridge \
   many_evented_tasks \
+  priority_scheduling \
   evented_vs_threads
 do
   printf '\n== %s ==\n' "$showcase"
