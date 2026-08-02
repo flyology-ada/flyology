@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" role="img" aria-labelledby="title desc">
+  <title id="title">Flyology refined logo variants</title>
+  <desc id="desc">Primary icon, transparent mark, one-color mark, and horizontal lockup shown on a light review board.</desc>
+  <rect width="1400" height="900" fill="#F4F6FA"/>
+  <text x="60" y="64" fill="#17213D" font-family="Inter, Avenir Next, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="30" font-weight="600">Flyology · refined identity system</text>
+
+  <g fill="#FFFFFF">
+    <rect x="60" y="100" width="400" height="400" rx="28"/>
+    <rect x="500" y="100" width="400" height="400" rx="28"/>
+    <rect x="940" y="100" width="400" height="400" rx="28"/>
+    <rect x="60" y="550" width="1280" height="280" rx="28"/>
+  </g>
+
+  <image href="flyology-primary-icon.svg" x="110" y="130" width="300" height="300"/>
+  <image href="flyology-mark-transparent.svg" x="550" y="130" width="300" height="300"/>
+  <image href="flyology-one-color.svg" x="990" y="130" width="300" height="300"/>
+  <image href="flyology-horizontal-lockup.svg" x="230" y="590" width="940" height="190"/>
+
+  <g fill="#56617A" font-family="Inter, Avenir Next, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="22" text-anchor="middle">
+    <text x="260" y="468">Primary icon</text>
+    <text x="700" y="468">Transparent mark</text>
+    <text x="1140" y="468">One color</text>
+    <text x="700" y="798">Horizontal lockup</text>
+  </g>
+</svg>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+  <title id="title">Flyology horizontal lockup</title>
+  <desc id="desc">Flyology event-loop flight mark with the Flyology wordmark.</desc>
+  <defs>
+    <mask id="node-gaps" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <rect width="256" height="256" fill="white"/>
+      <circle cx="203.4" cy="77.1" r="10.5" fill="black"/>
+      <circle cx="219" cy="128" r="10.5" fill="black"/>
+      <circle cx="203.4" cy="178.9" r="10.5" fill="black"/>
+    </mask>
+  </defs>
+
+  <g transform="translate(16 18) scale(.72)">
+    <g mask="url(#node-gaps)" fill="none" stroke-width="8" stroke-linecap="round">
+      <circle cx="128" cy="128" r="91" stroke="#AAB5CF"/>
+      <path d="M186.5 58.3A91 91 0 0 1 219 128" stroke="#6F66EE"/>
+      <path d="M219 128A91 91 0 0 1 186.5 197.7" stroke="#24BEB5"/>
+    </g>
+    <circle cx="203.4" cy="77.1" r="6.5" fill="#6F66EE"/>
+    <circle cx="219" cy="128" r="6.5" fill="#6F66EE"/>
+    <circle cx="203.4" cy="178.9" r="6.5" fill="#24BEB5"/>
+    <path d="M177.8 205.8C179.3 201.4 180.2 197.4 180.4 193.2C184 196.3 188.1 198.7 192.5 199.9C187.9 201.1 182.8 203.2 177.8 205.8Z" fill="#24BEB5"/>
+    <g fill="#17213D">
+      <path d="M143 103C116 88 91 78 62 75C84 94 102 112 116 134C120 140 128 138 134 132C141 124 145 113 143 103Z"/>
+      <path d="M128 137C109 127 89 122 68 124C86 135 101 148 112 163C117 169 124 166 129 160C134 153 134 144 128 137Z"/>
+      <path d="M119 177C126 145 133 118 146 97C158 81 173 72 191 68C176 87 160 108 148 134C140 152 133 165 119 177Z"/>
+      <circle cx="129" cy="137" r="4"/>
+    </g>
+  </g>
+
+  <text x="226" y="139" fill="#17213D" font-family="Inter, Avenir Next, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="82" font-weight="600" letter-spacing="0.2">Flyology</text>
+</svg>

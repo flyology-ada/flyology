@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
+  <title id="title">Flyology logo concept</title>
+  <desc id="desc">A winged flight mark inside an event loop with three lightweight task nodes.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="104" y1="72" x2="536" y2="568" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18234A"/>
+      <stop offset="1" stop-color="#090D1B"/>
+    </linearGradient>
+    <linearGradient id="loop" x1="142" y1="118" x2="508" y2="522" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9B8CFF"/>
+      <stop offset="0.52" stop-color="#6D66FF"/>
+      <stop offset="1" stop-color="#31D6C7"/>
+    </linearGradient>
+    <linearGradient id="flight" x1="188" y1="208" x2="452" y2="428" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.56" stop-color="#DCE7FF"/>
+      <stop offset="1" stop-color="#8FF3E8"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#02040B" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect x="40" y="40" width="560" height="560" rx="142" fill="url(#background)" filter="url(#soft-shadow)"/>
+  <rect x="41" y="41" width="558" height="558" rx="141" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- The open orbit is the event loop. Its three nodes are runnable tasks. -->
+  <path d="M467 192A210 210 0 1 1 188 153" fill="none" stroke="#55608C" stroke-opacity="0.34" stroke-width="18" stroke-linecap="round"/>
+  <path d="M467 192A210 210 0 0 1 494 415" fill="none" stroke="url(#loop)" stroke-width="18" stroke-linecap="round"/>
+  <path d="M484 410 509 426 506 396Z" fill="#31D6C7"/>
+  <circle cx="467" cy="192" r="17" fill="#9B8CFF" stroke="#10172F" stroke-width="8"/>
+  <circle cx="509" cy="320" r="17" fill="#6D66FF" stroke="#10172F" stroke-width="8"/>
+  <circle cx="494" cy="415" r="17" fill="#31D6C7" stroke="#10172F" stroke-width="8"/>
+
+  <!-- A compact, symmetric flight mark. The center seam reads as a lightweight body or an F stem. -->
+  <g fill="none" stroke="url(#flight)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M310 258C270 218 226 198 175 195 213 225 244 261 268 303" stroke-width="30"/>
+    <path d="M302 310C253 277 205 266 151 275 195 293 232 322 267 364" stroke-width="25" opacity="0.92"/>
+    <path d="M300 360C257 342 219 343 180 360 218 371 250 391 278 421" stroke-width="20" opacity="0.76"/>
+
+    <path d="M330 258C370 218 414 198 465 195 427 225 396 261 372 303" stroke-width="30"/>
+    <path d="M338 310C387 277 435 266 489 275 445 293 408 322 373 364" stroke-width="25" opacity="0.92"/>
+    <path d="M340 360C383 342 421 343 460 360 422 371 390 391 362 421" stroke-width="20" opacity="0.76"/>
+  </g>
+
+  <path d="M320 208C301 246 301 291 320 337 339 291 339 246 320 208Z" fill="url(#loop)"/>
+  <path d="M320 329C300 361 296 394 306 432L320 453 334 432C344 394 340 361 320 329Z" fill="url(#flight)"/>
+  <circle cx="320" cy="207" r="13" fill="#FFFFFF"/>
+</svg>

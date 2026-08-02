@@ -1,6 +1,14 @@
-# Flyology
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/flyology-horizontal-lockup-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/brand/flyology-horizontal-lockup.svg">
+    <img alt="Flyology" src="assets/brand/flyology-horizontal-lockup.svg" width="720">
+  </picture>
+</p>
 
-[![CI](https://github.com/yrashk/flyology/actions/workflows/ci.yml/badge.svg)](https://github.com/yrashk/flyology/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/yrashk/flyology/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/yrashk/flyology/actions/workflows/ci.yml/badge.svg"></a>
+</p>
 
 Flyology lets ordinary Ada tasks run as lightweight tasks on event loops. They
 keep Ada rendezvous, protected objects, exceptions, task activation, masters,
