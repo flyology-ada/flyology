@@ -4,13 +4,43 @@
 +++ b/s-tassta.adb
 @@ -43,0 +44 @@
 +with System.Flyology.Scheduler;
-@@ -893,0 +895,6 @@
+@@ -473,0 +475,2 @@
++      Is_Lightweight : constant Boolean :=
++        System.Flyology.Is_Lightweight_Designation (Task_Info);
+@@ -511,5 +515,4 @@
+-      --  Legal values of CPU are the special Unspecified_CPU value which is
+-      --  inserted by the compiler for tasks without CPU aspect, and those in
+-      --  the range of CPU_Range but no greater than Number_Of_CPUs. Otherwise
+-      --  the task is defined to have failed, and it becomes a completed task
+-      --  (RM D.16(14/3)).
++      --  Native tasks retain the Ada limit of Number_Of_CPUs. For a
++      --  lightweight task, the CPU aspect selects an execution group instead
++      --  of a native processor, so values through CPU_Range'Last remain legal.
++      --  Other values make task creation fail as required by RM D.16(14/3).
+@@ -516,3 +520,5 @@
+-        and then (CPU < Integer (System.Multiprocessors.CPU_Range'First)
+-                    or else
+-                  CPU > Integer (System.Multiprocessors.Number_Of_CPUs))
++        and then
++          (CPU < Integer (System.Multiprocessors.CPU_Range'First)
++           or else CPU > Integer (System.Multiprocessors.CPU_Range'Last)
++           or else
++             (not Is_Lightweight
++              and then CPU > Integer (System.Multiprocessors.Number_Of_CPUs)))
+@@ -653,1 +659,2 @@
+-      if Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
++      if not Is_Lightweight
++        and then Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
+@@ -669,1 +676,2 @@
+-      if Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
++      if not Is_Lightweight
++        and then Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
+@@ -893,0 +895,5 @@
 +      --  GNARL has completed global tasks and library objects. Flyology may
 +      --  now join quiescent event-loop threads; if an unexpected fiber is
 +      --  still live, the scheduler records deferred cleanup and leaves the
 +      --  resources to process exit instead of racing that task.
 +      System.Flyology.Scheduler.Finalize;
-+
 @@ -1008,8 +1009,13 @@
 -      Task_Alternate_Stack :
 -        aliased SSE.Storage_Array (1 .. Alternate_Stack_Size);

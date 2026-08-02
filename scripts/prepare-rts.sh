@@ -312,7 +312,7 @@ fi
   "$generated_include/s-fldeex.ads" \
   "$generated_include/s-flpoco.ads" \
   "$generated_include/s-flplco.ads" \
-  "$generated_include/s-flyolo.ads" \
+  "$generated_include/s-flyolo.adb" \
   "$generated_include/s-flycon.adb" \
   "$generated_include/s-flyasa.adb" \
   "$generated_include/s-flyfau.adb" \

@@ -1,5 +1,6 @@
 with Flyology;
 with Flyology.Execution_Groups;
+with System.Multiprocessors;
 
 procedure Loop_Thread_Placement_Smoke is
    package Groups renames Flyology.Execution_Groups;
@@ -71,6 +72,31 @@ procedure Loop_Thread_Placement_Smoke is
    Before : Groups.Placement_Status;
    After  : Groups.Placement_Status;
 begin
+   declare
+      task type Invalid_Native with
+        CPU => System.Multiprocessors.CPU_Range'Last
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Invalid_Native;
+
+      task body Invalid_Native is
+      begin
+         null;
+      end Invalid_Native;
+
+      type Invalid_Native_Access is access Invalid_Native;
+      Native_Item : Invalid_Native_Access;
+      pragma Unreferenced (Native_Item);
+   begin
+      begin
+         Native_Item := new Invalid_Native;
+         raise Program_Error with "native task accepted unavailable CPU";
+      exception
+         when Tasking_Error =>
+            null;
+      end;
+   end;
+
    if not Groups.Placement_Supported (Groups.No_Placement)
      or else Groups.Configure_Loop_Thread
        (Test_Group, Groups.No_Placement, 1) /= Groups.Invalid_Value
