@@ -22,3 +22,6 @@ do
   printf '\n== %s ==\n' "$showcase"
   "$project_root/showcases/bin/$showcase"
 done
+
+printf '\n== connection_density ==\n'
+"$project_root/showcases/run_connection_density.sh"

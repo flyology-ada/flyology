@@ -434,6 +434,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/evented_vs_threads
 ./showcases/bin/evented_io
 ./showcases/bin/execution_groups
+./showcases/run_connection_density.sh
 ```
 
 The examples demonstrate:
@@ -445,7 +446,45 @@ The examples demonstrate:
   one-task thread, and rejection of unsafe live stock-native conversion;
 - evented versus pthread-backed tasks under identical source-level work;
 - a real loopback TCP exchange, positional file I/O, and timers through the
-  task-aware I/O API.
+  task-aware I/O API;
+- 10,000 simultaneously waiting socket connections on one event-loop thread,
+  followed by an isolated same-load resource comparison with native tasks.
+
+### Connection-density showcase
+
+`run_connection_density.sh` uses separate processes so peak and current
+resource measurements from one mode cannot contaminate the other. Every
+connection owns a real socket endpoint and an Ada task blocked inside
+`Receive_Exactly`; an in-process peer endpoint releases every connection after
+the waiting-state measurement. Both modes request the same 32 KiB task stack.
+
+The default run is:
+
+```sh
+./showcases/run_connection_density.sh 1000 10000
+```
+
+The first argument is the connection count used for the evented/native
+comparison. The second is the evented-only scale run. A representative run on
+the development Apple Silicon machine produced:
+
+| Mode | Connections | OS threads while waiting | RSS increase | Virtual-memory increase | Setup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Evented scale | 10,000 | 1 | 617 MiB | 1.14 GiB | 0.77 s |
+| Evented comparison | 1,000 | 1 | 62.0 MiB | 129 MiB | 0.027 s |
+| Native comparison | 1,000 | 1,001 | 62.2 MiB | 181 MiB | 0.063 s |
+
+The central win today is kernel-concurrency density: the evented version avoids
+one pthread per connection and can reach connection counts at which creating an
+equal number of pthreads commonly exceeds host limits. It also reserved less
+address space and set up faster in this run. Resident memory was nearly equal,
+because Ada task control state and explicitly equal stack budgets dominate both
+lanes. Release latency can favor native threads at modest counts because they
+run in parallel; the showcase reports it rather than hiding that tradeoff.
+
+The process holds both ends of each socket pair to provide a self-contained load
+generator, so it reports twice as many file descriptors as server-side
+connections. Results vary with the OS, compiler, allocator, and resource limits.
 
 ## Performance snapshot
 

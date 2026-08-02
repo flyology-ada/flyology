@@ -1,12 +1,13 @@
 with "../gnatevl.gpr";
 
 project Showcases is
-   for Languages use ("Ada");
+   for Languages use ("Ada", "C");
    for Source_Dirs use (".");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Main use
-     ("execution_groups.adb",
+     ("connection_density.adb",
+      "execution_groups.adb",
       "evented_io.adb",
       "evented_pipeline.adb",
       "evented_vs_threads.adb",
@@ -17,5 +18,6 @@ project Showcases is
    package Compiler is
       for Default_Switches ("Ada") use
         ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa");
+      for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
    end Compiler;
 end Showcases;
