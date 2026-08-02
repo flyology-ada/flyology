@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gnatevl-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: ${{ matrix.os }} / GNAT ${{ matrix.toolchain.gnat }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        toolchain:
+          - { gnat: 13.2.2, gprbuild: 25.0.1 }
+          - { gnat: 14.1.3, gprbuild: 25.0.1 }
+          - { gnat: 14.2.1, gprbuild: 25.0.1 }
+          - { gnat: 15.1.2, gprbuild: 25.0.1 }
+          - { gnat: 15.3.1, gprbuild: 25.0.1 }
+          - { gnat: 16.1.0, gprbuild: 26.0.1 }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: alire-project/setup-alire@v6
+        with:
+          version: 2.1.1
+          toolchain: >-
+            gnat_native=${{ matrix.toolchain.gnat }}
+            gprbuild=${{ matrix.toolchain.gprbuild }}
+          cache: true
+      - name: Build crate and out-of-tree consumer
+        env:
+          GNATEVL_EXPECTED_GNAT: ${{ matrix.toolchain.gnat }}
+        run: ./scripts/ci-compatibility.sh
+
+  full:
+    name: Full runtime suite / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: alire-project/setup-alire@v6
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - run: ./scripts/test.sh
+
+  proof:
+    name: SPARK proof / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: alire-project/setup-alire@v6
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - run: ./scripts/prove.sh

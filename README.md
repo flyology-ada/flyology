@@ -732,6 +732,10 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
+GNATprove is a dependency of the nested `proof` development crate, not of the
+published GNATEVL library. Applications therefore do not download proof tooling
+merely because they depend on the runtime API.
+
 The current run discharges 64 flow, functional-contract, termination, and
 run-time-safety checks across four production policy units, with zero unproved
 checks. This includes the loss-of-inherited-priority queue-placement choice.
@@ -779,8 +783,17 @@ rather than hidden behind a claim of universal portability.
 
 ## Build and test
 
-The project expects Alire at `~/alr` and one of the tested GNAT 13–16
-toolchains. Set `ALR` to override the executable location:
+GNATEVL supports Alire 2.1 or newer with the exact `gnat_native` releases
+13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0. The crate declares a
+generic `gnat >=13 & <17` dependency so Alire can select a compatible compiler;
+runtime preparation then checks the exact release against the versioned patch
+manifest and fails closed if it has not actually been verified. macOS/AArch64
+and Linux/x86-64 are the CI reference targets. The source also contains the
+x86-64 macOS context switch, but that host/ABI combination is not part of the
+hosted matrix.
+
+Scripts use `ALR` when set, otherwise `alr` from `PATH`, with `~/alr` retained
+as a compatibility fallback:
 
 ```sh
 ./scripts/prepare-rts.sh                       # native project default
@@ -792,6 +805,9 @@ GNATEVL_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,
 selects the project execution default, and builds a static RTS.
+Set `GNATEVL_RTS_DIR` to put that generated runtime somewhere other than the
+crate checkout. Relative values are resolved from the caller's current
+directory; the resulting path is canonicalized before patching runtime files.
 `GNATEVL_DEFAULT` accepts only `native` or `evented`.
 `GNATEVL_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
 `GNATEVL_PLACEMENT` currently accepts `round_robin`. These generated policies
@@ -800,6 +816,44 @@ deployment configuration is stable during elaboration and concurrent task
 activation. The script checks source compatibility by applying the source
 patch under `set -e`, so an incompatible runtime source tree fails rather than
 being silently accepted.
+
+### Use as an Alire dependency
+
+Once an indexed release exists, an application adds it normally:
+
+```sh
+alr with gnatevl
+```
+
+During development, use a path or Git pin instead:
+
+```sh
+alr with gnatevl --use /path/to/gnatevl
+```
+
+Alire makes `gnatevl.gpr` available to the consumer and exports
+`GNATEVL_ROOT` as the deployed dependency root. Prepare a consumer-owned RTS,
+then compile the application with that runtime:
+
+```sh
+alr exec -- sh -c \
+  'GNATEVL_RTS_DIR="$PWD/build/gnatevl-rts" \
+   "$GNATEVL_ROOT/scripts/prepare-rts.sh"'
+alr exec -- gprbuild --RTS="$PWD/build/gnatevl-rts" -P app.gpr
+```
+
+The application's GPR file may explicitly `with "gnatevl.gpr"`; Alire also
+supports its normal automatic GPR dependency wiring. No `../../src` paths or
+imports of runtime implementation units are required. Building an executable
+without `--RTS` is intentionally unsupported: the public library imports the
+GNATEVL hooks supplied by the prepared runtime, and the stock GNARL does not
+define them.
+
+`scripts/test-external-consumer.sh` copies a small consumer into a fresh
+temporary workspace, adds GNATEVL through an Alire path pin, prepares native-
+and evented-default runtimes under that workspace, and runs both variants. It
+also verifies the native default is inert before and after an ordinary task and
+that event machinery appears only for the evented opt-in.
 
 Run the complete verification suite with:
 
@@ -869,6 +923,34 @@ release covered by the patch family:
 ```sh
 ./scripts/test-alire-runtime-matrix.sh
 ```
+
+### CI and releases
+
+`.github/workflows/ci.yml` runs three independent gates without
+`continue-on-error` fallbacks:
+
+- a macOS/AArch64 and Linux/x86-64 compatibility matrix for every exact GNAT
+  release above, compiling the crate in release mode and running the external
+  consumer in native-default and evented-default configurations;
+- the full behavioral suite on both platforms with GNAT 16.1; and
+- the SPARK proof crate on both platforms with GNATprove 16.1.
+
+The official Alire setup action is pinned to its v6 interface and Alire 2.1.1.
+Its cache key includes runner OS, architecture, Alire revision, and the exact
+GNAT/GPRbuild selection, so toolchains are reused without sharing incompatible
+runtime objects. Local and Docker scripts remain the source of the commands run
+by CI; generated `alire`, `config`, `obj`, `lib`, `build`, and test/showcase
+output directories stay ignored and are not release inputs.
+
+For a release, replace the `-dev` crate version with the intended semantic
+version, run `./scripts/test.sh`, `./scripts/stress.sh`, and
+`./scripts/prove.sh`, and require the complete hosted matrix to pass. Tag the
+same commit with that version, then run Alire's publishing assistant against
+the tagged public origin. Do not widen the generic compiler dependency or add a
+GNAT release to the verified list until its exact bundled GNARL sources apply
+the matching patch family and pass the external-consumer and behavioral
+matrices. `alr publish` is intentionally a maintainer action; CI never submits
+or publishes a release.
 
 Current smoke coverage includes:
 
