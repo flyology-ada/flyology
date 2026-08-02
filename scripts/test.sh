@@ -6,10 +6,25 @@ alr=${ALR:-"$HOME/alr"}
 
 cd "$project_root"
 
+run_gprbuild () {
+  if [ "$(uname -s)" = Darwin ]; then
+    compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)
+    if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
+      current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
+      "$alr" exec -- gprbuild "$@" \
+        -largs "-Wl,-syslibroot,$current_sysroot" -nodefaultrpaths
+      return
+    fi
+    "$alr" exec -- gprbuild "$@" -largs -nodefaultrpaths
+    return
+  fi
+  "$alr" exec -- gprbuild "$@"
+}
+
 "$alr" build
 
 GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
-"$alr" exec -- gprbuild \
+run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
   -P tests/runtime_smoke.gpr \
@@ -17,7 +32,7 @@ GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
 "$project_root/tests/bin/default_policy_smoke" evented
 
 GNATEVL_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
-"$alr" exec -- gprbuild \
+run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
   -P tests/runtime_smoke.gpr \
@@ -39,7 +54,7 @@ for test_main in \
   timer_heap_smoke \
   tcp_native_smoke
 do
-  "$alr" exec -- gprbuild \
+  run_gprbuild \
     --RTS="$project_root/build/rts" \
     -f \
     -P tests/runtime_smoke.gpr \

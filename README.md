@@ -1,6 +1,6 @@
 # GNATEVL
 
-GNATEVL is an experimental GNAT 16 runtime that can run designated ordinary Ada
+GNATEVL is an experimental GNAT runtime that can run designated ordinary Ada
 tasks as stackful tasks on an event loop while leaving undesignated tasks on
 GNAT's native pthread-backed path.
 
@@ -10,10 +10,11 @@ masters, exceptions, and normal blocking-looking Ada control flow still come
 from GNARL. GNATEVL changes how a task is scheduled and adds I/O operations that
 cooperate with either execution mode.
 
-The current implementation is verified with GNAT 16.1 on macOS/AArch64 and on
-Linux/x86-64 in Docker. The event backend is `kqueue` on macOS and `epoll` plus
-`eventfd` on Linux. Evented tasks resume through the small ABI-specific context
-switch described below.
+The current patch family covers Alire's available `gnat_native` 13 through 16
+releases: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0. It is tested on
+macOS/AArch64 and through a Linux/x86-64 Docker matrix. The event backend is
+`kqueue` on macOS and `epoll` plus `eventfd` on Linux. Evented tasks resume
+through the small ABI-specific context switch described below.
 
 ## Programming model
 
@@ -395,7 +396,7 @@ potentially slow remote-filesystem metadata operations on a native task.
 | Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code and bounded submission queues |
 | Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Limited owners release permits automatically; cancellation latency is bounded by a configurable readiness quantum |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
-| Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require the matching installed GNAT 16.1 runtime sources |
+| Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require a matching installed runtime from the tested GNAT 13–16 family |
 
 ## Ada, C, and assembly boundary
 
@@ -408,9 +409,9 @@ clauses for Darwin `aiocb` and Linux `io_uring`/native-AIO UAPI records, own the
 mapped rings and control blocks, submit operations, and drain completions.
 
 The shared Linux rings require acquire/release ordering against the kernel.
-GNATEVL uses GNAT's `System.Atomic_Primitives` for those accesses; that unit maps
-directly to compiler `__atomic_load_n` and `__atomic_store_n` intrinsics, so no C
-atomics wrapper or worker runtime is involved.
+GNATEVL uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
+not expose the corresponding store operation, so the narrow C ABI shim calls
+the compiler's `__atomic_store_n` intrinsic; no worker runtime is involved.
 
 The only assembly is the minimal context swap needed to save and restore the
 callee-saved machine state. Rewriting a system-call declaration in Ada would
@@ -471,7 +472,7 @@ from this Ada source tree.
 | Context switch | AArch64 and x86-64 assembly | x86-64 assembly | One small implementation per additional architecture/ABI |
 | Stack allocation | `mmap` plus guard pages | `mmap` plus guard pages | Platform virtual-memory API |
 | OS calls | Thin Ada imports of Darwin/POSIX interfaces | Thin Ada imports of Linux/POSIX interfaces | Per-platform binding body |
-| GNARL hook | Darwin GNAT 16.1 patch | Linux GNAT 16.1 patch | Rebase and verify for each GNAT runtime version |
+| GNARL hook | Versioned GNAT 13–16 Darwin patch | Versioned GNAT 13–16 Linux patch | Add and verify a new family when GNARL source changes |
 
 The scheduler and public I/O semantics are intended to remain Ada and
 platform-neutral. Pollers and context implementations are explicitly isolated
@@ -487,8 +488,10 @@ rather than hidden behind a claim of universal portability.
   plus the Ada platform file-engine implementations.
 - [`runtime/native`](runtime/native): ABI-specific context-switch assembly,
   and the minimal platform-constant shim.
-- [`runtime/patches`](runtime/patches): Darwin and Linux GNARL task-primitives
-  integration.
+- [`runtime/compat`](runtime/compat): version-selected bindings for runtime ABI
+  differences such as the GNAT 16 `timespec` move.
+- [`runtime/patches`](runtime/patches): versioned Darwin/Linux GNARL
+  task-primitives integration and its tested-release manifest.
 - [`src`](src): public task-aware I/O packages.
 - [`tests`](tests): runtime, socket, timeout, and native TCP smoke tests.
 - [`showcases`](showcases): side-by-side scheduling and I/O demonstrations.
@@ -496,8 +499,8 @@ rather than hidden behind a claim of universal portability.
 
 ## Build and test
 
-The project expects Alire at `~/alr` and an installed GNAT 16.1 toolchain. Set
-`ALR` to override the executable location:
+The project expects Alire at `~/alr` and one of the tested GNAT 13–16
+toolchains. Set `ALR` to override the executable location:
 
 ```sh
 ./scripts/prepare-rts.sh                       # native project default
@@ -505,9 +508,10 @@ GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
 ~/alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
 
-The build script copies the matching installed runtime sources, selects the
-project execution default, applies the GNATEVL patch, adds the runtime units,
-and builds a static RTS. `GNATEVL_DEFAULT` accepts only `native` or `evented`;
+The build script detects the exact active compiler release, selects its versioned patch
+family and runtime ABI adapter, copies the matching installed runtime sources,
+selects the project execution default, and builds a static RTS.
+`GNATEVL_DEFAULT` accepts only `native` or `evented`;
 the generated policy is compiled into the RTS, so it is deterministic during
 library elaboration and task activation. The script checks source compatibility
 by applying the source patch under `set -e`, so an incompatible runtime source
@@ -533,8 +537,14 @@ suite under emulation:
 ./scripts/test-linux-docker.sh
 ```
 
-The image pins Ubuntu 24.04, Alire 2.1.0, GNAT 16.1, and GPRbuild 26.0.1. Set
-`GNATEVL_LINUX_IMAGE` to override its local image name.
+The default image uses Ubuntu 24.04, Alire 2.1.0, GNAT 16.1, and GPRbuild
+26.0.1. `GNATEVL_GNAT_VERSION` and `GNATEVL_GPRBUILD_VERSION` select another
+pair; `GNATEVL_LINUX_IMAGE` overrides its local image name. To run every Alire
+release covered by the patch family:
+
+```sh
+./scripts/test-alire-runtime-matrix.sh
+```
 
 Current smoke coverage includes:
 
@@ -730,7 +740,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   provides the required per-task and per-task-type designation without a
   compiler fork. GNATEVL's test and showcase projects use `-gnatwJ` to suppress
   that specific warning class while retaining the other `-gnatwa` diagnostics.
-- The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.
+- The custom RTS patch is tied deliberately to the versioned GNAT 13–16 source
+  family. An unsupported compiler release or a changed source hunk fails runtime
+  preparation instead of falling back to a nearby patch.
 
 The next architectural work is additional architectures and operating systems,
 optional CPU-affinity policy, structured listener/worker orchestration, and

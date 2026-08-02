@@ -1,9 +1,9 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
-with System.C_Time;
 with System.Gnatevl.Contexts;
 with System.Gnatevl.Poller;
 with System.Gnatevl.Scheduling_Policy;
+with System.Gnatevl.Time_ABI;
 with System.OS_Constants;
 with System.Storage_Elements;
 
@@ -12,6 +12,7 @@ package body System.Gnatevl.Scheduler is
    package Contexts renames System.Gnatevl.Contexts;
    package Pollers renames System.Gnatevl.Poller;
    package Scheduling renames System.Gnatevl.Scheduling_Policy;
+   package Time_ABI renames System.Gnatevl.Time_ABI;
    package OSC renames System.OS_Constants;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
@@ -117,12 +118,21 @@ package body System.Gnatevl.Scheduler is
       Registry_Shard  : Registry_Shard_Index := 0;
    end record;
 
+   --  Older Darwin System.OS_Locks representations omit the leading
+   --  eight-byte pthread signature. Keep tail storage after every scheduler
+   --  mutex so libSystem can use the complete native object on that runtime;
+   --  the padding is harmless for runtimes whose binding is already exact.
+   type Scheduler_Mutex is limited record
+      Value        : aliased OSI.pthread_mutex_t;
+      Tail_Padding : SSE.Storage_Array (1 .. 8);
+   end record;
+
    type Loop_Group is limited record
       Id          : C.int := -1;
       Dedicated   : Boolean := False;
-      Lock        : aliased OSI.pthread_mutex_t;
-      Started     : Boolean := False;
-      Start_Failed : Boolean := False;
+      Lock        : Scheduler_Mutex;
+      Started     : Boolean := False with Volatile;
+      Start_Failed : Boolean := False with Volatile;
       Event_Thread : aliased OSI.pthread_t;
       Scheduler_Context : Contexts.Context_Access;
       Scheduler_Poller  : Pollers.Poller;
@@ -151,7 +161,7 @@ package body System.Gnatevl.Scheduler is
    type Registry_Bucket_Array is
      array (Registry_Bucket_Index) of Fiber_Access;
    type Registry_Shard_Lock_Array is
-     array (Registry_Shard_Index) of aliased OSI.pthread_mutex_t;
+     array (Registry_Shard_Index) of Scheduler_Mutex;
 
    function Fiber_To_Address is new Ada.Unchecked_Conversion
      (Fiber_Access, System.Address);
@@ -174,7 +184,7 @@ package body System.Gnatevl.Scheduler is
    --  group's membership count, fiber list, ready queue, timers, I/O state,
    --  and current fiber. Code needing all three takes shard, topology, group.
    --  Hot Wake and Set_Priority paths take only one shard and one group.
-   Topology_Lock  : aliased OSI.pthread_mutex_t;
+   Topology_Lock  : Scheduler_Mutex;
    Registry_Shard_Locks : Registry_Shard_Lock_Array;
    Initialized    : Boolean := False;
    Event_Runtime_Active : C.int := 0;
@@ -281,7 +291,7 @@ package body System.Gnatevl.Scheduler is
 
    procedure Lock_Topology is
       Result : constant C.int :=
-        OSI.pthread_mutex_lock (Topology_Lock'Access);
+        OSI.pthread_mutex_lock (Topology_Lock.Value'Access);
    begin
       if Result /= 0 then
          Fatal;
@@ -290,7 +300,7 @@ package body System.Gnatevl.Scheduler is
 
    procedure Unlock_Topology is
       Result : constant C.int :=
-        OSI.pthread_mutex_unlock (Topology_Lock'Access);
+        OSI.pthread_mutex_unlock (Topology_Lock.Value'Access);
    begin
       if Result /= 0 then
          Fatal;
@@ -299,7 +309,8 @@ package body System.Gnatevl.Scheduler is
 
    procedure Lock_Registry_Shard (Shard : Registry_Shard_Index) is
       Result : constant C.int :=
-        OSI.pthread_mutex_lock (Registry_Shard_Locks (Shard)'Access);
+        OSI.pthread_mutex_lock
+          (Registry_Shard_Locks (Shard).Value'Access);
    begin
       if Result /= 0 then
          Fatal;
@@ -308,7 +319,8 @@ package body System.Gnatevl.Scheduler is
 
    procedure Unlock_Registry_Shard (Shard : Registry_Shard_Index) is
       Result : constant C.int :=
-        OSI.pthread_mutex_unlock (Registry_Shard_Locks (Shard)'Access);
+        OSI.pthread_mutex_unlock
+          (Registry_Shard_Locks (Shard).Value'Access);
    begin
       if Result /= 0 then
          Fatal;
@@ -316,7 +328,8 @@ package body System.Gnatevl.Scheduler is
    end Unlock_Registry_Shard;
 
    procedure Lock_Group (Group : not null Loop_Group_Access) is
-      Result : constant C.int := OSI.pthread_mutex_lock (Group.Lock'Access);
+      Result : constant C.int :=
+        OSI.pthread_mutex_lock (Group.Lock.Value'Access);
    begin
       if Result /= 0 then
          Fatal;
@@ -324,7 +337,8 @@ package body System.Gnatevl.Scheduler is
    end Lock_Group;
 
    procedure Unlock_Group (Group : not null Loop_Group_Access) is
-      Result : constant C.int := OSI.pthread_mutex_unlock (Group.Lock'Access);
+      Result : constant C.int :=
+        OSI.pthread_mutex_unlock (Group.Lock.Value'Access);
    begin
       if Result /= 0 then
          Fatal;
@@ -383,7 +397,7 @@ package body System.Gnatevl.Scheduler is
          Group := new Loop_Group;
          Group.Id := Id;
          Group.Dedicated := Dedicated;
-         Result := OSI.pthread_mutex_init (Group.Lock'Access, null);
+         Result := OSI.pthread_mutex_init (Group.Lock.Value'Access, null);
          if Result /= 0 then
             Free_Group (Group);
             Unlock_Topology;
@@ -430,7 +444,10 @@ package body System.Gnatevl.Scheduler is
          end if;
       end loop;
 
-      return (if Failed then null else Group);
+      if Failed then
+         return null;
+      end if;
+      return Group;
    end Ensure_Group;
 
    function Registry_Bucket_For
@@ -973,7 +990,7 @@ package body System.Gnatevl.Scheduler is
    end Transfer;
 
    function Clock return Duration is
-      Now    : aliased System.C_Time.timespec;
+      Now    : aliased Time_ABI.Timespec;
       Result : C.int;
    begin
       Result :=
@@ -982,7 +999,7 @@ package body System.Gnatevl.Scheduler is
       if Result /= 0 then
          Fatal;
       end if;
-      return System.C_Time.To_Duration (Now);
+      return Time_ABI.To_Duration (Now);
    end Clock;
 
    function Promote_Expired_Timers
@@ -1018,13 +1035,13 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Result := OSI.pthread_mutex_init (Topology_Lock'Access, null);
+      Result := OSI.pthread_mutex_init (Topology_Lock.Value'Access, null);
       if Result /= 0 then
          return -1;
       end if;
       for Shard in Registry_Shard_Index loop
          Result := OSI.pthread_mutex_init
-           (Registry_Shard_Locks (Shard)'Access, null);
+           (Registry_Shard_Locks (Shard).Value'Access, null);
          if Result /= 0 then
             return -1;
          end if;

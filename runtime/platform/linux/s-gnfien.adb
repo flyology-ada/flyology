@@ -2,20 +2,19 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with Interfaces;
 with System.Atomic_Primitives;
-with System.C_Time;
+with System.Gnatevl.Time_ABI;
 with System.OS_Interface;
 with System.Storage_Elements;
 
 package body System.Gnatevl.File_Engine is
    package AP renames System.Atomic_Primitives;
    package C renames Interfaces.C;
-   package C_Time renames System.C_Time;
+   package Time_ABI renames System.Gnatevl.Time_ABI;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
 
    use type C.int;
    use type C.long;
-   use type C.long_long;
    use type C.size_t;
    use type C.unsigned_long;
    use type Interfaces.Integer_32;
@@ -361,6 +360,12 @@ package body System.Gnatevl.File_Engine is
      (Address : System.Address;
       Model   : AP.Mem_Model := AP.Acquire) return U32;
 
+   procedure Atomic_Store_32
+     (Address : System.Address;
+      Value   : U32;
+      Model   : AP.Mem_Model := AP.Release);
+   pragma Import (C, Atomic_Store_32, "gnatevl_atomic_store_u32");
+
    procedure Store
      (Address : System.Address;
       Value   : U32;
@@ -396,7 +401,7 @@ package body System.Gnatevl.File_Engine is
    --  CQ head after Ada has consumed completion fields.
    is
    begin
-      AP.Atomic_Store_32 (Address, Value, Model);
+      Atomic_Store_32 (Address, Value, Model);
    end Store;
 
    function Acquire_Request
@@ -805,7 +810,8 @@ package body System.Gnatevl.File_Engine is
          declare
             Events  : aliased IO_Event_Array
               (1 .. Natural'Max (1, Values'Length));
-            Timeout : aliased C_Time.timespec := (tv_sec => 0, tv_nsec => 0);
+            Timeout : aliased Time_ABI.Timespec :=
+              Time_ABI.To_Timespec (0.0);
             Result  : C.long;
          begin
             loop

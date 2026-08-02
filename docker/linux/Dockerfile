@@ -21,9 +21,11 @@ RUN curl -fsSL \
 ENV ALR=/usr/local/bin/alr
 
 # Keep the compiler download independent of source changes.
+ARG GNAT_VERSION=16.1.0
+ARG GPRBUILD_VERSION=26.0.1
 WORKDIR /toolchain
 RUN alr --non-interactive toolchain \
-      --select gnat_native=16.1.0 gprbuild=26.0.1
+      --select gnat_native=${GNAT_VERSION} gprbuild=${GPRBUILD_VERSION}
 
 WORKDIR /workspace
 COPY . .

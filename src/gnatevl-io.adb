@@ -1,14 +1,10 @@
 with GNAT.OS_Lib;
 with Gnatevl.Time_Math;
 with Gnatevl.Wait_Policy;
-with System.C_Time;
 with System.OS_Constants;
-with System.OS_Interface;
 
 package body Gnatevl.IO is
    package C renames Interfaces.C;
-   package C_Time renames System.C_Time;
-   package OSI renames System.OS_Interface;
 
    use type C.int;
 
@@ -38,17 +34,30 @@ package body Gnatevl.IO is
       Timeout_MS  : C.int) return C.int;
    pragma Import (C, Poll, "poll");
 
+   type Timespec is record
+      Seconds     : C.long;
+      Nanoseconds : C.long;
+   end record
+     with Convention => C;
+
+   function Clock_Gettime
+     (Clock_ID : C.int;
+      Value    : access Timespec) return C.int;
+   pragma Import (C, Clock_Gettime, "clock_gettime");
+
    function Clock return Duration is
-      Now    : aliased C_Time.timespec;
+      Now    : aliased Timespec;
       Result : C.int;
    begin
       Result :=
-        OSI.clock_gettime
-          (OSI.clockid_t (System.OS_Constants.CLOCK_RT_Ada), Now'Access);
+        Clock_Gettime
+          (C.int (System.OS_Constants.CLOCK_RT_Ada), Now'Access);
       if Result /= 0 then
          raise Device_Error with "monotonic clock failed";
       end if;
-      return C_Time.To_Duration (Now);
+      return
+        Duration (Now.Seconds)
+        + Duration (Now.Nanoseconds) / 1_000_000_000;
    end Clock;
 
    function Is_Evented_Task return Boolean is

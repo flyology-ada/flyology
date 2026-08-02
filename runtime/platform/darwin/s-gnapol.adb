@@ -1,10 +1,10 @@
-with System.C_Time;
+with System.Gnatevl.Time_ABI;
 with System.OS_Interface;
 with System.Storage_Elements;
 
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
-   package C_Time renames System.C_Time;
+   package Time_ABI renames System.Gnatevl.Time_ABI;
    package File_Engines renames System.Gnatevl.File_Engine;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
@@ -184,7 +184,7 @@ package body System.Gnatevl.Poller is
       type Kevent_Array is array (Positive range <>) of Kevent_Record;
       pragma Convention (C, Kevent_Array);
       Kernel_Events : aliased Kevent_Array (Events'Range);
-      Limit         : aliased C_Time.timespec;
+      Limit         : aliased Time_ABI.Timespec;
       Result        : C.int;
       Completion    : File_Engines.Completion;
       Kernel_Event  : Kevent_Record;
@@ -204,7 +204,7 @@ package body System.Gnatevl.Poller is
               0,
               System.Null_Address);
       else
-         Limit := C_Time.To_Timespec (Timeout);
+         Limit := Time_ABI.To_Timespec (Timeout);
          Result :=
            Kevent
              (Item.Descriptor,

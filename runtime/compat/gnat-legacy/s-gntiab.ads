@@ -1,0 +1,13 @@
+with System.OS_Interface;
+
+package System.Gnatevl.Time_ABI
+  with Preelaborate
+is
+   subtype Timespec is System.OS_Interface.timespec;
+
+   function To_Duration (Value : Timespec) return Duration
+     renames System.OS_Interface.To_Duration;
+
+   function To_Timespec (Value : Duration) return Timespec
+     renames System.OS_Interface.To_Timespec;
+end System.Gnatevl.Time_ABI;

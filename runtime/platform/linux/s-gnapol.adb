@@ -1,11 +1,11 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
-with System.C_Time;
+with System.Gnatevl.Time_ABI;
 with System.OS_Interface;
 
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
-   package C_Time renames System.C_Time;
+   package Time_ABI renames System.Gnatevl.Time_ABI;
    package File_Engines renames System.Gnatevl.File_Engine;
    package OSI renames System.OS_Interface;
 
@@ -168,7 +168,7 @@ package body System.Gnatevl.Poller is
    end Remove;
 
    function Timeout_Milliseconds (Timeout : Duration) return C.int is
-      Limit : C_Time.timespec;
+      Limit : Time_ABI.Timespec;
       Value : C.long_long;
    begin
       if Timeout < 0.0 then
@@ -179,7 +179,7 @@ package body System.Gnatevl.Poller is
          return C.int'Last;
       end if;
 
-      Limit := C_Time.To_Timespec (Timeout);
+      Limit := Time_ABI.To_Timespec (Timeout);
       Value :=
         C.long_long (Limit.tv_sec) * 1_000
         + (C.long_long (Limit.tv_nsec) + 999_999) / 1_000_000;

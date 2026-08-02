@@ -18,17 +18,39 @@ case "$execution_default" in
     ;;
 esac
 
+compiler_version=$("$alr" exec -- gcc -dumpfullversion)
+
+case "$compiler_version" in
+  13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+    patch_family=gnat-13-16
+    compat_family=gnat-legacy
+    ;;
+  16.1.0)
+    patch_family=gnat-13-16
+    compat_family=gnat-16
+    ;;
+  *)
+    printf '%s\n' \
+      "unsupported GNAT runtime version: $compiler_version" \
+      "verified releases: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
+    exit 1
+    ;;
+esac
+
+patch_root="$project_root/runtime/patches/$patch_family"
+
 case "$(uname -s)" in
   Darwin)
     platform=darwin
-    tasking_patch="$project_root/runtime/patches/s-taprop.adb.patch"
     ;;
   Linux)
     platform=linux
-    tasking_patch="$project_root/runtime/patches/s-taprop-linux.adb.patch"
     ;;
   *) printf '%s\n' "unsupported GNATEVL host: $(uname -s)" >&2; exit 1 ;;
 esac
+
+tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
+task_state_patch="$patch_root/common/s-tassta.adb.patch"
 
 source_include=$("$alr" exec -- gcc -print-file-name=adainclude)
 source_lib=$("$alr" exec -- gcc -print-file-name=adalib)
@@ -39,6 +61,8 @@ cp -R "$source_include/." "$generated_include/"
 cp -R "$source_lib/." "$generated_lib/"
 cp "$project_root"/runtime/ada/s-*.ad? "$generated_include/"
 cp "$project_root"/runtime/platform/"$platform"/s-*.ad? "$generated_include/"
+cp "$project_root/runtime/compat/$compat_family/s-gntiab.ads" \
+  "$generated_include/"
 cp "$project_root/runtime/config/$execution_default/s-gndeex.ads" \
   "$generated_include/"
 
@@ -47,7 +71,7 @@ git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   "$tasking_patch"
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
-  "$project_root/runtime/patches/s-tassta.adb.patch"
+  "$task_state_patch"
 
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
@@ -61,6 +85,7 @@ if [ "$platform" = linux ]; then
 fi
 "$alr" exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnata \
   -I "$generated_include" \
+  "$generated_include/s-gntiab.ads" \
   "$generated_include/s-gndeex.ads" \
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \
@@ -72,7 +97,7 @@ fi
   "$generated_include/s-tassta.adb"
 
 cp \
-  s-gndeex.ali s-gnatev.ali s-gnacon.ali s-gnfien.ali s-gnapol.ali \
+  s-gntiab.ali s-gndeex.ali s-gnatev.ali s-gnacon.ali s-gnfien.ali s-gnapol.ali \
   s-gnscpo.ali s-gnasch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$platform" = linux ]; then
