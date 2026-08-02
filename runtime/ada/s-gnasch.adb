@@ -109,6 +109,7 @@ package body System.Gnatevl.Scheduler is
       Finished                 : C.unsigned_long_long;
       Timer_Waits              : C.unsigned_long_long;
       Descriptor_Waits         : C.unsigned_long_long;
+      Interrupt_Waits          : C.unsigned_long_long;
       File_Waits               : C.unsigned_long_long;
       Pending_File_Submissions : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
@@ -1376,7 +1377,7 @@ package body System.Gnatevl.Scheduler is
       Lock_Group (Target);
       Output := To_Runtime_Group_Snapshot (Snapshot);
       Output.all :=
-        (ABI_Version              => 1,
+        (ABI_Version              => 2,
          Thread_State             =>
            (if Target.Start_Failed then 3
             elsif Target.Started then 2
@@ -1395,6 +1396,7 @@ package body System.Gnatevl.Scheduler is
          Timer_Waits              =>
            C.unsigned_long_long (Target.Timer_Count),
          Descriptor_Waits         => 0,
+         Interrupt_Waits          => 0,
          File_Waits               => 0,
          Pending_File_Submissions => 0,
          Dispatches               => Target.Dispatches,
@@ -1420,6 +1422,11 @@ package body System.Gnatevl.Scheduler is
          end case;
          if Item.IO_Wait then
             Output.Descriptor_Waits := Output.Descriptor_Waits + 1;
+            if Item.IO_Links (First_Interrupt).Registered
+              or else Item.IO_Links (Second_Interrupt).Registered
+            then
+               Output.Interrupt_Waits := Output.Interrupt_Waits + 1;
+            end if;
          end if;
          if Item.Thread_Pin_Count /= 0 then
             Output.Pinned_Members := Output.Pinned_Members + 1;

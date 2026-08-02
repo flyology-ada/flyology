@@ -7,7 +7,7 @@ package body Gnatevl.Observability is
    use type C.size_t;
    use type C.unsigned;
 
-   ABI_Version : constant C.unsigned := 1;
+   ABI_Version : constant C.unsigned := 2;
 
    type Runtime_Group_Snapshot is record
       Version                  : C.unsigned;
@@ -23,6 +23,7 @@ package body Gnatevl.Observability is
       Finished                 : C.unsigned_long_long;
       Timer_Waits              : C.unsigned_long_long;
       Descriptor_Waits         : C.unsigned_long_long;
+      Interrupt_Waits          : C.unsigned_long_long;
       File_Waits               : C.unsigned_long_long;
       Pending_File_Submissions : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
@@ -78,6 +79,7 @@ package body Gnatevl.Observability is
          Finished                 => Counter (Raw.Finished),
          Timer_Waits              => Counter (Raw.Timer_Waits),
          Descriptor_Waits         => Counter (Raw.Descriptor_Waits),
+         Interrupt_Waits          => Counter (Raw.Interrupt_Waits),
          File_Waits               => Counter (Raw.File_Waits),
          Pending_File_Submissions =>
            Counter (Raw.Pending_File_Submissions),

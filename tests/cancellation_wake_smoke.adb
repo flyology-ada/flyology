@@ -4,10 +4,13 @@ with GNAT.Sockets;
 with Gnatevl;
 with Gnatevl.IO;
 with Gnatevl.IO.Connections;
+with Gnatevl.Observability;
+with Interfaces;
 
 procedure Cancellation_Wake_Smoke is
    package Connections renames Gnatevl.IO.Connections;
    use type Ada.Real_Time.Time;
+   use type Interfaces.Unsigned_64;
 
    Scale : constant Positive := 64;
    type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
@@ -84,6 +87,7 @@ procedure Cancellation_Wake_Smoke is
       Workers : array (Servers'Range) of Worker_Access;
       pragma Unreferenced (Workers);
       Cancelled_At : Ada.Real_Time.Time;
+      Sample : Gnatevl.Observability.Group_Snapshot;
    begin
       for Index in Servers'Range loop
          GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
@@ -97,6 +101,11 @@ procedure Cancellation_Wake_Smoke is
       end loop;
       Progress.All_Started;
       delay 0.050;
+      pragma Assert (Gnatevl.Observability.Snapshot (0, Sample));
+      pragma Assert
+        (Sample.Interrupt_Waits = Gnatevl.Observability.Counter (Scale));
+      pragma Assert
+        (Sample.Descriptor_Waits = Gnatevl.Observability.Counter (Scale));
       Cancelled_At := Ada.Real_Time.Clock;
       Token.Request;
       Progress.All_Finished;

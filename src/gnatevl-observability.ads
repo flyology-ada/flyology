@@ -30,6 +30,7 @@ package Gnatevl.Observability with Preelaborate is
       Finished                 : Counter;
       Timer_Waits              : Counter;
       Descriptor_Waits         : Counter;
+      Interrupt_Waits          : Counter;
       File_Waits               : Counter;
       Pending_File_Submissions : Counter;
       Dispatches               : Counter;

@@ -124,6 +124,7 @@ begin
         or else Before_Release.Running /= 0
         or else Before_Release.Timer_Waits /= 2
         or else Before_Release.Descriptor_Waits /= 1
+        or else Before_Release.Interrupt_Waits /= 0
         or else Before_Release.File_Waits /= 0
         or else Before_Release.Pending_File_Submissions /= 0
         or else Before_Release.Dispatches < 3
