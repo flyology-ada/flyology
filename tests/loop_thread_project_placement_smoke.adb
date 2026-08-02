@@ -1,8 +1,8 @@
-with Gnatevl;
-with Gnatevl.Execution_Groups;
+with Flyology;
+with Flyology.Execution_Groups;
 
 procedure Loop_Thread_Project_Placement_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
 
    use type Groups.Group_Id;
    use type Groups.Loop_Thread_Placement;
@@ -35,7 +35,7 @@ procedure Loop_Thread_Project_Placement_Smoke is
    end Result;
 
    task Project_Worker with CPU => 6 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Project_Worker;
 
    task body Project_Worker is

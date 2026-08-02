@@ -1,9 +1,9 @@
-with Gnatevl;
-with Gnatevl.Execution_Groups;
+with Flyology;
+with Flyology.Execution_Groups;
 with System;
 
 procedure Execution_Groups_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
    Mover_Total : constant := 8;
 
    use type Groups.Group_Id;
@@ -111,26 +111,26 @@ procedure Execution_Groups_Smoke is
    end Results;
 
    task Group_One_A with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_A;
 
    task Group_One_B with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_B;
 
    task Group_Two with CPU => 2 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_Two;
 
    task Migrator with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Migrator;
    task Native is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native;
 
    task type Ping_Pong_Mover is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Ping_Pong_Mover;
 
    task body Ping_Pong_Mover is

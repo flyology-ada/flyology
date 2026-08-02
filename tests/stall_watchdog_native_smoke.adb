@@ -1,9 +1,9 @@
-with Gnatevl.Observability;
-with Gnatevl.Observability.Stall_Watchdogs;
+with Flyology.Observability;
+with Flyology.Observability.Stall_Watchdogs;
 
 procedure Stall_Watchdog_Native_Smoke is
-   package Observation renames Gnatevl.Observability;
-   package Watchdogs renames Gnatevl.Observability.Stall_Watchdogs;
+   package Observation renames Flyology.Observability;
+   package Watchdogs renames Flyology.Observability.Stall_Watchdogs;
 
    use type Watchdogs.Group_Condition;
 

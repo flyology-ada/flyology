@@ -7,7 +7,7 @@
 #include <mach/mach.h>
 #endif
 
-int64_t gnatevl_current_rss_bytes(void) {
+int64_t flyology_current_rss_bytes(void) {
 #if defined(__APPLE__)
     mach_task_basic_info_data_t info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
@@ -35,7 +35,7 @@ int64_t gnatevl_current_rss_bytes(void) {
 #endif
 }
 
-int64_t gnatevl_virtual_bytes(void) {
+int64_t flyology_virtual_bytes(void) {
 #if defined(__APPLE__)
     mach_task_basic_info_data_t info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
@@ -63,7 +63,7 @@ int64_t gnatevl_virtual_bytes(void) {
 #endif
 }
 
-int64_t gnatevl_peak_rss_bytes(void) {
+int64_t flyology_peak_rss_bytes(void) {
     struct rusage usage;
 
     if (getrusage(RUSAGE_SELF, &usage) != 0) {
@@ -78,7 +78,7 @@ int64_t gnatevl_peak_rss_bytes(void) {
 #endif
 }
 
-int gnatevl_thread_count(void) {
+int flyology_thread_count(void) {
 #if defined(__APPLE__)
     thread_act_array_t threads;
     mach_msg_type_number_t count = 0;
@@ -113,7 +113,7 @@ int gnatevl_thread_count(void) {
 #endif
 }
 
-double gnatevl_process_cpu_seconds(void) {
+double flyology_process_cpu_seconds(void) {
     struct rusage usage;
 
     if (getrusage(RUSAGE_SELF, &usage) != 0) {

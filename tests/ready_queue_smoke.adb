@@ -1,5 +1,5 @@
 with Ada.Dynamic_Priorities;
-with Gnatevl;
+with Flyology;
 
 procedure Ready_Queue_Smoke is
    Worker_Count      : constant := 3;
@@ -97,12 +97,12 @@ procedure Ready_Queue_Smoke is
 
    task type Worker (Id : Positive) is
       pragma Priority (Worker_Priority);
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Worker;
 
    task Blocker is
       pragma Priority (Blocker_Priority);
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Blocker;
 
    task body Blocker is

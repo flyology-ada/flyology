@@ -1,28 +1,28 @@
 with Ada.Text_IO;
-with Gnatevl;
+with Flyology;
 with Showcase_Support;
 
 procedure Hybrid_Blocking_Bridge is
    use Ada.Text_IO;
 
    task Inbox is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
       entry Deliver (Value : Integer);
    end Inbox;
 
    task Ticker is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Ticker;
 
    task Blocking_Worker is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Blocking_Worker;
 
    task body Inbox is
    begin
       accept Deliver (Value : Integer) do
          Put_Line
-           ("evented inbox received" & Value'Image
+           ("lightweight inbox received" & Value'Image
             & " on thread=" & Showcase_Support.Thread_Image);
       end Deliver;
    end Inbox;
@@ -44,7 +44,7 @@ procedure Hybrid_Blocking_Bridge is
          & Showcase_Support.Thread_Image);
 
       --  Stand-in for a blocking driver or foreign library call. This task
-      --  owns a pthread, so the event-loop tasks continue to make progress.
+      --  owns a pthread, so the lightweight tasks continue to make progress.
       delay 0.050;
       Inbox.Deliver (42);
       Put_Line

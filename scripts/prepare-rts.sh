@@ -2,7 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-build_root=${GNATEVL_RTS_DIR:-"$project_root/build/rts"}
+build_root=${FLYOLOGY_RTS_DIR:-"$project_root/build/rts"}
 case "$build_root" in
   /*) ;;
   *) build_root="$(pwd)/$build_root" ;;
@@ -12,20 +12,20 @@ build_root=$(CDPATH= cd -- "$build_root" && pwd -P)
 generated_include="$build_root/adainclude"
 generated_lib="$build_root/adalib"
 alr=$("$project_root/scripts/find-alr.sh")
-execution_default=${GNATEVL_DEFAULT:-native}
-loop_pool_size=${GNATEVL_LOOP_POOL_SIZE:-1}
-placement_policy=${GNATEVL_PLACEMENT:-round_robin}
-loop_placement=${GNATEVL_LOOP_PLACEMENT:-none}
-loop_placement_map=${GNATEVL_LOOP_PLACEMENT_MAP:-}
-test_faults=${GNATEVL_TEST_FAULTS:-0}
-deny_io_uring=${GNATEVL_TEST_DENY_IO_URING:-0}
-sanitizer=${GNATEVL_SANITIZER:-none}
+execution_default=${FLYOLOGY_DEFAULT:-native}
+loop_pool_size=${FLYOLOGY_LOOP_POOL_SIZE:-1}
+placement_policy=${FLYOLOGY_PLACEMENT:-round_robin}
+loop_placement=${FLYOLOGY_LOOP_PLACEMENT:-none}
+loop_placement_map=${FLYOLOGY_LOOP_PLACEMENT_MAP:-}
+test_faults=${FLYOLOGY_TEST_FAULTS:-0}
+deny_io_uring=${FLYOLOGY_TEST_DENY_IO_URING:-0}
+sanitizer=${FLYOLOGY_SANITIZER:-none}
 
 case "$execution_default" in
-  native|evented) ;;
+  native|lightweight) ;;
   *)
     printf '%s\n' \
-      "GNATEVL_DEFAULT must be 'native' or 'evented', got: $execution_default" \
+      "FLYOLOGY_DEFAULT must be 'native' or 'lightweight', got: $execution_default" \
       >&2
     exit 1
     ;;
@@ -34,14 +34,14 @@ esac
 case "$loop_pool_size" in
   ''|*[!0-9]*)
     printf '%s\n' \
-      "GNATEVL_LOOP_POOL_SIZE must be an integer from 1 through 128, got: $loop_pool_size" \
+      "FLYOLOGY_LOOP_POOL_SIZE must be an integer from 1 through 128, got: $loop_pool_size" \
       >&2
     exit 1
     ;;
 esac
 if [ "$loop_pool_size" -lt 1 ] || [ "$loop_pool_size" -gt 128 ]; then
   printf '%s\n' \
-    "GNATEVL_LOOP_POOL_SIZE must be an integer from 1 through 128, got: $loop_pool_size" \
+    "FLYOLOGY_LOOP_POOL_SIZE must be an integer from 1 through 128, got: $loop_pool_size" \
     >&2
   exit 1
 fi
@@ -50,7 +50,7 @@ case "$placement_policy" in
   round_robin) ;;
   *)
     printf '%s\n' \
-      "GNATEVL_PLACEMENT must be 'round_robin', got: $placement_policy" \
+      "FLYOLOGY_PLACEMENT must be 'round_robin', got: $placement_policy" \
       >&2
     exit 1
     ;;
@@ -61,7 +61,7 @@ case "$loop_placement" in
     placement_mode=0
     if [ -n "$loop_placement_map" ]; then
       printf '%s\n' \
-        "GNATEVL_LOOP_PLACEMENT_MAP requires strict or advisory placement" \
+        "FLYOLOGY_LOOP_PLACEMENT_MAP requires strict or advisory placement" \
         >&2
       exit 1
     fi
@@ -74,7 +74,7 @@ case "$loop_placement" in
     ;;
   *)
     printf '%s\n' \
-      "GNATEVL_LOOP_PLACEMENT must be 'none', 'strict', or 'advisory', got: $loop_placement" \
+      "FLYOLOGY_LOOP_PLACEMENT must be 'none', 'strict', or 'advisory', got: $loop_placement" \
       >&2
     exit 1
     ;;
@@ -83,7 +83,7 @@ esac
 if [ "$loop_placement" != none ]; then
   if [ -z "$loop_placement_map" ]; then
     printf '%s\n' \
-      "GNATEVL_LOOP_PLACEMENT_MAP must list group:value pairs for $loop_placement placement" \
+      "FLYOLOGY_LOOP_PLACEMENT_MAP must list group:value pairs for $loop_placement placement" \
       >&2
     exit 1
   fi
@@ -103,7 +103,7 @@ if [ "$loop_placement" != none ]; then
     END { exit valid ? 0 : 1 }
   ' mode="$loop_placement"; then
     printf '%s\n' \
-      "GNATEVL_LOOP_PLACEMENT_MAP must contain unique GROUP:VALUE pairs (group 0..255, value 0..2147483647), got: $loop_placement_map" \
+      "FLYOLOGY_LOOP_PLACEMENT_MAP must contain unique GROUP:VALUE pairs (group 0..255, value 0..2147483647), got: $loop_placement_map" \
       >&2
     exit 1
   fi
@@ -134,12 +134,12 @@ case "$test_faults" in
     fault_config=disabled
     ;;
   1)
-    fault_cflags=-DGNATEVL_TEST_FAULTS
+    fault_cflags=-DFLYOLOGY_TEST_FAULTS
     fault_config=enabled
     ;;
   *)
     printf '%s\n' \
-      "GNATEVL_TEST_FAULTS must be '0' or '1', got: $test_faults" >&2
+      "FLYOLOGY_TEST_FAULTS must be '0' or '1', got: $test_faults" >&2
     exit 1
     ;;
 esac
@@ -149,11 +149,11 @@ case "$deny_io_uring" in
     io_uring_test_cflags=
     ;;
   1)
-    io_uring_test_cflags=-DGNATEVL_TEST_DENY_IO_URING
+    io_uring_test_cflags=-DFLYOLOGY_TEST_DENY_IO_URING
     ;;
   *)
     printf '%s\n' \
-      "GNATEVL_TEST_DENY_IO_URING must be '0' or '1', got: $deny_io_uring" >&2
+      "FLYOLOGY_TEST_DENY_IO_URING must be '0' or '1', got: $deny_io_uring" >&2
     exit 1
     ;;
 esac
@@ -167,7 +167,7 @@ case "$sanitizer" in
     ;;
   *)
     printf '%s\n' \
-      "GNATEVL_SANITIZER must be 'none' or 'address', got: $sanitizer" >&2
+      "FLYOLOGY_SANITIZER must be 'none' or 'address', got: $sanitizer" >&2
     exit 1
     ;;
 esac
@@ -181,7 +181,7 @@ case "$(uname -s)" in
   Linux)
     platform=linux
     ;;
-  *) printf '%s\n' "unsupported GNATEVL host: $(uname -s)" >&2; exit 1 ;;
+  *) printf '%s\n' "unsupported Flyology host: $(uname -s)" >&2; exit 1 ;;
 esac
 
 if [ "$loop_placement" = strict ] && [ "$platform" != linux ]; then
@@ -228,7 +228,7 @@ if [ "$loop_placement" = strict ]; then
       END { exit valid ? 0 : 1 }
     '; then
     printf '%s\n' \
-      "GNATEVL_LOOP_PLACEMENT_MAP requests a CPU outside this process's allowed Linux set: $allowed_cpus" \
+      "FLYOLOGY_LOOP_PLACEMENT_MAP requests a CPU outside this process's allowed Linux set: $allowed_cpus" \
       >&2
     exit 1
   fi
@@ -246,7 +246,7 @@ case "$platform:$compiler_release" in
     ;;
   *)
     printf '%s\n' \
-      "unsupported GNATEVL host/compiler pair: $platform / gnat_native $compiler_release" \
+      "unsupported Flyology host/compiler pair: $platform / gnat_native $compiler_release" \
       "selected Alire release: $compiler_release" \
       "verified on Darwin: 13.2.2, 14.1.3, 14.2.1, 16.1.0" \
       "verified on Linux: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
@@ -270,22 +270,22 @@ cp -R "$source_lib/." "$generated_lib/"
 chmod -R u+w "$generated_include" "$generated_lib"
 cp "$project_root"/runtime/ada/s-*.ad? "$generated_include/"
 cp "$project_root"/runtime/platform/"$platform"/s-*.ad? "$generated_include/"
-cp "$project_root/runtime/compat/$compat_family/s-gntiab.ads" \
+cp "$project_root/runtime/compat/$compat_family/s-fltiab.ads" \
   "$generated_include/"
-cp "$project_root/runtime/config/$execution_default/s-gndeex.ads" \
+cp "$project_root/runtime/config/$execution_default/s-fldeex.ads" \
   "$generated_include/"
 sed \
   "s/@AUTOMATIC_POOL_SIZE@/$loop_pool_size/g" \
-  "$project_root/runtime/config/pool/s-gnpoco.ads.in" \
-  >"$generated_include/s-gnpoco.ads"
+  "$project_root/runtime/config/pool/s-flpoco.ads.in" \
+  >"$generated_include/s-flpoco.ads"
 sed \
   -e "s/@PLACEMENT_REQUESTS@/$placement_requests/g" \
   -e "s/@PLACEMENT_ANY@/$placement_any/g" \
-  "$project_root/runtime/config/placement/s-gnplco.ads.in" \
-  >"$generated_include/s-gnplco.ads"
-cp "$project_root/runtime/config/faults/$fault_config"/s-gnafau.ad? \
+  "$project_root/runtime/config/placement/s-flplco.ads.in" \
+  >"$generated_include/s-flplco.ads"
+cp "$project_root/runtime/config/faults/$fault_config"/s-flyfau.ad? \
   "$generated_include/"
-cp "$project_root/runtime/config/sanitizers/$sanitizer_config"/s-gnaasa.ad? \
+cp "$project_root/runtime/config/sanitizers/$sanitizer_config"/s-flyasa.ad? \
   "$generated_include/"
 
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
@@ -304,52 +304,52 @@ cd "$build_root/obj"
 if [ "$platform" = linux ]; then
   "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
     -I "$generated_include" \
-    "$generated_include/s-gnlimo.ads"
+    "$generated_include/s-fllimo.ads"
 fi
 "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
   -I "$generated_include" \
-  "$generated_include/s-gntiab.ads" \
-  "$generated_include/s-gndeex.ads" \
-  "$generated_include/s-gnpoco.ads" \
-  "$generated_include/s-gnplco.ads" \
-  "$generated_include/s-gnatev.ads" \
-  "$generated_include/s-gnacon.adb" \
-  "$generated_include/s-gnaasa.adb" \
-  "$generated_include/s-gnafau.adb" \
-  "$generated_include/s-gnfien.adb" \
-  "$generated_include/s-gnapol.adb" \
-  "$generated_include/s-gnscpo.adb" \
-  "$generated_include/s-gnasch.adb" \
+  "$generated_include/s-fltiab.ads" \
+  "$generated_include/s-fldeex.ads" \
+  "$generated_include/s-flpoco.ads" \
+  "$generated_include/s-flplco.ads" \
+  "$generated_include/s-flyolo.ads" \
+  "$generated_include/s-flycon.adb" \
+  "$generated_include/s-flyasa.adb" \
+  "$generated_include/s-flyfau.adb" \
+  "$generated_include/s-flfien.adb" \
+  "$generated_include/s-flypol.adb" \
+  "$generated_include/s-flscpo.adb" \
+  "$generated_include/s-flysch.adb" \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-tassta.adb"
 
 cp \
-  s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnplco.ali s-gnatev.ali s-gnacon.ali \
-  s-gnaasa.ali \
-  s-gnafau.ali s-gnfien.ali s-gnapol.ali \
-  s-gnscpo.ali s-gnasch.ali s-taprop.ali s-tassta.ali \
+  s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-flycon.ali \
+  s-flyasa.ali \
+  s-flyfau.ali s-flfien.ali s-flypol.ali \
+  s-flscpo.ali s-flysch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$platform" = linux ]; then
-  cp s-gnlimo.ali "$generated_lib/"
+  cp s-fllimo.ali "$generated_lib/"
 fi
 ar -r "$generated_lib/libgnarl.a" \
-  s-gndeex.o \
-  s-gnpoco.o \
-  s-gnplco.o \
-  s-gnatev.o \
-  s-gnacon.o \
-  s-gnaasa.o \
-  s-gnafau.o \
-  s-gnfien.o \
-  s-gnapol.o \
-  s-gnscpo.o \
-  s-gnasch.o \
+  s-fldeex.o \
+  s-flpoco.o \
+  s-flplco.o \
+  s-flyolo.o \
+  s-flycon.o \
+  s-flyasa.o \
+  s-flyfau.o \
+  s-flfien.o \
+  s-flypol.o \
+  s-flscpo.o \
+  s-flysch.o \
   s-taprop.o \
   s-tassta.o \
   context_switch.o \
   platform.o
 if [ "$platform" = linux ]; then
-  ar -r "$generated_lib/libgnarl.a" s-gnlimo.o
+  ar -r "$generated_lib/libgnarl.a" s-fllimo.o
 fi
 ranlib "$generated_lib/libgnarl.a"
 

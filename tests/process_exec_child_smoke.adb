@@ -1,16 +1,16 @@
-with Gnatevl.Process_Lifecycle;
+with Flyology.Process_Lifecycle;
 with Interfaces.C;
 
 procedure Process_Exec_Child_Smoke is
    package C renames Interfaces.C;
-   package Lifecycle renames Gnatevl.Process_Lifecycle;
+   package Lifecycle renames Flyology.Process_Lifecycle;
 
    use type C.int;
    use type Lifecycle.Event_Runtime_State;
 
    function Arm_Exit_Check (State, Groups : C.int) return C.int;
    pragma Import
-     (C, Arm_Exit_Check, "gnatevl_test_arm_exit_check");
+     (C, Arm_Exit_Check, "flyology_test_arm_exit_check");
 
    task Native_Activation;
    task body Native_Activation is

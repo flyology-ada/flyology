@@ -1,16 +1,16 @@
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO;
 with Interfaces.C;
 
 procedure Sanitizer_Fiber_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
 
    use type Ada.Streams.Stream_Element_Offset;
    use type Groups.Group_Id;
-   use type Gnatevl.IO.Wait_Outcome;
+   use type Flyology.IO.Wait_Outcome;
    use type Interfaces.C.unsigned;
 
    Worker_Count : constant Positive := 12;
@@ -22,7 +22,7 @@ procedure Sanitizer_Fiber_Smoke is
    function Touch_Stack
      (Seed  : Interfaces.C.unsigned;
       Depth : Interfaces.C.unsigned) return Interfaces.C.unsigned;
-   pragma Import (C, Touch_Stack, "gnatevl_sanitizer_touch_stack");
+   pragma Import (C, Touch_Stack, "flyology_sanitizer_touch_stack");
 
    protected Results is
       procedure Finished (Passed : Boolean);
@@ -49,7 +49,7 @@ procedure Sanitizer_Fiber_Smoke is
    end Results;
 
    task type Worker (Index : Positive) with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
       pragma Storage_Size (64 * 1_024);
    end Worker;
 
@@ -74,20 +74,20 @@ procedure Sanitizer_Fiber_Smoke is
    end Worker;
 
    task type Interruptible_Waiter is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
       pragma Storage_Size (64 * 1_024);
    end Interruptible_Waiter;
 
    task body Interruptible_Waiter is
-      Outcome : Gnatevl.IO.Wait_Outcome;
+      Outcome : Flyology.IO.Wait_Outcome;
    begin
-      Outcome := Gnatevl.IO.Wait_Interruptibly
-        (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Primary_Reader)),
-         Gnatevl.IO.For_Read,
+      Outcome := Flyology.IO.Wait_Interruptibly
+        (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Primary_Reader)),
+         Flyology.IO.For_Read,
          Timeout => 5.0,
          Interrupt_1 =>
-           Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Interrupt_Reader)));
-      Results.Finished (Outcome = Gnatevl.IO.Interrupted);
+           Flyology.IO.Descriptor (GNAT.Sockets.To_C (Interrupt_Reader)));
+      Results.Finished (Outcome = Flyology.IO.Interrupted);
    exception
       when others =>
          Results.Finished (False);

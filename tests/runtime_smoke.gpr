@@ -1,4 +1,4 @@
-with "../gnatevl.gpr";
+with "../flyology.gpr";
 
 project Runtime_Smoke is
    for Languages use ("Ada", "C");

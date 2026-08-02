@@ -1,11 +1,11 @@
 with Ada.Exceptions;
 with Ada.Streams;
-with Gnatevl.IO.DNS;
-with Gnatevl.IO.DNS.Testing;
+with Flyology.IO.DNS;
+with Flyology.IO.DNS.Testing;
 
 procedure DNS_Parser_Smoke is
-   package DNS renames Gnatevl.IO.DNS;
-   package Testing renames Gnatevl.IO.DNS.Testing;
+   package DNS renames Flyology.IO.DNS;
+   package Testing renames Flyology.IO.DNS.Testing;
    package Streams renames Ada.Streams;
    use type Streams.Stream_Element_Offset;
 

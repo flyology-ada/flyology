@@ -1,8 +1,8 @@
-with Gnatevl;
-with Gnatevl.Execution_Groups;
+with Flyology;
+with Flyology.Execution_Groups;
 
 procedure Loop_Thread_Placement_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
 
    use type Groups.Group_Id;
    use type Groups.Loop_Thread_Placement;
@@ -39,7 +39,7 @@ procedure Loop_Thread_Placement_Smoke is
    end Result;
 
    task type Worker with CPU => 7 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Worker;
 
    task body Worker is
@@ -218,7 +218,7 @@ begin
       end Race;
 
       task Configurer is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Configurer;
 
       task body Configurer is
@@ -232,23 +232,23 @@ begin
       end Configurer;
 
       task Starter is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Starter;
 
       task body Starter is
-         task type Evented with CPU => 8 is
-            pragma Task_Info (Gnatevl.Event_Loop_Task);
-         end Evented;
-         task body Evented is
+         task type Lightweight with CPU => 8 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Lightweight;
+         task body Lightweight is
          begin
             null;
-         end Evented;
-         type Evented_Access is access Evented;
-         Evented_Item : Evented_Access;
-         pragma Unreferenced (Evented_Item);
+         end Lightweight;
+         type Lightweight_Access is access Lightweight;
+         Lightweight_Item : Lightweight_Access;
+         pragma Unreferenced (Lightweight_Item);
       begin
          Race.Start;
-         Evented_Item := new Evented;
+         Lightweight_Item := new Lightweight;
          Race.Activation (True);
       exception
          when others =>

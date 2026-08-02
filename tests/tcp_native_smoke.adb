@@ -2,9 +2,9 @@ with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl_Config;
-with Gnatevl.IO.Sockets;
+with Flyology;
+with Flyology_Config;
+with Flyology.IO.Sockets;
 with Interfaces.C;
 with System;
 
@@ -33,12 +33,12 @@ procedure TCP_Native_Smoke is
    begin
       --  Linux suppresses SIGPIPE at send time with MSG_NOSIGNAL rather than
       --  with a per-socket option. Darwin exposes SO_NOSIGPIPE for inspection.
-      if Gnatevl_Config.Alire_Host_OS = "linux" then
+      if Flyology_Config.Alire_Host_OS = "linux" then
          return True;
       end if;
       return
         Get_Socket_Option
-          (C.int (Gnatevl.IO.Sockets.Native_Descriptor (Socket)),
+          (C.int (Flyology.IO.Sockets.Native_Descriptor (Socket)),
            SOL_SOCKET,
            SO_NOSIGPIPE,
            Value'Address,
@@ -85,11 +85,11 @@ begin
 
    declare
       task Server is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Server;
 
       task Client is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Client;
 
       task body Server is
@@ -100,10 +100,10 @@ begin
          Stage : Natural := 0;
       begin
          Stage := 1;
-         Gnatevl.IO.Sockets.Accept_Connection
+         Flyology.IO.Sockets.Accept_Connection
            (Listener, Peer, From, Timeout => 1.0);
          Stage := 2;
-         Gnatevl.IO.Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
+         Flyology.IO.Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
          Stage := 3;
          Results.Report
            (Last = Data'Last
@@ -131,9 +131,9 @@ begin
          begin
             GNAT.Sockets.Create_Socket (Socket);
             Stage := 2;
-            Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
+            Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
             Stage := 3;
-            Gnatevl.IO.Sockets.Send (Socket, Data, Last, Timeout => 1.0);
+            Flyology.IO.Sockets.Send (Socket, Data, Last, Timeout => 1.0);
             Stage := 4;
             Results.Report (Last = Data'Last);
             Stage := 5;

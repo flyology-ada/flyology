@@ -1,9 +1,9 @@
 with Ada.Streams;
 with Ada.Real_Time;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO;
-with Gnatevl.IO.Sockets;
+with Flyology;
+with Flyology.IO;
+with Flyology.IO.Sockets;
 
 procedure Wait_Any_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
@@ -32,7 +32,7 @@ procedure Wait_Any_Smoke is
       end Wait;
    end Result;
 
-   task type Runner (Model : Gnatevl.Execution_Model) is
+   task type Runner (Model : Flyology.Execution_Model) is
       pragma Task_Info (Model);
    end Runner;
 
@@ -45,19 +45,19 @@ procedure Wait_Any_Smoke is
    begin
       GNAT.Sockets.Create_Socket_Pair (Left_1, Right_1);
       GNAT.Sockets.Create_Socket_Pair (Left_2, Right_2);
-      Gnatevl.IO.Sockets.Prepare (Left_1);
-      Gnatevl.IO.Sockets.Prepare (Left_2);
+      Flyology.IO.Sockets.Prepare (Left_1);
+      Flyology.IO.Sockets.Prepare (Left_2);
       GNAT.Sockets.Send_Socket (Right_2, Data, Last);
       pragma Assert (Last = Data'Last);
 
       declare
-         Requests : constant Gnatevl.IO.Wait_Request_Array (7 .. 8) :=
-           [7 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Read),
-            8 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_2),
-                  Gnatevl.IO.For_Read)];
+         Requests : constant Flyology.IO.Wait_Request_Array (7 .. 8) :=
+           [7 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read),
+            8 => (Flyology.IO.Sockets.Native_Descriptor (Left_2),
+                  Flyology.IO.For_Read)];
       begin
-         Passed := Gnatevl.IO.Wait_Any (Requests, 1.0) = 8;
+         Passed := Flyology.IO.Wait_Any (Requests, 1.0) = 8;
       end;
 
       --  Right_2 became ready first, but both distinct descriptors are ready
@@ -65,12 +65,12 @@ procedure Wait_Any_Smoke is
       --  independent of kernel event ordering.
       GNAT.Sockets.Send_Socket (Right_1, Data, Last);
       declare
-         Requests : constant Gnatevl.IO.Wait_Request_Array (7 .. 8) :=
-           [7 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Read),
-            8 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_2),
-                  Gnatevl.IO.For_Read)];
-         Got : constant Natural := Gnatevl.IO.Wait_Any (Requests, 1.0);
+         Requests : constant Flyology.IO.Wait_Request_Array (7 .. 8) :=
+           [7 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read),
+            8 => (Flyology.IO.Sockets.Native_Descriptor (Left_2),
+                  Flyology.IO.For_Read)];
+         Got : constant Natural := Flyology.IO.Wait_Any (Requests, 1.0);
          Drained : Ada.Streams.Stream_Element_Array (1 .. 1);
       begin
          Passed := Passed and then Got = 7;
@@ -78,79 +78,79 @@ procedure Wait_Any_Smoke is
       end;
 
       declare
-         Requests : constant Gnatevl.IO.Wait_Request_Array (4 .. 5) :=
+         Requests : constant Flyology.IO.Wait_Request_Array (4 .. 5) :=
            [others =>
-              (Gnatevl.IO.Sockets.Native_Descriptor (Left_2),
-               Gnatevl.IO.For_Read)];
+              (Flyology.IO.Sockets.Native_Descriptor (Left_2),
+               Flyology.IO.For_Read)];
       begin
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Requests, 0.0) = 4;
+         Passed := Passed and then Flyology.IO.Wait_Any (Requests, 0.0) = 4;
       end;
 
       declare
-         Requests : Gnatevl.IO.Wait_Request_Array
-           (1 .. Gnatevl.IO.Max_Wait_Requests);
+         Requests : Flyology.IO.Wait_Request_Array
+           (1 .. Flyology.IO.Max_Wait_Requests);
       begin
          Requests :=
            [others =>
-              (Gnatevl.IO.Sockets.Native_Descriptor (Left_2),
-               Gnatevl.IO.For_Read)];
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Requests, 0.0) = 1;
+              (Flyology.IO.Sockets.Native_Descriptor (Left_2),
+               Flyology.IO.For_Read)];
+         Passed := Passed and then Flyology.IO.Wait_Any (Requests, 0.0) = 1;
       end;
 
       declare
-         Empty : Gnatevl.IO.Wait_Request_Array (2 .. 1);
+         Empty : Flyology.IO.Wait_Request_Array (2 .. 1);
       begin
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Empty, 0.0) = 0;
+         Passed := Passed and then Flyology.IO.Wait_Any (Empty, 0.0) = 0;
       end;
 
       declare
-         Requests : constant Gnatevl.IO.Wait_Request_Array :=
-           [1 => (Gnatevl.IO.Invalid_Descriptor, Gnatevl.IO.For_Read),
-            2 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Write)];
+         Requests : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (Flyology.IO.Invalid_Descriptor, Flyology.IO.For_Read),
+            2 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Write)];
          Rejected : Boolean := False;
       begin
          begin
             declare
-               Ignored : constant Natural := Gnatevl.IO.Wait_Any (Requests);
+               Ignored : constant Natural := Flyology.IO.Wait_Any (Requests);
                pragma Unreferenced (Ignored);
             begin
                null;
             end;
          exception
-            when Gnatevl.IO.Device_Error => Rejected := True;
+            when Flyology.IO.Device_Error => Rejected := True;
          end;
          Passed := Passed and Rejected;
       end;
 
       --  A closed, nonnegative descriptor reaches poll/kqueue/epoll rather
       --  than the public negative-descriptor guard.  Placing a valid request
-      --  second makes the evented reverse-registration path arm it before the
+      --  second makes the lightweight reverse-registration path arm it before the
       --  closed descriptor fails, exercising transactional rollback.
       declare
          Closed_Left, Closed_Right : GNAT.Sockets.Socket_Type;
       begin
          GNAT.Sockets.Create_Socket_Pair (Closed_Left, Closed_Right);
          declare
-            Closed_FD : constant Gnatevl.IO.Descriptor :=
-              Gnatevl.IO.Sockets.Native_Descriptor (Closed_Left);
-            Requests : constant Gnatevl.IO.Wait_Request_Array :=
-              [1 => (Closed_FD, Gnatevl.IO.For_Read),
-               2 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                     Gnatevl.IO.For_Write)];
+            Closed_FD : constant Flyology.IO.Descriptor :=
+              Flyology.IO.Sockets.Native_Descriptor (Closed_Left);
+            Requests : constant Flyology.IO.Wait_Request_Array :=
+              [1 => (Closed_FD, Flyology.IO.For_Read),
+               2 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                     Flyology.IO.For_Write)];
             Rejected : Boolean := False;
          begin
             GNAT.Sockets.Close_Socket (Closed_Left);
             begin
                declare
                   Ignored : constant Natural :=
-                    Gnatevl.IO.Wait_Any (Requests, 0.1);
+                    Flyology.IO.Wait_Any (Requests, 0.1);
                   pragma Unreferenced (Ignored);
                begin
                   null;
                end;
             exception
-               when Gnatevl.IO.Device_Error => Rejected := True;
+               when Flyology.IO.Device_Error => Rejected := True;
             end;
             Passed := Passed and Rejected;
          end;
@@ -158,21 +158,21 @@ procedure Wait_Any_Smoke is
       end;
 
       declare
-         Requests : constant Gnatevl.IO.Wait_Request_Array (1 .. 2) :=
-           [1 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Read),
-            2 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Write)];
+         Requests : constant Flyology.IO.Wait_Request_Array (1 .. 2) :=
+           [1 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read),
+            2 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Write)];
       begin
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Requests, 1.0) = 2;
+         Passed := Passed and then Flyology.IO.Wait_Any (Requests, 1.0) = 2;
       end;
 
       declare
-         Request : constant Gnatevl.IO.Wait_Request_Array :=
-           [1 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Read)];
+         Request : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read)];
       begin
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Request, 0.01) = 0;
+         Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.01) = 0;
       end;
 
       GNAT.Sockets.Close_Socket (Left_1);
@@ -183,25 +183,25 @@ procedure Wait_Any_Smoke is
       --  A timed-out wait must leave no registration that can act on a later
       --  descriptor generation reusing the same integer.
       GNAT.Sockets.Create_Socket_Pair (Left_1, Right_1);
-      Gnatevl.IO.Sockets.Prepare (Left_1);
+      Flyology.IO.Sockets.Prepare (Left_1);
       declare
-         Request : constant Gnatevl.IO.Wait_Request_Array :=
-           [1 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Read)];
+         Request : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read)];
       begin
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Request, 0.005) = 0;
+         Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.005) = 0;
       end;
       GNAT.Sockets.Close_Socket (Left_1);
       GNAT.Sockets.Close_Socket (Right_1);
       GNAT.Sockets.Create_Socket_Pair (Left_1, Right_1);
-      Gnatevl.IO.Sockets.Prepare (Left_1);
+      Flyology.IO.Sockets.Prepare (Left_1);
       GNAT.Sockets.Send_Socket (Right_1, Data, Last);
       declare
-         Request : constant Gnatevl.IO.Wait_Request_Array :=
-           [1 => (Gnatevl.IO.Sockets.Native_Descriptor (Left_1),
-                  Gnatevl.IO.For_Read)];
+         Request : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read)];
       begin
-         Passed := Passed and then Gnatevl.IO.Wait_Any (Request, 0.1) = 1;
+         Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.1) = 1;
       end;
       GNAT.Sockets.Close_Socket (Left_1);
       GNAT.Sockets.Close_Socket (Right_1);
@@ -213,21 +213,21 @@ procedure Wait_Any_Smoke is
 
    type Runner_Access is access Runner;
    Native  : Runner_Access;
-   Evented : Runner_Access;
-   pragma Unreferenced (Native, Evented);
+   Lightweight : Runner_Access;
+   pragma Unreferenced (Native, Lightweight);
    Passed  : Boolean;
 begin
    GNAT.Sockets.Initialize;
-   Native := new Runner (Gnatevl.Native_Thread);
+   Native := new Runner (Flyology.Native_Task);
    Result.Wait (Passed);
    pragma Assert (Passed);
-   Evented := new Runner (Gnatevl.Event_Loop_Task);
+   Lightweight := new Runner (Flyology.Lightweight_Task);
    Result.Wait (Passed);
    pragma Assert (Passed);
 
-   --  Aborting an evented task while Wait_Any is suspended must unregister
+   --  Aborting a lightweight task while Wait_Any is suspended must unregister
    --  every kernel interest before its stack-resident wait links disappear.
-   --  A second evented waiter on the same descriptor checks that the poller
+   --  A second lightweight waiter on the same descriptor checks that the poller
    --  and group registry remain usable after that unwind.
    declare
       protected Started is
@@ -249,29 +249,29 @@ begin
          end Wait;
       end Started;
 
-      task type Abortable_Waiter (FD : Gnatevl.IO.Descriptor) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      task type Abortable_Waiter (FD : Flyology.IO.Descriptor) is
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Abortable_Waiter;
 
       task body Abortable_Waiter is
-         Requests : constant Gnatevl.IO.Wait_Request_Array :=
-           [1 => (FD, Gnatevl.IO.For_Read)];
+         Requests : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (FD, Flyology.IO.For_Read)];
          Ignored : Natural;
          pragma Unreferenced (Ignored);
       begin
          Started.Set;
-         Ignored := Gnatevl.IO.Wait_Any (Requests);
+         Ignored := Flyology.IO.Wait_Any (Requests);
       end Abortable_Waiter;
 
-      task type Followup_Waiter (FD : Gnatevl.IO.Descriptor) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+      task type Followup_Waiter (FD : Flyology.IO.Descriptor) is
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Followup_Waiter;
 
       task body Followup_Waiter is
-         Requests : constant Gnatevl.IO.Wait_Request_Array :=
-           [1 => (FD, Gnatevl.IO.For_Read)];
+         Requests : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (FD, Flyology.IO.For_Read)];
       begin
-         Result.Set (Gnatevl.IO.Wait_Any (Requests, 1.0) = 1);
+         Result.Set (Flyology.IO.Wait_Any (Requests, 1.0) = 1);
       exception
          when others => Result.Set (False);
       end Followup_Waiter;
@@ -282,10 +282,10 @@ begin
       Last : Ada.Streams.Stream_Element_Offset;
    begin
       GNAT.Sockets.Create_Socket_Pair (Left, Right);
-      Gnatevl.IO.Sockets.Prepare (Left);
+      Flyology.IO.Sockets.Prepare (Left);
       declare
-         FD : constant Gnatevl.IO.Descriptor :=
-           Gnatevl.IO.Sockets.Native_Descriptor (Left);
+         FD : constant Flyology.IO.Descriptor :=
+           Flyology.IO.Sockets.Native_Descriptor (Left);
          Victim : constant Abortable_Access := new Abortable_Waiter (FD);
          Limit : constant Ada.Real_Time.Time :=
            Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);

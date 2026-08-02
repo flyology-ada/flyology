@@ -1,5 +1,5 @@
 with Ada.Real_Time;
-with Gnatevl;
+with Flyology;
 
 procedure Timer_Heap_Smoke is
    use Ada.Real_Time;
@@ -40,7 +40,7 @@ procedure Timer_Heap_Smoke is
 begin
    declare
       task type Timed_Worker (Index : Positive) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Timed_Worker;
 
       task body Timed_Worker is
@@ -68,7 +68,7 @@ begin
 
    declare
       task type Cancelled_Timer is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Cancelled_Timer;
 
       task body Cancelled_Timer is

@@ -1,22 +1,22 @@
 with Ada.Real_Time;
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO.Connections;
-with Gnatevl.IO.Sockets;
-with Gnatevl.IO.Structured_Servers;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO.Connections;
+with Flyology.IO.Sockets;
+with Flyology.IO.Structured_Servers;
 with System.Multiprocessors;
 
 procedure Structured_Server_Smoke is
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
    package Sockets renames GNAT.Sockets;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Array;
-   use type Gnatevl.IO.Descriptor;
-   use type Gnatevl.Execution_Groups.Group_Id;
-   use type Gnatevl.Execution_Model;
+   use type Flyology.IO.Descriptor;
+   use type Flyology.Execution_Groups.Group_Id;
+   use type Flyology.Execution_Model;
    use type Sockets.Socket_Type;
 
    procedure Open_Listener
@@ -39,7 +39,7 @@ procedure Structured_Server_Smoke is
    end Open_Listener;
 
    generic
-      Model : Gnatevl.Execution_Model;
+      Model : Flyology.Execution_Model;
       CPU   : System.Multiprocessors.CPU_Range;
    procedure Run_Lane;
 
@@ -98,10 +98,10 @@ procedure Structured_Server_Smoke is
          Data : Ada.Streams.Stream_Element_Array (1 .. 1);
          pragma Unreferenced (Peer);
       begin
-         if Model = Gnatevl.Event_Loop_Task then
+         if Model = Flyology.Lightweight_Task then
             pragma Assert
-              (Gnatevl.Execution_Groups.Current =
-                 Gnatevl.Execution_Groups.Group_Id (CPU));
+              (Flyology.Execution_Groups.Current =
+                 Flyology.Execution_Groups.Group_Id (CPU));
          end if;
          State.State.Handler_Entered;
          case State.Mode is
@@ -119,7 +119,7 @@ procedure Structured_Server_Smoke is
          end case;
       end Handle;
 
-      package Structured is new Gnatevl.IO.Structured_Servers
+      package Structured is new Flyology.IO.Structured_Servers
         (Handler_Context => Context,
          Handle          => Handle,
          Handler_Model   => Model,
@@ -175,7 +175,7 @@ procedure Structured_Server_Smoke is
          declare
             task Runner;
             task type Client is
-               pragma Task_Info (Gnatevl.Native_Thread);
+               pragma Task_Info (Flyology.Native_Task);
             end Client;
 
             task body Runner is
@@ -191,9 +191,9 @@ procedure Structured_Server_Smoke is
                Got    : Ada.Streams.Stream_Element_Array (1 .. 1);
             begin
                Sockets.Create_Socket (Socket);
-               Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
-               Gnatevl.IO.Sockets.Send_All (Socket, Sent, Timeout => 1.0);
-               Gnatevl.IO.Sockets.Receive_Exactly
+               Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
+               Flyology.IO.Sockets.Send_All (Socket, Sent, Timeout => 1.0);
+               Flyology.IO.Sockets.Receive_Exactly
                  (Socket, Got, Timeout => 2.0);
                Results.Report (Got = Sent);
                Sockets.Close_Socket (Socket);
@@ -245,7 +245,7 @@ procedure Structured_Server_Smoke is
          declare
             task Runner;
             task Client is
-               pragma Task_Info (Gnatevl.Native_Thread);
+               pragma Task_Info (Flyology.Native_Task);
             end Client;
 
             task body Runner is
@@ -260,10 +260,10 @@ procedure Structured_Server_Smoke is
                  (1 => 7);
             begin
                Sockets.Create_Socket (Socket);
-               Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
+               Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
                State.State.Client_Ready;
                State.State.Await_Gate;
-               Gnatevl.IO.Sockets.Send_All (Socket, Data, Timeout => 1.0);
+               Flyology.IO.Sockets.Send_All (Socket, Data, Timeout => 1.0);
                Sockets.Close_Socket (Socket);
             end Client;
          begin
@@ -296,7 +296,7 @@ procedure Structured_Server_Smoke is
          declare
             task Runner;
             task Client is
-               pragma Task_Info (Gnatevl.Native_Thread);
+               pragma Task_Info (Flyology.Native_Task);
             end Client;
 
             task body Runner is
@@ -309,7 +309,7 @@ procedure Structured_Server_Smoke is
                Socket : Sockets.Socket_Type;
             begin
                Sockets.Create_Socket (Socket);
-               Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
+               Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
                delay 0.100;
                Sockets.Close_Socket (Socket);
             end Client;
@@ -338,7 +338,7 @@ procedure Structured_Server_Smoke is
          declare
             task Runner;
             task Client is
-               pragma Task_Info (Gnatevl.Native_Thread);
+               pragma Task_Info (Flyology.Native_Task);
             end Client;
 
             task body Runner is
@@ -356,7 +356,7 @@ procedure Structured_Server_Smoke is
                Socket : Sockets.Socket_Type;
             begin
                Sockets.Create_Socket (Socket);
-               Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
+               Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
                delay 0.020;
                Sockets.Close_Socket (Socket);
             end Client;
@@ -377,13 +377,13 @@ procedure Structured_Server_Smoke is
          State    : aliased Context := (Mode => Draining_Read, others => <>);
          Listener : Sockets.Socket_Type;
          Address  : Sockets.Sock_Addr_Type;
-         Old_FD   : Gnatevl.IO.Descriptor;
+         Old_FD   : Flyology.IO.Descriptor;
 
          function Is_Running return Boolean is
            (Structured.Current (Item).Running);
       begin
          Open_Listener (Listener, Address);
-         Old_FD := Gnatevl.IO.Sockets.Native_Descriptor (Listener);
+         Old_FD := Flyology.IO.Sockets.Native_Descriptor (Listener);
          declare
             task Runner;
             task First_Stop is entry Go; end First_Stop;
@@ -418,7 +418,7 @@ procedure Structured_Server_Smoke is
          begin
             Sockets.Create_Socket (Reused);
             pragma Assert
-              (Gnatevl.IO.Sockets.Native_Descriptor (Reused) = Old_FD);
+              (Flyology.IO.Sockets.Native_Descriptor (Reused) = Old_FD);
             Sockets.Close_Socket (Reused);
          end;
          pragma Assert (Structured.Current (Item).Active_Handlers = 0);
@@ -457,13 +457,13 @@ procedure Structured_Server_Smoke is
       Run_Pre_Requested_Shutdown;
    end Run_Lane;
 
-   procedure Run_Evented is new Run_Lane
-     (Model => Gnatevl.Event_Loop_Task,
+   procedure Run_Lightweight is new Run_Lane
+     (Model => Flyology.Lightweight_Task,
       CPU   => 1);
    procedure Run_Native is new Run_Lane
-     (Model => Gnatevl.Native_Thread,
+     (Model => Flyology.Native_Task,
       CPU   => System.Multiprocessors.Not_A_Specific_CPU);
 begin
-   Run_Evented;
+   Run_Lightweight;
    Run_Native;
 end Structured_Server_Smoke;

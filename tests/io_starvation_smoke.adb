@@ -1,9 +1,9 @@
 with Ada.Real_Time;
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Sockets;
-with Gnatevl.IO.Timers;
+with Flyology;
+with Flyology.IO.Sockets;
+with Flyology.IO.Timers;
 
 procedure IO_Starvation_Smoke is
    use Ada.Real_Time;
@@ -53,14 +53,14 @@ begin
 
    declare
       task Spinner is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Spinner;
 
       task Reader is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Reader;
       task Writer is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Writer;
 
       task body Spinner is
@@ -75,7 +75,7 @@ begin
          Started  : constant Time := Clock;
          Elapsed  : Duration;
       begin
-         Gnatevl.IO.Sockets.Receive_Exactly
+         Flyology.IO.Sockets.Receive_Exactly
            (Reader_Socket, Incoming, Timeout => 1.0);
          Elapsed := To_Duration (Clock - Started);
          Results.Reader_Finished
@@ -87,8 +87,8 @@ begin
 
       task body Writer is
       begin
-         Gnatevl.IO.Timers.Sleep_For (0.050);
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Timers.Sleep_For (0.050);
+         Flyology.IO.Sockets.Send_All
            (Writer_Socket, Payload, Timeout => 1.0);
          Results.Writer_Finished (True);
       exception

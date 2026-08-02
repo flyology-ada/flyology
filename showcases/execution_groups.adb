@@ -1,12 +1,12 @@
 with Ada.Exceptions;
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
+with Flyology;
+with Flyology.Execution_Groups;
 with Interfaces.C;
 with Showcase_Support;
 
 procedure Execution_Groups is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
    package C renames Interfaces.C;
 
    use type C.int;
@@ -80,22 +80,22 @@ procedure Execution_Groups is
    end Show;
 
    task Group_One_Peer with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_Peer;
 
    task Group_Two_Peer with CPU => 2 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_Two_Peer;
 
    task Heartbeat with CPU => 2 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Heartbeat;
 
    task Migrator with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Migrator;
    task Native_Task is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native_Task;
 
    task body Group_One_Peer is
@@ -173,7 +173,7 @@ procedure Execution_Groups is
       Rejected : Boolean := False;
    begin
       Ada.Text_IO.Put_Line
-        ("stock Native_Thread pthread=" & Showcase_Support.Thread_Image);
+        ("stock Native_Task pthread=" & Showcase_Support.Thread_Image);
       begin
          Groups.Migrate (Groups.Default_Group);
       exception

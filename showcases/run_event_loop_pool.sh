@@ -48,7 +48,7 @@ run_gprbuild () {
 }
 
 restore_default () {
-  GNATEVL_DEFAULT=native GNATEVL_LOOP_POOL_SIZE=1 \
+  FLYOLOGY_DEFAULT=native FLYOLOGY_LOOP_POOL_SIZE=1 \
     "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1 || true
 }
 trap restore_default EXIT HUP INT TERM
@@ -59,9 +59,9 @@ printf '%s\n' \
   "Groups are execution lanes, not physical-CPU pins; the OS decides where each loop pthread runs."
 
 for loops in 1 "$pool_size"; do
-  GNATEVL_DEFAULT=native \
-  GNATEVL_LOOP_POOL_SIZE=$loops \
-  GNATEVL_PLACEMENT=round_robin \
+  FLYOLOGY_DEFAULT=native \
+  FLYOLOGY_LOOP_POOL_SIZE=$loops \
+  FLYOLOGY_PLACEMENT=round_robin \
     "$project_root/scripts/prepare-rts.sh" >/dev/null
   run_gprbuild \
     --RTS="$project_root/build/rts" \

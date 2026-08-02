@@ -7,22 +7,22 @@ with Ada.Streams;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO;
-with Gnatevl.IO.Files;
-with Gnatevl.IO.Sockets;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO;
+with Flyology.IO.Files;
+with Flyology.IO.Sockets;
 with System;
 
 procedure Stress_Randomized is
    use Ada.Streams;
    use type Ada.Real_Time.Time;
-   use type Gnatevl.Execution_Groups.Group_Id;
-   use type Gnatevl.IO.Files.File_Descriptor;
-   use type Gnatevl.IO.Wait_Outcome;
+   use type Flyology.Execution_Groups.Group_Id;
+   use type Flyology.IO.Files.File_Descriptor;
+   use type Flyology.IO.Wait_Outcome;
 
-   package Groups renames Gnatevl.Execution_Groups;
-   package Files renames Gnatevl.IO.Files;
+   package Groups renames Flyology.Execution_Groups;
+   package Files renames Flyology.IO.Files;
    package Random_Natural is new Ada.Numerics.Discrete_Random (Natural);
 
    function Argument
@@ -35,7 +35,7 @@ procedure Stress_Randomized is
    Seed        : constant Positive := Argument (1, 1);
    Batch_Count : constant Positive := Argument (2, 8);
    Width       : constant Positive := Argument (3, 24);
-   Path        : constant String := "/tmp/gnatevl-stress-" & Seed'Image;
+   Path        : constant String := "/tmp/flyology-stress-" & Seed'Image;
 
    Generator : Random_Natural.Generator;
 
@@ -76,19 +76,19 @@ procedure Stress_Randomized is
       function Passed return Boolean is (All_OK);
    end Progress;
 
-   task Evented_Server is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   task Lightweight_Server is
+      pragma Task_Info (Flyology.Lightweight_Task);
       entry Ping (Value : Natural; Reply : out Natural);
       entry Stop;
-   end Evented_Server;
+   end Lightweight_Server;
 
    task Native_Server is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
       entry Ping (Value : Natural; Reply : out Natural);
       entry Stop;
    end Native_Server;
 
-   task body Evented_Server is
+   task body Lightweight_Server is
    begin
       loop
          select
@@ -100,7 +100,7 @@ procedure Stress_Randomized is
             exit;
          end select;
       end loop;
-   end Evented_Server;
+   end Lightweight_Server;
 
    task body Native_Server is
    begin
@@ -117,7 +117,7 @@ procedure Stress_Randomized is
    end Native_Server;
 
    procedure Exercise_Abort (Ordinal : Positive) is
-      task type Abortee (Kind : Gnatevl.Execution_Model) is
+      task type Abortee (Kind : Flyology.Execution_Model) is
          pragma Task_Info (Kind);
       end Abortee;
 
@@ -134,8 +134,8 @@ procedure Stress_Randomized is
       Victim : Abortee_Access :=
         new Abortee
           ((if Ordinal mod 2 = 0
-            then Gnatevl.Event_Loop_Task
-            else Gnatevl.Native_Thread));
+            then Flyology.Lightweight_Task
+            else Flyology.Native_Task));
       Limit : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
@@ -157,7 +157,7 @@ begin
       raise Constraint_Error with "stress width must be at most 512";
    end if;
    Ada.Text_IO.Put_Line
-     ("GNATEVL stress seed=" & Seed'Image
+     ("Flyology stress seed=" & Seed'Image
       & " batches=" & Batch_Count'Image
       & " width=" & Width'Image);
    Random_Natural.Reset (Generator, Integer (Seed));
@@ -187,7 +187,7 @@ begin
 
          task type Worker
            (Index : Positive;
-            Kind  : Gnatevl.Execution_Model;
+            Kind  : Flyology.Execution_Model;
             Plan  : Natural)
          is
             pragma Task_Info (Kind);
@@ -211,11 +211,11 @@ begin
               Groups.Shared_Group_Id (1 + (Plan + 1) mod 4);
             Rejected : Boolean := False;
             OK       : Boolean := True;
-            Outcome  : Gnatevl.IO.Wait_Outcome;
+            Outcome  : Flyology.IO.Wait_Outcome;
             Will_Interrupt : constant Boolean := Plan mod 3 = 0;
          begin
             Ada.Dynamic_Priorities.Set_Priority (Changed);
-            if Gnatevl.IO.Is_Evented_Task then
+            if Flyology.IO.Is_Lightweight_Task then
                Groups.Migrate (Destination);
                declare
                   Pin : Groups.Thread_Pin := Groups.Pin_To_Current_Thread;
@@ -236,7 +236,7 @@ begin
                Native_Server.Ping (Plan, Reply);
                OK := OK and then Reply = Plan + 16#A5A5#;
             else
-               Evented_Server.Ping (Plan, Reply);
+               Lightweight_Server.Ping (Plan, Reply);
                OK := Reply = Plan + 16#5A5A#;
             end if;
 
@@ -245,25 +245,25 @@ begin
             else
                delay 0.0;
             end if;
-            OK := OK and then Gnatevl.IO.Wait_Interruptibly
-              (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
-               Gnatevl.IO.For_Read,
+            OK := OK and then Flyology.IO.Wait_Interruptibly
+              (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
+               Flyology.IO.For_Read,
                Timeout     => 0.0,
-               Interrupt_1 => Gnatevl.IO.Descriptor
+               Interrupt_1 => Flyology.IO.Descriptor
                  (GNAT.Sockets.To_C (Interrupt_Readers (Index))))
-              = Gnatevl.IO.Timed_Out;
+              = Flyology.IO.Timed_Out;
             State.Started;
-            Outcome := Gnatevl.IO.Wait_Interruptibly
-              (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
-               Gnatevl.IO.For_Read,
+            Outcome := Flyology.IO.Wait_Interruptibly
+              (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
+               Flyology.IO.For_Read,
                Timeout     => 2.0,
-               Interrupt_1 => Gnatevl.IO.Descriptor
+               Interrupt_1 => Flyology.IO.Descriptor
                  (GNAT.Sockets.To_C (Interrupt_Readers (Index))));
             if Will_Interrupt then
-               OK := OK and then Outcome = Gnatevl.IO.Interrupted;
+               OK := OK and then Outcome = Flyology.IO.Interrupted;
             else
-               OK := OK and then Outcome = Gnatevl.IO.Ready;
-               Gnatevl.IO.Sockets.Receive_Exactly
+               OK := OK and then Outcome = Flyology.IO.Ready;
+               Flyology.IO.Sockets.Receive_Exactly
                  (Readers (Index), Incoming, Timeout => 2.0);
                OK := OK
                  and then Incoming (1) = Stream_Element (Plan mod 251);
@@ -296,18 +296,18 @@ begin
               new Worker
                 (Index,
                  (if (Plans (Index) + Batch) mod 2 = 0
-                  then Gnatevl.Event_Loop_Task
-                  else Gnatevl.Native_Thread),
+                  then Flyology.Lightweight_Task
+                  else Flyology.Native_Task),
                  Plans (Index));
          end loop;
 
          State.Await_Started;
          for Index in 1 .. Width loop
             if Plans (Index) mod 3 = 0 then
-               Gnatevl.IO.Sockets.Send_All
+               Flyology.IO.Sockets.Send_All
                  (Interrupt_Peers (Index), [1 => 1], Timeout => 2.0);
             else
-               Gnatevl.IO.Sockets.Send_All
+               Flyology.IO.Sockets.Send_All
                  (Peers (Index),
                   [1 => Stream_Element (Plans (Index) mod 251)],
                   Timeout => 2.0);
@@ -339,10 +339,10 @@ begin
 
    Files.Close (File);
    Ada.Directories.Delete_File (Path);
-   Evented_Server.Stop;
+   Lightweight_Server.Stop;
    Native_Server.Stop;
    Ada.Text_IO.Put_Line
-     ("GNATEVL stress passed seed=" & Seed'Image
+     ("Flyology stress passed seed=" & Seed'Image
       & " operations=" & Positive'Image (Batch_Count * Width));
 exception
    when others =>

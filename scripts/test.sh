@@ -23,15 +23,15 @@ run_gprbuild () {
 
 "$alr" build
 
-GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
+FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
   -P tests/runtime_smoke.gpr \
   default_policy_smoke.adb
-"$project_root/tests/bin/default_policy_smoke" evented
+"$project_root/tests/bin/default_policy_smoke" lightweight
 
-GNATEVL_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
+FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
@@ -39,49 +39,49 @@ run_gprbuild \
   default_policy_smoke.adb
 "$project_root/tests/bin/default_policy_smoke" native
 
-if GNATEVL_LOOP_POOL_SIZE=0 \
+if FLYOLOGY_LOOP_POOL_SIZE=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "invalid zero-sized event-loop pool was accepted" >&2
   exit 1
 fi
-if GNATEVL_PLACEMENT=unknown \
+if FLYOLOGY_PLACEMENT=unknown \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "unknown event-loop placement policy was accepted" >&2
   exit 1
 fi
-if GNATEVL_SANITIZER=unknown \
+if FLYOLOGY_SANITIZER=unknown \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "unknown sanitizer configuration was accepted" >&2
   exit 1
 fi
-if GNATEVL_TEST_DENY_IO_URING=unknown \
+if FLYOLOGY_TEST_DENY_IO_URING=unknown \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "unknown io_uring test denial setting was accepted" >&2
   exit 1
 fi
-if GNATEVL_LOOP_PLACEMENT=unknown \
+if FLYOLOGY_LOOP_PLACEMENT=unknown \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "unknown loop-thread placement was accepted" >&2
   exit 1
 fi
-if GNATEVL_LOOP_PLACEMENT=none GNATEVL_LOOP_PLACEMENT_MAP=0:0 \
+if FLYOLOGY_LOOP_PLACEMENT=none FLYOLOGY_LOOP_PLACEMENT_MAP=0:0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "loop-thread map without a policy was accepted" >&2
   exit 1
 fi
-if GNATEVL_LOOP_PLACEMENT=advisory GNATEVL_LOOP_PLACEMENT_MAP=0:0 \
+if FLYOLOGY_LOOP_PLACEMENT=advisory FLYOLOGY_LOOP_PLACEMENT_MAP=0:0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "zero Darwin advisory tag was accepted" >&2
   exit 1
 fi
-if GNATEVL_LOOP_PLACEMENT=advisory GNATEVL_LOOP_PLACEMENT_MAP=0:1,0:2 \
+if FLYOLOGY_LOOP_PLACEMENT=advisory FLYOLOGY_LOOP_PLACEMENT_MAP=0:1,0:2 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
   printf '%s\n' "duplicate loop-thread map group was accepted" >&2
@@ -89,8 +89,8 @@ then
 fi
 case "$(uname -s):$(uname -m)" in
   Linux:*)
-    if placement_error=$(GNATEVL_LOOP_PLACEMENT=strict \
-      GNATEVL_LOOP_PLACEMENT_MAP=0:2147483647 \
+    if placement_error=$(FLYOLOGY_LOOP_PLACEMENT=strict \
+      FLYOLOGY_LOOP_PLACEMENT_MAP=0:2147483647 \
       "$project_root/scripts/prepare-rts.sh" 2>&1)
     then
       printf '%s\n' "unavailable Linux placement CPU was accepted" >&2
@@ -105,7 +105,7 @@ case "$(uname -s):$(uname -m)" in
     esac
     ;;
   Darwin:arm64)
-    if GNATEVL_LOOP_PLACEMENT=advisory GNATEVL_LOOP_PLACEMENT_MAP=0:1 \
+    if FLYOLOGY_LOOP_PLACEMENT=advisory FLYOLOGY_LOOP_PLACEMENT_MAP=0:1 \
       "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
     then
       printf '%s\n' "unsupported arm64 Darwin affinity tag was accepted" >&2
@@ -180,9 +180,9 @@ done
 #  Exercise automatic placement separately because the pool policy is compiled
 #  into the prepared RTS. The ordinary suite above intentionally retains the
 #  compatibility default of one lazily created loop.
-GNATEVL_DEFAULT=native \
-GNATEVL_LOOP_POOL_SIZE=3 \
-GNATEVL_PLACEMENT=round_robin \
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+FLYOLOGY_PLACEMENT=round_robin \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \
   --RTS="$project_root/build/rts" \
@@ -211,9 +211,9 @@ case "$(uname -s)" in
     ;;
 esac
 if [ "$loop_placement" != none ]; then
-  GNATEVL_DEFAULT=native \
-  GNATEVL_LOOP_PLACEMENT="$loop_placement" \
-  GNATEVL_LOOP_PLACEMENT_MAP="6:$loop_placement_value" \
+  FLYOLOGY_DEFAULT=native \
+  FLYOLOGY_LOOP_PLACEMENT="$loop_placement" \
+  FLYOLOGY_LOOP_PLACEMENT_MAP="6:$loop_placement_value" \
     "$project_root/scripts/prepare-rts.sh" >/dev/null
   run_gprbuild \
     --RTS="$project_root/build/rts" \
@@ -224,8 +224,8 @@ if [ "$loop_placement" != none ]; then
 fi
 
 #  Leave the worktree with the documented compatibility configuration.
-GNATEVL_DEFAULT=native \
-GNATEVL_LOOP_POOL_SIZE=1 \
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 
 #  Prove that a separate Alire workspace can locate the crate, prepare its own

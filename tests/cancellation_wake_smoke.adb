@@ -1,14 +1,14 @@
 with Ada.Real_Time;
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO;
-with Gnatevl.IO.Connections;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.IO;
+with Flyology.IO.Connections;
+with Flyology.Observability;
 with Interfaces;
 
 procedure Cancellation_Wake_Smoke is
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
    use type Ada.Real_Time.Time;
    use type Interfaces.Unsigned_64;
 
@@ -55,7 +55,7 @@ procedure Cancellation_Wake_Smoke is
       end Progress;
 
       task type Worker
-        (Index : Positive; Model : Gnatevl.Execution_Model)
+        (Index : Positive; Model : Flyology.Execution_Model)
       is
          pragma Task_Info (Model);
          pragma Storage_Size (64 * 1_024);
@@ -88,7 +88,7 @@ procedure Cancellation_Wake_Smoke is
       Workers : array (Servers'Range) of Worker_Access;
       pragma Unreferenced (Workers);
       Cancelled_At : Ada.Real_Time.Time;
-      Sample : Gnatevl.Observability.Group_Snapshot;
+      Sample : Flyology.Observability.Group_Snapshot;
       Park_Deadline : Ada.Real_Time.Time;
    begin
       for Index in Servers'Range loop
@@ -96,20 +96,20 @@ procedure Cancellation_Wake_Smoke is
       end loop;
       for Index in Servers'Range loop
          Workers (Index) :=
-           new Worker (Index, Gnatevl.Event_Loop_Task);
+           new Worker (Index, Flyology.Lightweight_Task);
       end loop;
       Progress.All_Started;
       Park_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
       loop
-         pragma Assert (Gnatevl.Observability.Snapshot (0, Sample));
+         pragma Assert (Flyology.Observability.Snapshot (0, Sample));
          exit when
-           Sample.Interrupt_Waits = Gnatevl.Observability.Counter (Scale)
+           Sample.Interrupt_Waits = Flyology.Observability.Counter (Scale)
            and then
-             Sample.Descriptor_Waits = Gnatevl.Observability.Counter (Scale);
+             Sample.Descriptor_Waits = Flyology.Observability.Counter (Scale);
          if Ada.Real_Time.Clock >= Park_Deadline then
             Token.Request;
             raise Program_Error with
-              "evented cancellable connections did not reach the poller";
+              "lightweight cancellable connections did not reach the poller";
          end if;
          delay 0.001;
       end loop;
@@ -158,7 +158,7 @@ procedure Cancellation_Wake_Smoke is
             Timeout_Owned.Receive_Exactly
               (Data, Timeout => 0.030, Cancellation_Quantum => 10.0);
          exception
-            when Gnatevl.IO.Timeout_Error =>
+            when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
          end;
       end;
@@ -199,7 +199,7 @@ procedure Cancellation_Wake_Smoke is
       GNAT.Sockets.Create_Socket_Pair (Server, Peer);
       declare
          task Worker is
-            pragma Task_Info (Gnatevl.Event_Loop_Task);
+            pragma Task_Info (Flyology.Lightweight_Task);
          end Worker;
          task body Worker is
             Owned : Connections.Connection;

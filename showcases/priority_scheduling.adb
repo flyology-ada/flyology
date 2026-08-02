@@ -1,12 +1,12 @@
 with Ada.Synchronous_Task_Control;
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Observability;
 with Interfaces;
 
 procedure Priority_Scheduling is
    package STC renames Ada.Synchronous_Task_Control;
-   package Observation renames Gnatevl.Observability;
+   package Observation renames Flyology.Observability;
 
    use type Interfaces.Unsigned_64;
 
@@ -55,22 +55,22 @@ procedure Priority_Scheduling is
 
    task Low_A with CPU => 1 is
       pragma Priority (5);
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Low_A;
 
    task Low_B with CPU => 1 is
       pragma Priority (5);
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Low_B;
 
    task High with CPU => 1 is
       pragma Priority (20);
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end High;
 
    task Blocker with CPU => 1 is
       pragma Priority (25);
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Blocker;
 
    task body Low_A is
@@ -123,7 +123,7 @@ begin
    Results.Await_All;
 
    Ada.Text_IO.Put_Line
-     ("evented group 1 dispatch trace: " & Results.Trace);
+     ("lightweight group 1 dispatch trace: " & Results.Trace);
    Ada.Text_IO.Put_Line
      ("expected: H first (priority 20), then A/B FIFO (priority 5)");
    Ada.Text_IO.Put_Line

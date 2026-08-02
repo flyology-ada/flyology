@@ -1,17 +1,17 @@
 with Ada.Dynamic_Priorities;
 with Ada.Real_Time;
 with Ada.Synchronous_Task_Control;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.Observability;
 with Interfaces;
 
 procedure Priority_Semantics_Smoke is
    package Priorities renames Ada.Dynamic_Priorities;
    package RT renames Ada.Real_Time;
    package STC renames Ada.Synchronous_Task_Control;
-   package Groups renames Gnatevl.Execution_Groups;
-   package Observation renames Gnatevl.Observability;
+   package Groups renames Flyology.Execution_Groups;
+   package Observation renames Flyology.Observability;
 
    use type Interfaces.Unsigned_64;
    use type RT.Time;
@@ -88,17 +88,17 @@ procedure Priority_Semantics_Smoke is
 
       task A with CPU => 1 is
          pragma Priority (5);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end A;
 
       task B with CPU => 1 is
          pragma Priority (10);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end B;
 
       task Blocker with CPU => 1 is
          pragma Priority (25);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
 
       task body A is
@@ -173,12 +173,12 @@ procedure Priority_Semantics_Smoke is
 
       task Controller with CPU => 1 is
          pragma Priority (20);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Controller;
 
       task Competitor with CPU => 1 is
          pragma Priority (10);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Competitor;
 
       task body Controller is
@@ -188,7 +188,7 @@ procedure Priority_Semantics_Smoke is
          STC.Set_True (Competitor_Gate);
          --  Ada.Dynamic_Priorities supplies the required task dispatching
          --  point. The scheduler update itself must not invent preemption in
-         --  the middle of arbitrary evented code.
+         --  the middle of arbitrary lightweight code.
          Priorities.Set_Priority (5);
          Result.Record_Run (1);
       end Controller;
@@ -276,28 +276,28 @@ procedure Priority_Semantics_Smoke is
 
       task Server with CPU => 3 is
          pragma Priority (5);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          entry Work;
       end Server;
 
       task Caller with CPU => 3 is
          pragma Priority (20);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Caller;
 
       task Medium with CPU => 3 is
          pragma Priority (10);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Medium;
 
       task Peer with CPU => 3 is
          pragma Priority (5);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Peer;
 
       task Blocker with CPU => 3 is
          pragma Priority (25);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
 
       task body Server is
@@ -427,23 +427,23 @@ procedure Priority_Semantics_Smoke is
 
       task Server with CPU => 4 is
          pragma Priority (5);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          entry Work;
       end Server;
 
       task Caller with CPU => 4 is
          pragma Priority (20);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Caller;
 
       task Peer with CPU => 4 is
          pragma Priority (5);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Peer;
 
       task Blocker with CPU => 4 is
          pragma Priority (25);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
 
       task body Server is
@@ -551,17 +551,17 @@ procedure Priority_Semantics_Smoke is
 
       task Migrant with CPU => 1 is
          pragma Priority (20);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Migrant;
 
       task Local with CPU => 2 is
          pragma Priority (10);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Local;
 
       task Blocker with CPU => 2 is
          pragma Priority (25);
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
 
       task body Migrant is
@@ -598,7 +598,7 @@ procedure Priority_Semantics_Smoke is
       Result.Await_Done;
       if not Result.Passed then
          raise Program_Error with
-           "migration did not preserve evented task priority";
+           "migration did not preserve lightweight task priority";
       end if;
    end Check_Migration_Priority;
 

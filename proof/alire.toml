@@ -1,5 +1,5 @@
-name = "gnatevl_proof"
-description = "Development-only SPARK proof harness for GNATEVL"
+name = "flyology_proof"
+description = "Development-only SPARK proof harness for Flyology"
 version = "0.1.0-dev"
 
 authors = ["Yurii Rashkovskii"]
@@ -10,8 +10,8 @@ tags = ["ada", "spark", "proof"]
 project-files = ["runtime_policy.gpr"]
 
 [[depends-on]]
-gnatevl = "*"
+flyology = "*"
 gnatprove = "^16.1.0"
 
 [[pins]]
-gnatevl = { path = ".." }
+flyology = { path = ".." }

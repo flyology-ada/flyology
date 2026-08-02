@@ -36,18 +36,18 @@ package Fault_Control is
 
 private
    function C_Enabled return Interfaces.C.int;
-   pragma Import (C, C_Enabled, "gnatevl_test_faults_enabled");
+   pragma Import (C, C_Enabled, "flyology_test_faults_enabled");
 
    procedure C_Reset;
-   pragma Import (C, C_Reset, "gnatevl_test_fault_reset");
+   pragma Import (C, C_Reset, "flyology_test_fault_reset");
 
    function C_Arm
      (At_Point : Interfaces.C.int;
       First    : Interfaces.C.unsigned;
       Count    : Interfaces.C.unsigned) return Interfaces.C.int;
-   pragma Import (C, C_Arm, "gnatevl_test_fault_arm");
+   pragma Import (C, C_Arm, "flyology_test_fault_arm");
 
    function C_Calls
      (At_Point : Interfaces.C.int) return Interfaces.C.unsigned;
-   pragma Import (C, C_Calls, "gnatevl_test_fault_calls");
+   pragma Import (C, C_Calls, "flyology_test_fault_calls");
 end Fault_Control;

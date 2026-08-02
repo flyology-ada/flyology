@@ -1,6 +1,6 @@
 with Ada.Real_Time;
-with Gnatevl;
-with Gnatevl.Fairness;
+with Flyology;
+with Flyology.Fairness;
 
 procedure Fairness_Smoke is
    use Ada.Real_Time;
@@ -58,15 +58,15 @@ procedure Fairness_Smoke is
    end State;
 
    task CPU_Work is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end CPU_Work;
 
    task Pulse is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Pulse;
 
    task body CPU_Work is
-      Budget  : Gnatevl.Fairness.Yield_Budget;
+      Budget  : Flyology.Fairness.Yield_Budget;
       Started : Time;
       Stop_At : Time;
       Value   : Long_Long_Integer := 1;

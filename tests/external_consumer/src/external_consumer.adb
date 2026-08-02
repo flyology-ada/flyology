@@ -1,17 +1,17 @@
 with Ada.Command_Line;
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.IO;
-with Gnatevl.IO.Timers;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.IO;
+with Flyology.IO.Timers;
+with Flyology.Observability;
 
 procedure External_Consumer is
-   Expected_Evented : constant Boolean :=
+   Expected_Lightweight : constant Boolean :=
      Ada.Command_Line.Argument_Count = 1
-     and then Ada.Command_Line.Argument (1) = "evented";
+     and then Ada.Command_Line.Argument (1) = "lightweight";
 
    protected Observation is
-      procedure Report (Evented : Boolean);
+      procedure Report (Lightweight : Boolean);
       entry Wait;
       function Passed return Boolean;
    private
@@ -20,9 +20,9 @@ procedure External_Consumer is
    end Observation;
 
    protected body Observation is
-      procedure Report (Evented : Boolean) is
+      procedure Report (Lightweight : Boolean) is
       begin
-         OK := Evented = Expected_Evented;
+         OK := Lightweight = Expected_Lightweight;
          Done := True;
       end Report;
 
@@ -34,38 +34,38 @@ procedure External_Consumer is
       function Passed return Boolean is (OK);
    end Observation;
 
-   task type Default_Worker (Model : Gnatevl.Execution_Model) is
+   task type Default_Worker (Model : Flyology.Execution_Model) is
       pragma Task_Info (Model);
    end Default_Worker;
 
    task body Default_Worker is
    begin
-      Gnatevl.IO.Timers.Sleep_For (0.001);
-      Observation.Report (Gnatevl.IO.Is_Evented_Task);
+      Flyology.IO.Timers.Sleep_For (0.001);
+      Observation.Report (Flyology.IO.Is_Lightweight_Task);
    end Default_Worker;
 
    type Default_Worker_Access is access Default_Worker;
-   Snapshot : Gnatevl.Observability.Group_Snapshot;
+   Snapshot : Flyology.Observability.Group_Snapshot;
 begin
    if Ada.Command_Line.Argument_Count /= 1
      or else
        (Ada.Command_Line.Argument (1) /= "native"
-        and then Ada.Command_Line.Argument (1) /= "evented")
+        and then Ada.Command_Line.Argument (1) /= "lightweight")
    then
-      raise Program_Error with "expected native or evented argument";
+      raise Program_Error with "expected native or lightweight argument";
    end if;
 
-   if Gnatevl.IO.Is_Evented_Task then
-      raise Program_Error with "environment task became evented";
+   if Flyology.IO.Is_Lightweight_Task then
+      raise Program_Error with "environment task became lightweight";
    end if;
 
-   if Gnatevl.Observability.Snapshot (0, Snapshot) then
+   if Flyology.Observability.Snapshot (0, Snapshot) then
       raise Program_Error with "event loop started before opt-in";
    end if;
 
    declare
       Worker : constant Default_Worker_Access :=
-        new Default_Worker (Gnatevl.Project_Default);
+        new Default_Worker (Flyology.Project_Default);
       pragma Unreferenced (Worker);
    begin
       Observation.Wait;
@@ -75,7 +75,7 @@ begin
       raise Program_Error with "prepared project default was not honored";
    end if;
 
-   if Gnatevl.Observability.Snapshot (0, Snapshot) /= Expected_Evented then
+   if Flyology.Observability.Snapshot (0, Snapshot) /= Expected_Lightweight then
       raise Program_Error with "runtime machinery inertness did not match mode";
    end if;
 

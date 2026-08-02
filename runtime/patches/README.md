@@ -17,7 +17,7 @@ task-primitives shape and needs its own patch family before it can be enabled.
 Platform-specific changes live in `darwin/` and `linux/`; changes shared by
 both GNARL implementations live in `common/`.
 
-The common task-stages patch also invokes GNATEVL's one-shot finalizer after
+The common task-stages patch also invokes Flyology's one-shot finalizer after
 GNARL has completed global tasks and controlled library objects. This placement
 is part of the patch-family contract: moving it earlier would race live task
 stacks, while omitting it leaves internal scheduler pthreads and pollers for the

@@ -48,12 +48,12 @@ printf '%s\n' \
   "RSS includes the Ada task state common to both; compare OS threads and address space."
 
 printf '%s\n' \
-  "== evented scale run: $scale_connections live socket connections =="
-"$showcase_root/bin/connection_density" evented "$scale_connections"
+  "== lightweight scale run: $scale_connections live socket connections =="
+"$showcase_root/bin/connection_density" lightweight "$scale_connections"
 
 printf '\n%s\n' \
   "== same-load comparison: $comparison_connections connections =="
-"$showcase_root/bin/connection_density" evented "$comparison_connections"
+"$showcase_root/bin/connection_density" lightweight "$comparison_connections"
 "$showcase_root/bin/connection_density" native "$comparison_connections"
 
 printf '\n%s\n' \

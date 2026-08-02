@@ -2,14 +2,14 @@ with Ada.Directories;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.DNS;
-with Gnatevl.IO.DNS.Testing;
-with Gnatevl.IO.Files;
-with Gnatevl.Wake_Sources;
+with Flyology;
+with Flyology.IO.DNS;
+with Flyology.IO.DNS.Testing;
+with Flyology.IO.Files;
+with Flyology.Wake_Sources;
 
 procedure DNS_Smoke is
-   package DNS renames Gnatevl.IO.DNS;
+   package DNS renames Flyology.IO.DNS;
    package Sockets renames GNAT.Sockets;
    package Streams renames Ada.Streams;
 
@@ -17,10 +17,10 @@ procedure DNS_Smoke is
    use type Streams.Stream_Element;
    use type Sockets.Socket_Type;
    use type Sockets.Selector_Status;
-   use type Gnatevl.IO.Files.File_Descriptor;
+   use type Flyology.IO.Files.File_Descriptor;
 
-   procedure Run (Model : Gnatevl.Execution_Model) is
-      Cancel_Source : aliased Gnatevl.Wake_Sources.Source;
+   procedure Run (Model : Flyology.Execution_Model) is
+      Cancel_Source : aliased Flyology.Wake_Sources.Source;
 
       protected Control is
          procedure Ready (Address : Sockets.Sock_Addr_Type);
@@ -59,15 +59,15 @@ procedure DNS_Smoke is
       function Config_Path
         (Server : Sockets.Sock_Addr_Type) return String is
       begin
-         return "/tmp/gnatevl-dns-smoke-"
+         return "/tmp/flyology-dns-smoke-"
            & Ada.Strings.Fixed.Trim
              (Sockets.Port_Type'Image (Server.Port), Ada.Strings.Both)
            & ".conf";
       end Config_Path;
 
       procedure Write_Config (Server : Sockets.Sock_Addr_Type) is
-         File : Gnatevl.IO.Files.File_Descriptor :=
-           Gnatevl.IO.Files.Invalid_File;
+         File : Flyology.IO.Files.File_Descriptor :=
+           Flyology.IO.Files.Invalid_File;
          Text : constant String :=
            ASCII.HT & "nameserver" & ASCII.HT
            & Sockets.Image (Server) & ASCII.HT & ASCII.LF
@@ -82,16 +82,16 @@ procedure DNS_Smoke is
               (Streams.Stream_Element_Offset (Index - Text'First + 1)) :=
                 Character'Pos (Text (Index));
          end loop;
-         File := Gnatevl.IO.Files.Open
-           (Config_Path (Server), Gnatevl.IO.Files.Write_Only,
+         File := Flyology.IO.Files.Open
+           (Config_Path (Server), Flyology.IO.Files.Write_Only,
             Create => True, Truncate => True);
-         Gnatevl.IO.Files.Write_At (File, 0, Data, Last);
-         Gnatevl.IO.Files.Close (File);
+         Flyology.IO.Files.Write_At (File, 0, Data, Last);
+         Flyology.IO.Files.Close (File);
          pragma Assert (Last = Data'Last);
       exception
          when others =>
-            if File /= Gnatevl.IO.Files.Invalid_File then
-               Gnatevl.IO.Files.Close (File);
+            if File /= Flyology.IO.Files.Invalid_File then
+               Flyology.IO.Files.Close (File);
             end if;
             raise;
       end Write_Config;
@@ -773,7 +773,7 @@ procedure DNS_Smoke is
             declare
                Ignored : constant DNS.Address_Array := DNS.Resolve_Using
                  ("cancel.test", Servers, DNS.IPv4_Only, Timeout => 5.0,
-                  Interrupt_1 => Gnatevl.Wake_Sources.Descriptor (Cancel_Source));
+                  Interrupt_1 => Flyology.Wake_Sources.Descriptor (Cancel_Source));
                pragma Unreferenced (Ignored);
             begin
                null;
@@ -796,7 +796,7 @@ procedure DNS_Smoke is
       Last : Streams.Stream_Element_Offset;
       Passed : Boolean;
    begin
-      Gnatevl.Wake_Sources.Ensure (Cancel_Source);
+      Flyology.Wake_Sources.Ensure (Cancel_Source);
       Control.Get_Address (Address);
       Control.Get_Secondary (Secondary_Address);
       Write_Config (Address);
@@ -808,7 +808,7 @@ procedure DNS_Smoke is
       end select;
       --  Signal even after a timed coordination failure so a client that
       --  reached cancellation late can still unwind before scope finalization.
-      Gnatevl.Wake_Sources.Signal (Cancel_Source);
+      Flyology.Wake_Sources.Signal (Cancel_Source);
       select
          Control.Wait_Finished (Passed);
       or
@@ -828,7 +828,7 @@ procedure DNS_Smoke is
 
 begin
    Sockets.Initialize;
-   Run (Gnatevl.Native_Thread);
-   Run (Gnatevl.Event_Loop_Task);
+   Run (Flyology.Native_Task);
+   Run (Flyology.Lightweight_Task);
    Sockets.Finalize;
 end DNS_Smoke;

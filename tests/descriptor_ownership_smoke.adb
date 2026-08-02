@@ -1,29 +1,29 @@
 with Ada.Real_Time;
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Connections;
-with Gnatevl.IO.Sockets;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.IO.Connections;
+with Flyology.IO.Sockets;
+with Flyology.Observability;
 with Interfaces;
 with Interfaces.C;
 
 procedure Descriptor_Ownership_Smoke is
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
    package Sockets renames GNAT.Sockets;
 
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Real_Time.Time;
-   use type Gnatevl.Execution_Model;
-   use type Gnatevl.Observability.Counter;
+   use type Flyology.Execution_Model;
+   use type Flyology.Observability.Counter;
    use type Interfaces.C.int;
    use type Sockets.Socket_Type;
 
    procedure Assert_No_Event_Waits is
-      Sample : Gnatevl.Observability.Group_Snapshot;
+      Sample : Flyology.Observability.Group_Snapshot;
    begin
-      pragma Assert (Gnatevl.Observability.Snapshot (0, Sample));
+      pragma Assert (Flyology.Observability.Snapshot (0, Sample));
       pragma Assert (Sample.Descriptor_Waits = 0);
       pragma Assert (Sample.Interrupt_Waits = 0);
    end Assert_No_Event_Waits;
@@ -31,12 +31,12 @@ procedure Descriptor_Ownership_Smoke is
    procedure Await_Event_Waits (Count : Natural) is
       Deadline : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
-      Sample : Gnatevl.Observability.Group_Snapshot;
+      Sample : Flyology.Observability.Group_Snapshot;
    begin
       loop
-         pragma Assert (Gnatevl.Observability.Snapshot (0, Sample));
+         pragma Assert (Flyology.Observability.Snapshot (0, Sample));
          exit when Sample.Descriptor_Waits =
-           Gnatevl.Observability.Counter (Count);
+           Flyology.Observability.Counter (Count);
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "descriptor wait did not reach poller";
          end if;
@@ -44,11 +44,11 @@ procedure Descriptor_Ownership_Smoke is
       end loop;
    end Await_Event_Waits;
 
-   procedure Run_Close_Reuse (Model : Gnatevl.Execution_Model) is
+   procedure Run_Close_Reuse (Model : Flyology.Execution_Model) is
       Manager : aliased Connections.Server (Capacity => 1);
       Owned   : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
-      Old_FD : Gnatevl.IO.Descriptor;
+      Old_FD : Flyology.IO.Descriptor;
 
       protected Progress is
          procedure Entering;
@@ -78,7 +78,7 @@ procedure Descriptor_Ownership_Smoke is
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
-      Old_FD := Gnatevl.IO.Sockets.Native_Descriptor (Server);
+      Old_FD := Flyology.IO.Sockets.Native_Descriptor (Server);
       Connections.Take (Manager, Server, Owned);
       pragma Assert (Server = Sockets.No_Socket);
 
@@ -105,7 +105,7 @@ procedure Descriptor_Ownership_Smoke is
          end Reader;
       begin
          Progress.Wait_Entering;
-         if Model = Gnatevl.Event_Loop_Task then
+         if Model = Flyology.Lightweight_Task then
             Await_Event_Waits (1);
          else
             --  The native lane cannot be inspected through group snapshots;
@@ -131,14 +131,14 @@ procedure Descriptor_Ownership_Smoke is
       begin
          Sockets.Create_Socket_Pair (New_Server, New_Peer);
          pragma Assert
-           (Gnatevl.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
+           (Flyology.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
          declare
             task Reused_Reader is
                pragma Task_Info (Model);
             end Reused_Reader;
             task body Reused_Reader is
             begin
-               if Gnatevl.IO.Wait (Old_FD, Gnatevl.IO.For_Read, 0.5) then
+               if Flyology.IO.Wait (Old_FD, Flyology.IO.For_Read, 0.5) then
                   Sockets.Receive_Socket (New_Server, Incoming, Last);
                   Reuse_OK :=
                     Last = Incoming'Last and then Incoming = Outgoing;
@@ -148,7 +148,7 @@ procedure Descriptor_Ownership_Smoke is
                   Reuse_OK := False;
             end Reused_Reader;
          begin
-            if Model = Gnatevl.Event_Loop_Task then
+            if Model = Flyology.Lightweight_Task then
                Await_Event_Waits (1);
             else
                delay 0.050;
@@ -161,13 +161,13 @@ procedure Descriptor_Ownership_Smoke is
          Sockets.Close_Socket (New_Peer);
       end;
       Sockets.Close_Socket (Peer);
-      if Model = Gnatevl.Event_Loop_Task then
+      if Model = Flyology.Lightweight_Task then
          Assert_No_Event_Waits;
       end if;
    end Run_Close_Reuse;
 
    procedure Run_Cancellation_Close_Race
-     (Model : Gnatevl.Execution_Model)
+     (Model : Flyology.Execution_Model)
    is
       Manager : aliased Connections.Server (Capacity => 1);
       Token   : aliased Connections.Cancellation_Token;
@@ -230,7 +230,7 @@ procedure Descriptor_Ownership_Smoke is
          end Requester;
       begin
          Progress.Wait_Entering;
-         if Model = Gnatevl.Event_Loop_Task then
+         if Model = Flyology.Lightweight_Task then
             Await_Event_Waits (1);
          else
             delay 0.050;
@@ -242,7 +242,7 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (Progress.Passed);
       pragma Assert (Manager.Active = 0);
       Sockets.Close_Socket (Peer);
-      if Model = Gnatevl.Event_Loop_Task then
+      if Model = Flyology.Lightweight_Task then
          Assert_No_Event_Waits;
       end if;
    end Run_Cancellation_Close_Race;
@@ -281,7 +281,7 @@ procedure Descriptor_Ownership_Smoke is
       Connections.Take (Manager, Server, Owned);
       declare
          task type Reader (Index : Positive) is
-            pragma Task_Info (Gnatevl.Event_Loop_Task);
+            pragma Task_Info (Flyology.Lightweight_Task);
          end Reader;
          task body Reader is
             Data : Ada.Streams.Stream_Element_Array (1 .. 1);
@@ -312,19 +312,19 @@ procedure Descriptor_Ownership_Smoke is
 
    procedure Run_Timeout_Close_Reuse is
       Server, Peer : Sockets.Socket_Type;
-      Old_FD : Gnatevl.IO.Descriptor;
+      Old_FD : Flyology.IO.Descriptor;
       Timed_Out : Boolean := False with Atomic;
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
-      Old_FD := Gnatevl.IO.Sockets.Native_Descriptor (Server);
+      Old_FD := Flyology.IO.Sockets.Native_Descriptor (Server);
       declare
          task Waiter is
-            pragma Task_Info (Gnatevl.Event_Loop_Task);
+            pragma Task_Info (Flyology.Lightweight_Task);
          end Waiter;
          task body Waiter is
          begin
-            Timed_Out := not Gnatevl.IO.Wait
-              (Old_FD, Gnatevl.IO.For_Read, Timeout => 0.020);
+            Timed_Out := not Flyology.IO.Wait
+              (Old_FD, Flyology.IO.For_Read, Timeout => 0.020);
          end Waiter;
       begin
          null;
@@ -343,15 +343,15 @@ procedure Descriptor_Ownership_Smoke is
       begin
          Sockets.Create_Socket_Pair (New_Server, New_Peer);
          pragma Assert
-           (Gnatevl.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
+           (Flyology.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
          declare
             task Reused_Waiter is
-               pragma Task_Info (Gnatevl.Event_Loop_Task);
+               pragma Task_Info (Flyology.Lightweight_Task);
             end Reused_Waiter;
             task body Reused_Waiter is
             begin
-               Ready := Gnatevl.IO.Wait
-                 (Old_FD, Gnatevl.IO.For_Read, Timeout => 0.5);
+               Ready := Flyology.IO.Wait
+                 (Old_FD, Flyology.IO.For_Read, Timeout => 0.5);
             end Reused_Waiter;
          begin
             Await_Event_Waits (1);
@@ -365,7 +365,7 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Timeout_Close_Reuse;
 
    procedure Run_Timeout_Readiness_Races
-     (Model : Gnatevl.Execution_Model)
+     (Model : Flyology.Execution_Model)
    is
    begin
       for Iteration in 1 .. 12 loop
@@ -389,7 +389,7 @@ procedure Descriptor_Ownership_Smoke is
                   begin
                      Owned.Receive_Exactly (Data, Timeout => 0.004);
                   exception
-                     when Gnatevl.IO.Timeout_Error =>
+                     when Flyology.IO.Timeout_Error =>
                         null;
                   end;
                   Finished := True;
@@ -415,20 +415,20 @@ procedure Descriptor_Ownership_Smoke is
             Sockets.Close_Socket (Peer);
          end;
       end loop;
-      if Model = Gnatevl.Event_Loop_Task then
+      if Model = Flyology.Lightweight_Task then
          Assert_No_Event_Waits;
       end if;
    end Run_Timeout_Readiness_Races;
 
 begin
    Sockets.Initialize;
-   Run_Close_Reuse (Gnatevl.Event_Loop_Task);
-   Run_Close_Reuse (Gnatevl.Native_Thread);
-   Run_Cancellation_Close_Race (Gnatevl.Event_Loop_Task);
-   Run_Cancellation_Close_Race (Gnatevl.Native_Thread);
+   Run_Close_Reuse (Flyology.Lightweight_Task);
+   Run_Close_Reuse (Flyology.Native_Task);
+   Run_Cancellation_Close_Race (Flyology.Lightweight_Task);
+   Run_Cancellation_Close_Race (Flyology.Native_Task);
    Run_Exclusive_Waiters;
    Run_Timeout_Close_Reuse;
-   Run_Timeout_Readiness_Races (Gnatevl.Event_Loop_Task);
-   Run_Timeout_Readiness_Races (Gnatevl.Native_Thread);
+   Run_Timeout_Readiness_Races (Flyology.Lightweight_Task);
+   Run_Timeout_Readiness_Races (Flyology.Native_Task);
    Sockets.Finalize;
 end Descriptor_Ownership_Smoke;

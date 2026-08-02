@@ -18,29 +18,29 @@
 #endif
 
 #if defined(__linux__)
-static int gnatevl_linux_selected_file_backend;
+static int flyology_linux_selected_file_backend;
 
-void gnatevl_linux_note_file_backend(int backend) {
-    __atomic_store_n(&gnatevl_linux_selected_file_backend, backend,
+void flyology_linux_note_file_backend(int backend) {
+    __atomic_store_n(&flyology_linux_selected_file_backend, backend,
                      __ATOMIC_RELAXED);
 }
 
-int gnatevl_linux_file_backend(void) {
-    return __atomic_load_n(&gnatevl_linux_selected_file_backend,
+int flyology_linux_file_backend(void) {
+    return __atomic_load_n(&flyology_linux_selected_file_backend,
                            __ATOMIC_RELAXED);
 }
 
-struct gnatevl_epoll_event {
+struct flyology_epoll_event {
     uint32_t events;
     int descriptor;
 };
-_Static_assert(sizeof(struct gnatevl_epoll_event) == 8,
+_Static_assert(sizeof(struct flyology_epoll_event) == 8,
                "Ada epoll translation record must remain eight bytes");
 
 /* Translate through libc's native struct epoll_event so ABI-dependent
    padding never leaks into Ada.  x86-64 uses a packed 12-byte kernel record;
    AArch64 uses a naturally aligned 16-byte record. */
-int gnatevl_linux_epoll_ctl(int epoll_fd, int operation, int descriptor,
+int flyology_linux_epoll_ctl(int epoll_fd, int operation, int descriptor,
                             uint32_t events) {
     struct epoll_event item = { .events = events };
 
@@ -49,8 +49,8 @@ int gnatevl_linux_epoll_ctl(int epoll_fd, int operation, int descriptor,
                      operation == EPOLL_CTL_DEL ? NULL : &item);
 }
 
-int gnatevl_linux_epoll_wait(int epoll_fd,
-                             struct gnatevl_epoll_event *events,
+int flyology_linux_epoll_wait(int epoll_fd,
+                             struct flyology_epoll_event *events,
                              int max_events, int timeout_ms) {
     struct epoll_event native_events[64];
     int count;
@@ -78,31 +78,31 @@ int gnatevl_linux_epoll_wait(int epoll_fd,
  * expose as ordinary functions.  syscall(2) preserves its normal convention:
  * -1 on failure with errno set, and a nonnegative kernel result on success.
  */
-long gnatevl_linux_io_setup(unsigned entries, unsigned long *context) {
+long flyology_linux_io_setup(unsigned entries, unsigned long *context) {
     return syscall(SYS_io_setup, entries, context);
 }
 
-long gnatevl_linux_io_destroy(unsigned long context) {
+long flyology_linux_io_destroy(unsigned long context) {
     return syscall(SYS_io_destroy, context);
 }
 
-long gnatevl_linux_io_submit(unsigned long context, long count,
+long flyology_linux_io_submit(unsigned long context, long count,
                              void *controls) {
     return syscall(SYS_io_submit, context, count, controls);
 }
 
-long gnatevl_linux_io_cancel(unsigned long context, void *control,
+long flyology_linux_io_cancel(unsigned long context, void *control,
                              void *result) {
     return syscall(SYS_io_cancel, context, control, result);
 }
 
-long gnatevl_linux_io_getevents(unsigned long context, long minimum,
+long flyology_linux_io_getevents(unsigned long context, long minimum,
                                 long count, void *events, void *timeout) {
     return syscall(SYS_io_getevents, context, minimum, count, events, timeout);
 }
 
-long gnatevl_linux_io_uring_setup(unsigned entries, void *parameters) {
-#if defined(GNATEVL_TEST_DENY_IO_URING)
+long flyology_linux_io_uring_setup(unsigned entries, void *parameters) {
+#if defined(FLYOLOGY_TEST_DENY_IO_URING)
     (void)entries;
     (void)parameters;
     errno = EPERM;
@@ -112,36 +112,36 @@ long gnatevl_linux_io_uring_setup(unsigned entries, void *parameters) {
 #endif
 }
 
-long gnatevl_linux_io_uring_enter(int descriptor, unsigned to_submit,
+long flyology_linux_io_uring_enter(int descriptor, unsigned to_submit,
                                   unsigned minimum, unsigned flags,
                                   void *signal_mask, size_t signal_size) {
     return syscall(SYS_io_uring_enter, descriptor, to_submit, minimum, flags,
                    signal_mask, signal_size);
 }
 
-long gnatevl_linux_io_uring_register(int descriptor, unsigned opcode,
+long flyology_linux_io_uring_register(int descriptor, unsigned opcode,
                                      void *argument, unsigned count) {
     return syscall(SYS_io_uring_register, descriptor, opcode, argument, count);
 }
 #endif
 
 #if !defined(__linux__)
-int gnatevl_linux_file_backend(void) {
+int flyology_linux_file_backend(void) {
     return 0;
 }
 #endif
 
-#define GNATEVL_PLACEMENT_STRICT 1
-#define GNATEVL_PLACEMENT_ADVISORY 2
-#define GNATEVL_PLACEMENT_UNSUPPORTED (-1)
-#define GNATEVL_PLACEMENT_INVALID (-2)
+#define FLYOLOGY_PLACEMENT_STRICT 1
+#define FLYOLOGY_PLACEMENT_ADVISORY 2
+#define FLYOLOGY_PLACEMENT_UNSUPPORTED (-1)
+#define FLYOLOGY_PLACEMENT_INVALID (-2)
 
 #if defined(__linux__)
-static cpu_set_t gnatevl_initial_cpu_mask;
-static int gnatevl_initial_cpu_mask_valid;
+static cpu_set_t flyology_initial_cpu_mask;
+static int flyology_initial_cpu_mask_valid;
 #endif
-static pthread_once_t gnatevl_placement_once = PTHREAD_ONCE_INIT;
-static int gnatevl_placement_initialization_result;
+static pthread_once_t flyology_placement_once = PTHREAD_ONCE_INIT;
+static int flyology_placement_initialization_result;
 
 /*
  * Capture the Linux process leader's CPU allowance. Unlike pthread_self(),
@@ -150,38 +150,38 @@ static int gnatevl_placement_initialization_result;
  * placement policy; these helpers only bridge macro-only OS interfaces and
  * verify kernel state.
  */
-static void gnatevl_thread_placement_initialize_once(void) {
+static void flyology_thread_placement_initialize_once(void) {
 #if defined(__linux__)
-    int result = sched_getaffinity(getpid(), sizeof(gnatevl_initial_cpu_mask),
-                                   &gnatevl_initial_cpu_mask);
-    gnatevl_initial_cpu_mask_valid = result == 0;
-    gnatevl_placement_initialization_result = result == 0 ? 0 : errno;
+    int result = sched_getaffinity(getpid(), sizeof(flyology_initial_cpu_mask),
+                                   &flyology_initial_cpu_mask);
+    flyology_initial_cpu_mask_valid = result == 0;
+    flyology_placement_initialization_result = result == 0 ? 0 : errno;
 #endif
 }
 
-int gnatevl_thread_placement_initialize(void) {
-    int result = pthread_once(&gnatevl_placement_once,
-                              gnatevl_thread_placement_initialize_once);
-    return result == 0 ? gnatevl_placement_initialization_result : result;
+int flyology_thread_placement_initialize(void) {
+    int result = pthread_once(&flyology_placement_once,
+                              flyology_thread_placement_initialize_once);
+    return result == 0 ? flyology_placement_initialization_result : result;
 }
 
-static int gnatevl_thread_placement_platform_ready(void) {
-    return gnatevl_thread_placement_initialize() == 0;
+static int flyology_thread_placement_platform_ready(void) {
+    return flyology_thread_placement_initialize() == 0;
 }
 
-int gnatevl_thread_placement_supported(int mode) {
-    if (!gnatevl_thread_placement_platform_ready()) {
+int flyology_thread_placement_supported(int mode) {
+    if (!flyology_thread_placement_platform_ready()) {
         return 0;
     }
 #if defined(__linux__)
-    return mode == GNATEVL_PLACEMENT_STRICT &&
-           gnatevl_initial_cpu_mask_valid;
+    return mode == FLYOLOGY_PLACEMENT_STRICT &&
+           flyology_initial_cpu_mask_valid;
 #elif defined(__APPLE__)
 #if defined(__aarch64__) || defined(__arm64__)
     (void)mode;
     return 0;
 #else
-    return mode == GNATEVL_PLACEMENT_ADVISORY;
+    return mode == FLYOLOGY_PLACEMENT_ADVISORY;
 #endif
 #else
     (void)mode;
@@ -189,23 +189,23 @@ int gnatevl_thread_placement_supported(int mode) {
 #endif
 }
 
-int gnatevl_thread_placement_validate(int mode, int value) {
-    if (!gnatevl_thread_placement_supported(mode)) {
-        return GNATEVL_PLACEMENT_UNSUPPORTED;
+int flyology_thread_placement_validate(int mode, int value) {
+    if (!flyology_thread_placement_supported(mode)) {
+        return FLYOLOGY_PLACEMENT_UNSUPPORTED;
     }
 #if defined(__linux__)
-    if (!gnatevl_initial_cpu_mask_valid || value < 0 || value >= CPU_SETSIZE ||
-        !CPU_ISSET(value, &gnatevl_initial_cpu_mask)) {
-        return GNATEVL_PLACEMENT_INVALID;
+    if (!flyology_initial_cpu_mask_valid || value < 0 || value >= CPU_SETSIZE ||
+        !CPU_ISSET(value, &flyology_initial_cpu_mask)) {
+        return FLYOLOGY_PLACEMENT_INVALID;
     }
     return 0;
 #elif defined(__APPLE__)
-    return value > 0 ? 0 : GNATEVL_PLACEMENT_INVALID;
+    return value > 0 ? 0 : FLYOLOGY_PLACEMENT_INVALID;
 #endif
 }
 
-int gnatevl_thread_placement_apply(int mode, int value) {
-    int valid = gnatevl_thread_placement_validate(mode, value);
+int flyology_thread_placement_apply(int mode, int value) {
+    int valid = flyology_thread_placement_validate(mode, value);
 
     if (valid != 0) {
         return valid;
@@ -245,7 +245,7 @@ int gnatevl_thread_placement_apply(int mode, int value) {
 #endif
 }
 
-int gnatevl_thread_current_processor(void) {
+int flyology_thread_current_processor(void) {
 #if defined(__linux__)
     return sched_getcpu();
 #else
@@ -254,87 +254,87 @@ int gnatevl_thread_current_processor(void) {
 #endif
 }
 
-static uint32_t *gnatevl_fork_child_flag;
+static uint32_t *flyology_fork_child_flag;
 
-static void gnatevl_mark_fork_child(void) {
-    __atomic_store_n(gnatevl_fork_child_flag, 1, __ATOMIC_RELAXED);
+static void flyology_mark_fork_child(void) {
+    __atomic_store_n(flyology_fork_child_flag, 1, __ATOMIC_RELAXED);
 }
 
-int gnatevl_install_fork_guard(void *flag) {
-    if (flag == NULL || gnatevl_fork_child_flag != NULL) {
+int flyology_install_fork_guard(void *flag) {
+    if (flag == NULL || flyology_fork_child_flag != NULL) {
         return -1;
     }
-    gnatevl_fork_child_flag = (uint32_t *)flag;
-    return pthread_atfork(NULL, NULL, gnatevl_mark_fork_child);
+    flyology_fork_child_flag = (uint32_t *)flag;
+    return pthread_atfork(NULL, NULL, flyology_mark_fork_child);
 }
 
-int gnatevl_in_fork_child(void) {
-    return gnatevl_fork_child_flag != NULL &&
-           __atomic_load_n(gnatevl_fork_child_flag, __ATOMIC_RELAXED) != 0;
+int flyology_in_fork_child(void) {
+    return flyology_fork_child_flag != NULL &&
+           __atomic_load_n(flyology_fork_child_flag, __ATOMIC_RELAXED) != 0;
 }
 
-#ifdef GNATEVL_TEST_FAULTS
+#ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define GNATEVL_FAULT_POINT_COUNT 10
+#define FLYOLOGY_FAULT_POINT_COUNT 10
 
-struct gnatevl_fault_plan {
+struct flyology_fault_plan {
     atomic_uint calls;
     atomic_uint first;
     atomic_uint count;
 };
 
-static struct gnatevl_fault_plan
-    gnatevl_faults[GNATEVL_FAULT_POINT_COUNT + 1];
+static struct flyology_fault_plan
+    flyology_faults[FLYOLOGY_FAULT_POINT_COUNT + 1];
 
-int gnatevl_test_faults_enabled(void) {
+int flyology_test_faults_enabled(void) {
     return 1;
 }
 
-void gnatevl_test_fault_reset(void) {
+void flyology_test_fault_reset(void) {
     unsigned point;
 
-    for (point = 1; point <= GNATEVL_FAULT_POINT_COUNT; ++point) {
-        atomic_store_explicit(&gnatevl_faults[point].calls, 0,
+    for (point = 1; point <= FLYOLOGY_FAULT_POINT_COUNT; ++point) {
+        atomic_store_explicit(&flyology_faults[point].calls, 0,
                               memory_order_relaxed);
-        atomic_store_explicit(&gnatevl_faults[point].first, 0,
+        atomic_store_explicit(&flyology_faults[point].first, 0,
                               memory_order_relaxed);
-        atomic_store_explicit(&gnatevl_faults[point].count, 0,
+        atomic_store_explicit(&flyology_faults[point].count, 0,
                               memory_order_release);
     }
 }
 
-int gnatevl_test_fault_arm(int point, unsigned first, unsigned count) {
-    if (point < 1 || point > GNATEVL_FAULT_POINT_COUNT) {
+int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
         return -1;
     }
-    atomic_store_explicit(&gnatevl_faults[point].calls, 0,
+    atomic_store_explicit(&flyology_faults[point].calls, 0,
                           memory_order_relaxed);
-    atomic_store_explicit(&gnatevl_faults[point].first, first,
+    atomic_store_explicit(&flyology_faults[point].first, first,
                           memory_order_relaxed);
-    atomic_store_explicit(&gnatevl_faults[point].count, count,
+    atomic_store_explicit(&flyology_faults[point].count, count,
                           memory_order_release);
     return 0;
 }
 
-unsigned gnatevl_test_fault_calls(int point) {
-    if (point < 1 || point > GNATEVL_FAULT_POINT_COUNT) {
+unsigned flyology_test_fault_calls(int point) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
         return 0;
     }
-    return atomic_load_explicit(&gnatevl_faults[point].calls,
+    return atomic_load_explicit(&flyology_faults[point].calls,
                                 memory_order_relaxed);
 }
 
-int gnatevl_test_fault_hit(int point) {
-    struct gnatevl_fault_plan *plan;
+int flyology_test_fault_hit(int point) {
+    struct flyology_fault_plan *plan;
     unsigned call;
     unsigned first;
     unsigned count;
 
-    if (point < 1 || point > GNATEVL_FAULT_POINT_COUNT) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
         return 0;
     }
-    plan = &gnatevl_faults[point];
+    plan = &flyology_faults[point];
     call = atomic_fetch_add_explicit(&plan->calls, 1,
                                      memory_order_relaxed);
     count = atomic_load_explicit(&plan->count, memory_order_acquire);
@@ -345,32 +345,32 @@ int gnatevl_test_fault_hit(int point) {
     return call >= first && call - first < count;
 }
 #else
-int gnatevl_test_faults_enabled(void) {
+int flyology_test_faults_enabled(void) {
     return 0;
 }
 
-void gnatevl_test_fault_reset(void) {
+void flyology_test_fault_reset(void) {
 }
 
-int gnatevl_test_fault_arm(int point, unsigned first, unsigned count) {
+int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
     (void)point;
     (void)first;
     (void)count;
     return -1;
 }
 
-unsigned gnatevl_test_fault_calls(int point) {
+unsigned flyology_test_fault_calls(int point) {
     (void)point;
     return 0;
 }
 
-int gnatevl_test_fault_hit(int point) {
+int flyology_test_fault_hit(int point) {
     (void)point;
     return 0;
 }
 #endif
 
-int gnatevl_map_anonymous(void) {
+int flyology_map_anonymous(void) {
     return MAP_ANONYMOUS;
 }
 
@@ -380,20 +380,20 @@ int gnatevl_map_anonymous(void) {
  * sources: a statically initialized pthread mutex and the host's page-discard
  * advice value. A native-only program never calls either function.
  */
-static pthread_mutex_t gnatevl_stack_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t flyology_stack_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int gnatevl_stack_pool_lock(void) {
-    return pthread_mutex_lock(&gnatevl_stack_pool_mutex);
+int flyology_stack_pool_lock(void) {
+    return pthread_mutex_lock(&flyology_stack_pool_mutex);
 }
 
-int gnatevl_stack_pool_unlock(void) {
-    return pthread_mutex_unlock(&gnatevl_stack_pool_mutex);
+int flyology_stack_pool_unlock(void) {
+    return pthread_mutex_unlock(&flyology_stack_pool_mutex);
 }
 
-int gnatevl_discard_pages(void *address, size_t length) {
+int flyology_discard_pages(void *address, size_t length) {
     return madvise(address, length, MADV_DONTNEED);
 }
 
-void gnatevl_atomic_store_u32(void *address, uint32_t value, int model) {
+void flyology_atomic_store_u32(void *address, uint32_t value, int model) {
     __atomic_store_n((uint32_t *)address, value, model);
 }

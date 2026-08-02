@@ -1,4 +1,4 @@
-name = "gnatevl"
+name = "flyology"
 description = "Event-loop processes for the GNAT Ada runtime"
 version = "0.1.0-dev"
 
@@ -8,7 +8,7 @@ maintainers-logins = ["yrashk"]
 licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
 website = ""
 tags = ["ada", "runtime", "event-loop", "concurrency"]
-project-files = ["gnatevl.gpr"]
+project-files = ["flyology.gpr"]
 
 [[depends-on]]
 gnat = ">=13 & <17"
@@ -18,7 +18,7 @@ gnat = ">=13 & <17"
 '...' = false
 
 [environment]
-GNATEVL_ROOT.set = "${CRATE_ROOT}"
+FLYOLOGY_ROOT.set = "${CRATE_ROOT}"
 
 [[actions]]
 type = "test"

@@ -1,9 +1,9 @@
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO;
-with Gnatevl.IO.Sockets;
-with Gnatevl.IO.Timers;
+with Flyology;
+with Flyology.IO;
+with Flyology.IO.Sockets;
+with Flyology.IO.Timers;
 
 procedure IO_Smoke is
    use Ada.Streams;
@@ -117,23 +117,23 @@ begin
    GNAT.Sockets.Create_Socket_Pair (Event_Socket, Native_Socket);
 
    declare
-      task Evented is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
-      end Evented;
+      task Lightweight is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Lightweight;
 
       task Native is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Native;
 
-      task body Evented is
+      task body Lightweight is
          Incoming : Stream_Element_Array (Native_To_Event'Range);
       begin
-         Gnatevl.IO.Sockets.Receive_Exactly
+         Flyology.IO.Sockets.Receive_Exactly
            (Event_Socket, Incoming, Timeout => 1.0);
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Sockets.Send_All
            (Event_Socket, Event_To_Native, Timeout => 1.0);
          Results.Event_Passed (Incoming = Native_To_Event);
-      end Evented;
+      end Lightweight;
 
       task body Native is
          Incoming : Stream_Element_Array (Event_To_Native'Range);
@@ -141,16 +141,16 @@ begin
          Last     : Stream_Element_Offset;
          Timed_Out : Boolean := False;
       begin
-         Gnatevl.IO.Timers.Sleep_For (0.020);
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Timers.Sleep_For (0.020);
+         Flyology.IO.Sockets.Send_All
            (Native_Socket, Native_To_Event, Timeout => 1.0);
-         Gnatevl.IO.Sockets.Receive_Exactly
+         Flyology.IO.Sockets.Receive_Exactly
            (Native_Socket, Incoming, Timeout => 1.0);
          begin
-            Gnatevl.IO.Sockets.Receive
+            Flyology.IO.Sockets.Receive
               (Native_Socket, Probe, Last, Timeout => 0.010);
          exception
-            when Gnatevl.IO.Timeout_Error =>
+            when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
          end;
          Results.Native_Passed
@@ -162,25 +162,25 @@ begin
 
    declare
       task Read_Waiter is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Read_Waiter;
 
       task Write_Waiter is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Write_Waiter;
       task Native_Sender is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Native_Sender;
 
       task body Read_Waiter is
          Incoming : Stream_Element_Array (1 .. 1);
       begin
-         if Gnatevl.IO.Wait
-           (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
-            Gnatevl.IO.For_Read,
+         if Flyology.IO.Wait
+           (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+            Flyology.IO.For_Read,
             Timeout => 1.0)
          then
-            Gnatevl.IO.Sockets.Receive_Exactly
+            Flyology.IO.Sockets.Receive_Exactly
               (Event_Socket, Incoming, Timeout => 1.0);
             Duplex_Results.Reader_Passed (Incoming (1) = 42);
          else
@@ -191,16 +191,16 @@ begin
       task body Write_Waiter is
       begin
          Duplex_Results.Writer_Passed
-           (Gnatevl.IO.Wait
-              (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
-               Gnatevl.IO.For_Write,
+           (Flyology.IO.Wait
+              (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+               Flyology.IO.For_Write,
                Timeout => 1.0));
       end Write_Waiter;
 
       task body Native_Sender is
       begin
-         Gnatevl.IO.Timers.Sleep_For (0.020);
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Timers.Sleep_For (0.020);
+         Flyology.IO.Sockets.Send_All
            (Native_Socket, [1 => 42], Timeout => 1.0);
       end Native_Sender;
    begin
@@ -213,10 +213,10 @@ begin
 
    declare
       task type Read_Waiter is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Read_Waiter;
       task Sender is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Sender;
 
       task body Read_Waiter is
@@ -224,9 +224,9 @@ begin
       begin
          Fanout_Results.Started;
          Ready :=
-           Gnatevl.IO.Wait
-             (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
-              Gnatevl.IO.For_Read,
+           Flyology.IO.Wait
+             (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+              Flyology.IO.For_Read,
               Timeout => 1.0);
          Fanout_Results.Finished (Ready);
       exception
@@ -237,7 +237,7 @@ begin
       task body Sender is
       begin
          Fanout_Results.Wait_Until_Started;
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Sockets.Send_All
            (Native_Socket, [1 => 43], Timeout => 1.0);
       end Sender;
 
@@ -246,7 +246,7 @@ begin
       Probe : Stream_Element_Array (1 .. 1);
    begin
       Fanout_Results.Wait_Until_Finished;
-      Gnatevl.IO.Sockets.Receive_Exactly
+      Flyology.IO.Sockets.Receive_Exactly
         (Event_Socket, Probe, Timeout => 1.0);
       if not Fanout_Results.Passed or else Probe (1) /= 43 then
          raise Program_Error with "same-direction descriptor fanout failed";
@@ -259,28 +259,28 @@ begin
       Timed_Out : Boolean := False;
 
       task Delayed_Sender is
-         pragma Task_Info (Gnatevl.Native_Thread);
+         pragma Task_Info (Flyology.Native_Task);
       end Delayed_Sender;
 
       task body Delayed_Sender is
       begin
-         Gnatevl.IO.Timers.Sleep_For (0.050);
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Timers.Sleep_For (0.050);
+         Flyology.IO.Sockets.Send_All
            (Native_Socket, [1 => 44], Timeout => 1.0);
       end Delayed_Sender;
    begin
       begin
-         Gnatevl.IO.Sockets.Receive
+         Flyology.IO.Sockets.Receive
            (Event_Socket, Probe, Last, Timeout => 0.010);
       exception
-         when Gnatevl.IO.Timeout_Error =>
+         when Flyology.IO.Timeout_Error =>
             Timed_Out := True;
       end;
       if not Timed_Out then
-         raise Program_Error with "evented socket timeout did not fire";
+         raise Program_Error with "lightweight socket timeout did not fire";
       end if;
 
-      Gnatevl.IO.Sockets.Receive_Exactly
+      Flyology.IO.Sockets.Receive_Exactly
         (Event_Socket, Probe, Timeout => 1.0);
       if Probe (1) /= 44 then
          raise Program_Error with "descriptor wait did not rearm after timeout";

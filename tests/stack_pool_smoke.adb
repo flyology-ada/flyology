@@ -1,12 +1,12 @@
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
-with Gnatevl;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Observability;
 with Interfaces;
 with Interfaces.C;
 
 procedure Stack_Pool_Smoke is
-   package Observation renames Gnatevl.Observability;
+   package Observation renames Flyology.Observability;
 
    use type Interfaces.Unsigned_64;
    use type Observation.Stack_Pool_Snapshot;
@@ -156,7 +156,7 @@ procedure Stack_Pool_Smoke is
       end Control;
 
       task type Original (First_Half : Boolean) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (16 * 1_024);
       end Original;
 
@@ -172,7 +172,7 @@ procedure Stack_Pool_Smoke is
       end Original;
 
       task type Replacement is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (16 * 1_024);
       end Replacement;
 
@@ -348,12 +348,12 @@ procedure Stack_Pool_Smoke is
       end Control;
 
       task type Older is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (16 * 1_024);
       end Older;
 
       task type Head is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (512 * 1_024);
       end Head;
 
@@ -461,12 +461,12 @@ procedure Stack_Pool_Smoke is
       end Control;
 
       task type Small is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (16 * 1_024);
       end Small;
 
       task type Large is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (512 * 1_024);
       end Large;
 

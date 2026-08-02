@@ -1,9 +1,9 @@
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Observability;
 
 procedure Runtime_Observability is
-   package Observation renames Gnatevl.Observability;
+   package Observation renames Flyology.Observability;
    package TIO renames Ada.Text_IO;
 
    Task_Count : constant := 128;
@@ -82,7 +82,7 @@ procedure Runtime_Observability is
 begin
    declare
       task type Worker is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Worker;
 
       task body Worker is

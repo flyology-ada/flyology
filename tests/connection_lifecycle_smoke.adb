@@ -1,10 +1,10 @@
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Connections;
+with Flyology;
+with Flyology.IO.Connections;
 
 procedure Connection_Lifecycle_Smoke is
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
    use type GNAT.Sockets.Socket_Type;
 
    Manager : aliased Connections.Server (Capacity => 1);
@@ -83,11 +83,11 @@ begin
 
    declare
       task First is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end First;
 
       task Second is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Second;
 
       task body First is
@@ -134,7 +134,7 @@ begin
 
    declare
       task Third is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Third;
 
       task body Third is
@@ -217,7 +217,7 @@ begin
 
       declare
          task Acceptor is
-            pragma Task_Info (Gnatevl.Event_Loop_Task);
+            pragma Task_Info (Flyology.Lightweight_Task);
          end Acceptor;
 
          task body Acceptor is
@@ -282,7 +282,7 @@ begin
       GNAT.Sockets.Create_Socket_Pair (Native_Server, Native_Peer);
       declare
          task Native_Worker is
-            pragma Task_Info (Gnatevl.Native_Thread);
+            pragma Task_Info (Flyology.Native_Task);
          end Native_Worker;
 
          task body Native_Worker is

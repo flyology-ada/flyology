@@ -1,5 +1,5 @@
 /*
- * Minimal stackful-context support used by System.Gnatevl.Contexts.
+ * Minimal stackful-context support used by System.Flyology.Contexts.
  *
  * The Ada side owns each stack and a zero-initialized Register_Array.  This
  * file supplies two C-callable leaf routines:
@@ -14,7 +14,7 @@
  * This is deliberately a cooperative call boundary, not an interrupt frame.
  * Caller-saved registers need not survive: the compiler already assumes a
  * normal call may clobber them.  The offsets below are therefore a private ABI
- * shared with the Register_Array declared in s-gnacon.ads.  Change the two
+ * shared with the Register_Array declared in s-flycon.ads.  Change the two
  * together, and keep the array large enough for the greatest offset used here.
  */
 
@@ -36,8 +36,8 @@
  */
 .text
 .p2align 2
-.globl _gnatevl_context_initialize_registers
-_gnatevl_context_initialize_registers:
+.globl _flyology_context_initialize_registers
+_flyology_context_initialize_registers:
     /* A first restore executes `ret`, so seed LR with the trampoline. */
     str x2, [x0, #88]
 
@@ -50,8 +50,8 @@ _gnatevl_context_initialize_registers:
      */
     ret
 
-.globl _gnatevl_context_swap_registers
-_gnatevl_context_swap_registers:
+.globl _flyology_context_swap_registers
+_flyology_context_swap_registers:
     /* Save every nonvolatile general register in `from` (x0). */
     stp x19, x20, [x0, #0]
     stp x21, x22, [x0, #16]
@@ -113,8 +113,8 @@ _gnatevl_context_swap_registers:
  */
 .text
 .p2align 4
-.globl _gnatevl_context_initialize_registers
-_gnatevl_context_initialize_registers:
+.globl _flyology_context_initialize_registers
+_flyology_context_initialize_registers:
     /*
      * A normal call enters with rsp == 8 (mod 16), after its return address was
      * pushed.  A first context is reached by `jmp`, so manufacture that stack
@@ -130,8 +130,8 @@ _gnatevl_context_initialize_registers:
     movw $0x037f, 68(%rdi)
     ret
 
-.globl _gnatevl_context_swap_registers
-_gnatevl_context_swap_registers:
+.globl _flyology_context_swap_registers
+_flyology_context_swap_registers:
     /* Save the SysV nonvolatile general registers in `from` (rdi). */
     movq %rbx, 0(%rdi)
     movq %rbp, 8(%rdi)
@@ -165,7 +165,7 @@ _gnatevl_context_swap_registers:
     /* `jmp` changes contexts without pushing onto the destination stack. */
     jmp *56(%rsi)
 1:
-    /* Resumed swap: return normally to System.Gnatevl.Contexts.Switch. */
+    /* Resumed swap: return normally to System.Flyology.Contexts.Switch. */
     ret
 
 #elif defined(__linux__) && defined(__aarch64__)
@@ -186,9 +186,9 @@ _gnatevl_context_swap_registers:
  */
 .text
 .p2align 2
-.globl gnatevl_context_initialize_registers
-.type gnatevl_context_initialize_registers, %function
-gnatevl_context_initialize_registers:
+.globl flyology_context_initialize_registers
+.type flyology_context_initialize_registers, %function
+flyology_context_initialize_registers:
     /* Seed LR for the first `ret`; SP is already 16-byte aligned. */
     str x2, [x0, #88]
     str x1, [x0, #96]
@@ -196,9 +196,9 @@ gnatevl_context_initialize_registers:
     /* Zero-initialized x29 terminates the fresh context's backtrace. */
     ret
 
-.globl gnatevl_context_swap_registers
-.type gnatevl_context_swap_registers, %function
-gnatevl_context_swap_registers:
+.globl flyology_context_swap_registers
+.type flyology_context_swap_registers, %function
+flyology_context_swap_registers:
     /* Save all AAPCS64 nonvolatile state in `from` (x0). */
     stp x19, x20, [x0, #0]
     stp x21, x22, [x0, #16]
@@ -258,9 +258,9 @@ gnatevl_context_swap_registers:
  */
 .text
 .p2align 4
-.globl gnatevl_context_initialize_registers
-.type gnatevl_context_initialize_registers, @function
-gnatevl_context_initialize_registers:
+.globl flyology_context_initialize_registers
+.type flyology_context_initialize_registers, @function
+flyology_context_initialize_registers:
     /*
      * Reproduce function-entry alignment without a call instruction.  The
      * zero word stands in for a return address and catches an impossible
@@ -276,9 +276,9 @@ gnatevl_context_initialize_registers:
     movw $0x037f, 68(%rdi)
     ret
 
-.globl gnatevl_context_swap_registers
-.type gnatevl_context_swap_registers, @function
-gnatevl_context_swap_registers:
+.globl flyology_context_swap_registers
+.type flyology_context_swap_registers, @function
+flyology_context_swap_registers:
     /* Save SysV nonvolatile general and floating-point control state. */
     movq %rbx, 0(%rdi)
     movq %rbp, 8(%rdi)
@@ -315,5 +315,5 @@ gnatevl_context_swap_registers:
 .section .note.GNU-stack,"",@progbits
 
 #else
-#error GNATEVL needs a context switch for this ABI
+#error Flyology needs a context switch for this ABI
 #endif

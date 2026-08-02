@@ -1,13 +1,13 @@
 with Ada.Real_Time;
-with Gnatevl;
-with Gnatevl.Observability.Stall_Watchdogs;
+with Flyology;
+with Flyology.Observability.Stall_Watchdogs;
 
 procedure Stall_Watchdog_Smoke is
    package RT renames Ada.Real_Time;
-   package Watchdogs renames Gnatevl.Observability.Stall_Watchdogs;
+   package Watchdogs renames Flyology.Observability.Stall_Watchdogs;
 
    use type RT.Time;
-   use type Gnatevl.Observability.Counter;
+   use type Flyology.Observability.Counter;
    use type Watchdogs.Group_Condition;
 
    protected Control is
@@ -91,15 +91,15 @@ begin
 
    declare
       task Spinner is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Spinner;
 
       task Waiter with CPU => 1 is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Waiter;
 
       task Seeder with CPU => 2 is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Seeder;
 
       task body Spinner is

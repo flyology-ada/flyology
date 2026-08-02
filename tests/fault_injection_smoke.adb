@@ -6,9 +6,9 @@ with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Fault_Control;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO;
-with Gnatevl.IO.Files;
+with Flyology;
+with Flyology.IO;
+with Flyology.IO.Files;
 with Interfaces.C;
 
 procedure Fault_Injection_Smoke is
@@ -18,15 +18,15 @@ procedure Fault_Injection_Smoke is
    use type GNAT.Sockets.Socket_Type;
    use type Interfaces.C.int;
 
-   package IO renames Gnatevl.IO;
-   package Files renames Gnatevl.IO.Files;
+   package IO renames Flyology.IO;
+   package Files renames Flyology.IO.Files;
 
    Case_Name : constant String :=
      (if Ada.Command_Line.Argument_Count = 0
       then ""
       else Ada.Command_Line.Argument (1));
 
-   task type Probe (Kind : Gnatevl.Execution_Model) is
+   task type Probe (Kind : Flyology.Execution_Model) is
       pragma Task_Info (Kind);
    end Probe;
 
@@ -52,7 +52,7 @@ procedure Fault_Injection_Smoke is
    end Await;
 
    procedure Warm_Group is
-      Item : Probe_Access := new Probe (Gnatevl.Event_Loop_Task);
+      Item : Probe_Access := new Probe (Flyology.Lightweight_Task);
    begin
       Await (Item);
       Free_Probe (Item);
@@ -65,7 +65,7 @@ procedure Fault_Injection_Smoke is
       Fault_Control.Reset;
       Fault_Control.Arm (At_Point);
       begin
-         Item := new Probe (Gnatevl.Event_Loop_Task);
+         Item := new Probe (Flyology.Lightweight_Task);
          Await (Item);
       exception
          when Tasking_Error | Storage_Error =>
@@ -102,7 +102,7 @@ procedure Fault_Injection_Smoke is
       Failed_As_Device_Error : Boolean := False with Atomic;
 
       task type Waiter is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Waiter;
 
       task body Waiter is
@@ -170,7 +170,7 @@ procedure Fault_Injection_Smoke is
       Reused_FD : IO.Descriptor;
 
       task type Failed_Waiter is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Failed_Waiter;
       task body Failed_Waiter is
          Outcome : IO.Wait_Outcome;
@@ -237,7 +237,7 @@ procedure Fault_Injection_Smoke is
            (1 => 1);
          Last : Ada.Streams.Stream_Element_Offset;
          task Retry is
-            pragma Task_Info (Gnatevl.Event_Loop_Task);
+            pragma Task_Info (Flyology.Lightweight_Task);
          end Retry;
          task body Retry is
          begin
@@ -260,7 +260,7 @@ procedure Fault_Injection_Smoke is
       Warm_Group;
       Fault_Control.Reset;
       Fault_Control.Arm (Fault_Control.Poller_EINTR, Count => 32);
-      Item := new Probe (Gnatevl.Event_Loop_Task);
+      Item := new Probe (Flyology.Lightweight_Task);
       Await (Item);
       Free_Probe (Item);
       if Fault_Control.Calls (Fault_Control.Poller_EINTR) < 32 then
@@ -270,7 +270,7 @@ procedure Fault_Injection_Smoke is
    end Test_EINTR;
 
    procedure Test_File_Saturation is
-      Path : constant String := "/tmp/gnatevl-fault-file.data";
+      Path : constant String := "/tmp/flyology-fault-file.data";
       Count : constant Positive := 48;
       File : Files.File_Descriptor := Files.Invalid_File;
 
@@ -299,7 +299,7 @@ procedure Fault_Injection_Smoke is
       end Progress;
 
       task type Writer (Index : Positive) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Writer;
 
       task body Writer is
@@ -367,14 +367,14 @@ procedure Fault_Injection_Smoke is
       end if;
       Fault_Control.Reset;
       Fault_Control.Arm (At_Point);
-      Item := new Probe (Gnatevl.Event_Loop_Task);
+      Item := new Probe (Flyology.Lightweight_Task);
       Await (Item);
       Free_Probe (Item);
       raise Program_Error with "fatal fault unexpectedly returned";
    end Trigger_Fatal;
 
    procedure Trigger_Stack_Release_Fatal is
-      Item : Probe_Access := new Probe (Gnatevl.Event_Loop_Task);
+      Item : Probe_Access := new Probe (Flyology.Lightweight_Task);
    begin
       Await (Item);
       Fault_Control.Reset;
@@ -386,7 +386,7 @@ procedure Fault_Injection_Smoke is
 begin
    if not Fault_Control.Enabled then
       raise Program_Error with
-        "fault test requires GNATEVL_TEST_FAULTS=1 runtime";
+        "fault test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
 
    if Case_Name = "fiber-allocation" then

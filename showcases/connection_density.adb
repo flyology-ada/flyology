@@ -3,9 +3,9 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Sockets;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.IO.Sockets;
+with Flyology.Observability;
 with Interfaces.C;
 with Showcase_Support;
 
@@ -16,22 +16,22 @@ procedure Connection_Density is
 
    package C renames Interfaces.C;
    use type C.long_long;
-   use type Gnatevl.Observability.Counter;
+   use type Flyology.Observability.Counter;
 
    Worker_Stack_Size : constant := 16 * 1_024;
    One_Byte          : constant Stream_Element_Array := [1 => 42];
 
    function Current_RSS return C.long_long;
-   pragma Import (C, Current_RSS, "gnatevl_current_rss_bytes");
+   pragma Import (C, Current_RSS, "flyology_current_rss_bytes");
 
    function Peak_RSS return C.long_long;
-   pragma Import (C, Peak_RSS, "gnatevl_peak_rss_bytes");
+   pragma Import (C, Peak_RSS, "flyology_peak_rss_bytes");
 
    function Virtual_Bytes return C.long_long;
-   pragma Import (C, Virtual_Bytes, "gnatevl_virtual_bytes");
+   pragma Import (C, Virtual_Bytes, "flyology_virtual_bytes");
 
    function Thread_Count return C.int;
-   pragma Import (C, Thread_Count, "gnatevl_thread_count");
+   pragma Import (C, Thread_Count, "flyology_thread_count");
 
    protected type Progress (Target : Positive) is
       procedure At_Receive_Boundary;
@@ -92,7 +92,7 @@ procedure Connection_Density is
       Baseline_Virtual : C.long_long;
       Sample_Virtual   : C.long_long;
       Sample_Threads   : C.int;
-      Pool             : Gnatevl.Observability.Stack_Pool_Snapshot;
+      Pool             : Flyology.Observability.Stack_Pool_Snapshot;
       Setup_Elapsed    : Duration;
       Release_Elapsed  : Duration)
    is
@@ -147,7 +147,7 @@ procedure Connection_Density is
    procedure Run
      (Mode        : String;
       Connections : Positive;
-      Model       : Gnatevl.Execution_Model)
+      Model       : Flyology.Execution_Model)
    is
       Servers : constant Socket_Array_Access :=
         new Socket_Array (1 .. Connections);
@@ -157,7 +157,7 @@ procedure Connection_Density is
 
       task type Connection
         (Index : Positive;
-         Kind  : Gnatevl.Execution_Model)
+         Kind  : Flyology.Execution_Model)
       is
          pragma Task_Info (Kind);
          pragma Storage_Size (Worker_Stack_Size);
@@ -171,7 +171,7 @@ procedure Connection_Density is
          --  into the model-specific blocking receive. It does not claim that
          --  every task has completed its poller/poll registration.
          State.At_Receive_Boundary;
-         Gnatevl.IO.Sockets.Receive_Exactly
+         Flyology.IO.Sockets.Receive_Exactly
            (Servers (Index), Incoming, Timeout => 30.0);
          Success := Incoming = One_Byte;
          State.Finished (Success);
@@ -191,7 +191,7 @@ procedure Connection_Density is
       Sample_RSS     : C.long_long;
       Sample_Virtual : C.long_long;
       Sample_Threads : C.int;
-      Pool           : Gnatevl.Observability.Stack_Pool_Snapshot;
+      Pool           : Flyology.Observability.Stack_Pool_Snapshot;
       Setup_Started   : constant Time := Clock;
       Release_Started : Time;
       Setup_Elapsed   : Duration;
@@ -209,11 +209,11 @@ procedure Connection_Density is
       Sample_RSS := Current_RSS;
       Sample_Virtual := Virtual_Bytes;
       Sample_Threads := Thread_Count;
-      Pool := Gnatevl.Observability.Stack_Pool;
+      Pool := Flyology.Observability.Stack_Pool;
 
       Release_Started := Clock;
       for Index in 1 .. Connections loop
-         Gnatevl.IO.Sockets.Send_All
+         Flyology.IO.Sockets.Send_All
            (Peers (Index), One_Byte, Timeout => 30.0);
       end loop;
       State.Wait_Until_Finished;
@@ -245,7 +245,7 @@ procedure Connection_Density is
 
    procedure Usage is
    begin
-      Put_Line ("usage: connection_density evented|native CONNECTIONS");
+      Put_Line ("usage: connection_density lightweight|native CONNECTIONS");
    end Usage;
 
 begin
@@ -260,10 +260,10 @@ begin
         Positive'Value (Ada.Command_Line.Argument (2));
       Mode : constant String := Ada.Command_Line.Argument (1);
    begin
-      if Mode = "evented" then
-         Run (Mode, Connections, Gnatevl.Event_Loop_Task);
+      if Mode = "lightweight" then
+         Run (Mode, Connections, Flyology.Lightweight_Task);
       elsif Mode = "native" then
-         Run (Mode, Connections, Gnatevl.Native_Thread);
+         Run (Mode, Connections, Flyology.Native_Task);
       else
          Usage;
          Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);

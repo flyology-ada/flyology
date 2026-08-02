@@ -1,14 +1,14 @@
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO;
-with Gnatevl.IO.Sockets;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO;
+with Flyology.IO.Sockets;
+with Flyology.Observability;
 with Interfaces;
 
 procedure Observability_Smoke is
-   package Observation renames Gnatevl.Observability;
-   package Groups renames Gnatevl.Execution_Groups;
+   package Observation renames Flyology.Observability;
+   package Groups renames Flyology.Execution_Groups;
 
    use type Interfaces.Unsigned_64;
    use type Observation.Event_Thread_State;
@@ -68,15 +68,15 @@ begin
 
    declare
       task Timed is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Timed;
 
       task Descriptor is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Descriptor;
 
       task Rendezvous is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Rendezvous;
 
       task body Timed is
@@ -89,9 +89,9 @@ begin
       task body Descriptor is
       begin
          Control.Started;
-         if not Gnatevl.IO.Wait
-           (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Reader_Socket)),
-            Gnatevl.IO.For_Read,
+         if not Flyology.IO.Wait
+           (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Reader_Socket)),
+            Flyology.IO.For_Read,
             Timeout => 1.0)
          then
             raise Program_Error with "descriptor wait timed out";
@@ -133,7 +133,7 @@ begin
       end if;
 
       Control.Open;
-      Gnatevl.IO.Sockets.Send_All
+      Flyology.IO.Sockets.Send_All
         (Writer_Socket, [1 => 42], Timeout => 1.0);
       Control.Wait_Until_Finished;
    end;

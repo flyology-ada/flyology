@@ -1,4 +1,4 @@
-with "../gnatevl.gpr";
+with "../flyology.gpr";
 
 project Showcases is
    for Languages use ("Ada", "C");
@@ -12,14 +12,14 @@ project Showcases is
       "cooperative_fairness.adb",
       "dns_resolution.adb",
       "execution_groups.adb",
-      "evented_file_io.adb",
-      "evented_io.adb",
+      "lightweight_file_io.adb",
+      "lightweight_io.adb",
       "event_loop_pool.adb",
-      "evented_pipeline.adb",
-      "evented_vs_threads.adb",
+      "lightweight_pipeline.adb",
+      "lightweight_vs_native.adb",
       "hybrid_blocking_bridge.adb",
       "loop_thread_placement.adb",
-      "many_evented_tasks.adb",
+      "many_lightweight_tasks.adb",
       "priority_scheduling.adb",
       "runtime_observability.adb",
       "stall_watchdog.adb",

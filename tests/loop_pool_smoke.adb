@@ -1,11 +1,11 @@
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO;
+with Flyology.Observability;
 
 procedure Loop_Pool_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
-   package Observe renames Gnatevl.Observability;
+   package Groups renames Flyology.Execution_Groups;
+   package Observe renames Flyology.Observability;
 
    use type Groups.Automatic_Placement_Policy;
    use type Groups.Group_Id;
@@ -76,7 +76,7 @@ procedure Loop_Pool_Smoke is
    end Results;
 
    task type Native_Worker with CPU => 1 is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native_Worker;
 
    task body Native_Worker is
@@ -94,14 +94,14 @@ procedure Loop_Pool_Smoke is
             Current_Rejected := True;
       end;
       Results.Report_Native
-        (not Gnatevl.IO.Is_Evented_Task and then Current_Rejected);
+        (not Flyology.IO.Is_Lightweight_Task and then Current_Rejected);
    exception
       when others =>
          Results.Report_Native (False);
    end Native_Worker;
 
    task type Automatic_Worker is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Automatic_Worker;
 
    task body Automatic_Worker is
@@ -113,12 +113,12 @@ procedure Loop_Pool_Smoke is
    end Automatic_Worker;
 
    task type Explicit_Worker with CPU => 2 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Explicit_Worker;
 
    task body Explicit_Worker is
       task Inherited_Worker is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Inherited_Worker;
 
       task body Inherited_Worker is
@@ -139,7 +139,7 @@ procedure Loop_Pool_Smoke is
    end Explicit_Worker;
 
    task type Pin_Worker is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Pin_Worker;
 
    task body Pin_Worker is
@@ -207,7 +207,7 @@ begin
    end;
 
    --  A native task, including one with an Ada CPU aspect, remains on stock
-   --  GNARL and must not initialize the evented pool.
+   --  GNARL and must not initialize the lightweight pool.
    for Group in Groups.Group_Id range 0 .. Pool_Size - 1 loop
       if Observe.Snapshot (Group, Snapshot) then
          raise Program_Error with "native CPU selection started an event loop";

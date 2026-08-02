@@ -3,15 +3,15 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
-seeds=${GNATEVL_STRESS_SEEDS:-"1 7 42 8675309"}
-batches=${GNATEVL_STRESS_BATCHES:-8}
-width=${GNATEVL_STRESS_WIDTH:-24}
-case_timeout=${GNATEVL_STRESS_TIMEOUT:-120}
-run_faults=${GNATEVL_STRESS_FAULTS:-1}
+seeds=${FLYOLOGY_STRESS_SEEDS:-"1 7 42 8675309"}
+batches=${FLYOLOGY_STRESS_BATCHES:-8}
+width=${FLYOLOGY_STRESS_WIDTH:-24}
+case_timeout=${FLYOLOGY_STRESS_TIMEOUT:-120}
+run_faults=${FLYOLOGY_STRESS_FAULTS:-1}
 
 case "$run_faults" in
   0|1) ;;
-  *) printf '%s\n' "GNATEVL_STRESS_FAULTS must be 0 or 1" >&2; exit 2 ;;
+  *) printf '%s\n' "FLYOLOGY_STRESS_FAULTS must be 0 or 1" >&2; exit 2 ;;
 esac
 
 cd "$project_root"
@@ -39,14 +39,14 @@ run_timed () {
 }
 
 restore_runtime () {
-  GNATEVL_TEST_FAULTS=0 "$project_root/scripts/prepare-rts.sh" >/dev/null
+  FLYOLOGY_TEST_FAULTS=0 "$project_root/scripts/prepare-rts.sh" >/dev/null
 }
 trap restore_runtime EXIT HUP INT TERM
 
 printf '%s\n' \
-  "GNATEVL short stress: seeds=[$seeds] batches=$batches width=$width timeout=${case_timeout}s"
+  "Flyology short stress: seeds=[$seeds] batches=$batches width=$width timeout=${case_timeout}s"
 
-GNATEVL_TEST_FAULTS=0 "$project_root/scripts/prepare-rts.sh" >/dev/null
+FLYOLOGY_TEST_FAULTS=0 "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f -P tests/runtime_smoke.gpr stress_randomized.adb
@@ -58,7 +58,7 @@ for seed in $seeds; do
 done
 
 if [ "$run_faults" = 1 ]; then
-  GNATEVL_TEST_FAULTS=1 "$project_root/scripts/prepare-rts.sh" >/dev/null
+  FLYOLOGY_TEST_FAULTS=1 "$project_root/scripts/prepare-rts.sh" >/dev/null
   run_gprbuild \
     --RTS="$project_root/build/rts" \
     -f -P tests/runtime_smoke.gpr fault_injection_smoke.adb
@@ -87,4 +87,4 @@ if [ "$run_faults" = 1 ]; then
   done
 fi
 
-printf '%s\n' "GNATEVL short stress passed"
+printf '%s\n' "Flyology short stress passed"

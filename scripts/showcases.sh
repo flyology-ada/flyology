@@ -5,7 +5,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
 
 cd "$project_root"
-GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
+FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 "$alr" exec -- gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
@@ -13,14 +13,14 @@ GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null
 
 for showcase in \
   execution_groups \
-  evented_file_io \
-  evented_io \
-  evented_pipeline \
+  lightweight_file_io \
+  lightweight_io \
+  lightweight_pipeline \
   hybrid_blocking_bridge \
-  many_evented_tasks \
+  many_lightweight_tasks \
   priority_scheduling \
   structured_http \
-  evented_vs_threads
+  lightweight_vs_native
 do
   printf '\n== %s ==\n' "$showcase"
   "$project_root/showcases/bin/$showcase"

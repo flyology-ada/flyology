@@ -3,11 +3,11 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
-test_root=$(mktemp -d "${TMPDIR:-/tmp}/gnatevl-sanitizer.XXXXXX")
+test_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-sanitizer.XXXXXX")
 normal_rts="$test_root/rts-normal"
 asan_rts="$test_root/rts-address"
-normal_context="$normal_rts/obj/s-gnacon.o"
-asan_context="$asan_rts/obj/s-gnacon.o"
+normal_context="$normal_rts/obj/s-flycon.o"
+asan_context="$asan_rts/obj/s-flycon.o"
 negative_log="$test_root/negative.log"
 
 cleanup () {
@@ -37,8 +37,8 @@ run_gprbuild () {
 # A normal prepared runtime must neither reference the sanitizer interface nor
 # retain sanitizer-only TLS. This is stronger than merely leaving libasan out
 # of the final link: it verifies the static configuration erased the hot path.
-GNATEVL_RTS_DIR="$normal_rts" \
-GNATEVL_SANITIZER=none \
+FLYOLOGY_RTS_DIR="$normal_rts" \
+FLYOLOGY_SANITIZER=none \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 if nm "$normal_context" | grep -E 'sanitizer|gnaasa|switching_from' >/dev/null
 then
@@ -46,10 +46,10 @@ then
   exit 1
 fi
 
-GNATEVL_RTS_DIR="$asan_rts" \
-GNATEVL_SANITIZER=address \
+FLYOLOGY_RTS_DIR="$asan_rts" \
+FLYOLOGY_SANITIZER=address \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
-if ! nm "$asan_context" | grep 'gnatevl__asan__start_switch' >/dev/null
+if ! nm "$asan_context" | grep 'flyology__asan__start_switch' >/dev/null
 then
   printf '%s\n' "ASan context switch lacks fiber annotations" >&2
   exit 1
@@ -81,4 +81,4 @@ if ! grep 'stack-buffer-overflow' "$negative_log" >/dev/null; then
   exit 1
 fi
 
-printf '%s\n' "GNATEVL ASan fiber-switch tests passed"
+printf '%s\n' "Flyology ASan fiber-switch tests passed"

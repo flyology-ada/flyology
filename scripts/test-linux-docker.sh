@@ -2,9 +2,9 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-gnat_version=${GNATEVL_GNAT_VERSION:-16.1.0}
-gprbuild_version=${GNATEVL_GPRBUILD_VERSION:-26.0.1}
-case "${GNATEVL_LINUX_ARCH:-$(uname -m)}" in
+gnat_version=${FLYOLOGY_GNAT_VERSION:-16.1.0}
+gprbuild_version=${FLYOLOGY_GPRBUILD_VERSION:-26.0.1}
+case "${FLYOLOGY_LINUX_ARCH:-$(uname -m)}" in
   arm64|aarch64)
     linux_arch=arm64
     ;;
@@ -13,11 +13,11 @@ case "${GNATEVL_LINUX_ARCH:-$(uname -m)}" in
     ;;
   *)
     printf '%s\n' \
-      "GNATEVL_LINUX_ARCH must be arm64/aarch64 or amd64/x86_64" >&2
+      "FLYOLOGY_LINUX_ARCH must be arm64/aarch64 or amd64/x86_64" >&2
     exit 1
     ;;
 esac
-image=${GNATEVL_LINUX_IMAGE:-gnatevl-linux-test-$linux_arch}
+image=${FLYOLOGY_LINUX_IMAGE:-flyology-linux-test-$linux_arch}
 
 docker build \
   --platform "linux/$linux_arch" \
@@ -29,6 +29,6 @@ docker build \
 
 docker run --rm \
   --platform "linux/$linux_arch" \
-  --env GNATEVL_TEST_DENY_IO_URING=1 \
-  --env GNATEVL_EXPECT_FILE_BACKEND=native-aio \
+  --env FLYOLOGY_TEST_DENY_IO_URING=1 \
+  --env FLYOLOGY_EXPECT_FILE_BACKEND=native-aio \
   "$image"

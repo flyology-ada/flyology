@@ -7,8 +7,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern int gnatevl_runtime_observe_lifecycle(void);
-extern int gnatevl_runtime_observe_created_groups(void);
+extern int flyology_runtime_observe_lifecycle(void);
+extern int flyology_runtime_observe_created_groups(void);
 struct runtime_group_snapshot {
     unsigned version;
     int thread_state;
@@ -33,16 +33,16 @@ struct runtime_group_snapshot {
     unsigned long long migrations_in;
     unsigned long long migrations_out;
 };
-extern int gnatevl_runtime_observe_group(
+extern int flyology_runtime_observe_group(
     int group, struct runtime_group_snapshot *snapshot, size_t size);
-extern int gnatevl_runtime_placement_supported(int mode);
+extern int flyology_runtime_placement_supported(int mode);
 struct runtime_placement_status {
     int mode;
     int value;
     int state;
     int error_code;
 };
-extern int gnatevl_runtime_query_group_placement(
+extern int flyology_runtime_query_group_placement(
     int group, struct runtime_placement_status *status, size_t size);
 
 static int expected_state;
@@ -50,13 +50,13 @@ static int expected_groups;
 static volatile sig_atomic_t signal_count;
 
 static void check_lifecycle_at_exit(void) {
-    int state = gnatevl_runtime_observe_lifecycle();
-    int groups = gnatevl_runtime_observe_created_groups();
+    int state = flyology_runtime_observe_lifecycle();
+    int groups = flyology_runtime_observe_created_groups();
 
     if (state != expected_state || groups != expected_groups) {
         char message[160];
         int length = snprintf(message, sizeof(message),
-            "GNATEVL lifecycle exit check failed: state=%d groups=%d "
+            "Flyology lifecycle exit check failed: state=%d groups=%d "
             "expected_state=%d expected_groups=%d\n",
             state, groups, expected_state, expected_groups);
         if (length > 0) {
@@ -64,7 +64,7 @@ static void check_lifecycle_at_exit(void) {
         }
         if (groups > 0) {
             struct runtime_group_snapshot snapshot;
-            if (gnatevl_runtime_observe_group(
+            if (flyology_runtime_observe_group(
                     0, &snapshot, sizeof(snapshot)) == 1) {
                 length = snprintf(message, sizeof(message),
                     "group0 members=%llu ready=%llu waiting=%llu "
@@ -81,7 +81,7 @@ static void check_lifecycle_at_exit(void) {
     }
 }
 
-int gnatevl_test_arm_exit_check(int state, int groups) {
+int flyology_test_arm_exit_check(int state, int groups) {
     expected_state = state;
     expected_groups = groups;
     return atexit(check_lifecycle_at_exit);
@@ -92,7 +92,7 @@ static void count_signal(int signo) {
     signal_count = 1;
 }
 
-int gnatevl_test_signal_thread(uintptr_t raw_thread) {
+int flyology_test_signal_thread(uintptr_t raw_thread) {
     struct sigaction action;
 
     action.sa_handler = count_signal;
@@ -111,7 +111,7 @@ int gnatevl_test_signal_thread(uintptr_t raw_thread) {
     return signal_count == 1 ? 0 : -1;
 }
 
-int gnatevl_test_fork_exec(const char *program) {
+int flyology_test_fork_exec(const char *program) {
     pid_t child = fork();
     int status;
 
@@ -121,9 +121,9 @@ int gnatevl_test_fork_exec(const char *program) {
     if (child == 0) {
         struct runtime_placement_status placement;
 
-        if (gnatevl_runtime_observe_lifecycle() != 5 ||
-            gnatevl_runtime_placement_supported(1) != 0 ||
-            gnatevl_runtime_query_group_placement(
+        if (flyology_runtime_observe_lifecycle() != 5 ||
+            flyology_runtime_placement_supported(1) != 0 ||
+            flyology_runtime_query_group_placement(
                 0, &placement, sizeof(placement)) != 0 ||
             placement.state != 4) {
             _Exit(91);

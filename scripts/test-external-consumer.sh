@@ -4,7 +4,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_root="$project_root/tests/external_consumer"
 alr=$("$project_root/scripts/find-alr.sh")
-consumer_root=$(mktemp -d "${TMPDIR:-/tmp}/gnatevl-consumer.XXXXXX")
+consumer_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-consumer.XXXXXX")
 
 cleanup () {
   rm -rf -- "$consumer_root"
@@ -14,7 +14,7 @@ trap cleanup EXIT HUP INT TERM
 cp -R "$fixture_root/." "$consumer_root/"
 cd "$consumer_root"
 
-"$alr" --non-interactive with gnatevl --use="$project_root"
+"$alr" --non-interactive with flyology --use="$project_root"
 
 run_gprbuild () {
   if [ "$(uname -s)" = Darwin ]; then
@@ -31,11 +31,11 @@ run_gprbuild () {
   "$alr" exec -- gprbuild "$@"
 }
 
-for execution_default in native evented; do
+for execution_default in native lightweight; do
   rts_root="$consumer_root/build/rts-$execution_default"
   ALR="$alr" \
-  GNATEVL_CONSUMER_RTS="$rts_root" \
-  GNATEVL_CONSUMER_DEFAULT="$execution_default" \
+  FLYOLOGY_CONSUMER_RTS="$rts_root" \
+  FLYOLOGY_CONSUMER_DEFAULT="$execution_default" \
     "$alr" exec -- ./prepare-rts.sh
 
   run_gprbuild \
@@ -52,7 +52,7 @@ leaked_objects=$(find "$project_root" -maxdepth 1 -type f \
   \( -name 's-*.o' -o -name 's-*.ali' \) -print)
 if [ -n "$leaked_objects" ]; then
   printf '%s\n' \
-    'runtime preparation leaked generated objects into the GNATEVL root:' \
+    'runtime preparation leaked generated objects into the Flyology root:' \
     "$leaked_objects" >&2
   exit 1
 fi

@@ -3,28 +3,28 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Connections;
+with Flyology;
+with Flyology.IO.Connections;
 with Interfaces.C;
 with Showcase_Support;
 
 procedure Cancellation_Density is
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
    package C renames Interfaces.C;
    use Ada.Text_IO;
    use type Ada.Real_Time.Time;
    use type C.double;
 
    function Thread_Count return C.int;
-   pragma Import (C, Thread_Count, "gnatevl_thread_count");
+   pragma Import (C, Thread_Count, "flyology_thread_count");
    function Process_CPU_Seconds return C.double;
-   pragma Import (C, Process_CPU_Seconds, "gnatevl_process_cpu_seconds");
+   pragma Import (C, Process_CPU_Seconds, "flyology_process_cpu_seconds");
 
    type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
    type Socket_Array_Access is access Socket_Array;
 
    procedure Run
-     (Count : Positive; Model : Gnatevl.Execution_Model; Mode : String)
+     (Count : Positive; Model : Flyology.Execution_Model; Mode : String)
    is
       Manager : aliased Connections.Server (Capacity => Count);
       Token   : aliased Connections.Cancellation_Token;
@@ -59,7 +59,7 @@ procedure Cancellation_Density is
       end Progress;
 
       task type Worker
-        (Index : Positive; Kind : Gnatevl.Execution_Model)
+        (Index : Positive; Kind : Flyology.Execution_Model)
       is
          pragma Task_Info (Kind);
          pragma Storage_Size (64 * 1_024);
@@ -136,13 +136,13 @@ procedure Cancellation_Density is
       then Positive'Value (Ada.Command_Line.Argument (2)) else 1_000);
    Mode : constant String :=
      (if Ada.Command_Line.Argument_Count >= 1
-      then Ada.Command_Line.Argument (1) else "evented");
+      then Ada.Command_Line.Argument (1) else "lightweight");
 begin
-   if Mode = "evented" then
-      Run (Count, Gnatevl.Event_Loop_Task, Mode);
+   if Mode = "lightweight" then
+      Run (Count, Flyology.Lightweight_Task, Mode);
    elsif Mode = "native" then
-      Run (Count, Gnatevl.Native_Thread, Mode);
+      Run (Count, Flyology.Native_Task, Mode);
    else
-      raise Constraint_Error with "mode must be evented or native";
+      raise Constraint_Error with "mode must be lightweight or native";
    end if;
 end Cancellation_Density;

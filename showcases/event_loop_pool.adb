@@ -3,10 +3,10 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO.Sockets;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO.Sockets;
+with Flyology.Observability;
 with Showcase_Support;
 
 procedure Event_Loop_Pool is
@@ -14,8 +14,8 @@ procedure Event_Loop_Pool is
    use Ada.Streams;
    use Ada.Text_IO;
 
-   package Groups renames Gnatevl.Execution_Groups;
-   package Observe renames Gnatevl.Observability;
+   package Groups renames Flyology.Execution_Groups;
+   package Observe renames Flyology.Observability;
 
    type Socket_Array is
      array (Positive range <>) of GNAT.Sockets.Socket_Type;
@@ -79,7 +79,7 @@ procedure Event_Loop_Pool is
       end Progress;
 
       task type Connection (Index : Positive) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
          pragma Storage_Size (16 * 1_024);
       end Connection;
 
@@ -89,7 +89,7 @@ procedure Event_Loop_Pool is
          Progress.Ready (Groups.Current);
          for Round in 1 .. Rounds loop
             begin
-               Gnatevl.IO.Sockets.Receive_Exactly
+               Flyology.IO.Sockets.Receive_Exactly
                  (Servers (Index), Incoming, Timeout => 30.0);
                Progress.Complete (Incoming = Byte);
             exception
@@ -125,7 +125,7 @@ procedure Event_Loop_Pool is
       Started := Clock;
       for Round in 1 .. Rounds loop
          for Index in 1 .. Workers loop
-            Gnatevl.IO.Sockets.Send_All
+            Flyology.IO.Sockets.Send_All
               (Peers (Index), Byte, Timeout => 30.0);
          end loop;
          Progress.Await_Round;

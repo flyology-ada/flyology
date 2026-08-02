@@ -3,7 +3,7 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
-expected_gnat=${GNATEVL_EXPECTED_GNAT:-}
+expected_gnat=${FLYOLOGY_EXPECTED_GNAT:-}
 
 cd "$project_root"
 actual_gnat=$("$project_root/scripts/gnat-native-release.sh" "$alr")

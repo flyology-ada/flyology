@@ -1,4 +1,4 @@
-with Gnatevl;
+with Flyology;
 
 procedure Lifecycle_Smoke is
    protected Results is
@@ -26,23 +26,23 @@ procedure Lifecycle_Smoke is
    end Results;
 
    task Native_Master is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native_Master;
 
    task body Native_Master is
    begin
       for Round in 1 .. 200 loop
          declare
-            task type Evented_Child is
-               pragma Task_Info (Gnatevl.Event_Loop_Task);
-            end Evented_Child;
+            task type Lightweight_Child is
+               pragma Task_Info (Flyology.Lightweight_Task);
+            end Lightweight_Child;
 
-            task body Evented_Child is
+            task body Lightweight_Child is
             begin
                delay 0.0;
-            end Evented_Child;
+            end Lightweight_Child;
 
-            Children : array (1 .. 8) of Evented_Child;
+            Children : array (1 .. 8) of Lightweight_Child;
             pragma Unreferenced (Children);
          begin
             null;
@@ -58,6 +58,6 @@ begin
    Results.Wait;
    if not Results.Passed then
       raise Program_Error with
-        "evented child lifecycle failed under a native master";
+        "lightweight child lifecycle failed under a native master";
    end if;
 end Lifecycle_Smoke;

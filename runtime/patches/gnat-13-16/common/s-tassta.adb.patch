@@ -1,25 +1,25 @@
 --- a/s-tassta.adb
 +++ b/s-tassta.adb
 @@ -43,0 +44 @@
-+with System.Gnatevl.Scheduler;
++with System.Flyology.Scheduler;
 @@ -893,0 +895,6 @@
-+      --  GNARL has completed global tasks and library objects. GNATEVL may
++      --  GNARL has completed global tasks and library objects. Flyology may
 +      --  now join quiescent event-loop threads; if an unexpected fiber is
 +      --  still live, the scheduler records deferred cleanup and leaves the
 +      --  resources to process exit instead of racing that task.
-+      System.Gnatevl.Scheduler.Finalize;
++      System.Flyology.Scheduler.Finalize;
 +
 @@ -1008,8 +1009,13 @@
 -      Task_Alternate_Stack :
 -        aliased SSE.Storage_Array (1 .. Alternate_Stack_Size);
-+      Is_Evented : constant Boolean :=
-+        System.Gnatevl.Scheduler.Current_Task /= System.Null_Address;
++      Is_Lightweight : constant Boolean :=
++        System.Flyology.Scheduler.Current_Task /= System.Null_Address;
 +
 +      Task_Alternate_Stack : aliased SSE.Storage_Array
-+        (1 .. (if Is_Evented then 0 else Alternate_Stack_Size));
++        (1 .. (if Is_Lightweight then 0 else Alternate_Stack_Size));
        --  The alternate signal stack for this task, if any
  
 -      Use_Alternate_Stack : constant Boolean := Alternate_Stack_Size /= 0;
 +      Use_Alternate_Stack : constant Boolean :=
-+        Alternate_Stack_Size /= 0 and then not Is_Evented;
++        Alternate_Stack_Size /= 0 and then not Is_Lightweight;
        --  Whether to use above alternate signal stack for stack overflows

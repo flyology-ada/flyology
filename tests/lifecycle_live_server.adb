@@ -1,8 +1,8 @@
-with Gnatevl;
+with Flyology;
 
 package body Lifecycle_Live_Server is
    task Server is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
       entry Stop;
    end Server;
 

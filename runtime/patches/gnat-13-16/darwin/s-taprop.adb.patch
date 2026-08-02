@@ -1,8 +1,8 @@
 --- a/s-taprop.adb
 +++ b/s-taprop.adb
 @@ -43,0 +44,2 @@
-+with System.Gnatevl.Default_Execution;
-+with System.Gnatevl.Scheduler;
++with System.Flyology.Default_Execution;
++with System.Flyology.Scheduler;
 @@ -201,3 +201,6 @@
    function To_Address is
       new Ada.Unchecked_Conversion (Task_Id, System.Address);
@@ -14,62 +14,62 @@
    pragma Import (C,
       GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
 
-+   function Event_Initialize (Environment : System.Address)
++   function Lightweight_Initialize (Environment : System.Address)
 +     return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Initialize;
++     renames System.Flyology.Scheduler.Initialize;
 +
-+   function Event_Create
++   function Lightweight_Create
 +     (T          : System.Address;
 +      Stack_Size : Interfaces.C.size_t;
 +      Priority   : Interfaces.C.int;
 +      Wrapper    : System.Address;
 +      Group      : Interfaces.C.int) return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Create;
++     renames System.Flyology.Scheduler.Create;
 +
-+   function Event_Is_Task (T : System.Address) return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Is_Event_Task;
++   function Lightweight_Is_Task (T : System.Address) return Interfaces.C.int
++     renames System.Flyology.Scheduler.Is_Lightweight_Task;
 +
-+   function Event_Current return System.Address
-+     renames System.Gnatevl.Scheduler.Current_Task;
++   function Lightweight_Current return System.Address
++     renames System.Flyology.Scheduler.Current_Task;
 +
-+   function Event_Task_Thread
++   function Lightweight_Task_Thread
 +     (T : System.Address) return OSI.Thread_Id
-+     renames System.Gnatevl.Scheduler.Task_Thread;
++     renames System.Flyology.Scheduler.Task_Thread;
 +
-+   function Event_Sleep
++   function Lightweight_Sleep
 +     (Task_Lock : System.Address;
 +      Deadline  : Duration;
 +      Timed_Out : access Interfaces.C.int) return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Sleep;
++     renames System.Flyology.Scheduler.Sleep;
 +
-+   function Event_Wake (T : System.Address) return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Wake;
++   function Lightweight_Wake (T : System.Address) return Interfaces.C.int
++     renames System.Flyology.Scheduler.Wake;
 +
-+   function Event_Yield return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Yield;
++   function Lightweight_Yield return Interfaces.C.int
++     renames System.Flyology.Scheduler.Yield;
 +
-+   function Event_Set_Priority
++   function Lightweight_Set_Priority
 +     (T                   : System.Address;
 +      Priority            : Interfaces.C.int;
 +      Loss_Of_Inheritance : Interfaces.C.int)
 +      return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Set_Priority;
++     renames System.Flyology.Scheduler.Set_Priority;
 +
-+   function Event_Destroy (T : System.Address) return Interfaces.C.int
-+     renames System.Gnatevl.Scheduler.Destroy;
++   function Lightweight_Destroy (T : System.Address) return Interfaces.C.int
++     renames System.Flyology.Scheduler.Destroy;
 +
-+   function Is_Event_Task (T : Task_Id) return Boolean is
-+     (Event_Is_Task (To_Address (T)) /= 0);
++   function Is_Lightweight_Task (T : Task_Id) return Boolean is
++     (Lightweight_Is_Task (To_Address (T)) /= 0);
 +
-+   function Event_Deadline
++   function Lightweight_Deadline
 +     (Time : Duration; Mode : ST.Delay_Modes) return Duration;
 +
 @@ -277 +330 @@
 -      Stack_Base : constant Address := Get_Stack_Base (T.Common.LL.Thread);
 +      Stack_Base : Address;
 @@ -283,0 +337,6 @@
-+      --  Evented stacks are allocated with guard pages by GNATEVL.
-+      if Is_Event_Task (T) then
++      --  Lightweight stacks are allocated with guard pages by Flyology.
++      if Is_Lightweight_Task (T) then
 +         return;
 +      end if;
 +
@@ -79,8 +79,8 @@
     begin
 -      return T.Common.LL.Thread;
 +      return
-+        (if Is_Event_Task (T)
-+         then Event_Task_Thread (To_Address (T))
++        (if Is_Lightweight_Task (T)
++         then Lightweight_Task_Thread (To_Address (T))
 +         else T.Common.LL.Thread);
     end Get_Thread_Id;
 @@ -305,10 +369,17 @@
@@ -90,12 +90,12 @@
 
 -   function Self return Task_Id renames Specific.Self;
 +   function Self return Task_Id is
-+      Event_Self : constant System.Address := Event_Current;
++      Lightweight_Self : constant System.Address := Lightweight_Current;
 +   begin
 +      return
-+        (if Event_Self = System.Null_Address
++        (if Lightweight_Self = System.Null_Address
 +         then Specific.Self
-+         else To_Task_Id (Event_Self));
++         else To_Task_Id (Lightweight_Self));
 +   end Self;
 
     ---------------------
@@ -114,14 +114,14 @@
 -        pthread_cond_wait
 -          (cond  => Self_ID.Common.LL.CV'Access,
 -           mutex => Self_ID.Common.LL.L'Access);
-+      if Is_Event_Task (Self_ID) then
++      if Is_Lightweight_Task (Self_ID) then
 +         Result :=
-+           Event_Sleep
++           Lightweight_Sleep
 +             (Self_ID.Common.LL.L'Address,
 +              -1.0,
 +              Ignored'Access);
 +         if Result /= 0 then
-+            raise Program_Error with "GNATEVL sleep failed";
++            raise Program_Error with "Flyology sleep failed";
 +         end if;
 +      else
 +         Result :=
@@ -148,9 +148,9 @@
 +      Yielded  : out Boolean)
 +   is
 +      Result       : Interfaces.C.int;
-+      Event_Result : aliased Interfaces.C.int;
++      Lightweight_Result : aliased Interfaces.C.int;
 +   begin
-+      if not Is_Event_Task (Self_ID) then
++      if not Is_Lightweight_Task (Self_ID) then
 +         Monotonic.Timed_Sleep
 +           (Self_ID, Time, Mode, Reason, Timedout, Yielded);
 +         return;
@@ -163,14 +163,14 @@
 +      end if;
 +
 +      Result :=
-+        Event_Sleep
++        Lightweight_Sleep
 +          (Self_ID.Common.LL.L'Address,
-+           Event_Deadline (Time, Mode),
-+           Event_Result'Access);
++           Lightweight_Deadline (Time, Mode),
++           Lightweight_Result'Access);
 +      if Result /= 0 then
-+         raise Program_Error with "GNATEVL timed sleep failed";
++         raise Program_Error with "Flyology timed sleep failed";
 +      end if;
-+      Timedout := Event_Result /= 0;
++      Timedout := Lightweight_Result /= 0;
 +   end Timed_Sleep;
 @@ -526,10 +626,74 @@
 -   procedure Timed_Delay
@@ -183,16 +183,16 @@
 +      Mode    : ST.Delay_Modes)
 +   is
 +      Deadline     : Duration;
-+      Event_Result : aliased Interfaces.C.int;
++      Lightweight_Result : aliased Interfaces.C.int;
 +      Result       : Interfaces.C.int;
 +   begin
-+      if not Is_Event_Task (Self_ID) then
++      if not Is_Lightweight_Task (Self_ID) then
 +         Monotonic.Timed_Delay (Self_ID, Time, Mode);
 +         return;
 +      end if;
 +
 +      Write_Lock (Self_ID);
-+      Deadline := Event_Deadline (Time, Mode);
++      Deadline := Lightweight_Deadline (Time, Mode);
 +
 +      if Deadline > Monotonic.Monotonic_Clock
 +        and then Self_ID.Pending_ATC_Level >= Self_ID.ATC_Nesting_Level
@@ -200,27 +200,27 @@
 +         Self_ID.Common.State := Delay_Sleep;
 +         loop
 +            Result :=
-+              Event_Sleep
++              Lightweight_Sleep
 +                (Self_ID.Common.LL.L'Address,
 +                 Deadline,
-+                 Event_Result'Access);
++                 Lightweight_Result'Access);
 +            if Result /= 0 then
-+               raise Program_Error with "GNATEVL timed delay failed";
++               raise Program_Error with "Flyology timed delay failed";
 +            end if;
-+            exit when Event_Result /= 0
++            exit when Lightweight_Result /= 0
 +              or else Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
 +         end loop;
 +         Self_ID.Common.State := Runnable;
 +      end if;
 +
 +      Unlock (Self_ID);
-+      Result := Event_Yield;
++      Result := Lightweight_Yield;
 +      if Result /= 0 then
-+         raise Program_Error with "GNATEVL delay yield failed";
++         raise Program_Error with "Flyology delay yield failed";
 +      end if;
 +   end Timed_Delay;
 +
-+   function Event_Deadline
++   function Lightweight_Deadline
 +     (Time : Duration; Mode : ST.Delay_Modes) return Duration
 +   is
 +      Now : constant Duration := Monotonic.Monotonic_Clock;
@@ -238,17 +238,17 @@
 +           (Now + Max_Sensible_Delay,
 +            Time + Now - OS_Primitives.Clock);
 +      end if;
-+   end Event_Deadline;
++   end Lightweight_Deadline;
 @@ -547,11 +711,15 @@
    procedure Wakeup (T : Task_Id; Reason : System.Tasking.Task_States) is
        pragma Unreferenced (Reason);
        Result : Interfaces.C.int;
     begin
 -      Result := pthread_cond_signal (T.Common.LL.CV'Access);
-+      if Is_Event_Task (T) then
-+         Result := Event_Wake (To_Address (T));
++      if Is_Lightweight_Task (T) then
++         Result := Lightweight_Wake (To_Address (T));
 +         if Result /= 0 then
-+            raise Program_Error with "GNATEVL wake failed";
++            raise Program_Error with "Flyology wake failed";
 +         end if;
 +      else
 +         Result := pthread_cond_signal (T.Common.LL.CV'Access);
@@ -262,10 +262,10 @@
     begin
        if Do_Yield then
 -         Result := sched_yield;
-+         if Event_Current /= System.Null_Address then
-+            Result := Event_Yield;
++         if Lightweight_Current /= System.Null_Address then
++            Result := Lightweight_Yield;
 +            if Result /= 0 then
-+               raise Program_Error with "GNATEVL yield failed";
++               raise Program_Error with "Flyology yield failed";
 +            end if;
 +         else
 +            Result := sched_yield;
@@ -284,14 +284,14 @@
    begin
        T.Common.Current_Priority := Prio;
 +
-+      if Is_Event_Task (T) then
++      if Is_Lightweight_Task (T) then
 +         Result :=
-+           Event_Set_Priority
++           Lightweight_Set_Priority
 +             (To_Address (T),
 +              Interfaces.C.int (Prio),
 +              Boolean'Pos (Loss_Of_Inheritance));
 +         if Result /= 0 then
-+            raise Program_Error with "GNATEVL priority update failed";
++            raise Program_Error with "Flyology priority update failed";
 +         end if;
 +         return;
 +      end if;
@@ -300,17 +300,18 @@
 @@ -654,7 +836,8 @@
 -   function Is_Valid_Task return Boolean renames Specific.Is_Valid_Task;
 +   function Is_Valid_Task return Boolean is
-+     (Event_Current /= System.Null_Address or else Specific.Is_Valid_Task);
++     (Lightweight_Current /= System.Null_Address
++      or else Specific.Is_Valid_Task);
 @@ -772,6 +955,18 @@
    begin
 +      if T.Common.Task_Info in System.Task_Info.Process_Scope
 +        or else
-+          (System.Gnatevl.Default_Execution.Evented
++          (System.Flyology.Default_Execution.Lightweight
 +           and then T.Common.Task_Info in
 +             System.Task_Info.Unspecified_Task_Info)
 +      then
 +         Result :=
-+           Event_Create
++           Lightweight_Create
 +             (To_Address (T),
 +              Interfaces.C.size_t (Stack_Size + Alternate_Stack_Size),
 +              Interfaces.C.int (Priority),
@@ -329,10 +330,10 @@
        Result : Interfaces.C.int;
 
     begin
-+      if Is_Event_Task (T) then
-+         Result := Event_Destroy (To_Address (T));
++      if Is_Lightweight_Task (T) then
++         Result := Lightweight_Destroy (To_Address (T));
 +         if Result /= 0 then
-+            raise Program_Error with "GNATEVL task destruction failed";
++            raise Program_Error with "Flyology task destruction failed";
 +         end if;
 +      end if;
 +
@@ -342,10 +343,10 @@
        Result : Interfaces.C.int;
     begin
 -      if Abort_Handler_Installed then
-+      if Is_Event_Task (T) then
-+         Result := Event_Wake (To_Address (T));
++      if Is_Lightweight_Task (T) then
++         Result := Lightweight_Wake (To_Address (T));
 +         if Result /= 0 then
-+            raise Program_Error with "GNATEVL abort wake failed";
++            raise Program_Error with "Flyology abort wake failed";
 +         end if;
 +      elsif Abort_Handler_Installed then
           Result :=
@@ -353,9 +354,9 @@
 @@ -1071,6 +1275,9 @@
       Enter_Task (Environment_Task);
 +
-+      Result := Event_Initialize (To_Address (Environment_Task));
++      Result := Lightweight_Initialize (To_Address (Environment_Task));
 +      if Result /= 0 then
-+         raise Program_Error with "GNATEVL initialization failed";
++         raise Program_Error with "Flyology initialization failed";
 +      end if;
 
        if State

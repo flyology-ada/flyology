@@ -1,13 +1,13 @@
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Connections;
-with Gnatevl.IO.Sockets;
-with Gnatevl.IO.Structured_Servers;
+with Flyology;
+with Flyology.IO.Connections;
+with Flyology.IO.Sockets;
+with Flyology.IO.Structured_Servers;
 
 procedure Structured_HTTP is
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
    package Sockets renames GNAT.Sockets;
 
    use Ada.Text_IO;
@@ -17,7 +17,7 @@ procedure Structured_HTTP is
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    Request_Text : constant String := "GET / HTTP/1.0" & CRLF & CRLF;
    Response_Body : constant String :=
-     "hello from a structured GNATEVL server" & CRLF;
+     "hello from a structured Flyology server" & CRLF;
    Response_Text : constant String :=
      "HTTP/1.0 200 OK" & CRLF
      & "Content-Type: text/plain" & CRLF
@@ -40,7 +40,7 @@ procedure Structured_HTTP is
    end Bytes;
 
    generic
-      Model : Gnatevl.Execution_Model;
+      Model : Flyology.Execution_Model;
       with function Lane_Name return String;
    procedure Run_Lane;
 
@@ -105,7 +105,7 @@ procedure Structured_HTTP is
          State.State.Handler_Done;
       end Handle;
 
-      package HTTP_Server is new Gnatevl.IO.Structured_Servers
+      package HTTP_Server is new Flyology.IO.Structured_Servers
         (Handler_Context => Context,
          Handle          => Handle,
          Handler_Model   => Model);
@@ -135,11 +135,11 @@ procedure Structured_HTTP is
 
       declare
          task Stopper is
-            pragma Task_Info (Gnatevl.Native_Thread);
+            pragma Task_Info (Flyology.Native_Task);
          end Stopper;
 
          task type Client is
-            pragma Task_Info (Gnatevl.Native_Thread);
+            pragma Task_Info (Flyology.Native_Task);
          end Client;
 
          task body Stopper is
@@ -154,10 +154,10 @@ procedure Structured_HTTP is
               Bytes (Response_Text);
          begin
             Sockets.Create_Socket (Socket);
-            Gnatevl.IO.Sockets.Connect (Socket, Address, Timeout => 2.0);
-            Gnatevl.IO.Sockets.Send_All
+            Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 2.0);
+            Flyology.IO.Sockets.Send_All
               (Socket, Bytes (Request_Text), Timeout => 2.0);
-            Gnatevl.IO.Sockets.Receive_Exactly
+            Flyology.IO.Sockets.Receive_Exactly
               (Socket, Response, Timeout => 2.0);
             State.State.Client_Done (Response = Bytes (Response_Text));
             Sockets.Close_Socket (Socket);
@@ -192,17 +192,17 @@ procedure Structured_HTTP is
       end;
    end Run_Lane;
 
-   function Evented_Name return String is ("event-loop handlers");
-   function Native_Name return String is ("native-thread handlers");
+   function Lightweight_Name return String is ("lightweight handlers");
+   function Native_Name return String is ("native handlers");
 
-   procedure Run_Evented is new Run_Lane
-     (Gnatevl.Event_Loop_Task, Evented_Name);
+   procedure Run_Lightweight is new Run_Lane
+     (Flyology.Lightweight_Task, Lightweight_Name);
    procedure Run_Native is new Run_Lane
-     (Gnatevl.Native_Thread, Native_Name);
+     (Flyology.Native_Task, Native_Name);
 begin
    Put_Line
      ("Each Serve call owns its listener, handler task scope, admission bound,"
       & " and deterministic shutdown.");
-   Run_Evented;
+   Run_Lightweight;
    Run_Native;
 end Structured_HTTP;

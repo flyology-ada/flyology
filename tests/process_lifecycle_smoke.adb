@@ -1,14 +1,14 @@
 with Ada.Command_Line;
 with Ada.Directories;
-with Gnatevl;
-with Gnatevl.Process_Lifecycle;
+with Flyology;
+with Flyology.Process_Lifecycle;
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 
 procedure Process_Lifecycle_Smoke is
    package C renames Interfaces.C;
-   package Lifecycle renames Gnatevl.Process_Lifecycle;
+   package Lifecycle renames Flyology.Process_Lifecycle;
 
    use type C.int;
    use type Lifecycle.Event_Runtime_State;
@@ -19,14 +19,14 @@ procedure Process_Lifecycle_Smoke is
 
    function Arm_Exit_Check (State, Groups : C.int) return C.int;
    pragma Import
-     (C, Arm_Exit_Check, "gnatevl_test_arm_exit_check");
+     (C, Arm_Exit_Check, "flyology_test_arm_exit_check");
 
    function Signal_Thread (Thread : System.Address) return C.int;
-   pragma Import (C, Signal_Thread, "gnatevl_test_signal_thread");
+   pragma Import (C, Signal_Thread, "flyology_test_signal_thread");
 
    function Fork_Exec
      (Program : Interfaces.C.Strings.chars_ptr) return C.int;
-   pragma Import (C, Fork_Exec, "gnatevl_test_fork_exec");
+   pragma Import (C, Fork_Exec, "flyology_test_fork_exec");
 
    protected Result is
       procedure Set_Thread (Value : System.Address);
@@ -49,15 +49,15 @@ procedure Process_Lifecycle_Smoke is
       end Wait;
    end Result;
 
-   task Evented is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
-   end Evented;
+   task Lightweight is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Lightweight;
 
-   task body Evented is
+   task body Lightweight is
    begin
       Result.Set_Thread (Current_Thread);
       delay 0.01;
-   end Evented;
+   end Lightweight;
 
    Event_Thread : System.Address;
    Program      : Interfaces.C.Strings.chars_ptr;

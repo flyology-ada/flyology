@@ -1,7 +1,7 @@
 with Ada.Streams;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Sockets;
+with Flyology;
+with Flyology.IO.Sockets;
 
 procedure Stack_Size_Parity_Smoke is
    use Ada.Streams;
@@ -67,7 +67,7 @@ begin
    declare
       task type Worker
         (Index : Positive;
-         Model : Gnatevl.Execution_Model)
+         Model : Flyology.Execution_Model)
       is
          pragma Task_Info (Model);
          pragma Storage_Size (Small_Stack);
@@ -78,7 +78,7 @@ begin
          Success  : Boolean := False;
       begin
          State.Started;
-         Gnatevl.IO.Sockets.Receive_Exactly
+         Flyology.IO.Sockets.Receive_Exactly
            (Servers (Index), Incoming, Timeout => 5.0);
          Success := Incoming = One_Byte;
          State.Finished (Index, Success);
@@ -94,11 +94,11 @@ begin
    begin
       for Index in 1 .. Tasks_Per_Lane loop
          Workers (Index) :=
-           new Worker (Index, Gnatevl.Event_Loop_Task);
+           new Worker (Index, Flyology.Lightweight_Task);
       end loop;
       for Index in Tasks_Per_Lane + 1 .. Task_Count loop
          Workers (Index) :=
-           new Worker (Index, Gnatevl.Native_Thread);
+           new Worker (Index, Flyology.Native_Task);
       end loop;
 
       select
@@ -109,7 +109,7 @@ begin
       end select;
 
       for Index in Peers'Range loop
-         Gnatevl.IO.Sockets.Send_All (Peers (Index), One_Byte, Timeout => 5.0);
+         Flyology.IO.Sockets.Send_All (Peers (Index), One_Byte, Timeout => 5.0);
       end loop;
 
       select

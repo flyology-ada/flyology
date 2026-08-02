@@ -1,10 +1,10 @@
-with Gnatevl;
-with Gnatevl.Execution_Groups;
+with Flyology;
+with Flyology.Execution_Groups;
 with Interfaces.C.Extensions;
 with System;
 
 procedure Thread_Affinity_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
    package C_Ext renames Interfaces.C.Extensions;
 
    use type C_Ext.unsigned_long_long;
@@ -22,10 +22,10 @@ procedure Thread_Affinity_Smoke is
    pragma Import (C, Current_Thread, "pthread_self");
 
    function TLS_Get return C_Ext.unsigned_long_long;
-   pragma Import (C, TLS_Get, "gnatevl_test_tls_get");
+   pragma Import (C, TLS_Get, "flyology_test_tls_get");
 
    procedure TLS_Set (Value : C_Ext.unsigned_long_long);
-   pragma Import (C, TLS_Set, "gnatevl_test_tls_set");
+   pragma Import (C, TLS_Set, "flyology_test_tls_set");
 
    protected Observations is
       procedure Group_One_Seeded (Thread : System.Address);
@@ -80,23 +80,23 @@ procedure Thread_Affinity_Smoke is
    end Observations;
 
    task Group_One_Seeder with CPU => 11 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_Seeder;
 
    task Group_One_Observer with CPU => 11 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_Observer;
 
    task Group_Two_Seeder with CPU => 12 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Group_Two_Seeder;
 
    task Migrator with CPU => 11 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Migrator;
 
    task Native is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native;
 
    task body Group_One_Seeder is

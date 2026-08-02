@@ -1,25 +1,25 @@
-# GNATEVL
+# Flyology
 
-GNATEVL is an experimental GNAT runtime that can run designated ordinary Ada
-tasks as stackful tasks on an event loop while leaving undesignated tasks on
-GNAT's native pthread-backed path.
+Flyology is an experimental GNAT runtime that can run designated ordinary Ada
+tasks as lightweight tasks on an event loop while leaving undesignated tasks
+as native tasks backed by pthreads.
 
 It is an augmentation of the existing GNAT runtime, not a new async language or
 a replacement tasking model. Rendezvous, protected objects, task activation,
 masters, exceptions, and normal blocking-looking Ada control flow still come
-from GNARL. GNATEVL changes how a task is scheduled and adds I/O operations that
+from GNARL. Flyology changes how a task is scheduled and adds I/O operations that
 cooperate with either execution mode.
 
 The current patch family covers exact Alire `gnat_native` releases from 13
 through 16. Linux/x86-64 supports 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1,
 and 16.1.0; Linux/AArch64 is validated with 16.1.0. macOS supports 13.2.2,
 14.1.3, 14.2.1, and 16.1.0. The event backend is
-`kqueue` on macOS and `epoll` plus `eventfd` on Linux. Evented tasks resume
+`kqueue` on macOS and `epoll` plus `eventfd` on Linux. Lightweight tasks resume
 through the small ABI-specific context switch described below.
 
 ## Programming model
 
-An undesignated Ada task uses a native thread by default, preserving the
+An undesignated Ada task runs as a native task by default, preserving the
 behavior expected by existing GNAT applications:
 
 ```ada
@@ -30,40 +30,40 @@ Event-loop execution is an explicit per-task designation:
 
 ```ada
 task Connection is
-   pragma Task_Info (Gnatevl.Event_Loop_Task);
+   pragma Task_Info (Flyology.Lightweight_Task);
 end Connection;
 ```
 
 The prepared runtime has a project-wide default. Compatibility-oriented builds
-omit the setting or select `native`; evented applications can opt in once for
+omit the setting or select `native`; lightweight applications can opt in once for
 the whole project:
 
 ```sh
-GNATEVL_DEFAULT=native  ./scripts/prepare-rts.sh  # default when omitted
-GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
+FLYOLOGY_DEFAULT=native  ./scripts/prepare-rts.sh  # default when omitted
+FLYOLOGY_DEFAULT=lightweight ./scripts/prepare-rts.sh
 ```
 
 The environment task always remains native. No poller, scheduler context,
 fiber stack, or event-loop pthread is created until activation of the first
-evented child task.
+lightweight child task.
 
-An explicit `Gnatevl.Event_Loop_Task` or `Gnatevl.Native_Thread` always
-overrides that project default. `Gnatevl.Project_Default` explicitly requests
+An explicit `Flyology.Lightweight_Task` or `Flyology.Native_Task` always
+overrides that project default. `Flyology.Project_Default` explicitly requests
 the prepared default and is useful as a task-type discriminant:
 
 ```ada
-task type Worker (Model : Gnatevl.Execution_Model) is
+task type Worker (Model : Flyology.Execution_Model) is
    pragma Task_Info (Model);
 end Worker;
 
-Evented : Worker (Gnatevl.Event_Loop_Task);
-Native  : Worker (Gnatevl.Native_Thread);
-Default : Worker (Gnatevl.Project_Default);
+Lightweight : Worker (Flyology.Lightweight_Task);
+Native  : Worker (Flyology.Native_Task);
+Default : Worker (Flyology.Project_Default);
 ```
 
 The designation is captured when each task object is created. GNAT's
-`Task_Info` representation is target-specific, so GNATEVL supplies distinct
-platform-specific values for explicit evented, explicit native, and project
+`Task_Info` representation is target-specific, so Flyology supplies distinct
+platform-specific values for explicit lightweight, explicit native, and project
 default selection. This preserves the compiler/runtime ABI and avoids a
 compiler fork.
 
@@ -73,24 +73,24 @@ execution resource; it does not create a second tasking language.
 
 ### Execution groups and live migration
 
-An evented task whose effective Ada CPU is `Not_A_Specific_CPU` is placed
+A lightweight task whose effective Ada CPU is `Not_A_Specific_CPU` is placed
 automatically. The compatibility configuration has one loop and therefore
 retains the original group-0 behavior. A prepared runtime can instead
 distribute such tasks across a fixed pool with deterministic round-robin
 tickets:
 
 ```sh
-GNATEVL_LOOP_POOL_SIZE=4 \
-GNATEVL_PLACEMENT=round_robin \
+FLYOLOGY_LOOP_POOL_SIZE=4 \
+FLYOLOGY_PLACEMENT=round_robin \
   ./scripts/prepare-rts.sh
 ```
 
 Pool groups are created independently and lazily: configuration inspection
 does not start them, and a four-loop configuration owns no event pthreads until
-evented tasks are activated. `Gnatevl.Execution_Groups.Configured_Pool_Size`
+lightweight tasks are activated. `Flyology.Execution_Groups.Configured_Pool_Size`
 and `Configured_Placement` report the compiled policy,
 `In_Configured_Pool` classifies a group, and `Current` reports where the
-calling evented task was actually placed. `Gnatevl.Observability.Snapshot` can
+calling lightweight task was actually placed. `Flyology.Observability.Snapshot` can
 then inspect each created pool group without creating missing ones.
 
 The standard Ada `CPU` aspect is an explicit override and selects that exact
@@ -100,17 +100,17 @@ pthreads and can therefore execute in parallel:
 
 ```ada
 task Parser with CPU => 1 is
-   pragma Task_Info (Gnatevl.Event_Loop_Task);
+   pragma Task_Info (Flyology.Lightweight_Task);
 end Parser;
 
 task Writer with CPU => 2 is
-   pragma Task_Info (Gnatevl.Event_Loop_Task);
+   pragma Task_Info (Flyology.Lightweight_Task);
 end Writer;
 ```
 
 Shared group identifiers are `0 .. 127`. Values `128 .. 255` are reserved for
 runtime-created dedicated groups, so applying `CPU => 128` or greater to an
-evented task fails activation with `Tasking_Error` rather than selecting a CPU.
+lightweight task fails activation with `Tasking_Error` rather than selecting a CPU.
 The automatic pool is likewise limited to 128 shared groups. This interpretation
 applies only after event-loop designation: an Ada `CPU` aspect on a native task
 continues through stock GNARL's processor-affinity path.
@@ -127,8 +127,8 @@ schedule it across processors.
 Loop-thread placement is a fourth, explicitly separate policy. Linux can bind
 a group pthread to one zero-based OS logical-CPU id and verifies the effective
 mask after `pthread_setaffinity_np`. The value is not an Ada `CPU` aspect: that
-aspect names a logical GNATEVL group. Darwin has no public hard-core binding.
-Where its kernel supports `THREAD_AFFINITY_POLICY`, GNATEVL instead exposes a
+aspect names a logical Flyology group. Darwin has no public hard-core binding.
+Where its kernel supports `THREAD_AFFINITY_POLICY`, Flyology instead exposes a
 positive advisory tag for cache locality; a tag is never reported as a CPU.
 Current Apple-silicon Darwin returns `KERN_NOT_SUPPORTED`, which the capability
 query and runtime preparation report rather than pretending that a hint was
@@ -158,11 +158,11 @@ preconfigured in the same way before `Create_Dedicated` claims them. Migration
 to a placed group naturally resumes on that group's already-placed pthread.
 Native-task `CPU` affinity remains entirely on stock GNARL's path.
 
-`Gnatevl.Execution_Groups` also provides an explicit safe-point migration API:
+`Flyology.Execution_Groups` also provides an explicit safe-point migration API:
 
 ```ada
 declare
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
    Home      : constant Groups.Group_Id := Groups.Current;
    Dedicated : Groups.Dedicated_Group_Id;
 begin
@@ -181,7 +181,7 @@ identity, its stack, locals, exception state, master, or rendezvous semantics.
 The source scheduler performs the actual handoff only after the fiber has fully
 switched away, so two loops can never restore one context concurrently.
 
-Ada task identity is not OS-thread identity. Evented tasks in one group share
+Ada task identity is not OS-thread identity. Lightweight tasks in one group share
 that group's pthread and therefore also share C `pthread_key` values, signal
 masks, per-thread foreign-library caches, locale state, and other pthread-local
 state. A yield stays on the same group pthread, but migration changes all of
@@ -207,12 +207,12 @@ of that pthread, so unrelated fibers in the group still share its pthread-local
 state. Use a dedicated group as well when a foreign resource requires both
 stable identity and exclusive access. Native tasks accept the same API as an
 inherent no-op because GNARL already fixes each native task to its own pthread.
-`Is_Thread_Pinned` reports both explicit evented pins and this inherent native
+`Is_Thread_Pinned` reports both explicit lightweight pins and this inherent native
 binding.
 
 A dedicated group is a reusable event loop reserved for one fiber. Operationally
 it gives that task an OS thread to itself, which is the safe live transition for
-temporarily blocking foreign work. A stock `Native_Thread` task remains fixed at
+temporarily blocking foreign work. A stock `Native_Task` task remains fixed at
 creation: its continuation lives on a pthread-owned stack and cannot be
 teleported into a fiber without replacing GNARL task identity and lifecycle.
 
@@ -220,16 +220,16 @@ The reservation is consumed when its task migrates out, immediately making the
 empty lane reusable. Call `Create_Dedicated` again before re-entering it; if no
 other task claimed the lane, the API normally returns the same group id.
 
-The same GNATEVL I/O call also works from either kind of task:
+The same Flyology I/O call also works from either kind of task:
 
 ```ada
-Gnatevl.IO.Timers.Sleep_For (0.050);
-Gnatevl.IO.Sockets.Receive (Socket, Buffer, Last, Timeout => 1.0);
-Gnatevl.IO.Files.Read_At
+Flyology.IO.Timers.Sleep_For (0.050);
+Flyology.IO.Sockets.Receive (Socket, Buffer, Last, Timeout => 1.0);
+Flyology.IO.Files.Read_At
   (File, Offset => 0, Item => Buffer, Last => Last);
 ```
 
-In an evented task, these calls suspend only the current Ada task. In a native
+In a lightweight task, these calls suspend only the current Ada task. In a native
 task, they may block only that task's pthread. Values, `out` parameters, local
 variables, exception propagation, and call stacks behave like normal
 synchronous Ada code in both cases.
@@ -237,16 +237,16 @@ synchronous Ada code in both cases.
 ## Priority and real-time contract
 
 Task priorities retain two deliberately different implementation domains. An
-undesignated or explicitly `Native_Thread` task stays on stock GNARL's pthread
-path: GNATEVL does not intercept its kernel scheduling policy, priority, CPU
+undesignated or explicitly `Native_Task` task stays on stock GNARL's pthread
+path: Flyology does not intercept its kernel scheduling policy, priority, CPU
 affinity, or priority-change calls. The host GNAT runtime and operating system
 therefore keep their normal behavior, permissions, and limitations.
 
-For an evented task, Ada active priority orders fibers **within its current
+For a lightweight task, Ada active priority orders fibers **within its current
 execution group**. Every group selects the highest non-empty priority bucket;
 tasks of equal priority run FIFO. The state transitions are precise:
 
-| Priority change while the evented task is… | Scheduler effect |
+| Priority change while the lightweight task is… | Scheduler effect |
 | --- | --- |
 | Ready | Remove from the old bucket and append to the new bucket in constant time |
 | Waiting | Record the active priority; the next wake enters that priority's bucket |
@@ -255,9 +255,9 @@ tasks of equal priority run FIFO. The state transitions are precise:
 | Losing rendezvous-inherited priority | If the next handoff is a yield on the same loop, enter the head of the base-priority bucket as required by RM D.2.2(9); a wait, migration, or finish consumes that intent without carrying it to a later wake or another group |
 
 `Ada.Dynamic_Priorities.Set_Priority` remains the standard public operation. A
-self-change reaches GNARL's normal dispatching point, which yields the evented
+self-change reaches GNARL's normal dispatching point, which yields the lightweight
 task after the runtime update. GNARL's rendezvous priority boost is also routed
-into the evented scheduler, so a low-base-priority acceptor runs at the caller's
+into the lightweight scheduler, so a low-base-priority acceptor runs at the caller's
 inherited active priority and returns with the specified loss-of-inheritance
 queue placement. Head placement describes entering a ready queue now; it is not
 a durable preference. A server that blocks after losing inheritance was never
@@ -268,27 +268,27 @@ rendezvous, loss followed by blocking, and cross-group migration cases; the
 
 This is fixed-priority cooperative scheduling, not a hard-real-time claim:
 
-- Priorities do not preempt arbitrary evented instructions. A task that does
+- Priorities do not preempt arbitrary lightweight instructions. A task that does
   not suspend or yield can delay even a newly ready higher-priority peer.
 - Priority order is local to one loop. Separate groups execute on separate
   pthreads, so there is no process-wide total order between their ready queues.
 - The loop pthread is not raised and lowered to mirror each fiber's active
   priority. `FIFO_Within_Priorities` and `Round_Robin_Within_Priorities` kernel
   policies, deadline dispatching, budget enforcement, and bounded preemption
-  are not implemented for evented tasks.
+  are not implemented for lightweight tasks.
 - `CPU` chooses an event-loop group. Physical loop-thread placement is a
   separate opt-in policy; unconfigured groups remain OS-scheduled.
   Native-task CPU affinity remains stock.
 - Protected-object mutual exclusion and language-level rendezvous still come
   from GNARL. Successful maximum-ceiling protected actions are covered by the
-  native/evented semantic suite, but kernel priority-ceiling violation checks,
+  native/lightweight semantic suite, but kernel priority-ceiling violation checks,
   priority inheritance through arbitrary pthread/foreign locks, and bounded
-  priority inversion are not an evented guarantee. Potentially blocking work
+  priority inversion are not a lightweight guarantee. Potentially blocking work
   remains unsuitable inside a protected action.
 
 Applications needing OS `SCHED_FIFO`/`SCHED_RR`, physical affinity, a
 preemption bound, or certified ceiling behavior should keep those tasks native
-and validate the target GNAT/OS real-time configuration. Evented priorities are
+and validate the target GNAT/OS real-time configuration. Lightweight priorities are
 useful for deterministic service preference among cooperative tasks on one
 loop, especially at high I/O concurrency; they are not a substitute for that
 configuration.
@@ -297,10 +297,10 @@ configuration.
 
 ```mermaid
 flowchart TB
-    A[Application: ordinary Ada tasks and Gnatevl.IO]
+    A[Application: ordinary Ada tasks and Flyology.IO]
     G[Existing GNARL task semantics]
     R{Task-primitives routing}
-    E[Evented groups: one scheduler pthread per group]
+    E[Lightweight groups: one scheduler pthread per group]
     N[Native lane: one pthread per designated task]
     Q[Per-group priority queues and timer deadlines]
     K[Per-group OS readiness and completion poller]
@@ -309,8 +309,8 @@ flowchart TB
     O[Operating system]
 
     A --> G --> R
-    R -->|Event_Loop_Task or evented project default| E
-    R -->|Native_Thread or native project default| N
+    R -->|Lightweight_Task or lightweight project default| E
+    R -->|Native_Task or native project default| N
     E --> Q
     E --> K
     E --> C --> X
@@ -321,22 +321,22 @@ flowchart TB
 
 ### GNARL integration boundary
 
-GNATEVL integrates at `System.Task_Primitives.Operations`, below GNARL's task
+Flyology integrates at `System.Task_Primitives.Operations`, below GNARL's task
 semantics. The patched task primitives route each task to one of two execution
 lanes:
 
-- Evented tasks receive a guarded stack and a resumable execution context. Each
+- Lightweight tasks receive a guarded stack and a resumable execution context. Each
   execution group has a priority-aware ready queue, poller, and scheduler
   pthread. The environment task remains a normal GNARL task; even group 0 owns
-  a separate scheduler pthread created on first evented-task activation.
-- `Native_Thread` tasks use the normal pthread-backed path.
+  a separate scheduler pthread created on first lightweight-task activation.
+- `Native_Task` tasks use the normal pthread-backed path.
 - Alternate signal stacks are owned by OS threads. Native tasks retain GNARL's
   per-pthread stack, while each event-loop pthread installs one permanent stack
   shared by its fibers. `Task_Wrapper` therefore does not reserve GNARL's 32 KiB
-  alternate-stack local inside every evented task stack. Stack sizing still
+  alternate-stack local inside every lightweight task stack. Stack sizing still
   retains GNARL's conservative alternate-stack allowance; removing the local
   changes touched pages, not the requested task's established headroom.
-- Evented stacks are mapped in arenas of at most 64 slots and 4 MiB. The layout
+- Lightweight stacks are mapped in arenas of at most 64 slots and 4 MiB. The layout
   alternates inaccessible guard pages and usable stacks, so adjacent stacks
   share one interior guard without weakening either stack's lower or upper
   boundary. A released slot is protected before reuse and receives best-effort
@@ -348,12 +348,12 @@ lanes:
 
 Keeping the integration below GNARL is what lets existing Ada task syntax and
 semantics survive. Reimplementing rendezvous or protected objects would create a
-parallel runtime with subtly different behavior; GNATEVL deliberately avoids
+parallel runtime with subtly different behavior; Flyology deliberately avoids
 that.
 
 At normal process finalization, GNARL first completes task masters, terminates
 remaining library-level tasks according to Ada rules, and finalizes controlled
-library objects. GNATEVL then reaps any already-finished static task fibers,
+library objects. Flyology then reaps any already-finished static task fibers,
 wakes and joins quiescent loop pthreads, and releases their pollers, contexts,
 timer heaps, locks, and group records. It never tears these resources down while
 a fiber can still run: if the final registry is unexpectedly nonempty after a
@@ -366,7 +366,7 @@ These are independent mechanisms with different jobs:
 
 | Mechanism | Purpose | Current implementation | Portability boundary |
 | --- | --- | --- | --- |
-| Context switching | Save one evented task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine for AArch64 and x86-64 on macOS or Linux | ABI and architecture |
+| Context switching | Save one lightweight task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine for AArch64 and x86-64 on macOS or Linux | ABI and architecture |
 | Event polling | Sleep until socket readiness, file completion, a timer deadline, or a cross-thread wake | `kqueue` with `EVFILT_AIO`/`EVFILT_USER` on macOS; `epoll` with `io_uring`/`eventfd` on Linux | Operating system |
 | Scheduling | Choose which runnable Ada task executes next | Ada priority-ready queue and deadline bookkeeping | Runtime policy |
 
@@ -390,12 +390,12 @@ stateDiagram-v2
     Finished --> [*]
 ```
 
-Scheduling inside the evented lane is cooperative. A CPU-bound task must reach a
+Scheduling inside the lightweight lane is cooperative. A CPU-bound task must reach a
 runtime suspension or yield point; otherwise it owns the loop. A native task is
 the intended designation for code that blocks unpredictably, invokes blocking
 foreign libraries, or needs independent CPU execution.
 
-`delay 0.0` is an explicit cooperative yield for an evented task. A permanently
+`delay 0.0` is an explicit cooperative yield for a lightweight task. A permanently
 runnable yielding task does not starve descriptors: after at most 64 dispatches,
 the scheduler promotes expired timers and drains up to 64 immediately available
 poll events in one batched `kevent` or `epoll_wait` call before returning to the
@@ -406,7 +406,7 @@ descriptor set to monopolize the loop in the opposite direction.
 CPU loops can make that policy reusable with a time-budgeted checkpoint:
 
 ```ada
-Budget : Gnatevl.Fairness.Yield_Budget;
+Budget : Flyology.Fairness.Yield_Budget;
 
 Budget.Configure (Ada.Real_Time.Microseconds (250));
 while More_Work loop
@@ -416,7 +416,7 @@ end loop;
 ```
 
 `Checkpoint` reads the monotonic clock and performs `delay 0.0` only after its
-quantum expires. It works for both task designations: an evented task gives its
+quantum expires. It works for both task designations: a lightweight task gives its
 loop peers a turn, while a native task offers its pthread to the OS scheduler.
 It deliberately does not interrupt arbitrary Ada instructions; code that never
 calls a runtime suspension or checkpoint remains cooperative and can still own
@@ -424,25 +424,25 @@ the loop until it returns.
 
 ## Task-aware I/O
 
-GNATEVL exposes synchronous-looking operations in:
+Flyology exposes synchronous-looking operations in:
 
-- `Gnatevl.IO.Timers`: relative and absolute sleeps.
-- `Gnatevl.IO.Sockets`: connect, accept, partial/exact receive, and partial/all
+- `Flyology.IO.Timers`: relative and absolute sleeps.
+- `Flyology.IO.Sockets`: connect, accept, partial/exact receive, and partial/all
   send operations.
-- `Gnatevl.IO.Connections`: bounded admission, single-owner sockets,
+- `Flyology.IO.Connections`: bounded admission, single-owner sockets,
   cancellation tokens, and descriptor-generation-safe close.
-- `Gnatevl.IO.Structured_Servers`: scoped listener ownership, bounded handler
+- `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
-- `Gnatevl.IO.Files`: open, close, positional read, and positional write.
-- `Gnatevl.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
+- `Flyology.IO.Files`: open, close, positional read, and positional write.
+- `Flyology.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
   resolver worker thread.
-- `Gnatevl.IO`: descriptor waits and task-mode detection used by the packages
+- `Flyology.IO`: descriptor waits and task-mode detection used by the packages
   above.
 
 ### Sockets and descriptors
 
 Socket operations use readiness, not callback delivery and not kernel
-completion queues. The evented path is:
+completion queues. The lightweight path is:
 
 ```mermaid
 sequenceDiagram
@@ -472,14 +472,14 @@ Descriptor registrations are one-shot so the resumed task owns the retry and
 decides whether another wait is needed. Exact reads and complete writes loop
 over partial progress while preserving a single deadline.
 
-`Gnatevl.IO.Wait` and `Gnatevl.IO.Wait_Interruptibly` deliberately remain raw
+`Flyology.IO.Wait` and `Flyology.IO.Wait_Interruptibly` deliberately remain raw
 integer-descriptor primitives. They do not own the descriptor or prevent a
 concurrent `close(2)` from releasing its number for reuse; callers choosing
 that compatibility layer must serialize descriptor lifetime themselves.
 
-`Gnatevl.IO.Wait_Any` extends the same low-level contract to a bounded,
+`Flyology.IO.Wait_Any` extends the same low-level contract to a bounded,
 caller-provided array of read/write interests. It allocates neither in the
-public library nor while registering an evented fiber, returns the exact array
+public library nor while registering a lightweight fiber, returns the exact array
 index that became ready, and returns zero on timeout. Repeated descriptors and
 separate read/write interests for one descriptor are valid; when multiple
 entries are ready together the lowest index wins. The fixed limit of 32 keeps
@@ -494,14 +494,14 @@ recomputed remaining monotonic deadline.
 
 ### DNS resolution
 
-`Gnatevl.IO.DNS.Resolve` is an in-tree Ada stub resolver. Numeric addresses and
+`Flyology.IO.DNS.Resolve` is an in-tree Ada stub resolver. Numeric addresses and
 `localhost` return without opening a socket. Other names use numeric servers,
 search domains, `ndots`, attempt counts, timeouts, and rotation read from
-`/etc/resolv.conf` through `Gnatevl.IO.Files`, so an evented caller parks while
+`/etc/resolv.conf` through `Flyology.IO.Files`, so a lightweight caller parks while
 the kernel-completion backend reads the configuration. `Resolve` accepts an
 alternate configuration path for isolated deployments and tests; numeric
 IPv4 `address:port` and bracketed IPv6 `[address]:port` server entries are a
-GNATEVL extension. `Resolve_Using` accepts explicit numeric endpoints for
+Flyology extension. `Resolve_Using` accepts explicit numeric endpoints for
 split-DNS applications and deterministic tests.
 
 Each attempt sends a nonblocking UDP query to one configured server and parks
@@ -531,15 +531,15 @@ that lookup on an explicitly native task.
 
 ### Connection lifecycle
 
-`Gnatevl.IO.Connections.Server` puts a bounded admission gate in front of
+`Flyology.IO.Connections.Server` puts a bounded admission gate in front of
 socket ownership. `Take` transfers an existing socket into a limited
 `Connection`; `Accept_Connection` acquires capacity before accepting from the
 listener, so overload remains in the kernel backlog instead of becoming an
 unbounded user-space task or socket queue.
 
 ```ada
-Manager : aliased Gnatevl.IO.Connections.Server (Capacity => 256);
-Owned   : Gnatevl.IO.Connections.Connection;
+Manager : aliased Flyology.IO.Connections.Server (Capacity => 256);
+Owned   : Flyology.IO.Connections.Connection;
 
 Manager.Accept_Connection (Listener, Owned, Peer);
 Owned.Receive_Exactly (Request);
@@ -553,7 +553,7 @@ concurrent `Close` signals that generation's private wake source, waits for its
 active operation to remove every poller registration, and only then releases
 the OS descriptor. The kernel therefore cannot reuse an integer while an old
 generation can still act on its readiness. An in-flight operation interrupted
-by close raises `Operation_Cancelled` in both native and evented lanes.
+by close raises `Operation_Cancelled` in both native and lightweight lanes.
 
 A connection admits one socket operation at a time. Additional operations queue
 at the owner rather than registering duplicate waits, which gives
@@ -564,7 +564,7 @@ must outlive its admitted owners.
 Operations register both an optional per-operation `Cancellation_Token` and the
 server shutdown source in the same kernel wait as the socket. A token request
 or `Request_Shutdown` writes a persistent nonblocking wake descriptor: native
-tasks observe it in `poll`, while evented tasks observe it through their loop's
+tasks observe it in `poll`, while lightweight tasks observe it through their loop's
 `kqueue`/`epoll` poller. The suspended call resumes immediately without closing
 the connection descriptor and without periodic timer wakeups. One signal wakes
 all operations registered with that source.
@@ -574,7 +574,7 @@ longer a polling interval and is ignored. Cancellation tokens and servers must
 outlive operations waiting on their wake sources. `Request_Shutdown` also closes
 admission, releases tasks queued at the capacity gate with `Admission_Closed`,
 and causes active lifecycle I/O to raise `Operation_Cancelled`;
-`Await_Drained` returns after all owners release. Raw `Gnatevl.IO.Sockets`
+`Await_Drained` returns after all owners release. Raw `Flyology.IO.Sockets`
 remains the lower-level mechanism when an application needs different ownership
 or cancellation policy. Its optional interrupt descriptors and the raw
 descriptor-wait APIs are unsafe lifetime building blocks: callers retain their
@@ -582,22 +582,22 @@ ownership, close serialization, and wake-source lifetime responsibility.
 
 ### Structured servers
 
-`Gnatevl.IO.Structured_Servers` is the application-facing orchestration layer
+`Flyology.IO.Structured_Servers` is the application-facing orchestration layer
 above `Connections`. It is generic over a limited handler context, a typed
 handler procedure, and the handler task type's execution designation:
 
 ```ada
 procedure Handle
   (State        : in out App_State;
-   Connection   : in out Gnatevl.IO.Connections.Connection;
+   Connection   : in out Flyology.IO.Connections.Connection;
    Peer         : GNAT.Sockets.Sock_Addr_Type;
    Cancellation : not null access
-     Gnatevl.IO.Connections.Cancellation_Token);
+     Flyology.IO.Connections.Cancellation_Token);
 
-package HTTP is new Gnatevl.IO.Structured_Servers
+package HTTP is new Flyology.IO.Structured_Servers
   (Handler_Context => App_State,
    Handle          => Handle,
-   Handler_Model   => Gnatevl.Event_Loop_Task,
+   Handler_Model   => Flyology.Lightweight_Task,
    Handler_CPU     => System.Multiprocessors.Not_A_Specific_CPU);
 
 Server : aliased HTTP.Server (Capacity => 256);
@@ -610,10 +610,10 @@ handler tasks in a lexical task scope; each task accepts at most one connection
 at a time, so accepted work cannot exceed the bound and overload remains in the
 kernel listen backlog. There is no detached task, hidden worker thread, or
 user-space connection queue. A native instantiation creates ordinary GNARL
-pthread tasks; an evented instantiation creates fibers on the configured loop
+native tasks backed by pthreads; a lightweight instantiation creates fibers on the configured loop
 pool. The designation belongs to the instantiated task type and never changes
 during a connection. `Handler_CPU` is also a task-type property: an explicit
-value chooses an event group for evented handlers (or keeps normal Ada CPU
+value chooses an event group for lightweight handlers (or keeps normal Ada CPU
 semantics for native handlers), while `Not_A_Specific_CPU` uses the configured
 automatic event-loop pool or stock native placement.
 
@@ -654,14 +654,14 @@ serialization themselves.
 
 The structured smoke program is also compiled and linked against the
 ASan-aware RTS. It is not executed under ASan on Darwin because orderly server
-shutdown necessarily propagates and catches `Operation_Cancelled` on an evented
+shutdown necessarily propagates and catches `Operation_Cancelled` on a lightweight
 stack, which crosses the fully instrumented Ada exception-propagation boundary
 called out in [AddressSanitizer builds](#addresssanitizer-builds). Ordinary
 macOS and Linux runs exercise those exception paths in both handler lanes.
 
 ### Timers
 
-An evented sleep records a scheduler deadline and suspends the current context.
+A lightweight sleep records a scheduler deadline and suspends the current context.
 A native sleep blocks only its pthread. Timer calls share one public API and use
 monotonic time, so wall-clock changes do not alter elapsed waits.
 
@@ -680,7 +680,7 @@ timer object.
 
 Regular files are not readiness-oriented: marking a regular descriptor readable
 with `kqueue` or `epoll` does not make a potentially blocking `pread` safe on an
-event-loop thread. GNATEVL therefore submits positional reads and writes to an
+event-loop thread. Flyology therefore submits positional reads and writes to an
 actual kernel completion facility and suspends only the calling Ada task.
 
 - On macOS, POSIX AIO posts `EVFILT_AIO` completions directly to the execution
@@ -701,7 +701,7 @@ submission, completion handling, and scheduling in Ada.
 Submission-queue saturation is explicit backpressure: the task remains
 suspended in a per-group FIFO until the scheduler can submit it. No Ada worker
 task, pthread pool, or blocking `pread`/`pwrite` call is hidden behind the
-evented API. Native-designated callers use direct positional syscalls. Explicit
+lightweight API. Native-designated callers use direct positional syscalls. Explicit
 offsets avoid shared file-position races in both lanes.
 
 `Open` and `Close` are still direct metadata syscalls because neither supported
@@ -711,7 +711,7 @@ potentially slow remote-filesystem metadata operations on a native task.
 
 ## Runtime observability
 
-`Gnatevl.Observability` exposes a stable, read-only snapshot for each event
+`Flyology.Observability` exposes a stable, read-only snapshot for each event
 group. Calling `Snapshot` for a group that has never existed returns `False`
 and does not create a pthread, poller, scheduler context, or any other event
 runtime resource. A native-only application can therefore link and query the
@@ -719,9 +719,9 @@ package without losing lazy-start inertness.
 
 ```ada
 declare
-   Sample : Gnatevl.Observability.Group_Snapshot;
+   Sample : Flyology.Observability.Group_Snapshot;
 begin
-   if Gnatevl.Observability.Snapshot (0, Sample) then
+   if Flyology.Observability.Snapshot (0, Sample) then
       Put_Line ("ready" & Sample.Ready'Image
                 & " waiting" & Sample.Waiting'Image
                 & " dispatches" & Sample.Dispatches'Image);
@@ -757,7 +757,7 @@ deliberately not a runtime scheduling policy.
 
 ### Sampled stall watchdog
 
-`Gnatevl.Observability.Stall_Watchdogs` can monitor one group from a dedicated
+`Flyology.Observability.Stall_Watchdogs` can monitor one group from a dedicated
 native Ada task. Merely declaring a `Watchdog` is inert. `Start` creates the
 native monitor, but observing a group that does not exist still does not create
 that group or any event-runtime resource. `Stop` waits for the monitor to exit;
@@ -766,15 +766,15 @@ object can be restarted.
 
 ```ada
 declare
-   Monitor : Gnatevl.Observability.Stall_Watchdogs.Watchdog;
+   Monitor : Flyology.Observability.Stall_Watchdogs.Watchdog;
 begin
-   Gnatevl.Observability.Stall_Watchdogs.Start
+   Flyology.Observability.Stall_Watchdogs.Start
      (Monitor,
       (Group           => 0,
        Sample_Interval => 0.050,
        Stall_Threshold => 0.250));
    --  Poll Latest_Report from a service health or diagnostics task.
-   Gnatevl.Observability.Stall_Watchdogs.Stop (Monitor);
+   Flyology.Observability.Stall_Watchdogs.Stop (Monitor);
 end;
 ```
 
@@ -800,11 +800,11 @@ a crash handler or debugger and querying it takes no scheduler lock.
 
 ## Process lifecycle
 
-`Gnatevl.Process_Lifecycle` exposes the event runtime's process-wide state and
+`Flyology.Process_Lifecycle` exposes the event runtime's process-wide state and
 the number of lazily created groups without starting a loop. A native-only
-program reports `Dormant` and zero groups. The first evented task changes the
+program reports `Dormant` and zero groups. The first lightweight task changes the
 state to `Running`; successful GNARL process finalization changes it to
-`Stopped` and returns the group count to zero. `Cleanup_Deferred` means GNATEVL
+`Stopped` and returns the group count to zero. `Cleanup_Deferred` means Flyology
 found state it could not safely tear down and deliberately left it to operating
 system process exit.
 
@@ -817,8 +817,8 @@ should stop accepting, cancel owned connections, and let their task scopes
 finish normally.
 
 `fork` does not clone the other pthreads of a multi-threaded process. GNARL and
-GNATEVL mutex ownership, loop threads, pollers, and TLS therefore cannot be
-continued safely in the child. GNATEVL records the process that initialized the
+Flyology mutex ownership, loop threads, pollers, and TLS therefore cannot be
+continued safely in the child. Flyology records the process that initialized the
 runtime: its lock-free lifecycle query reports `Fork_Child` after `fork`, and an
 attempt to enter a scheduler lock fails loudly instead of waiting forever for a
 vanished owner. The supported child path is the POSIX minimum: call only
@@ -829,28 +829,28 @@ the calling Ada task was native because stock GNARL is already multi-threaded.
 Loop pthreads inherit the creator's signal mask. A signal handler may therefore
 run on a loop pthread and interrupt the kernel wait; pollers treat `EINTR` as a
 retry/no-event result. Application signal handlers must still obey normal
-async-signal-safety rules and must not call Ada tasking or GNATEVL APIs.
+async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 
 ## Design decisions
 
 | Decision | Rationale | Consequence |
 | --- | --- | --- |
 | Keep ordinary Ada task syntax | Existing programs and GNARL semantics remain recognizable | No separate `async`/`await`, callback, or future API is required |
-| Default to native execution, with a project-wide evented option | Existing tasking code keeps its blocking and parallelism assumptions while high-I/O projects can opt in once | Evented examples and mixed projects must designate their intended lane |
-| Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first evented task pays the one-time group startup handshake |
+| Default to native execution, with a project-wide lightweight option | Existing tasking code keeps its blocking and parallelism assumptions while high-I/O projects can opt in once | Lightweight examples and mixed projects must designate their intended lane |
+| Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first lightweight task pays the one-time group startup handshake |
 | Finalize loops only at GNARL's process boundary | Suspended stacks, in-flight file buffers, and Ada masters must outlive their tasks | There is no arbitrary shutdown/restart API; unsafe cleanup is deferred to OS exit |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
-| Place undesignated evented tasks through a build-time loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration | The compatibility default remains one loop; round-robin balances task count rather than measured work |
+| Place undesignated lightweight tasks through a build-time loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration | The compatibility default remains one loop; round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Configure loop pthread placement separately | Logical co-location and physical scheduling are different policies | Linux can verify a strict one-CPU mask; Darwin exposes only a capability-checked advisory cache tag, and requests become immutable once startup begins |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
-| Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every evented task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
+| Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every lightweight task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
 | Shard the task registry | Independent loops and native wake sources should not serialize every lookup on one process-wide mutex | 64 shard locks isolate ordinary wake and priority paths; group creation, reservations, migration, and destruction still coordinate through a short-held topology lock |
 | Hash descriptor waiters per group | Readiness delivery must not scan every fiber once for every ready descriptor | Delivery is constant-time on average while collision chains retain same-descriptor reader/writer fan-out |
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
 | Make CPU fairness explicit | Arbitrary signal-time preemption would cross Ada and GNARL critical regions at unsafe instructions | Time-budgeted checkpoints provide bounded cooperative slices where application invariants are known to be stable |
-| Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
+| Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each lightweight task still needs a virtual stack and ABI-specific switching code |
 | Pack stacks into guarded arenas | A private mapping spends two guard pages per task even though neighboring stacks can share an inaccessible boundary | Creation and reap briefly take one process-wide stack-pool mutex; empty arenas are unmapped and partially occupied slots receive best-effort page-discard advice |
 | Select ASan fiber annotations at RTS build time | AddressSanitizer must learn the real source and destination stack around a custom assembly transfer | Sanitized builds use LLVM's fiber interface; ordinary builds compile out every hook and sanitizer TLS object |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
@@ -871,7 +871,7 @@ clauses for Darwin `aiocb` and Linux `io_uring`/native-AIO UAPI records, own the
 mapped rings and control blocks, submit operations, and drain completions.
 
 The shared Linux rings require acquire/release ordering against the kernel.
-GNATEVL uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
+Flyology uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
 not expose the corresponding store operation, so the narrow C ABI shim calls
 the compiler's `__atomic_store_n` intrinsic; no worker runtime is involved.
 
@@ -883,7 +883,7 @@ and coordination in Ada while treating the OS ABI as a narrow platform layer.
 ## SPARK proof boundary
 
 SPARK can cover the deterministic policy kernels without pretending that the
-entire task runtime is currently proofable. `Gnatevl.Time_Math` implements the
+entire task runtime is currently proofable. `Flyology.Time_Math` implements the
 timeout clamp used by socket retry loops and the nanosecond/millisecond
 conversions used by event-loop and native descriptor waits. Its contracts cover
 the infinite-timeout sentinel, non-expired timeout, expiration, remaining-time
@@ -916,7 +916,7 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ```
 
 GNATprove is a dependency of the nested `proof` development crate, not of the
-published GNATEVL library. Applications therefore do not download proof tooling
+published Flyology library. Applications therefore do not download proof tooling
 merely because they depend on the runtime API.
 
 The current run discharges 64 flow, functional-contract, termination, and
@@ -966,7 +966,7 @@ rather than hidden behind a claim of universal portability.
 
 ## Build and test
 
-GNATEVL supports Alire 2.1 or newer with the exact `gnat_native` releases shown
+Flyology supports Alire 2.1 or newer with the exact `gnat_native` releases shown
 below:
 
 | Host | Releases |
@@ -990,24 +990,24 @@ as a compatibility fallback:
 
 ```sh
 ./scripts/prepare-rts.sh                       # native project default
-GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
-GNATEVL_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
-GNATEVL_LOOP_PLACEMENT=strict \
-GNATEVL_LOOP_PLACEMENT_MAP=0:2,1:4 ./scripts/prepare-rts.sh  # Linux
+FLYOLOGY_DEFAULT=lightweight ./scripts/prepare-rts.sh
+FLYOLOGY_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
+FLYOLOGY_LOOP_PLACEMENT=strict \
+FLYOLOGY_LOOP_PLACEMENT_MAP=0:2,1:4 ./scripts/prepare-rts.sh  # Linux
 ~/alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
 
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,
 selects the project execution default, and builds a static RTS.
-Set `GNATEVL_RTS_DIR` to put that generated runtime somewhere other than the
+Set `FLYOLOGY_RTS_DIR` to put that generated runtime somewhere other than the
 crate checkout. Relative values are resolved from the caller's current
 directory; the resulting path is canonicalized before patching runtime files.
-`GNATEVL_DEFAULT` accepts only `native` or `evented`.
-`GNATEVL_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
-`GNATEVL_PLACEMENT` currently accepts `round_robin`.
-`GNATEVL_LOOP_PLACEMENT` accepts `none`, `strict`, or `advisory`, and
-`GNATEVL_LOOP_PLACEMENT_MAP` supplies unique `GROUP:VALUE` pairs. `strict` is
+`FLYOLOGY_DEFAULT` accepts only `native` or `lightweight`.
+`FLYOLOGY_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
+`FLYOLOGY_PLACEMENT` currently accepts `round_robin`.
+`FLYOLOGY_LOOP_PLACEMENT` accepts `none`, `strict`, or `advisory`, and
+`FLYOLOGY_LOOP_PLACEMENT_MAP` supplies unique `GROUP:VALUE` pairs. `strict` is
 Linux-only; its values are zero-based OS logical CPUs in the process leader's
 current allowed mask and preparation rejects unavailable values. `advisory` is
 Darwin-only, requires positive tags, and is rejected on Apple-silicon hosts
@@ -1024,38 +1024,38 @@ being silently accepted.
 Once an indexed release exists, an application adds it normally:
 
 ```sh
-alr with gnatevl
+alr with flyology
 ```
 
 During development, use a path or Git pin instead:
 
 ```sh
-alr with gnatevl --use /path/to/gnatevl
+alr with flyology --use /path/to/flyology
 ```
 
-Alire makes `gnatevl.gpr` available to the consumer and exports
-`GNATEVL_ROOT` as the deployed dependency root. Prepare a consumer-owned RTS,
+Alire makes `flyology.gpr` available to the consumer and exports
+`FLYOLOGY_ROOT` as the deployed dependency root. Prepare a consumer-owned RTS,
 then compile the application with that runtime:
 
 ```sh
 alr exec -- sh -c \
-  'GNATEVL_RTS_DIR="$PWD/build/gnatevl-rts" \
-   "$GNATEVL_ROOT/scripts/prepare-rts.sh"'
-alr exec -- gprbuild --RTS="$PWD/build/gnatevl-rts" -P app.gpr
+  'FLYOLOGY_RTS_DIR="$PWD/build/flyology-rts" \
+   "$FLYOLOGY_ROOT/scripts/prepare-rts.sh"'
+alr exec -- gprbuild --RTS="$PWD/build/flyology-rts" -P app.gpr
 ```
 
-The application's GPR file may explicitly `with "gnatevl.gpr"`; Alire also
+The application's GPR file may explicitly `with "flyology.gpr"`; Alire also
 supports its normal automatic GPR dependency wiring. No `../../src` paths or
 imports of runtime implementation units are required. Building an executable
 without `--RTS` is intentionally unsupported: the public library imports the
-GNATEVL hooks supplied by the prepared runtime, and the stock GNARL does not
+Flyology hooks supplied by the prepared runtime, and the stock GNARL does not
 define them.
 
 `scripts/test-external-consumer.sh` copies a small consumer into a fresh
-temporary workspace, adds GNATEVL through an Alire path pin, prepares native-
-and evented-default runtimes under that workspace, and runs both variants. It
+temporary workspace, adds Flyology through an Alire path pin, prepares native-
+and lightweight-default runtimes under that workspace, and runs both variants. It
 also verifies the native default is inert before and after an ordinary task and
-that event machinery appears only for the evented opt-in.
+that event machinery appears only for the lightweight opt-in.
 
 Run the complete verification suite with:
 
@@ -1075,8 +1075,8 @@ Run the bounded, reproducible concurrency and fault campaign with:
 AddressSanitizer awareness is opt-in when preparing the runtime:
 
 ```sh
-GNATEVL_RTS_DIR="$PWD/build/asan-rts" \
-GNATEVL_SANITIZER=address ./scripts/prepare-rts.sh
+FLYOLOGY_RTS_DIR="$PWD/build/asan-rts" \
+FLYOLOGY_SANITIZER=address ./scripts/prepare-rts.sh
 # Compile/link the application with the same GCC toolchain and
 # -fsanitize=address, then run with:
 ASAN_OPTIONS=detect_stack_use_after_return=0:use_sigaltstack=0 ./application
@@ -1093,9 +1093,9 @@ every return.
 
 Fake-stack handles are deliberately null. LLVM documents that mode for
 programs which do not require stack-use-after-return detection, and it is the
-only supported mode here because an evented task can migrate to a different
+only supported mode here because a lightweight task can migrate to a different
 pthread while ASan fake stacks are thread-owned. Set
-`detect_stack_use_after_return=0` accordingly. GNATEVL also installs the loop
+`detect_stack_use_after_return=0` accordingly. Flyology also installs the loop
 pthread's alternate signal stack for guard-page translation, so ASan must not
 install and later unmap a competing stack; set `use_sigaltstack=0`.
 
@@ -1106,7 +1106,7 @@ Run the focused positive and negative campaign with:
 ```
 
 It proves the normal RTS object contains no sanitizer references or
-sanitizer-only TLS, then exercises instrumented C frames on evented task
+sanitizer-only TLS, then exercises instrumented C frames on lightweight task
 stacks across yields, timers, I/O interruption, cross-pthread migration,
 repeated task destruction, and process finalization. An isolated executable
 also performs an intentional fiber-stack out-of-bounds write and must terminate
@@ -1124,19 +1124,19 @@ Valgrind stack registration are not enabled by the ASan switch and require
 separate, tool-specific lifecycle designs.
 
 The default short campaign reports every seed and runs four seeds through
-repeated evented/native task allocation and destruction, cross-lane
+repeated lightweight/native task allocation and destruction, cross-lane
 rendezvous, priority changes, yield and delay, abort, group migration, pin
 rejection, readiness, interrupt, and timeout waits, concurrent kernel file
-submissions, and four active event groups. Override `GNATEVL_STRESS_SEEDS`,
-`GNATEVL_STRESS_BATCHES`, `GNATEVL_STRESS_WIDTH`, or
-`GNATEVL_STRESS_TIMEOUT` to reproduce or resize a run. For example:
+submissions, and four active event groups. Override `FLYOLOGY_STRESS_SEEDS`,
+`FLYOLOGY_STRESS_BATCHES`, `FLYOLOGY_STRESS_WIDTH`, or
+`FLYOLOGY_STRESS_TIMEOUT` to reproduce or resize a run. For example:
 
 ```sh
-GNATEVL_STRESS_SEEDS="42" GNATEVL_STRESS_BATCHES=50 \
-  GNATEVL_STRESS_WIDTH=64 ./scripts/stress.sh
+FLYOLOGY_STRESS_SEEDS="42" FLYOLOGY_STRESS_BATCHES=50 \
+  FLYOLOGY_STRESS_WIDTH=64 ./scripts/stress.sh
 ```
 
-The same runner rebuilds a test-only RTS with `GNATEVL_TEST_FAULTS=1` and
+The same runner rebuilds a test-only RTS with `FLYOLOGY_TEST_FAULTS=1` and
 exercises deterministic failure counters for fiber allocation, stack mapping,
 group startup, poller watch/wait/wake, interrupted poll waits, and file-queue
 saturation. Recoverable failures must surface to Ada and permit a subsequent
@@ -1150,7 +1150,7 @@ random decision logic or fault-hook call overhead.
 The longer campaign is deliberately opt-in:
 
 ```sh
-GNATEVL_LONG_SOAK=1 ./scripts/stress-soak.sh
+FLYOLOGY_LONG_SOAK=1 ./scripts/stress-soak.sh
 ```
 
 Its defaults execute 16 fixed seeds, 250 batches per seed, and 64 workers per
@@ -1158,9 +1158,9 @@ batch. All sizing and seed variables remain overrideable. A failure log's seed,
 batch count, and width are sufficient to replay the exact operation plan.
 
 `scripts/test.sh` verifies both project defaults, then runs the behavioral suite
-with the compatibility-oriented native default and explicit evented/native task
-designations. `scripts/showcases.sh` selects the evented project default;
-`many_evented_tasks.adb` deliberately uses `Gnatevl.Project_Default`, while the
+with the compatibility-oriented native default and explicit lightweight/native task
+designations. `scripts/showcases.sh` selects the lightweight project default;
+`many_lightweight_tasks.adb` deliberately uses `Flyology.Project_Default`, while the
 mixed-lane showcases keep explicit overrides.
 
 Docker builds the host's native Linux architecture by default, so an Apple
@@ -1172,10 +1172,10 @@ Silicon host validates Linux/AArch64 without emulation:
 
 The default image uses Ubuntu 24.04, the matching official AArch64 or x86-64
 Alire 2.1.0 archive, GNAT 16.1, and GPRbuild 26.0.1. The test run deliberately
-denies `io_uring_setup` at the C bridge and asserts that a real evented file
-operation selected Linux native AIO. `GNATEVL_LINUX_ARCH=amd64` requests the
-x86-64 compatibility target explicitly; `GNATEVL_GNAT_VERSION` and
-`GNATEVL_GPRBUILD_VERSION` select another pair, and `GNATEVL_LINUX_IMAGE`
+denies `io_uring_setup` at the C bridge and asserts that a real lightweight file
+operation selected Linux native AIO. `FLYOLOGY_LINUX_ARCH=amd64` requests the
+x86-64 compatibility target explicitly; `FLYOLOGY_GNAT_VERSION` and
+`FLYOLOGY_GPRBUILD_VERSION` select another pair, and `FLYOLOGY_LINUX_IMAGE`
 overrides its local image name. To run every Alire release covered by the patch
 family:
 
@@ -1190,7 +1190,7 @@ family:
 
 - a platform-specific compatibility matrix for every exact GNAT release in the
   table above, compiling the crate in release mode and running the external
-  consumer in native-default and evented-default configurations;
+  consumer in native-default and lightweight-default configurations;
 - the full behavioral suite on both platforms with GNAT 16.1; and
 - the SPARK proof crate on both platforms with GNATprove 16.1.
 
@@ -1226,7 +1226,7 @@ Current smoke coverage includes:
 - real C pthread-local state shared by same-loop fibers and changed by
   cross-group migration, plus nested scoped pinning, exception cleanup,
   dedicated-group stability, and native pthread identity;
-- evented and native task activation, rendezvous, protected operations, and
+- lightweight and native task activation, rendezvous, protected operations, and
   timers;
 - one generic semantic-conformance scenario instantiated unchanged for both
   lanes: conditional and timed entry calls, selective accept delay and
@@ -1234,12 +1234,12 @@ Current smoke coverage includes:
   suspension objects, task attributes, dynamic priority across a
   maximum-ceiling protected operation, nested and access-type task masters,
   abort during activation/delay/entry wait/finalization, and rendezvous in both
-  directions across the native/evented boundary;
-- evented/native socket-pair transfer, simultaneous read/write watches on one
+  directions across the native/lightweight boundary;
+- lightweight/native socket-pair transfer, simultaneous read/write watches on one
   descriptor, bounded multi-descriptor waits, lowest-index simultaneous
   readiness, partial-registration rollback, abort cleanup, descriptor reuse,
   and timeout behavior;
-- native/evented local DNS resolution with source/question validation, OS
+- native/lightweight local DNS resolution with source/question validation, OS
   entropy and deterministic test injection, positive/negative cache TTLs,
   ordered split-DNS identity, retry and TCP failover, AAAA-to-A deadline
   fallback, task-aware resolver-configuration reads, cancellation, and a
@@ -1247,7 +1247,7 @@ Current smoke coverage includes:
   RDLENGTH arithmetic;
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
   cancellation, RAII socket release, admission closure, accept cancellation,
-  immediate pre-requested cancellation, timeout precedence, 64 idle evented
+  immediate pre-requested cancellation, timeout precedence, 64 idle lightweight
   connections, and blocked native parity despite a ten-second legacy quantum;
 - generation-tagged connection close under forced descriptor-number reuse,
   simultaneous cancellation/close, readiness/timeout races in both lanes,
@@ -1256,14 +1256,14 @@ Current smoke coverage includes:
   overload backpressure, handler-failure propagation, concurrent idempotent
   shutdown, accept cancellation, graceful drain, deadline cancellation,
   final scope joining, and listener descriptor reuse;
-- descriptor-readiness fairness under a continuously yielding evented task;
+- descriptor-readiness fairness under a continuously yielding lightweight task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;
 - read/write/create/truncate file-open combinations plus 64 concurrent
   positional operations through the kernel-completion path;
-- repeated evented-child teardown under a native master, exercising deferred
+- repeated lightweight-child teardown under a native master, exercising deferred
   fiber destruction and ATCB-address reuse;
-- 16 KiB `Storage_Size` parity across evented and native tasks, including
+- 16 KiB `Storage_Size` parity across lightweight and native tasks, including
   task-aware socket suspension and resumption;
 - native TCP connect, accept, send, and receive behavior, including verification
   that accepted sockets suppress `SIGPIPE`.
@@ -1282,17 +1282,17 @@ Run every showcase with:
 After they have been built, an individual showcase can be rerun directly:
 
 ```sh
-./showcases/bin/evented_pipeline
-./showcases/bin/many_evented_tasks
+./showcases/bin/lightweight_pipeline
+./showcases/bin/many_lightweight_tasks
 ./showcases/bin/cooperative_fairness
 ./showcases/bin/dns_resolution example.com
 ./showcases/bin/priority_scheduling
 ./showcases/bin/connection_lifecycle
-./showcases/bin/cancellation_density evented 1000
+./showcases/bin/cancellation_density lightweight 1000
 ./showcases/bin/hybrid_blocking_bridge
-./showcases/bin/evented_vs_threads
-./showcases/bin/evented_io
-./showcases/bin/evented_file_io
+./showcases/bin/lightweight_vs_native
+./showcases/bin/lightweight_io
+./showcases/bin/lightweight_file_io
 ./showcases/bin/execution_groups
 ./showcases/bin/runtime_observability
 ./showcases/bin/stall_watchdog
@@ -1315,17 +1315,17 @@ The examples demonstrate:
 - cancellation-enabled connection density with one second of idle process-CPU
   measurement and immediate release from a deliberately ten-second legacy
   quantum;
-- evented coordination with native CPU workers;
-- the same synchronous DNS API on native and evented tasks, backed by UDP/TCP
+- lightweight coordination with native CPU workers;
+- the same synchronous DNS API on native and lightweight tasks, backed by UDP/TCP
   readiness rather than a resolver worker pool;
 - `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
   one-task thread, and rejection of unsafe live stock-native conversion;
 - side-by-side logical group selection and physical/advisory loop-thread
   placement, including the explicit unsupported result on current arm64 Darwin;
-- evented versus pthread-backed tasks under identical source-level work;
+- lightweight versus native tasks under identical source-level work;
 - a real loopback TCP exchange, positional file I/O, and timers through the
   task-aware I/O API;
-- 256 evented file tasks sharing one event-loop pthread, with the process thread
+- 256 lightweight file tasks sharing one event-loop pthread, with the process thread
   count sampled before their kernel-completion writes are released;
 - periodic per-group diagnostics showing parked load, idle progress, dispatch,
   poll, and wakeup counters before and after releasing 128 tasks;
@@ -1338,7 +1338,7 @@ The examples demonstrate:
 
 ### Event-loop pool showcase
 
-`run_event_loop_pool.sh` rebuilds the same explicitly evented workload first
+`run_event_loop_pool.sh` rebuilds the same explicitly lightweight workload first
 with one automatic loop and then with a configurable pool. Each worker owns a
 real socket endpoint; every round sends one byte to every endpoint, waits for
 all task-aware receives, and reports elapsed time plus per-group worker,
@@ -1375,8 +1375,8 @@ The default run is:
 ./showcases/run_connection_density.sh 1000 10000
 ```
 
-The first argument is the connection count used for the evented/native
-comparison. The second is the evented-only scale run. On a host capable of
+The first argument is the connection count used for the lightweight/native
+comparison. The second is the lightweight-only scale run. On a host capable of
 creating 10,000 pthreads, a full head-to-head can be requested explicitly:
 
 ```sh
@@ -1389,10 +1389,10 @@ from each fiber to its event-loop pthread, produced:
 
 | Mode | Connections | OS threads at sample | RSS increase | Virtual-memory increase | Setup | Release all |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Evented | 10,000 | 2 | 462 MiB | 1.13 GiB | 0.219 s | 0.028 s |
+| Lightweight | 10,000 | 2 | 462 MiB | 1.13 GiB | 0.219 s | 0.028 s |
 | Native | 10,000 | 10,001 | 617 MiB | 1.17 GiB | 7.736 s | 0.137 s |
 
-The central win today is kernel-concurrency density: the evented version avoids
+The central win today is kernel-concurrency density: the lightweight version avoids
 one pthread per connection and can reach connection counts at which creating an
 equal number of pthreads commonly exceeds host limits. In this run it also used
 about 155 MiB (25%) less incremental resident memory, reserved less address
@@ -1403,13 +1403,13 @@ release latency can still win at other loads because pthreads run in parallel;
 the showcase reports the result rather than assuming either outcome.
 
 The scaling changes identify the data structures responsible. Hashing ATCB
-addresses changed 10,000-task evented setup from roughly 0.76 seconds to 0.31
+addresses changed 10,000-task lightweight setup from roughly 0.76 seconds to 0.31
 seconds. Hashing descriptor waiters per group then changed the 10,000-connection
 release drain from roughly 0.41 seconds to 0.065 seconds. Both formerly
 quadratic lookup components now take expected linear total work for the
 one-descriptor-per-connection load.
 
-Stack-pool telemetry printed by the showcase separates GNATEVL's exact stack
+Stack-pool telemetry printed by the showcase separates Flyology's exact stack
 reservation from noisier process-wide virtual-memory accounting. A fresh 10,000
 connection before/after run on the same Apple Silicon host measured:
 
@@ -1423,9 +1423,9 @@ sharing interior guards. RSS is intentionally unchanged: the parked receive
 path already touches only one 16 KiB stack page, and guard or untouched
 headroom pages have no resident backing. At this scale the remaining roughly
 32 KiB of resident cost per connection is predominantly GNARL/Ada task state
-common to both lanes, not the sub-KiB GNATEVL fiber/context records. Total
+common to both lanes, not the sub-KiB Flyology fiber/context records. Total
 virtual-memory readings can vary with the system allocator;
-`Gnatevl.Observability.Stack_Pool` reports the stable active-arena, live-stack,
+`Flyology.Observability.Stack_Pool` reports the stable active-arena, live-stack,
 exact-reservation, mapping, unmapping, sharing, and accepted page-discard advice
 counters.
 
@@ -1442,11 +1442,11 @@ ten-second `Cancellation_Quantum`: cancellation completing promptly demonstrates
 that the value is compatibility-only and no periodic quantum drives progress.
 
 ```sh
-./showcases/bin/cancellation_density evented 1000
+./showcases/bin/cancellation_density lightweight 1000
 ./showcases/bin/cancellation_density native 1000
 ```
 
-The evented lane should remain close to idle process CPU with one loop thread;
+The lightweight lane should remain close to idle process CPU with one loop thread;
 the native lane blocks a pthread per connection. Absolute CPU and cancellation
 latency vary by host, so the showcase reports measurements rather than asserting
 a fixed performance ratio.
@@ -1455,14 +1455,14 @@ a fixed performance ratio.
 
 Five-run medians on the development Apple Silicon machine:
 
-| Workload | Evented tasks | pthread tasks | Result |
+| Workload | Lightweight tasks | Native tasks | Result |
 | --- | ---: | ---: | --- |
 | 256 tasks × 100 yields | 25.910 ms | 17.935 ms | pthreads 1.44× faster |
-| 2,048 tasks × 20 ms wait | 83.675 ms | 308.056 ms | evented 3.68× faster |
+| 2,048 tasks × 20 ms wait | 83.675 ms | 308.056 ms | lightweight 3.68× faster |
 
 This is the intended tradeoff, not a claim that event loops always win. Native
 threads are very competitive at modest concurrency and can run CPU work in
-parallel. Evented tasks become attractive when many mostly-waiting activities
+parallel. Lightweight tasks become attractive when many mostly-waiting activities
 would otherwise pay for thousands of pthreads and kernel scheduling events.
 
 ## Current constraints
@@ -1472,7 +1472,7 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   context switch is implemented but is not part of the current automated run.
 - Each event group uses one scheduler pthread. Tasks within a group are
   cooperative, while separate groups can execute in parallel.
-- Evented tasks without a `CPU` aspect use the compiled automatic pool. Its
+- Lightweight tasks without a `CPU` aspect use the compiled automatic pool. Its
   default size is one for compatibility; the only current policy is
   round-robin task count, which does not measure per-task CPU or I/O load.
 - A group identifies a stable loop pthread but is unplaced by default. Linux
@@ -1483,8 +1483,8 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   pinning: advisory tags are exposed only on supported host architectures,
   and an actual kernel rejection is reported in the group's status. Current
   arm64 Darwin reports `THREAD_AFFINITY_POLICY` unsupported.
-- Evented tasks in a group share pthread-local state. Scoped
-  `Gnatevl.Execution_Groups.Thread_Pin` objects prevent migration but do not
+- Lightweight tasks in a group share pthread-local state. Scoped
+  `Flyology.Execution_Groups.Thread_Pin` objects prevent migration but do not
   isolate that state from other tasks in the same group; use a dedicated group
   when exclusive pthread-local ownership is required.
 - All loops, including group 0, are created lazily; each group's pthread and
@@ -1493,7 +1493,7 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   bounded to 256 groups, and vacated dedicated loops are reserved and reused by
   later callers.
 - First use of a loop waits synchronously for its pthread startup handshake. An
-  evented caller occupies its source loop during this bounded `sched_yield`
+  lightweight caller occupies its source loop during this bounded `sched_yield`
   wait; subsequent use of the already-started loop does not wait.
 - Ready queues, fiber membership, timer heaps, descriptor delivery, and dispatch
   use independent per-group locks, per-group fiber lists, and an 8,191-bucket
@@ -1507,26 +1507,26 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
   dedicated range and cannot be selected statically with the `CPU` aspect.
 - The environment task always remains on its native pthread-owned initial stack
-  and is never registered as a fiber, even when the project default is evented.
-  It therefore cannot migrate; child evented tasks use guarded runtime-owned
+  and is never registered as a fiber, even when the project default is lightweight.
+  It therefore cannot migrate; child lightweight tasks use guarded runtime-owned
   stacks and can.
 - Event-runtime initialization and teardown are one-shot. There is no supported
   repeated setup/teardown cycle inside a process and no per-group shutdown API.
 - After `fork` in a process that initialized Ada tasking, neither GNARL nor
-  GNATEVL may be used in the child. Only async-signal-safe work followed by
+  Flyology may be used in the child. Only async-signal-safe work followed by
   `exec` or `_exit` is supported; the lifecycle query reports `Fork_Child` for
   diagnostics and scheduler lock entry aborts rather than deadlocking.
-- Cooperative scheduling means an evented task that never reaches a suspension
-  point can monopolize the loop. `Gnatevl.Fairness.Yield_Budget` makes explicit
+- Cooperative scheduling means a lightweight task that never reaches a suspension
+  point can monopolize the loop. `Flyology.Fairness.Yield_Budget` makes explicit
   time-budgeted checkpoints reusable but cannot force unmodified CPU loops to
   yield safely.
-- Evented priorities order ready fibers within one cooperative group but do not
+- Lightweight priorities order ready fibers within one cooperative group but do not
   provide kernel FIFO/RR scheduling, deadline dispatching, bounded preemption,
   or a cross-group total order. Native tasks retain the stock GNARL/OS priority
   path.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
-- Evented regular-file data operations use bounded kernel completion queues;
+- Lightweight regular-file data operations use bounded kernel completion queues;
   queue saturation suspends and retries the Ada task without creating workers.
   Linux prefers `io_uring` and falls back to native AIO when the syscall is
   unavailable or forbidden. The fallback is still kernel completion I/O, but
@@ -1537,15 +1537,15 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - A submitted file buffer remains owned by the kernel until completion. An
   abort request therefore wakes that task only after the outstanding operation
   completes; cancellable file-operation handles are not yet a public API.
-- `Gnatevl.IO.Connections` provides scheduler-driven cancellation and
+- `Flyology.IO.Connections` provides scheduler-driven cancellation and
   generation-safe concurrent close without periodic readiness timeouts. Its
   intentionally exclusive operation gate means a single connection does not
   support simultaneous full-duplex calls; applications needing concurrent
   read/write lanes must coordinate them above the owner or use the raw API with
   explicit lifetime serialization. Raw socket operations do not infer
   descriptor ownership, so concurrent close remains outside their guarantees.
-- `Gnatevl.IO.Structured_Servers` deadline cancellation can promptly stop a
-  handler suspended in GNATEVL connection I/O. It cannot forcibly preempt an
+- `Flyology.IO.Structured_Servers` deadline cancellation can promptly stop a
+  handler suspended in Flyology connection I/O. It cannot forcibly preempt an
   arbitrary callback that loops in CPU code or blocks in an unrelated foreign
   call; such a handler must inspect its cancellation token or use explicit
   fairness/native boundaries.
@@ -1559,13 +1559,13 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   scheduling, I/O, and context switches do not take it. Empty arenas are
   unmapped, so a past burst does not leave an unbounded virtual-memory cache.
 - ASan-aware builds require `detect_stack_use_after_return=0` for migratable
-  tasks and `use_sigaltstack=0` so GNATEVL remains the sole owner of each loop
+  tasks and `use_sigaltstack=0` so Flyology remains the sole owner of each loop
   pthread's alternate signal stack. LeakSanitizer root discovery for suspended
   stacks, fully instrumented Ada exception propagation on Darwin, TSan fiber
   identities, and Valgrind stack registration are not yet supported.
 - `Task_Info` produces an obsolete-feature warning in current GNAT, but it
   provides the required per-task and per-task-type designation without a
-  compiler fork. GNATEVL's test and showcase projects use `-gnatwJ` to suppress
+  compiler fork. Flyology's test and showcase projects use `-gnatwJ` to suppress
   that specific warning class while retaining the other `-gnatwa` diagnostics.
 - The custom RTS patch is tied deliberately to the versioned GNAT 13–16 source
   family and its platform-specific release map. An unsupported host/release
@@ -1575,7 +1575,7 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   only where the Ada rules determine them; it deliberately does not compare
   scheduling traces or elapsed-time ordering between lanes. It covers a
   successful dynamic-priority/maximum-ceiling protected interaction. A focused
-  evented suite additionally covers per-group priority queues and GNARL
+  lightweight suite additionally covers per-group priority queues and GNARL
   rendezvous inheritance/loss ordering, but not full Real-Time Systems Annex
   dispatching, kernel-lock priority inheritance, or ceiling-violation
   conformance across OS schedulers.

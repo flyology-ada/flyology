@@ -1,26 +1,26 @@
 with Ada.Text_IO;
-with Gnatevl;
+with Flyology;
 with Semantic_Scenarios;
 
 procedure Semantic_Parity_Smoke is
 
-   package Evented_Scenarios is new Semantic_Scenarios
-     (Model      => Gnatevl.Event_Loop_Task,
-      Peer_Model => Gnatevl.Native_Thread);
+   package Lightweight_Scenarios is new Semantic_Scenarios
+     (Model      => Flyology.Lightweight_Task,
+      Peer_Model => Flyology.Native_Task);
 
    package Native_Scenarios is new Semantic_Scenarios
-     (Model      => Gnatevl.Native_Thread,
-      Peer_Model => Gnatevl.Event_Loop_Task);
+     (Model      => Flyology.Native_Task,
+      Peer_Model => Flyology.Lightweight_Task);
 
-   Evented : constant Evented_Scenarios.Results := Evented_Scenarios.Run;
+   Lightweight : constant Lightweight_Scenarios.Results := Lightweight_Scenarios.Run;
    Native  : constant Native_Scenarios.Results := Native_Scenarios.Run;
 
 begin
-   for Check in Evented_Scenarios.Check_Id loop
-      if not Evented (Check) then
+   for Check in Lightweight_Scenarios.Check_Id loop
+      if not Lightweight (Check) then
          raise Program_Error with
-           "evented semantic check failed: "
-           & Evented_Scenarios.Check_Id'Image (Check);
+           "lightweight semantic check failed: "
+           & Lightweight_Scenarios.Check_Id'Image (Check);
       end if;
    end loop;
 
@@ -35,14 +35,14 @@ begin
    --  The generic suite is identical for both models.  This explicit parity
    --  comparison catches a future lane-specific semantic regression even if
    --  a newly added check accidentally accepts a false result in isolation.
-   for Check in Evented_Scenarios.Check_Id loop
-      if Evented (Check)
+   for Check in Lightweight_Scenarios.Check_Id loop
+      if Lightweight (Check)
         /= Native (Native_Scenarios.Check_Id'Value
-                     (Evented_Scenarios.Check_Id'Image (Check)))
+                     (Lightweight_Scenarios.Check_Id'Image (Check)))
       then
          raise Program_Error with
-           "native/evented semantic mismatch: "
-           & Evented_Scenarios.Check_Id'Image (Check);
+           "native/lightweight semantic mismatch: "
+           & Lightweight_Scenarios.Check_Id'Image (Check);
       end if;
    end loop;
 
@@ -50,7 +50,7 @@ begin
      ("semantic parity smoke:"
       & Natural'Image
           (Natural'Succ
-             (Evented_Scenarios.Check_Id'Pos
-                (Evented_Scenarios.Check_Id'Last)))
+             (Lightweight_Scenarios.Check_Id'Pos
+                (Lightweight_Scenarios.Check_Id'Last)))
       & " checks passed in both lanes");
 end Semantic_Parity_Smoke;

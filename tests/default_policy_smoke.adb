@@ -1,14 +1,14 @@
 with Ada.Command_Line;
-with Gnatevl;
-with Gnatevl.IO;
+with Flyology;
+with Flyology.IO;
 
 procedure Default_Policy_Smoke is
-   Expected_Evented : constant Boolean :=
+   Expected_Lightweight : constant Boolean :=
      Ada.Command_Line.Argument_Count = 1
-     and then Ada.Command_Line.Argument (1) = "evented";
+     and then Ada.Command_Line.Argument (1) = "lightweight";
 
    protected Results is
-      procedure Report (Evented : Boolean);
+      procedure Report (Lightweight : Boolean);
       entry Wait;
       function Passed return Boolean;
    private
@@ -17,10 +17,10 @@ procedure Default_Policy_Smoke is
    end Results;
 
    protected body Results is
-      procedure Report (Evented : Boolean) is
+      procedure Report (Lightweight : Boolean) is
       begin
          Reports := Reports + 1;
-         All_OK := All_OK and (Evented = Expected_Evented);
+         All_OK := All_OK and (Lightweight = Expected_Lightweight);
       end Report;
 
       entry Wait when Reports = 2 is
@@ -33,33 +33,33 @@ procedure Default_Policy_Smoke is
 
    task Implicit_Default;
 
-   task type Selected_Worker (Model : Gnatevl.Execution_Model) is
+   task type Selected_Worker (Model : Flyology.Execution_Model) is
       pragma Task_Info (Model);
    end Selected_Worker;
 
    task body Implicit_Default is
    begin
-      Results.Report (Gnatevl.IO.Is_Evented_Task);
+      Results.Report (Flyology.IO.Is_Lightweight_Task);
    end Implicit_Default;
 
    task body Selected_Worker is
    begin
-      Results.Report (Gnatevl.IO.Is_Evented_Task);
+      Results.Report (Flyology.IO.Is_Lightweight_Task);
    end Selected_Worker;
 
-   Explicit_Default : Selected_Worker (Gnatevl.Project_Default);
+   Explicit_Default : Selected_Worker (Flyology.Project_Default);
    pragma Unreferenced (Implicit_Default, Explicit_Default);
 begin
-   if Gnatevl.IO.Is_Evented_Task then
-      raise Program_Error with "environment task became an event-loop fiber";
+   if Flyology.IO.Is_Lightweight_Task then
+      raise Program_Error with "environment task became a lightweight fiber";
    end if;
 
    if Ada.Command_Line.Argument_Count /= 1
      or else
        (Ada.Command_Line.Argument (1) /= "native"
-        and then Ada.Command_Line.Argument (1) /= "evented")
+        and then Ada.Command_Line.Argument (1) /= "lightweight")
    then
-      raise Program_Error with "expected native or evented policy argument";
+      raise Program_Error with "expected native or lightweight policy argument";
    end if;
 
    Results.Wait;

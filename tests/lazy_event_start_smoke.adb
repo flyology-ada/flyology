@@ -1,10 +1,10 @@
-with Gnatevl;
-with Gnatevl.Execution_Groups;
-with Gnatevl.IO;
+with Flyology;
+with Flyology.Execution_Groups;
+with Flyology.IO;
 with System;
 
 procedure Lazy_Event_Start_Smoke is
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
 
    use type Groups.Group_Id;
    use type System.Address;
@@ -16,7 +16,7 @@ procedure Lazy_Event_Start_Smoke is
 
    protected Observation is
       procedure Report
-        (Evented : Boolean;
+        (Lightweight : Boolean;
          Group   : Groups.Group_Id;
          Thread  : System.Address);
       entry Wait;
@@ -28,12 +28,12 @@ procedure Lazy_Event_Start_Smoke is
 
    protected body Observation is
       procedure Report
-        (Evented : Boolean;
+        (Lightweight : Boolean;
          Group   : Groups.Group_Id;
          Thread  : System.Address)
       is
       begin
-         OK := Evented
+         OK := Lightweight
            and then Group = Groups.Default_Group
            and then Thread /= Environment_Thread;
          Done := True;
@@ -47,24 +47,24 @@ procedure Lazy_Event_Start_Smoke is
       function Passed return Boolean is (OK);
    end Observation;
 
-   task type Evented_Worker is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
-   end Evented_Worker;
+   task type Lightweight_Worker is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Lightweight_Worker;
 
-   task body Evented_Worker is
+   task body Lightweight_Worker is
    begin
       Observation.Report
-        (Gnatevl.IO.Is_Evented_Task,
+        (Flyology.IO.Is_Lightweight_Task,
          Groups.Current,
          Current_Thread);
-   end Evented_Worker;
+   end Lightweight_Worker;
 
-   type Evented_Worker_Access is access Evented_Worker;
+   type Lightweight_Worker_Access is access Lightweight_Worker;
 begin
-   --  No evented object has been created yet. The environment task must stay
+   --  No lightweight object has been created yet. The environment task must stay
    --  on stock GNARL rather than serving as an eagerly captured group-0 fiber.
-   if Gnatevl.IO.Is_Evented_Task then
-      raise Program_Error with "environment task became evented";
+   if Flyology.IO.Is_Lightweight_Task then
+      raise Program_Error with "environment task became lightweight";
    end if;
    if Groups.Configured_Pool_Size /= 1
      or else not Groups.In_Configured_Pool (Groups.Default_Group)
@@ -74,7 +74,7 @@ begin
    end if;
 
    declare
-      Worker : constant Evented_Worker_Access := new Evented_Worker;
+      Worker : constant Lightweight_Worker_Access := new Lightweight_Worker;
       pragma Unreferenced (Worker);
    begin
       Observation.Wait;

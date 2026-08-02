@@ -1,8 +1,8 @@
-with Gnatevl;
-with Gnatevl.Observability;
+with Flyology;
+with Flyology.Observability;
 
 procedure Observability_Native_Smoke is
-   package Observation renames Gnatevl.Observability;
+   package Observation renames Flyology.Observability;
 
    use type Observation.Fatal_Context;
 
@@ -33,7 +33,7 @@ procedure Observability_Native_Smoke is
    end Result;
 
    task Native is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native;
 
    task body Native is

@@ -1,9 +1,9 @@
-name = "gnatevl_external_consumer"
-description = "Out-of-tree Alire consumer smoke for GNATEVL"
+name = "flyology_external_consumer"
+description = "Out-of-tree Alire consumer smoke for Flyology"
 version = "0.1.0-dev"
 
-authors = ["GNATEVL maintainers"]
-maintainers = ["GNATEVL maintainers <noreply@example.com>"]
+authors = ["Flyology maintainers"]
+maintainers = ["Flyology maintainers <noreply@example.com>"]
 maintainers-logins = ["yrashk"]
 licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
 executables = ["external_consumer"]

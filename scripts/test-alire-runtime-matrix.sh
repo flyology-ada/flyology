@@ -15,8 +15,8 @@ do
   gprbuild_version=${toolchain#*:}
   printf '\nTesting Linux GNAT %s with GPRbuild %s\n' \
     "$gnat_version" "$gprbuild_version"
-  GNATEVL_LINUX_IMAGE="gnatevl-linux-test-$gnat_version" \
-  GNATEVL_GNAT_VERSION="$gnat_version" \
-  GNATEVL_GPRBUILD_VERSION="$gprbuild_version" \
+  FLYOLOGY_LINUX_IMAGE="flyology-linux-test-$gnat_version" \
+  FLYOLOGY_GNAT_VERSION="$gnat_version" \
+  FLYOLOGY_GPRBUILD_VERSION="$gprbuild_version" \
     "$project_root/scripts/test-linux-docker.sh"
 done

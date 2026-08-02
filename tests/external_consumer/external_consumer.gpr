@@ -1,4 +1,4 @@
-with "gnatevl.gpr";
+with "flyology.gpr";
 
 project External_Consumer is
    for Languages use ("Ada");

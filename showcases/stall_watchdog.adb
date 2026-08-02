@@ -1,16 +1,16 @@
 with Ada.Real_Time;
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.Observability.Stall_Watchdogs;
+with Flyology;
+with Flyology.Observability.Stall_Watchdogs;
 with Showcase_Support;
 
 procedure Stall_Watchdog is
    package RT renames Ada.Real_Time;
    package TIO renames Ada.Text_IO;
-   package Watchdogs renames Gnatevl.Observability.Stall_Watchdogs;
+   package Watchdogs renames Flyology.Observability.Stall_Watchdogs;
 
    use type RT.Time;
-   use type Gnatevl.Observability.Counter;
+   use type Flyology.Observability.Counter;
 
    protected Completion is
       procedure Finish;
@@ -34,7 +34,7 @@ procedure Stall_Watchdog is
    Monitor : Watchdogs.Watchdog;
 
    task Event_Work is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Event_Work;
 
    task body Event_Work is

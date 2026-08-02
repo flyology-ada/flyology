@@ -1,5 +1,5 @@
 with Ada.Real_Time;
-with Gnatevl;
+with Flyology;
 with System;
 
 procedure Runtime_Smoke is
@@ -62,12 +62,12 @@ procedure Runtime_Smoke is
          and Event_Delay_Was_Correct);
    end Results;
 
-   task Evented is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   task Lightweight is
+      pragma Task_Info (Flyology.Lightweight_Task);
       entry Called_From_Native;
-   end Evented;
+   end Lightweight;
 
-   task body Evented is
+   task body Lightweight is
       Started : Time;
    begin
       Results.Event_Ran (Current_Thread);
@@ -76,17 +76,17 @@ procedure Runtime_Smoke is
       delay 0.020;
       Results.Rendezvous_Completed
         (To_Duration (Clock - Started) >= 0.019);
-   end Evented;
+   end Lightweight;
 
    task Native is
-      pragma Task_Info (Gnatevl.Native_Thread);
+      pragma Task_Info (Flyology.Native_Task);
    end Native;
 
    task body Native is
    begin
       Results.Native_Ran (Current_Thread);
       delay 0.005;
-      Evented.Called_From_Native;
+      Lightweight.Called_From_Native;
    end Native;
 
 begin

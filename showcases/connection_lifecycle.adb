@@ -1,13 +1,13 @@
 with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
-with Gnatevl;
-with Gnatevl.IO.Connections;
+with Flyology;
+with Flyology.IO.Connections;
 
 procedure Connection_Lifecycle is
    use Ada.Text_IO;
    use type GNAT.Sockets.Socket_Type;
-   package Connections renames Gnatevl.IO.Connections;
+   package Connections renames Flyology.IO.Connections;
 
    Worker_Count : constant := 5;
    Capacity     : constant := 2;
@@ -78,7 +78,7 @@ begin
 
    declare
       task type Worker (Index : Positive) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Worker;
 
       task body Worker is

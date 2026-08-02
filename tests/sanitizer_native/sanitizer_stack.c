@@ -2,13 +2,13 @@
 #include <stdint.h>
 
 #if defined(__GNUC__) || defined(__clang__)
-#define GNATEVL_NOINLINE __attribute__((noinline))
+#define FLYOLOGY_NOINLINE __attribute__((noinline))
 #else
-#define GNATEVL_NOINLINE
+#define FLYOLOGY_NOINLINE
 #endif
 
-GNATEVL_NOINLINE
-unsigned gnatevl_sanitizer_touch_stack(unsigned seed, unsigned depth) {
+FLYOLOGY_NOINLINE
+unsigned flyology_sanitizer_touch_stack(unsigned seed, unsigned depth) {
     volatile unsigned char frame[257];
     unsigned result = seed;
     size_t index;
@@ -18,13 +18,13 @@ unsigned gnatevl_sanitizer_touch_stack(unsigned seed, unsigned depth) {
         result = result * 33u + frame[index];
     }
     if (depth != 0) {
-        result ^= gnatevl_sanitizer_touch_stack(result, depth - 1);
+        result ^= flyology_sanitizer_touch_stack(result, depth - 1);
     }
     return result ^ frame[seed % sizeof(frame)];
 }
 
-GNATEVL_NOINLINE
-void gnatevl_sanitizer_trigger_stack_violation(unsigned index) {
+FLYOLOGY_NOINLINE
+void flyology_sanitizer_trigger_stack_violation(unsigned index) {
     volatile unsigned char frame[8] = {0};
 
     /* The sanitizer subprocess passes 16. Keeping the index opaque to the

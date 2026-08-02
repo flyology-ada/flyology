@@ -1,10 +1,10 @@
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.Execution_Groups;
+with Flyology;
+with Flyology.Execution_Groups;
 
 procedure Loop_Thread_Placement is
    use Ada.Text_IO;
-   package Groups renames Gnatevl.Execution_Groups;
+   package Groups renames Flyology.Execution_Groups;
 
    use type Groups.Loop_Thread_Placement;
    use type Groups.Placement_Configuration_Result;
@@ -45,10 +45,10 @@ procedure Loop_Thread_Placement is
    end Output;
 
    task type First_Worker with CPU => 1 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end First_Worker;
    task type Second_Worker with CPU => 2 is
-      pragma Task_Info (Gnatevl.Event_Loop_Task);
+      pragma Task_Info (Flyology.Lightweight_Task);
    end Second_Worker;
 
    task body First_Worker is

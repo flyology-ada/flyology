@@ -2,25 +2,25 @@ with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Streams;
 with Ada.Text_IO;
-with Gnatevl;
-with Gnatevl.IO;
-with Gnatevl.IO.Files;
+with Flyology;
+with Flyology.IO;
+with Flyology.IO.Files;
 with Interfaces.C;
 
 procedure Files_Smoke is
    use Ada.Streams;
-   use type Gnatevl.IO.Files.File_Descriptor;
+   use type Flyology.IO.Files.File_Descriptor;
    use type Interfaces.C.int;
 
    function Selected_Linux_Backend return Interfaces.C.int;
    pragma Import
-     (C, Selected_Linux_Backend, "gnatevl_linux_file_backend");
+     (C, Selected_Linux_Backend, "flyology_linux_file_backend");
 
-   Path : constant String := "/tmp/gnatevl-files-smoke.data";
+   Path : constant String := "/tmp/flyology-files-smoke.data";
    Data : constant Stream_Element_Array (1 .. 4) := [10, 20, 30, 40];
 
-   File     : Gnatevl.IO.Files.File_Descriptor :=
-     Gnatevl.IO.Files.Invalid_File;
+   File     : Flyology.IO.Files.File_Descriptor :=
+     Flyology.IO.Files.Invalid_File;
    Incoming : Stream_Element_Array (Data'Range);
    Last     : Stream_Element_Offset;
    Rejected : Boolean := False;
@@ -36,16 +36,16 @@ begin
    Remove_Test_File;
 
    File :=
-     Gnatevl.IO.Files.Open
+     Flyology.IO.Files.Open
        (Path,
-        Mode     => Gnatevl.IO.Files.Read_Write,
+        Mode     => Flyology.IO.Files.Read_Write,
         Create   => True,
         Truncate => True);
-   Gnatevl.IO.Files.Write_At (File, 0, Data, Last);
+   Flyology.IO.Files.Write_At (File, 0, Data, Last);
    if Last /= Data'Last then
       raise Program_Error with "read/write create wrote a partial record";
    end if;
-   Gnatevl.IO.Files.Read_At (File, 0, Incoming, Last);
+   Flyology.IO.Files.Read_At (File, 0, Incoming, Last);
    if Last /= Incoming'Last or else Incoming /= Data then
       raise Program_Error with "read/write create returned a write-only fd";
    end if;
@@ -78,7 +78,7 @@ begin
       end Progress;
 
       task type Parallel_Writer (Index : Positive) is
-         pragma Task_Info (Gnatevl.Event_Loop_Task);
+         pragma Task_Info (Flyology.Lightweight_Task);
       end Parallel_Writer;
 
       task body Parallel_Writer is
@@ -86,8 +86,8 @@ begin
            [1 => Stream_Element (Index mod 251)];
          Written : Stream_Element_Offset;
       begin
-         Gnatevl.IO.Files.Write_At
-           (File, Gnatevl.IO.Files.File_Offset (Index - 1), Item, Written);
+         Flyology.IO.Files.Write_At
+           (File, Flyology.IO.Files.File_Offset (Index - 1), Item, Written);
          Progress.Finished (Written = Item'Last);
       exception
          when others =>
@@ -107,7 +107,7 @@ begin
          raise Program_Error with "parallel kernel file write failed";
       end if;
 
-      Gnatevl.IO.Files.Read_At (File, 0, Batch, Last);
+      Flyology.IO.Files.Read_At (File, 0, Batch, Last);
       if Last /= Batch'Last then
          raise Program_Error with "parallel kernel file read was short";
       end if;
@@ -119,61 +119,61 @@ begin
          end if;
       end loop;
    end;
-   Gnatevl.IO.Files.Close (File);
+   Flyology.IO.Files.Close (File);
 
    File :=
-     Gnatevl.IO.Files.Open
+     Flyology.IO.Files.Open
        (Path,
-        Mode     => Gnatevl.IO.Files.Write_Only,
+        Mode     => Flyology.IO.Files.Write_Only,
         Truncate => True);
 
    begin
-      Gnatevl.IO.Files.Read_At (File, 0, Incoming, Last);
+      Flyology.IO.Files.Read_At (File, 0, Incoming, Last);
    exception
-      when Gnatevl.IO.Device_Error =>
+      when Flyology.IO.Device_Error =>
          Rejected := True;
    end;
    if not Rejected then
       raise Program_Error with "read from write-only file was accepted";
    end if;
-   Gnatevl.IO.Files.Close (File);
+   Flyology.IO.Files.Close (File);
 
    Rejected := False;
-   File := Gnatevl.IO.Files.Open (Path, Mode => Gnatevl.IO.Files.Read_Only);
-   Gnatevl.IO.Files.Read_At (File, 0, Incoming, Last);
+   File := Flyology.IO.Files.Open (Path, Mode => Flyology.IO.Files.Read_Only);
+   Flyology.IO.Files.Read_At (File, 0, Incoming, Last);
    if Last >= Incoming'First then
       raise Program_Error with "truncate without create was ignored";
    end if;
-   Gnatevl.IO.Files.Close (File);
+   Flyology.IO.Files.Close (File);
 
    Remove_Test_File;
    File :=
-     Gnatevl.IO.Files.Open
-       (Path, Mode => Gnatevl.IO.Files.Read_Only, Create => True);
-   Gnatevl.IO.Files.Read_At (File, 0, Incoming, Last);
+     Flyology.IO.Files.Open
+       (Path, Mode => Flyology.IO.Files.Read_Only, Create => True);
+   Flyology.IO.Files.Read_At (File, 0, Incoming, Last);
    if Last >= Incoming'First then
       raise Program_Error with "read-only create was not empty";
    end if;
-   Gnatevl.IO.Files.Close (File);
+   Flyology.IO.Files.Close (File);
 
    begin
       File :=
-        Gnatevl.IO.Files.Open
+        Flyology.IO.Files.Open
           (Path,
-           Mode     => Gnatevl.IO.Files.Read_Only,
+           Mode     => Flyology.IO.Files.Read_Only,
            Truncate => True);
    exception
-      when Gnatevl.IO.Device_Error =>
+      when Flyology.IO.Device_Error =>
          Rejected := True;
    end;
    if not Rejected then
-      Gnatevl.IO.Files.Close (File);
+      Flyology.IO.Files.Close (File);
       raise Program_Error with "read-only truncate was accepted";
    end if;
 
    Remove_Test_File;
    if Ada.Environment_Variables.Value
-     ("GNATEVL_EXPECT_FILE_BACKEND", "") = "native-aio"
+     ("FLYOLOGY_EXPECT_FILE_BACKEND", "") = "native-aio"
    then
       if Selected_Linux_Backend /= 2 then
          raise Program_Error with
@@ -184,9 +184,9 @@ begin
    end if;
 exception
    when others =>
-      if File /= Gnatevl.IO.Files.Invalid_File then
+      if File /= Flyology.IO.Files.Invalid_File then
          begin
-            Gnatevl.IO.Files.Close (File);
+            Flyology.IO.Files.Close (File);
          exception
             when others =>
                null;
