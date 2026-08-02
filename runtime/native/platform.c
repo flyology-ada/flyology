@@ -1,5 +1,20 @@
 #include <sys/mman.h>
+#include <pthread.h>
 #include <stdint.h>
+
+static uint32_t *gnatevl_fork_child_flag;
+
+static void gnatevl_mark_fork_child(void) {
+    __atomic_store_n(gnatevl_fork_child_flag, 1, __ATOMIC_RELAXED);
+}
+
+int gnatevl_install_fork_guard(void *flag) {
+    if (flag == NULL || gnatevl_fork_child_flag != NULL) {
+        return -1;
+    }
+    gnatevl_fork_child_flag = (uint32_t *)flag;
+    return pthread_atfork(NULL, NULL, gnatevl_mark_fork_child);
+}
 
 #ifdef GNATEVL_TEST_FAULTS
 #include <stdatomic.h>

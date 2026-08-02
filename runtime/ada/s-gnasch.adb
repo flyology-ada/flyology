@@ -254,8 +254,8 @@ package body System.Gnatevl.Scheduler is
    pragma Atomic (Lifecycle_State);
    Created_Group_Count : C.int := 0;
    pragma Atomic (Created_Group_Count);
-   Origin_Process : C.int := -1;
-   pragma Atomic (Origin_Process);
+   Fork_Child_State : C.int := 0;
+   pragma Atomic (Fork_Child_State);
    Last_Fatal_Context : C.int := 0;
    pragma Atomic (Last_Fatal_Context);
    Groups         : Group_Array := (others => null);
@@ -376,15 +376,16 @@ package body System.Gnatevl.Scheduler is
       Count  : C.size_t) return C.long;
    pragma Import (C, C_Write, "write");
 
-   function Get_Process_Id return C.int;
-   pragma Import (C, Get_Process_Id, "getpid");
+   function Install_Fork_Guard (Flag : System.Address) return C.int;
+   pragma Import
+     (C, Install_Fork_Guard, "gnatevl_install_fork_guard");
 
    function Pthread_Join
      (Thread : OSI.pthread_t; Value : System.Address) return C.int;
    pragma Import (C, Pthread_Join, "pthread_join");
 
    function In_Fork_Child return Boolean is
-     (Origin_Process > 0 and then Get_Process_Id /= Origin_Process);
+     (Fork_Child_State /= 0);
 
    function Group_Quiescent_Locked
      (Group : not null Loop_Group_Access) return Boolean
@@ -1305,12 +1306,17 @@ package body System.Gnatevl.Scheduler is
          end if;
       end loop;
 
+      Result := Install_Fork_Guard (Fork_Child_State'Address);
+      if Result /= 0 then
+         return -1;
+      end if;
+
       --  Do not allocate a group, poller, context, stack, or pthread here.
       --  Ensure_Group creates the complete event machinery when the first
       --  designated evented task is activated. Until then native programs
       --  stay on the stock GNARL execution path.
       Initialized := True;
-      Origin_Process := Get_Process_Id;
+      Fork_Child_State := 0;
       Lifecycle_State := 0;
       Created_Group_Count := 0;
       return 0;
