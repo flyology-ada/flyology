@@ -332,7 +332,15 @@ lanes:
 - Alternate signal stacks are owned by OS threads. Native tasks retain GNARL's
   per-pthread stack, while each event-loop pthread installs one permanent stack
   shared by its fibers. `Task_Wrapper` therefore does not reserve GNARL's 32 KiB
-  alternate-stack local inside every evented task stack.
+  alternate-stack local inside every evented task stack. Stack sizing still
+  retains GNARL's conservative alternate-stack allowance; removing the local
+  changes touched pages, not the requested task's established headroom.
+- Evented stacks are mapped in arenas of at most 64 slots and 4 MiB. The layout
+  alternates inaccessible guard pages and usable stacks, so adjacent stacks
+  share one interior guard without weakening either stack's lower or upper
+  boundary. A released slot is protected and physically discarded before
+  reuse; a completely empty arena is unmapped instead of becoming an
+  historical-peak cache.
 - Synchronization between the lanes still passes through GNARL. A native task
   wakes the event-loop scheduler through `EVFILT_USER` on macOS or `eventfd` on
   Linux.
@@ -835,6 +843,7 @@ async-signal-safety rules and must not call Ada tasking or GNATEVL APIs.
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
 | Make CPU fairness explicit | Arbitrary signal-time preemption would cross Ada and GNARL critical regions at unsafe instructions | Time-budgeted checkpoints provide bounded cooperative slices where application invariants are known to be stable |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
+| Pack stacks into guarded arenas | A private mapping spends two guard pages per task even though neighboring stacks can share an inaccessible boundary | Creation and reap briefly take one process-wide stack-pool mutex; empty arenas are unmapped and partially occupied slots are page-discarded |
 | Select ASan fiber annotations at RTS build time | AddressSanitizer must learn the real source and destination stack around a custom assembly transfer | Sanitized builds use LLVM's fiber interface; ordinary builds compile out every hook and sanitizer TLS object |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
@@ -1386,6 +1395,25 @@ release drain from roughly 0.41 seconds to 0.065 seconds. Both formerly
 quadratic lookup components now take expected linear total work for the
 one-descriptor-per-connection load.
 
+Stack-pool telemetry printed by the showcase separates GNATEVL's exact stack
+reservation from noisier process-wide virtual-memory accounting. A fresh 10,000
+connection before/after run on the same Apple Silicon host measured:
+
+| Allocator | Requested stack | Effective usable stack | Stack arenas | Exact stack reservation | RSS increase | Process virtual increase |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| One mapping per task | 16 KiB | 48 KiB | 10,000 | 781.25 MiB | 463.42 MiB | 1,529.80 MiB |
+| Shared-guard arenas | 16 KiB | 48 KiB | 157 | 630.45 MiB | 463.41 MiB | 1,235.00 MiB |
+
+The exact runtime-controlled reservation falls by 150.80 MiB (19%) solely by
+sharing interior guards. RSS is intentionally unchanged: the parked receive
+path already touches only one 16 KiB stack page, and guard or untouched
+headroom pages have no resident backing. At this scale the remaining roughly
+32 KiB of resident cost per connection is predominantly GNARL/Ada task state
+common to both lanes, not the sub-KiB GNATEVL fiber/context records. Total
+virtual-memory readings can vary with the system allocator;
+`Gnatevl.Observability.Stack_Pool` reports the stable active-arena, live-stack,
+exact-reservation, mapping, unmapping, sharing, and page-discard counters.
+
 The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
 connections. Results vary with the OS, compiler, allocator, and resource limits.
@@ -1509,6 +1537,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   alternate signal stack on which GNARL can translate the guard fault into Ada
   `Storage_Error`; this stack is thread state and is intentionally not stored
   in an individual fiber's task wrapper.
+- Stack arenas hold at most 64 slots and target at most 4 MiB before the final
+  guard page. Different effective stack sizes use different arenas. A global
+  stack-pool mutex serializes only task activation and final reap across groups;
+  scheduling, I/O, and context switches do not take it. Empty arenas are
+  unmapped, so a past burst does not leave an unbounded virtual-memory cache.
 - ASan-aware builds require `detect_stack_use_after_return=0` for migratable
   tasks and `use_sigaltstack=0` so GNATEVL remains the sole owner of each loop
   pthread's alternate signal stack. LeakSanitizer root discovery for suspended

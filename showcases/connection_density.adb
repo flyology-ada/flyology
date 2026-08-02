@@ -5,6 +5,7 @@ with Ada.Text_IO;
 with GNAT.Sockets;
 with Gnatevl;
 with Gnatevl.IO.Sockets;
+with Gnatevl.Observability;
 with Interfaces.C;
 with Showcase_Support;
 
@@ -15,6 +16,7 @@ procedure Connection_Density is
 
    package C renames Interfaces.C;
    use type C.long_long;
+   use type Gnatevl.Observability.Counter;
 
    Worker_Stack_Size : constant := 16 * 1_024;
    One_Byte          : constant Stream_Element_Array := [1 => 42];
@@ -90,6 +92,7 @@ procedure Connection_Density is
       Baseline_Virtual : C.long_long;
       Sample_Virtual   : C.long_long;
       Sample_Threads   : C.int;
+      Pool             : Gnatevl.Observability.Stack_Pool_Snapshot;
       Setup_Elapsed    : Duration;
       Release_Elapsed  : Duration)
    is
@@ -116,6 +119,20 @@ procedure Connection_Density is
         ("  density: rss_delta_per_connection="
          & C.long_long'Image (RSS_Increase / C.long_long (Connections))
          & " bytes");
+      if Pool.Live_Stacks /= 0 then
+         Put_Line
+           ("  stack_pool: live=" & Pool.Live_Stacks'Image
+            & " arenas=" & Pool.Active_Arenas'Image
+            & " usable_per_task="
+            & Interfaces.Unsigned_64'Image
+                (Pool.Live_Usable_Bytes / Pool.Live_Stacks / 1_024)
+            & " KiB"
+            & " reserved="
+            & Showcase_Support.Fixed_Image
+                (Long_Float (Pool.Reserved_Bytes)
+                 / (1_024.0 * 1_024.0))
+            & " MiB shared=" & Pool.Shared_Stacks'Image);
+      end if;
       Put_Line
         ("  timing: setup="
          & Showcase_Support.Fixed_Image (Long_Float (Setup_Elapsed), 6)
@@ -174,6 +191,7 @@ procedure Connection_Density is
       Sample_RSS     : C.long_long;
       Sample_Virtual : C.long_long;
       Sample_Threads : C.int;
+      Pool           : Gnatevl.Observability.Stack_Pool_Snapshot;
       Setup_Started   : constant Time := Clock;
       Release_Started : Time;
       Setup_Elapsed   : Duration;
@@ -191,6 +209,7 @@ procedure Connection_Density is
       Sample_RSS := Current_RSS;
       Sample_Virtual := Virtual_Bytes;
       Sample_Threads := Thread_Count;
+      Pool := Gnatevl.Observability.Stack_Pool;
 
       Release_Started := Clock;
       for Index in 1 .. Connections loop
@@ -214,6 +233,7 @@ procedure Connection_Density is
          Baseline_Virtual,
          Sample_Virtual,
          Sample_Threads,
+         Pool,
          Setup_Elapsed,
          Release_Elapsed);
 
