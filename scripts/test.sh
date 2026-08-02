@@ -66,6 +66,9 @@ for test_main in \
   observability_native_smoke \
   observability_smoke \
   priority_semantics_smoke \
+  process_exit_live_task_smoke \
+  process_exec_child_smoke \
+  process_lifecycle_smoke \
   ready_queue_smoke \
   runtime_smoke \
   semantic_parity_smoke \
@@ -81,7 +84,15 @@ do
     -f \
     -P tests/runtime_smoke.gpr \
     "$test_main.adb"
-  "$project_root/tests/bin/$test_main"
+  case "$test_main" in
+    process_lifecycle_smoke|process_exit_live_task_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 10 \
+        "$project_root/tests/bin/$test_main"
+      ;;
+    *)
+      "$project_root/tests/bin/$test_main"
+      ;;
+  esac
 done
 
 #  Exercise automatic placement separately because the pool policy is compiled

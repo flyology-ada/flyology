@@ -9,6 +9,7 @@ cd "$project_root"
   -P gnatevl.gpr \
   --mode=all \
   --level=1 \
+  --output=oneline \
   --output-header \
   --report=all \
   gnatevl-time_math.adb
@@ -17,6 +18,7 @@ cd "$project_root"
   -P proof/runtime_policy.gpr \
   --mode=all \
   --level=1 \
+  --output=oneline \
   --output-header \
   --report=all \
   s-gnscpo.adb

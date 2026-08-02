@@ -307,6 +307,15 @@ semantics survive. Reimplementing rendezvous or protected objects would create a
 parallel runtime with subtly different behavior; GNATEVL deliberately avoids
 that.
 
+At normal process finalization, GNARL first completes task masters, terminates
+remaining library-level tasks according to Ada rules, and finalizes controlled
+library objects. GNATEVL then reaps any already-finished static task fibers,
+wakes and joins quiescent loop pthreads, and releases their pollers, contexts,
+timer heaps, locks, and group records. It never tears these resources down while
+a fiber can still run: if the final registry is unexpectedly nonempty after a
+bounded final-reap grace period, cleanup is marked deferred and left to the
+operating system at process exit.
+
 ### Context switching is not event polling
 
 These are independent mechanisms with different jobs:
@@ -609,6 +618,39 @@ same category directly to standard error before `abort`. A live process normally
 reports `No_Fatal`; the retained atomic scalar is chiefly postmortem context for
 a crash handler or debugger and querying it takes no scheduler lock.
 
+## Process lifecycle
+
+`Gnatevl.Process_Lifecycle` exposes the event runtime's process-wide state and
+the number of lazily created groups without starting a loop. A native-only
+program reports `Dormant` and zero groups. The first evented task changes the
+state to `Running`; successful GNARL process finalization changes it to
+`Stopped` and returns the group count to zero. `Cleanup_Deferred` means GNATEVL
+found state it could not safely tear down and deliberately left it to operating
+system process exit.
+
+Shutdown is intentionally not a public application operation. Ada masters,
+task termination, and controlled-object finalization establish the only safe
+global boundary; stopping a group earlier could invalidate a suspended task's
+stack or an in-flight kernel file buffer. The event runtime is therefore
+one-shot and cannot be restarted inside the same process. Higher-level servers
+should stop accepting, cancel owned connections, and let their task scopes
+finish normally.
+
+`fork` does not clone the other pthreads of a multi-threaded process. GNARL and
+GNATEVL mutex ownership, loop threads, pollers, and TLS therefore cannot be
+continued safely in the child. GNATEVL records the process that initialized the
+runtime: its lock-free lifecycle query reports `Fork_Child` after `fork`, and an
+attempt to enter a scheduler lock fails loudly instead of waiting forever for a
+vanished owner. The supported child path is the POSIX minimum: call only
+async-signal-safe operations and then `exec` or `_exit`. After `exec`, the new
+image initializes a fresh `Dormant` runtime. This restriction applies even when
+the calling Ada task was native because stock GNARL is already multi-threaded.
+
+Loop pthreads inherit the creator's signal mask. A signal handler may therefore
+run on a loop pthread and interrupt the kernel wait; pollers treat `EINTR` as a
+retry/no-event result. Application signal handlers must still obey normal
+async-signal-safety rules and must not call Ada tasking or GNATEVL APIs.
+
 ## Design decisions
 
 | Decision | Rationale | Consequence |
@@ -616,6 +658,7 @@ a crash handler or debugger and querying it takes no scheduler lock.
 | Keep ordinary Ada task syntax | Existing programs and GNARL semantics remain recognizable | No separate `async`/`await`, callback, or future API is required |
 | Default to native execution, with a project-wide evented option | Existing tasking code keeps its blocking and parallelism assumptions while high-I/O projects can opt in once | Evented examples and mixed projects must designate their intended lane |
 | Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first evented task pays the one-time group startup handshake |
+| Finalize loops only at GNARL's process boundary | Suspended stacks, in-flight file buffers, and Ada masters must outlive their tasks | There is no arbitrary shutdown/restart API; unsafe cleanup is deferred to OS exit |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
 | Place undesignated evented tasks through a build-time loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration | The compatibility default remains one loop; round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
@@ -1053,9 +1096,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   isolate that state from other tasks in the same group; use a dedicated group
   when exclusive pthread-local ownership is required.
 - All loops, including group 0, are created lazily; each group's pthread and
-  poller (`kqueue` or `epoll`) remain alive for the process lifetime. The table
-  is bounded to 256 groups, and vacated dedicated loops are reserved and reused
-  by later callers.
+  poller (`kqueue` or `epoll`) remain alive for the application's tasking
+  lifetime and are joined at safe GNARL process finalization. The table is
+  bounded to 256 groups, and vacated dedicated loops are reserved and reused by
+  later callers.
 - First use of a loop waits synchronously for its pthread startup handshake. An
   evented caller occupies its source loop during this bounded `sched_yield`
   wait; subsequent use of the already-started loop does not wait.
@@ -1074,6 +1118,12 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   and is never registered as a fiber, even when the project default is evented.
   It therefore cannot migrate; child evented tasks use guarded runtime-owned
   stacks and can.
+- Event-runtime initialization and teardown are one-shot. There is no supported
+  repeated setup/teardown cycle inside a process and no per-group shutdown API.
+- After `fork` in a process that initialized Ada tasking, neither GNARL nor
+  GNATEVL may be used in the child. Only async-signal-safe work followed by
+  `exec` or `_exit` is supported; the lifecycle query reports `Fork_Child` for
+  diagnostics and scheduler lock entry aborts rather than deadlocking.
 - Cooperative scheduling means an evented task that never reaches a suspension
   point can monopolize the loop. `Gnatevl.Fairness.Yield_Budget` makes explicit
   time-budgeted checkpoints reusable but cannot force unmodified CPU loops to
