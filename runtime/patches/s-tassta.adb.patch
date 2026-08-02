@@ -1,0 +1,18 @@
+--- a/s-tassta.adb
++++ b/s-tassta.adb
+@@ -43,0 +44 @@
++with System.Gnatevl.Scheduler;
+@@ -1008,8 +1009,13 @@
+-      Task_Alternate_Stack :
+-        aliased SSE.Storage_Array (1 .. Alternate_Stack_Size);
++      Is_Evented : constant Boolean :=
++        System.Gnatevl.Scheduler.Current_Task /= System.Null_Address;
++
++      Task_Alternate_Stack : aliased SSE.Storage_Array
++        (1 .. (if Is_Evented then 0 else Alternate_Stack_Size));
+       --  The alternate signal stack for this task, if any
+ 
+-      Use_Alternate_Stack : constant Boolean := Alternate_Stack_Size /= 0;
++      Use_Alternate_Stack : constant Boolean :=
++        Alternate_Stack_Size /= 0 and then not Is_Evented;
+       --  Whether to use above alternate signal stack for stack overflows

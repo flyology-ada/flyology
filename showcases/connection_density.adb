@@ -16,7 +16,7 @@ procedure Connection_Density is
    package C renames Interfaces.C;
    use type C.long_long;
 
-   Worker_Stack_Size : constant := 32 * 1_024;
+   Worker_Stack_Size : constant := 16 * 1_024;
    One_Byte          : constant Stream_Element_Array := [1 => 42];
 
    function Current_RSS return C.long_long;

@@ -120,6 +120,11 @@ package body System.Gnatevl.Scheduler is
       Timer_Capacity    : Natural := 0;
       Member_Count      : Natural := 0;
       Reserved_For      : System.Address := System.Null_Address;
+      --  Signal stacks belong to OS threads, not fibers. Keeping one with
+      --  each permanent loop prevents Task_Wrapper from reserving and
+      --  installing 32 KiB inside every evented task stack.
+      Signal_Stack      : aliased SSE.Storage_Array
+        (1 .. OSI.Alternate_Stack_Size);
    end record;
 
    type Group_Array is array (Group_Index) of Loop_Group_Access;
@@ -297,9 +302,16 @@ package body System.Gnatevl.Scheduler is
 
    function Group_Thread (Argument : System.Address) return System.Address is
       Group : constant Loop_Group_Access := Address_To_Group (Argument);
+      Stack : aliased OSI.stack_t :=
+        (ss_sp    => Group.Signal_Stack'Address,
+         ss_size  => OSI.Alternate_Stack_Size,
+         ss_flags => 0);
+      Result : C.int;
    begin
       Thread_Group := Group;
-      Group.Scheduler_Context := Contexts.Capture;
+      Result := OSI.sigaltstack (Stack'Access, null);
+      Group.Scheduler_Context :=
+        (if Result = 0 then Contexts.Capture else null);
 
       Lock_Topology;
       Group.Started := Group.Scheduler_Context /= null;

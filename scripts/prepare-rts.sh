@@ -32,6 +32,9 @@ cp "$project_root"/runtime/platform/"$platform"/s-*.ad? "$generated_include/"
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$tasking_patch"
+git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
+  --directory="$generated_include" \
+  "$project_root/runtime/patches/s-tassta.adb.patch"
 
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
@@ -46,10 +49,11 @@ cd "$build_root/obj"
   "$generated_include/s-gnapol.adb" \
   "$generated_include/s-gnscpo.adb" \
   "$generated_include/s-gnasch.adb" \
-  "$generated_include/s-taprop.adb"
+  "$generated_include/s-taprop.adb" \
+  "$generated_include/s-tassta.adb"
 
 cp s-gnatev.ali s-gnacon.ali s-gnapol.ali s-gnscpo.ali s-gnasch.ali \
-  s-taprop.ali "$generated_lib/"
+  s-taprop.ali s-tassta.ali "$generated_lib/"
 ar -r "$generated_lib/libgnarl.a" \
   s-gnatev.o \
   s-gnacon.o \
@@ -57,6 +61,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-gnscpo.o \
   s-gnasch.o \
   s-taprop.o \
+  s-tassta.o \
   context_switch.o \
   platform.o
 ranlib "$generated_lib/libgnarl.a"

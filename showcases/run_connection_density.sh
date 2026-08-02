@@ -43,7 +43,7 @@ then
 fi
 
 printf '%s\n' \
-  "Both modes use real socket pairs and the same 32 KiB task stack." \
+  "Both modes use real socket pairs and the same 16 KiB task stack." \
   "The sample is taken after every task reaches its receive-call boundary." \
   "RSS includes the Ada task state common to both; compare OS threads and address space."
 

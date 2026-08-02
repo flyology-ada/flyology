@@ -143,6 +143,10 @@ lanes:
   execution group has a priority-aware ready queue, poller, and scheduler
   pthread; the default group uses the environment pthread.
 - `Native_Thread` tasks use the normal pthread-backed path.
+- Alternate signal stacks are owned by OS threads. Native tasks retain GNARL's
+  per-pthread stack, while each event-loop pthread installs one permanent stack
+  shared by its fibers. `Task_Wrapper` therefore does not reserve GNARL's 32 KiB
+  alternate-stack local inside every evented task stack.
 - Synchronization between the lanes still passes through GNARL. A native task
   wakes the event-loop scheduler through `EVFILT_USER` on macOS or `eventfd` on
   Linux.
@@ -487,6 +491,8 @@ Current smoke coverage includes:
 - read/write/create/truncate file-open combinations and same-descriptor reads;
 - repeated evented-child teardown under a native master, exercising deferred
   fiber destruction and ATCB-address reuse;
+- 16 KiB `Storage_Size` parity across evented and native tasks, including
+  task-aware socket suspension and resumption;
 - native TCP connect, accept, send, and receive behavior, including verification
   that accepted sockets suppress `SIGPIPE`.
 
@@ -535,7 +541,7 @@ The examples demonstrate:
 resource measurements from one mode cannot contaminate the other. Every
 connection owns a real socket endpoint and an Ada task that enters
 `Receive_Exactly`; an in-process peer endpoint releases every connection after
-the resource measurement. Both modes request the same 32 KiB task stack.
+the resource measurement. Both modes request the same 16 KiB task stack.
 
 The sampling barrier establishes that every worker has reached the boundary
 immediately before its `Receive_Exactly` call. It does not claim every worker
@@ -558,21 +564,23 @@ creating 10,000 pthreads, a full head-to-head can be requested explicitly:
 ```
 
 A representative run on the development Apple Silicon machine, after adding
-the ATCB and descriptor-wait indexes, produced:
+the ATCB and descriptor-wait indexes and moving alternate signal-stack storage
+from each fiber to its event-loop pthread, produced:
 
 | Mode | Connections | OS threads at sample | RSS increase | Virtual-memory increase | Setup | Release all |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Evented | 10,000 | 1 | 617 MiB | 1.11 GiB | 0.269 s | 0.065 s |
-| Native | 10,000 | 10,001 | 617 MiB | 1.31 GiB | 9.196 s | 0.148 s |
+| Evented | 10,000 | 1 | 461 MiB | 1.03 GiB | 0.232 s | 0.031 s |
+| Native | 10,000 | 10,001 | 617 MiB | 1.17 GiB | 7.736 s | 0.137 s |
 
 The central win today is kernel-concurrency density: the evented version avoids
 one pthread per connection and can reach connection counts at which creating an
-equal number of pthreads commonly exceeds host limits. In this run it also
-reserved less address space, set up 34 times faster, and drained readiness 2.3
-times faster. Resident memory was nearly equal because Ada task control state
-and explicitly equal stack budgets dominate both lanes. Native release latency
-can still win at other loads because pthreads run in parallel; the showcase
-reports the result rather than assuming either outcome.
+equal number of pthreads commonly exceeds host limits. In this run it also used
+about 156 MiB (25%) less incremental resident memory, reserved less address
+space, set up 33 times faster, and drained readiness 4.4 times faster. The RSS
+change comes from no longer touching pages for a dead 32 KiB alternate-stack
+local in every fiber; both lanes still request the same user stack size. Native
+release latency can still win at other loads because pthreads run in parallel;
+the showcase reports the result rather than assuming either outcome.
 
 The scaling changes identify the data structures responsible. Hashing ATCB
 addresses changed 10,000-task evented setup from roughly 0.76 seconds to 0.31
@@ -641,9 +649,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   descriptor close, bounded by its readiness quantum. Raw socket operations do
   not infer descriptor ownership; closing a raw descriptor concurrently with
   an indefinite wait remains outside that lower-level API's guarantees.
-- Fiber guard pages make stack overflow fail fast, but the evented stack does
-  not yet have an alternate signal stack that translates the fault into Ada
-  `Storage_Error`; overflow currently terminates the process.
+- Fiber guard pages make stack overflow fail fast. Each loop pthread has an
+  alternate signal stack on which GNARL can translate the guard fault into Ada
+  `Storage_Error`; this stack is thread state and is intentionally not stored
+  in an individual fiber's task wrapper.
 - `Task_Info` produces an obsolete-feature warning in current GNAT, but it
   provides the required per-task designation without a compiler fork.
 - The custom RTS patch is tied deliberately to the verified GNAT 16.1 sources.
