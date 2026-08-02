@@ -17,16 +17,62 @@ is
    No_Deadline : constant Duration := -1.0;
    type Deadline_Status is (No_Deadline_Set, Expired, Pending);
 
-   type Fiber_Phase is (Running, Ready, Waiting, Finished);
+   type Fiber_Phase is (Running, Ready, Waiting, Migrating, Finished);
    type Destruction_Plan is (Defer, Reap_Now);
 
    function Plan_Destroy (Phase : Fiber_Phase) return Destruction_Plan
    with Inline,
         Post =>
-          (if Phase = Running then
+          (if Phase in Running | Migrating then
               Plan_Destroy'Result = Defer
            else
               Plan_Destroy'Result = Reap_Now);
+
+   First_Shared_Group    : constant C.int := 0;
+   First_Dedicated_Group : constant C.int := 128;
+   Last_Group            : constant C.int := 255;
+
+   function Valid_Group (Group : C.int) return Boolean
+   with Inline,
+        Post =>
+          Valid_Group'Result =
+            (Group >= First_Shared_Group and then Group <= Last_Group);
+
+   function Shared_Group (Group : C.int) return Boolean
+   with Inline,
+        Post =>
+          Shared_Group'Result =
+            (Group >= First_Shared_Group
+             and then Group < First_Dedicated_Group);
+
+   function Dedicated_Group (Group : C.int) return Boolean
+   with Inline,
+        Post =>
+          Dedicated_Group'Result =
+            (Group >= First_Dedicated_Group and then Group <= Last_Group);
+
+   function Dedicated_Available
+     (Member_Count : Natural;
+      Reserved     : Boolean) return Boolean
+   with Inline,
+        Post =>
+          Dedicated_Available'Result =
+            (Member_Count = 0 and then not Reserved);
+
+   function Migration_Allowed
+     (Can_Migrate         : Boolean;
+      Target_Dedicated    : Boolean;
+      Target_Member_Count : Natural;
+      Reservation_Matches : Boolean) return Boolean
+   with Inline,
+        Post =>
+          Migration_Allowed'Result =
+            (Can_Migrate
+             and then
+               (not Target_Dedicated
+                or else
+                  (Target_Member_Count = 0
+                   and then Reservation_Matches)));
 
    function Should_Reap_After_Switch
      (Phase             : Fiber_Phase;

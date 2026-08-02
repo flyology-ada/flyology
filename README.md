@@ -49,6 +49,10 @@ task Parser with CPU => 1;
 task Writer with CPU => 2;
 ```
 
+Shared group identifiers are `0 .. 127`. Values `128 .. 255` are reserved for
+runtime-created dedicated groups, so applying `CPU => 128` or greater to an
+evented task fails activation with `Tasking_Error` rather than selecting a CPU.
+
 `Gnatevl.Execution_Groups` also provides an explicit safe-point migration API:
 
 ```ada
@@ -77,6 +81,10 @@ it gives that task an OS thread to itself, which is the safe live transition for
 temporarily blocking foreign work. A stock `Native_Thread` task remains fixed at
 creation: its continuation lives on a pthread-owned stack and cannot be
 teleported into a fiber without replacing GNARL task identity and lifecycle.
+
+The reservation is consumed when its task migrates out, immediately making the
+empty lane reusable. Call `Create_Dedicated` again before re-entering it; if no
+other task claimed the lane, the API normally returns the same group id.
 
 The same GNATEVL I/O call also works from either kind of task:
 
@@ -162,6 +170,8 @@ stateDiagram-v2
     Ready --> Running: scheduler dispatch
     Running --> Ready: explicit yield
     Running --> Waiting: rendezvous, timer, or I/O wait
+    Running --> Migrating: explicit cross-group safe point
+    Migrating --> Ready: target-loop handoff
     Waiting --> Ready: GNARL wake, deadline, or descriptor readiness
     Running --> Finished: task completion
     Finished --> [*]
@@ -175,8 +185,9 @@ foreign libraries, or needs independent CPU execution.
 `delay 0.0` is an explicit cooperative yield for an evented task. A permanently
 runnable yielding task does not starve descriptors: after at most 64 dispatches,
 the scheduler promotes expired timers and drains up to 64 immediately available
-poll events before returning to the ready queue. Both budgets are explicit
-policy, keeping I/O moving without allowing a hot descriptor set to monopolize
+poll events in one batched `kevent` call before returning to the ready queue.
+Both budgets are explicit policy, keeping I/O moving without allowing a hot
+descriptor set to monopolize
 the loop in the opposite direction.
 
 ## Task-aware I/O
@@ -302,9 +313,11 @@ sequence order, and the resulting relation is irreflexive, asymmetric, and
 transitive. The same unit proves scheduler deadline classification and safe
 calculation of the next poll timeout. It now also proves earliest-deadline
 selection, maintenance cadence, dispatch-counter safety, and the distinction
-between immediate and deferred fiber destruction. The intrusive linked-list
-updates and actual context handoff use these proved decisions but remain outside
-SPARK until pointer ownership is factored from scheduler locking.
+between immediate and deferred fiber destruction, including the in-flight
+`Migrating` phase. Shared/dedicated group classification, dedicated-lane
+availability, and migration admission are exact contracted functions used by
+the production scheduler. The intrusive linked-list updates, lock ownership,
+and actual context handoff use these proved decisions but remain outside SPARK.
 
 Run the proof through the Alire-provided GNATprove toolchain:
 
@@ -312,7 +325,7 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
-The current run discharges 63 flow, functional-contract, termination, and
+The current run discharges 73 flow, functional-contract, termination, and
 run-time-safety checks across four production policy units, with zero unproved
 checks. Good next proof candidates are intrusive ready-list insertion/removal
 invariants, whole-list minimum-deadline selection, and descriptor wake matching.
@@ -434,12 +447,15 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   cooperative, while separate groups can execute in parallel.
 - On macOS, a group identifies a stable loop pthread but is not a hard physical
   core binding; Darwin exposes affinity hints rather than strict core pinning.
-- Shared and dedicated loops are created lazily and their pthreads remain alive
-  for the process lifetime. Vacated dedicated loops are reserved and reused by
-  later callers.
-- Scheduler metadata currently uses one short-held global lock across groups;
-  queues, timers, pollers, and task execution are per-group, but very high
-  cross-group wake or migration rates may contend on this lock.
+- Shared and dedicated loops are created lazily; each group's pthread and
+  `kqueue` remain alive for the process lifetime. The table is bounded to 256
+  groups, and vacated dedicated loops are reserved and reused by later callers.
+- Ready queues, fiber membership, timer scans, descriptor delivery, and dispatch
+  use independent per-group locks and per-group fiber lists. A short-held
+  registry lock remains only for task lookup, group allocation, and ownership
+  handoff during cross-group wake, destruction, priority changes, or migration.
+- Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
+  dedicated range and cannot be selected statically with the `CPU` aspect.
 - The environment task uses its pthread-owned initial stack and therefore
   cannot migrate; child evented tasks use guarded runtime-owned stacks and can.
 - Cooperative scheduling means an evented task that never reaches a suspension

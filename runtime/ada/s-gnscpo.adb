@@ -2,7 +2,34 @@ package body System.Gnatevl.Scheduling_Policy
   with SPARK_Mode
 is
    function Plan_Destroy (Phase : Fiber_Phase) return Destruction_Plan is
-     (if Phase = Running then Defer else Reap_Now);
+     (if Phase in Running | Migrating then Defer else Reap_Now);
+
+   function Valid_Group (Group : C.int) return Boolean is
+     (Group >= First_Shared_Group and then Group <= Last_Group);
+
+   function Shared_Group (Group : C.int) return Boolean is
+     (Group >= First_Shared_Group and then Group < First_Dedicated_Group);
+
+   function Dedicated_Group (Group : C.int) return Boolean is
+     (Group >= First_Dedicated_Group and then Group <= Last_Group);
+
+   function Dedicated_Available
+     (Member_Count : Natural;
+      Reserved     : Boolean) return Boolean
+   is
+     (Member_Count = 0 and then not Reserved);
+
+   function Migration_Allowed
+     (Can_Migrate         : Boolean;
+      Target_Dedicated    : Boolean;
+      Target_Member_Count : Natural;
+      Reservation_Matches : Boolean) return Boolean
+   is
+     (Can_Migrate
+      and then
+        (not Target_Dedicated
+         or else
+           (Target_Member_Count = 0 and then Reservation_Matches)));
 
    function Should_Reap_After_Switch
      (Phase             : Fiber_Phase;

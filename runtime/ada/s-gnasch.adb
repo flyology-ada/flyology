@@ -29,12 +29,12 @@ package body System.Gnatevl.Scheduler is
    Poll_Event_Budget    : constant := 64;
    No_Deadline          : constant Duration := Scheduling.No_Deadline;
 
-   Default_Group_Id    : constant C.int := 0;
-   Dedicated_First_Id  : constant C.int := 128;
-   Maximum_Group_Id    : constant C.int := 255;
+   Default_Group_Id    : constant C.int := Scheduling.First_Shared_Group;
+   Dedicated_First_Id  : constant C.int := Scheduling.First_Dedicated_Group;
+   Maximum_Group_Id    : constant C.int := Scheduling.Last_Group;
    subtype Group_Index is Natural range 0 .. Natural (Maximum_Group_Id);
 
-   type Fiber_State is (Running, Ready, Waiting, Finished);
+   type Fiber_State is (Running, Ready, Waiting, Migrating, Finished);
 
    function Phase_Of
      (State : Fiber_State) return Scheduling.Fiber_Phase
@@ -43,6 +43,7 @@ package body System.Gnatevl.Scheduler is
          when Running  => Scheduling.Running,
          when Ready    => Scheduling.Ready,
          when Waiting  => Scheduling.Waiting,
+         when Migrating => Scheduling.Migrating,
          when Finished => Scheduling.Finished);
 
    type Fiber;
@@ -63,17 +64,20 @@ package body System.Gnatevl.Scheduler is
       IO_Descriptor : C.int := -1;
       IO_Interest : Pollers.Interest := Pollers.Readable;
       Destroy_Requested : Boolean := False;
+      Reaping     : Boolean := False;
       Can_Migrate : Boolean := True;
       Group      : Loop_Group_Access;
       Migration_Target : Loop_Group_Access;
       Reserved_Group : Loop_Group_Access;
       Next_Ready : Fiber_Access;
-      Next_All   : Fiber_Access;
+      Next_Group : Fiber_Access;
+      Next_Global : Fiber_Access;
    end record;
 
    type Loop_Group is limited record
       Id          : C.int := -1;
       Dedicated   : Boolean := False;
+      Lock        : aliased OSI.pthread_mutex_t;
       Started     : Boolean := False;
       Start_Failed : Boolean := False;
       Event_Thread : aliased OSI.pthread_t;
@@ -82,6 +86,7 @@ package body System.Gnatevl.Scheduler is
       Current_Fiber     : Fiber_Access;
       Ready_Head        : Fiber_Access;
       Next_Sequence     : C.unsigned_long := 0;
+      Fibers            : Fiber_Access;
       Member_Count      : Natural := 0;
       Reserved_For      : System.Address := System.Null_Address;
    end record;
@@ -101,7 +106,12 @@ package body System.Gnatevl.Scheduler is
    procedure Free_Group is new Ada.Unchecked_Deallocation
      (Loop_Group, Loop_Group_Access);
 
-   Scheduler_Lock : aliased OSI.pthread_mutex_t;
+   --  Registry_Lock protects Groups, All_Fibers, group membership counts and
+   --  reservations, and each Fiber.Group ownership pointer. A group lock
+   --  protects that group's fiber list, ready queue, timers, I/O state, and
+   --  current fiber. Code needing both always takes registry then group; the
+   --  migration handoff releases its source before taking its target.
+   Registry_Lock  : aliased OSI.pthread_mutex_t;
    Initialized    : Boolean := False;
    Groups         : Group_Array := (others => null);
    All_Fibers     : Fiber_Access;
@@ -126,8 +136,12 @@ package body System.Gnatevl.Scheduler is
    pragma Convention (C, Fiber_Main);
    pragma No_Return (Fiber_Main);
 
-   procedure Lock;
-   procedure Unlock;
+   procedure Lock_Registry;
+   procedure Unlock_Registry;
+   procedure Lock_Group (Group : not null Loop_Group_Access);
+   procedure Unlock_Group (Group : not null Loop_Group_Access);
+   procedure Fatal;
+   pragma No_Return (Fatal);
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
    function Find (T : System.Address) return Fiber_Access;
@@ -137,7 +151,10 @@ package body System.Gnatevl.Scheduler is
    procedure Remove_From_Ready
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
-   procedure Reap (Item : not null Fiber_Access);
+   procedure Reap_Locked (Item : not null Fiber_Access);
+   procedure Reap_From_Scheduler
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access);
    procedure Transfer
      (Item   : not null Fiber_Access;
       Source : not null Loop_Group_Access);
@@ -150,39 +167,65 @@ package body System.Gnatevl.Scheduler is
       Event : Pollers.Poll_Event);
    procedure Poll_Ready_Events (Group : not null Loop_Group_Access);
 
-   procedure Lock is
-      Result : constant C.int :=
-        OSI.pthread_mutex_lock (Scheduler_Lock'Access);
-   begin
-      if Result /= 0 then
-         raise Program_Error with "GNATEVL scheduler lock failed";
-      end if;
-   end Lock;
+   procedure C_Abort;
+   pragma Import (C, C_Abort, "abort");
+   pragma No_Return (C_Abort);
 
-   procedure Unlock is
+   procedure Fatal is
+   begin
+      C_Abort;
+   end Fatal;
+
+   procedure Lock_Registry is
       Result : constant C.int :=
-        OSI.pthread_mutex_unlock (Scheduler_Lock'Access);
+        OSI.pthread_mutex_lock (Registry_Lock'Access);
    begin
       if Result /= 0 then
-         raise Program_Error with "GNATEVL scheduler unlock failed";
+         Fatal;
       end if;
-   end Unlock;
+   end Lock_Registry;
+
+   procedure Unlock_Registry is
+      Result : constant C.int :=
+        OSI.pthread_mutex_unlock (Registry_Lock'Access);
+   begin
+      if Result /= 0 then
+         Fatal;
+      end if;
+   end Unlock_Registry;
+
+   procedure Lock_Group (Group : not null Loop_Group_Access) is
+      Result : constant C.int := OSI.pthread_mutex_lock (Group.Lock'Access);
+   begin
+      if Result /= 0 then
+         Fatal;
+      end if;
+   end Lock_Group;
+
+   procedure Unlock_Group (Group : not null Loop_Group_Access) is
+      Result : constant C.int := OSI.pthread_mutex_unlock (Group.Lock'Access);
+   begin
+      if Result /= 0 then
+         Fatal;
+      end if;
+   end Unlock_Group;
 
    function Group_Thread (Argument : System.Address) return System.Address is
       Group : constant Loop_Group_Access := Address_To_Group (Argument);
    begin
       Thread_Group := Group;
-      Group.Event_Thread := OSI.pthread_self;
       Group.Scheduler_Context := Contexts.Capture;
 
-      Lock;
+      Lock_Registry;
       Group.Started := Group.Scheduler_Context /= null;
       Group.Start_Failed := not Group.Started;
       if Group.Start_Failed then
-         Unlock;
+         Unlock_Registry;
          return System.Null_Address;
       end if;
 
+      Unlock_Registry;
+      Lock_Group (Group);
       Scheduler_Main (Argument);
    end Group_Thread;
 
@@ -194,28 +237,33 @@ package body System.Gnatevl.Scheduler is
       Ready  : Boolean;
       Failed : Boolean;
    begin
-      if not Initialized
-        or else Id < Default_Group_Id
-        or else Id > Maximum_Group_Id
-      then
+      if not Initialized or else not Scheduling.Valid_Group (Id) then
          return null;
       end if;
 
-      Lock;
+      Lock_Registry;
       Group := Groups (Group_Index (Id));
       if Group /= null then
-         if Group.Dedicated /= Dedicated and then Id >= Dedicated_First_Id then
-            Unlock;
+         if Group.Dedicated /= Dedicated
+           and then Scheduling.Dedicated_Group (Id)
+         then
+            Unlock_Registry;
             return null;
          end if;
-         Unlock;
+         Unlock_Registry;
       else
          Group := new Loop_Group;
          Group.Id := Id;
          Group.Dedicated := Dedicated;
+         Result := OSI.pthread_mutex_init (Group.Lock'Access, null);
+         if Result /= 0 then
+            Free_Group (Group);
+            Unlock_Registry;
+            return null;
+         end if;
          if not Pollers.Initialize (Group.Scheduler_Poller) then
             Free_Group (Group);
-            Unlock;
+            Unlock_Registry;
             return null;
          end if;
 
@@ -226,21 +274,24 @@ package body System.Gnatevl.Scheduler is
               null,
               Group_Thread'Access,
               Group_To_Address (Group));
+         --  pthread_create is the sole writer of Event_Thread. The new thread
+         --  cannot publish Started until it acquires Registry_Lock, which is
+         --  still held here, so readers cannot observe an uninitialized id.
          if Result /= 0 then
             Groups (Group_Index (Id)) := null;
             Pollers.Finalize (Group.Scheduler_Poller);
             Free_Group (Group);
-            Unlock;
+            Unlock_Registry;
             return null;
          end if;
-         Unlock;
+         Unlock_Registry;
       end if;
 
       loop
-         Lock;
+         Lock_Registry;
          Ready := Group.Started;
          Failed := Group.Start_Failed;
-         Unlock;
+         Unlock_Registry;
          exit when Ready or else Failed;
          Result := Sched_Yield;
          if Result /= 0 then
@@ -255,7 +306,7 @@ package body System.Gnatevl.Scheduler is
       Item : Fiber_Access := All_Fibers;
    begin
       while Item /= null and then Item.T /= T loop
-         Item := Item.Next_All;
+         Item := Item.Next_Global;
       end loop;
       return Item;
    end Find;
@@ -311,31 +362,46 @@ package body System.Gnatevl.Scheduler is
       end loop;
    end Remove_From_Ready;
 
-   procedure Reap (Item : not null Fiber_Access) is
-      Position : Fiber_Access := All_Fibers;
-      Previous : Fiber_Access;
-      Victim   : Fiber_Access := Item;
-      Group    : constant Loop_Group_Access := Item.Group;
+   procedure Reap_Locked (Item : not null Fiber_Access) is
+      Position_Global : Fiber_Access := All_Fibers;
+      Previous_Global : Fiber_Access;
+      Position_Group  : Fiber_Access;
+      Previous_Group  : Fiber_Access;
+      Victim           : Fiber_Access := Item;
+      Group            : constant Loop_Group_Access := Item.Group;
    begin
       if Scheduling.Plan_Destroy (Phase_Of (Item.State)) = Scheduling.Defer
       then
-         raise Program_Error with "attempt to reap a running GNATEVL task";
+         Fatal;
       end if;
 
       if Item.State = Ready then
          Remove_From_Ready (Group, Item);
       end if;
 
-      while Position /= null and then Position /= Item loop
-         Previous := Position;
-         Position := Position.Next_All;
+      while Position_Global /= null and then Position_Global /= Item loop
+         Previous_Global := Position_Global;
+         Position_Global := Position_Global.Next_Global;
       end loop;
-      if Position = null then
-         raise Program_Error with "GNATEVL task missing from scheduler";
-      elsif Previous = null then
-         All_Fibers := Item.Next_All;
+      if Position_Global = null then
+         Fatal;
+      elsif Previous_Global = null then
+         All_Fibers := Item.Next_Global;
       else
-         Previous.Next_All := Item.Next_All;
+         Previous_Global.Next_Global := Item.Next_Global;
+      end if;
+
+      Position_Group := Group.Fibers;
+      while Position_Group /= null and then Position_Group /= Item loop
+         Previous_Group := Position_Group;
+         Position_Group := Position_Group.Next_Group;
+      end loop;
+      if Position_Group = null then
+         Fatal;
+      elsif Previous_Group = null then
+         Group.Fibers := Item.Next_Group;
+      else
+         Previous_Group.Next_Group := Item.Next_Group;
       end if;
 
       if Group.Current_Fiber = Item then
@@ -348,18 +414,55 @@ package body System.Gnatevl.Scheduler is
       end if;
       Contexts.Destroy (Item.Context);
       Free_Fiber (Victim);
-   end Reap;
+   exception
+      when others =>
+         Fatal;
+   end Reap_Locked;
+
+   procedure Reap_From_Scheduler
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access)
+   is
+   begin
+      Item.Reaping := True;
+      Unlock_Group (Group);
+      Lock_Registry;
+      Lock_Group (Group);
+      Reap_Locked (Item);
+      Unlock_Registry;
+   end Reap_From_Scheduler;
 
    procedure Transfer
      (Item   : not null Fiber_Access;
       Source : not null Loop_Group_Access)
    is
       Target : constant Loop_Group_Access := Item.Migration_Target;
+      Position : Fiber_Access := Source.Fibers;
+      Previous : Fiber_Access;
+      Wake_Target : Boolean := True;
    begin
       if Target = null or else Item.Group /= Source then
-         raise Program_Error with "GNATEVL migration invariant failed";
+         Fatal;
       end if;
 
+      Item.State := Migrating;
+      while Position /= null and then Position /= Item loop
+         Previous := Position;
+         Position := Position.Next_Group;
+      end loop;
+      if Position = null then
+         Fatal;
+      elsif Previous = null then
+         Source.Fibers := Item.Next_Group;
+      else
+         Previous.Next_Group := Item.Next_Group;
+      end if;
+      Item.Next_Group := null;
+      Source.Current_Fiber := null;
+      Unlock_Group (Source);
+
+      Lock_Registry;
+      Lock_Group (Target);
       Source.Member_Count := Source.Member_Count - 1;
       if Source.Dedicated then
          Source.Reserved_For := System.Null_Address;
@@ -368,12 +471,25 @@ package body System.Gnatevl.Scheduler is
       Target.Member_Count := Target.Member_Count + 1;
       Item.Group := Target;
       Item.Migration_Target := null;
-      Enqueue (Target, Item);
-      Source.Current_Fiber := null;
-
-      if not Pollers.Wake (Target.Scheduler_Poller) then
-         raise Program_Error with "GNATEVL migration wake failed";
+      Item.Next_Group := Target.Fibers;
+      Target.Fibers := Item;
+      if Item.Destroy_Requested then
+         Item.State := Finished;
+         Reap_Locked (Item);
+         Wake_Target := False;
+      else
+         Enqueue (Target, Item);
       end if;
+      Unlock_Group (Target);
+      Unlock_Registry;
+
+      if Wake_Target and then not Pollers.Wake (Target.Scheduler_Poller) then
+         Fatal;
+      end if;
+      Lock_Group (Source);
+   exception
+      when others =>
+         Fatal;
    end Transfer;
 
    function Clock return Duration is
@@ -384,7 +500,7 @@ package body System.Gnatevl.Scheduler is
         OSI.clock_gettime
           (OSI.clockid_t (OSC.CLOCK_RT_Ada), Now'Access);
       if Result /= 0 then
-         raise Program_Error with "GNATEVL monotonic clock failed";
+         Fatal;
       end if;
       return System.C_Time.To_Duration (Now);
    end Clock;
@@ -394,10 +510,10 @@ package body System.Gnatevl.Scheduler is
    is
       Now     : constant Duration := Clock;
       Nearest : Duration := No_Deadline;
-      Item    : Fiber_Access := All_Fibers;
+      Item    : Fiber_Access := Group.Fibers;
    begin
       while Item /= null loop
-         if Item.Group = Group and then Item.State = Waiting then
+         if Item.State = Waiting then
             case Scheduling.Classify_Deadline (Item.Deadline, Now) is
                when Scheduling.No_Deadline_Set =>
                   null;
@@ -411,7 +527,7 @@ package body System.Gnatevl.Scheduler is
                     Scheduling.Earlier_Deadline (Nearest, Item.Deadline);
             end case;
          end if;
-         Item := Item.Next_All;
+         Item := Item.Next_Group;
       end loop;
 
       return Scheduling.Time_Until (Nearest, Now);
@@ -426,13 +542,18 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Result := OSI.pthread_mutex_init (Scheduler_Lock'Access, null);
+      Result := OSI.pthread_mutex_init (Registry_Lock'Access, null);
       if Result /= 0 then
          return -1;
       end if;
 
       Default_Group := new Loop_Group;
       Default_Group.Id := Default_Group_Id;
+      Result := OSI.pthread_mutex_init (Default_Group.Lock'Access, null);
+      if Result /= 0 then
+         Free_Group (Default_Group);
+         return -1;
+      end if;
       if not Pollers.Initialize (Default_Group.Scheduler_Poller) then
          Free_Group (Default_Group);
          return -1;
@@ -458,7 +579,10 @@ package body System.Gnatevl.Scheduler is
 
       Environment_Fiber.T := Environment;
       Environment_Fiber.State := Running;
+      Environment_Fiber.Next_Group := null;
+      Environment_Fiber.Next_Global := null;
       All_Fibers := Environment_Fiber;
+      Default_Group.Fibers := Environment_Fiber;
       Default_Group.Current_Fiber := Environment_Fiber;
       Default_Group.Member_Count := 1;
       Default_Group.Event_Thread := OSI.pthread_self;
@@ -485,7 +609,7 @@ package body System.Gnatevl.Scheduler is
         or else T = System.Null_Address
         or else Stack_Size = 0
         or else Wrapper = System.Null_Address
-        or else Group_Id >= Dedicated_First_Id
+        or else not Scheduling.Shared_Group (Group_Id)
       then
          return -1;
       end if;
@@ -511,20 +635,24 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Lock;
+      Lock_Registry;
       if Find (T) /= null then
-         Unlock;
+         Unlock_Registry;
          Contexts.Destroy (Item.Context);
          Free_Fiber (Item);
          return -1;
       end if;
-      Item.Next_All := All_Fibers;
+      Lock_Group (Target);
+      Item.Next_Global := All_Fibers;
       All_Fibers := Item;
+      Item.Next_Group := Target.Fibers;
+      Target.Fibers := Item;
       Target.Member_Count := Target.Member_Count + 1;
       Enqueue (Target, Item);
-      Unlock;
+      Unlock_Group (Target);
+      Unlock_Registry;
       if not Pollers.Wake (Target.Scheduler_Poller) then
-         raise Program_Error with "GNATEVL create wake failed";
+         Fatal;
       end if;
       return 0;
    end Create;
@@ -535,9 +663,9 @@ package body System.Gnatevl.Scheduler is
       if not Initialized or else T = System.Null_Address then
          return 0;
       end if;
-      Lock;
+      Lock_Registry;
       Result := (if Find (T) = null then 0 else 1);
-      Unlock;
+      Unlock_Registry;
       return Result;
    end Is_Event_Task;
 
@@ -557,11 +685,11 @@ package body System.Gnatevl.Scheduler is
       Item   : Fiber_Access;
       Result : OSI.Thread_Id;
    begin
-      Lock;
+      Lock_Registry;
       Item := Find (T);
       Result :=
         (if Item = null then OSI.pthread_self else Item.Group.Event_Thread);
-      Unlock;
+      Unlock_Registry;
       return Result;
    end Task_Thread;
 
@@ -569,7 +697,7 @@ package body System.Gnatevl.Scheduler is
      (if Current_Task = System.Null_Address then -1 else Thread_Group.Id);
 
    function Create_Dedicated_Group return C.int is
-      Id      : C.int := Dedicated_First_Id;
+      Id      : C.int;
       Group   : Loop_Group_Access;
       Item    : Fiber_Access;
       Current : constant System.Address := Current_Task;
@@ -578,70 +706,63 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Lock;
-      Item := Find (Current);
-      if Item = null or else not Item.Can_Migrate
-        or else Item.Reserved_Group /= null
-      then
-         Unlock;
-         return -1;
-      end if;
+      for Attempt in 1 .. Natural (Maximum_Group_Id - Dedicated_First_Id + 1)
+      loop
+         Lock_Registry;
+         Item := Find (Current);
+         if Item = null or else not Item.Can_Migrate
+           or else Item.Reserved_Group /= null
+         then
+            Unlock_Registry;
+            return -1;
+         end if;
 
-      while Id <= Maximum_Group_Id loop
-         Group := Groups (Group_Index (Id));
-         exit when Group = null
-           or else
-             (Group.Dedicated
-              and then Group.Member_Count = 0
-              and then Group.Reserved_For = System.Null_Address);
-         Id := Id + 1;
+         Id := Dedicated_First_Id;
+         Group := null;
+         while Id <= Maximum_Group_Id loop
+            Group := Groups (Group_Index (Id));
+            exit when Group = null
+              or else
+                (Group.Dedicated
+                 and then
+                   Scheduling.Dedicated_Available
+                     (Group.Member_Count,
+                      Group.Reserved_For /= System.Null_Address));
+            Id := Id + 1;
+         end loop;
+         if Id > Maximum_Group_Id then
+            Unlock_Registry;
+            return -1;
+         elsif Group /= null then
+            Group.Reserved_For := Current;
+            Item.Reserved_Group := Group;
+            Unlock_Registry;
+            return Id;
+         end if;
+         Unlock_Registry;
+
+         Group := Ensure_Group (Id, Dedicated => True);
+         if Group = null then
+            return -1;
+         end if;
+         --  Another caller can reserve the newly created group before this
+         --  task reacquires the registry. The bounded outer loop simply
+         --  searches again instead of recursively consuming the Ada stack.
       end loop;
-      if Id <= Maximum_Group_Id and then Group /= null then
-         Group.Reserved_For := Current;
-         Item.Reserved_Group := Group;
-         Unlock;
-         return Id;
-      end if;
-      Unlock;
-      if Id > Maximum_Group_Id then
-         return -1;
-      end if;
-
-      Group := Ensure_Group (Id, Dedicated => True);
-      if Group = null then
-         return -1;
-      end if;
-
-      Lock;
-      Item := Find (Current);
-      if Item = null
-        or else Item.Reserved_Group /= null
-        or else Group.Member_Count /= 0
-        or else Group.Reserved_For /= System.Null_Address
-      then
-         Unlock;
-         return Create_Dedicated_Group;
-      end if;
-      Group.Reserved_For := Current;
-      Item.Reserved_Group := Group;
-      Unlock;
-      return Id;
+      return -1;
    end Create_Dedicated_Group;
 
    function Is_Dedicated_Group (Group : C.int) return C.int is
       Item   : Loop_Group_Access;
       Result : C.int;
    begin
-      if not Initialized
-        or else Group < Default_Group_Id
-        or else Group > Maximum_Group_Id
-      then
+      if not Initialized or else not Scheduling.Valid_Group (Group) then
          return 0;
       end if;
-      Lock;
+      Lock_Registry;
       Item := Groups (Group_Index (Group));
       Result := (if Item /= null and then Item.Dedicated then 1 else 0);
-      Unlock;
+      Unlock_Registry;
       return Result;
    end Is_Dedicated_Group;
 
@@ -651,8 +772,7 @@ package body System.Gnatevl.Scheduler is
       Target : Loop_Group_Access;
    begin
       if Current_Task = System.Null_Address
-        or else Group < Default_Group_Id
-        or else Group > Maximum_Group_Id
+        or else not Scheduling.Valid_Group (Group)
       then
          return -1;
       end if;
@@ -662,34 +782,39 @@ package body System.Gnatevl.Scheduler is
          return 0;
       end if;
 
-      if Group < Dedicated_First_Id then
+      if Scheduling.Shared_Group (Group) then
          Target := Ensure_Group (Group, Dedicated => False);
       else
-         Lock;
+         Lock_Registry;
          Target := Groups (Group_Index (Group));
-         Unlock;
+         Unlock_Registry;
       end if;
       if Target = null then
          return -1;
       end if;
 
-      Lock;
+      Lock_Registry;
+      Lock_Group (Source);
       Item := Source.Current_Fiber;
       if Item = null
-        or else not Item.Can_Migrate
         or else Item.Group /= Source
         or else
-          (Target.Dedicated
-           and then
-             (Target.Member_Count /= 0
-              or else Target.Reserved_For /= Item.T
-              or else Item.Reserved_Group /= Target))
+          not Scheduling.Migration_Allowed
+            (Can_Migrate         => Item.Can_Migrate,
+             Target_Dedicated    => Target.Dedicated,
+             Target_Member_Count => Target.Member_Count,
+             Reservation_Matches =>
+               Target.Reserved_For = Item.T
+               and then Item.Reserved_Group = Target)
       then
-         Unlock;
+         Unlock_Group (Source);
+         Unlock_Registry;
          return -1;
       end if;
 
       Item.Migration_Target := Target;
+      Item.State := Migrating;
+      Unlock_Registry;
       Contexts.Switch (Item.Context, Source.Scheduler_Context);
       return 0;
    end Migrate;
@@ -726,9 +851,9 @@ package body System.Gnatevl.Scheduler is
            + Duration (Remainder) / 1_000_000_000;
       end if;
 
-      Lock;
+      Lock_Group (Group);
       if not Pollers.Watch (Group.Scheduler_Poller, Descriptor, Condition) then
-         Unlock;
+         Unlock_Group (Group);
          return -1;
       end if;
 
@@ -750,12 +875,13 @@ package body System.Gnatevl.Scheduler is
    is
       Item : Fiber_Access;
    begin
-      Lock;
+      Lock_Registry;
       Item := Find (T);
       if Item = null then
-         Unlock;
+         Unlock_Registry;
          return -1;
       end if;
+      Lock_Group (Item.Group);
 
       if Item.State = Ready then
          Remove_From_Ready (Item.Group, Item);
@@ -764,7 +890,8 @@ package body System.Gnatevl.Scheduler is
       else
          Item.Priority := Priority;
       end if;
-      Unlock;
+      Unlock_Group (Item.Group);
+      Unlock_Registry;
       return 0;
    end Set_Priority;
 
@@ -776,7 +903,7 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Lock;
+      Lock_Group (Group);
       Item := Group.Current_Fiber;
       Enqueue (Group, Item);
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
@@ -796,7 +923,7 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Lock;
+      Lock_Group (Group);
       Item := Group.Current_Fiber;
       Item.Deadline := Deadline;
       Item.Timed_Out := False;
@@ -805,7 +932,9 @@ package body System.Gnatevl.Scheduler is
       if Task_Lock /= System.Null_Address then
          Result := Mutex_Unlock (Task_Lock);
          if Result /= 0 then
-            raise Program_Error with "GNATEVL task unlock failed";
+            Item.State := Running;
+            Unlock_Group (Group);
+            return -1;
          end if;
       end if;
 
@@ -814,7 +943,7 @@ package body System.Gnatevl.Scheduler is
       if Task_Lock /= System.Null_Address then
          Result := Mutex_Lock (Task_Lock);
          if Result /= 0 then
-            raise Program_Error with "GNATEVL task relock failed";
+            Fatal;
          end if;
       end if;
       if Timed_Out /= null then
@@ -828,14 +957,15 @@ package body System.Gnatevl.Scheduler is
       Group      : Loop_Group_Access;
       Made_Ready : Boolean := False;
    begin
-      Lock;
+      Lock_Registry;
       Item := Find (T);
       if Item = null then
-         Unlock;
+         Unlock_Registry;
          return -1;
       end if;
 
       Group := Item.Group;
+      Lock_Group (Group);
       if Item.State = Waiting then
          Item.Deadline := No_Deadline;
          Item.Timed_Out := False;
@@ -844,10 +974,11 @@ package body System.Gnatevl.Scheduler is
          Enqueue (Group, Item);
          Made_Ready := True;
       end if;
-      Unlock;
+      Unlock_Group (Group);
+      Unlock_Registry;
 
       if Made_Ready and then not Pollers.Wake (Group.Scheduler_Poller) then
-         raise Program_Error with "GNATEVL task wake failed";
+         Fatal;
       end if;
       return 0;
    end Wake;
@@ -859,11 +990,18 @@ package body System.Gnatevl.Scheduler is
          return -1;
       end if;
 
-      Lock;
+      Lock_Registry;
       Item := Find (T);
       if Item = null then
-         Unlock;
+         Unlock_Registry;
          return -1;
+      end if;
+      Lock_Group (Item.Group);
+
+      if Item.Reaping then
+         Unlock_Group (Item.Group);
+         Unlock_Registry;
+         return 0;
       end if;
 
       Item.T := System.Null_Address;
@@ -871,11 +1009,17 @@ package body System.Gnatevl.Scheduler is
 
       case Scheduling.Plan_Destroy (Phase_Of (Item.State)) is
          when Scheduling.Defer =>
-            Unlock;
+            Unlock_Group (Item.Group);
+            Unlock_Registry;
             return 0;
          when Scheduling.Reap_Now =>
-            Reap (Item);
-            Unlock;
+            declare
+               Group : constant Loop_Group_Access := Item.Group;
+            begin
+               Reap_Locked (Item);
+               Unlock_Group (Group);
+            end;
+            Unlock_Registry;
             return 0;
       end case;
    end Destroy;
@@ -890,19 +1034,19 @@ package body System.Gnatevl.Scheduler is
    begin
       To_Wrapper (Item.Wrapper).all (Item.T);
 
-      Lock;
       Group := Item.Group;
+      Lock_Group (Group);
       Item.State := Finished;
       Item.Deadline := No_Deadline;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
-      raise Program_Error;
+      Fatal;
    end Fiber_Main;
 
    procedure Handle_Poll_Event
      (Group : not null Loop_Group_Access;
       Event : Pollers.Poll_Event)
    is
-      Item    : Fiber_Access := All_Fibers;
+      Item    : Fiber_Access := Group.Fibers;
       Matches : Boolean;
    begin
       if Event.Kind not in Pollers.Readable_Event | Pollers.Writable_Event then
@@ -911,8 +1055,7 @@ package body System.Gnatevl.Scheduler is
 
       while Item /= null loop
          Matches :=
-           Item.Group = Group
-           and then Item.State = Waiting
+           Item.State = Waiting
            and then Item.IO_Wait
            and then Item.IO_Descriptor = Event.Descriptor
            and then
@@ -928,23 +1071,24 @@ package body System.Gnatevl.Scheduler is
             Item.IO_Descriptor := -1;
             Enqueue (Group, Item);
          end if;
-         Item := Item.Next_All;
+         Item := Item.Next_Group;
       end loop;
    end Handle_Poll_Event;
 
    procedure Poll_Ready_Events (Group : not null Loop_Group_Access) is
       Waited : Boolean;
-      Event  : Pollers.Poll_Event;
+      Events : Pollers.Poll_Event_Array (1 .. Poll_Event_Budget);
+      Count  : Natural;
    begin
-      for Count in 1 .. Poll_Event_Budget loop
-         Unlock;
-         Waited := Pollers.Wait (Group.Scheduler_Poller, 0.0, Event);
-         Lock;
-         if not Waited then
-            raise Program_Error with "GNATEVL readiness poll failed";
-         end if;
-         exit when Event.Kind = Pollers.Timeout_Event;
-         Handle_Poll_Event (Group, Event);
+      Unlock_Group (Group);
+      Waited := Pollers.Wait_Batch
+        (Group.Scheduler_Poller, 0.0, Events, Count);
+      Lock_Group (Group);
+      if not Waited then
+         Fatal;
+      end if;
+      for Index in 1 .. Count loop
+         Handle_Poll_Event (Group, Events (Index));
       end loop;
    end Poll_Ready_Events;
 
@@ -954,7 +1098,8 @@ package body System.Gnatevl.Scheduler is
       Timeout : Duration;
       Next    : Fiber_Access;
       Waited  : Boolean;
-      Event   : Pollers.Poll_Event;
+      Events  : Pollers.Poll_Event_Array (1 .. Poll_Event_Budget);
+      Count   : Natural;
    begin
       loop
          Timeout := No_Deadline;
@@ -975,13 +1120,12 @@ package body System.Gnatevl.Scheduler is
             Next.State := Running;
             Group.Current_Fiber := Next;
             if Dispatches_Until_Timer_Check = 0 then
-               raise Program_Error with
-                 "GNATEVL scheduler maintenance counter invariant failed";
+               Fatal;
             end if;
             Dispatches_Until_Timer_Check :=
               Scheduling.After_Dispatch
                 (Positive (Dispatches_Until_Timer_Check));
-            Unlock;
+            Unlock_Group (Group);
             Contexts.Switch (Group.Scheduler_Context, Next.Context);
 
             if Next.Migration_Target /= null then
@@ -989,17 +1133,20 @@ package body System.Gnatevl.Scheduler is
             elsif Scheduling.Should_Reap_After_Switch
               (Phase_Of (Next.State), Next.Destroy_Requested)
             then
-               Reap (Next);
+               Reap_From_Scheduler (Group, Next);
             end if;
          else
             Group.Current_Fiber := null;
-            Unlock;
-            Waited := Pollers.Wait (Group.Scheduler_Poller, Timeout, Event);
-            Lock;
+            Unlock_Group (Group);
+            Waited := Pollers.Wait_Batch
+              (Group.Scheduler_Poller, Timeout, Events, Count);
+            Lock_Group (Group);
             if not Waited then
-               raise Program_Error with "GNATEVL readiness wait failed";
+               Fatal;
             end if;
-            Handle_Poll_Event (Group, Event);
+            for Index in 1 .. Count loop
+               Handle_Poll_Event (Group, Events (Index));
+            end loop;
          end if;
       end loop;
    end Scheduler_Main;

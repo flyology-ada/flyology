@@ -120,19 +120,41 @@ package body System.Gnatevl.Poller is
       Timeout             : Duration;
       Event               : out Poll_Event) return Boolean
    is
-      Kernel_Event : aliased Kevent_Record;
-      Limit        : aliased C_Time.timespec;
-      Result       : C.int;
+      Events : Poll_Event_Array (1 .. 1);
+      Count  : Natural;
    begin
-      Event := (Kind => Timeout_Event, Descriptor => -1);
+      if not Wait_Batch (Item, Timeout, Events, Count) then
+         Event := (Kind => Timeout_Event, Descriptor => -1);
+         return False;
+      end if;
+      Event := (if Count = 0
+                then (Kind => Timeout_Event, Descriptor => -1)
+                else Events (1));
+      return True;
+   end Wait;
+
+   function Wait_Batch
+     (Item                : Poller;
+      Timeout             : Duration;
+      Events              : out Poll_Event_Array;
+      Count               : out Natural) return Boolean
+   is
+      type Kevent_Array is array (Positive range <>) of Kevent_Record;
+      pragma Convention (C, Kevent_Array);
+      Kernel_Events : aliased Kevent_Array (Events'Range);
+      Limit         : aliased C_Time.timespec;
+      Result        : C.int;
+   begin
+      Events := (others => (Kind => Timeout_Event, Descriptor => -1));
+      Count := 0;
       if Timeout < 0.0 then
          Result :=
            Kevent
              (Item.Descriptor,
               System.Null_Address,
               0,
-              Kernel_Event'Address,
-              1,
+              Kernel_Events'Address,
+              C.int (Events'Length),
               System.Null_Address);
       else
          Limit := C_Time.To_Timespec (Timeout);
@@ -141,22 +163,32 @@ package body System.Gnatevl.Poller is
              (Item.Descriptor,
               System.Null_Address,
               0,
-              Kernel_Event'Address,
-              1,
+              Kernel_Events'Address,
+              C.int (Events'Length),
               Limit'Address);
       end if;
       if Result > 0 then
-         Event.Descriptor := C.int (Kernel_Event.Ident);
-         if Kernel_Event.Filter = EVFILT_USER then
-            Event.Kind := Wake_Event;
-         elsif Kernel_Event.Filter = EVFILT_READ then
-            Event.Kind := Readable_Event;
-         elsif Kernel_Event.Filter = EVFILT_WRITE then
-            Event.Kind := Writable_Event;
-         end if;
+         Count := Natural (Result);
+         for Index in 1 .. Count loop
+            Events (Events'First + Index - 1).Descriptor :=
+              C.int (Kernel_Events (Kernel_Events'First + Index - 1).Ident);
+            if Kernel_Events (Kernel_Events'First + Index - 1).Filter =
+              EVFILT_USER
+            then
+               Events (Events'First + Index - 1).Kind := Wake_Event;
+            elsif Kernel_Events (Kernel_Events'First + Index - 1).Filter =
+              EVFILT_READ
+            then
+               Events (Events'First + Index - 1).Kind := Readable_Event;
+            elsif Kernel_Events (Kernel_Events'First + Index - 1).Filter =
+              EVFILT_WRITE
+            then
+               Events (Events'First + Index - 1).Kind := Writable_Event;
+            end if;
+         end loop;
       end if;
       return Result >= 0 or else OSI.errno = OSI.EINTR;
-   end Wait;
+   end Wait_Batch;
 
    function Wake (Item : Poller) return Boolean is
       Change : aliased Kevent_Record :=

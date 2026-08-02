@@ -18,6 +18,9 @@ package Gnatevl.Execution_Groups with Preelaborate is
 
    function Current return Group_Id;
 
+   --  Reserve an empty reusable group for the calling evented task. Migrating
+   --  out consumes the reservation so the lane can be reused; call this again
+   --  before re-entering a dedicated group (the same id is normally returned).
    function Create_Dedicated return Dedicated_Group_Id;
 
    function Is_Dedicated (Group : Group_Id) return Boolean;
