@@ -634,6 +634,13 @@ Current smoke coverage includes:
   dedicated-group stability, and native pthread identity;
 - evented and native task activation, rendezvous, protected operations, and
   timers;
+- one generic semantic-conformance scenario instantiated unchanged for both
+  lanes: conditional and timed entry calls, selective accept delay and
+  terminate alternatives, requeue, asynchronous transfer of control,
+  suspension objects, task attributes, dynamic priority across a
+  maximum-ceiling protected operation, nested and access-type task masters,
+  abort during activation/delay/entry wait/finalization, and rendezvous in both
+  directions across the native/evented boundary;
 - evented/native socket-pair transfer, simultaneous read/write watches on one
   descriptor, and timeout behavior;
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
@@ -834,8 +841,13 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - The custom RTS patch is tied deliberately to the versioned GNAT 13–16 source
   family. An unsupported compiler release or a changed source hunk fails runtime
   preparation instead of falling back to a nearby patch.
+- The semantic differential suite checks language-level outcomes and ordering
+  only where the Ada rules determine them; it deliberately does not compare
+  scheduling traces or elapsed-time ordering between lanes. It covers a
+  successful dynamic-priority/maximum-ceiling protected interaction under the
+  project's locking policy, but not full Real-Time Systems Annex dispatching,
+  priority-inheritance, or ceiling-violation conformance across OS schedulers.
 
 The next architectural work is additional architectures and operating systems,
 optional CPU-affinity policy, structured listener/worker orchestration, and
-more complete stress and semantic-conformance testing across both execution
-lanes.
+more complete randomized stress testing across both execution lanes.

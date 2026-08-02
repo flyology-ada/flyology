@@ -52,6 +52,7 @@ for test_main in \
   observability_smoke \
   ready_queue_smoke \
   runtime_smoke \
+  semantic_parity_smoke \
   stack_size_parity_smoke \
   thread_affinity_smoke \
   timer_heap_smoke \

@@ -19,6 +19,7 @@ project Runtime_Smoke is
       "observability_smoke.adb",
       "ready_queue_smoke.adb",
       "runtime_smoke.adb",
+      "semantic_parity_smoke.adb",
       "stack_size_parity_smoke.adb",
       "thread_affinity_smoke.adb",
       "timer_heap_smoke.adb",
