@@ -172,16 +172,30 @@ begin
    end if;
 
    Remove_Test_File;
-   if Ada.Environment_Variables.Value
-     ("FLYOLOGY_EXPECT_FILE_BACKEND", "") = "native-aio"
-   then
-      if Selected_Linux_Backend /= 2 then
+   declare
+      Expected_Backend : constant String :=
+        Ada.Environment_Variables.Value
+          ("FLYOLOGY_EXPECT_FILE_BACKEND", "");
+   begin
+      if Expected_Backend = "io-uring" then
+         if Selected_Linux_Backend /= 1 then
+            raise Program_Error with
+              "expected Linux io_uring backend, got" &
+              Interfaces.C.int'Image (Selected_Linux_Backend);
+         end if;
+         Ada.Text_IO.Put_Line ("linux file backend: io_uring");
+      elsif Expected_Backend = "native-aio" then
+         if Selected_Linux_Backend /= 2 then
+            raise Program_Error with
+              "expected Linux native-AIO backend, got" &
+              Interfaces.C.int'Image (Selected_Linux_Backend);
+         end if;
+         Ada.Text_IO.Put_Line ("linux file backend: native-aio");
+      elsif Expected_Backend /= "" then
          raise Program_Error with
-           "expected Linux native-AIO backend, got" &
-           Interfaces.C.int'Image (Selected_Linux_Backend);
+           "unknown expected Linux file backend: " & Expected_Backend;
       end if;
-      Ada.Text_IO.Put_Line ("linux file backend: native-aio");
-   end if;
+   end;
 exception
    when others =>
       if File /= Flyology.IO.Files.Invalid_File then

@@ -1,5 +1,7 @@
 # Flyology
 
+[![CI](https://github.com/yrashk/flyology/actions/workflows/ci.yml/badge.svg)](https://github.com/yrashk/flyology/actions/workflows/ci.yml)
+
 Flyology lets ordinary Ada tasks run as lightweight tasks on event loops. They
 keep Ada rendezvous, protected objects, exceptions, task activation, masters,
 and normal blocking-looking control flow. Undesignated tasks remain native by
@@ -1199,16 +1201,15 @@ family:
 
 ### CI and releases
 
-`.github/workflows/ci.yml` runs three independent gates without
+`.github/workflows/ci.yml` runs the following checks without
 `continue-on-error` fallbacks:
 
-- a platform-specific compatibility matrix for every exact GNAT release in the
-  table above, compiling the crate in release mode and running the external
-  consumer in native-default and lightweight-default configurations;
-- the full behavioral suite on both platforms with GNAT 16.1; and
-- the SPARK proof crate on both platforms with GNATprove 16.1.
+- the full behavioral suite and a 1,000-connection showcase smoke on macOS and
+  Linux with GNAT 16.1;
+- explicit `epoll` and `io_uring` checks in the Linux behavioral run; and
+- the SPARK proof crate on Linux with GNATprove 16.1.
 
-The official Alire setup action is pinned to its v6 interface and Alire 2.1.1.
+The official Alire setup action is pinned to its v6.0.0 commit and Alire 2.1.1.
 Its cache key includes runner OS, architecture, Alire revision, and the exact
 GNAT/GPRbuild selection, so toolchains are reused without sharing incompatible
 runtime objects. Local and Docker scripts remain the source of the commands run
