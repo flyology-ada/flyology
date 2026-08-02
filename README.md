@@ -670,6 +670,7 @@ async-signal-safety rules and must not call Ada tasking or GNATEVL APIs.
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
 | Make CPU fairness explicit | Arbitrary signal-time preemption would cross Ada and GNARL critical regions at unsafe instructions | Time-budgeted checkpoints provide bounded cooperative slices where application invariants are known to be stable |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
+| Select ASan fiber annotations at RTS build time | AddressSanitizer must learn the real source and destination stack around a custom assembly transfer | Sanitized builds use LLVM's fiber interface; ordinary builds compile out every hook and sanitizer TLS object |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
 | Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code and bounded submission queues |
@@ -875,6 +876,58 @@ Run the bounded, reproducible concurrency and fault campaign with:
 ```sh
 ./scripts/stress.sh
 ```
+
+### AddressSanitizer builds
+
+AddressSanitizer awareness is opt-in when preparing the runtime:
+
+```sh
+GNATEVL_SANITIZER=address ./scripts/prepare-rts.sh
+# Compile/link the application with the same GCC toolchain and
+# -fsanitize=address, then run with:
+ASAN_OPTIONS=detect_stack_use_after_return=0:use_sigaltstack=0 ./application
+```
+
+The address configuration brackets every assembly context transfer with
+LLVM's `__sanitizer_start_switch_fiber` and
+`__sanitizer_finish_switch_fiber` interface. It covers first task entry,
+yield/sleep/I/O suspension, resumption on another group pthread, terminal
+switch-away, scheduler-stack discovery, and normal event-thread teardown.
+Scheduler pthread stack bounds are learned from the first completed transfer;
+runtime-owned task stacks are checked against their exact guarded mappings on
+every return.
+
+Fake-stack handles are deliberately null. LLVM documents that mode for
+programs which do not require stack-use-after-return detection, and it is the
+only supported mode here because an evented task can migrate to a different
+pthread while ASan fake stacks are thread-owned. Set
+`detect_stack_use_after_return=0` accordingly. GNATEVL also installs the loop
+pthread's alternate signal stack for guard-page translation, so ASan must not
+install and later unmap a competing stack; set `use_sigaltstack=0`.
+
+Run the focused positive and negative campaign with:
+
+```sh
+./scripts/test-sanitizer.sh
+```
+
+It proves the normal RTS object contains no sanitizer references or
+sanitizer-only TLS, then exercises instrumented C frames on evented task
+stacks across yields, timers, I/O interruption, cross-pthread migration,
+repeated task destruction, and process finalization. An isolated executable
+also performs an intentional fiber-stack out-of-bounds write and must terminate
+with an ASan `stack-buffer-overflow` report.
+
+This is stack-switch awareness, not a promise that every sanitizer/toolchain
+combination understands Ada. The current Darwin GNAT/libasan combination can
+fail inside fully ASan-instrumented Ada exception propagation, so the checked
+harness instruments C frames and leaves its Ada frames uninstrumented. Leak
+scanning of suspended or migrated custom stacks is not claimed and the test
+disables leak detection. Assembly transfers remain opaque to compiler-generated
+unwind metadata, so debugger backtraces stop at the task's fresh frame unless a
+tool explicitly understands the saved context. TSan fiber identities and
+Valgrind stack registration are not enabled by the ASan switch and require
+separate, tool-specific lifecycle designs.
 
 The default short campaign reports every seed and runs four seeds through
 repeated evented/native task allocation and destruction, cross-lane
@@ -1246,6 +1299,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   alternate signal stack on which GNARL can translate the guard fault into Ada
   `Storage_Error`; this stack is thread state and is intentionally not stored
   in an individual fiber's task wrapper.
+- ASan-aware builds require `detect_stack_use_after_return=0` for migratable
+  tasks and `use_sigaltstack=0` so GNATEVL remains the sole owner of each loop
+  pthread's alternate signal stack. LeakSanitizer root discovery for suspended
+  stacks, fully instrumented Ada exception propagation on Darwin, TSan fiber
+  identities, and Valgrind stack registration are not yet supported.
 - `Task_Info` produces an obsolete-feature warning in current GNAT, but it
   provides the required per-task and per-task-type designation without a
   compiler fork. GNATEVL's test and showcase projects use `-gnatwJ` to suppress
@@ -1265,4 +1323,5 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 
 The next architectural work is additional architectures and operating systems,
 optional CPU-affinity policy, structured listener/worker orchestration, and
-sanitizer-aware fiber switch annotations for memory-sanitizer campaigns.
+separate TSan/Valgrind integration where their lifecycle contracts can be
+preserved across cross-pthread migration.

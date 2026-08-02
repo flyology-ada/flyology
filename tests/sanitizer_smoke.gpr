@@ -1,0 +1,25 @@
+with "../gnatevl.gpr";
+
+project Sanitizer_Smoke is
+   for Languages use ("Ada", "C");
+   for Source_Dirs use (".", "sanitizer_native");
+   for Object_Dir use "obj/sanitizer_smoke";
+   for Exec_Dir use "bin";
+   for Main use
+     ("sanitizer_fiber_smoke.adb",
+      "sanitizer_stack_violation.adb",
+      "lifecycle_smoke.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
+         "-O1", "-g", "-fno-omit-frame-pointer");
+      for Default_Switches ("C") use
+        ("-O1", "-g", "-fsanitize=address", "-fno-omit-frame-pointer");
+   end Compiler;
+
+   package Linker is
+      for Default_Switches ("Ada") use ("-fsanitize=address");
+   end Linker;
+end Sanitizer_Smoke;
