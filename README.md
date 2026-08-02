@@ -120,8 +120,42 @@ therefore stays on the inherited group rather than entering the automatic pool.
 Automatic placement, explicit `CPU` selection, and live migration are separate
 decisions. Placement chooses an event loop at activation, `CPU` overrides that
 choice, and `Migrate` changes the current group later at an explicit safe point.
-None of these currently claims that the group's pthread is hard-pinned to a
-physical core; the operating system schedules loop pthreads across processors.
+By default none of these pins the group's pthread; the operating system may
+schedule it across processors.
+
+Loop-thread placement is a fourth, explicitly separate policy. Linux can bind
+a group pthread to one zero-based OS logical-CPU id and verifies the effective
+mask after `pthread_setaffinity_np`. The value is not an Ada `CPU` aspect: that
+aspect names a logical GNATEVL group. Darwin has no public hard-core binding.
+Where its kernel supports `THREAD_AFFINITY_POLICY`, GNATEVL instead exposes a
+positive advisory tag for cache locality; a tag is never reported as a CPU.
+Current Apple-silicon Darwin returns `KERN_NOT_SUPPORTED`, which the capability
+query and runtime preparation report rather than pretending that a hint was
+applied.
+
+Configure a group before its lazy startup, then inspect whether the request is
+pending, applied, failed, or unavailable:
+
+```ada
+if Groups.Placement_Supported (Groups.Strict_CPU)
+  and then Groups.Placement_Value_Available (Groups.Strict_CPU, 3)
+then
+   Result := Groups.Configure_Loop_Thread
+     (Group => 1, Kind => Groups.Strict_CPU, Value => 3);
+end if;
+
+Status := Groups.Loop_Thread_Status (1);
+```
+
+The same request is idempotent after startup. A different request or clearing
+the request after group creation reports `Group_Already_Started`; the scheduler
+never moves a live loop pthread behind the application's back. Configuration
+and lazy creation serialize on the topology lock, so a race has one of two
+complete outcomes: configuration wins and is applied before startup publishes,
+or startup wins and configuration is rejected. Groups `128 .. 255` can be
+preconfigured in the same way before `Create_Dedicated` claims them. Migration
+to a placed group naturally resumes on that group's already-placed pthread.
+Native-task `CPU` affinity remains entirely on stock GNARL's path.
 
 `Gnatevl.Execution_Groups` also provides an explicit safe-point migration API:
 
@@ -241,8 +275,9 @@ This is fixed-priority cooperative scheduling, not a hard-real-time claim:
   priority. `FIFO_Within_Priorities` and `Round_Robin_Within_Priorities` kernel
   policies, deadline dispatching, budget enforcement, and bounded preemption
   are not implemented for evented tasks.
-- `CPU` chooses an event-loop group but does not currently pin that group's
-  pthread to a physical processor. Native-task CPU affinity remains stock.
+- `CPU` chooses an event-loop group. Physical loop-thread placement is a
+  separate opt-in policy; unconfigured groups remain OS-scheduled.
+  Native-task CPU affinity remains stock.
 - Protected-object mutual exclusion and language-level rendezvous still come
   from GNARL. Successful maximum-ceiling protected actions are covered by the
   native/evented semantic suite, but kernel priority-ceiling violation checks,
@@ -791,6 +826,7 @@ async-signal-safety rules and must not call Ada tasking or GNATEVL APIs.
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
 | Place undesignated evented tasks through a build-time loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration | The compatibility default remains one loop; round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
+| Configure loop pthread placement separately | Logical co-location and physical scheduling are different policies | Linux can verify a strict one-CPU mask; Darwin exposes only a capability-checked advisory cache tag, and requests become immutable once startup begins |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
 | Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every evented task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
@@ -882,7 +918,7 @@ from this Ada source tree.
 | --- | --- | --- | --- |
 | Descriptor poller | `kqueue` with `EVFILT_USER` | `epoll` with `eventfd` | Windows IOCP needs a completion-oriented adapter |
 | Regular-file completion | POSIX AIO with `EVFILT_AIO` | Per-group `io_uring`; Linux native AIO fallback | Windows overlapped I/O/IOCP adapter |
-| CPU placement | Stable group pthread; no public hard pinning | Stable group pthread; strict affinity is not yet applied | Optional platform binding policy |
+| CPU placement | Stable pthread; capability-checked advisory tag only, with no physical-CPU claim | Stable pthread; optional verified one-CPU affinity mask | Windows processor-group adapter |
 | Context switch | AArch64 and x86-64 assembly | x86-64 assembly | One small implementation per additional architecture/ABI |
 | Stack allocation | `mmap` plus guard pages | `mmap` plus guard pages | Platform virtual-memory API |
 | OS calls | Thin Ada imports of Darwin/POSIX interfaces | Thin Ada imports of Linux/POSIX interfaces | Per-platform binding body |
@@ -937,6 +973,8 @@ as a compatibility fallback:
 ./scripts/prepare-rts.sh                       # native project default
 GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
 GNATEVL_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
+GNATEVL_LOOP_PLACEMENT=strict \
+GNATEVL_LOOP_PLACEMENT_MAP=0:2,1:4 ./scripts/prepare-rts.sh  # Linux
 ~/alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
 
@@ -948,7 +986,14 @@ crate checkout. Relative values are resolved from the caller's current
 directory; the resulting path is canonicalized before patching runtime files.
 `GNATEVL_DEFAULT` accepts only `native` or `evented`.
 `GNATEVL_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
-`GNATEVL_PLACEMENT` currently accepts `round_robin`. These generated policies
+`GNATEVL_PLACEMENT` currently accepts `round_robin`.
+`GNATEVL_LOOP_PLACEMENT` accepts `none`, `strict`, or `advisory`, and
+`GNATEVL_LOOP_PLACEMENT_MAP` supplies unique `GROUP:VALUE` pairs. `strict` is
+Linux-only; its values are zero-based OS logical CPUs in the process leader's
+current allowed mask and preparation rejects unavailable values. `advisory` is
+Darwin-only, requires positive tags, and is rejected on Apple-silicon hosts
+where the kernel reports `THREAD_AFFINITY_POLICY` unsupported. An empty default
+map adds no placement initialization syscall to a native-only process. These generated policies
 are compiled into the RTS rather than read from the process environment, so
 deployment configuration is stable during elaboration and concurrent task
 activation. The script checks source compatibility by applying the source
@@ -1149,6 +1194,10 @@ Current smoke coverage includes:
   `CPU` override, round-robin distribution across three lazy loops, native
   `CPU` behavior, and automatic-placement interaction with scoped pins and
   dedicated groups;
+- capability-checked loop-thread placement, invalid value rejection, pre-start
+  and idempotent configuration, immutable post-start policy, dedicated-group
+  placement, Darwin no-hard-pin behavior, and Linux runtime verification that
+  a strict group runs on the requested logical CPU;
 - `CPU`-selected shared groups, same-group thread identity, cross-group live
   migration, reusable dedicated lanes, and native-task migration rejection;
 - real C pthread-local state shared by same-loop fibers and changed by
@@ -1224,6 +1273,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/execution_groups
 ./showcases/bin/runtime_observability
 ./showcases/bin/stall_watchdog
+./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_connection_density.sh
 ```
@@ -1247,6 +1297,8 @@ The examples demonstrate:
   readiness rather than a resolver worker pool;
 - `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
   one-task thread, and rejection of unsafe live stock-native conversion;
+- side-by-side logical group selection and physical/advisory loop-thread
+  placement, including the explicit unsupported result on current arm64 Darwin;
 - evented versus pthread-backed tasks under identical source-level work;
 - a real loopback TCP exchange, positional file I/O, and timers through the
   task-aware I/O API;
@@ -1379,9 +1431,14 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - Evented tasks without a `CPU` aspect use the compiled automatic pool. Its
   default size is one for compatibility; the only current policy is
   round-robin task count, which does not measure per-task CPU or I/O load.
-- A group identifies a stable loop pthread but is not currently hard-pinned to
-  a physical core. Darwin lacks a public strict pinning API; Linux affinity can
-  be added as an explicit policy.
+- A group identifies a stable loop pthread but is unplaced by default. Linux
+  strict placement uses one zero-based logical CPU from the process leader's
+  allowed mask and verifies the resulting one-CPU mask. CPU hotplug or a
+  concurrent external affinity-policy change can still make startup fail; the
+  group's placement status preserves the OS error. Darwin never claims strict
+  pinning: advisory tags are exposed only on supported host architectures,
+  and an actual kernel rejection is reported in the group's status. Current
+  arm64 Darwin reports `THREAD_AFFINITY_POLICY` unsupported.
 - Evented tasks in a group share pthread-local state. Scoped
   `Gnatevl.Execution_Groups.Thread_Pin` objects prevent migration but do not
   isolate that state from other tasks in the same group; use a dedicated group

@@ -18,6 +18,7 @@ project Showcases is
       "evented_pipeline.adb",
       "evented_vs_threads.adb",
       "hybrid_blocking_bridge.adb",
+      "loop_thread_placement.adb",
       "many_evented_tasks.adb",
       "priority_scheduling.adb",
       "runtime_observability.adb",
