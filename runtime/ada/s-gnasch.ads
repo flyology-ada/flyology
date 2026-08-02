@@ -117,6 +117,13 @@ package System.Gnatevl.Scheduler is
       return Interfaces.C.int;
    pragma Export (C, Wait_IO, "gnatevl_runtime_wait_io");
 
+   function Wait_IO_Many
+     (Requests            : System.Address;
+      Count               : Interfaces.C.unsigned;
+      Timeout_Nanoseconds : Interfaces.C.long_long)
+      return Interfaces.C.int;
+   pragma Export (C, Wait_IO_Many, "gnatevl_runtime_wait_io_many");
+
    function File_IO
      (Descriptor  : Interfaces.C.int;
       Buffer      : System.Address;

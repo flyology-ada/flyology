@@ -431,6 +431,15 @@ integer-descriptor primitives. They do not own the descriptor or prevent a
 concurrent `close(2)` from releasing its number for reuse; callers choosing
 that compatibility layer must serialize descriptor lifetime themselves.
 
+`Gnatevl.IO.Wait_Any` extends the same low-level contract to a bounded,
+caller-provided array of read/write interests. It allocates neither in the
+public library nor while registering an evented fiber, returns the exact array
+index that became ready, and returns zero on timeout. Repeated descriptors and
+separate read/write interests for one descriptor are valid; when equivalent
+entries are ready together the lowest index wins. The fixed limit of 32 keeps
+per-fiber scheduler storage predictable and is intended for protocol engines,
+not as a replacement for ownership-aware connection APIs.
+
 Accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are exposed to
 the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
 process-safety convention while retaining the raw nonblocking `accept(2)` retry

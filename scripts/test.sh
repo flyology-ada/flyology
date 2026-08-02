@@ -84,7 +84,8 @@ for test_main in \
   structured_server_smoke \
   thread_affinity_smoke \
   timer_heap_smoke \
-  tcp_native_smoke
+  tcp_native_smoke \
+  wait_any_smoke
 do
   run_gprbuild \
     --RTS="$project_root/build/rts" \

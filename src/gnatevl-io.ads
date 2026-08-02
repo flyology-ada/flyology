@@ -12,6 +12,18 @@ package Gnatevl.IO with Preelaborate is
    type Wait_Kind is (For_Read, For_Write);
    type Wait_Outcome is (Ready, Timed_Out, Interrupted);
 
+   type Wait_Request is record
+      FD        : Descriptor;
+      Condition : Wait_Kind;
+   end record;
+   type Wait_Request_Array is array (Positive range <>) of Wait_Request;
+
+   --  Upper bound chosen for predictable, allocation-free registration in
+   --  both the public library and the patched runtime.  Callers can split
+   --  larger sets across owning tasks instead of making each fiber carry an
+   --  unbounded descriptor vector.
+   Max_Wait_Requests : constant := 32;
+
    function Is_Evented_Task return Boolean;
 
    --  Wait until Descriptor is ready. False denotes timeout. Event-loop
@@ -20,6 +32,15 @@ package Gnatevl.IO with Preelaborate is
      (FD        : Descriptor;
       Condition : Wait_Kind;
       Timeout   : Duration := Infinite) return Boolean;
+
+   --  Wait until any requested descriptor is ready.  The return value is the
+   --  exact index in Requests, or 0 on timeout.  Duplicate descriptors and a
+   --  read/write pair for the same descriptor are supported.  No descriptor
+   --  is read, closed, or otherwise consumed by this operation.
+   function Wait_Any
+     (Requests : Wait_Request_Array;
+      Timeout  : Duration := Infinite) return Natural
+     with Pre => Requests'Length <= Max_Wait_Requests;
 
    --  Wait for Descriptor or any optional one-shot interrupt source.
    --  Interrupt descriptors are observed for readability and are not read or
