@@ -96,7 +96,8 @@ procedure Evented_File_IO is
 
    type Writer_Access is access Writer;
    Writers : array (1 .. Task_Count) of Writer_Access;
-   Threads : C.int;
+   Baseline_Threads : constant C.int := Thread_Count;
+   Threads          : C.int;
 
    procedure Remove_File is
    begin
@@ -122,7 +123,7 @@ begin
    Threads := Thread_Count;
    Put_Line ("evented file tasks parked:" & Task_Count'Image);
    Put_Line ("process pthreads:" & Threads'Image);
-   if Threads /= 1 then
+   if Threads /= Baseline_Threads + 1 then
       raise Program_Error with "evented file tasks created hidden pthreads";
    end if;
 

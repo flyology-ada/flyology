@@ -21,7 +21,7 @@ procedure Runtime_Smoke is
    private
       Event_Reported            : Boolean := False;
       Native_Reported           : Boolean := False;
-      Event_Was_On_Environment : Boolean := False;
+      Event_Was_Separate        : Boolean := False;
       Native_Was_Separate      : Boolean := False;
       Rendezvous_Was_Completed : Boolean := False;
       Event_Delay_Was_Correct  : Boolean := False;
@@ -31,7 +31,7 @@ procedure Runtime_Smoke is
       procedure Event_Ran (On_Thread : System.Address) is
       begin
          Event_Reported := True;
-         Event_Was_On_Environment := On_Thread = Environment_Thread;
+         Event_Was_Separate := On_Thread /= Environment_Thread;
       end Event_Ran;
 
       procedure Native_Ran (On_Thread : System.Address) is
@@ -56,7 +56,7 @@ procedure Runtime_Smoke is
       end Await_Complete;
 
       function Passed return Boolean is
-        (Event_Was_On_Environment
+        (Event_Was_Separate
          and Native_Was_Separate
          and Rendezvous_Was_Completed
          and Event_Delay_Was_Correct);

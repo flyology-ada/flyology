@@ -50,6 +50,10 @@ procedure Default_Policy_Smoke is
    Explicit_Default : Selected_Worker (Gnatevl.Project_Default);
    pragma Unreferenced (Implicit_Default, Explicit_Default);
 begin
+   if Gnatevl.IO.Is_Evented_Task then
+      raise Program_Error with "environment task became an event-loop fiber";
+   end if;
+
    if Ada.Command_Line.Argument_Count /= 1
      or else
        (Ada.Command_Line.Argument (1) /= "native"

@@ -1,8 +1,8 @@
 # GNATEVL
 
-GNATEVL is an experimental GNAT 16 runtime for running ordinary Ada tasks as
-stackful tasks on an event loop, while retaining native pthread-backed tasks as
-an explicit escape hatch.
+GNATEVL is an experimental GNAT 16 runtime that can run designated ordinary Ada
+tasks as stackful tasks on an event loop while leaving undesignated tasks on
+GNAT's native pthread-backed path.
 
 It is an augmentation of the existing GNAT runtime, not a new async language or
 a replacement tasking model. Rendezvous, protected objects, task activation,
@@ -40,6 +40,10 @@ the whole project:
 GNATEVL_DEFAULT=native  ./scripts/prepare-rts.sh  # default when omitted
 GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
 ```
+
+The environment task always remains native. No poller, scheduler context,
+fiber stack, or event-loop pthread is created until activation of the first
+evented child task.
 
 An explicit `Gnatevl.Event_Loop_Task` or `Gnatevl.Native_Thread` always
 overrides that project default. `Gnatevl.Project_Default` explicitly requests
@@ -166,7 +170,8 @@ lanes:
 
 - Evented tasks receive a guarded stack and a resumable execution context. Each
   execution group has a priority-aware ready queue, poller, and scheduler
-  pthread; the default group uses the environment pthread.
+  pthread. The environment task remains a normal GNARL task; even group 0 owns
+  a separate scheduler pthread created on first evented-task activation.
 - `Native_Thread` tasks use the normal pthread-backed path.
 - Alternate signal stacks are owned by OS threads. Native tasks retain GNARL's
   per-pthread stack, while each event-loop pthread installs one permanent stack
@@ -374,6 +379,7 @@ potentially slow remote-filesystem metadata operations on a native task.
 | --- | --- | --- |
 | Keep ordinary Ada task syntax | Existing programs and GNARL semantics remain recognizable | No separate `async`/`await`, callback, or future API is required |
 | Default to native execution, with a project-wide evented option | Existing tasking code keeps its blocking and parallelism assumptions while high-I/O projects can opt in once | Evented examples and mixed projects must designate their intended lane |
+| Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first evented task pays the one-time group startup handshake |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
@@ -626,14 +632,14 @@ from each fiber to its event-loop pthread, produced:
 
 | Mode | Connections | OS threads at sample | RSS increase | Virtual-memory increase | Setup | Release all |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Evented | 10,000 | 1 | 461 MiB | 1.03 GiB | 0.232 s | 0.031 s |
+| Evented | 10,000 | 2 | 462 MiB | 1.13 GiB | 0.219 s | 0.028 s |
 | Native | 10,000 | 10,001 | 617 MiB | 1.17 GiB | 7.736 s | 0.137 s |
 
 The central win today is kernel-concurrency density: the evented version avoids
 one pthread per connection and can reach connection counts at which creating an
 equal number of pthreads commonly exceeds host limits. In this run it also used
-about 156 MiB (25%) less incremental resident memory, reserved less address
-space, set up 33 times faster, and drained readiness 4.4 times faster. The RSS
+about 155 MiB (25%) less incremental resident memory, reserved less address
+space, set up 35 times faster, and drained readiness 4.8 times faster. The RSS
 change comes from no longer touching pages for a dead 32 KiB alternate-stack
 local in every fiber; both lanes still request the same user stack size. Native
 release latency can still win at other loads because pthreads run in parallel;
@@ -673,7 +679,7 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - A group identifies a stable loop pthread but is not currently hard-pinned to
   a physical core. Darwin lacks a public strict pinning API; Linux affinity can
   be added as an explicit policy.
-- Shared and dedicated loops are created lazily; each group's pthread and
+- All loops, including group 0, are created lazily; each group's pthread and
   poller (`kqueue` or `epoll`) remain alive for the process lifetime. The table
   is bounded to 256 groups, and vacated dedicated loops are reserved and reused
   by later callers.
@@ -691,8 +697,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   use a short-held topology lock; topology changes remain globally serialized.
 - Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
   dedicated range and cannot be selected statically with the `CPU` aspect.
-- The environment task uses its pthread-owned initial stack and therefore
-  cannot migrate; child evented tasks use guarded runtime-owned stacks and can.
+- The environment task always remains on its native pthread-owned initial stack
+  and is never registered as a fiber, even when the project default is evented.
+  It therefore cannot migrate; child evented tasks use guarded runtime-owned
+  stacks and can.
 - Cooperative scheduling means an evented task that never reaches a suspension
   point can monopolize the loop. `Gnatevl.Fairness.Yield_Budget` makes explicit
   time-budgeted checkpoints reusable but cannot force unmodified CPU loops to

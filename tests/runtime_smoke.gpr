@@ -13,6 +13,7 @@ project Runtime_Smoke is
       "files_smoke.adb",
       "io_smoke.adb",
       "io_starvation_smoke.adb",
+      "lazy_event_start_smoke.adb",
       "lifecycle_smoke.adb",
       "ready_queue_smoke.adb",
       "runtime_smoke.adb",

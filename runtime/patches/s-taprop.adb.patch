@@ -377,12 +377,5 @@
 +      if Result /= 0 then
 +         raise Program_Error with "GNATEVL initialization failed";
 +      end if;
-+      Result :=
-+        Event_Set_Priority
-+          (To_Address (Environment_Task),
-+           Interfaces.C.int (Environment_Task.Common.Current_Priority));
-+      if Result /= 0 then
-+         raise Program_Error with "GNATEVL initial priority failed";
-+      end if;
 
        if State

@@ -26,7 +26,6 @@ package body System.Gnatevl.Scheduler is
    use type Scheduling.Destruction_Plan;
    use type SSE.Integer_Address;
 
-   Scheduler_Stack_Size : constant C.size_t := 256 * 1_024;
    Timer_Check_Interval : constant := 64;
    Poll_Event_Budget    : constant := 64;
    No_Deadline          : constant Duration := Scheduling.No_Deadline;
@@ -178,6 +177,8 @@ package body System.Gnatevl.Scheduler is
    Topology_Lock  : aliased OSI.pthread_mutex_t;
    Registry_Shard_Locks : Registry_Shard_Lock_Array;
    Initialized    : Boolean := False;
+   Event_Runtime_Active : C.int := 0;
+   pragma Atomic (Event_Runtime_Active);
    Groups         : Group_Array := (others => null);
    Fiber_Registry : Registry_Bucket_Array := (others => null);
    Thread_Group   : Loop_Group_Access := null;
@@ -212,8 +213,8 @@ package body System.Gnatevl.Scheduler is
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
    --  Registry operations require the bucket's shard lock after bootstrap
-   --  publishes Initialized; Initialize registers the environment task
-   --  single-threaded.
+   --  publishes Initialized. The environment task is deliberately absent
+   --  from this registry: only evented tasks become fibers.
    function Registry_Bucket_For
      (T : System.Address) return Registry_Bucket_Index;
    function Registry_Shard_For
@@ -1011,9 +1012,7 @@ package body System.Gnatevl.Scheduler is
    end Promote_Expired_Timers;
 
    function Initialize (Environment : System.Address) return C.int is
-      Environment_Fiber : Fiber_Access;
-      Default_Group     : Loop_Group_Access;
-      Result            : C.int;
+      Result : C.int;
    begin
       if Environment = System.Null_Address or else Initialized then
          return -1;
@@ -1031,47 +1030,10 @@ package body System.Gnatevl.Scheduler is
          end if;
       end loop;
 
-      Default_Group := new Loop_Group;
-      Default_Group.Id := Default_Group_Id;
-      Result := OSI.pthread_mutex_init (Default_Group.Lock'Access, null);
-      if Result /= 0 then
-         Free_Group (Default_Group);
-         return -1;
-      end if;
-      if not Pollers.Initialize (Default_Group.Scheduler_Poller) then
-         Free_Group (Default_Group);
-         return -1;
-      end if;
-
-      Environment_Fiber := new Fiber;
-      Environment_Fiber.Context := Contexts.Capture;
-      Environment_Fiber.Group := Default_Group;
-      Environment_Fiber.Can_Migrate := False;
-      Default_Group.Scheduler_Context :=
-        Contexts.Create
-          (Scheduler_Stack_Size,
-           Scheduler_Main'Address,
-           Group_To_Address (Default_Group),
-           Environment_Fiber.Context);
-      if Default_Group.Scheduler_Context = null then
-         Contexts.Destroy (Environment_Fiber.Context);
-         Free_Fiber (Environment_Fiber);
-         Pollers.Finalize (Default_Group.Scheduler_Poller);
-         Free_Group (Default_Group);
-         return -1;
-      end if;
-
-      Environment_Fiber.T := Environment;
-      Environment_Fiber.State := Running;
-      Environment_Fiber.Next_Group := null;
-      Register_Locked (Environment_Fiber);
-      Default_Group.Fibers := Environment_Fiber;
-      Default_Group.Current_Fiber := Environment_Fiber;
-      Default_Group.Member_Count := 1;
-      Default_Group.Event_Thread := OSI.pthread_self;
-      Default_Group.Started := True;
-      Groups (Group_Index (Default_Group_Id)) := Default_Group;
-      Thread_Group := Default_Group;
+      --  Do not allocate a group, poller, context, stack, or pthread here.
+      --  Ensure_Group creates the complete event machinery when the first
+      --  designated evented task is activated. Until then native programs
+      --  stay on the stock GNARL execution path.
       Initialized := True;
       return 0;
    end Initialize;
@@ -1132,6 +1094,7 @@ package body System.Gnatevl.Scheduler is
       Target.Fibers := Item;
       Target.Member_Count := Target.Member_Count + 1;
       Enqueue (Target, Item);
+      Event_Runtime_Active := 1;
       Unlock_Group (Target);
       Unlock_Registry_Shard (Shard);
       if not Pollers.Wake (Target.Scheduler_Poller) then
@@ -1144,7 +1107,7 @@ package body System.Gnatevl.Scheduler is
       Result : C.int;
       Shard  : Registry_Shard_Index;
    begin
-      if not Initialized or else T = System.Null_Address then
+      if Event_Runtime_Active = 0 or else T = System.Null_Address then
          return 0;
       end if;
       Shard := Registry_Shard_For (T);

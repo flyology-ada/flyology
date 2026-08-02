@@ -31,6 +31,7 @@ for test_main in \
   files_smoke \
   io_smoke \
   io_starvation_smoke \
+  lazy_event_start_smoke \
   lifecycle_smoke \
   ready_queue_smoke \
   runtime_smoke \

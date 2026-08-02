@@ -5,12 +5,18 @@ procedure Ready_Queue_Smoke is
    Worker_Count      : constant := 3;
    Worker_Priority   : constant := 5;
    Promoted_Priority : constant := 20;
+   Blocker_Priority  : constant := 25;
    type Result_Array is
      array (Positive range 1 .. Worker_Count) of Positive;
+   Stop_Blocker : Boolean := False with Atomic;
 
    protected State is
       procedure Arrive (Ticket : out Positive);
       entry Await_All_Arrivals;
+      entry Await_Blocker_Start;
+      procedure Start_Blocker;
+      procedure Blocker_Is_Running;
+      entry Await_Blocker_Running;
       entry Await_Release;
       procedure Release;
       procedure Record_Run (Id, Ticket : Positive);
@@ -20,6 +26,8 @@ procedure Ready_Queue_Smoke is
       function Third_Ticket return Positive;
    private
       Arrivals : Natural := 0;
+      Blocker_Started : Boolean := False;
+      Blocker_Running : Boolean := False;
       Released : Boolean := False;
       Completed : Natural := 0;
       Run_Ids     : Result_Array := (others => 1);
@@ -37,6 +45,26 @@ procedure Ready_Queue_Smoke is
       begin
          null;
       end Await_All_Arrivals;
+
+      entry Await_Blocker_Start when Blocker_Started is
+      begin
+         null;
+      end Await_Blocker_Start;
+
+      procedure Start_Blocker is
+      begin
+         Blocker_Started := True;
+      end Start_Blocker;
+
+      procedure Blocker_Is_Running is
+      begin
+         Blocker_Running := True;
+      end Blocker_Is_Running;
+
+      entry Await_Blocker_Running when Blocker_Running is
+      begin
+         null;
+      end Await_Blocker_Running;
 
       entry Await_Release when Released is
       begin
@@ -72,6 +100,20 @@ procedure Ready_Queue_Smoke is
       pragma Task_Info (Gnatevl.Event_Loop_Task);
    end Worker;
 
+   task Blocker is
+      pragma Priority (Blocker_Priority);
+      pragma Task_Info (Gnatevl.Event_Loop_Task);
+   end Blocker;
+
+   task body Blocker is
+   begin
+      State.Await_Blocker_Start;
+      State.Blocker_Is_Running;
+      while not Stop_Blocker loop
+         null;
+      end loop;
+   end Blocker;
+
    task body Worker is
       Ticket : Positive;
    begin
@@ -83,12 +125,15 @@ procedure Ready_Queue_Smoke is
    First    : Worker (1);
    Second   : Worker (2);
    Promoted : Worker (3);
-   pragma Unreferenced (First, Second);
+   pragma Unreferenced (First, Second, Blocker);
 begin
    State.Await_All_Arrivals;
+   State.Start_Blocker;
+   State.Await_Blocker_Running;
    State.Release;
    Ada.Dynamic_Priorities.Set_Priority
      (Promoted_Priority, Promoted'Identity);
+   Stop_Blocker := True;
    delay 0.0;
    State.Await_Completion;
 
