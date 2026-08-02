@@ -15,6 +15,8 @@ project Runtime_Smoke is
       "io_starvation_smoke.adb",
       "lazy_event_start_smoke.adb",
       "lifecycle_smoke.adb",
+      "observability_native_smoke.adb",
+      "observability_smoke.adb",
       "ready_queue_smoke.adb",
       "runtime_smoke.adb",
       "stack_size_parity_smoke.adb",

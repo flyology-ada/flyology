@@ -48,6 +48,8 @@ for test_main in \
   io_starvation_smoke \
   lazy_event_start_smoke \
   lifecycle_smoke \
+  observability_native_smoke \
+  observability_smoke \
   ready_queue_smoke \
   runtime_smoke \
   stack_size_parity_smoke \

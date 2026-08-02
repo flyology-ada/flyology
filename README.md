@@ -403,6 +403,56 @@ platform provides an equivalent portable completion operation for them. They
 normally complete quickly on local filesystems, but applications should isolate
 potentially slow remote-filesystem metadata operations on a native task.
 
+## Runtime observability
+
+`Gnatevl.Observability` exposes a stable, read-only snapshot for each event
+group. Calling `Snapshot` for a group that has never existed returns `False`
+and does not create a pthread, poller, scheduler context, or any other event
+runtime resource. A native-only application can therefore link and query the
+package without losing lazy-start inertness.
+
+```ada
+declare
+   Sample : Gnatevl.Observability.Group_Snapshot;
+begin
+   if Gnatevl.Observability.Snapshot (0, Sample) then
+      Put_Line ("ready" & Sample.Ready'Image
+                & " waiting" & Sample.Waiting'Image
+                & " dispatches" & Sample.Dispatches'Image);
+   end if;
+end;
+```
+
+A snapshot reports thread startup state and whether the group is dedicated or
+reserved; total and thread-pinned members; members in ready, waiting, running,
+migrating, and finished states;
+active timer, descriptor, and file waits; file submissions queued behind kernel
+backpressure; and lifetime dispatch, poll-batch, delivered-event, GNARL-wakeup,
+and migration-in/out counters. Wait categories overlap: for example, a
+descriptor wait with a deadline contributes to both `Descriptor_Waits` and
+`Timer_Waits`. `Pending_File_Submissions` is the subset of `File_Waits` not yet
+accepted by the bounded kernel queue.
+
+Topology and queue values are coherent at one instant: the runtime holds the
+short topology lock and the selected group's scheduler lock while walking its
+member list. Snapshot cost is therefore `O(group members)` and briefly delays
+group creation or migration as well as scheduler queue maintenance; it is
+intended for periodic diagnostics, not per-request instrumentation. Lifetime
+counters are updated under the owning group lock, wrap modulo 2^64, and never
+reset because groups are permanent.
+
+`Made_Progress` compares two samples. A group with runnable or running work but
+no dispatch or poll progress over the sampling interval is a useful loop-lag
+signal; an empty waiting group with no progress is merely idle. This sampled
+design avoids adding a monotonic-clock read to every dispatch. A policy-driven
+stall watchdog can be layered on these observations, but is deliberately not a
+runtime scheduling policy.
+
+Fatal invariant paths retain a small `Last_Fatal` classification and write the
+same category directly to standard error before `abort`. A live process normally
+reports `No_Fatal`; the retained atomic scalar is chiefly postmortem context for
+a crash handler or debugger and querying it takes no scheduler lock.
+
 ## Design decisions
 
 | Decision | Rationale | Consequence |
@@ -482,7 +532,7 @@ Run the proof through the Alire-provided GNATprove toolchain:
 ./scripts/prove.sh
 ```
 
-The current run discharges 66 flow, functional-contract, termination, and
+The current run discharges 62 flow, functional-contract, termination, and
 run-time-safety checks across four production policy units, with zero unproved
 checks. Good next proof candidates are ready-bucket insertion/removal invariants
 and descriptor wake matching.
@@ -589,6 +639,8 @@ Current smoke coverage includes:
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
   cancellation, RAII socket release, admission closure, and accept cancellation;
 - descriptor-readiness fairness under a continuously yielding evented task;
+- coherent event-group load/counter snapshots and native-only observation that
+  does not eagerly start a loop;
 - read/write/create/truncate file-open combinations plus 64 concurrent
   positional operations through the kernel-completion path;
 - repeated evented-child teardown under a native master, exercising deferred
@@ -618,6 +670,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/evented_io
 ./showcases/bin/evented_file_io
 ./showcases/bin/execution_groups
+./showcases/bin/runtime_observability
 ./showcases/run_connection_density.sh
 ```
 
@@ -637,6 +690,8 @@ The examples demonstrate:
   task-aware I/O API;
 - 256 evented file tasks sharing one event-loop pthread, with the process thread
   count sampled before their kernel-completion writes are released;
+- periodic per-group diagnostics showing parked load, idle progress, dispatch,
+  poll, and wakeup counters before and after releasing 128 tasks;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
 

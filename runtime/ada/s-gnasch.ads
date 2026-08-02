@@ -63,6 +63,19 @@ package System.Gnatevl.Scheduler is
    pragma Export
      (C, Is_Dedicated_Group, "gnatevl_runtime_is_dedicated_group");
 
+   --  Internal ABI used by Gnatevl.Observability. Snapshot points at a
+   --  caller-owned, C-compatible record and Snapshot_Size permits the ABI to
+   --  reject mismatched clients instead of overwriting a shorter record.
+   function Observe_Group
+     (Group         : Interfaces.C.int;
+      Snapshot      : System.Address;
+      Snapshot_Size : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export (C, Observe_Group, "gnatevl_runtime_observe_group");
+
+   function Observe_Last_Fatal return Interfaces.C.int;
+   pragma Export
+     (C, Observe_Last_Fatal, "gnatevl_runtime_observe_last_fatal");
+
    --  ABI used by the public Gnatevl.IO package. A timeout below zero waits
    --  indefinitely; otherwise it is a relative count of nanoseconds.
    function In_Event_Task return Interfaces.C.int;

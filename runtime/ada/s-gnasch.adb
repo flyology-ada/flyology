@@ -20,6 +20,7 @@ package body System.Gnatevl.Scheduler is
    use type C.int;
    use type C.long_long;
    use type C.size_t;
+   use type C.unsigned_long_long;
    use type Contexts.Context_Access;
    use type OSI.pthread_t;
    use type Pollers.Event_Kind;
@@ -79,6 +80,34 @@ package body System.Gnatevl.Scheduler is
    type IO_Bucket_Array is array (IO_Bucket_Index) of Fiber_Access;
    type Timer_Heap_Array is array (Positive range <>) of Fiber_Access;
    type Timer_Heap_Access is access Timer_Heap_Array;
+
+   type Runtime_Group_Snapshot is record
+      ABI_Version              : C.unsigned;
+      Thread_State             : C.int;
+      Dedicated                : C.int;
+      Reserved                 : C.int;
+      Members                  : C.unsigned_long_long;
+      Pinned_Members           : C.unsigned_long_long;
+      Ready                    : C.unsigned_long_long;
+      Waiting                  : C.unsigned_long_long;
+      Running                  : C.unsigned_long_long;
+      Migrating                : C.unsigned_long_long;
+      Finished                 : C.unsigned_long_long;
+      Timer_Waits              : C.unsigned_long_long;
+      Descriptor_Waits         : C.unsigned_long_long;
+      File_Waits               : C.unsigned_long_long;
+      Pending_File_Submissions : C.unsigned_long_long;
+      Dispatches               : C.unsigned_long_long;
+      Poll_Batches             : C.unsigned_long_long;
+      Poll_Events              : C.unsigned_long_long;
+      Wakeups                  : C.unsigned_long_long;
+      Migrations_In            : C.unsigned_long_long;
+      Migrations_Out           : C.unsigned_long_long;
+   end record;
+   pragma Convention (C, Runtime_Group_Snapshot);
+   type Runtime_Group_Snapshot_Access is access all Runtime_Group_Snapshot;
+   function To_Runtime_Group_Snapshot is new Ada.Unchecked_Conversion
+     (System.Address, Runtime_Group_Snapshot_Access);
 
    type Fiber is record
       T          : System.Address := System.Null_Address;
@@ -151,6 +180,12 @@ package body System.Gnatevl.Scheduler is
       Timer_Capacity    : Natural := 0;
       Member_Count      : Natural := 0;
       Reserved_For      : System.Address := System.Null_Address;
+      Dispatches        : C.unsigned_long_long := 0;
+      Poll_Batches      : C.unsigned_long_long := 0;
+      Poll_Events       : C.unsigned_long_long := 0;
+      Wakeups           : C.unsigned_long_long := 0;
+      Migrations_In     : C.unsigned_long_long := 0;
+      Migrations_Out    : C.unsigned_long_long := 0;
       --  Signal stacks belong to OS threads, not fibers. Keeping one with
       --  each permanent loop prevents Task_Wrapper from reserving and
       --  installing 32 KiB inside every evented task stack.
@@ -190,6 +225,8 @@ package body System.Gnatevl.Scheduler is
    Initialized    : Boolean := False;
    Event_Runtime_Active : C.int := 0;
    pragma Atomic (Event_Runtime_Active);
+   Last_Fatal_Context : C.int := 0;
+   pragma Atomic (Last_Fatal_Context);
    Groups         : Group_Array := (others => null);
    Fiber_Registry : Registry_Bucket_Array := (others => null);
    Thread_Group   : Loop_Group_Access := null;
@@ -219,7 +256,12 @@ package body System.Gnatevl.Scheduler is
    procedure Unlock_Registry_Shard (Shard : Registry_Shard_Index);
    procedure Lock_Group (Group : not null Loop_Group_Access);
    procedure Unlock_Group (Group : not null Loop_Group_Access);
-   procedure Fatal;
+   Scheduler_Invariant : constant C.int := 1;
+   Mutex_Failure       : constant C.int := 2;
+   Poller_Failure      : constant C.int := 3;
+   Context_Failure     : constant C.int := 4;
+
+   procedure Fatal (Context : C.int := Scheduler_Invariant);
    pragma No_Return (Fatal);
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
@@ -285,8 +327,38 @@ package body System.Gnatevl.Scheduler is
    pragma Import (C, C_Abort, "abort");
    pragma No_Return (C_Abort);
 
-   procedure Fatal is
+   function C_Write
+     (FD     : C.int;
+      Buffer : System.Address;
+      Count  : C.size_t) return C.long;
+   pragma Import (C, C_Write, "write");
+
+   procedure Fatal (Context : C.int := Scheduler_Invariant) is
+      Invariant_Message : aliased constant String :=
+        "GNATEVL fatal: scheduler invariant" & ASCII.LF;
+      Mutex_Message : aliased constant String :=
+        "GNATEVL fatal: scheduler mutex" & ASCII.LF;
+      Poller_Message : aliased constant String :=
+        "GNATEVL fatal: event poller" & ASCII.LF;
+      Context_Message : aliased constant String :=
+        "GNATEVL fatal: context switch" & ASCII.LF;
+      Written : C.long;
    begin
+      Last_Fatal_Context := Context;
+      if Context = Mutex_Failure then
+         Written := C_Write
+           (2, Mutex_Message'Address, Mutex_Message'Length);
+      elsif Context = Poller_Failure then
+         Written := C_Write
+           (2, Poller_Message'Address, Poller_Message'Length);
+      elsif Context = Context_Failure then
+         Written := C_Write
+           (2, Context_Message'Address, Context_Message'Length);
+      else
+         Written := C_Write
+           (2, Invariant_Message'Address, Invariant_Message'Length);
+      end if;
+      pragma Unreferenced (Written);
       C_Abort;
    end Fatal;
 
@@ -295,7 +367,7 @@ package body System.Gnatevl.Scheduler is
         OSI.pthread_mutex_lock (Topology_Lock.Value'Access);
    begin
       if Result /= 0 then
-         Fatal;
+         Fatal (Mutex_Failure);
       end if;
    end Lock_Topology;
 
@@ -304,7 +376,7 @@ package body System.Gnatevl.Scheduler is
         OSI.pthread_mutex_unlock (Topology_Lock.Value'Access);
    begin
       if Result /= 0 then
-         Fatal;
+         Fatal (Mutex_Failure);
       end if;
    end Unlock_Topology;
 
@@ -314,7 +386,7 @@ package body System.Gnatevl.Scheduler is
           (Registry_Shard_Locks (Shard).Value'Access);
    begin
       if Result /= 0 then
-         Fatal;
+         Fatal (Mutex_Failure);
       end if;
    end Lock_Registry_Shard;
 
@@ -324,7 +396,7 @@ package body System.Gnatevl.Scheduler is
           (Registry_Shard_Locks (Shard).Value'Access);
    begin
       if Result /= 0 then
-         Fatal;
+         Fatal (Mutex_Failure);
       end if;
    end Unlock_Registry_Shard;
 
@@ -333,7 +405,7 @@ package body System.Gnatevl.Scheduler is
         OSI.pthread_mutex_lock (Group.Lock.Value'Access);
    begin
       if Result /= 0 then
-         Fatal;
+         Fatal (Mutex_Failure);
       end if;
    end Lock_Group;
 
@@ -342,7 +414,7 @@ package body System.Gnatevl.Scheduler is
         OSI.pthread_mutex_unlock (Group.Lock.Value'Access);
    begin
       if Result /= 0 then
-         Fatal;
+         Fatal (Mutex_Failure);
       end if;
    end Unlock_Group;
 
@@ -956,6 +1028,7 @@ package body System.Gnatevl.Scheduler is
       Item.Next_Group := null;
       Source.Current_Fiber := null;
       Source.Member_Count := Source.Member_Count - 1;
+      Source.Migrations_Out := Source.Migrations_Out + 1;
       Unlock_Group (Source);
 
       Lock_Registry_Shard (Shard);
@@ -966,6 +1039,7 @@ package body System.Gnatevl.Scheduler is
          Item.Reserved_Group := null;
       end if;
       Target.Member_Count := Target.Member_Count + 1;
+      Target.Migrations_In := Target.Migrations_In + 1;
       Item.Group := Target;
       Item.Migration_Target := null;
       Item.Next_Group := Target.Fibers;
@@ -982,7 +1056,7 @@ package body System.Gnatevl.Scheduler is
       Unlock_Registry_Shard (Shard);
 
       if Wake_Target and then not Pollers.Wake (Target.Scheduler_Poller) then
-         Fatal;
+         Fatal (Poller_Failure);
       end if;
       Lock_Group (Source);
    exception
@@ -1116,7 +1190,7 @@ package body System.Gnatevl.Scheduler is
       Unlock_Group (Target);
       Unlock_Registry_Shard (Shard);
       if not Pollers.Wake (Target.Scheduler_Poller) then
-         Fatal;
+         Fatal (Poller_Failure);
       end if;
       return 0;
    end Create;
@@ -1243,6 +1317,102 @@ package body System.Gnatevl.Scheduler is
       Unlock_Topology;
       return Result;
    end Is_Dedicated_Group;
+
+   function Observe_Group
+     (Group         : C.int;
+      Snapshot      : System.Address;
+      Snapshot_Size : C.size_t) return C.int
+   is
+      Target : Loop_Group_Access;
+      Item   : Fiber_Access;
+      Output : Runtime_Group_Snapshot_Access;
+   begin
+      if Snapshot = System.Null_Address
+        or else Snapshot_Size /= Runtime_Group_Snapshot'Size / 8
+        or else not Scheduling.Valid_Group (Group)
+      then
+         return -1;
+      elsif not Initialized then
+         return 0;
+      end if;
+
+      Lock_Topology;
+      Target := Groups (Group_Index (Group));
+      if Target = null then
+         Unlock_Topology;
+         return 0;
+      end if;
+
+      Lock_Group (Target);
+      Output := To_Runtime_Group_Snapshot (Snapshot);
+      Output.all :=
+        (ABI_Version              => 1,
+         Thread_State             =>
+           (if Target.Start_Failed then 3
+            elsif Target.Started then 2
+            else 1),
+         Dedicated                => (if Target.Dedicated then 1 else 0),
+         Reserved                 =>
+           (if Target.Reserved_For = System.Null_Address then 0 else 1),
+         Members                  =>
+           C.unsigned_long_long (Target.Member_Count),
+         Pinned_Members           => 0,
+         Ready                    => 0,
+         Waiting                  => 0,
+         Running                  => 0,
+         Migrating                => 0,
+         Finished                 => 0,
+         Timer_Waits              =>
+           C.unsigned_long_long (Target.Timer_Count),
+         Descriptor_Waits         => 0,
+         File_Waits               => 0,
+         Pending_File_Submissions => 0,
+         Dispatches               => Target.Dispatches,
+         Poll_Batches             => Target.Poll_Batches,
+         Poll_Events              => Target.Poll_Events,
+         Wakeups                  => Target.Wakeups,
+         Migrations_In            => Target.Migrations_In,
+         Migrations_Out           => Target.Migrations_Out);
+
+      Item := Target.Fibers;
+      while Item /= null loop
+         case Item.State is
+            when Ready =>
+               Output.Ready := Output.Ready + 1;
+            when Waiting =>
+               Output.Waiting := Output.Waiting + 1;
+            when Running =>
+               Output.Running := Output.Running + 1;
+            when Migrating =>
+               Output.Migrating := Output.Migrating + 1;
+            when Finished =>
+               Output.Finished := Output.Finished + 1;
+         end case;
+         if Item.IO_Wait then
+            Output.Descriptor_Waits := Output.Descriptor_Waits + 1;
+         end if;
+         if Item.Thread_Pin_Count /= 0 then
+            Output.Pinned_Members := Output.Pinned_Members + 1;
+         end if;
+         if Item.File_Wait then
+            Output.File_Waits := Output.File_Waits + 1;
+         end if;
+         if Item.File_Pending then
+            Output.Pending_File_Submissions :=
+              Output.Pending_File_Submissions + 1;
+         end if;
+         Item := Item.Next_Group;
+      end loop;
+
+      Unlock_Group (Target);
+      Unlock_Topology;
+      return 1;
+   exception
+      when others =>
+         Fatal;
+   end Observe_Group;
+
+   function Observe_Last_Fatal return C.int is (Last_Fatal_Context);
 
    function Migrate (Group : C.int) return C.int is
       Item   : Fiber_Access;
@@ -1665,12 +1835,13 @@ package body System.Gnatevl.Scheduler is
          Remove_IO_Wait_Locked (Group, Item);
          Enqueue (Group, Item);
          Made_Ready := True;
+         Group.Wakeups := Group.Wakeups + 1;
       end if;
       Unlock_Group (Group);
       Unlock_Registry_Shard (Shard);
 
       if Made_Ready and then not Pollers.Wake (Group.Scheduler_Poller) then
-         Fatal;
+         Fatal (Poller_Failure);
       end if;
       return 0;
    end Wake;
@@ -1738,7 +1909,7 @@ package body System.Gnatevl.Scheduler is
       Item.State := Finished;
       Item.Deadline := No_Deadline;
       Contexts.Switch (Item.Context, Group.Scheduler_Context);
-      Fatal;
+      Fatal (Context_Failure);
    end Fiber_Main;
 
    procedure Handle_Poll_Event
@@ -1831,8 +2002,11 @@ package body System.Gnatevl.Scheduler is
         (Group.Scheduler_Poller, 0.0, Events, Count);
       Lock_Group (Group);
       if not Waited then
-         Fatal;
+         Fatal (Poller_Failure);
       end if;
+      Group.Poll_Batches := Group.Poll_Batches + 1;
+      Group.Poll_Events :=
+        Group.Poll_Events + C.unsigned_long_long (Count);
       for Index in 1 .. Count loop
          Handle_Poll_Event (Group, Events (Index));
       end loop;
@@ -1877,6 +2051,7 @@ package body System.Gnatevl.Scheduler is
             end if;
             Next.State := Running;
             Group.Current_Fiber := Next;
+            Group.Dispatches := Group.Dispatches + 1;
             if Dispatches_Until_Timer_Check = 0 then
                Fatal;
             end if;
@@ -1900,8 +2075,11 @@ package body System.Gnatevl.Scheduler is
               (Group.Scheduler_Poller, Timeout, Events, Count);
             Lock_Group (Group);
             if not Waited then
-               Fatal;
+               Fatal (Poller_Failure);
             end if;
+            Group.Poll_Batches := Group.Poll_Batches + 1;
+            Group.Poll_Events :=
+              Group.Poll_Events + C.unsigned_long_long (Count);
             for Index in 1 .. Count loop
                Handle_Poll_Event (Group, Events (Index));
             end loop;

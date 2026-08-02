@@ -1,0 +1,101 @@
+with Interfaces.C;
+
+package body Gnatevl.Observability is
+   package C renames Interfaces.C;
+
+   use type C.int;
+   use type C.size_t;
+   use type C.unsigned;
+
+   ABI_Version : constant C.unsigned := 1;
+
+   type Runtime_Group_Snapshot is record
+      Version                  : C.unsigned;
+      Thread_State             : C.int;
+      Dedicated                : C.int;
+      Reserved                 : C.int;
+      Members                  : C.unsigned_long_long;
+      Pinned_Members           : C.unsigned_long_long;
+      Ready                    : C.unsigned_long_long;
+      Waiting                  : C.unsigned_long_long;
+      Running                  : C.unsigned_long_long;
+      Migrating                : C.unsigned_long_long;
+      Finished                 : C.unsigned_long_long;
+      Timer_Waits              : C.unsigned_long_long;
+      Descriptor_Waits         : C.unsigned_long_long;
+      File_Waits               : C.unsigned_long_long;
+      Pending_File_Submissions : C.unsigned_long_long;
+      Dispatches               : C.unsigned_long_long;
+      Poll_Batches             : C.unsigned_long_long;
+      Poll_Events              : C.unsigned_long_long;
+      Wakeups                  : C.unsigned_long_long;
+      Migrations_In            : C.unsigned_long_long;
+      Migrations_Out           : C.unsigned_long_long;
+   end record;
+   pragma Convention (C, Runtime_Group_Snapshot);
+
+   function Runtime_Observe_Group
+     (Group         : C.int;
+      Snapshot      : access Runtime_Group_Snapshot;
+      Snapshot_Size : C.size_t) return C.int;
+   pragma Import
+     (C, Runtime_Observe_Group, "gnatevl_runtime_observe_group");
+
+   function Runtime_Observe_Last_Fatal return C.int;
+   pragma Import
+     (C, Runtime_Observe_Last_Fatal, "gnatevl_runtime_observe_last_fatal");
+
+   function Snapshot
+     (Group  : Group_Id;
+      Result : out Group_Snapshot) return Boolean
+   is
+      Raw    : aliased Runtime_Group_Snapshot;
+      Status : C.int;
+   begin
+      Status := Runtime_Observe_Group
+        (C.int (Group), Raw'Access, Runtime_Group_Snapshot'Size / 8);
+      if Status = 0 then
+         return False;
+      elsif Status /= 1 or else Raw.Version /= ABI_Version then
+         raise Program_Error with "incompatible GNATEVL observability ABI";
+      end if;
+
+      Result :=
+        (Group                    => Group,
+         Thread_State             =>
+           (case Raw.Thread_State is
+               when 1 => Starting,
+               when 2 => Running,
+               when others => Failed),
+         Dedicated                => Raw.Dedicated /= 0,
+         Reserved                 => Raw.Reserved /= 0,
+         Members                  => Counter (Raw.Members),
+         Pinned_Members           => Counter (Raw.Pinned_Members),
+         Ready                    => Counter (Raw.Ready),
+         Waiting                  => Counter (Raw.Waiting),
+         Running                  => Counter (Raw.Running),
+         Migrating                => Counter (Raw.Migrating),
+         Finished                 => Counter (Raw.Finished),
+         Timer_Waits              => Counter (Raw.Timer_Waits),
+         Descriptor_Waits         => Counter (Raw.Descriptor_Waits),
+         File_Waits               => Counter (Raw.File_Waits),
+         Pending_File_Submissions =>
+           Counter (Raw.Pending_File_Submissions),
+         Dispatches               => Counter (Raw.Dispatches),
+         Poll_Batches             => Counter (Raw.Poll_Batches),
+         Poll_Events              => Counter (Raw.Poll_Events),
+         Wakeups                  => Counter (Raw.Wakeups),
+         Migrations_In            => Counter (Raw.Migrations_In),
+         Migrations_Out           => Counter (Raw.Migrations_Out));
+      return True;
+   end Snapshot;
+
+   function Last_Fatal return Fatal_Context is
+     (case Runtime_Observe_Last_Fatal is
+         when 0 => No_Fatal,
+         when 1 => Scheduler_Invariant,
+         when 2 => Mutex_Failure,
+         when 3 => Poller_Failure,
+         when others => Context_Switch_Failure);
+
+end Gnatevl.Observability;
