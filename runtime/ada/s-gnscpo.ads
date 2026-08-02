@@ -12,6 +12,16 @@ is
 
    type Fiber_Phase is (Running, Ready, Waiting, Migrating, Finished);
    type Destruction_Plan is (Defer, Reap_Now);
+   type Ready_Placement is (Queue_Head, Queue_Tail);
+
+   function Placement_After_Priority_Update
+     (Loss_Of_Inheritance : Boolean) return Ready_Placement
+   with Inline,
+        Post =>
+          (if Loss_Of_Inheritance then
+              Placement_After_Priority_Update'Result = Queue_Head
+           else
+              Placement_After_Priority_Update'Result = Queue_Tail);
 
    function Plan_Destroy (Phase : Fiber_Phase) return Destruction_Plan
    with Inline,

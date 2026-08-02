@@ -4,7 +4,7 @@
 +with System.Gnatevl.Default_Execution;
 +with System.Gnatevl.Linux_Models;
 +with System.Gnatevl.Scheduler;
-@@ -196,6 +197,52 @@
+@@ -196,6 +197,54 @@
     pragma Import
       (C, GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
  
@@ -42,7 +42,9 @@
 +     renames System.Gnatevl.Scheduler.Yield;
 +
 +   function Event_Set_Priority
-+     (T : System.Address; Priority : C.int) return C.int
++     (T                   : System.Address;
++      Priority            : C.int;
++      Loss_Of_Inheritance : C.int) return C.int
 +     renames System.Gnatevl.Scheduler.Set_Priority;
 +
 +   function Event_Destroy (T : System.Address) return C.int
@@ -57,7 +59,7 @@
     function GNAT_has_cap_sys_nice return C.int;
     pragma Import
       (C, GNAT_has_cap_sys_nice, "__gnat_has_cap_sys_nice");
-@@ -334,12 +381,22 @@
+@@ -334,12 +383,22 @@
  
     function Get_Thread_Id (T : ST.Task_Id) return OSI.Thread_Id is
     begin
@@ -82,7 +84,7 @@
 +         else To_Task_Id (Event_Self));
 +   end Self;
  
-@@ -587,15 +644,25 @@
+@@ -587,15 +646,25 @@
     is
        pragma Unreferenced (Reason);
  
@@ -113,7 +115,7 @@
  
        --  EINTR is not considered a failure
  
-@@ -616,7 +683,33 @@
+@@ -616,7 +685,33 @@
        Mode     : ST.Delay_Modes;
        Reason   : System.Tasking.Task_States;
        Timedout : out Boolean;
@@ -148,7 +150,7 @@
  
     -----------------
     -- Timed_Delay --
-@@ -628,7 +721,65 @@
+@@ -628,7 +723,65 @@
     procedure Timed_Delay
       (Self_ID : Task_Id;
        Time    : Duration;
@@ -215,7 +217,7 @@
  
     ---------------------
     -- Monotonic_Clock --
-@@ -650,7 +801,14 @@
+@@ -650,7 +803,14 @@
        pragma Unreferenced (Reason);
        Result : C.int;
     begin
@@ -231,7 +233,7 @@
        pragma Assert (Result = 0);
     end Wakeup;
  
-@@ -660,10 +818,16 @@
+@@ -660,10 +820,16 @@
  
     procedure Yield (Do_Yield : Boolean := True) is
        Result : C.int;
@@ -250,12 +252,16 @@
        end if;
     end Yield;
  
-@@ -692,6 +856,14 @@
+@@ -692,6 +858,18 @@
     begin
        T.Common.Current_Priority := Prio;
  
 +      if Is_Event_Task (T) then
-+         Result := Event_Set_Priority (To_Address (T), C.int (Prio));
++         Result :=
++           Event_Set_Priority
++             (To_Address (T),
++              C.int (Prio),
++              Boolean'Pos (Loss_Of_Inheritance));
 +         if Result /= 0 then
 +            raise Program_Error with "GNATEVL priority update failed";
 +         end if;
@@ -265,7 +271,7 @@
        Param.sched_priority := Prio_To_Linux_Prio (Prio);
  
        if Dispatching_Policy = 'R'
-@@ -824,7 +996,8 @@
+@@ -824,7 +1002,8 @@
     -- Is_Valid_Task --
     -------------------
  
@@ -275,7 +281,7 @@
  
     -----------------------------
     -- Register_Foreign_Thread --
-@@ -906,6 +1079,18 @@
+@@ -906,6 +1085,18 @@
        use type Multiprocessors.CPU_Range, Interfaces.C.size_t;
  
     begin
@@ -301,7 +307,7 @@
        --  Check whether both Dispatching_Domain and CPU are specified for
        --  the task, and the CPU value is not contained within the range of
        --  processors for the domain.
-@@ -1054,6 +1239,13 @@
+@@ -1054,6 +1245,13 @@
        Result : C.int;
  
     begin
@@ -315,7 +321,7 @@
        Result := pthread_mutex_destroy (T.Common.LL.L'Access);
        pragma Assert (Result = 0);
  
-@@ -1088,7 +1280,12 @@
+@@ -1088,7 +1286,12 @@
        --  returns ESRCH, so we don't consider that to be an error.
  
     begin
@@ -329,7 +335,7 @@
           Result :=
             pthread_kill
               (T.Common.LL.Thread,
-@@ -1257,6 +1454,18 @@
+@@ -1257,6 +1460,18 @@
  
        Enter_Task (Environment_Task);
  

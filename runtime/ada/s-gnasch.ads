@@ -27,8 +27,13 @@ package System.Gnatevl.Scheduler is
    function Yield return Interfaces.C.int;
 
    function Set_Priority
-     (T : System.Address; Priority : Interfaces.C.int)
+     (T                   : System.Address;
+      Priority            : Interfaces.C.int;
+      Loss_Of_Inheritance : Interfaces.C.int)
       return Interfaces.C.int;
+   --  Priority is GNARL's current (active) Ada priority. A nonzero
+   --  Loss_Of_Inheritance preserves RM D.2.2(9) head-of-queue placement at
+   --  the task's next event-loop dispatching point.
 
    function Destroy (T : System.Address) return Interfaces.C.int;
 

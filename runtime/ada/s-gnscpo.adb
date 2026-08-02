@@ -1,6 +1,11 @@
 package body System.Gnatevl.Scheduling_Policy
   with SPARK_Mode
 is
+   function Placement_After_Priority_Update
+     (Loss_Of_Inheritance : Boolean) return Ready_Placement
+   is
+     (if Loss_Of_Inheritance then Queue_Head else Queue_Tail);
+
    function Plan_Destroy (Phase : Fiber_Phase) return Destruction_Plan is
      (if Phase in Running | Migrating then Defer else Reap_Now);
 

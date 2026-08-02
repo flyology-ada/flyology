@@ -30,6 +30,7 @@ package body System.Gnatevl.Scheduler is
    use type Pollers.Event_Kind;
    use type Pollers.Interest;
    use type Scheduling.Destruction_Plan;
+   use type Scheduling.Ready_Placement;
    use type SSE.Integer_Address;
 
    Timer_Check_Interval : constant := 64;
@@ -153,6 +154,11 @@ package body System.Gnatevl.Scheduler is
       Reaping     : Boolean := False;
       Can_Migrate : Boolean := True;
       Thread_Pin_Count : Natural := 0;
+      --  RM D.2.2(9) puts a runnable task at the head of its new priority
+      --  queue when it loses inherited priority.  GNARL can report that
+      --  transition while this fiber is still running, so remember it until
+      --  the next scheduler handoff.
+      Enqueue_At_Head : Boolean := False;
       Group      : Loop_Group_Access;
       Migration_Target : Loop_Group_Access;
       Reserved_Group : Loop_Group_Access;
@@ -946,17 +952,30 @@ package body System.Gnatevl.Scheduler is
    is
       Priority : constant Ready_Priority := Ready_Priority (Item.Priority);
       Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
+      At_Head  : constant Boolean := Item.Enqueue_At_Head;
    begin
       Item.State := Ready;
-      Item.Previous_Ready := Bucket.Tail;
-      Item.Next_Ready := null;
+      Item.Enqueue_At_Head := False;
 
-      if Bucket.Tail = null then
+      if At_Head then
+         Item.Previous_Ready := null;
+         Item.Next_Ready := Bucket.Head;
+         if Bucket.Head = null then
+            Bucket.Tail := Item;
+         else
+            Bucket.Head.Previous_Ready := Item;
+         end if;
          Bucket.Head := Item;
       else
-         Bucket.Tail.Next_Ready := Item;
+         Item.Previous_Ready := Bucket.Tail;
+         Item.Next_Ready := null;
+         if Bucket.Tail = null then
+            Bucket.Head := Item;
+         else
+            Bucket.Tail.Next_Ready := Item;
+         end if;
+         Bucket.Tail := Item;
       end if;
-      Bucket.Tail := Item;
 
       if Group.Ready_Count = 0 or else Priority > Group.Highest_Ready then
          Group.Highest_Ready := Priority;
@@ -1248,6 +1267,8 @@ package body System.Gnatevl.Scheduler is
         or else T = System.Null_Address
         or else Stack_Size = 0
         or else Wrapper = System.Null_Address
+        or else Priority < C.int (System.Any_Priority'First)
+        or else Priority > C.int (System.Any_Priority'Last)
       then
          return -1;
       end if;
@@ -1883,11 +1904,21 @@ package body System.Gnatevl.Scheduler is
    end File_IO;
 
    function Set_Priority
-     (T : System.Address; Priority : C.int) return C.int
+     (T                   : System.Address;
+      Priority            : C.int;
+      Loss_Of_Inheritance : C.int) return C.int
    is
       Item : Fiber_Access;
-      Shard : constant Registry_Shard_Index := Registry_Shard_For (T);
+      Shard : Registry_Shard_Index;
    begin
+      if T = System.Null_Address
+        or else Priority < C.int (System.Any_Priority'First)
+        or else Priority > C.int (System.Any_Priority'Last)
+      then
+         return -1;
+      end if;
+
+      Shard := Registry_Shard_For (T);
       Lock_Registry_Shard (Shard);
       Item := Find (T);
       if Item = null then
@@ -1899,9 +1930,15 @@ package body System.Gnatevl.Scheduler is
       if Item.State = Ready then
          Remove_From_Ready (Item.Group, Item);
          Item.Priority := Priority;
+         Item.Enqueue_At_Head :=
+           Scheduling.Placement_After_Priority_Update
+             (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
          Enqueue (Item.Group, Item);
       else
          Item.Priority := Priority;
+         Item.Enqueue_At_Head :=
+           Scheduling.Placement_After_Priority_Update
+             (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
       end if;
       Unlock_Group (Item.Group);
       Unlock_Registry_Shard (Shard);
