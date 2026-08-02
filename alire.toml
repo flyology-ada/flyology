@@ -8,6 +8,18 @@ maintainers-logins = ["yrashk"]
 licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
 website = ""
 tags = ["ada", "runtime", "event-loop", "concurrency"]
+project-files = ["gnatevl.gpr"]
 
 [[depends-on]]
-gnatprove = "^16.1.0"
+gnat = ">=13 & <17"
+
+[available.'case(os)']
+'linux|macos' = true
+'...' = false
+
+[environment]
+GNATEVL_ROOT.set = "${CRATE_ROOT}"
+
+[[actions]]
+type = "test"
+command = ["./scripts/test.sh"]

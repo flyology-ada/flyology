@@ -2,7 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=${ALR:-"$HOME/alr"}
+alr=$("$project_root/scripts/find-alr.sh")
 
 cd "$project_root"
 
@@ -113,3 +113,8 @@ run_gprbuild \
 GNATEVL_DEFAULT=native \
 GNATEVL_LOOP_POOL_SIZE=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
+
+#  Prove that a separate Alire workspace can locate the crate, prepare its own
+#  runtime outside the dependency checkout, and build against only public GPR
+#  and Ada interfaces.
+ALR="$alr" "$project_root/scripts/test-external-consumer.sh"

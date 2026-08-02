@@ -3,7 +3,7 @@ set -eu
 
 showcase_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$showcase_root/.." && pwd)
-alr=${ALR:-"$HOME/alr"}
+alr=$("$project_root/scripts/find-alr.sh")
 workers=${1:-1024}
 rounds=${2:-20}
 pool_size=${3:-4}

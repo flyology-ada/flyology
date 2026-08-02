@@ -2,7 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=${ALR:-"$HOME/alr"}
+alr=$("$project_root/scripts/find-alr.sh")
 
 cd "$project_root"
 GNATEVL_DEFAULT=evented "$project_root/scripts/prepare-rts.sh" >/dev/null

@@ -2,11 +2,11 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=${ALR:-"$HOME/alr"}
+alr=$("$project_root/scripts/find-alr.sh")
 
-cd "$project_root"
+cd "$project_root/proof"
 "$alr" gnatprove \
-  -P gnatevl.gpr \
+  -P "$project_root/gnatevl.gpr" \
   --mode=all \
   --level=1 \
   --output=oneline \
@@ -15,7 +15,7 @@ cd "$project_root"
   gnatevl-time_math.adb
 
 "$alr" gnatprove \
-  -P proof/runtime_policy.gpr \
+  -P "$project_root/proof/runtime_policy.gpr" \
   --mode=all \
   --level=1 \
   --output=oneline \

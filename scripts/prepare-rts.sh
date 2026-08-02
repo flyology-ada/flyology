@@ -2,10 +2,16 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-build_root="$project_root/build/rts"
+build_root=${GNATEVL_RTS_DIR:-"$project_root/build/rts"}
+case "$build_root" in
+  /*) ;;
+  *) build_root="$(pwd)/$build_root" ;;
+esac
+mkdir -p "$build_root"
+build_root=$(CDPATH= cd -- "$build_root" && pwd -P)
 generated_include="$build_root/adainclude"
 generated_lib="$build_root/adalib"
-alr=${ALR:-"$HOME/alr"}
+alr=$("$project_root/scripts/find-alr.sh")
 execution_default=${GNATEVL_DEFAULT:-native}
 loop_pool_size=${GNATEVL_LOOP_POOL_SIZE:-1}
 placement_policy=${GNATEVL_PLACEMENT:-round_robin}

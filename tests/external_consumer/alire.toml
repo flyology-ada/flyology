@@ -1,0 +1,10 @@
+name = "gnatevl_external_consumer"
+description = "Out-of-tree Alire consumer smoke for GNATEVL"
+version = "0.1.0-dev"
+
+authors = ["GNATEVL maintainers"]
+maintainers = ["GNATEVL maintainers <noreply@example.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+executables = ["external_consumer"]
+project-files = ["external_consumer.gpr"]

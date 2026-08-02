@@ -2,7 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=${ALR:-"$HOME/alr"}
+alr=$("$project_root/scripts/find-alr.sh")
 seeds=${GNATEVL_STRESS_SEEDS:-"1 7 42 8675309"}
 batches=${GNATEVL_STRESS_BATCHES:-8}
 width=${GNATEVL_STRESS_WIDTH:-24}
