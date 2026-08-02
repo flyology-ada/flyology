@@ -21,6 +21,9 @@ package System.Gnatevl.Contexts is
    function Stack_Size (Item : Context_Access) return Interfaces.C.size_t;
 
 private
+   --  Opaque 176-byte machine-state image. The architecture-specific byte
+   --  layout and calling-contract rationale live beside the implementation in
+   --  runtime/native/context_switch.S; keep this storage in sync with it.
    type Register_Array is
      array (Natural range 0 .. 21) of Interfaces.C.unsigned_long;
    pragma Convention (C, Register_Array);
