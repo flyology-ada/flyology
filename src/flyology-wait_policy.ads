@@ -1,3 +1,6 @@
+--  Internal, proved classification of poll and nonblocking-I/O results.
+--
+--  Example: `Action := Classify (Result, Errno, EINTR);`
 with Interfaces.C;
 
 private package Flyology.Wait_Policy

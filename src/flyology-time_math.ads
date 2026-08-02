@@ -1,3 +1,6 @@
+--  Internal, proved conversion of Duration deadlines to host poll intervals.
+--
+--  Example: `Milliseconds := To_Milliseconds (0.050);`
 with Interfaces.C;
 
 private package Flyology.Time_Math

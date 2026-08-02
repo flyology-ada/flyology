@@ -3,12 +3,27 @@ with GNAT.Sockets;
 with Flyology.IO.Connections;
 with System.Multiprocessors;
 
+--  Runs a bounded set of handler tasks under one structured Serve call.
+--
+--  Example:
+--
+--     Server_Instance.Serve (Server, Listener, Context);
+--
+--  @formal Handler_Context Shared handler state with caller-defined safety
+--  @formal Handle Per-connection callback invoked by a handler task
+--  @formal Handler_Model Fixed lightweight or native handler designation
+--  @formal Handler_CPU CPU aspect applied to every handler task
 generic
-   --  One Context object is shared by every concurrent Handle invocation and
-   --  may also be observed by the Serve caller. Its mutable state must use
-   --  protected operations, atomics, or another synchronization discipline.
+   --  State shared by every concurrent Handle call. Mutable state must provide
+   --  its own synchronization.
    type Handler_Context (<>) is limited private;
 
+   --  Process one admitted connection. Handle owns no connection lifetime and
+   --  should observe Cancellation during CPU-only work.
+   --  @param Context Shared instance supplied to Serve
+   --  @param Connection Open connection owned by its handler task
+   --  @param Peer Accepted peer address
+   --  @param Cancellation One-shot server cancellation source
    with procedure Handle
      (Context      : in out Handler_Context;
       Connection   : in out Flyology.IO.Connections.Connection;
@@ -16,16 +31,34 @@ generic
       Cancellation : not null access
         Flyology.IO.Connections.Cancellation_Token);
 
+   --  Fixed task designation for all handlers in this generic instance.
    Handler_Model : Flyology.Execution_Model := Flyology.Project_Default;
+   --  CPU aspect for handlers. For lightweight tasks, 0 .. 127 selects a
+   --  shared execution group; for native tasks it retains Ada CPU affinity.
    Handler_CPU   : System.Multiprocessors.CPU_Range :=
      System.Multiprocessors.Not_A_Specific_CPU;
 
 package Flyology.IO.Structured_Servers is
 
+   --  Raised by Serve after one or more handler or admission failures.
    Server_Failed : exception;
 
+   --  Source of the first recorded failure.
+   --  @enum No_Failure No failure has been recorded
+   --  @enum Handler_Callback Handle or connection cleanup failed
+   --  @enum Admission_Loop Accept or handler bookkeeping failed
    type Failure_Origin is (No_Failure, Handler_Callback, Admission_Loop);
 
+   --  Atomic lifecycle snapshot returned by Current.
+   --  @field Running Serve is active or draining
+   --  @field Shutdown_Requested Admission has been stopped
+   --  @field Forced_Cancellation Drain timeout required handler cancellation
+   --  @field Active_Handlers Handlers currently processing a connection
+   --  @field Accepted_Connections Cumulative accepted connections
+   --  @field Completed_Connections Cumulative normal callback completions
+   --  @field Cancelled_Connections Cumulative cancelled callbacks
+   --  @field Failures Cumulative admission, callback, or cleanup failures
+   --  @field First_Failure Origin of the first failure
    type Snapshot is record
       Running              : Boolean;
       Shutdown_Requested   : Boolean;
@@ -38,27 +71,30 @@ package Flyology.IO.Structured_Servers is
       First_Failure        : Failure_Origin;
    end record;
 
-   --  Capacity is both the maximum number of accepted connections and the
-   --  eagerly created number of handler tasks, including while no connection
-   --  is active. The handler task type is fixed by this generic instance: it
-   --  is never converted between native and event-loop execution after
-   --  activation. Handler_CPU uses the normal Flyology meaning: an explicit
-   --  value selects an event group for lightweight handlers and retains stock
-   --  Ada CPU semantics for native handlers; Not_A_Specific_CPU uses automatic
-   --  event-loop pool placement or stock native placement.
+   --  One-shot server object. Capacity is both the admission limit and the
+   --  number of handler tasks created eagerly by Serve. Handler designation is
+   --  fixed at activation and cannot change. Serve, Request_Shutdown, and
+   --  Current coordinate through protected state, but only one Serve is valid.
+   --  Keep the object alive until Serve returns.
+   --  @field Capacity Handler task count and connection admission limit
    type Server (Capacity : Positive) is limited private;
 
-   --  Take ownership of an already-bound, listening socket and serve until
-   --  Request_Shutdown is called or a worker reports a failure. Listener is
-   --  set to No_Socket after ownership transfers. The call is a structured
-   --  task scope and does not return until every handler task has terminated.
-   --
-   --  Shutdown first stops admission and lets active handlers finish. If they
-   --  have not drained after Drain_Timeout, their cancellation token and the
-   --  connection manager are signalled. Infinite waits indefinitely; zero
-   --  requests cancellation immediately. Cancellation is cooperative: a
-   --  handler blocked in Flyology connection I/O wakes promptly, while
-   --  arbitrary user CPU code must observe Cancellation.Requested itself.
+   --  Take sole closing ownership of Listener, set it to No_Socket, and serve
+   --  until shutdown or failure. The call returns only after all handler tasks
+   --  terminate. Shutdown first stops admission. Infinite waits indefinitely;
+   --  zero forces cancellation immediately; other values are seconds. One
+   --  deadline covers the drain. Connection I/O wakes on cancellation, while
+   --  CPU-only Handle code must poll Cancellation.Requested cooperatively.
+   --  Lightweight handlers suspend on event-loop I/O; native handlers block
+   --  their threads.
+   --  @param Item One-shot server kept alive for the call
+   --  @param Listener Bound listening socket; transferred and always closed
+   --  @param Context Shared handler context kept alive for the call
+   --  @param Drain_Timeout Grace period before forced cancellation
+   --  @exception Program_Error Listener, lifecycle, or wake source is invalid
+   --  @exception Server_Failed A handler or admission failure was recorded
+   --  @exception GNAT.Sockets.Socket_Error Listener shutdown or close fails
+   --  @exception Tasking_Error Handler task activation fails
    procedure Serve
      (Item          : aliased in out Server;
       Listener      : in out GNAT.Sockets.Socket_Type;
@@ -66,17 +102,22 @@ package Flyology.IO.Structured_Servers is
       Drain_Timeout : Duration := Infinite)
    with Pre => Drain_Timeout = Infinite or else Drain_Timeout >= 0.0;
 
-   --  Idempotently stop new accepts. Active handlers are allowed to drain
-   --  according to the Drain_Timeout of the concurrent Serve call.
-   --  Requesting before the one allowed Serve call makes that call take and
-   --  close the listener without admitting any connection.
+   --  Idempotently stop new accepts. Active handlers drain according to the
+   --  concurrent Serve call. Calling before Serve causes that call to take and
+   --  close Listener without admitting connections.
+   --  @param Item Server whose admission loop should stop
+   --  @exception Program_Error The shutdown wake source cannot be signalled
    procedure Request_Shutdown (Item : in out Server);
 
+   --  Read one protected lifecycle snapshot. Safe during Serve.
+   --  @param Item Server to observe
+   --  @return Current counters and lifecycle flags
    function Current (Item : Server) return Snapshot;
 
-   --  Empty until a worker records a failure. The information is retained
-   --  after Serve raises Server_Failed so callers can log it without keeping
-   --  an exception occurrence whose lifetime is tied to a handler task.
+   --  Return retained information for the first failure, or an empty string.
+   --  The text remains available after Serve raises Server_Failed.
+   --  @param Item Server to inspect
+   --  @return First failure information, truncated to 2,048 characters
    function First_Failure_Information (Item : Server) return String;
 
 private
@@ -126,6 +167,8 @@ private
       Handler_Stop : aliased Cancellation_Token;
    end record;
 
+   --  Request shutdown and cancellation if Item is still serving.
+   --  @param Item Server being finalized
    overriding procedure Finalize (Item : in out Server);
 
 end Flyology.IO.Structured_Servers;

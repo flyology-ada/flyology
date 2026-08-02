@@ -4,15 +4,35 @@ with Interfaces.C;
 package Flyology.Wake_Sources is
    pragma Preelaborate;
 
+   --  Provides a readable one-shot descriptor for protected cancellation
+   --  state.
+   --
+   --  Example:
+   --
+   --     Flyology.Wake_Sources.Signal (Wake);
+
+   --  Controlled owner of a lazily created descriptor pair. Operations are
+   --  intentionally unsynchronized: place Source inside a protected object or
+   --  otherwise serialize every call. Finalize releases both descriptors.
    type Source is new Ada.Finalization.Limited_Controlled with private;
 
-   --  These operations are intentionally unsynchronized: a Source is owned
-   --  by a protected object, which serializes initialization and signalling.
+   --  Lazily allocate a nonblocking close-on-exec descriptor pair. Repeated
+   --  calls before Release are harmless.
+   --  @param Item Serialized source to initialize
+   --  @exception Program_Error Descriptor creation or configuration fails
    procedure Ensure (Item : in out Source);
+   --  Make Item's read end ready. Repeated signals remain readable until
+   --  Release; this operation does not consume or close the source.
+   --  @param Item Serialized source to signal
+   --  @exception Program_Error Descriptor creation or signaling fails
    procedure Signal (Item : in out Source);
-   --  Release both ends after the owning controller has drained all waiters.
-   --  A later Ensure starts a new descriptor generation.
+   --  Close both owned descriptors. Repeated calls are harmless. A later
+   --  Ensure creates a new descriptor generation.
+   --  @param Item Serialized source whose descriptors are released
    procedure Release (Item : in out Source);
+   --  Borrow the current readable descriptor without transferring ownership.
+   --  @param Item Source to inspect
+   --  @return Read descriptor, or -1 before Ensure or after Release
    function Descriptor (Item : Source) return Interfaces.C.int;
 
 private
@@ -21,5 +41,7 @@ private
       Write_End : Interfaces.C.int := Interfaces.C.int (-1);
    end record;
 
+   --  Release Item without propagating close errors.
+   --  @param Item Source being finalized
    overriding procedure Finalize (Item : in out Source);
 end Flyology.Wake_Sources;

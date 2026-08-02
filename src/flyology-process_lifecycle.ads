@@ -1,5 +1,17 @@
+--  Exposes inert process-level state for the patched tasking runtime.
+--
+--  Example:
+--
+--     State := Flyology.Process_Lifecycle.State;
 package Flyology.Process_Lifecycle with Preelaborate is
 
+   --  Process-wide Flyology scheduler lifecycle.
+   --  @enum Dormant Initialized but no event-loop group was created
+   --  @enum Running At least one group exists and finalization has not begun
+   --  @enum Finalizing Runtime shutdown is in progress
+   --  @enum Stopped Runtime shutdown completed
+   --  @enum Cleanup_Deferred Unsafe cleanup was deferred to process exit
+   --  @enum Fork_Child Process identity changed after runtime initialization
    type Event_Runtime_State is
      (Dormant,
       Running,
@@ -8,25 +20,23 @@ package Flyology.Process_Lifecycle with Preelaborate is
       Cleanup_Deferred,
       Fork_Child);
 
-   --  Dormant means that Flyology is initialized but no event-loop group has
-   --  ever been created. Native-only applications remain in this state until
-   --  GNARL process finalization changes it to Stopped.
-   --
-   --  Cleanup_Deferred means that finalization found an unexpected live
-   --  fiber or could not safely stop a loop. Resources are deliberately left
-   --  to operating-system process exit instead of racing the task.
-   --
-   --  Fork_Child is reported when the process identity no longer matches the
-   --  runtime that initialized Flyology. The underlying query takes no runtime
-   --  lock, but this diagnostic does not broaden the child contract: only
-   --  async-signal-safe operations followed by exec/_exit are supported;
-   --  Ada tasking and all other Flyology operations are unsupported.
+   --  Read the process lifecycle without taking a runtime lock. Native-only
+   --  programs remain Dormant until GNARL finalization changes them to
+   --  Stopped.
+   --  Cleanup_Deferred means live resources were intentionally left for OS
+   --  process exit. Fork_Child is diagnostic only: after fork, only
+   --  async-signal-safe operations followed by exec or _exit are supported.
+   --  @return Current process lifecycle state
+   --  @exception Program_Error The runtime reports an unknown state encoding
    function State return Event_Runtime_State;
 
+   --  Number of possible lazily created execution groups.
    subtype Group_Count is Natural range 0 .. 256;
 
-   --  Number of lazily created groups currently owned by the process. This
-   --  query is inert and does not start an event loop.
+   --  Count groups currently owned by the process. This thread-safe query is
+   --  inert and does not start an event loop.
+   --  @return Number of created groups
+   --  @exception Program_Error The runtime reports an invalid count
    function Created_Groups return Group_Count;
 
 end Flyology.Process_Lifecycle;

@@ -1,3 +1,6 @@
+--  Internal, proved composition of portable file-open flags.
+--
+--  Example: `Flags := Compose (Read_Write, True, False);`
 with Interfaces.C;
 with Flyology_Config;
 

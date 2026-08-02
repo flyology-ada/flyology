@@ -13,6 +13,33 @@ project Flyology is
       when others =>
          for Source_Dirs use ("src/", "config/");
    end case;
+
+   type Documentation_Mode_Type is ("false", "true");
+   Documentation_Mode : Documentation_Mode_Type :=
+     external ("FLYOLOGY_DOCUMENTATION", "false");
+   case Documentation_Mode is
+      when "false" =>
+         null;
+      when "true" =>
+         --  Public API only. Private proof helpers remain build sources in the
+         --  normal scenario but are intentionally outside GNATdoc's scope.
+         for Source_Files use
+           ("flyology.ads",
+            "flyology-execution_groups.ads",
+            "flyology-fairness.ads",
+            "flyology-io.ads",
+            "flyology-io-connections.ads",
+            "flyology-io-dns.ads",
+            "flyology-io-dns-testing.ads",
+            "flyology-io-files.ads",
+            "flyology-io-sockets.ads",
+            "flyology-io-structured_servers.ads",
+            "flyology-io-timers.ads",
+            "flyology-observability.ads",
+            "flyology-observability-stall_watchdogs.ads",
+            "flyology-process_lifecycle.ads",
+            "flyology-wake_sources.ads");
+   end case;
    for Object_Dir use "obj/" & Flyology_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
    for Library_Dir use "lib";
@@ -30,5 +57,9 @@ project Flyology is
    package Binder is
       for Switches ("Ada") use ("-Es"); --  Symbolic traceback
    end Binder;
+
+   package Documentation is
+      for Excluded_Project_Files use ("config/flyology_config.gpr");
+   end Documentation;
 
 end Flyology;

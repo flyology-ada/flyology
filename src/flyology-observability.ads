@@ -5,10 +5,29 @@ package Flyology.Observability with Preelaborate is
 
    use type Interfaces.Unsigned_64;
 
+   --  Exposes inert runtime snapshots for diagnostics and monitoring.
+   --
+   --  Example:
+   --
+   --     Available := Flyology.Observability.Snapshot (0, Current);
+
+   --  Execution-group identifier used by observability calls.
    subtype Group_Id is Flyology.Execution_Groups.Group_Id;
+   --  Unsigned process-lifetime counter; values wrap modulo Counter'Modulus.
    subtype Counter is Interfaces.Unsigned_64;
 
+   --  Lifecycle of one event-loop scheduler thread.
+   --  @enum Starting The thread is entering scheduler startup
+   --  @enum Running The scheduler loop is active
+   --  @enum Failed Startup or scheduler execution failed
    type Event_Thread_State is (Starting, Running, Failed);
+   --  Classification recorded immediately before a fatal runtime abort.
+   --  @enum No_Fatal No fatal path has been recorded
+   --  @enum Scheduler_Invariant A scheduler state invariant failed
+   --  @enum Mutex_Failure A runtime mutex operation failed
+   --  @enum Poller_Failure The host event poller failed
+   --  @enum Context_Switch_Failure A fiber context transition failed
+   --  @enum Fork_Child_Use Unsupported runtime use occurred after fork
    type Fatal_Context is
      (No_Fatal,
       Scheduler_Invariant,
@@ -17,6 +36,29 @@ package Flyology.Observability with Preelaborate is
       Context_Switch_Failure,
       Fork_Child_Use);
 
+   --  Consistent queue state plus cumulative counters for one permanent group.
+   --  @field Group Execution group represented by the snapshot
+   --  @field Thread_State Current scheduler-thread lifecycle state
+   --  @field Dedicated Whether Group is in the dedicated range
+   --  @field Reserved Whether a lightweight task currently reserves Group
+   --  @field Members Current registered fibers in Group
+   --  @field Pinned_Members Current fibers with at least one thread pin
+   --  @field Ready Current runnable fibers
+   --  @field Waiting Current suspended fibers
+   --  @field Running Current executing fibers, normally zero or one
+   --  @field Migrating Current fibers transferring to another group
+   --  @field Finished Current fibers awaiting reap
+   --  @field Timer_Waits Current timer-suspended fibers
+   --  @field Descriptor_Waits Current single-descriptor waits
+   --  @field Interrupt_Waits Current waits with cancellation descriptors
+   --  @field File_Waits Current submitted file operations awaiting completion
+   --  @field Pending_File_Submissions Current file requests queued for submit
+   --  @field Dispatches Cumulative fiber dispatches
+   --  @field Poll_Batches Cumulative event-poller batches
+   --  @field Poll_Events Cumulative host events delivered
+   --  @field Wakeups Cumulative task wake requests
+   --  @field Migrations_In Cumulative migrations entering Group
+   --  @field Migrations_Out Cumulative migrations leaving Group
    type Group_Snapshot is record
       Group                    : Group_Id;
       Thread_State             : Event_Thread_State;
@@ -42,30 +84,41 @@ package Flyology.Observability with Preelaborate is
       Migrations_Out           : Counter;
    end record;
 
+   --  Process-wide lightweight stack allocator state and cumulative counters.
+   --  @field Active_Arenas Current mapped stack arenas
+   --  @field Live_Stacks Current allocated fiber stacks
+   --  @field Live_Usable_Bytes Current requested usable stack bytes
+   --  @field Reserved_Bytes Current virtual bytes reserved for arenas
+   --  @field Arena_Mappings Cumulative arena mappings
+   --  @field Arena_Unmappings Cumulative arena unmaps
+   --  @field Shared_Stacks Cumulative stacks placed in an existing arena
+   --  @field Discarded_Stacks Cumulative accepted MADV_DONTNEED releases
    type Stack_Pool_Snapshot is record
-      Active_Arenas    : Counter;
-      Live_Stacks      : Counter;
+      Active_Arenas     : Counter;
+      Live_Stacks       : Counter;
       Live_Usable_Bytes : Counter;
-      Reserved_Bytes   : Counter;
-      Arena_Mappings   : Counter;
-      Arena_Unmappings : Counter;
-      Shared_Stacks    : Counter;
-      Discarded_Stacks : Counter;
+      Reserved_Bytes    : Counter;
+      Arena_Mappings    : Counter;
+      Arena_Unmappings  : Counter;
+      Shared_Stacks     : Counter;
+      Discarded_Stacks  : Counter;
    end record;
 
-   --  Return False when Group has never been created. This query is inert: it
-   --  does not initialize an event group or allocate runtime resources.
-   --
-   --  The state and queue counts in Result are captured while holding the
-   --  group's scheduler lock. Counters are cumulative modulo Counter'Modulus
-   --  and belong to the lifetime of the permanent group.
+   --  Capture Group while holding its scheduler lock. The query is thread-safe
+   --  and inert: it does not start a group or allocate scheduler resources.
+   --  @param Group Execution group to observe
+   --  @param Result Snapshot written when the group exists
+   --  @return True when Group has been created; False otherwise
+   --  @exception Program_Error Runtime and library observability ABIs differ
    function Snapshot
      (Group  : Group_Id;
       Result : out Group_Snapshot) return Boolean;
 
-   --  Progress between periodic samples is the least intrusive loop-lag
-   --  signal: a group with runnable work and no new dispatches or poll batches
-   --  is not advancing. This deliberately avoids a clock read per dispatch.
+   --  Test whether dispatch or polling counters changed between snapshots.
+   --  This avoids adding a clock read to each scheduler dispatch.
+   --  @param Earlier Older snapshot of a group
+   --  @param Later Newer snapshot of the same group
+   --  @return True when dispatches, poll batches, or poll events advanced
    function Made_Progress
      (Earlier : Group_Snapshot;
       Later   : Group_Snapshot) return Boolean
@@ -73,21 +126,16 @@ package Flyology.Observability with Preelaborate is
        or else Later.Poll_Batches /= Earlier.Poll_Batches
        or else Later.Poll_Events /= Earlier.Poll_Events);
 
-   --  Fatal runtime paths record this classification and write it to standard
-   --  error immediately before aborting. In a normally running process the
-   --  value is No_Fatal; the retained scalar is principally useful to crash
-   --  handlers and postmortem debuggers and requires no scheduler lock.
+   --  Read the lock-free fatal classification retained before runtime abort.
+   --  @return No_Fatal during normal execution, otherwise the last fatal class
    function Last_Fatal return Fatal_Context;
 
-   --  Report process-wide lightweight stack allocation. Adjacent live stacks
-   --  share an inaccessible interior guard page, while each stack remains
-   --  guarded on both sides. Active_Arenas and Reserved_Bytes return to zero
-   --  after all lightweight task objects are finalized; cumulative counters
-   --  are retained for process-lifetime diagnostics. Shared_Stacks counts
-   --  acquisitions placed into an existing arena, and Discarded_Stacks counts
-   --  release-time MADV_DONTNEED advice accepted by the kernel. The advice is
-   --  best-effort; slot protection and empty-arena unmapping do not depend on
-   --  it. This query does not create an event loop or allocate a stack.
+   --  Capture process-wide stack allocation without creating an event loop.
+   --  Adjacent stacks share an inaccessible guard page and remain guarded on
+   --  both sides. Empty arenas are unmapped. MADV_DONTNEED is best effort.
+   --  The query is thread-safe.
+   --  @return Current stack-pool state and cumulative counters
+   --  @exception Program_Error Runtime and library stack-pool ABIs differ
    function Stack_Pool return Stack_Pool_Snapshot;
 
 end Flyology.Observability;
