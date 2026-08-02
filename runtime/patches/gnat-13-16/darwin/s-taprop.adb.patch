@@ -303,7 +303,9 @@
 +              Interfaces.C.size_t (Stack_Size + Alternate_Stack_Size),
 +              Interfaces.C.int (Priority),
 +              Wrapper,
-+              Interfaces.C.int (T.Common.Base_CPU));
++              (if Interfaces.C.int (T.Common.Base_CPU) = 0
++               then -1
++               else Interfaces.C.int (T.Common.Base_CPU)));
 +         Succeeded := Result = 0;
 +         return;
 +      end if;

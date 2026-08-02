@@ -66,6 +66,12 @@ begin
    if Gnatevl.IO.Is_Evented_Task then
       raise Program_Error with "environment task became evented";
    end if;
+   if Groups.Configured_Pool_Size /= 1
+     or else not Groups.In_Configured_Pool (Groups.Default_Group)
+     or else Groups.In_Configured_Pool (1)
+   then
+      raise Program_Error with "default loop-pool compatibility changed";
+   end if;
 
    declare
       Worker : constant Evented_Worker_Access := new Evented_Worker;

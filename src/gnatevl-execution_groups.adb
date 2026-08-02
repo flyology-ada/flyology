@@ -9,6 +9,18 @@ package body Gnatevl.Execution_Groups is
    pragma Import
      (C, Runtime_Current_Group, "gnatevl_runtime_current_group");
 
+   function Runtime_Configured_Pool_Size return C.int;
+   pragma Import
+     (C,
+      Runtime_Configured_Pool_Size,
+      "gnatevl_runtime_configured_pool_size");
+
+   function Runtime_Configured_Placement return C.int;
+   pragma Import
+     (C,
+      Runtime_Configured_Placement,
+      "gnatevl_runtime_configured_placement");
+
    function Runtime_Create_Dedicated_Group return C.int;
    pragma Import
      (C,
@@ -83,6 +95,30 @@ package body Gnatevl.Execution_Groups is
       end if;
       return Group_Id (Result);
    end Current;
+
+   function Configured_Pool_Size return Loop_Pool_Size is
+      Result : constant C.int := Runtime_Configured_Pool_Size;
+   begin
+      if Result < C.int (Loop_Pool_Size'First)
+        or else Result > C.int (Loop_Pool_Size'Last)
+      then
+         raise Group_Error with "invalid event-loop pool configuration";
+      end if;
+      return Loop_Pool_Size (Result);
+   end Configured_Pool_Size;
+
+   function Configured_Placement return Automatic_Placement_Policy is
+   begin
+      case Runtime_Configured_Placement is
+         when 0 =>
+            return Round_Robin;
+         when others =>
+            raise Group_Error with "unknown event-loop placement policy";
+      end case;
+   end Configured_Placement;
+
+   function In_Configured_Pool (Group : Group_Id) return Boolean is
+     (Group < Group_Id (Configured_Pool_Size));
 
    function Create_Dedicated return Dedicated_Group_Id is
       Result : constant C.int := Runtime_Create_Dedicated_Group;

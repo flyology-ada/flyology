@@ -24,5 +24,8 @@ do
   "$project_root/showcases/bin/$showcase"
 done
 
+printf '\n== event_loop_pool ==\n'
+"$project_root/showcases/run_event_loop_pool.sh"
+
 printf '\n== connection_density ==\n'
 "$project_root/showcases/run_connection_density.sh"

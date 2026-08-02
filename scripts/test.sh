@@ -39,6 +39,19 @@ run_gprbuild \
   default_policy_smoke.adb
 "$project_root/tests/bin/default_policy_smoke" native
 
+if GNATEVL_LOOP_POOL_SIZE=0 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "invalid zero-sized event-loop pool was accepted" >&2
+  exit 1
+fi
+if GNATEVL_PLACEMENT=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown event-loop placement policy was accepted" >&2
+  exit 1
+fi
+
 for test_main in \
   cancellation_wake_smoke \
   connection_lifecycle_smoke \
@@ -68,3 +81,22 @@ do
     "$test_main.adb"
   "$project_root/tests/bin/$test_main"
 done
+
+#  Exercise automatic placement separately because the pool policy is compiled
+#  into the prepared RTS. The ordinary suite above intentionally retains the
+#  compatibility default of one lazily created loop.
+GNATEVL_DEFAULT=native \
+GNATEVL_LOOP_POOL_SIZE=3 \
+GNATEVL_PLACEMENT=round_robin \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  loop_pool_smoke.adb
+"$project_root/tests/bin/loop_pool_smoke"
+
+#  Leave the worktree with the documented compatibility configuration.
+GNATEVL_DEFAULT=native \
+GNATEVL_LOOP_POOL_SIZE=1 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null

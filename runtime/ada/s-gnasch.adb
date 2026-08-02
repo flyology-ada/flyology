@@ -2,6 +2,7 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.Gnatevl.Contexts;
 with System.Gnatevl.Poller;
+with System.Gnatevl.Pool_Config;
 with System.Gnatevl.Scheduling_Policy;
 with System.Gnatevl.Time_ABI;
 with System.OS_Constants;
@@ -11,6 +12,7 @@ package body System.Gnatevl.Scheduler is
    package C renames Interfaces.C;
    package Contexts renames System.Gnatevl.Contexts;
    package Pollers renames System.Gnatevl.Poller;
+   package Pool_Config renames System.Gnatevl.Pool_Config;
    package Scheduling renames System.Gnatevl.Scheduling_Policy;
    package Time_ABI renames System.Gnatevl.Time_ABI;
    package OSC renames System.OS_Constants;
@@ -32,7 +34,6 @@ package body System.Gnatevl.Scheduler is
    Poll_Event_Budget    : constant := 64;
    No_Deadline          : constant Duration := Scheduling.No_Deadline;
 
-   Default_Group_Id    : constant C.int := Scheduling.First_Shared_Group;
    Dedicated_First_Id  : constant C.int := Scheduling.First_Dedicated_Group;
    Maximum_Group_Id    : constant C.int := Scheduling.Last_Group;
    subtype Group_Index is Natural range 0 .. Natural (Maximum_Group_Id);
@@ -242,6 +243,7 @@ package body System.Gnatevl.Scheduler is
    pragma Atomic (Last_Fatal_Context);
    Groups         : Group_Array := (others => null);
    Fiber_Registry : Registry_Bucket_Array := (others => null);
+   Next_Automatic_Group : C.unsigned_long_long := 0;
    Thread_Group   : Loop_Group_Access := null;
    pragma Thread_Local_Storage (Thread_Group);
 
@@ -278,6 +280,7 @@ package body System.Gnatevl.Scheduler is
    pragma No_Return (Fatal);
    function Ensure_Group
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
+   function Select_Automatic_Group return C.int;
    --  Registry operations require the bucket's shard lock after bootstrap
    --  publishes Initialized. The environment task is deliberately absent
    --  from this registry: only evented tasks become fibers.
@@ -536,6 +539,26 @@ package body System.Gnatevl.Scheduler is
       end if;
       return Group;
    end Ensure_Group;
+
+   function Select_Automatic_Group return C.int is
+      Selected : C.int;
+   begin
+      --  Serialize only the ticket allocation.  Group construction remains
+      --  lazy, and Ensure_Group takes the topology lock independently after
+      --  this function returns.  The modular counter can wrap indefinitely
+      --  without changing the round-robin sequence.
+      Lock_Topology;
+      Selected :=
+        C.int
+          (Next_Automatic_Group
+           mod C.unsigned_long_long (Pool_Config.Automatic_Pool_Size));
+      Next_Automatic_Group := Next_Automatic_Group + 1;
+      Unlock_Topology;
+      return Selected;
+   exception
+      when others =>
+         Fatal;
+   end Select_Automatic_Group;
 
    function Registry_Bucket_For
      (T : System.Address) return Registry_Bucket_Index
@@ -1171,15 +1194,20 @@ package body System.Gnatevl.Scheduler is
       Item   : Fiber_Access;
       Target : Loop_Group_Access;
       Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
-      Group_Id : constant C.int :=
-        (if Group < 0 then Default_Group_Id else Group);
+      Group_Id : C.int := Group;
    begin
       if not Initialized
         or else T = System.Null_Address
         or else Stack_Size = 0
         or else Wrapper = System.Null_Address
-        or else not Scheduling.Shared_Group (Group_Id)
       then
+         return -1;
+      end if;
+
+      if Group_Id < 0 then
+         Group_Id := Select_Automatic_Group;
+      end if;
+      if not Scheduling.Shared_Group (Group_Id) then
          return -1;
       end if;
 
@@ -1267,6 +1295,11 @@ package body System.Gnatevl.Scheduler is
 
    function Current_Group return C.int is
      (if Current_Task = System.Null_Address then -1 else Thread_Group.Id);
+
+   function Configured_Pool_Size return C.int is
+     (C.int (Pool_Config.Automatic_Pool_Size));
+
+   function Configured_Placement return C.int is (0);
 
    function Create_Dedicated_Group return C.int is
       Id      : C.int;

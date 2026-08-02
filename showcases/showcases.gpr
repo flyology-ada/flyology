@@ -13,6 +13,7 @@ project Showcases is
       "execution_groups.adb",
       "evented_file_io.adb",
       "evented_io.adb",
+      "event_loop_pool.adb",
       "evented_pipeline.adb",
       "evented_vs_threads.adb",
       "hybrid_blocking_bridge.adb",

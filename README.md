@@ -72,9 +72,30 @@ execution resource; it does not create a second tasking language.
 
 ### Execution groups and live migration
 
-The standard Ada `CPU` aspect selects a shared event-loop group when a task is
-created. Tasks with the same value share one loop pthread; different values use
-different loop pthreads and can therefore execute in parallel:
+An evented task whose effective Ada CPU is `Not_A_Specific_CPU` is placed
+automatically. The compatibility configuration has one loop and therefore
+retains the original group-0 behavior. A prepared runtime can instead
+distribute such tasks across a fixed pool with deterministic round-robin
+tickets:
+
+```sh
+GNATEVL_LOOP_POOL_SIZE=4 \
+GNATEVL_PLACEMENT=round_robin \
+  ./scripts/prepare-rts.sh
+```
+
+Pool groups are created independently and lazily: configuration inspection
+does not start them, and a four-loop configuration owns no event pthreads until
+evented tasks are activated. `Gnatevl.Execution_Groups.Configured_Pool_Size`
+and `Configured_Placement` report the compiled policy,
+`In_Configured_Pool` classifies a group, and `Current` reports where the
+calling evented task was actually placed. `Gnatevl.Observability.Snapshot` can
+then inspect each created pool group without creating missing ones.
+
+The standard Ada `CPU` aspect is an explicit override and selects that exact
+shared event-loop group without consuming an automatic placement ticket. Tasks
+with the same value share one loop pthread; different values use different loop
+pthreads and can therefore execute in parallel:
 
 ```ada
 task Parser with CPU => 1 is
@@ -89,6 +110,18 @@ end Writer;
 Shared group identifiers are `0 .. 127`. Values `128 .. 255` are reserved for
 runtime-created dedicated groups, so applying `CPU => 128` or greater to an
 evented task fails activation with `Tasking_Error` rather than selecting a CPU.
+The automatic pool is likewise limited to 128 shared groups. This interpretation
+applies only after event-loop designation: an Ada `CPU` aspect on a native task
+continues through stock GNARL's processor-affinity path.
+Ada D.16 CPU inheritance is also preserved: a task without its own aspect but
+activated by a task with an assigned CPU inherits that effective assignment and
+therefore stays on the inherited group rather than entering the automatic pool.
+
+Automatic placement, explicit `CPU` selection, and live migration are separate
+decisions. Placement chooses an event loop at activation, `CPU` overrides that
+choice, and `Migrate` changes the current group later at an explicit safe point.
+None of these currently claims that the group's pthread is hard-pinned to a
+physical core; the operating system schedules loop pthreads across processors.
 
 `Gnatevl.Execution_Groups` also provides an explicit safe-point migration API:
 
@@ -509,6 +542,7 @@ a crash handler or debugger and querying it takes no scheduler lock.
 | Default to native execution, with a project-wide evented option | Existing tasking code keeps its blocking and parallelism assumptions while high-I/O projects can opt in once | Evented examples and mixed projects must designate their intended lane |
 | Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first evented task pays the one-time group startup handshake |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
+| Place undesignated evented tasks through a build-time loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration | The compatibility default remains one loop; round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
@@ -609,8 +643,8 @@ rather than hidden behind a claim of universal portability.
 
 - [`runtime/ada`](runtime/ada): platform-neutral scheduler, context, and poller
   interfaces.
-- [`runtime/config`](runtime/config): native and evented project-default policy
-  units selected while preparing the RTS.
+- [`runtime/config`](runtime/config): project-default execution and generated
+  automatic loop-pool policy selected while preparing the RTS.
 - [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies,
   plus the Ada platform file-engine implementations.
 - [`runtime/native`](runtime/native): ABI-specific context-switch assembly,
@@ -632,17 +666,21 @@ toolchains. Set `ALR` to override the executable location:
 ```sh
 ./scripts/prepare-rts.sh                       # native project default
 GNATEVL_DEFAULT=evented ./scripts/prepare-rts.sh
+GNATEVL_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
 ~/alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
 ```
 
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,
 selects the project execution default, and builds a static RTS.
-`GNATEVL_DEFAULT` accepts only `native` or `evented`;
-the generated policy is compiled into the RTS, so it is deterministic during
-library elaboration and task activation. The script checks source compatibility
-by applying the source patch under `set -e`, so an incompatible runtime source
-tree fails rather than being silently accepted.
+`GNATEVL_DEFAULT` accepts only `native` or `evented`.
+`GNATEVL_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
+`GNATEVL_PLACEMENT` currently accepts `round_robin`. These generated policies
+are compiled into the RTS rather than read from the process environment, so
+deployment configuration is stable during elaboration and concurrent task
+activation. The script checks source compatibility by applying the source
+patch under `set -e`, so an incompatible runtime source tree fails rather than
+being silently accepted.
 
 Run the complete verification suite with:
 
@@ -675,6 +713,10 @@ release covered by the patch family:
 
 Current smoke coverage includes:
 
+- inert pool configuration queries, one-loop compatibility, exact explicit
+  `CPU` override, round-robin distribution across three lazy loops, native
+  `CPU` behavior, and automatic-placement interaction with scoped pins and
+  dedicated groups;
 - `CPU`-selected shared groups, same-group thread identity, cross-group live
   migration, reusable dedicated lanes, and native-task migration rejection;
 - real C pthread-local state shared by same-loop fibers and changed by
@@ -730,6 +772,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/execution_groups
 ./showcases/bin/runtime_observability
 ./showcases/bin/stall_watchdog
+./showcases/run_event_loop_pool.sh
 ./showcases/run_connection_density.sh
 ```
 
@@ -756,8 +799,29 @@ The examples demonstrate:
   poll, and wakeup counters before and after releasing 128 tasks;
 - native-thread sampling that distinguishes normally waiting and idle groups
   from a sustained, runnable event loop that is not making progress;
+- repeated socket-readiness waves over one loop and a configured loop pool,
+  including per-group task distribution and poll/dispatch counters;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
+
+### Event-loop pool showcase
+
+`run_event_loop_pool.sh` rebuilds the same explicitly evented workload first
+with one automatic loop and then with a configurable pool. Each worker owns a
+real socket endpoint; every round sends one byte to every endpoint, waits for
+all task-aware receives, and reports elapsed time plus per-group worker,
+dispatch, poll-batch, and delivered-event counts:
+
+```sh
+./showcases/run_event_loop_pool.sh 1024 20 4
+```
+
+The arguments are workers, readiness rounds, and comparison pool size. Timing
+starts after task and socket creation, so the measurement is repeated I/O wake
+and dispatch rather than setup density. The pool permits the OS to run several
+loop pthreads concurrently, but it deliberately makes no physical-core-pinning
+claim; load shape, kernel behavior, and host scheduling determine whether more
+loops improve elapsed time.
 
 ### Connection-density showcase
 
@@ -855,6 +919,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   context switch is implemented but is not part of the current automated run.
 - Each event group uses one scheduler pthread. Tasks within a group are
   cooperative, while separate groups can execute in parallel.
+- Evented tasks without a `CPU` aspect use the compiled automatic pool. Its
+  default size is one for compatibility; the only current policy is
+  round-robin task count, which does not measure per-task CPU or I/O load.
 - A group identifies a stable loop pthread but is not currently hard-pinned to
   a physical core. Darwin lacks a public strict pinning API; Linux affinity can
   be added as an explicit policy.

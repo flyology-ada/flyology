@@ -9,6 +9,9 @@ package Gnatevl.Execution_Groups with Preelaborate is
 
    Default_Group : constant Shared_Group_Id := 0;
 
+   subtype Loop_Pool_Size is Positive range 1 .. 128;
+   type Automatic_Placement_Policy is (Round_Robin);
+
    Group_Error     : exception;
    Migration_Error : exception;
 
@@ -32,6 +35,16 @@ package Gnatevl.Execution_Groups with Preelaborate is
         Post => Integer (For_CPU'Result) = Integer (CPU);
 
    function Current return Group_Id;
+
+   --  These configuration queries are inert: they neither create an event
+   --  loop nor change the next automatic placement.  A task designated for
+   --  event-loop execution whose effective Ada CPU is Not_A_Specific_CPU is
+   --  assigned to one of groups 0 .. Configured_Pool_Size - 1 according to
+   --  Configured_Placement.  Current reports the task's actual group; an
+   --  explicit or inherited CPU assignment continues to select that group.
+   function Configured_Pool_Size return Loop_Pool_Size;
+   function Configured_Placement return Automatic_Placement_Policy;
+   function In_Configured_Pool (Group : Group_Id) return Boolean;
 
    --  Reserve an empty reusable group for the calling evented task. Migrating
    --  out consumes the reservation so the lane can be reused; call this again

@@ -7,12 +7,39 @@ generated_include="$build_root/adainclude"
 generated_lib="$build_root/adalib"
 alr=${ALR:-"$HOME/alr"}
 execution_default=${GNATEVL_DEFAULT:-native}
+loop_pool_size=${GNATEVL_LOOP_POOL_SIZE:-1}
+placement_policy=${GNATEVL_PLACEMENT:-round_robin}
 
 case "$execution_default" in
   native|evented) ;;
   *)
     printf '%s\n' \
       "GNATEVL_DEFAULT must be 'native' or 'evented', got: $execution_default" \
+      >&2
+    exit 1
+    ;;
+esac
+
+case "$loop_pool_size" in
+  ''|*[!0-9]*)
+    printf '%s\n' \
+      "GNATEVL_LOOP_POOL_SIZE must be an integer from 1 through 128, got: $loop_pool_size" \
+      >&2
+    exit 1
+    ;;
+esac
+if [ "$loop_pool_size" -lt 1 ] || [ "$loop_pool_size" -gt 128 ]; then
+  printf '%s\n' \
+    "GNATEVL_LOOP_POOL_SIZE must be an integer from 1 through 128, got: $loop_pool_size" \
+    >&2
+  exit 1
+fi
+
+case "$placement_policy" in
+  round_robin) ;;
+  *)
+    printf '%s\n' \
+      "GNATEVL_PLACEMENT must be 'round_robin', got: $placement_policy" \
       >&2
     exit 1
     ;;
@@ -66,6 +93,10 @@ cp "$project_root/runtime/compat/$compat_family/s-gntiab.ads" \
   "$generated_include/"
 cp "$project_root/runtime/config/$execution_default/s-gndeex.ads" \
   "$generated_include/"
+sed \
+  "s/@AUTOMATIC_POOL_SIZE@/$loop_pool_size/g" \
+  "$project_root/runtime/config/pool/s-gnpoco.ads.in" \
+  >"$generated_include/s-gnpoco.ads"
 
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
@@ -88,6 +119,7 @@ fi
   -I "$generated_include" \
   "$generated_include/s-gntiab.ads" \
   "$generated_include/s-gndeex.ads" \
+  "$generated_include/s-gnpoco.ads" \
   "$generated_include/s-gnatev.ads" \
   "$generated_include/s-gnacon.adb" \
   "$generated_include/s-gnfien.adb" \
@@ -98,7 +130,7 @@ fi
   "$generated_include/s-tassta.adb"
 
 cp \
-  s-gntiab.ali s-gndeex.ali s-gnatev.ali s-gnacon.ali s-gnfien.ali s-gnapol.ali \
+  s-gntiab.ali s-gndeex.ali s-gnpoco.ali s-gnatev.ali s-gnacon.ali s-gnfien.ali s-gnapol.ali \
   s-gnscpo.ali s-gnasch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$platform" = linux ]; then
@@ -106,6 +138,7 @@ if [ "$platform" = linux ]; then
 fi
 ar -r "$generated_lib/libgnarl.a" \
   s-gndeex.o \
+  s-gnpoco.o \
   s-gnatev.o \
   s-gnacon.o \
   s-gnfien.o \

@@ -35,6 +35,14 @@ package System.Gnatevl.Scheduler is
    function Current_Group return Interfaces.C.int;
    pragma Export (C, Current_Group, "gnatevl_runtime_current_group");
 
+   function Configured_Pool_Size return Interfaces.C.int;
+   pragma Export
+     (C, Configured_Pool_Size, "gnatevl_runtime_configured_pool_size");
+
+   function Configured_Placement return Interfaces.C.int;
+   pragma Export
+     (C, Configured_Placement, "gnatevl_runtime_configured_placement");
+
    function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, Migrate, "gnatevl_runtime_migrate");
 
