@@ -16,9 +16,9 @@ procedure Cancellation_Wake_Smoke is
    type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
 
    procedure Run_Token_Wake is
-      Manager : aliased Connections.Server (Capacity => Scale * 2);
+      Manager : aliased Connections.Server (Capacity => Scale);
       Token   : aliased Connections.Cancellation_Token;
-      Servers : Socket_Array (1 .. Scale * 2);
+      Servers : Socket_Array (1 .. Scale);
       Peers   : Socket_Array (Servers'Range);
 
       protected Progress is
@@ -77,6 +77,7 @@ procedure Cancellation_Wake_Smoke is
             when Connections.Operation_Cancelled =>
                Was_Cancelled := True;
          end;
+         Owned.Close;
          Progress.Finished (Was_Cancelled);
       exception
          when others =>
@@ -88,24 +89,30 @@ procedure Cancellation_Wake_Smoke is
       pragma Unreferenced (Workers);
       Cancelled_At : Ada.Real_Time.Time;
       Sample : Gnatevl.Observability.Group_Snapshot;
+      Park_Deadline : Ada.Real_Time.Time;
    begin
       for Index in Servers'Range loop
          GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
       end loop;
-      for Index in 1 .. Scale loop
+      for Index in Servers'Range loop
          Workers (Index) :=
            new Worker (Index, Gnatevl.Event_Loop_Task);
       end loop;
-      for Index in Scale + 1 .. Servers'Last loop
-         Workers (Index) := new Worker (Index, Gnatevl.Native_Thread);
-      end loop;
       Progress.All_Started;
-      delay 0.050;
-      pragma Assert (Gnatevl.Observability.Snapshot (0, Sample));
-      pragma Assert
-        (Sample.Interrupt_Waits = Gnatevl.Observability.Counter (Scale));
-      pragma Assert
-        (Sample.Descriptor_Waits = Gnatevl.Observability.Counter (Scale));
+      Park_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      loop
+         pragma Assert (Gnatevl.Observability.Snapshot (0, Sample));
+         exit when
+           Sample.Interrupt_Waits = Gnatevl.Observability.Counter (Scale)
+           and then
+             Sample.Descriptor_Waits = Gnatevl.Observability.Counter (Scale);
+         if Ada.Real_Time.Clock >= Park_Deadline then
+            Token.Request;
+            raise Program_Error with
+              "evented cancellable connections did not reach the poller";
+         end if;
+         delay 0.001;
+      end loop;
       Cancelled_At := Ada.Real_Time.Clock;
       Token.Request;
       Progress.All_Finished;
@@ -164,19 +171,27 @@ procedure Cancellation_Wake_Smoke is
       Server, Peer : GNAT.Sockets.Socket_Type;
 
       protected Result is
+         procedure Started;
          procedure Finished (Cancelled : Boolean);
+         entry Wait_Started;
          entry Wait;
          function Passed return Boolean;
       private
+         Is_Started : Boolean := False;
          Done : Boolean := False;
          OK   : Boolean := False;
       end Result;
       protected body Result is
+         procedure Started is
+         begin
+            Is_Started := True;
+         end Started;
          procedure Finished (Cancelled : Boolean) is
          begin
             OK := Cancelled;
             Done := True;
          end Finished;
+         entry Wait_Started when Is_Started is begin null; end Wait_Started;
          entry Wait when Done is begin null; end Wait;
          function Passed return Boolean is (OK);
       end Result;
@@ -192,6 +207,7 @@ procedure Cancellation_Wake_Smoke is
             Was_Cancelled : Boolean := False;
          begin
             Connections.Take (Manager, Server, Owned);
+            Result.Started;
             begin
                Owned.Receive_Exactly
                  (Data, Cancellation_Quantum => 10.0);
@@ -202,7 +218,7 @@ procedure Cancellation_Wake_Smoke is
             Result.Finished (Was_Cancelled);
          end Worker;
       begin
-         delay 0.050;
+         Result.Wait_Started;
          Manager.Request_Shutdown;
          Manager.Await_Drained;
          Result.Wait;

@@ -693,8 +693,8 @@ Current smoke coverage includes:
   descriptor, and timeout behavior;
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
   cancellation, RAII socket release, admission closure, accept cancellation,
-  immediate pre-requested cancellation, timeout precedence, and 128 idle
-  native/evented connections cancelled despite a ten-second legacy quantum;
+  immediate pre-requested cancellation, timeout precedence, 64 idle evented
+  connections, and blocked native parity despite a ten-second legacy quantum;
 - descriptor-readiness fairness under a continuously yielding evented task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;

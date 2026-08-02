@@ -241,7 +241,10 @@ begin
 
          pragma Unreferenced (Acceptor);
       begin
-         delay 0.020;
+         for Attempt in 1 .. 1_000 loop
+            exit when Accept_Manager.Active = 1;
+            delay 0.001;
+         end loop;
          pragma Assert (Accept_Manager.Active = 1);
          Accept_Manager.Request_Shutdown;
          Accept_Manager.Await_Drained;
@@ -291,7 +294,7 @@ begin
             begin
                Owned.Receive_Exactly
                  (Data,
-                  Cancellation_Quantum => 0.010,
+                  Cancellation_Quantum => 10.0,
                   Token => Native_Token'Access);
             exception
                when Connections.Operation_Cancelled =>
