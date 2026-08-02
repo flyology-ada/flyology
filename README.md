@@ -195,6 +195,25 @@ ready queue.
 Both budgets are explicit policy, keeping I/O moving without allowing a hot
 descriptor set to monopolize the loop in the opposite direction.
 
+CPU loops can make that policy reusable with a time-budgeted checkpoint:
+
+```ada
+Budget : Gnatevl.Fairness.Yield_Budget;
+
+Budget.Configure (Ada.Real_Time.Microseconds (250));
+while More_Work loop
+   Process_One_Item;
+   Budget.Checkpoint;
+end loop;
+```
+
+`Checkpoint` reads the monotonic clock and performs `delay 0.0` only after its
+quantum expires. It works for both task designations: an evented task gives its
+loop peers a turn, while a native task offers its pthread to the OS scheduler.
+It deliberately does not interrupt arbitrary Ada instructions; code that never
+calls a runtime suspension or checkpoint remains cooperative and can still own
+the loop until it returns.
+
 ## Task-aware I/O
 
 GNATEVL exposes synchronous-looking operations in:
@@ -294,6 +313,7 @@ thread-pool runtime.
 | Shard the task registry | Independent loops and native wake sources should not serialize every lookup on one process-wide mutex | 64 shard locks isolate ordinary wake and priority paths; group creation, reservations, migration, and destruction still coordinate through a short-held topology lock |
 | Hash descriptor waiters per group | Readiness delivery must not scan every fiber once for every ready descriptor | Delivery is constant-time on average while collision chains retain same-descriptor reader/writer fan-out |
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
+| Make CPU fairness explicit | Arbitrary signal-time preemption would cross Ada and GNARL critical regions at unsafe instructions | Time-budgeted checkpoints provide bounded cooperative slices where application invariants are known to be stable |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
@@ -448,6 +468,7 @@ After they have been built, an individual showcase can be rerun directly:
 ```sh
 ./showcases/bin/evented_pipeline
 ./showcases/bin/many_evented_tasks
+./showcases/bin/cooperative_fairness
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/evented_vs_threads
 ./showcases/bin/evented_io
@@ -459,6 +480,8 @@ The examples demonstrate:
 
 - a producer/transform/sink pipeline using entry calls;
 - fan-out timers and protected aggregation;
+- uncooperative CPU monopolization versus time-budgeted cooperative checkpoints
+  on the same event loop;
 - evented coordination with native CPU workers;
 - `CPU`-selected loop groups, live cross-loop migration, a reusable dedicated
   one-task thread, and rejection of unsafe live stock-native conversion;
@@ -568,7 +591,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 - The environment task uses its pthread-owned initial stack and therefore
   cannot migrate; child evented tasks use guarded runtime-owned stacks and can.
 - Cooperative scheduling means an evented task that never reaches a suspension
-  point can monopolize the loop.
+  point can monopolize the loop. `Gnatevl.Fairness.Yield_Budget` makes explicit
+  time-budgeted checkpoints reusable but cannot force unmodified CPU loops to
+  yield safely.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
 - Regular-file operations use an adaptive native executor pool rather than

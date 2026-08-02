@@ -7,6 +7,7 @@ project Showcases is
    for Exec_Dir use "bin";
    for Main use
      ("connection_density.adb",
+      "cooperative_fairness.adb",
       "execution_groups.adb",
       "evented_io.adb",
       "evented_pipeline.adb",
