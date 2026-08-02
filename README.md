@@ -114,10 +114,9 @@ flowchart TB
     E[Evented groups: one scheduler pthread per group]
     N[Native lane: one pthread per designated task]
     Q[Per-group priority queues and timer deadlines]
-    K[Per-group OS poller readiness and cross-thread wake]
+    K[Per-group OS readiness and completion poller]
     C[Guarded stackful task contexts]
     X[Small ABI-specific register swap]
-    F[Adaptive native Ada regular-file executors]
     O[Operating system]
 
     A --> G --> R
@@ -126,11 +125,9 @@ flowchart TB
     E --> Q
     E --> K
     E --> C --> X
-    E -->|regular-file request| F
     E <-->|GNARL synchronization| N
-    K --> O
+    K -->|sockets, files, timers, wakeups| O
     N --> O
-    F --> O
 ```
 
 ### GNARL integration boundary
@@ -163,7 +160,7 @@ These are independent mechanisms with different jobs:
 | Mechanism | Purpose | Current implementation | Portability boundary |
 | --- | --- | --- | --- |
 | Context switching | Save one evented task's CPU/stack state and resume another | Guarded stacks plus a small ABI-specific register-swap routine for AArch64/macOS and x86-64/macOS or Linux | ABI and architecture |
-| Event polling | Sleep until a descriptor, timer, or cross-thread wake is ready | `kqueue`/`EVFILT_USER` on macOS; `epoll`/`eventfd` on Linux | Operating system |
+| Event polling | Sleep until socket readiness, file completion, a timer deadline, or a cross-thread wake | `kqueue` with `EVFILT_AIO`/`EVFILT_USER` on macOS; `epoll` with `io_uring`/`eventfd` on Linux | Operating system |
 | Scheduling | Choose which runnable Ada task executes next | Ada priority-ready queue and deadline bookkeeping | Runtime policy |
 
 GNATEVL does not use `ucontext`. A context switch cannot tell whether a socket is
@@ -312,28 +309,36 @@ expiration removes the minimum repeatedly without scanning unrelated fibers.
 The index stored in each fiber also lets readiness, abort wakeups, and reaping
 remove that fiber's deadline directly.
 
+The earliest deadline becomes the timeout of the group's next `kevent64` or
+`epoll_wait`; expiry therefore wakes the same event-loop syscall already used
+for sockets and file completions. There is no timer thread and no per-task OS
+timer object.
+
 ### Regular files
 
-Regular disk files are different from sockets: readiness from `kqueue` or
-`epoll` does not make a potentially blocking `pread` or `pwrite` safe to execute
-on the event-loop thread.
+Regular files are not readiness-oriented: marking a regular descriptor readable
+with `kqueue` or `epoll` does not make a potentially blocking `pread` safe on an
+event-loop thread. GNATEVL therefore submits positional reads and writes to an
+actual kernel completion facility and suspends only the calling Ada task.
 
-GNATEVL therefore uses designated native Ada executors for file operations. An
-evented caller acquires the next executor that is actually idle, rendezvous with
-it, suspends through normal GNARL machinery, and resumes when the result is
-available. Waiting for an executor is the bounded backpressure point; it no
-longer assigns a request round-robin to a busy worker while another is idle. A
-native caller can execute the same positional operation directly. Explicit
-offsets avoid shared file-position races.
+- On macOS, POSIX AIO posts `EVFILT_AIO` completions directly to the execution
+  group's kqueue. `kevent64` carries the XNU completion result and error back to
+  the Ada scheduler.
+- On Linux, each execution group owns an `io_uring`; its completion queue
+  signals the group's existing eventfd, which is already watched by epoll. If
+  `io_uring_setup` is unavailable or forbidden, the backend uses Linux native
+  AIO with `IOCB_FLAG_RESFD` and the same eventfd completion path.
 
-The default executor width is twice the host CPU count, clamped to `4 .. 32`.
-`GNATEVL_FILE_WORKERS` can override it in `1 .. 128`, and
-`Gnatevl.IO.Files.Executor_Width` reports the selected value. This is a scalable
-completion bridge, not a claim to use Linux `io_uring`; a real `io_uring`
-backend remains separate platform work.
+Submission-queue saturation is explicit backpressure: the task remains
+suspended in a per-group FIFO until the scheduler can submit it. No Ada worker
+task, pthread pool, or blocking `pread`/`pwrite` call is hidden behind the
+evented API. Native-designated callers use direct positional syscalls. Explicit
+offsets avoid shared file-position races in both lanes.
 
-This worker bridge is intentionally written as Ada tasking, not as a separate C
-thread-pool runtime.
+`Open` and `Close` are still direct metadata syscalls because neither supported
+platform provides an equivalent portable completion operation for them. They
+normally complete quickly on local filesystems, but applications should isolate
+potentially slow remote-filesystem metadata operations on a native task.
 
 ## Design decisions
 
@@ -341,7 +346,7 @@ thread-pool runtime.
 | --- | --- | --- |
 | Keep ordinary Ada task syntax | Existing programs and GNARL semantics remain recognizable | No separate `async`/`await`, callback, or future API is required |
 | Make evented execution the default | Large numbers of mostly-waiting tasks should not require one pthread each | CPU-bound or blocking code must be identified and isolated |
-| Keep native threads as a task designation | Some foreign calls, disk work, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
+| Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
@@ -353,19 +358,20 @@ thread-pool runtime.
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
-| Offload regular-file I/O | Disk operations must not stall the single event loop | An adaptive idle-executor pool introduces bounded parallelism and explicit acquisition backpressure |
+| Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code and bounded submission queues |
 | Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Limited owners release permits automatically; cancellation latency is bounded by a configurable readiness quantum |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require the matching installed GNAT 16.1 runtime sources |
 
 ## Ada, C, and assembly boundary
 
-Ada implements scheduling, queues, timeouts, descriptor registration, stacks,
-task routing, I/O retry logic, and the regular-file worker protocol. It imports
-the platform primitives that the operating system exposes through its C ABI,
-including `kqueue`/`kevent`, `epoll`/`eventfd`, `mmap`, `poll`, socket calls, and
-positional file calls. One tiny C function exposes the target's
-`MAP_ANONYMOUS` value without duplicating a platform header constant in Ada.
+Ada implements scheduling, queues, timeout and backpressure policy, descriptor
+registration, stacks, task routing, and I/O retry logic. It imports the platform
+primitives exposed through the C ABI, including `kqueue`/`kevent64`,
+`epoll`/`eventfd`, `mmap`, `poll`, and socket calls. A narrow C file-engine shim
+owns only the kernel ABI objects that are impractical to model safely in Ada:
+Darwin `aiocb` allocations and Linux `io_uring` mappings or native-AIO control
+blocks. It creates no threads and contains no scheduling policy.
 
 The only assembly is the minimal context swap needed to save and restore the
 callee-saved machine state. Rewriting a system-call declaration in Ada would
@@ -421,6 +427,7 @@ from this Ada source tree.
 | Area | macOS | Linux | Remaining boundary |
 | --- | --- | --- | --- |
 | Descriptor poller | `kqueue` with `EVFILT_USER` | `epoll` with `eventfd` | Windows IOCP needs a completion-oriented adapter |
+| Regular-file completion | POSIX AIO with `EVFILT_AIO` | Per-group `io_uring`; Linux native AIO fallback | Windows overlapped I/O/IOCP adapter |
 | CPU placement | Stable group pthread; no public hard pinning | Stable group pthread; strict affinity is not yet applied | Optional platform binding policy |
 | Context switch | AArch64 and x86-64 assembly | x86-64 assembly | One small implementation per additional architecture/ABI |
 | Stack allocation | `mmap` plus guard pages | `mmap` plus guard pages | Platform virtual-memory API |
@@ -436,8 +443,8 @@ rather than hidden behind a claim of universal portability.
 - [`runtime/ada`](runtime/ada): platform-neutral scheduler, context, and poller
   interfaces.
 - [`runtime/platform`](runtime/platform): `kqueue` and `epoll` poller bodies.
-- [`runtime/native`](runtime/native): ABI-specific context-switch assembly and
-  the minimal platform-constant shim.
+- [`runtime/native`](runtime/native): ABI-specific context-switch assembly,
+  minimal platform constants, and the thread-free kernel file-completion shim.
 - [`runtime/patches`](runtime/patches): Darwin and Linux GNARL task-primitives
   integration.
 - [`src`](src): public task-aware I/O packages.
@@ -488,7 +495,8 @@ Current smoke coverage includes:
 - bounded connection admission, one-shot cancellation, shutdown-driven I/O
   cancellation, RAII socket release, admission closure, and accept cancellation;
 - descriptor-readiness fairness under a continuously yielding evented task;
-- read/write/create/truncate file-open combinations and same-descriptor reads;
+- read/write/create/truncate file-open combinations plus 64 concurrent
+  positional operations through the kernel-completion path;
 - repeated evented-child teardown under a native master, exercising deferred
   fiber destruction and ATCB-address reuse;
 - 16 KiB `Storage_Size` parity across evented and native tasks, including
@@ -514,6 +522,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/evented_vs_threads
 ./showcases/bin/evented_io
+./showcases/bin/evented_file_io
 ./showcases/bin/execution_groups
 ./showcases/run_connection_density.sh
 ```
@@ -532,6 +541,8 @@ The examples demonstrate:
 - evented versus pthread-backed tasks under identical source-level work;
 - a real loopback TCP exchange, positional file I/O, and timers through the
   task-aware I/O API;
+- 256 evented file tasks sharing one event-loop pthread, with the process thread
+  count sampled before their kernel-completion writes are released;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
 
@@ -642,9 +653,17 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   yield safely.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
-- Regular-file operations use an adaptive native executor pool rather than
-  kernel asynchronous file I/O. Linux `io_uring` and platform-native completion
-  backends are not implemented yet.
+- Evented regular-file data operations use bounded kernel completion queues;
+  queue saturation suspends and retries the Ada task without creating workers.
+  Linux prefers `io_uring` and falls back to native AIO when the syscall is
+  unavailable or forbidden. The fallback is still kernel completion I/O, but
+  filesystem support and true asynchronous behavior are more limited than with
+  `io_uring`.
+- File `Open` and `Close` remain direct metadata syscalls and may briefly occupy
+  an event loop, particularly on remote or unhealthy filesystems.
+- A submitted file buffer remains owned by the kernel until completion. An
+  abort request therefore wakes that task only after the outstanding operation
+  completes; cancellable file-operation handles are not yet a public API.
 - `Gnatevl.IO.Connections` provides cooperative cancellation without concurrent
   descriptor close, bounded by its readiness quantum. Raw socket operations do
   not infer descriptor ownership; closing a raw descriptor concurrently with

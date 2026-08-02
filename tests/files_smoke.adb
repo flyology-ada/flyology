@@ -42,8 +42,7 @@ begin
    end if;
 
    declare
-      Batch_Size : constant Positive :=
-        Positive'Min (64, Gnatevl.IO.Files.Executor_Width * 2);
+      Batch_Size : constant Positive := 64;
 
       protected Progress is
          procedure Finished (Passed : Boolean);
@@ -94,12 +93,12 @@ begin
       end loop;
       Progress.Wait;
       if not Progress.Passed then
-         raise Program_Error with "parallel file executor write failed";
+         raise Program_Error with "parallel kernel file write failed";
       end if;
 
       Gnatevl.IO.Files.Read_At (File, 0, Batch, Last);
       if Last /= Batch'Last then
-         raise Program_Error with "parallel file executor read was short";
+         raise Program_Error with "parallel kernel file read was short";
       end if;
       for Index in Writers'Range loop
          if Batch (Stream_Element_Offset (Index)) /=
@@ -116,8 +115,19 @@ begin
        (Path,
         Mode     => Gnatevl.IO.Files.Write_Only,
         Truncate => True);
+
+   begin
+      Gnatevl.IO.Files.Read_At (File, 0, Incoming, Last);
+   exception
+      when Gnatevl.IO.Device_Error =>
+         Rejected := True;
+   end;
+   if not Rejected then
+      raise Program_Error with "read from write-only file was accepted";
+   end if;
    Gnatevl.IO.Files.Close (File);
 
+   Rejected := False;
    File := Gnatevl.IO.Files.Open (Path, Mode => Gnatevl.IO.Files.Read_Only);
    Gnatevl.IO.Files.Read_At (File, 0, Incoming, Last);
    if Last >= Incoming'First then

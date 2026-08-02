@@ -9,11 +9,6 @@ package Gnatevl.IO.Files is
    type Open_Mode is (Read_Only, Write_Only, Read_Write);
    type File_Offset is range 0 .. Interfaces.C.long_long'Last;
 
-   --  Number of native executors serving evented file operations. The default
-   --  is derived from the host CPU count and can be overridden before program
-   --  start with GNATEVL_FILE_WORKERS (clamped to 1 .. 128).
-   function Executor_Width return Positive;
-
    function Open
      (Path     : String;
       Mode     : Open_Mode := Read_Only;
@@ -21,6 +16,11 @@ package Gnatevl.IO.Files is
       Truncate : Boolean := False) return File_Descriptor;
 
    procedure Close (File : in out File_Descriptor);
+
+   --  Evented tasks submit reads and writes to the execution group's kernel
+   --  completion backend (Darwin AIO/kqueue or Linux io_uring/epoll). Native
+   --  tasks use positional syscalls directly. Open and Close are metadata
+   --  syscalls on both lanes; no hidden file-worker tasks are created.
 
    procedure Read_At
      (File   : File_Descriptor;

@@ -13,6 +13,7 @@ cd "$project_root"
 
 for showcase in \
   execution_groups \
+  evented_file_io \
   evented_io \
   evented_pipeline \
   hybrid_blocking_bridge \

@@ -40,6 +40,8 @@ cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
 cc -O2 -c "$project_root/runtime/native/platform.c" \
   -o "$build_root/obj/platform.o"
+cc -O2 -std=c11 -c "$project_root/runtime/native/file_engine.c" \
+  -o "$build_root/obj/file_engine.o"
 
 cd "$build_root/obj"
 "$alr" exec -- gcc -c -gnatg -gnat2022 -O2 -fPIC -gnata \
@@ -63,6 +65,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-taprop.o \
   s-tassta.o \
   context_switch.o \
+  file_engine.o \
   platform.o
 ranlib "$generated_lib/libgnarl.a"
 

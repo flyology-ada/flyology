@@ -15,7 +15,7 @@ procedure Evented_IO is
 
    Request_Text : constant String := "hello from native task";
    Reply_Text   : constant String := "hello from evented task";
-   File_Text    : constant String := "file I/O crossed the native worker pool";
+   File_Text    : constant String := "file I/O completed through the kernel queue";
    File_Path    : constant String := "/tmp/gnatevl-evented-io-showcase.dat";
 
    function Bytes (Text : String) return Stream_Element_Array is
@@ -288,5 +288,6 @@ begin
    if not Results.Passed then
       raise Program_Error with "evented I/O showcase failed";
    end if;
-   Put_Line ("timers, files, and sockets passed across both task models");
+   Put_Line
+     ("timers, files, and sockets passed without hidden I/O workers");
 end Evented_IO;

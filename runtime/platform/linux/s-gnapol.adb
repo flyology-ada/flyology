@@ -2,11 +2,13 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.C_Time;
 with System.OS_Interface;
+with System.Storage_Elements;
 
 package body System.Gnatevl.Poller is
    package C renames Interfaces.C;
    package C_Time renames System.C_Time;
    package OSI renames System.OS_Interface;
+   package SSE renames System.Storage_Elements;
 
    use type C.int;
    use type C.long;
@@ -40,6 +42,18 @@ package body System.Gnatevl.Poller is
 
    type Epoll_Event_Array is array (Positive range <>) of Epoll_Event
      with Convention => C;
+
+   type File_Completion is record
+      Token      : SSE.Integer_Address;
+      Result     : C.long_long;
+      Error_Code : C.int;
+      Reserved   : C.int;
+   end record
+     with Convention => C;
+
+   type File_Completion_Array is
+     array (Positive range <>) of aliased File_Completion
+       with Convention => C;
 
    type Watch_Record;
    type Watch_Access is access all Watch_Record;
@@ -88,6 +102,34 @@ package body System.Gnatevl.Poller is
    function Close (Descriptor : C.int) return C.int;
    pragma Import (C, Close, "close");
 
+   function File_Engine_Create
+     (Poller_FD, Wake_FD : C.int) return System.Address;
+   pragma Import
+     (C, File_Engine_Create, "gnatevl_file_engine_create");
+
+   procedure File_Engine_Destroy (Engine : System.Address);
+   pragma Import
+     (C, File_Engine_Destroy, "gnatevl_file_engine_destroy");
+
+   function File_Engine_Submit
+     (Engine      : System.Address;
+      Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Offset      : C.long_long;
+      For_Write   : C.int;
+      Token       : SSE.Integer_Address;
+      Error_Code  : access C.int) return C.int;
+   pragma Import
+     (C, File_Engine_Submit, "gnatevl_file_engine_submit");
+
+   function File_Engine_Drain
+     (Engine      : System.Address;
+      Completions : System.Address;
+      Capacity    : C.unsigned) return C.int;
+   pragma Import
+     (C, File_Engine_Drain, "gnatevl_file_engine_drain");
+
    procedure Set_Head (Item : in out Poller; Value : Watch_Access);
 
    function Find
@@ -99,6 +141,11 @@ package body System.Gnatevl.Poller is
      (Item : in out Poller; Watch_Item : not null Watch_Access);
 
    function Timeout_Milliseconds (Timeout : Duration) return C.int;
+
+   function Drain_File_Events
+     (Item   : in out Poller;
+      Events : in out Poll_Event_Array;
+      Count  : in out Natural) return Boolean;
 
    function Head (Item : Poller) return Watch_Access is
      (Address_To_Watch (Item.State));
@@ -180,6 +227,39 @@ package body System.Gnatevl.Poller is
       return C.int (Value);
    end Timeout_Milliseconds;
 
+   function Drain_File_Events
+     (Item   : in out Poller;
+      Events : in out Poll_Event_Array;
+      Count  : in out Natural) return Boolean
+   is
+      Available   : constant Natural := Events'Length - Count;
+      Completions : aliased File_Completion_Array
+        (1 .. Natural'Max (1, Available));
+      Drained     : C.int;
+   begin
+      if Available = 0 then
+         return True;
+      end if;
+      Drained :=
+        File_Engine_Drain
+          (Item.File_State,
+           Completions'Address,
+           C.unsigned (Available));
+      if Drained < 0 or else Natural (Drained) > Available then
+         return False;
+      end if;
+      for Index in 1 .. Natural (Drained) loop
+         Count := Count + 1;
+         Events (Events'First + Count - 1) :=
+           (Kind       => File_Event,
+            Descriptor => -1,
+            Token      => SSE.To_Address (Completions (Index).Token),
+            Result     => Completions (Index).Result,
+            Error_Code => Completions (Index).Error_Code);
+      end loop;
+      return True;
+   end Drain_File_Events;
+
    function Initialize (Item : in out Poller) return Boolean is
       Event  : aliased Epoll_Event;
       Result : C.int;
@@ -215,6 +295,15 @@ package body System.Gnatevl.Poller is
          Item.Descriptor := -1;
          return False;
       end if;
+      Item.File_State :=
+        File_Engine_Create (Item.Descriptor, Item.Wake_Descriptor);
+      if Item.File_State = System.Null_Address then
+         Result := Close (Item.Wake_Descriptor);
+         Result := Close (Item.Descriptor);
+         Item.Wake_Descriptor := -1;
+         Item.Descriptor := -1;
+         return False;
+      end if;
       return True;
    end Initialize;
 
@@ -229,6 +318,11 @@ package body System.Gnatevl.Poller is
          Free_Watch (Victim);
       end loop;
       Item.State := System.Null_Address;
+
+      if Item.File_State /= System.Null_Address then
+         File_Engine_Destroy (Item.File_State);
+         Item.File_State := System.Null_Address;
+      end if;
 
       if Item.Wake_Descriptor >= 0 then
          Result := Close (Item.Wake_Descriptor);
@@ -295,6 +389,33 @@ package body System.Gnatevl.Poller is
          return False;
    end Watch;
 
+   function Submit_File
+     (Item        : in out Poller;
+      Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Offset      : C.long_long;
+      For_Write   : Boolean;
+      Token       : System.Address;
+      Error_Code  : out C.int) return Boolean
+   is
+      Error  : aliased C.int := 0;
+      Result : C.int;
+   begin
+      Result :=
+        File_Engine_Submit
+          (Item.File_State,
+           Descriptor,
+           Buffer,
+           Length,
+           Offset,
+           (if For_Write then 1 else 0),
+           SSE.To_Integer (Token),
+           Error'Access);
+      Error_Code := Error;
+      return Result = 0;
+   end Submit_File;
+
    function Wait
      (Item                : in out Poller;
       Timeout             : Duration;
@@ -304,12 +425,13 @@ package body System.Gnatevl.Poller is
       Count  : Natural;
    begin
       if not Wait_Batch (Item, Timeout, Events, Count) then
-         Event := (Kind => Timeout_Event, Descriptor => -1);
+         Event :=
+           (Kind => Timeout_Event, Descriptor => -1, others => <>);
          return False;
       end if;
       Event :=
         (if Count = 0
-         then (Kind => Timeout_Event, Descriptor => -1)
+         then (Kind => Timeout_Event, Descriptor => -1, others => <>)
          else Events (1));
       return True;
    end Wait;
@@ -333,8 +455,14 @@ package body System.Gnatevl.Poller is
       Read_Result   : C.long;
       Wake_Value    : aliased C.unsigned_long_long;
    begin
-      Events := (others => (Kind => Timeout_Event, Descriptor => -1));
+      Events :=
+        (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
       Count := 0;
+      if not Drain_File_Events (Item, Events, Count) then
+         return False;
+      elsif Count > 0 then
+         return True;
+      end if;
       Kernel_Count :=
         Epoll_Wait
           (Item.Descriptor,
@@ -361,7 +489,7 @@ package body System.Gnatevl.Poller is
             end if;
             Count := Count + 1;
             Events (Events'First + Count - 1) :=
-              (Kind => Wake_Event, Descriptor => Descriptor);
+              (Kind => Wake_Event, Descriptor => Descriptor, others => <>);
          else
             Watch_Item := Find (Item, Descriptor);
             if Watch_Item /= null then
@@ -407,16 +535,17 @@ package body System.Gnatevl.Poller is
                if Read_Ready or else Write_Ready then
                   Count := Count + 1;
                   Events (Events'First + Count - 1) :=
-                    (Kind =>
+                     (Kind =>
                        (if Read_Ready and Write_Ready then Read_Write_Event
                         elsif Read_Ready then Readable_Event
                         else Writable_Event),
-                     Descriptor => Descriptor);
+                     Descriptor => Descriptor,
+                     others => <>);
                end if;
             end if;
          end if;
       end loop;
-      return True;
+      return Drain_File_Events (Item, Events, Count);
    end Wait_Batch;
 
    function Wake (Item : Poller) return Boolean is

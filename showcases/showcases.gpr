@@ -10,6 +10,7 @@ project Showcases is
       "connection_lifecycle.adb",
       "cooperative_fairness.adb",
       "execution_groups.adb",
+      "evented_file_io.adb",
       "evented_io.adb",
       "evented_pipeline.adb",
       "evented_vs_threads.adb",

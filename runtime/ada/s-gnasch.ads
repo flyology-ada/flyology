@@ -59,6 +59,16 @@ package System.Gnatevl.Scheduler is
       return Interfaces.C.int;
    pragma Export (C, Wait_IO, "gnatevl_runtime_wait_io");
 
+   function File_IO
+     (Descriptor  : Interfaces.C.int;
+      Buffer      : System.Address;
+      Length      : Interfaces.C.size_t;
+      Offset      : Interfaces.C.long_long;
+      For_Write   : Interfaces.C.int;
+      Transferred : access Interfaces.C.long_long;
+      Error_Code  : access Interfaces.C.int) return Interfaces.C.int;
+   pragma Export (C, File_IO, "gnatevl_runtime_file_io");
+
 private
    pragma Inline (Is_Event_Task);
    pragma Inline (Current_Task);

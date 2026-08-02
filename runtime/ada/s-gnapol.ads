@@ -10,11 +10,15 @@ package System.Gnatevl.Poller is
       Readable_Event,
       Writable_Event,
       Read_Write_Event,
+      File_Event,
       Timeout_Event);
 
    type Poll_Event is record
       Kind       : Event_Kind := Timeout_Event;
       Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Token      : System.Address := System.Null_Address;
+      Result     : Interfaces.C.long_long := 0;
+      Error_Code : Interfaces.C.int := 0;
    end record;
 
    type Poll_Event_Array is array (Positive range <>) of Poll_Event;
@@ -27,6 +31,19 @@ package System.Gnatevl.Poller is
      (Item       : in out Poller;
       Descriptor : Interfaces.C.int;
       Condition  : Interest) return Boolean;
+
+   --  Enqueue positional file I/O and arrange for a File_Event carrying Token
+   --  to be returned by Wait_Batch. The buffer must remain valid until that
+   --  completion is delivered.
+   function Submit_File
+     (Item        : in out Poller;
+      Descriptor  : Interfaces.C.int;
+      Buffer      : System.Address;
+      Length      : Interfaces.C.size_t;
+      Offset      : Interfaces.C.long_long;
+      For_Write   : Boolean;
+      Token       : System.Address;
+      Error_Code  : out Interfaces.C.int) return Boolean;
 
    --  A negative timeout waits indefinitely. The result is false on error.
    function Wait
@@ -53,5 +70,6 @@ private
       Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       Wake_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       State : System.Address := System.Null_Address;
+      File_State : System.Address := System.Null_Address;
    end record;
 end System.Gnatevl.Poller;
