@@ -6,6 +6,7 @@ with GNAT.Sockets;
 with Gnatevl;
 with Gnatevl.IO.Sockets;
 with Interfaces.C;
+with Showcase_Support;
 
 procedure Connection_Density is
    use Ada.Real_Time;
@@ -31,22 +32,22 @@ procedure Connection_Density is
    pragma Import (C, Thread_Count, "gnatevl_thread_count");
 
    protected type Progress (Target : Positive) is
-      procedure Ready;
+      procedure At_Receive_Boundary;
       procedure Finished (Succeeded : Boolean);
-      entry Wait_Until_Ready;
+      entry Wait_Until_Receive_Boundary;
       entry Wait_Until_Finished;
       function Failure_Count return Natural;
    private
-      Ready_Count    : Natural := 0;
+      Receive_Count  : Natural := 0;
       Finished_Count : Natural := 0;
       Failures       : Natural := 0;
    end Progress;
 
    protected body Progress is
-      procedure Ready is
+      procedure At_Receive_Boundary is
       begin
-         Ready_Count := Ready_Count + 1;
-      end Ready;
+         Receive_Count := Receive_Count + 1;
+      end At_Receive_Boundary;
 
       procedure Finished (Succeeded : Boolean) is
       begin
@@ -56,10 +57,10 @@ procedure Connection_Density is
          end if;
       end Finished;
 
-      entry Wait_Until_Ready when Ready_Count = Target is
+      entry Wait_Until_Receive_Boundary when Receive_Count = Target is
       begin
          null;
-      end Wait_Until_Ready;
+      end Wait_Until_Receive_Boundary;
 
       entry Wait_Until_Finished when Finished_Count = Target is
       begin
@@ -85,41 +86,45 @@ procedure Connection_Density is
      (Mode             : String;
       Connections      : Positive;
       Baseline_RSS     : C.long_long;
-      Waiting_RSS      : C.long_long;
+      Sample_RSS       : C.long_long;
       Baseline_Virtual : C.long_long;
-      Waiting_Virtual  : C.long_long;
-      Waiting_Threads  : C.int;
+      Sample_Virtual   : C.long_long;
+      Sample_Threads   : C.int;
       Setup_Elapsed    : Duration;
       Release_Elapsed  : Duration)
    is
       RSS_Increase : constant C.long_long :=
-        Increase_From (Waiting_RSS, Baseline_RSS);
+        Increase_From (Sample_RSS, Baseline_RSS);
       Virtual_Increase : constant C.long_long :=
-        Increase_From (Waiting_Virtual, Baseline_Virtual);
+        Increase_From (Sample_Virtual, Baseline_Virtual);
    begin
       Put_Line
         ("mode=" & Mode
          & " connections=" & Connections'Image
-         & " completed=" & Connections'Image
          & " socket_endpoints=" & Natural'Image (Connections * 2)
          & " task_stack=" & Natural'Image (Worker_Stack_Size / 1_024)
          & " KiB");
       Put_Line
-        ("  waiting: threads=" & Waiting_Threads'Image
-         & " rss=" & Long_Float'Image (MiB (Waiting_RSS)) & " MiB"
-         & " rss_delta=" & Long_Float'Image (MiB (RSS_Increase)) & " MiB");
+        ("  receive_boundary: threads=" & Sample_Threads'Image
+         & " rss=" & Showcase_Support.Fixed_Image (MiB (Sample_RSS))
+         & " MiB rss_delta="
+         & Showcase_Support.Fixed_Image (MiB (RSS_Increase)) & " MiB");
       Put_Line
         ("  address_space: virtual_delta="
-         & Long_Float'Image (MiB (Virtual_Increase)) & " MiB");
+         & Showcase_Support.Fixed_Image (MiB (Virtual_Increase)) & " MiB");
       Put_Line
         ("  density: rss_delta_per_connection="
          & C.long_long'Image (RSS_Increase / C.long_long (Connections))
          & " bytes");
       Put_Line
-        ("  timing: setup=" & Setup_Elapsed'Image
-         & " s release_all=" & Release_Elapsed'Image & " s");
+        ("  timing: setup="
+         & Showcase_Support.Fixed_Image (Long_Float (Setup_Elapsed), 6)
+         & " s release_all="
+         & Showcase_Support.Fixed_Image (Long_Float (Release_Elapsed), 6)
+         & " s");
       Put_Line
-        ("  peak_rss=" & Long_Float'Image (MiB (Peak_RSS)) & " MiB");
+        ("  peak_rss=" & Showcase_Support.Fixed_Image (MiB (Peak_RSS))
+         & " MiB");
    end Report;
 
    procedure Run
@@ -145,7 +150,10 @@ procedure Connection_Density is
          Incoming : Stream_Element_Array (One_Byte'Range);
          Success  : Boolean := False;
       begin
-         State.Ready;
+         --  This acknowledges the last observable point before the task calls
+         --  into the model-specific blocking receive. It does not claim that
+         --  every task has completed its poller/poll registration.
+         State.At_Receive_Boundary;
          Gnatevl.IO.Sockets.Receive_Exactly
            (Servers (Index), Incoming, Timeout => 30.0);
          Success := Incoming = One_Byte;
@@ -163,9 +171,9 @@ procedure Connection_Density is
 
       Baseline_RSS     : constant C.long_long := Current_RSS;
       Baseline_Virtual : constant C.long_long := Virtual_Bytes;
-      Waiting_RSS     : C.long_long;
-      Waiting_Virtual : C.long_long;
-      Waiting_Threads : C.int;
+      Sample_RSS     : C.long_long;
+      Sample_Virtual : C.long_long;
+      Sample_Threads : C.int;
       Setup_Started   : constant Time := Clock;
       Release_Started : Time;
       Setup_Elapsed   : Duration;
@@ -178,11 +186,11 @@ procedure Connection_Density is
          Workers (Index) := new Connection (Index, Model);
       end loop;
 
-      State.Wait_Until_Ready;
+      State.Wait_Until_Receive_Boundary;
       Setup_Elapsed := To_Duration (Clock - Setup_Started);
-      Waiting_RSS := Current_RSS;
-      Waiting_Virtual := Virtual_Bytes;
-      Waiting_Threads := Thread_Count;
+      Sample_RSS := Current_RSS;
+      Sample_Virtual := Virtual_Bytes;
+      Sample_Threads := Thread_Count;
 
       Release_Started := Clock;
       for Index in 1 .. Connections loop
@@ -202,10 +210,10 @@ procedure Connection_Density is
         (Mode,
          Connections,
          Baseline_RSS,
-         Waiting_RSS,
+         Sample_RSS,
          Baseline_Virtual,
-         Waiting_Virtual,
-         Waiting_Threads,
+         Sample_Virtual,
+         Sample_Threads,
          Setup_Elapsed,
          Release_Elapsed);
 

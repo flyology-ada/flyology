@@ -277,6 +277,7 @@ thread-pool runtime.
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
 | Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every evented task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
+| Hash descriptor waiters per group | Readiness delivery must not scan every fiber once for every ready descriptor | Delivery is constant-time on average while collision chains retain same-descriptor reader/writer fan-out |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each evented task still needs a virtual stack and ABI-specific switching code |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
@@ -455,9 +456,15 @@ The examples demonstrate:
 
 `run_connection_density.sh` uses separate processes so peak and current
 resource measurements from one mode cannot contaminate the other. Every
-connection owns a real socket endpoint and an Ada task blocked inside
+connection owns a real socket endpoint and an Ada task that enters
 `Receive_Exactly`; an in-process peer endpoint releases every connection after
-the waiting-state measurement. Both modes request the same 32 KiB task stack.
+the resource measurement. Both modes request the same 32 KiB task stack.
+
+The sampling barrier establishes that every worker has reached the boundary
+immediately before its `Receive_Exactly` call. It does not claim every worker
+has completed kernel-poller registration by that instant. Task stacks and, for
+native mode, pthreads already exist at the boundary, so the resource comparison
+does not depend on that narrower scheduling distinction.
 
 The default run is:
 
@@ -466,22 +473,36 @@ The default run is:
 ```
 
 The first argument is the connection count used for the evented/native
-comparison. The second is the evented-only scale run. A representative run on
-the development Apple Silicon machine produced:
+comparison. The second is the evented-only scale run. On a host capable of
+creating 10,000 pthreads, a full head-to-head can be requested explicitly:
 
-| Mode | Connections | OS threads while waiting | RSS increase | Virtual-memory increase | Setup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Evented scale | 10,000 | 1 | 617 MiB | 1.10 GiB | 0.269 s |
-| Evented comparison | 1,000 | 1 | 62.2 MiB | 156 MiB | 0.027 s |
-| Native comparison | 1,000 | 1,001 | 62.5 MiB | 208 MiB | 0.054 s |
+```sh
+./showcases/run_connection_density.sh 10000 10000
+```
+
+A representative run on the development Apple Silicon machine, after adding
+the ATCB and descriptor-wait indexes, produced:
+
+| Mode | Connections | OS threads at sample | RSS increase | Virtual-memory increase | Setup | Release all |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Evented | 10,000 | 1 | 617 MiB | 1.11 GiB | 0.269 s | 0.065 s |
+| Native | 10,000 | 10,001 | 617 MiB | 1.31 GiB | 9.196 s | 0.148 s |
 
 The central win today is kernel-concurrency density: the evented version avoids
 one pthread per connection and can reach connection counts at which creating an
-equal number of pthreads commonly exceeds host limits. It also reserved less
-address space and set up faster in this run. Resident memory was nearly equal,
-because Ada task control state and explicitly equal stack budgets dominate both
-lanes. Release latency can favor native threads at modest counts because they
-run in parallel; the showcase reports it rather than hiding that tradeoff.
+equal number of pthreads commonly exceeds host limits. In this run it also
+reserved less address space, set up 34 times faster, and drained readiness 2.3
+times faster. Resident memory was nearly equal because Ada task control state
+and explicitly equal stack budgets dominate both lanes. Native release latency
+can still win at other loads because pthreads run in parallel; the showcase
+reports the result rather than assuming either outcome.
+
+The scaling changes identify the data structures responsible. Hashing ATCB
+addresses changed 10,000-task evented setup from roughly 0.76 seconds to 0.31
+seconds. Hashing descriptor waiters per group then changed the 10,000-connection
+release drain from roughly 0.41 seconds to 0.065 seconds. Both formerly
+quadratic lookup components now take expected linear total work for the
+one-descriptor-per-connection load.
 
 The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
@@ -518,8 +539,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   evented caller occupies its source loop during this bounded `sched_yield`
   wait; subsequent use of the already-started loop does not wait.
 - Ready queues, fiber membership, timer scans, descriptor delivery, and dispatch
-  use independent per-group locks and per-group fiber lists. A short-held
-  registry lock remains only for constant-time-average hashed task lookup,
+  use independent per-group locks, per-group fiber lists, and an 8,191-bucket
+  descriptor-wait index. On the supported 64-bit targets, each lazily created
+  loop therefore carries about 64 KiB of fixed descriptor-index storage. A
+  short-held registry lock remains only for constant-time-average hashed lookup,
   group allocation, and ownership handoff during cross-group wake, destruction,
   priority changes, or migration. Its fixed 16,381-bucket table uses collision
   chains and never resizes in a wake path.

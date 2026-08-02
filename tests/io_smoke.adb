@@ -34,6 +34,18 @@ procedure IO_Smoke is
       Reader_OK, Writer_OK     : Boolean := False;
    end Duplex_Results;
 
+   protected Fanout_Results is
+      procedure Started;
+      procedure Finished (Value : Boolean);
+      entry Wait_Until_Started;
+      entry Wait_Until_Finished;
+      function Passed return Boolean;
+   private
+      Started_Count  : Natural := 0;
+      Finished_Count : Natural := 0;
+      All_OK         : Boolean := True;
+   end Fanout_Results;
+
    protected body Results is
       procedure Event_Passed (Value : Boolean) is
       begin
@@ -75,6 +87,31 @@ procedure IO_Smoke is
 
       function Passed return Boolean is (Reader_OK and Writer_OK);
    end Duplex_Results;
+
+   protected body Fanout_Results is
+      procedure Started is
+      begin
+         Started_Count := Started_Count + 1;
+      end Started;
+
+      procedure Finished (Value : Boolean) is
+      begin
+         Finished_Count := Finished_Count + 1;
+         All_OK := All_OK and Value;
+      end Finished;
+
+      entry Wait_Until_Started when Started_Count = 2 is
+      begin
+         null;
+      end Wait_Until_Started;
+
+      entry Wait_Until_Finished when Finished_Count = 2 is
+      begin
+         null;
+      end Wait_Until_Finished;
+
+      function Passed return Boolean is (All_OK);
+   end Fanout_Results;
 
 begin
    GNAT.Sockets.Create_Socket_Pair (Event_Socket, Native_Socket);
@@ -168,9 +205,60 @@ begin
    end if;
 
    declare
+      task type Read_Waiter;
+      task Sender is
+         pragma Task_Info (Gnatevl.Native_Thread);
+      end Sender;
+
+      task body Read_Waiter is
+         Ready : Boolean := False;
+      begin
+         Fanout_Results.Started;
+         Ready :=
+           Gnatevl.IO.Wait
+             (Gnatevl.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+              Gnatevl.IO.For_Read,
+              Timeout => 1.0);
+         Fanout_Results.Finished (Ready);
+      exception
+         when others =>
+            Fanout_Results.Finished (False);
+      end Read_Waiter;
+
+      task body Sender is
+      begin
+         Fanout_Results.Wait_Until_Started;
+         Gnatevl.IO.Sockets.Send_All
+           (Native_Socket, [1 => 43], Timeout => 1.0);
+      end Sender;
+
+      Waiters : array (1 .. 2) of Read_Waiter;
+      pragma Unreferenced (Waiters);
+      Probe : Stream_Element_Array (1 .. 1);
+   begin
+      Fanout_Results.Wait_Until_Finished;
+      Gnatevl.IO.Sockets.Receive_Exactly
+        (Event_Socket, Probe, Timeout => 1.0);
+      if not Fanout_Results.Passed or else Probe (1) /= 43 then
+         raise Program_Error with "same-direction descriptor fanout failed";
+      end if;
+   end;
+
+   declare
       Probe     : Stream_Element_Array (1 .. 1);
       Last      : Stream_Element_Offset;
       Timed_Out : Boolean := False;
+
+      task Delayed_Sender is
+         pragma Task_Info (Gnatevl.Native_Thread);
+      end Delayed_Sender;
+
+      task body Delayed_Sender is
+      begin
+         Gnatevl.IO.Timers.Sleep_For (0.050);
+         Gnatevl.IO.Sockets.Send_All
+           (Native_Socket, [1 => 44], Timeout => 1.0);
+      end Delayed_Sender;
    begin
       begin
          Gnatevl.IO.Sockets.Receive
@@ -181,6 +269,12 @@ begin
       end;
       if not Timed_Out then
          raise Program_Error with "evented socket timeout did not fire";
+      end if;
+
+      Gnatevl.IO.Sockets.Receive_Exactly
+        (Event_Socket, Probe, Timeout => 1.0);
+      if Probe (1) /= 44 then
+         raise Program_Error with "descriptor wait did not rearm after timeout";
       end if;
    end;
 

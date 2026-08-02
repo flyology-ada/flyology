@@ -82,9 +82,13 @@ int gnatevl_thread_count(void) {
 #if defined(__APPLE__)
     thread_act_array_t threads;
     mach_msg_type_number_t count = 0;
+    mach_msg_type_number_t index;
 
     if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) {
         return -1;
+    }
+    for (index = 0; index < count; ++index) {
+        mach_port_deallocate(mach_task_self(), threads[index]);
     }
     vm_deallocate(mach_task_self(), (vm_address_t)threads,
                   (vm_size_t)count * sizeof(*threads));
