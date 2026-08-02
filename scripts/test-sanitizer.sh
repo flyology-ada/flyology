@@ -2,34 +2,61 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=${ALR:-"$HOME/alr"}
-normal_context="$project_root/build/rts/obj/s-gnacon.o"
-asan_context="$project_root/build/rts/obj/s-gnacon.o"
-negative_log="$project_root/build/sanitizer-negative.log"
+alr=$("$project_root/scripts/find-alr.sh")
+test_root=$(mktemp -d "${TMPDIR:-/tmp}/gnatevl-sanitizer.XXXXXX")
+normal_rts="$test_root/rts-normal"
+asan_rts="$test_root/rts-address"
+normal_context="$normal_rts/obj/s-gnacon.o"
+asan_context="$asan_rts/obj/s-gnacon.o"
+negative_log="$test_root/negative.log"
+
+cleanup () {
+  rm -rf -- "$test_root"
+}
+trap cleanup EXIT HUP INT TERM
 
 cd "$project_root"
 
 "$alr" build
 
+run_gprbuild () {
+  if [ "$(uname -s)" = Darwin ]; then
+    compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)
+    if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
+      current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
+      "$alr" exec -- gprbuild "$@" \
+        -largs "-Wl,-syslibroot,$current_sysroot"
+      return
+    fi
+    "$alr" exec -- gprbuild "$@"
+    return
+  fi
+  "$alr" exec -- gprbuild "$@"
+}
+
 # A normal prepared runtime must neither reference the sanitizer interface nor
 # retain sanitizer-only TLS. This is stronger than merely leaving libasan out
 # of the final link: it verifies the static configuration erased the hot path.
-GNATEVL_SANITIZER=none "$project_root/scripts/prepare-rts.sh" >/dev/null
+GNATEVL_RTS_DIR="$normal_rts" \
+GNATEVL_SANITIZER=none \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
 if nm "$normal_context" | grep -E 'sanitizer|gnaasa|switching_from' >/dev/null
 then
   printf '%s\n' "normal context switch retains ASan instrumentation" >&2
   exit 1
 fi
 
-GNATEVL_SANITIZER=address "$project_root/scripts/prepare-rts.sh" >/dev/null
+GNATEVL_RTS_DIR="$asan_rts" \
+GNATEVL_SANITIZER=address \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
 if ! nm "$asan_context" | grep 'gnatevl__asan__start_switch' >/dev/null
 then
   printf '%s\n' "ASan context switch lacks fiber annotations" >&2
   exit 1
 fi
 
-"$alr" exec -- gprbuild \
-  --RTS="$project_root/build/rts" \
+run_gprbuild \
+  --RTS="$asan_rts" \
   -f -P tests/sanitizer_smoke.gpr
 
 # Fake stacks are deliberately unsupported across pthread migration. The

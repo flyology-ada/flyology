@@ -882,6 +882,7 @@ Run the bounded, reproducible concurrency and fault campaign with:
 AddressSanitizer awareness is opt-in when preparing the runtime:
 
 ```sh
+GNATEVL_RTS_DIR="$PWD/build/asan-rts" \
 GNATEVL_SANITIZER=address ./scripts/prepare-rts.sh
 # Compile/link the application with the same GCC toolchain and
 # -fsanitize=address, then run with:
