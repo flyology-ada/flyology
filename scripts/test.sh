@@ -131,6 +131,7 @@ for test_main in \
   ready_queue_smoke \
   runtime_smoke \
   semantic_parity_smoke \
+  stack_pool_smoke \
   stack_size_parity_smoke \
   stall_watchdog_native_smoke \
   stall_watchdog_smoke \

@@ -34,6 +34,7 @@ project Runtime_Smoke is
       "stress_randomized.adb",
       "semantic_parity_smoke.adb",
       "stack_size_parity_smoke.adb",
+      "stack_pool_smoke.adb",
       "stall_watchdog_native_smoke.adb",
       "stall_watchdog_smoke.adb",
       "structured_server_smoke.adb",

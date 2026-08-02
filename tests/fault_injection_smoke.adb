@@ -82,6 +82,20 @@ procedure Fault_Injection_Smoke is
       Warm_Group;
    end Expect_Activation_Failure;
 
+   procedure Expect_Discard_Failure_Recovery is
+   begin
+      Fault_Control.Reset;
+      Fault_Control.Arm (Fault_Control.Stack_Discard);
+      Warm_Group;
+      if Fault_Control.Calls (Fault_Control.Stack_Discard) = 0 then
+         raise Program_Error with "stack discard fault was not reached";
+      end if;
+      Fault_Control.Reset;
+      --  A second allocation/reap proves the ignored advice failure did not
+      --  strand the stack-pool mutex or retain the empty arena.
+      Warm_Group;
+   end Expect_Discard_Failure_Recovery;
+
    procedure Test_Watch_Error is
       Reader : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
       Writer : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
@@ -359,6 +373,16 @@ procedure Fault_Injection_Smoke is
       raise Program_Error with "fatal fault unexpectedly returned";
    end Trigger_Fatal;
 
+   procedure Trigger_Stack_Release_Fatal is
+      Item : Probe_Access := new Probe (Gnatevl.Event_Loop_Task);
+   begin
+      Await (Item);
+      Fault_Control.Reset;
+      Fault_Control.Arm (Fault_Control.Stack_Protection);
+      Free_Probe (Item);
+      raise Program_Error with "stack release fault unexpectedly returned";
+   end Trigger_Stack_Release_Fatal;
+
 begin
    if not Fault_Control.Enabled then
       raise Program_Error with
@@ -371,6 +395,12 @@ begin
    elsif Case_Name = "stack-map" then
       Warm_Group;
       Expect_Activation_Failure (Fault_Control.Stack_Mapping);
+   elsif Case_Name = "stack-protect" then
+      Warm_Group;
+      Expect_Activation_Failure (Fault_Control.Stack_Protection);
+   elsif Case_Name = "stack-discard" then
+      Warm_Group;
+      Expect_Discard_Failure_Recovery;
    elsif Case_Name = "group-startup" then
       Expect_Activation_Failure (Fault_Control.Group_Startup);
    elsif Case_Name = "watch-error" then
@@ -384,6 +414,8 @@ begin
       Trigger_Fatal (Fault_Control.Poller_Wake);
    elsif Case_Name = "fatal-wait" then
       Trigger_Fatal (Fault_Control.Poller_Wait);
+   elsif Case_Name = "fatal-stack-release" then
+      Trigger_Stack_Release_Fatal;
    else
       raise Program_Error with "unknown fault case: " & Case_Name;
    end if;

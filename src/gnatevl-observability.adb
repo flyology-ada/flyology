@@ -46,6 +46,25 @@ package body Gnatevl.Observability is
    pragma Import
      (C, Runtime_Observe_Last_Fatal, "gnatevl_runtime_observe_last_fatal");
 
+   Stack_Pool_ABI_Version : constant C.unsigned := 1;
+   type Runtime_Stack_Pool_Snapshot is record
+      Version          : C.unsigned;
+      Active_Arenas    : C.unsigned_long_long;
+      Live_Stacks      : C.unsigned_long_long;
+      Live_Usable_Bytes : C.unsigned_long_long;
+      Reserved_Bytes   : C.unsigned_long_long;
+      Arena_Mappings   : C.unsigned_long_long;
+      Arena_Unmappings : C.unsigned_long_long;
+      Shared_Stacks    : C.unsigned_long_long;
+      Discarded_Stacks : C.unsigned_long_long;
+   end record with Convention => C;
+
+   function Runtime_Observe_Stack_Pool
+     (Snapshot      : System.Address;
+      Snapshot_Size : C.size_t) return C.int;
+   pragma Import
+     (C, Runtime_Observe_Stack_Pool, "gnatevl_runtime_observe_stack_pool");
+
    function Snapshot
      (Group  : Group_Id;
       Result : out Group_Snapshot) return Boolean
@@ -101,5 +120,26 @@ package body Gnatevl.Observability is
          when 4 => Context_Switch_Failure,
          when 5 => Fork_Child_Use,
          when others => Scheduler_Invariant);
+
+   function Stack_Pool return Stack_Pool_Snapshot is
+      Raw    : aliased Runtime_Stack_Pool_Snapshot;
+      Status : C.int;
+   begin
+      Status := Runtime_Observe_Stack_Pool
+        (Raw'Address, Runtime_Stack_Pool_Snapshot'Size / 8);
+      if Status /= 1 or else Raw.Version /= Stack_Pool_ABI_Version then
+         raise Program_Error with
+           "incompatible GNATEVL stack-pool observability ABI";
+      end if;
+      return
+        (Active_Arenas    => Counter (Raw.Active_Arenas),
+         Live_Stacks      => Counter (Raw.Live_Stacks),
+         Live_Usable_Bytes => Counter (Raw.Live_Usable_Bytes),
+         Reserved_Bytes   => Counter (Raw.Reserved_Bytes),
+         Arena_Mappings   => Counter (Raw.Arena_Mappings),
+         Arena_Unmappings => Counter (Raw.Arena_Unmappings),
+         Shared_Stacks    => Counter (Raw.Shared_Stacks),
+         Discarded_Stacks => Counter (Raw.Discarded_Stacks));
+   end Stack_Pool;
 
 end Gnatevl.Observability;

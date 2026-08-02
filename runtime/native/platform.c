@@ -152,10 +152,15 @@ int gnatevl_install_fork_guard(void *flag) {
     return pthread_atfork(NULL, NULL, gnatevl_mark_fork_child);
 }
 
+int gnatevl_in_fork_child(void) {
+    return gnatevl_fork_child_flag != NULL &&
+           __atomic_load_n(gnatevl_fork_child_flag, __ATOMIC_RELAXED) != 0;
+}
+
 #ifdef GNATEVL_TEST_FAULTS
 #include <stdatomic.h>
 
-#define GNATEVL_FAULT_POINT_COUNT 8
+#define GNATEVL_FAULT_POINT_COUNT 10
 
 struct gnatevl_fault_plan {
     atomic_uint calls;
@@ -251,6 +256,26 @@ int gnatevl_test_fault_hit(int point) {
 
 int gnatevl_map_anonymous(void) {
     return MAP_ANONYMOUS;
+}
+
+/*
+ * Stack-arena policy lives in Ada. These wrappers provide only the two
+ * process primitives which are awkward to represent portably in the runtime
+ * sources: a statically initialized pthread mutex and the host's page-discard
+ * advice value. A native-only program never calls either function.
+ */
+static pthread_mutex_t gnatevl_stack_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int gnatevl_stack_pool_lock(void) {
+    return pthread_mutex_lock(&gnatevl_stack_pool_mutex);
+}
+
+int gnatevl_stack_pool_unlock(void) {
+    return pthread_mutex_unlock(&gnatevl_stack_pool_mutex);
+}
+
+int gnatevl_discard_pages(void *address, size_t length) {
+    return madvise(address, length, MADV_DONTNEED);
 }
 
 void gnatevl_atomic_store_u32(void *address, uint32_t value, int model) {

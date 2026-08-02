@@ -11,7 +11,9 @@ package System.Gnatevl.Faults is
       Poller_Wake,
       Poller_EINTR,
       File_Submission_Full,
-      Group_Startup);
+      Group_Startup,
+      Stack_Protection,
+      Stack_Discard);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -21,7 +23,9 @@ package System.Gnatevl.Faults is
       Poller_Wake          => 5,
       Poller_EINTR         => 6,
       File_Submission_Full => 7,
-      Group_Startup        => 8);
+      Group_Startup        => 8,
+      Stack_Protection     => 9,
+      Stack_Discard        => 10);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);

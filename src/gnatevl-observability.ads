@@ -42,6 +42,17 @@ package Gnatevl.Observability with Preelaborate is
       Migrations_Out           : Counter;
    end record;
 
+   type Stack_Pool_Snapshot is record
+      Active_Arenas    : Counter;
+      Live_Stacks      : Counter;
+      Live_Usable_Bytes : Counter;
+      Reserved_Bytes   : Counter;
+      Arena_Mappings   : Counter;
+      Arena_Unmappings : Counter;
+      Shared_Stacks    : Counter;
+      Discarded_Stacks : Counter;
+   end record;
+
    --  Return False when Group has never been created. This query is inert: it
    --  does not initialize an event group or allocate runtime resources.
    --
@@ -67,5 +78,15 @@ package Gnatevl.Observability with Preelaborate is
    --  value is No_Fatal; the retained scalar is principally useful to crash
    --  handlers and postmortem debuggers and requires no scheduler lock.
    function Last_Fatal return Fatal_Context;
+
+   --  Report process-wide evented stack allocation. Adjacent live stacks
+   --  share an inaccessible interior guard page, while each stack remains
+   --  guarded on both sides. Active_Arenas and Reserved_Bytes return to zero
+   --  after all evented task objects are finalized; cumulative counters are
+   --  retained for process-lifetime diagnostics. Shared_Stacks counts
+   --  acquisitions placed into an existing arena, and Discarded_Stacks counts
+   --  successful physical-page discard requests on release. This query does
+   --  not create an event loop or allocate a stack.
+   function Stack_Pool return Stack_Pool_Snapshot;
 
 end Gnatevl.Observability;

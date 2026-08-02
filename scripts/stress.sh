@@ -64,14 +64,15 @@ if [ "$run_faults" = 1 ]; then
     -f -P tests/runtime_smoke.gpr fault_injection_smoke.adb
 
   for fault_case in \
-    fiber-allocation stack-map group-startup watch-error eintr file-saturation
+    fiber-allocation stack-map stack-protect stack-discard group-startup \
+    watch-error eintr file-saturation
   do
     printf '%s\n' "fault case=$fault_case"
     run_timed "$case_timeout" \
       "$project_root/tests/bin/fault_injection_smoke" "$fault_case"
   done
 
-  for fault_case in fatal-wake fatal-wait; do
+  for fault_case in fatal-wake fatal-wait fatal-stack-release; do
     printf '%s\n' "fatal fault case=$fault_case (expecting SIGABRT)"
     set +e
     run_timed "$case_timeout" \

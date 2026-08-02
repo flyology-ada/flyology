@@ -10,7 +10,9 @@ package Fault_Control is
       Poller_Wake,
       Poller_EINTR,
       File_Submission_Full,
-      Group_Startup);
+      Group_Startup,
+      Stack_Protection,
+      Stack_Discard);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -20,7 +22,9 @@ package Fault_Control is
       Poller_Wake          => 5,
       Poller_EINTR         => 6,
       File_Submission_Full => 7,
-      Group_Startup        => 8);
+      Group_Startup        => 8,
+      Stack_Protection     => 9,
+      Stack_Discard        => 10);
 
    function Enabled return Boolean;
    procedure Reset;
