@@ -234,6 +234,19 @@ package body System.Gnatevl.File_Engine is
       Extra  at 24 range 0 .. 63;
    end record;
 
+   type Native_AIO_Request;
+   type Native_AIO_Request_Access is access all Native_AIO_Request;
+
+   type Native_AIO_Request is record
+      Control   : aliased IOCB;
+      Next_Free : Native_AIO_Request_Access;
+   end record
+     with Size => 576, Alignment => 8;
+   for Native_AIO_Request use record
+      Control   at 0  range 0 .. 511;
+      Next_Free at 64 range 0 .. 63;
+   end record;
+
    type Backend_Kind is (IO_Uring, Native_AIO);
 
    type Engine_State is record
@@ -257,10 +270,10 @@ package body System.Gnatevl.File_Engine is
       CQ_Tail           : System.Address := System.Null_Address;
       CQ_Mask           : System.Address := System.Null_Address;
       CQEs              : System.Address := System.Null_Address;
+      Free_Requests     : Native_AIO_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
 
-   type IOCB_Access is access all IOCB;
    type Submission_Entry_Access is access all Submission_Entry;
    type Completion_Entry_Access is access all Completion_Entry;
 
@@ -273,10 +286,8 @@ package body System.Gnatevl.File_Engine is
      (System.Address, Engine_State_Access);
    function State_Address is new Ada.Unchecked_Conversion
      (Engine_State_Access, System.Address);
-   function To_IOCB is new Ada.Unchecked_Conversion
-     (System.Address, IOCB_Access);
-   function IOCB_Address is new Ada.Unchecked_Conversion
-     (IOCB_Access, System.Address);
+   function To_Native_Request is new Ada.Unchecked_Conversion
+     (System.Address, Native_AIO_Request_Access);
    function To_Submission_Entry is new Ada.Unchecked_Conversion
      (System.Address, Submission_Entry_Access);
    function To_Completion_Entry is new Ada.Unchecked_Conversion
@@ -284,8 +295,8 @@ package body System.Gnatevl.File_Engine is
 
    procedure Free_State is new Ada.Unchecked_Deallocation
      (Engine_State, Engine_State_Access);
-   procedure Free_IOCB is new Ada.Unchecked_Deallocation
-     (IOCB, IOCB_Access);
+   procedure Free_Native_Request is new Ada.Unchecked_Deallocation
+     (Native_AIO_Request, Native_AIO_Request_Access);
 
    function Mmap
      (Address : System.Address;
@@ -355,6 +366,13 @@ package body System.Gnatevl.File_Engine is
       Value   : U32;
       Model   : AP.Mem_Model := AP.Release);
 
+   function Acquire_Request
+     (State : not null Engine_State_Access) return Native_AIO_Request_Access;
+
+   procedure Recycle_Request
+     (State   : not null Engine_State_Access;
+      Request : in out Native_AIO_Request_Access);
+
    procedure Release_State (State : in out Engine_State_Access);
 
    function Failed_Mapping return System.Address is
@@ -381,9 +399,33 @@ package body System.Gnatevl.File_Engine is
       AP.Atomic_Store_32 (Address, Value, Model);
    end Store;
 
+   function Acquire_Request
+     (State : not null Engine_State_Access) return Native_AIO_Request_Access
+   is
+      Request : constant Native_AIO_Request_Access := State.Free_Requests;
+   begin
+      if Request = null then
+         return new Native_AIO_Request;
+      end if;
+      State.Free_Requests := Request.Next_Free;
+      Request.Next_Free := null;
+      return Request;
+   end Acquire_Request;
+
+   procedure Recycle_Request
+     (State   : not null Engine_State_Access;
+      Request : in out Native_AIO_Request_Access)
+   is
+   begin
+      Request.Next_Free := State.Free_Requests;
+      State.Free_Requests := Request;
+      Request := null;
+   end Recycle_Request;
+
    procedure Release_State (State : in out Engine_State_Access) is
       Ignored : C.int;
       Result  : C.long;
+      Request : Native_AIO_Request_Access;
    begin
       if State = null then
          return;
@@ -413,6 +455,11 @@ package body System.Gnatevl.File_Engine is
             Ignored := Close (State.Ring_FD);
          end if;
       end if;
+      while State.Free_Requests /= null loop
+         Request := State.Free_Requests;
+         State.Free_Requests := Request.Next_Free;
+         Free_Native_Request (Request);
+      end loop;
       pragma Unreferenced (Ignored);
       Free_State (State);
    end Release_State;
@@ -613,24 +660,28 @@ package body System.Gnatevl.File_Engine is
          return False;
       elsif State.Backend = Native_AIO then
          declare
-            Control  : IOCB_Access :=
-              new IOCB'
-                (Data        => U64 (SSE.To_Integer (Token)),
-                 Key         => 0,
-                 Read_Flags  => 0,
-                 Opcode      =>
-                   (if For_Write then IOCB_CMD_PWRITE else IOCB_CMD_PREAD),
-                 Priority    => 0,
-                 Descriptor  => U32 (Descriptor),
-                 Buffer      => U64 (SSE.To_Integer (Buffer)),
-                 Length      => U64 (Length),
-                 Offset      => S64 (Offset),
-                 Reserved    => 0,
-                 Flags       => IOCB_FLAG_RESFD,
-                 Result_FD   => U32 (State.Wake_FD));
+            Request : Native_AIO_Request_Access := Acquire_Request (State);
             Controls : aliased IOCB_Address_Array (1 .. 1) :=
-              [1 => IOCB_Address (Control)];
+              [1 => Request.Control'Address];
          begin
+            Request.all :=
+              (Control =>
+                 (Data        => U64 (SSE.To_Integer (Token)),
+                  Key         => 0,
+                  Read_Flags  => 0,
+                  Opcode      =>
+                    (if For_Write
+                     then IOCB_CMD_PWRITE
+                     else IOCB_CMD_PREAD),
+                  Priority    => 0,
+                  Descriptor  => U32 (Descriptor),
+                  Buffer      => U64 (SSE.To_Integer (Buffer)),
+                  Length      => U64 (Length),
+                  Offset      => S64 (Offset),
+                  Reserved    => 0,
+                  Flags       => IOCB_FLAG_RESFD,
+                  Result_FD   => U32 (State.Wake_FD)),
+               Next_Free => null);
             loop
                Result :=
                  Syscall_Submit
@@ -643,7 +694,7 @@ package body System.Gnatevl.File_Engine is
             if Result /= 1 then
                Error_Code :=
                  (if Result < 0 then C.int (OSI.errno) else EAGAIN);
-               Free_IOCB (Control);
+               Recycle_Request (State, Request);
                return False;
             end if;
             Error_Code := 0;
@@ -787,11 +838,11 @@ package body System.Gnatevl.File_Engine is
                      then C.int (-Events (Index).Extra)
                      else 0));
                declare
-                  Control : IOCB_Access := To_IOCB
+                  Request : Native_AIO_Request_Access := To_Native_Request
                     (SSE.To_Address
                        (SSE.Integer_Address (Events (Index).Object)));
                begin
-                  Free_IOCB (Control);
+                  Recycle_Request (State, Request);
                end;
             end loop;
             return True;

@@ -47,20 +47,24 @@ package body System.Gnatevl.File_Engine is
       List_Opcode at 72 range 0 .. 31;
    end record;
 
+   type AIO_Request;
+   type AIO_Request_Access is access all AIO_Request;
+
    type AIO_Request is record
       Control : aliased AIO_Control_Block;
       Token   : System.Address;
+      Next_Free : AIO_Request_Access;
    end record
-     with Size => 704, Alignment => 8;
+     with Size => 768, Alignment => 8;
    for AIO_Request use record
-      Control at 0  range 0 .. 639;
-      Token   at 80 range 0 .. 63;
+      Control   at 0  range 0 .. 639;
+      Token     at 80 range 0 .. 63;
+      Next_Free at 88 range 0 .. 63;
    end record;
 
-   type AIO_Request_Access is access all AIO_Request;
-
    type Engine_State is record
-      Kqueue_FD : C.int := -1;
+      Kqueue_FD    : C.int := -1;
+      Free_Requests : AIO_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
 
@@ -74,6 +78,36 @@ package body System.Gnatevl.File_Engine is
      (Engine_State, Engine_State_Access);
    procedure Free_Request is new Ada.Unchecked_Deallocation
      (AIO_Request, AIO_Request_Access);
+
+   function Acquire_Request
+     (State : not null Engine_State_Access) return AIO_Request_Access;
+
+   procedure Recycle_Request
+     (State   : not null Engine_State_Access;
+      Request : in out AIO_Request_Access);
+
+   function Acquire_Request
+     (State : not null Engine_State_Access) return AIO_Request_Access
+   is
+      Request : constant AIO_Request_Access := State.Free_Requests;
+   begin
+      if Request = null then
+         return new AIO_Request;
+      end if;
+      State.Free_Requests := Request.Next_Free;
+      Request.Next_Free := null;
+      return Request;
+   end Acquire_Request;
+
+   procedure Recycle_Request
+     (State   : not null Engine_State_Access;
+      Request : in out AIO_Request_Access)
+   is
+   begin
+      Request.Next_Free := State.Free_Requests;
+      State.Free_Requests := Request;
+      Request := null;
+   end Recycle_Request;
 
    function AIO_Read (Control : access AIO_Control_Block) return C.int;
    pragma Import (C, AIO_Read, "aio_read");
@@ -89,7 +123,10 @@ package body System.Gnatevl.File_Engine is
       State : Engine_State_Access;
    begin
       pragma Unreferenced (Wake_FD);
-      State := new Engine_State'(Kqueue_FD => Poller_FD);
+      State :=
+        new Engine_State'
+          (Kqueue_FD     => Poller_FD,
+           Free_Requests => null);
       Item.State := To_Address (State);
       return True;
    exception
@@ -99,8 +136,14 @@ package body System.Gnatevl.File_Engine is
 
    procedure Finalize (Item : in out Engine) is
       State : Engine_State_Access := To_State (Item.State);
+      Request : AIO_Request_Access;
    begin
       if State /= null then
+         while State.Free_Requests /= null loop
+            Request := State.Free_Requests;
+            State.Free_Requests := Request.Next_Free;
+            Free_Request (Request);
+         end loop;
          Free_State (State);
          Item.State := System.Null_Address;
       end if;
@@ -125,29 +168,30 @@ package body System.Gnatevl.File_Engine is
          return False;
       end if;
 
-      Request :=
-        new AIO_Request'
-          (Control =>
-             (Descriptor  => Descriptor,
-              Offset      => Offset,
-              Buffer      => Buffer,
-              Length      => Length,
-              Priority    => 0,
-              Signal      =>
-                (Notify            => SIGEV_KEVENT,
-                 Signo             => State.Kqueue_FD,
-                 Value             => Token,
-                 Notify_Function   => System.Null_Address,
-                 Notify_Attributes => System.Null_Address),
-              List_Opcode => 0),
-           Token => Token);
+      Request := Acquire_Request (State);
+      Request.all :=
+        (Control =>
+           (Descriptor  => Descriptor,
+            Offset      => Offset,
+            Buffer      => Buffer,
+            Length      => Length,
+            Priority    => 0,
+            Signal      =>
+              (Notify            => SIGEV_KEVENT,
+               Signo             => State.Kqueue_FD,
+               Value             => Token,
+               Notify_Function   => System.Null_Address,
+               Notify_Attributes => System.Null_Address),
+            List_Opcode => 0),
+         Token     => Token,
+         Next_Free => null);
       Result :=
         (if For_Write
          then AIO_Write (Request.Control'Access)
          else AIO_Read (Request.Control'Access));
       if Result /= 0 then
          Error_Code := C.int (OSI.errno);
-         Free_Request (Request);
+         Recycle_Request (State, Request);
          return False;
       end if;
       Error_Code := 0;
@@ -165,17 +209,17 @@ package body System.Gnatevl.File_Engine is
       Kernel_Error    : C.int;
       Value           : out Completion) return Boolean
    is
+      State   : constant Engine_State_Access := To_State (Item.State);
       Request : AIO_Request_Access := To_Request (Request_Address);
    begin
-      pragma Unreferenced (Item);
-      if Request = null then
+      if State = null or else Request = null then
          return False;
       end if;
       Value :=
         (Token      => Request.Token,
          Result     => (if Kernel_Result >= 0 then Kernel_Result else 0),
          Error_Code => Kernel_Error);
-      Free_Request (Request);
+      Recycle_Request (State, Request);
       return True;
    end Complete_Event;
 
