@@ -23,6 +23,7 @@ project Runtime_Smoke is
       "cancellation_wake_smoke.adb",
       "connection_lifecycle_smoke.adb",
       "connection_state_model.adb",
+      "context_abi_matrix.adb",
       "descriptor_ownership_smoke.adb",
       "dns_smoke.adb",
       "dns_parser_smoke.adb",

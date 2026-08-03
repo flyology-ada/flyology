@@ -33,9 +33,9 @@ FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
 if nm -g "$project_root/lib/libFlyology.a" | \
-     grep -Ei 'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules' >/dev/null
+     grep -Ei 'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)' >/dev/null
 then
-  echo "production library exposes TLS test symbols" >&2
+  echo "production library exposes test-only symbols" >&2
   exit 1
 fi
 FLYOLOGY_TLS_TEST_HOOKS=true
@@ -153,6 +153,7 @@ for test_main in \
   cancellation_wake_smoke \
   connection_lifecycle_smoke \
   connection_state_model \
+  context_abi_matrix \
   descriptor_ownership_smoke \
   dns_smoke \
   dns_parser_smoke \
