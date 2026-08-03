@@ -1349,8 +1349,12 @@ Generate a source-coverage baseline with:
 This requires the Alire `gnatcov_bin` tool crate on `PATH`. The script runs the
 portable behavioral programs selected by `scripts/coverage.sh` and consolidates
 statement and decision coverage for the Ada units in the Flyology library
-project. It writes a stable summary, a detailed text report, and annotated
-`xcov` sources under `coverage/`; those generated files are ignored. The Alire
+project. The native-default pass remains the inertness control. Focused pool,
+topology, and fault-policy programs are relinked against explicit prepared
+runtime configurations when that configuration exposes a distinct library
+decision. The summary computes the program, execution, and configuration
+counts from the run. It also writes a detailed text report and annotated `xcov`
+sources under `coverage/`; those generated files are ignored. The Alire
 GNATcoverage binary does not include its dynamic HTML reporter.
 
 The baseline deliberately excludes generated configuration, test sources, the

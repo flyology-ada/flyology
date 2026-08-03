@@ -6,6 +6,7 @@ alr=$("$project_root/scripts/find-alr.sh")
 coverage_root="$project_root/coverage"
 prepared_rts="$coverage_root/rts"
 pool_rts="$coverage_root/pool-rts"
+fault_rts="$coverage_root/fault-rts"
 instrumentation_rts="$coverage_root/gnatcov-rts"
 trace_dir="$coverage_root/traces"
 report_dir="$coverage_root/report"
@@ -30,10 +31,19 @@ fi
 rm -rf "$coverage_root"
 mkdir -p "$trace_dir" "$report_dir"
 
+#  A fresh Alire checkout has no generated config/flyology_config.* yet.
+#  Generate only configuration sources; the instrumented build below remains
+#  the sole library compilation measured by this workflow.
+"$alr" build --stop-after=generation >/dev/null
+
+configuration_count=0
+execution_count=0
+
 printf '%s\n' "coverage: preparing the native-default Flyology RTS"
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_RTS_DIR="$prepared_rts" \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
+configuration_count=$((configuration_count + 1))
 
 printf '%s\n' "coverage: preparing GNATcoverage support for the custom RTS"
 "$alr" exec -- "$gnatcov" setup \
@@ -68,7 +78,7 @@ printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
   --quiet \
   --warnings-as-errors
 
-test_mains='cancellation_wake_smoke
+ordinary_mains='cancellation_wake_smoke
 connection_lifecycle_smoke
 connection_state_model
 descriptor_ownership_smoke
@@ -108,14 +118,14 @@ tcp_native_smoke
 wait_any_smoke'
 
 set --
-test_count=0
-for test_main in $test_mains; do
-  test_count=$((test_count + 1))
+ordinary_count=0
+for test_main in $ordinary_mains; do
+  ordinary_count=$((ordinary_count + 1))
   set -- "$@" "$test_main.adb"
 done
 
 printf 'coverage: building %s instrumented portable test programs\n' \
-  "$test_count"
+  "$ordinary_count"
 "$alr" exec -- gprbuild \
   --RTS="$prepared_rts" \
   -f -p -q -j0 \
@@ -130,10 +140,10 @@ if [ -z "$tls_library_dir" ] && command -v pkg-config >/dev/null 2>&1; then
   tls_library_dir=$(pkg-config --variable=libdir openssl 2>/dev/null || :)
 fi
 
-for test_main in $test_mains; do
-  trace="$trace_dir/$test_main.srctrace"
+for test_main in $ordinary_mains; do
+  trace="$trace_dir/native-$test_main.srctrace"
   executable="$project_root/tests/bin/$coverage_subdir/$test_main"
-  printf '%s\n' "coverage: RUN $test_main"
+  printf '%s\n' "coverage: RUN native/$test_main"
   case "$test_main" in
     dns_smoke)
       FLYOLOGY_COVERAGE_TRACE="$trace" \
@@ -159,22 +169,31 @@ for test_main in $test_mains; do
       ;;
   esac
   if [ ! -s "$trace" ]; then
-    printf '%s\n' "coverage: $test_main produced no source trace" >&2
+    printf '%s\n' \
+      "coverage: native/$test_main produced no source trace" >&2
     exit 1
   fi
+  execution_count=$((execution_count + 1))
 done
 
-#  The differential conformance matrix deliberately crosses three automatic
-#  groups. Keep the ordinary one-loop compatibility run intact, then relink
-#  only this executable against a separately prepared three-loop RTS. The
-#  Flyology library instrumentation is identical, so its trace consolidates
-#  with the ordinary configuration.
-printf '%s\n' "coverage: preparing the three-loop conformance RTS"
+#  These programs inspect and cross three automatic groups. Keep the ordinary
+#  one-loop compatibility run intact, then relink only the pool-sensitive
+#  programs against a three-loop RTS. The Flyology library instrumentation is
+#  identical, so all traces consolidate into one report.
+pool_mains='loop_pool_smoke
+semantic_conformance_matrix
+topology_smoke'
+printf '%s\n' "coverage: preparing the three-loop topology RTS"
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=3 \
 FLYOLOGY_RTS_DIR="$pool_rts" \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
-printf '%s\n' "coverage: building semantic_conformance_matrix"
+configuration_count=$((configuration_count + 1))
+set --
+for test_main in $pool_mains; do
+  set -- "$@" "$test_main.adb"
+done
+printf '%s\n' "coverage: building three-loop topology programs"
 "$alr" exec -- gprbuild \
   --RTS="$pool_rts" \
   -f -p -q -j0 \
@@ -182,25 +201,75 @@ printf '%s\n' "coverage: building semantic_conformance_matrix"
   --subdirs="$coverage_subdir" \
   --src-subdirs=gnatcov-instr \
   --implicit-with=gnatcov_rts.gpr \
-  semantic_conformance_matrix.adb
-test_count=$((test_count + 1))
-trace="$trace_dir/semantic_conformance_matrix.srctrace"
-printf '%s\n' "coverage: RUN semantic_conformance_matrix"
-FLYOLOGY_COVERAGE_TRACE="$trace" \
-  "$project_root/scripts/run-with-timeout.sh" 30 \
-  "$project_root/tests/bin/$coverage_subdir/semantic_conformance_matrix"
-if [ ! -s "$trace" ]; then
-  printf '%s\n' \
-    "coverage: semantic_conformance_matrix produced no source trace" >&2
-  exit 1
-fi
+  "$@"
+for test_main in $pool_mains; do
+  trace="$trace_dir/pool-$test_main.srctrace"
+  printf '%s\n' "coverage: RUN pool/$test_main"
+  FLYOLOGY_COVERAGE_TRACE="$trace" \
+    "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$project_root/tests/bin/$coverage_subdir/$test_main"
+  if [ ! -s "$trace" ]; then
+    printf '%s\n' \
+      "coverage: pool/$test_main produced no source trace" >&2
+    exit 1
+  fi
+  execution_count=$((execution_count + 1))
+done
 
-printf '%s\n' "coverage: consolidating $test_count source traces"
+#  The runtime fault seam deterministically produces accept retry and listener
+#  cleanup outcomes that portable clients cannot request from the host kernel.
+#  Only the two public socket/server policy tests use this configuration.
+fault_mains='accept_transient_smoke
+structured_server_reuse_smoke'
+printf '%s\n' "coverage: preparing the portable fault-policy RTS"
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+FLYOLOGY_TEST_FAULTS=1 \
+FLYOLOGY_RTS_DIR="$fault_rts" \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+configuration_count=$((configuration_count + 1))
+set --
+for test_main in $fault_mains; do
+  set -- "$@" "$test_main.adb"
+done
+printf '%s\n' "coverage: building portable fault-policy programs"
+"$alr" exec -- gprbuild \
+  --RTS="$fault_rts" \
+  -f -p -q -j0 \
+  -P tests/runtime_smoke.gpr \
+  --subdirs="$coverage_subdir" \
+  --src-subdirs=gnatcov-instr \
+  --implicit-with=gnatcov_rts.gpr \
+  "$@"
+for test_main in $fault_mains; do
+  trace="$trace_dir/fault-$test_main.srctrace"
+  printf '%s\n' "coverage: RUN fault/$test_main"
+  FLYOLOGY_COVERAGE_TRACE="$trace" \
+    "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$project_root/tests/bin/$coverage_subdir/$test_main"
+  if [ ! -s "$trace" ]; then
+    printf '%s\n' \
+      "coverage: fault/$test_main produced no source trace" >&2
+    exit 1
+  fi
+  execution_count=$((execution_count + 1))
+done
+
+all_programs="$ordinary_mains
+$pool_mains
+$fault_mains"
+program_count=$(printf '%s\n' "$all_programs" | awk '
+  NF && !seen[$1]++ { count++ }
+  END { print count + 0 }
+')
+
+printf 'coverage: consolidating %s executions from %s configurations\n' \
+  "$execution_count" "$configuration_count"
 "$alr" exec -- "$gnatcov" coverage \
   -P tests/runtime_smoke.gpr \
   --projects=flyology \
   --level=stmt+decision \
-  --RTS="$pool_rts" \
+  --RTS="$prepared_rts" \
   --subdirs="$coverage_subdir" \
   --restricted-to-languages=Ada \
   --excluded-source-files='flyology_config.*' \
@@ -234,7 +303,11 @@ tool_version=$("$gnatcov" --version | sed -n '1p')
   printf 'tool: %s\n' "$tool_version"
   printf '%s\n' "level: statement + decision"
   printf '%s\n' "scope: Ada units owned by the Flyology library project"
-  printf 'tests: %s portable behavioral programs\n' "$test_count"
+  printf 'programs: %s distinct portable behavioral programs\n' \
+    "$program_count"
+  printf 'executions: %s instrumented runs\n' "$execution_count"
+  printf 'configurations: %s prepared runtime configurations\n' \
+    "$configuration_count"
   stats_summary statements "$report_dir/stats/stmt.index"
   stats_summary decisions "$report_dir/stats/decision.index"
   printf '%s\n' "excluded: generated configuration, prepared RTS, C bridge, assembly, tests"
