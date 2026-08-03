@@ -6,18 +6,13 @@ package body Flyology.Wake_Sources is
    use type C.int;
    use type C.long;
 
-   F_SETFD     : constant C.int := 2;
-   F_SETFL     : constant C.int := 4;
-   FD_CLOEXEC  : constant C.int := 1;
-   O_NONBLOCK  : constant C.int := 4;
-
    type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int
      with Convention => C;
 
    function Pipe (Ends : System.Address) return C.int;
    pragma Import (C, Pipe, "pipe");
-   function Fcntl (FD : C.int; Command : C.int; Value : C.int) return C.int;
-   pragma Import (C, Fcntl, "fcntl");
+   function Configure (FD : C.int) return C.int;
+   pragma Import (C, Configure, "flyology_wake_source_configure");
    function Write
      (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
@@ -39,10 +34,8 @@ package body Flyology.Wake_Sources is
            & GNAT.OS_Lib.Errno'Image;
       end if;
 
-      if Fcntl (Ends (0), F_SETFL, O_NONBLOCK) < 0
-        or else Fcntl (Ends (1), F_SETFL, O_NONBLOCK) < 0
-        or else Fcntl (Ends (0), F_SETFD, FD_CLOEXEC) < 0
-        or else Fcntl (Ends (1), F_SETFD, FD_CLOEXEC) < 0
+      if Configure (Ends (0)) < 0
+        or else Configure (Ends (1)) < 0
       then
          Ignored := Close (Ends (0));
          Ignored := Close (Ends (1));
