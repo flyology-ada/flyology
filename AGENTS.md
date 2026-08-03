@@ -82,6 +82,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   lane. A lightweight call suspends only its task; a native call may block only
   its pthread. Preserve `out` values, exceptions, retry deadlines, and ownership
   semantics across both paths.
+- TLS provider choice is per connection through the provider-neutral SPI.
+  OpenSSL is an optional dynamically loaded provider. Provider steps must never
+  block: return `Want_Read` or `Want_Write` and let Flyology wait for readiness.
+  A provider session borrows the descriptor while `TLS.Connection` retains sole
+  closing ownership.
 - Socket readiness uses `kqueue` on Darwin and `epoll` on Linux. Cross-thread
   wakes use `EVFILT_USER` or `eventfd` respectively.
 - Timers use the group poller’s next timeout and a monotonic deadline heap.
