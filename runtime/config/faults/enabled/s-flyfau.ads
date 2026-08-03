@@ -28,7 +28,12 @@ package System.Flyology.Faults is
       Accept_Process_File_Limit,
       Accept_System_File_Limit,
       Accept_Bad_Descriptor,
-      Structured_Listener_Close);
+      Structured_Listener_Close,
+      File_Uring_Drain_Pause,
+      File_Uring_Submit_EBUSY,
+      File_Uring_Overflow_Flush,
+      File_Uring_Backpressure,
+      File_Uring_Flush_EBUSY);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -55,7 +60,12 @@ package System.Flyology.Faults is
       Accept_Process_File_Limit    => 22,
       Accept_System_File_Limit     => 23,
       Accept_Bad_Descriptor        => 24,
-      Structured_Listener_Close   => 25);
+      Structured_Listener_Close   => 25,
+      File_Uring_Drain_Pause      => 26,
+      File_Uring_Submit_EBUSY     => 27,
+      File_Uring_Overflow_Flush   => 28,
+      File_Uring_Backpressure     => 29,
+      File_Uring_Flush_EBUSY      => 30);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);

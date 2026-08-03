@@ -31,6 +31,9 @@ package System.Flyology.File_Engine is
 
    procedure Finalize (Item : in out Engine);
 
+   --  False with EAGAIN denotes temporary kernel queue pressure and is safe
+   --  for the owning scheduler to retry without releasing Buffer. Linux also
+   --  normalizes io_uring EBUSY to this retry contract.
    function Submit
      (Item        : in out Engine;
       Descriptor  : Interfaces.C.int;

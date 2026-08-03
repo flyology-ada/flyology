@@ -144,6 +144,7 @@ long flyology_linux_io_uring_register(int descriptor, unsigned opcode,
 int flyology_linux_file_backend(void) {
     return 0;
 }
+
 #endif
 
 #define FLYOLOGY_PLACEMENT_STRICT 1
@@ -298,7 +299,7 @@ int flyology_in_fork_child(void) {
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 25
+#define FLYOLOGY_FAULT_POINT_COUNT 30
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
@@ -316,6 +317,17 @@ static atomic_uint flyology_file_cancel_counts
     [FLYOLOGY_FILE_CANCEL_DISPOSITIONS + 1][2];
 static atomic_uint flyology_uring_identity_counts[2];
 static atomic_uint flyology_uring_admin_completions;
+static atomic_uint flyology_uring_cq_capacity;
+
+void flyology_test_note_uring_cq_capacity(unsigned capacity) {
+    atomic_store_explicit(&flyology_uring_cq_capacity, capacity,
+                          memory_order_relaxed);
+}
+
+unsigned flyology_test_uring_cq_capacity(void) {
+    return atomic_load_explicit(&flyology_uring_cq_capacity,
+                                memory_order_relaxed);
+}
 
 void flyology_test_note_uring_identity(int reused) {
     atomic_fetch_add_explicit(&flyology_uring_identity_counts[reused != 0], 1,

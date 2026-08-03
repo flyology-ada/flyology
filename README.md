@@ -796,11 +796,14 @@ eight-byte Ada-neutral event record. This keeps both AArch64's aligned epoll
 record and x86-64's packed record out of Ada while leaving engine policy,
 submission, completion handling, and scheduling in Ada.
 
-Submission-queue saturation is explicit backpressure: the task remains
-suspended in a per-group FIFO until the scheduler can submit it. No Ada worker
-task, pthread pool, or blocking `pread`/`pwrite` call is hidden behind the
-lightweight API. Native-designated callers use direct positional syscalls. Explicit
-offsets avoid shared file-position races in both lanes.
+Linux submission pressure is explicit backpressure: Flyology caps outstanding
+`io_uring` SQEs at the kernel-reported completion-queue capacity, and a task
+that cannot yet be submitted remains suspended in a per-group FIFO. The engine
+also detects a kernel overflow backlog and asks `io_uring_enter` to flush it
+before admitting more work. No Ada worker task, pthread pool, or blocking
+`pread`/`pwrite` call is hidden behind the lightweight API. Native-designated
+callers use direct positional syscalls. Explicit offsets avoid shared
+file-position races in both lanes.
 
 `Read_At` and `Write_At` accept the same shared optional cancellation token.
 Cancellation is terminal rather than optimistic: the call never raises
@@ -1297,7 +1300,10 @@ FLYOLOGY_STRESS_SEEDS="42" FLYOLOGY_STRESS_BATCHES=50 \
 The stress runner rebuilds a test-only RTS with `FLYOLOGY_TEST_FAULTS=1` and
 exercises deterministic failure counters for fiber allocation, stack mapping,
 group startup, poller watch/wait/wake, interrupted poll waits, and file-queue
-saturation. Recoverable failures must surface to Ada and permit a subsequent
+saturation. On Linux it also drives more operations than the reported
+`io_uring` completion capacity, a retryable `EBUSY`, and the overflow-flush
+path while checking that every completion is delivered. Recoverable failures
+must surface to Ada and permit a subsequent
 task to run; poller failures that violate
 scheduler progress must terminate the isolated subprocess with `SIGABRT`. The
 runner restores a normal, fault-disabled RTS before exiting. The selected

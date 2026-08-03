@@ -27,7 +27,12 @@ package Fault_Control is
       Accept_Process_File_Limit,
       Accept_System_File_Limit,
       Accept_Bad_Descriptor,
-      Structured_Listener_Close);
+      Structured_Listener_Close,
+      File_Uring_Drain_Pause,
+      File_Uring_Submit_EBUSY,
+      File_Uring_Overflow_Flush,
+      File_Uring_Backpressure,
+      File_Uring_Flush_EBUSY);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -54,7 +59,12 @@ package Fault_Control is
       Accept_Process_File_Limit    => 22,
       Accept_System_File_Limit     => 23,
       Accept_Bad_Descriptor        => 24,
-      Structured_Listener_Close   => 25);
+      Structured_Listener_Close   => 25,
+      File_Uring_Drain_Pause      => 26,
+      File_Uring_Submit_EBUSY     => 27,
+      File_Uring_Overflow_Flush   => 28,
+      File_Uring_Backpressure     => 29,
+      File_Uring_Flush_EBUSY      => 30);
 
    function Enabled return Boolean;
    procedure Reset;
@@ -82,6 +92,7 @@ package Fault_Control is
 
    function Uring_Identity_Count (Reused : Boolean) return Natural;
    function Uring_Admin_Complete_Count return Natural;
+   function Uring_CQ_Capacity return Natural;
 
 private
    function C_Enabled return Interfaces.C.int;
@@ -119,4 +130,8 @@ private
    pragma Import
      (C, C_Uring_Admin_Complete_Count,
       "flyology_test_uring_admin_complete_count");
+
+   function C_Uring_CQ_Capacity return Interfaces.C.unsigned;
+   pragma Import
+     (C, C_Uring_CQ_Capacity, "flyology_test_uring_cq_capacity");
 end Fault_Control;

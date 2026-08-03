@@ -37,6 +37,7 @@ package body System.Flyology.File_Engine is
    EINVAL : constant C.int := 22;
    ENOMEM : constant C.int := 12;
    EAGAIN : constant C.int := 11;
+   EBUSY  : constant C.int := 16;
    ENOENT : constant C.int := 2;
 
    PROT_READ  : constant C.int := 1;
@@ -48,6 +49,8 @@ package body System.Flyology.File_Engine is
    IORING_OFF_SQES    : constant C.long_long := 16#1000_0000#;
 
    IORING_FEAT_SINGLE_MMAP       : constant U32 := 1;
+   IORING_SQ_CQ_OVERFLOW         : constant U32 := 2;
+   IORING_ENTER_GETEVENTS        : constant C.unsigned := 1;
    IORING_REGISTER_EVENTFD       : constant U32 := 4;
    IORING_REGISTER_EVENTFD_ASYNC : constant U32 := 7;
    IORING_OP_READ                : constant U8 := 22;
@@ -279,12 +282,21 @@ package body System.Flyology.File_Engine is
       SQ_Tail           : System.Address := System.Null_Address;
       SQ_Mask           : System.Address := System.Null_Address;
       SQ_Entries        : System.Address := System.Null_Address;
+      SQ_Flags          : System.Address := System.Null_Address;
       SQ_Array          : System.Address := System.Null_Address;
       SQEs              : System.Address := System.Null_Address;
       CQ_Head           : System.Address := System.Null_Address;
       CQ_Tail           : System.Address := System.Null_Address;
       CQ_Mask           : System.Address := System.Null_Address;
+      CQ_Overflow       : System.Address := System.Null_Address;
       CQEs              : System.Address := System.Null_Address;
+      CQ_Capacity       : U32 := 0;
+      CQ_Overflow_Seen  : U32 := 0;
+      --  Count every submitted SQE whose CQE has not yet been consumed.
+      --  Administrative cancellation SQEs count independently from their
+      --  data requests because each produces its own CQE.
+      Uring_In_Flight   : U32 := 0;
+      Test_Backpressure_Observed : Boolean := False;
       Free_Requests     : Native_AIO_Request_Access;
       Active_Requests   : Native_AIO_Request_Access;
       Active_Count      : Natural := 0 with Atomic;
@@ -337,6 +349,12 @@ package body System.Flyology.File_Engine is
 
    function Close (Descriptor : C.int) return C.int;
    pragma Import (C, Close, "close");
+
+   function Write
+     (Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t) return C.long;
+   pragma Import (C, Write, "write");
 
    function Linux_IO_Setup
      (Entries : C.unsigned; Context : System.Address)
@@ -406,6 +424,10 @@ package body System.Flyology.File_Engine is
      (C, Note_Uring_Admin_Complete,
       "flyology_test_note_uring_admin_complete");
 
+   procedure Note_Uring_CQ_Capacity (Capacity : C.unsigned);
+   pragma Import
+     (C, Note_Uring_CQ_Capacity, "flyology_test_note_uring_cq_capacity");
+
    procedure Note
      (State       : not null Engine_State_Access;
       Disposition : Cancellation_Disposition;
@@ -469,6 +491,11 @@ package body System.Flyology.File_Engine is
    procedure Submit_Deferred_Admin
      (State : not null Engine_State_Access);
 
+   function Retryable_Submit_Error (Error_Code : C.int) return C.int;
+
+   function Has_Overflow_Backlog
+     (State : not null Engine_State_Access) return Boolean;
+
    procedure Release_State (State : in out Engine_State_Access);
 
    function Failed_Mapping return System.Address is
@@ -477,6 +504,9 @@ package body System.Flyology.File_Engine is
    function Address_At
      (Base : System.Address; Offset : U32) return System.Address
    is (Base + Storage_Offset (Offset));
+
+   function Retryable_Submit_Error (Error_Code : C.int) return C.int is
+     (if Error_Code in EAGAIN | EBUSY then EAGAIN else Error_Code);
 
    function Load
      (Address : System.Address;
@@ -494,6 +524,13 @@ package body System.Flyology.File_Engine is
    begin
       Atomic_Store_32 (Address, Value, Model);
    end Store;
+
+   function Has_Overflow_Backlog
+     (State : not null Engine_State_Access) return Boolean
+   is
+     ((Load (State.SQ_Flags, AP.Acquire) and IORING_SQ_CQ_OVERFLOW) /= 0
+      or else
+        Load (State.CQ_Overflow, AP.Acquire) /= State.CQ_Overflow_Seen);
 
    function Acquire_Request
      (State : not null Engine_State_Access) return Native_AIO_Request_Access
@@ -604,7 +641,10 @@ package body System.Flyology.File_Engine is
       if Target mod 2 /= 0 then
          Error_Code := EINVAL;
          return False;
-      elsif Tail - Head >= Entries then
+      elsif Has_Overflow_Backlog (State)
+        or else State.Uring_In_Flight >= State.CQ_Capacity
+        or else Tail - Head >= Entries
+      then
          Error_Code := EAGAIN;
          return False;
       end if;
@@ -647,9 +687,12 @@ package body System.Flyology.File_Engine is
       if Result /= 1 then
          Store (State.SQ_Tail, Tail, AP.Release);
          Error_Code :=
-           (if Result < 0 then C.int (OSI.errno) else EAGAIN);
+           (if Result < 0
+            then Retryable_Submit_Error (C.int (OSI.errno))
+            else EAGAIN);
          return False;
       end if;
+      State.Uring_In_Flight := State.Uring_In_Flight + 1;
       Error_Code := 0;
       return True;
    end Submit_Uring_Cancel;
@@ -672,6 +715,12 @@ package body System.Flyology.File_Engine is
       Request.Next_Deferred := null;
       Request.Admin_Submit_Deferred := False;
       if not Submit_Uring_Cancel (State, Request, Error_Code) then
+         if Error_Code = EAGAIN then
+            Request.Admin_Submit_Deferred := True;
+            Request.Next_Deferred := State.Deferred_Admin_Submit_Head;
+            State.Deferred_Admin_Submit_Head := Request;
+            return;
+         end if;
          --  This queue exists only in a fault-enabled runtime. If submitting
          --  the deliberately delayed administrative request fails, there is
          --  no administrative CQE to retain the identity for. The ordinary
@@ -696,6 +745,7 @@ package body System.Flyology.File_Engine is
       elsif State.Active_Requests /= null
         or else State.Active_Uring_Requests /= null
         or else State.Deferred_Admin_Submit_Head /= null
+        or else State.Uring_In_Flight /= 0
       then
          raise Program_Error with
            "FLYOLOGY finalized with active Linux file requests";
@@ -868,6 +918,8 @@ package body System.Flyology.File_Engine is
         (State.SQ_Mapping, Parameters.SQ_Offsets.Ring_Mask);
       State.SQ_Entries := Address_At
         (State.SQ_Mapping, Parameters.SQ_Offsets.Ring_Entries);
+      State.SQ_Flags := Address_At
+        (State.SQ_Mapping, Parameters.SQ_Offsets.Flags);
       State.SQ_Array := Address_At
         (State.SQ_Mapping, Parameters.SQ_Offsets.Array_Offset);
       State.SQEs := State.SQEs_Mapping;
@@ -877,8 +929,19 @@ package body System.Flyology.File_Engine is
         (State.CQ_Mapping, Parameters.CQ_Offsets.Tail);
       State.CQ_Mask := Address_At
         (State.CQ_Mapping, Parameters.CQ_Offsets.Ring_Mask);
+      State.CQ_Overflow := Address_At
+        (State.CQ_Mapping, Parameters.CQ_Offsets.Overflow);
       State.CQEs := Address_At
         (State.CQ_Mapping, Parameters.CQ_Offsets.CQEs);
+      State.CQ_Capacity := Parameters.CQ_Entries;
+      if State.CQ_Capacity = 0 then
+         Release_State (State);
+         return False;
+      end if;
+      State.CQ_Overflow_Seen := Load (State.CQ_Overflow, AP.Acquire);
+      if Faults.Enabled then
+         Note_Uring_CQ_Capacity (C.unsigned (State.CQ_Capacity));
+      end if;
 
       Result :=
         Linux_IO_Uring_Register
@@ -996,6 +1059,19 @@ package body System.Flyology.File_Engine is
          Identity   : SSE.Integer_Address;
          Older      : IO_Uring_Request_Access;
       begin
+         if Has_Overflow_Backlog (State) then
+            Error_Code := EAGAIN;
+            return False;
+         elsif State.Uring_In_Flight >= State.CQ_Capacity then
+            if Faults.Enabled then
+               State.Test_Backpressure_Observed := True;
+               if Faults.Fail (Faults.File_Uring_Backpressure) then
+                  null;
+               end if;
+            end if;
+            Error_Code := EAGAIN;
+            return False;
+         end if;
          Uring_Request := Acquire_Uring_Request (State);
          Uring_Request.all :=
            (Token              => Token,
@@ -1059,6 +1135,14 @@ package body System.Flyology.File_Engine is
             AP.Relaxed);
          Store (State.SQ_Tail, Tail + 1, AP.Release);
 
+         if Faults.Enabled
+           and then Faults.Fail (Faults.File_Uring_Submit_EBUSY)
+         then
+            Store (State.SQ_Tail, Tail, AP.Release);
+            Error_Code := Retryable_Submit_Error (EBUSY);
+            Recycle_Uring_Request (State, Uring_Request);
+            return False;
+         end if;
          loop
             Result :=
               Linux_IO_Uring_Enter
@@ -1073,13 +1157,16 @@ package body System.Flyology.File_Engine is
          if Result /= 1 then
             Store (State.SQ_Tail, Tail, AP.Release);
             Error_Code :=
-              (if Result < 0 then C.int (OSI.errno) else EAGAIN);
+              (if Result < 0
+               then Retryable_Submit_Error (C.int (OSI.errno))
+               else EAGAIN);
             Recycle_Uring_Request (State, Uring_Request);
             return False;
          end if;
          Uring_Request.Next_Active := State.Active_Uring_Requests;
          State.Active_Uring_Requests := Uring_Request;
          State.Active_Count := State.Active_Count + 1;
+         State.Uring_In_Flight := State.Uring_In_Flight + 1;
          Uring_Request := null;
       end;
       Error_Code := 0;
@@ -1225,7 +1312,9 @@ package body System.Flyology.File_Engine is
       State : constant Engine_State_Access := To_State (Item.State);
    begin
       return
-        State = null or else State.Active_Count = 0;
+        State = null
+        or else
+          (State.Active_Count = 0 and then State.Uring_In_Flight = 0);
    end Is_Quiescent;
 
    function Drain
@@ -1289,70 +1378,176 @@ package body System.Flyology.File_Engine is
          end;
       end if;
 
-      Submit_Deferred_Admin (State);
+      if Faults.Enabled
+        and then not State.Test_Backpressure_Observed
+        and then Faults.Fail (Faults.File_Uring_Drain_Pause)
+      then
+         return True;
+      end if;
 
       declare
-         Head : U32 :=
-           Load (State.CQ_Head, AP.Relaxed);
-         Tail : constant U32 :=
-           Load (State.CQ_Tail, AP.Acquire);
-         Mask : constant U32 :=
-           Load (State.CQ_Mask, AP.Acquire);
-      begin
-         while Head /= Tail and then Count < Values'Length loop
-            declare
-               Index : constant U32 := Head and Mask;
-               CQ_Item : constant Completion_Entry_Access :=
-                 To_Completion_Entry
-                   (State.CQEs
-                      + Storage_Offset (Index)
-                          * Storage_Offset (Completion_Entry'Size / 8));
-            begin
+         type Flush_Disposition is (No_Flush, Flushed, Retry, Failed);
+
+         function Overflow_Pending return Boolean;
+         function Flush_Overflow return Flush_Disposition;
+         function Signal_Flush_Retry return Boolean;
+         procedure Drain_Visible;
+
+         function Overflow_Pending return Boolean is
+         begin
+            if Faults.Enabled
+              and then Faults.Fail (Faults.File_Uring_Overflow_Flush)
+            then
+               return True;
+            end if;
+            return Has_Overflow_Backlog (State);
+         end Overflow_Pending;
+
+         function Flush_Overflow return Flush_Disposition is
+            Result : C.long;
+            Error  : C.int;
+         begin
+            if not Overflow_Pending then
+               return No_Flush;
+            elsif Faults.Enabled
+              and then Faults.Fail (Faults.File_Uring_Flush_EBUSY)
+            then
+               return Retry;
+            end if;
+            loop
+               Result := Linux_IO_Uring_Enter
+                 (State.Ring_FD,
+                  0,
+                  0,
+                  IORING_ENTER_GETEVENTS,
+                  System.Null_Address,
+                  0);
+               exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+            end loop;
+            if Result >= 0 then
+               State.CQ_Overflow_Seen :=
+                 Load (State.CQ_Overflow, AP.Acquire);
+               return Flushed;
+            end if;
+            Error := C.int (OSI.errno);
+            if Error in EAGAIN | EBUSY then
+               --  EBUSY means the kernel could not move every overflow CQE
+               --  into the userspace ring yet. The persistent overflow flag
+               --  makes the next drain retry after more CQEs are consumed.
+               return Retry;
+            end if;
+            return Failed;
+         end Flush_Overflow;
+
+         function Signal_Flush_Retry return Boolean is
+            Value  : aliased C.unsigned_long_long := 1;
+            Result : C.long;
+         begin
+            loop
+               Result := Write
+                 (State.Wake_FD,
+                  Value'Address,
+                  C.size_t (C.unsigned_long_long'Size / 8));
+               if Result >= 0 then
+                  return True;
+               elsif OSI.errno = EAGAIN then
+                  --  A saturated eventfd is already readable by epoll.
+                  return True;
+               elsif OSI.errno /= OSI.EINTR then
+                  return False;
+               end if;
+            end loop;
+         end Signal_Flush_Retry;
+
+         procedure Drain_Visible is
+            Head : U32 := Load (State.CQ_Head, AP.Relaxed);
+            Tail : constant U32 := Load (State.CQ_Tail, AP.Acquire);
+            Mask : constant U32 := Load (State.CQ_Mask, AP.Acquire);
+         begin
+            while Head /= Tail and then Count < Values'Length loop
                declare
-                  Raw : constant SSE.Integer_Address :=
-                    SSE.Integer_Address (CQ_Item.User_Data);
-                  Administrative : constant Boolean := Raw mod 2 /= 0;
-                  Base : constant SSE.Integer_Address :=
-                    Raw - (if Administrative then 1 else 0);
-                  Request : IO_Uring_Request_Access :=
-                    To_Uring_Request (SSE.To_Address (Base));
+                  Index : constant U32 := Head and Mask;
+                  CQ_Item : constant Completion_Entry_Access :=
+                    To_Completion_Entry
+                      (State.CQEs
+                         + Storage_Offset (Index)
+                             * Storage_Offset (Completion_Entry'Size / 8));
                begin
-                  if Administrative then
-                     Request.Admin_Complete := True;
-                     if Faults.Enabled then
-                        Note_Uring_Admin_Complete;
-                     end if;
-                     if Request.Operation_Complete then
-                        Unlink_Active_Uring (State, Request);
-                        State.Active_Count := State.Active_Count - 1;
-                        Recycle_Uring_Request (State, Request);
-                     end if;
-                  else
-                     Count := Count + 1;
-                     Values (Values'First + Count - 1) :=
-                       (Token => Request.Token,
-                        Result =>
-                          (if CQ_Item.Result >= 0
-                           then C.long_long (CQ_Item.Result)
-                           else 0),
-                        Error_Code =>
-                          (if CQ_Item.Result < 0
-                           then C.int (-CQ_Item.Result)
-                           else 0));
-                     Request.Operation_Complete := True;
-                     if not Request.Cancel_Submitted
-                       or else Request.Admin_Complete
-                     then
-                        Unlink_Active_Uring (State, Request);
-                        State.Active_Count := State.Active_Count - 1;
-                        Recycle_Uring_Request (State, Request);
-                     end if;
+                  if State.Uring_In_Flight = 0 then
+                     raise Program_Error with
+                       "io_uring completion exceeds submitted request count";
                   end if;
+                  State.Uring_In_Flight := State.Uring_In_Flight - 1;
+                  declare
+                     Raw : constant SSE.Integer_Address :=
+                       SSE.Integer_Address (CQ_Item.User_Data);
+                     Administrative : constant Boolean := Raw mod 2 /= 0;
+                     Base : constant SSE.Integer_Address :=
+                       Raw - (if Administrative then 1 else 0);
+                     Request : IO_Uring_Request_Access :=
+                       To_Uring_Request (SSE.To_Address (Base));
+                  begin
+                     if Administrative then
+                        Request.Admin_Complete := True;
+                        if Faults.Enabled then
+                           Note_Uring_Admin_Complete;
+                        end if;
+                        if Request.Operation_Complete then
+                           Unlink_Active_Uring (State, Request);
+                           State.Active_Count := State.Active_Count - 1;
+                           Recycle_Uring_Request (State, Request);
+                        end if;
+                     else
+                        Count := Count + 1;
+                        Values (Values'First + Count - 1) :=
+                          (Token => Request.Token,
+                           Result =>
+                             (if CQ_Item.Result >= 0
+                              then C.long_long (CQ_Item.Result)
+                              else 0),
+                           Error_Code =>
+                             (if CQ_Item.Result < 0
+                              then C.int (-CQ_Item.Result)
+                              else 0));
+                        Request.Operation_Complete := True;
+                        if not Request.Cancel_Submitted
+                          or else Request.Admin_Complete
+                        then
+                           Unlink_Active_Uring (State, Request);
+                           State.Active_Count := State.Active_Count - 1;
+                           Recycle_Uring_Request (State, Request);
+                        end if;
+                     end if;
+                  end;
+                  Head := Head + 1;
                end;
-               Head := Head + 1;
-            end;
-         end loop;
-         Store (State.CQ_Head, Head, AP.Release);
+            end loop;
+            Store (State.CQ_Head, Head, AP.Release);
+         end Drain_Visible;
+
+         Flush : Flush_Disposition;
+      begin
+         Drain_Visible;
+         Flush := Flush_Overflow;
+         if Flush = Failed then
+            return False;
+         elsif Flush = Retry then
+            --  EBUSY can still have moved part of the overflow list into the
+            --  userspace CQ. Reap that progress, then make another drain
+            --  inevitable even if the kernel emitted no new eventfd edge.
+            Drain_Visible;
+            if not Signal_Flush_Retry then
+               return False;
+            end if;
+         elsif Flush = Flushed and then Count < Values'Length then
+            --  GETEVENTS may have copied backlog entries into the CQ after
+            --  the first tail snapshot. Consume them in this same drain.
+            Drain_Visible;
+         end if;
+
+         --  Delayed cancellation SQEs also consume CQ capacity. Submit one
+         --  only after visible completions have released that capacity.
+         Submit_Deferred_Admin (State);
       end;
       return True;
    end Drain;

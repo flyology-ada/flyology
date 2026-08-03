@@ -14,6 +14,7 @@ with Interfaces.C;
 
 procedure Fault_Injection_Smoke is
    use type Ada.Real_Time.Time;
+   use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type Fault_Control.File_Cancel_Backend;
    use type Fault_Control.Point;
@@ -365,6 +366,143 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_File_Saturation;
+
+   procedure Test_Uring_CQ_Backpressure is
+      Path : constant String := "/tmp/flyology-uring-capacity.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+   begin
+      Warm_Group;
+      if Selected_Linux_Backend /= 1 then
+         Ada.Text_IO.Put_Line
+           ("io_uring CQ test skipped: backend is not io_uring");
+         return;
+      end if;
+
+      declare
+         Capacity : constant Natural := Fault_Control.Uring_CQ_Capacity;
+         Writer_Count : constant Positive := Positive (Capacity + 64);
+
+         protected Progress is
+            procedure Done (OK : Boolean);
+            entry Wait;
+            function Passed return Boolean;
+         private
+            Finished : Natural := 0;
+            All_OK   : Boolean := True;
+         end Progress;
+
+         protected body Progress is
+            procedure Done (OK : Boolean) is
+            begin
+               Finished := Finished + 1;
+               All_OK := All_OK and OK;
+            end Done;
+
+            entry Wait when Finished = Writer_Count is
+            begin
+               null;
+            end Wait;
+
+            function Passed return Boolean is (All_OK);
+         end Progress;
+
+         task type Writer (Index : Positive) is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Writer;
+
+         task body Writer is
+            Data : constant Ada.Streams.Stream_Element_Array :=
+              [1 => Ada.Streams.Stream_Element (Index mod 251)];
+            Last : Ada.Streams.Stream_Element_Offset;
+         begin
+            Files.Write_At
+              (File, Files.File_Offset (Index - 1), Data, Last);
+            Progress.Done (Last = Data'Last);
+         exception
+            when others =>
+               Progress.Done (False);
+         end Writer;
+
+         type Writer_Access is access Writer;
+         type Writer_Array is array (Positive range <>) of Writer_Access;
+         procedure Free_Writer is new Ada.Unchecked_Deallocation
+           (Writer, Writer_Access);
+         Writers : Writer_Array (1 .. Writer_Count);
+         Data : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Writer_Count));
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         if Capacity = 0 then
+            raise Program_Error with "io_uring reported zero CQ capacity";
+         end if;
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         File := Files.Open
+           (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Uring_Drain_Pause, Count => 1_000_000);
+         Fault_Control.Arm (Fault_Control.File_Uring_Submit_EBUSY);
+         Fault_Control.Arm
+           (Fault_Control.File_Uring_Overflow_Flush, Count => 2);
+         Fault_Control.Arm (Fault_Control.File_Uring_Flush_EBUSY);
+
+         for Index in Writers'Range loop
+            Writers (Index) := new Writer (Index);
+         end loop;
+         Progress.Wait;
+         if not Progress.Passed then
+            raise Program_Error with
+              "io_uring capacity queue lost a file completion";
+         elsif Fault_Control.Calls (Fault_Control.File_Uring_Backpressure) = 0
+         then
+            raise Program_Error with
+              "more-than-CQ-capacity load did not reach backpressure";
+         elsif Fault_Control.Calls (Fault_Control.File_Uring_Submit_EBUSY) = 0
+         then
+            raise Program_Error with "io_uring EBUSY retry was not exercised";
+         elsif Fault_Control.Calls (Fault_Control.File_Uring_Overflow_Flush) < 2
+         then
+            raise Program_Error with
+              "io_uring overflow GETEVENTS flush was not exercised";
+         elsif Fault_Control.Calls (Fault_Control.File_Uring_Flush_EBUSY) = 0
+         then
+            raise Program_Error with
+              "io_uring overflow EBUSY retry was not exercised";
+         end if;
+
+         Files.Read_At (File, 0, Data, Last);
+         if Last /= Data'Last then
+            raise Program_Error with "io_uring capacity result was short";
+         end if;
+         for Index in Writers'Range loop
+            if Data (Ada.Streams.Stream_Element_Offset (Index)) /=
+              Ada.Streams.Stream_Element (Index mod 251)
+            then
+               raise Program_Error with
+                 "io_uring capacity result was corrupted";
+            end if;
+         end loop;
+         for Item of Writers loop
+            while not Item.all'Terminated loop
+               delay 0.001;
+            end loop;
+            Free_Writer (Item);
+         end loop;
+         Fault_Control.Reset;
+         Files.Close (File);
+         Ada.Directories.Delete_File (Path);
+      end;
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Uring_CQ_Backpressure;
 
    procedure Test_Cross_Domain_Cancellation is
       Path : constant String := "/tmp/flyology-cancel-file.data";
@@ -1282,6 +1420,8 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "file-uring-cq-backpressure" then
+      Test_Uring_CQ_Backpressure;
    elsif Case_Name = "file-cancellation" then
       Test_Cross_Domain_Cancellation;
    elsif Case_Name = "file-abort" then

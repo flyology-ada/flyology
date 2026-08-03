@@ -56,4 +56,7 @@ package body Fault_Control is
    function Uring_Admin_Complete_Count return Natural is
      (Natural (C_Uring_Admin_Complete_Count));
 
+   function Uring_CQ_Capacity return Natural is
+     (Natural (C_Uring_CQ_Capacity));
+
 end Fault_Control;
