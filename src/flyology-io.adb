@@ -267,7 +267,10 @@ package body Flyology.IO is
          raise Device_Error with "invalid descriptor";
       end if;
 
-      if Is_Lightweight_Task then
+      --  A zero-time probe is nonblocking and must inspect readiness rather
+      --  than let an already-expired scheduler timer win the race.  This is
+      --  the same native/lightweight parity rule used by Wait_Any.
+      if Is_Lightweight_Task and then Timeout /= 0.0 then
          Result :=
            Runtime_Wait_IO
               (FD,
