@@ -29,9 +29,25 @@ case "$keep_image" in
 esac
 
 image_built=0
+container_created=0
+container_id=
 cleanup_image() {
   exit_status=$?
   trap - EXIT
+
+  if [ "$container_created" -eq 1 ]; then
+    cleanup_attempt=0
+    while docker container inspect "$container_id" >/dev/null 2>&1; do
+      cleanup_attempt=$((cleanup_attempt + 1))
+      if [ "$cleanup_attempt" -gt 10 ]; then
+        printf 'warning: could not remove Docker test container %s\n' \
+          "$container_id" >&2
+        break
+      fi
+      docker container rm --force "$container_id" >/dev/null 2>&1 || true
+      sleep 1
+    done
+  fi
 
   if [ "$image_built" -eq 1 ]; then
     if [ "$keep_image" -eq 1 ]; then
@@ -61,8 +77,10 @@ docker build \
   "$project_root"
 image_built=1
 
-docker run --rm \
+container_id=$(docker container create \
   --platform "linux/$linux_arch" \
   --env FLYOLOGY_TEST_DENY_IO_URING=1 \
   --env FLYOLOGY_EXPECT_FILE_BACKEND=native-aio \
-  "$image"
+  "$image")
+container_created=1
+docker container start --attach "$container_id"
