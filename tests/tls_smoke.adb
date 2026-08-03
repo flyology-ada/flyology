@@ -1011,6 +1011,33 @@ procedure TLS_Smoke is
       Sockets.Close_Socket (New_Peer);
    end Run_Aborted_Close;
 
+   procedure Run_Empty_Closed_Validation is
+      Item     : TLS.Connection;
+      Empty    : Stream_Element_Array (1 .. 0);
+      Last     : Stream_Element_Offset;
+      Rejected : Natural := 0;
+   begin
+      begin
+         TLS.Receive (Item, Empty, Last);
+      exception
+         when Program_Error =>
+            Rejected := Rejected + 1;
+      end;
+      begin
+         TLS.Receive_Exactly (Item, Empty);
+      exception
+         when Program_Error =>
+            Rejected := Rejected + 1;
+      end;
+      begin
+         TLS.Send_All (Item, Empty);
+      exception
+         when Program_Error =>
+            Rejected := Rejected + 1;
+      end;
+      pragma Assert (Rejected = 3);
+   end Run_Empty_Closed_Validation;
+
    procedure Run_Generation_Reuse is
       Backend      : TLS_Test_Provider.Provider;
       Socket       : Sockets.Socket_Type;
@@ -1114,6 +1141,7 @@ begin
    Run_Hostname_Rejection;
    Run_Provider_Selection;
    Run_Provider_Result_Validation;
+   Run_Empty_Closed_Validation;
    Run_Generation_Reuse;
    Run_Close_Finalization_Fault;
    Run_Loader_Error;

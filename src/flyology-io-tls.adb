@@ -285,6 +285,12 @@ package body Flyology.IO.TLS is
       end case;
    end Snapshot_Operation;
 
+   procedure Validate_Operation_Start (Item : in out Connection) is
+      Ignored : Descriptor_Generation;
+   begin
+      Snapshot_Operation (Item, Ignored);
+   end Validate_Operation_Start;
+
    procedure Acquire_Operation
      (Item         : in out Connection;
       Started      : Ada.Real_Time.Time;
@@ -435,6 +441,7 @@ package body Flyology.IO.TLS is
    begin
       Last := Data'First - 1;
       if Data'Length = 0 then
+         Validate_Operation_Start (Item);
          return;
       end if;
 
@@ -492,6 +499,7 @@ package body Flyology.IO.TLS is
       Last         : Ada.Streams.Stream_Element_Offset;
    begin
       if Data'Length = 0 then
+         Validate_Operation_Start (Item);
          return;
       end if;
 
@@ -548,6 +556,7 @@ package body Flyology.IO.TLS is
       Last         : Ada.Streams.Stream_Element_Offset;
    begin
       if Data'Length = 0 then
+         Validate_Operation_Start (Item);
          return;
       end if;
 
