@@ -180,6 +180,11 @@ for test_main in \
   tcp_native_smoke \
   wait_any_smoke
 do
+  if [ "$test_main" = descriptor_ownership_smoke ]; then
+    export FLYOLOGY_CONNECTION_TEST_HOOKS=true
+  else
+    unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+  fi
   run_gprbuild \
     --RTS="$project_root/build/rts" \
     -f \
@@ -234,6 +239,7 @@ do
       ;;
   esac
 done
+unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 
 #  Exercise automatic placement separately because the pool policy is compiled
 #  into the prepared RTS. The ordinary suite above intentionally retains the

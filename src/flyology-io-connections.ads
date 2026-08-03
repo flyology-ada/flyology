@@ -134,11 +134,13 @@ package Flyology.IO.Connections is
    --  @param Timeout Deadline interval in seconds
    --  @param Cancellation_Quantum Compatibility parameter; value is ignored
    --  @param Token Optional token that must outlive this call
-   --  @exception Operation_Cancelled Shutdown, Token, or Close interrupts I/O
+   --  @exception Operation_Cancelled Shutdown, Token, or Close interrupts a
+   --     call that started while Item was open
    --  @exception Timeout_Error The deadline expires
    --  @exception Device_Error Readiness polling fails
    --  @exception GNAT.Sockets.Socket_Error Socket receive or setup fails
-   --  @exception Program_Error Item is closed or a wake source cannot be used
+   --  @exception Program_Error Item is already closed when the call starts,
+   --     or a wake source cannot be used
    procedure Receive
      (Item                 : in out Connection;
       Data                 : out Ada.Streams.Stream_Element_Array;
@@ -148,18 +150,20 @@ package Flyology.IO.Connections is
       Token                : access Cancellation_Token := null)
    with Pre => Cancellation_Quantum > 0.0;
 
-   --  Fill Data under a sequence-wide deadline. One deadline spans all partial
-   --  receives and retries. Cancellation and lane behavior match Receive.
+   --  Fill Data under one exclusive operation lease and one sequence-wide
+   --  deadline. Cancellation and lane behavior match Receive.
    --  @param Item Open connection
    --  @param Data Destination buffer to fill
    --  @param Timeout Deadline interval in seconds
    --  @param Cancellation_Quantum Compatibility parameter; value is ignored
    --  @param Token Optional token that must outlive this call
-   --  @exception Operation_Cancelled Shutdown, Token, or Close interrupts I/O
+   --  @exception Operation_Cancelled Shutdown, Token, or Close interrupts a
+   --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or the peer closes early
    --  @exception GNAT.Sockets.Socket_Error Socket receive or setup fails
-   --  @exception Program_Error Item is closed or a wake source cannot be used
+   --  @exception Program_Error Item is already closed when the call starts,
+   --     or a wake source cannot be used
    procedure Receive_Exactly
      (Item                 : in out Connection;
       Data                 : out Ada.Streams.Stream_Element_Array;
@@ -175,11 +179,13 @@ package Flyology.IO.Connections is
    --  @param Timeout Deadline interval in seconds
    --  @param Cancellation_Quantum Compatibility parameter; value is ignored
    --  @param Token Optional token that must outlive this call
-   --  @exception Operation_Cancelled Shutdown, Token, or Close interrupts I/O
+   --  @exception Operation_Cancelled Shutdown, Token, or Close interrupts a
+   --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or no forward progress is made
    --  @exception GNAT.Sockets.Socket_Error Socket send or setup fails
-   --  @exception Program_Error Item is closed or a wake source cannot be used
+   --  @exception Program_Error Item is already closed when the call starts,
+   --     or a wake source cannot be used
    procedure Send_All
      (Item                 : in out Connection;
       Data                 : Ada.Streams.Stream_Element_Array;
@@ -193,18 +199,41 @@ private
 
    type Descriptor_Generation is mod 2 ** 64;
 
+   --  Result of a nonblocking lease attempt.
+   type Lease_Result is (Lease_Busy, Lease_Acquired, Lease_Cancelled);
+
+   --  Cleanup obligation published by the controller. The caller owns no
+   --  controller state while Unregistered, one started-operation count while
+   --  Registered, and both that count and the exclusive lease while Acquired.
+   type Operation_State is (Unregistered, Registered, Acquired);
+
    protected type Descriptor_Controller is
       --  Publish descriptor, socket, and admission ownership atomically.
       procedure Adopt
         (FD     : Flyology.IO.Descriptor;
          Socket : GNAT.Sockets.Socket_Type;
          Owner  : Server_Access);
-      entry Acquire
-        (FD           : out Flyology.IO.Descriptor;
-         Generation   : out Descriptor_Generation;
+      --  Register an open generation before waiting for its exclusive lease.
+      --  Close retains the borrowed sources until Try_Acquire, abandonment, or
+      --  operation release resolves this registration.
+      procedure Start_Operation
+        (Generation   : not null access Descriptor_Generation;
+         State        : not null access Operation_State;
+         Lease_Source : out Flyology.IO.Descriptor;
+         Close_Source : out Flyology.IO.Descriptor;
+         Owner        : out Server_Access);
+      procedure Try_Acquire
+        (Expected_Generation : Descriptor_Generation;
+         State        : not null access Operation_State;
+         Result       : out Lease_Result;
+         FD           : out Flyology.IO.Descriptor;
          Close_Source : out Flyology.IO.Descriptor;
          Socket       : out GNAT.Sockets.Socket_Type;
          Owner        : out Server_Access);
+      --  Withdraw one operation whose lease acquisition did not complete.
+      procedure Abandon_Operation (Generation : Descriptor_Generation);
+      --  Reject further chunks after Close has marked this leased generation.
+      procedure Check_Operation (Generation : Descriptor_Generation);
       procedure Release (Generation : Descriptor_Generation);
       procedure Begin_Close
         (FD         : out Flyology.IO.Descriptor;
@@ -219,8 +248,13 @@ private
    private
       Current_FD         : Flyology.IO.Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;
-      Active             : Boolean := False;
-      Closing            : Boolean := False;
+      Active             : Boolean := False with Atomic;
+      Closing            : Boolean := False with Atomic;
+      --  Active operation plus callers between Start_Operation and
+      --  Try_Acquire.
+      Started_Operations : Natural := 0 with Atomic;
+      Lease_Signalled    : Boolean := False;
+      Lease_Wake         : Flyology.Wake_Sources.Source;
       Close_Wake         : Flyology.Wake_Sources.Source;
       Current_Socket     : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
       Current_Owner      : Server_Access := null;

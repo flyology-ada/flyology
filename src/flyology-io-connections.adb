@@ -11,6 +11,36 @@ package body Flyology.IO.Connections is
    use type Interfaces.C.int;
    use type Sockets.Socket_Type;
 
+   type Operation_Guard (Item : not null access Connection) is
+     new Ada.Finalization.Limited_Controlled with record
+      Generation : aliased Descriptor_Generation := 0;
+      State      : aliased Operation_State := Unregistered;
+   end record;
+
+   overriding procedure Finalize (Guard : in out Operation_Guard);
+
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+   function Test_Barrier_Arrive
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_arrive";
+   function Test_Barrier_Released
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_released";
+
+   procedure Test_Barrier (Point : Interfaces.C.int) is
+   begin
+      if Test_Barrier_Arrive (Point) /= 0 then
+         while Test_Barrier_Released (Point) = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Barrier;
+#end if;
+
    protected body Descriptor_Controller is
       procedure Adopt
         (FD     : Descriptor;
@@ -29,6 +59,7 @@ package body Flyology.IO.Connections is
             raise Program_Error with
               "descriptor controller already owns a resource";
          end if;
+         Wake_Sources.Ensure (Lease_Wake);
          Wake_Sources.Ensure (Close_Wake);
          Current_Socket := Socket;
          Current_Owner := Owner;
@@ -36,36 +67,126 @@ package body Flyology.IO.Connections is
          Current_Generation := Current_Generation + 1;
       end Adopt;
 
-      entry Acquire
-        (FD           : out Descriptor;
-         Generation   : out Descriptor_Generation;
+      procedure Start_Operation
+        (Generation   : not null access Descriptor_Generation;
+         State        : not null access Operation_State;
+         Lease_Source : out Descriptor;
          Close_Source : out Descriptor;
-         Socket       : out Sockets.Socket_Type;
          Owner        : out Server_Access)
-        when not Active
       is
       begin
+         if State.all /= Unregistered then
+            raise Program_Error with "connection operation already registered";
+         end if;
          if Current_FD < 0
            or else Closing
            or else Current_Socket = Sockets.No_Socket
            or else Current_Owner = null
          then
             raise Program_Error with "connection is not open";
+         elsif Started_Operations = Natural'Last then
+            raise Program_Error with "too many connection operations";
+         end if;
+         Started_Operations := Started_Operations + 1;
+         Generation.all := Current_Generation;
+         Lease_Source := Wake_Sources.Descriptor (Lease_Wake);
+         Close_Source := Wake_Sources.Descriptor (Close_Wake);
+         Owner := Current_Owner;
+         --  Publish the cleanup obligation before leaving the protected
+         --  action. A pending abort can therefore only observe a state whose
+         --  matching controller count already exists.
+         State.all := Registered;
+      end Start_Operation;
+
+      procedure Try_Acquire
+        (Expected_Generation : Descriptor_Generation;
+         State        : not null access Operation_State;
+         Result       : out Lease_Result;
+         FD           : out Descriptor;
+         Close_Source : out Descriptor;
+         Socket       : out Sockets.Socket_Type;
+         Owner        : out Server_Access)
+      is
+      begin
+         if State.all /= Registered then
+            raise Program_Error with "connection operation is not registered";
+         end if;
+         if Expected_Generation /= Current_Generation
+           or else Current_FD < 0
+           or else Closing
+           or else Current_Socket = Sockets.No_Socket
+           or else Current_Owner = null
+         then
+            if Started_Operations = 0 then
+               raise Program_Error with "missing connection operation";
+            end if;
+            Started_Operations := Started_Operations - 1;
+            State.all := Unregistered;
+            Result := Lease_Cancelled;
+            return;
+         elsif Active then
+            Result := Lease_Busy;
+            return;
+         end if;
+         if Lease_Signalled then
+            Wake_Sources.Consume (Lease_Wake);
+            Lease_Signalled := False;
          end if;
          Active := True;
          FD := Current_FD;
-         Generation := Current_Generation;
          Close_Source := Wake_Sources.Descriptor (Close_Wake);
          Socket := Current_Socket;
          Owner := Current_Owner;
-      end Acquire;
+         --  Active and the guard state become visible in one protected action.
+         --  Finalization after any abort at the call boundary will Release.
+         State.all := Acquired;
+         Result := Lease_Acquired;
+      end Try_Acquire;
+
+      procedure Abandon_Operation (Generation : Descriptor_Generation) is
+      begin
+         if Generation /= Current_Generation or else Started_Operations = 0
+         then
+            raise Program_Error with "stale connection operation withdrawal";
+         end if;
+         Started_Operations := Started_Operations - 1;
+         if not Active
+           and then not Closing
+           and then Started_Operations > 0
+           and then not Lease_Signalled
+         then
+            Wake_Sources.Signal (Lease_Wake);
+            Lease_Signalled := True;
+         end if;
+      end Abandon_Operation;
+
+      procedure Check_Operation (Generation : Descriptor_Generation) is
+      begin
+         if not Active or else Generation /= Current_Generation then
+            raise Program_Error with "stale descriptor operation";
+         elsif Closing then
+            raise Operation_Cancelled with
+              "connection closed during its operation";
+         end if;
+      end Check_Operation;
 
       procedure Release (Generation : Descriptor_Generation) is
       begin
-         if not Active or else Generation /= Current_Generation then
+         if not Active
+           or else Generation /= Current_Generation
+           or else Started_Operations = 0
+         then
             raise Program_Error with "stale descriptor operation release";
          end if;
          Active := False;
+         Started_Operations := Started_Operations - 1;
+         if not Closing
+           and then Started_Operations > 0
+           and then not Lease_Signalled
+         then
+            Wake_Sources.Signal (Lease_Wake);
+            Lease_Signalled := True;
+         end if;
       end Release;
 
       procedure Begin_Close
@@ -79,7 +200,7 @@ package body Flyology.IO.Connections is
          Leader := Current_FD >= 0 and then not Closing;
          if Leader then
             Closing := True;
-            if Active then
+            if Started_Operations > 0 then
                Wake_Sources.Signal (Close_Wake);
             end if;
          end if;
@@ -88,7 +209,7 @@ package body Flyology.IO.Connections is
       entry Await_Drained
         (Socket : out Sockets.Socket_Type;
          Owner  : out Server_Access)
-        when not Active
+        when not Active and then Started_Operations = 0
       is
       begin
          if not Closing
@@ -113,6 +234,7 @@ package body Flyology.IO.Connections is
       begin
          if not Closing
            or else Active
+           or else Started_Operations /= 0
            or else Generation /= Current_Generation
            or else Current_Socket /= Sockets.No_Socket
            or else Current_Owner /= null
@@ -120,7 +242,9 @@ package body Flyology.IO.Connections is
             raise Program_Error with "stale descriptor close completion";
          end if;
          Current_FD := Invalid_Descriptor;
+         Wake_Sources.Release (Lease_Wake);
          Wake_Sources.Release (Close_Wake);
+         Lease_Signalled := False;
          Closing := False;
       end Finish_Close;
 
@@ -129,6 +253,19 @@ package body Flyology.IO.Connections is
 
    end Descriptor_Controller;
 
+   overriding procedure Finalize (Guard : in out Operation_Guard) is
+   begin
+      case Guard.State is
+         when Unregistered =>
+            null;
+         when Registered =>
+            Guard.Item.Controller.Abandon_Operation (Guard.Generation);
+            Guard.State := Unregistered;
+         when Acquired =>
+            Guard.Item.Controller.Release (Guard.Generation);
+            Guard.State := Unregistered;
+      end case;
+   end Finalize;
    protected body Server is
       entry Acquire (Accepted : out Boolean)
         when Stopping or else Active_Count < Capacity
@@ -211,6 +348,87 @@ package body Flyology.IO.Connections is
          raise Operation_Cancelled;
       end if;
    end Interrupt_Sources;
+
+   procedure Acquire_Operation
+     (Item          : in out Connection;
+      Started       : Ada.Real_Time.Time;
+      Timeout       : Duration;
+      Token         : access Cancellation_Token;
+      FD            : out Descriptor;
+      Guard         : in out Operation_Guard;
+      Close_Source  : out Descriptor;
+      Socket        : out Sockets.Socket_Type;
+      Owner         : out Server_Access)
+   is
+      Lease_Source : Descriptor;
+      Initial_Close_Source : Descriptor;
+      Initial_Owner : Server_Access;
+      Interrupt_1 : Descriptor;
+      Interrupt_2 : Descriptor;
+      Outcome : Wait_Outcome := Timed_Out;
+      Result : Lease_Result := Lease_Busy;
+   begin
+      Item.Controller.Start_Operation
+        (Guard.Generation'Access,
+         Guard.State'Access,
+         Lease_Source,
+         Initial_Close_Source,
+         Initial_Owner);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (0);
+#end if;
+      loop
+         Interrupt_Sources
+           (Initial_Owner, Token, Interrupt_1, Interrupt_2);
+         Item.Controller.Try_Acquire
+           (Guard.Generation,
+            Guard.State'Access,
+            Result,
+            FD,
+            Close_Source,
+            Socket,
+            Owner);
+         case Result is
+            when Lease_Acquired =>
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+               Test_Barrier (1);
+#end if;
+               return;
+            when Lease_Cancelled =>
+               raise Operation_Cancelled with
+                 "connection closed while waiting for its operation lease";
+            when Lease_Busy =>
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+               Test_Barrier (4);
+#else
+               null;
+#end if;
+         end case;
+
+         --  Try_Acquire observes Active under the controller lock before this
+         --  wait is armed. Release makes Lease_Source readable under the same
+         --  lock, so readiness persists across the registration window.
+         Outcome := Wait_Interruptibly
+           (Lease_Source,
+            For_Read,
+            Remaining (Started, Timeout),
+            Initial_Close_Source,
+            Interrupt_1,
+            Interrupt_2);
+         if Outcome /= Ready then
+            case Outcome is
+               when Timed_Out =>
+                  raise Timeout_Error with
+                    "connection operation lease timed out";
+               when Interrupted =>
+                  raise Operation_Cancelled with
+                    "connection operation lease was cancelled";
+               when Ready =>
+                  null;
+            end case;
+         end if;
+      end loop;
+   end Acquire_Operation;
 
    procedure Reserve
      (Manager : aliased in out Server;
@@ -371,28 +589,28 @@ package body Flyology.IO.Connections is
       Interrupt_2 : Descriptor;
       Close_Interrupt : Descriptor;
       FD : Descriptor;
-      Generation : Descriptor_Generation;
+      Guard : Operation_Guard (Item'Unchecked_Access);
       Socket : Sockets.Socket_Type;
       Owner : Server_Access;
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       pragma Unreferenced (Cancellation_Quantum);
    begin
-      Item.Controller.Acquire
-        (FD, Generation, Close_Interrupt, Socket, Owner);
+      Acquire_Operation
+        (Item, Started, Timeout, Token,
+         FD, Guard, Close_Interrupt, Socket, Owner);
       pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
+      Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (3);
+#end if;
       begin
-         Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
          Flyology.IO.Sockets.Receive
-           (Socket, Data, Last, Timeout,
+           (Socket, Data, Last, Remaining (Started, Timeout),
             Close_Interrupt, Interrupt_1, Interrupt_2);
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
-            Item.Controller.Release (Generation);
             raise Operation_Cancelled;
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
       end;
-      Item.Controller.Release (Generation);
    end Receive;
 
    procedure Receive_Exactly
@@ -402,23 +620,46 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      First   : Ada.Streams.Stream_Element_Offset := Data'First;
-      Last    : Ada.Streams.Stream_Element_Offset;
+      Started        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      First          : Ada.Streams.Stream_Element_Offset := Data'First;
+      Last           : Ada.Streams.Stream_Element_Offset;
+      Interrupt_1    : Descriptor;
+      Interrupt_2    : Descriptor;
+      Close_Interrupt : Descriptor;
+      FD             : Descriptor;
+      Guard          : Operation_Guard (Item'Unchecked_Access);
+      Socket         : Sockets.Socket_Type;
+      Owner          : Server_Access;
+      pragma Unreferenced (Cancellation_Quantum);
    begin
-      while First <= Data'Last loop
-         Receive
-           (Item,
-            Data (First .. Data'Last),
-            Last,
-            Remaining (Started, Timeout),
-            Cancellation_Quantum,
-            Token);
-         if Last < First then
-            raise Device_Error with "connection closed while receiving";
-         end if;
-         First := Last + 1;
-      end loop;
+      Acquire_Operation
+        (Item, Started, Timeout, Token,
+         FD, Guard, Close_Interrupt, Socket, Owner);
+      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
+      begin
+         while First <= Data'Last loop
+            Item.Controller.Check_Operation (Guard.Generation);
+            Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+            Test_Barrier (3);
+#end if;
+            Flyology.IO.Sockets.Receive
+              (Socket,
+               Data (First .. Data'Last),
+               Last,
+               Remaining (Started, Timeout),
+               Close_Interrupt,
+               Interrupt_1,
+               Interrupt_2);
+            if Last < First then
+               raise Device_Error with "connection closed while receiving";
+            end if;
+            First := Last + 1;
+         end loop;
+      exception
+         when Flyology.IO.Sockets.Operation_Interrupted =>
+            raise Operation_Cancelled;
+      end;
    end Receive_Exactly;
 
    procedure Send_All
@@ -435,39 +676,50 @@ package body Flyology.IO.Connections is
       Interrupt_2 : Descriptor;
       Close_Interrupt : Descriptor;
       FD : Descriptor;
-      Generation : Descriptor_Generation;
+      Guard : Operation_Guard (Item'Unchecked_Access);
       Socket : Sockets.Socket_Type;
       Owner : Server_Access;
       pragma Unreferenced (Cancellation_Quantum);
    begin
-      Item.Controller.Acquire
-        (FD, Generation, Close_Interrupt, Socket, Owner);
+      Acquire_Operation
+        (Item, Started, Timeout, Token,
+         FD, Guard, Close_Interrupt, Socket, Owner);
       pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
       begin
          while First <= Data'Last loop
+            Item.Controller.Check_Operation (Guard.Generation);
             Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
-            Flyology.IO.Sockets.Send
-              (Socket,
-               Data (First .. Data'Last),
-               Last,
-               Remaining (Started, Timeout),
-               Close_Interrupt,
-               Interrupt_1,
-               Interrupt_2);
+            declare
+               Chunk_Last : constant Ada.Streams.Stream_Element_Offset :=
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+                 First;
+#else
+                 Data'Last;
+#end if;
+            begin
+               Flyology.IO.Sockets.Send
+                 (Socket,
+                  Data (First .. Chunk_Last),
+                  Last,
+                  Remaining (Started, Timeout),
+                  Close_Interrupt,
+                  Interrupt_1,
+                  Interrupt_2);
+            end;
             if Last < First then
                raise Device_Error with "connection closed while sending";
             end if;
             First := Last + 1;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+            if First <= Data'Last then
+               Test_Barrier (2);
+            end if;
+#end if;
          end loop;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
-            Item.Controller.Release (Generation);
             raise Operation_Cancelled;
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
       end;
-      Item.Controller.Release (Generation);
    end Send_All;
 
    overriding procedure Finalize (Item : in out Connection) is

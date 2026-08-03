@@ -22,10 +22,14 @@ package Flyology.Wake_Sources is
    --  @exception Program_Error Descriptor creation or configuration fails
    procedure Ensure (Item : in out Source);
    --  Make Item's read end ready. Repeated signals remain readable until
-   --  Release; this operation does not consume or close the source.
+   --  Consume or Release; this operation does not consume or close the source.
    --  @param Item Serialized source to signal
    --  @exception Program_Error Descriptor creation or signaling fails
    procedure Signal (Item : in out Source);
+   --  Consume one pending signal while retaining the descriptor generation.
+   --  @param Item Serialized source with a pending signal
+   --  @exception Program_Error No signal is pending or reading fails
+   procedure Consume (Item : in out Source);
    --  Close both owned descriptors. Repeated calls are harmless. A later
    --  Ensure creates a new descriptor generation.
    --  @param Item Serialized source whose descriptors are released

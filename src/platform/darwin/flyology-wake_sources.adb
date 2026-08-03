@@ -21,6 +21,9 @@ package body Flyology.Wake_Sources is
    function Write
      (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
+   function Read
+     (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
+   pragma Import (C, Read, "read");
    function Close (FD : C.int) return C.int;
    pragma Import (C, Close, "close");
 
@@ -62,6 +65,22 @@ package body Flyology.Wake_Sources is
          end if;
       end loop;
    end Signal;
+
+   procedure Consume (Item : in out Source) is
+      Byte   : aliased C.unsigned_char;
+      Result : C.long;
+   begin
+      if Item.Read_End < 0 then
+         raise Program_Error with "cannot consume absent wake source";
+      end if;
+      loop
+         Result := Read (Item.Read_End, Byte'Address, 1);
+         exit when Result = 1;
+         if Result >= 0 or else GNAT.OS_Lib.Errno /= 4 then
+            raise Program_Error with "cannot consume wake source";
+         end if;
+      end loop;
+   end Consume;
 
    function Descriptor (Item : Source) return C.int is (Item.Read_End);
 

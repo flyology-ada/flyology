@@ -23,6 +23,19 @@ project Flyology is
          TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=1";
    end case;
 
+   type Connection_Test_Hooks_Type is ("false", "true");
+   Connection_Test_Hooks : Connection_Test_Hooks_Type :=
+     external ("FLYOLOGY_CONNECTION_TEST_HOOKS", "false");
+   Connection_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False";
+   case Connection_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Connection_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
+   end case;
+
    for Languages use ("Ada", "C");
 
    for Library_Name use "Flyology";
@@ -80,7 +93,7 @@ project Flyology is
    package Compiler is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
-        & ("-gnatwJ", DNS_Test_Hook_Switch);
+        & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch);
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch);
    end Compiler;
