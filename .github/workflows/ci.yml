@@ -38,6 +38,15 @@ jobs:
             gnat_native=${{ matrix.toolchain.gnat }} \
             gprbuild=${{ matrix.toolchain.gprbuild }}
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
+      - name: Install OpenSSL 3 on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install openssl@3 pkg-config
+          printf 'FLYOLOGY_TEST_OPENSSL_DIR=%s/lib\n' \
+            "$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: Install OpenSSL 3 on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - name: Require the Linux io_uring file backend
         if: runner.os == 'Linux'
         run: printf '%s\n' 'FLYOLOGY_EXPECT_FILE_BACKEND=io-uring' >> "$GITHUB_ENV"

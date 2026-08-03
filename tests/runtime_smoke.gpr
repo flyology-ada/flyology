@@ -45,6 +45,7 @@ project Runtime_Smoke is
       "structured_server_smoke.adb",
       "thread_affinity_smoke.adb",
       "timer_heap_smoke.adb",
+      "tls_smoke.adb",
       "tcp_native_smoke.adb",
       "wait_any_smoke.adb");
    for Create_Missing_Dirs use "True";

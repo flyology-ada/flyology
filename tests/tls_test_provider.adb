@@ -1,0 +1,202 @@
+with Ada.Streams;
+
+package body TLS_Test_Provider is
+   package TLS renames Flyology.IO.TLS;
+   use Ada.Streams;
+
+   type Test_Session is new TLS.Session with record
+      Fail_Finalize : Boolean := False;
+      Behavior      : Receive_Behavior := Return_Data;
+      Handshakes    : Natural := 0;
+      Receives      : Natural := 0;
+      Sends         : Natural := 0;
+      Shutdowns     : Natural := 0;
+   end record;
+
+   overriding function Handshake_Step
+     (Item : in out Test_Session) return TLS.Step_Status;
+   overriding function Receive_Step
+     (Item : in out Test_Session;
+      Data : out Stream_Element_Array;
+      Last : in out Stream_Element_Offset) return TLS.Step_Status;
+   overriding function Send_Step
+     (Item : in out Test_Session;
+      Data : Stream_Element_Array;
+      Last : in out Stream_Element_Offset) return TLS.Step_Status;
+   overriding function Shutdown_Step
+     (Item : in out Test_Session) return TLS.Step_Status;
+   overriding function Error_Message (Item : Test_Session) return String;
+   overriding procedure Finalize (Item : in out Test_Session);
+
+   protected Telemetry is
+      procedure Reset;
+      procedure Saw_Want;
+      procedure Saw_Partial;
+      procedure Read (Wants : out Natural; Partials : out Natural);
+   private
+      Wants    : Natural := 0;
+      Partials : Natural := 0;
+   end Telemetry;
+
+   protected body Telemetry is
+      procedure Reset is
+      begin
+         Wants := 0;
+         Partials := 0;
+      end Reset;
+      procedure Saw_Want is
+      begin
+         Wants := Wants + 1;
+      end Saw_Want;
+      procedure Saw_Partial is
+      begin
+         Partials := Partials + 1;
+      end Saw_Partial;
+      procedure Read (Wants : out Natural; Partials : out Natural) is
+      begin
+         Wants := Telemetry.Wants;
+         Partials := Telemetry.Partials;
+      end Read;
+   end Telemetry;
+
+   procedure Set_Finalize_Failure (Item : in out Provider) is
+   begin
+      Item.Fail_Finalize := True;
+   end Set_Finalize_Failure;
+
+   procedure Set_Receive_Behavior
+     (Item     : in out Provider;
+      Behavior : Receive_Behavior)
+   is
+   begin
+      Item.Behavior := Behavior;
+   end Set_Receive_Behavior;
+
+   procedure Reset_Telemetry is
+   begin
+      Telemetry.Reset;
+   end Reset_Telemetry;
+
+   procedure Get_Telemetry
+     (Want_Results     : out Natural;
+      Partial_Progress : out Natural)
+   is
+   begin
+      Telemetry.Read (Want_Results, Partial_Progress);
+   end Get_Telemetry;
+
+   overriding function Name (Item : Provider) return String is
+      pragma Unreferenced (Item);
+   begin
+      return "test-provider";
+   end Name;
+
+   overriding function Is_Available (Item : Provider) return Boolean is
+      pragma Unreferenced (Item);
+   begin
+      return True;
+   end Is_Available;
+
+   overriding function Create_Session
+     (Item        : in out Provider;
+      FD          : Flyology.IO.Descriptor;
+      Side        : TLS.Role;
+      Server_Name : String) return TLS.Session_Access
+   is
+      pragma Unreferenced (FD, Side, Server_Name);
+   begin
+      return new Test_Session'
+        (TLS.Session with
+         Fail_Finalize => Item.Fail_Finalize,
+         Behavior      => Item.Behavior,
+         Handshakes    => 0,
+         Receives      => 0,
+         Sends         => 0,
+         Shutdowns     => 0);
+   end Create_Session;
+
+   overriding function Handshake_Step
+     (Item : in out Test_Session) return TLS.Step_Status
+   is
+   begin
+      Item.Handshakes := Item.Handshakes + 1;
+      if Item.Handshakes = 1 then
+         Telemetry.Saw_Want;
+         return TLS.Want_Write;
+      end if;
+      return TLS.Complete;
+   end Handshake_Step;
+
+   overriding function Receive_Step
+     (Item : in out Test_Session;
+      Data : out Stream_Element_Array;
+      Last : in out Stream_Element_Offset) return TLS.Step_Status
+   is
+   begin
+      Item.Receives := Item.Receives + 1;
+      if Item.Receives = 1 then
+         Telemetry.Saw_Want;
+         return TLS.Want_Read;
+      end if;
+      case Item.Behavior is
+         when Return_Data =>
+            Data (Data'First) := 42;
+            Last := Data'First;
+            if Data'Length > 1 then
+               Telemetry.Saw_Partial;
+            end if;
+            return TLS.Complete;
+         when Orderly_EOF =>
+            return TLS.Peer_Closed;
+         when Invalid_Lower =>
+            Last := Data'First - 1;
+            return TLS.Complete;
+         when Invalid_Upper =>
+            Last := Data'Last + 1;
+            return TLS.Complete;
+      end case;
+   end Receive_Step;
+
+   overriding function Send_Step
+     (Item : in out Test_Session;
+      Data : Stream_Element_Array;
+      Last : in out Stream_Element_Offset) return TLS.Step_Status
+   is
+   begin
+      Item.Sends := Item.Sends + 1;
+      if Item.Sends = 1 then
+         Telemetry.Saw_Want;
+         return TLS.Want_Write;
+      end if;
+      Last := Data'First;
+      if Data'Length > 1 then
+         Telemetry.Saw_Partial;
+      end if;
+      return TLS.Complete;
+   end Send_Step;
+
+   overriding function Shutdown_Step
+     (Item : in out Test_Session) return TLS.Step_Status
+   is
+   begin
+      Item.Shutdowns := Item.Shutdowns + 1;
+      if Item.Shutdowns = 1 then
+         Telemetry.Saw_Want;
+         return TLS.Want_Write;
+      end if;
+      return TLS.Complete;
+   end Shutdown_Step;
+
+   overriding function Error_Message (Item : Test_Session) return String is
+      pragma Unreferenced (Item);
+   begin
+      return "test provider failure";
+   end Error_Message;
+
+   overriding procedure Finalize (Item : in out Test_Session) is
+   begin
+      if Item.Fail_Finalize then
+         raise Program_Error with "injected provider finalization failure";
+      end if;
+   end Finalize;
+end TLS_Test_Provider;

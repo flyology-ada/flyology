@@ -9,6 +9,8 @@ RUN apt-get update \
        ca-certificates \
        curl \
        git \
+       libssl-dev \
+       pkg-config \
        unzip \
     && rm -rf /var/lib/apt/lists/*
 

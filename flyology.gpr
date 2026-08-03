@@ -12,17 +12,19 @@ project Flyology is
          DNS_Test_Hook_Switch := "-gnateDFLYOLOGY_DNS_TEST_HOOKS=True";
    end case;
 
-   for Languages use ("Ada");
+   for Languages use ("Ada", "C");
 
    for Library_Name use "Flyology";
 
    case Flyology_Config.Alire_Host_OS is
       when "linux" =>
-         for Source_Dirs use ("src/", "src/platform/linux/", "config/");
+         for Source_Dirs use
+           ("src/", "src/native/", "src/platform/linux/", "config/");
       when "macos" =>
-         for Source_Dirs use ("src/", "src/platform/darwin/", "config/");
+         for Source_Dirs use
+           ("src/", "src/native/", "src/platform/darwin/", "config/");
       when others =>
-         for Source_Dirs use ("src/", "config/");
+         for Source_Dirs use ("src/", "src/native/", "config/");
    end case;
 
    type Documentation_Mode_Type is ("false", "true");
@@ -32,6 +34,7 @@ project Flyology is
       when "false" =>
          null;
       when "true" =>
+         for Languages use ("Ada");
          --  Public API only. Private proof helpers remain build sources in the
          --  normal scenario but are intentionally outside GNATdoc's scope.
          for Source_Files use
@@ -46,6 +49,8 @@ project Flyology is
             "flyology-io-files.ads",
             "flyology-io-sockets.ads",
             "flyology-io-structured_servers.ads",
+            "flyology-io-tls.ads",
+            "flyology-io-tls-openssl.ads",
             "flyology-io-timers.ads",
             "flyology-observability.ads",
             "flyology-observability-stall_watchdogs.ads",
@@ -65,11 +70,23 @@ project Flyology is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
         & ("-gnatwJ", DNS_Test_Hook_Switch);
+      for Default_Switches ("C") use ("-std=c11", "-Wall", "-Wextra");
    end Compiler;
 
    package Binder is
       for Switches ("Ada") use ("-Es"); --  Symbolic traceback
    end Binder;
+
+   package Linker is
+      case Flyology_Config.Alire_Host_OS is
+         when "linux" =>
+            --  Keep compatibility with glibc releases where the dynamic
+            --  loader API is still provided by a separate libdl.
+            for Linker_Options use ("-ldl");
+         when others =>
+            null;
+      end case;
+   end Linker;
 
    package Documentation is
       for Excluded_Project_Files use ("config/flyology_config.gpr");

@@ -162,6 +162,7 @@ for test_main in \
   structured_server_smoke \
   thread_affinity_smoke \
   timer_heap_smoke \
+  tls_smoke \
   tcp_native_smoke \
   wait_any_smoke
 do
@@ -178,6 +179,40 @@ do
     process_lifecycle_smoke|process_exit_live_task_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$project_root/tests/bin/$test_main"
+      ;;
+    tls_smoke)
+      tls_library_dir=${FLYOLOGY_TEST_OPENSSL_DIR:-}
+      if [ -z "$tls_library_dir" ] && command -v pkg-config >/dev/null 2>&1; then
+        tls_library_dir=$(pkg-config --variable=libdir openssl 2>/dev/null || :)
+      fi
+      if [ -n "$tls_library_dir" ]; then
+        tls_mismatch_dir="$project_root/build/tests/tls-mismatch"
+        mkdir -p "$tls_mismatch_dir"
+        case "$(uname -s)" in
+          Darwin)
+            cc -std=c11 -Wall -Wextra -Werror -dynamiclib \
+              "$project_root/tests/fixtures/tls/mismatched_crypto.c" \
+              -o "$tls_mismatch_dir/libcrypto.3.dylib"
+            ln -sf "$tls_library_dir/libssl.3.dylib" \
+              "$tls_mismatch_dir/libssl.3.dylib"
+            ;;
+          Linux)
+            cc -std=c11 -Wall -Wextra -Werror -shared -fPIC \
+              -Wl,-soname,libcrypto.so.3 \
+              "$project_root/tests/fixtures/tls/mismatched_crypto.c" \
+              -o "$tls_mismatch_dir/libcrypto.so.3"
+            ln -sf "$tls_library_dir/libssl.so.3" \
+              "$tls_mismatch_dir/libssl.so.3"
+            ;;
+        esac
+        FLYOLOGY_TEST_OPENSSL_DIR="$tls_library_dir" \
+        FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR="$tls_mismatch_dir" \
+          "$project_root/scripts/run-with-timeout.sh" 90 \
+          "$project_root/tests/bin/$test_main"
+      else
+        "$project_root/scripts/run-with-timeout.sh" 90 \
+          "$project_root/tests/bin/$test_main"
+      fi
       ;;
     *)
       "$project_root/scripts/run-with-timeout.sh" 60 \
