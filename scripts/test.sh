@@ -174,6 +174,8 @@ for test_main in \
   ready_queue_smoke \
   runtime_smoke \
   semantic_parity_smoke \
+  stack_guard_violation_child \
+  stack_guard_smoke \
   stack_pool_smoke \
   stack_size_parity_smoke \
   suspension_object_smoke \

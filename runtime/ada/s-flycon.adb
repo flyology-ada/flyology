@@ -29,6 +29,7 @@ package body System.Flyology.Contexts is
    PROT_WRITE  : constant := 2;
    Arena_Slot_Limit : constant := 64;
    Maximum_Arena_Bytes : constant C.size_t := 4 * 1_024 * 1_024;
+   Minimum_Stack_Guard_Bytes : constant C.size_t := 64 * 1_024;
 
    function Map_Anonymous return C.int;
    pragma Import (C, Map_Anonymous, "flyology_map_anonymous");
@@ -96,6 +97,7 @@ package body System.Flyology.Contexts is
       Mapping      : System.Address := System.Null_Address;
       Mapping_Size : C.size_t := 0;
       Usable_Size  : C.size_t := 0;
+      Guard_Size   : C.size_t := 0;
       Stride       : C.size_t := 0;
       Capacity     : Natural := 0;
       Used_Count   : Natural := 0;
@@ -205,6 +207,11 @@ package body System.Flyology.Contexts is
       end if;
    end Unlock_Pool;
 
+   function Round_Up
+     (Value, Alignment : C.size_t) return C.size_t
+   is
+     ((Value + Alignment - 1) / Alignment * Alignment);
+
    function Acquire_Stack
      (Usable_Size : C.size_t;
       Stack       : out System.Address;
@@ -212,10 +219,12 @@ package body System.Flyology.Contexts is
       Slot        : out Natural) return Boolean
    is
       Page_Size : constant C.size_t := C.size_t (Get_Page_Size);
+      Guard_Size : constant C.size_t :=
+        Round_Up (Minimum_Stack_Guard_Bytes, Page_Size);
       Item      : Stack_Arena_Access;
       Capacity  : Natural;
       Result    : C.int;
-      Stride    : constant C.size_t := Usable_Size + Page_Size;
+      Stride    : constant C.size_t := Usable_Size + Guard_Size;
       Locked    : Boolean := False;
    begin
       Stack := System.Null_Address;
@@ -227,6 +236,7 @@ package body System.Flyology.Contexts is
       Item := Arenas;
       while Item /= null loop
          if Item.Usable_Size = Usable_Size
+           and then Item.Guard_Size = Guard_Size
            and then Item.Used_Count < Item.Capacity
          then
             for Index in 0 .. Item.Capacity - 1 loop
@@ -234,7 +244,8 @@ package body System.Flyology.Contexts is
                   Stack :=
                     Item.Mapping
                     + SSE.Storage_Offset
-                        (Page_Size + C.size_t (Index) * Item.Stride);
+                        (Item.Guard_Size
+                         + C.size_t (Index) * Item.Stride);
                   Result :=
                     (if Faults.Enabled
                        and then Faults.Fail (Faults.Stack_Protection)
@@ -275,9 +286,10 @@ package body System.Flyology.Contexts is
             Natural (Maximum_Arena_Bytes / Stride)));
       Item := new Stack_Arena;
       Item.Usable_Size := Usable_Size;
+      Item.Guard_Size := Guard_Size;
       Item.Stride := Stride;
       Item.Capacity := Capacity;
-      Item.Mapping_Size := C.size_t (Capacity) * Stride + Page_Size;
+      Item.Mapping_Size := C.size_t (Capacity) * Stride + Guard_Size;
       if Faults.Enabled and then Faults.Fail (Faults.Stack_Mapping) then
          Free_Arena (Item);
          Unlock_Pool;
@@ -298,7 +310,7 @@ package body System.Flyology.Contexts is
          return False;
       end if;
 
-      Stack := Item.Mapping + SSE.Storage_Offset (Page_Size);
+      Stack := Item.Mapping + SSE.Storage_Offset (Guard_Size);
       Result :=
         (if Faults.Enabled and then Faults.Fail (Faults.Stack_Protection)
          then -1
@@ -364,7 +376,7 @@ package body System.Flyology.Contexts is
       Expected :=
         Arena.Mapping
         + SSE.Storage_Offset
-            (C.size_t (Get_Page_Size) + C.size_t (Slot) * Arena.Stride);
+            (Arena.Guard_Size + C.size_t (Slot) * Arena.Stride);
       if Stack /= Expected then
          Unlock_Pool;
          Locked := False;
@@ -431,11 +443,6 @@ package body System.Flyology.Contexts is
          end if;
          raise;
    end Release_Stack;
-
-   function Round_Up
-     (Value, Alignment : C.size_t) return C.size_t
-   is
-     ((Value + Alignment - 1) / Alignment * Alignment);
 
    function Capture return Context_Access is
       Item : constant Context_Access := new Context;

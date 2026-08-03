@@ -15,6 +15,7 @@ procedure Stack_Pool_Smoke is
    Large_Effective_Bytes : Observation.Counter := 0;
    Arena_Slot_Limit      : constant Observation.Counter := 64;
    Maximum_Arena_Bytes   : constant Observation.Counter := 4 * 1_024 * 1_024;
+   Minimum_Guard_Bytes   : constant Observation.Counter := 64 * 1_024;
 
    function Get_Page_Size return Interfaces.C.int;
    pragma Import (C, Get_Page_Size, "getpagesize");
@@ -22,8 +23,12 @@ procedure Stack_Pool_Smoke is
    function Arena_Capacity
      (Usable_Bytes : Observation.Counter) return Observation.Counter
    is
+      Page_Size : constant Observation.Counter :=
+        Observation.Counter (Get_Page_Size);
+      Guard_Size : constant Observation.Counter :=
+        (Minimum_Guard_Bytes + Page_Size - 1) / Page_Size * Page_Size;
       Stride : constant Observation.Counter :=
-        Usable_Bytes + Observation.Counter (Get_Page_Size);
+        Usable_Bytes + Guard_Size;
    begin
       if Stride >= Maximum_Arena_Bytes then
          return 1;

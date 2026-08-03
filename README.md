@@ -359,12 +359,12 @@ lanes:
   alternate-stack local inside every lightweight task stack. Stack sizing still
   retains GNARL's conservative alternate-stack allowance; removing the local
   changes touched pages, not the requested task's established headroom.
-- Lightweight stacks are mapped in arenas of at most 64 slots and 4 MiB. The layout
-  alternates inaccessible guard pages and usable stacks, so adjacent stacks
-  share one interior guard without weakening either stack's lower or upper
-  boundary. A released slot is protected before reuse and receives best-effort
-  page-discard advice; a completely empty arena is unmapped instead of becoming
-  an historical-peak cache.
+- Lightweight stacks are mapped in arenas of at most 64 slots, targeting 4 MiB
+  before the final guard. Each usable stack is preceded by an inaccessible guard
+  of at least 64 KiB, rounded to the host page size. Adjacent stacks share that
+  interior guard region. A released slot is protected before reuse and receives
+  best-effort page-discard advice; a completely empty arena is unmapped instead
+  of becoming an historical-peak cache.
 - Synchronization between the lanes still passes through GNARL. A native task
   wakes the event-loop scheduler through `EVFILT_USER` on macOS or `eventfd` on
   Linux.
@@ -984,7 +984,7 @@ async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |
 | Make CPU fairness explicit | Arbitrary signal-time preemption would cross Ada and GNARL critical regions at unsafe instructions | Time-budgeted checkpoints provide bounded cooperative slices where application invariants are known to be stable |
 | Use stackful contexts | Normal calls, locals, `out` values, and exceptions survive suspension naturally | Each lightweight task still needs a virtual stack and ABI-specific switching code |
-| Pack stacks into guarded arenas | A private mapping spends two guard pages per task even though neighboring stacks can share an inaccessible boundary | Creation and reap briefly take one process-wide stack-pool mutex; empty arenas are unmapped and partially occupied slots receive best-effort page-discard advice |
+| Pack stacks into guarded arenas | Neighboring stacks can share one inaccessible boundary while allocation and reclamation remain arena operations | Every slot reserves a 64 KiB guard region; creation and reap briefly take one process-wide stack-pool mutex, empty arenas are unmapped, and partially occupied slots receive best-effort page-discard advice |
 | Select ASan fiber annotations at RTS build time | AddressSanitizer must learn the real source and destination stack around a custom assembly transfer | Sanitized builds use LLVM's fiber interface; ordinary builds compile out every hook and sanitizer TLS object |
 | Separate scheduler, context, and poller | CPU state, scheduling policy, and OS readiness are different concerns | New architectures and new OS pollers can be ported independently |
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
@@ -1572,21 +1572,23 @@ with Alire GNAT 16.1.0. Values are one run, not fixed performance guarantees:
 
 | Mode | Connections | OS threads at sample | RSS increase | Peak RSS | Virtual-memory increase | Setup | Release all |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Lightweight | 10,000 | 2 | 464.047 MiB | 466.000 MiB | 1,252.000 MiB | 0.226659 s | 0.032340 s |
-| Native | 10,000 | 10,001 | 340.172 MiB | 464.547 MiB | 1,152.500 MiB | 8.801629 s | 0.152476 s |
+| Lightweight | 10,000 | 2 | 463.922 MiB | 465.875 MiB | 1,571.547 MiB | 0.205089 s | 0.019983 s |
+| Native | 10,000 | 10,001 | 616.750 MiB | 618.734 MiB | 1,191.500 MiB | 7.875962 s | 0.133239 s |
 
-In this run the lightweight lane created the tasks about 38.8 times faster and
-released all waits about 4.7 times faster. It used one event-loop pthread in
-addition to the main thread instead of one pthread per connection. The native
-lane had the lower waiting-sample RSS and virtual-memory increase; peak RSS was
-nearly equal. The useful distinction is the resource shape, not a claim that
-one lane always uses less memory or finishes faster.
+In this run the lightweight lane created the tasks about 38.4 times faster and
+released all waits about 6.7 times faster. It used one event-loop pthread in
+addition to the main thread instead of one pthread per connection. The
+lightweight lane had the lower waiting-sample RSS, while the native lane had
+the lower virtual-memory increase. The useful distinction is the resource
+shape, not a claim that one lane always uses less memory or finishes faster.
 
-The lightweight stack-pool counters reported 157 active arenas, 10,000 live
-stacks, 48 KiB of effective usable stack per task, and 630.453 MiB of exact
-runtime-controlled reservation. Process RSS and virtual size also include Ada
-task state, allocator behavior, socket storage, and other process resources, so
-they should be measured on the deployment host.
+The lightweight stack-pool counters reported 278 active arenas, 10,000 live
+stacks, 48 KiB of effective usable stack per task, and 1,112.000 MiB of exact
+runtime-controlled reservation. The 64 KiB inter-slot guards account for most
+of that reservation without committing corresponding resident pages. Process
+RSS and virtual size also include Ada task state, allocator behavior, socket
+storage, and other process resources, so they should be measured on the
+deployment host.
 
 The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
@@ -1705,10 +1707,14 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   at run time. Automatic lookup covers the system loader and conventional
   Homebrew OpenSSL 3 paths; other installations must pass their library
   directory explicitly. Only OpenSSL 3 is tested in this repository.
-- Fiber guard pages make stack overflow fail fast. Each loop pthread has an
-  alternate signal stack on which GNARL can translate the guard fault into Ada
-  `Storage_Error`; this stack is thread state and is intentionally not stored
-  in an individual fiber's task wrapper.
+- Each lightweight stack has an inaccessible guard region of at least 64 KiB.
+  Ordinary overflow and an unprobed frame that lands within that region fail
+  rather than reaching the adjacent slot. A larger single stack-pointer jump
+  can still cross a finite guard; code with larger unchecked frames requires
+  compiler stack probing. Each loop pthread has an alternate signal stack on
+  which GNARL can translate a guard fault into Ada `Storage_Error`; this stack
+  is thread state and is intentionally not stored in an individual fiber's
+  task wrapper.
 - Stack arenas hold at most 64 slots and target at most 4 MiB before the final
   guard page. Different effective stack sizes use different arenas. A global
   stack-pool mutex serializes only task activation and final reap across groups;
