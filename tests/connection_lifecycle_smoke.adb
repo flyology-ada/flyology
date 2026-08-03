@@ -129,10 +129,11 @@ begin
       task body Completion_Probe is
          Sample : Flyology.Observability.Group_Snapshot;
       begin
-         delay 0.100;
+         delay 0.500;
          Ada.Text_IO.Put_Line
            ("issue18: first_terminated=" & Boolean'Image (First'Terminated)
-            & " second_terminated=" & Boolean'Image (Second'Terminated));
+            & " second_terminated=" & Boolean'Image (Second'Terminated)
+            & " manager_active=" & Natural'Image (Manager.Active));
          if Flyology.Observability.Snapshot (0, Sample) then
             Ada.Text_IO.Put_Line
               ("issue18: members=" & Interfaces.Unsigned_64'Image (Sample.Members)
