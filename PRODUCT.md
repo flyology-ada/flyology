@@ -13,11 +13,11 @@ the entire repository.
 
 ## Product Purpose
 
-Flyology presents an experimental way to run ordinary Ada tasks as lightweight
-tasks on event loops while preserving GNARL task semantics. The public site
-should help a visitor understand what changes, what stays ordinary Ada, where
-the portability and scheduling boundaries lie, and how to evaluate or use the
-project responsibly.
+Flyology presents an experimental lightweight execution lane for ordinary Ada
+tasks. Selected tasks share event-loop threads as fibers while preserving GNARL
+task semantics. The public site should help a visitor understand what changes,
+what stays ordinary Ada, where the portability and scheduling boundaries lie,
+and how to evaluate or use the project responsibly.
 
 ## Brand Personality
 

@@ -1,6 +1,6 @@
 ---
 name: Flyology
-description: A precise, contemporary guide to lightweight Ada tasks on event loops.
+description: A precise, contemporary guide to ordinary Ada tasking with an explicit lightweight execution lane.
 colors:
   ink: "oklch(27% 0.052 270)"
   ink-soft: "oklch(39% 0.043 270)"

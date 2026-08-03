@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Flyology runs ordinary Ada tasks cooperatively on event loops while preserving GNARL task semantics.">
+    <meta name="description" content="Flyology adds an explicit lightweight execution lane to ordinary Ada tasking without introducing a new async model.">
     <meta name="theme-color" content="#17213d">
-    <title>Flyology · Lightweight Ada tasks on event loops</title>
+    <title>Flyology · Lightweight tasks, ordinary Ada</title>
     <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles/site.css">
     <script src="assets/scripts/site.js"></script>
@@ -46,9 +46,9 @@
       <section class="hero page-shell" aria-labelledby="hero-title">
         <div>
           <p class="eyebrow">Experimental GNAT runtime integration</p>
-          <h1 id="hero-title">Ordinary Ada tasks, on event loops.</h1>
+          <h1 id="hero-title">Lightweight tasks. Ordinary Ada.</h1>
           <p class="hero-lede">
-            Flyology lets selected Ada tasks run cooperatively as fibers on shared event-loop threads. Rendezvous, protected objects, exceptions, and blocking-looking control flow stay ordinary Ada.
+            Flyology adds an explicit lightweight execution lane to ordinary Ada tasking, without introducing a new async model. Selected tasks run cooperatively as fibers on shared event-loop threads, while rendezvous, protected objects, exceptions, and blocking-looking control flow stay ordinary Ada.
           </p>
           <div class="actions">
             <a class="button button-primary" href="guide/">

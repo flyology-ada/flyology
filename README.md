@@ -16,12 +16,12 @@
   <a href="https://yrashk.github.io/flyology/api/">API reference</a>
 </p>
 
-Flyology lets ordinary Ada tasks run as lightweight tasks on event loops. They
-keep Ada rendezvous, protected objects, exceptions, task activation, masters,
-and normal blocking-looking control flow. Undesignated tasks remain native by
-default, and either execution model can be selected explicitly. Flyology adds no
-`async` dialect; the closest familiar comparison is an opt-in Ada analogue of
-Java virtual threads.
+Flyology adds an explicit lightweight execution lane to ordinary Ada tasking.
+Selected tasks share event-loop pthreads as fibers while keeping Ada rendezvous,
+protected objects, exceptions, task activation, masters, and normal
+blocking-looking control flow. Undesignated tasks remain native by default, and
+either lane can be selected explicitly. Flyology adds no `async` dialect; the
+closest familiar comparison is an opt-in Ada analogue of Java virtual threads.
 
 The name comes from Ada Lovelace's 1828 study of flight. Her letters from that
 year describe examining bird anatomy, making wings from paper, silk, and
