@@ -300,6 +300,10 @@ cp "$project_root/runtime/config/faults/$fault_config"/s-flyfau.ad? \
 cp "$project_root/runtime/config/sanitizers/$sanitizer_config"/s-flyasa.ad? \
   "$generated_include/"
 
+#  git apply resolves --directory relative to the repository worktree even
+#  when an absolute path is supplied. Anchor it here so callers may invoke
+#  prepare-rts.sh from a nested Alire crate or any other working directory.
+cd "$project_root"
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$tasking_patch"

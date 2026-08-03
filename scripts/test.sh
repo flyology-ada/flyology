@@ -139,6 +139,21 @@ case "$(uname -s):$(uname -m)" in
     ;;
 esac
 
+#  Runtime patch application must not depend on the caller's working
+#  directory. The showcase crate invokes preparation as an Alire pre-build
+#  action, so verify a nested invocation retains a patched GNARL bridge.
+(
+  cd "$project_root/showcases"
+  FLYOLOGY_DEFAULT=native \
+    "$project_root/scripts/prepare-rts.sh" >/dev/null
+)
+if ! nm -g "$project_root/build/rts/adalib/libgnarl.a" | \
+     grep 'flyology_runtime_file_io' >/dev/null
+then
+  printf '%s\n' "nested RTS preparation omitted the Flyology file-I/O bridge" >&2
+  exit 1
+fi
+
 if [ "$(uname -s)" = Linux ]; then
   mkdir -p "$project_root/build/tests"
   cc -Wall -Wextra -Werror \
