@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "flyology_tls_signal.h"
+
 #define FLY_COMPLETE 0
 #define FLY_WANT_READ -2
 #define FLY_WANT_WRITE -3
@@ -136,7 +138,9 @@ static void sigpipe_end(struct sigpipe_guard *guard)
    if (member < 0) abort();
    if (!guard->pending_before && member == 1) {
       struct timespec no_wait = { 0, 0 };
-      if (sigtimedwait(&guard->set, NULL, &no_wait) != SIGPIPE) abort();
+      if (flyology_sigtimedwait_retry
+            (&guard->set, &no_wait, sigtimedwait) != SIGPIPE)
+         abort();
    }
    if (pthread_sigmask(SIG_SETMASK, &guard->old_mask, NULL) != 0) abort();
 #else

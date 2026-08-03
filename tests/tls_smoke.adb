@@ -45,6 +45,10 @@ procedure TLS_Smoke is
    pragma Import
      (C, Set_Abortive_Close, "flyology_test_set_abortive_close");
 
+   function Signal_Wait_Retry_Passes return Interfaces.C.int;
+   pragma Import
+     (C, Signal_Wait_Retry_Passes, "flyology_test_sigtimedwait_retry");
+
    function Live_OpenSSL_Modules return Interfaces.C.unsigned;
    pragma Import
      (C, Live_OpenSSL_Modules, "flyology_tls_openssl_live_modules");
@@ -1287,6 +1291,7 @@ procedure TLS_Smoke is
    end Run_Provider_Lifetime;
 
 begin
+   pragma Assert (Signal_Wait_Retry_Passes = 1);
    OpenSSL.Initialize_Client
      (Client_Backend,
       CA_File           => Certificate,
