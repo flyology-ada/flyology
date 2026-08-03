@@ -1662,7 +1662,7 @@ in an Alire application and add the crate normally:
 ```sh
 alr init --bin flyology_app
 cd flyology_app
-alr index --add=git+https://github.com/flyology-ada/alire-index.git#codex/flyology-test-release \
+alr index --add=git+https://github.com/flyology-ada/alire-index.git#flyology-dev \
   --name=flyology_fork
 alr with flyology
 alr build
