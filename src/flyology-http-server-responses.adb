@@ -30,6 +30,40 @@ package body Flyology.HTTP.Server.Responses is
       end loop;
    end Validate_Value;
 
+   procedure Validate_Cookie_Attribute
+     (Value : String; Allow_Comma : Boolean := False) is
+   begin
+      if Value = "" then
+         raise Program_Error with "empty cookie attribute";
+      end if;
+      for Item of Value loop
+         if Character'Pos (Item) < 32 or else Character'Pos (Item) = 127
+           or else Item = ';' or else (not Allow_Comma and then Item = ',')
+         then
+            raise Program_Error with "invalid cookie attribute";
+         end if;
+      end loop;
+   end Validate_Cookie_Attribute;
+
+   procedure Validate_Domain (Value : String) is
+   begin
+      if Value = "" or else Value'Length > 253
+        or else Value (Value'First) in '.' | '-'
+        or else Value (Value'Last) in '.' | '-'
+      then
+         raise Program_Error with "invalid cookie domain";
+      end if;
+      for Item of Value loop
+         if Item not in 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.'
+         then
+            raise Program_Error with "invalid cookie domain";
+         end if;
+      end loop;
+      if Ada.Strings.Fixed.Index (Value, "..") /= 0 then
+         raise Program_Error with "invalid cookie domain";
+      end if;
+   end Validate_Domain;
+
    procedure Set_Cookie
      (X       : in out Applications.Exchange;
       Name    : String;
@@ -44,11 +78,11 @@ package body Flyology.HTTP.Server.Responses is
          raise Program_Error with "SameSite=None cookie requires Secure";
       end if;
       if Length (Options.Path) > 0 then
-         Validate_Value (To_String (Options.Path));
+         Validate_Cookie_Attribute (To_String (Options.Path));
          Append (Field, "; Path=" & To_String (Options.Path));
       end if;
       if Length (Options.Domain) > 0 then
-         Validate_Value (To_String (Options.Domain));
+         Validate_Domain (To_String (Options.Domain));
          Append (Field, "; Domain=" & To_String (Options.Domain));
       end if;
       if Options.Has_Max_Age then
@@ -57,7 +91,8 @@ package body Flyology.HTTP.Server.Responses is
               (Integer'Image (Options.Max_Age), Ada.Strings.Both));
       end if;
       if Length (Options.Expires) > 0 then
-         Validate_Value (To_String (Options.Expires));
+         Validate_Cookie_Attribute
+           (To_String (Options.Expires), Allow_Comma => True);
          Append (Field, "; Expires=" & To_String (Options.Expires));
       end if;
       if Options.Secure then

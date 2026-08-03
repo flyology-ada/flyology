@@ -99,7 +99,9 @@ procedure HTTP_Benchmark_Server is
 
       procedure Finish is
       begin
-         Requests.Completed;
+         if Request_Goal > 0 then
+            Requests.Completed;
+         end if;
       end Finish;
 
       procedure Routed_Get

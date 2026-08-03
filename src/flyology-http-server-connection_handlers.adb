@@ -20,6 +20,8 @@ package body Flyology.HTTP.Server.Connection_Handlers is
       Closed     : Boolean;
       Count      : Natural := 0;
       Started    : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Request_Started : Ada.Real_Time.Time := Started;
+      Request_Budget  : Duration := Timeout;
 
       function Time_Left return Duration is
          Elapsed : constant Duration := Ada.Real_Time.To_Duration
@@ -36,42 +38,56 @@ package body Flyology.HTTP.Server.Connection_Handlers is
          end if;
       end Time_Left;
 
-      procedure Best_Effort_Bad_Request is
+      function Request_Time_Left return Duration is
+         Elapsed : constant Duration := Ada.Real_Time.To_Duration
+           (Ada.Real_Time.Clock - Request_Started);
       begin
-         if Item.State = Reading_HTTP and then not Item.Response_Begun then
+         if Request_Budget < 0.0 then
+            return -1.0;
+         elsif Elapsed >= Request_Budget then
+            return 0.0;
+         else
+            return Request_Budget - Elapsed;
+         end if;
+      end Request_Time_Left;
+
+      procedure Best_Effort
+        (Status : Positive; Message : String; Retry : Boolean := False) is
+      begin
+         if Item.State = Reading_HTTP
+           and then not Item.Response_Begun
+           and then Request_Time_Left /= 0.0
+         then
             begin
                Respond
-                 (Item, 400, "text/plain; charset=utf-8",
-                  "bad request" & Character'Val (10), Close => True,
-                  Timeout => Time_Left, Token => Token);
+                 (Item, Status, "text/plain; charset=utf-8",
+                  Message & Character'Val (10),
+                  Extra_Headers =>
+                    (if Retry then "Retry-After: 1" & Character'Val (13)
+                       & Character'Val (10) else ""),
+                  Close => True, Timeout => Request_Time_Left, Token => Token);
             exception
-               when others =>
-                  null;
+               when others => null;
             end;
          end if;
+      end Best_Effort;
+
+      procedure Best_Effort_Bad_Request is
+      begin
+         Best_Effort (400, "bad request");
       end Best_Effort_Bad_Request;
 
       procedure Best_Effort_Overloaded is
       begin
-         if Item.State = Reading_HTTP and then not Item.Response_Begun then
-            begin
-               Respond
-                 (Item, 503, "text/plain; charset=utf-8",
-                  "server ingress budget exhausted" & Character'Val (10),
-                  Extra_Headers => "Retry-After: 1" & Character'Val (13)
-                    & Character'Val (10),
-                  Close => True, Timeout => Time_Left, Token => Token);
-            exception
-               when others =>
-                  null;
-            end;
-         end if;
+         Best_Effort (503, "server ingress budget exhausted", Retry => True);
       end Best_Effort_Overloaded;
    begin
       while Item.State = Reading_HTTP loop
          if Max_Connection_Age >= 0.0 and then Time_Left <= 0.0 then
             return;
          end if;
+         Request_Started := Ada.Real_Time.Clock;
+         Request_Budget := Time_Left;
          begin
             if Buffer_Body then
                Read_Request
@@ -81,6 +97,12 @@ package body Flyology.HTTP.Server.Connection_Handlers is
                  (Item, Value, Closed, Time_Left, Max_Body, Token);
             end if;
          exception
+            when Payload_Too_Large =>
+               Best_Effort (413, "request content is too large");
+               return;
+            when Expectation_Failed =>
+               Best_Effort (417, "request expectation failed");
+               return;
             when Resource_Exhausted =>
                Best_Effort_Overloaded;
                return;
@@ -103,6 +125,9 @@ package body Flyology.HTTP.Server.Connection_Handlers is
          begin
             Handle (Item, Value);
          exception
+            when Payload_Too_Large =>
+               Best_Effort (413, "request content is too large");
+               return;
             when Resource_Exhausted =>
                Best_Effort_Overloaded;
                return;
@@ -118,7 +143,8 @@ package body Flyology.HTTP.Server.Connection_Handlers is
          if Item.State = Reading_HTTP and then not Item.Response_Begun then
             begin
                Respond
-                 (Item, 204, "", "", Timeout => Time_Left, Token => Token);
+                 (Item, 204, "", "", Timeout => Request_Time_Left,
+                  Token => Token);
             exception
                when Flyology.IO.Timeout_Error |
                     Flyology.IO.Device_Error |

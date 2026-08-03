@@ -1,4 +1,5 @@
 with Ada.Strings.Unbounded;
+with Ada.Finalization;
 with Flyology.Bounded_Channels;
 with Flyology.Cancellation;
 with Flyology.HTTP.Server.Applications;
@@ -15,11 +16,21 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
       Data : Ada.Strings.Unbounded.Unbounded_String;
    end record;
 
+   --  Maximum payload bytes retained by one queued message.
+   Max_Queued_Message_Bytes : constant := 64 * 1_024;
+   --  Default aggregate payload bytes retained by one session.
+   Default_Session_Bytes : constant := 256 * 1_024;
+
    --  Request-scoped WebSocket session. Producer tasks may enqueue messages
    --  but cannot access the connection. Exactly one handler calls Run, and
    --  the session must not outlive that handler's Exchange scope.
    --  @field Capacity Maximum queued outgoing messages
-   type Session (Capacity : Positive := 32) is limited private;
+   --  @field Byte_Limit Maximum retained payload bytes in this session
+   --  @field Budget Optional shared server/application outbound budget
+   type Session
+     (Capacity   : Positive := 32;
+      Byte_Limit : Positive := Default_Session_Bytes;
+      Budget     : access Outbound_Budget := null) is limited private;
 
    --  Enqueue with backpressure, or return Accepted false after close.
    --  Owner-thread lifecycle callbacks should use Try_Publish to avoid
@@ -31,6 +42,21 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
      (Item     : in out Session;
       Value    : Outgoing_Message;
       Accepted : out Boolean);
+
+   --  Enqueue with bounded, cancellation-aware backpressure.
+   --  @param Item WebSocket session
+   --  @param Value Outgoing message
+   --  @param Accepted Whether the message was queued
+   --  @param Timeout Maximum monotonic wait
+   --  @param Timed_Out Whether Timeout expired while the queue stayed full
+   --  @param Token Optional cancellation source
+   procedure Publish_For
+     (Item      : in out Session;
+      Value     : Outgoing_Message;
+      Accepted  : out Boolean;
+      Timeout   : Duration;
+      Timed_Out : out Boolean;
+      Token     : access Flyology.Cancellation.Token := null);
 
    --  Attempt to enqueue without waiting.
    --  @param Item WebSocket session
@@ -88,27 +114,57 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
    --  @param Allowed_Origin Exact origin for Require_Exact_Origin
    --  @param Max_Message Maximum retained/reassembled inbound message bytes
    --  @param Receive_Quantum Maximum idle receive interval
+   --  @param Max_Outgoing_Burst Messages sent before servicing inbound frames
    --  @param Metric_Output Optional lifecycle metric sink
    procedure Run
      (X              : in out Applications.Exchange;
       Item           : in out Session;
-      Open           : Open_Handler := null;
-      Message        : Message_Handler := null;
-      Closed         : Close_Handler := null;
+      Open           : access procedure
+        (X : in out Applications.Exchange; Item : in out Session) := null;
+      Message        : access procedure
+        (X    : in out Applications.Exchange;
+         Item : in out Session;
+         Kind : WebSocket_Data_Kind;
+         Data : String) := null;
+      Closed         : access procedure
+        (X : in out Applications.Exchange; Item : in out Session) := null;
       Protocol       : String := "";
       Origin_Policy  : WebSocket_Origin_Policy := Reject_Browser_Origins;
       Allowed_Origin : String := "";
       Max_Message    : Natural := Max_WebSocket_Frame;
       Receive_Quantum : Duration := 0.05;
+      Max_Outgoing_Burst : Positive := 16;
       Metric_Output  : access Metrics.Sink'Class := null);
 
 private
-   package Message_Channels is new
-     Flyology.Bounded_Channels (Outgoing_Message);
+   type Outbound_Budget_Access is access all Outbound_Budget;
 
-   type Session (Capacity : Positive := 32) is limited record
+   protected type Retained_Bytes (Limit : Positive) is
+      procedure Try_Reserve (Bytes : Natural; Granted : out Boolean);
+      procedure Release (Bytes : Natural);
+   private
+      Used : Natural := 0;
+   end Retained_Bytes;
+   type Retained_Bytes_Access is access all Retained_Bytes;
+   type Session_Access is access all Session;
+   type Boolean_Access is access all Boolean;
+
+   Empty_Message : constant Outgoing_Message := (others => <>);
+   package Message_Channels is new
+     Flyology.Bounded_Channels (Outgoing_Message, Empty_Message);
+
+   type Session
+     (Capacity   : Positive := 32;
+      Byte_Limit : Positive := Default_Session_Bytes;
+      Budget     : access Outbound_Budget := null) is
+     limited new Ada.Finalization.Limited_Controlled with record
       Outbox : Message_Channels.Channel (Capacity);
       Stop   : Flyology.Cancellation.Token;
+      Bytes  : aliased Retained_Bytes (Byte_Limit);
    end record;
+
+   --  @exclude
+   --  @param Item Session whose queued reservations are released
+   overriding procedure Finalize (Item : in out Session);
 
 end Flyology.HTTP.Server.WebSocket_Handlers;

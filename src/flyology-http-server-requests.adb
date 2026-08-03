@@ -203,6 +203,37 @@ package body Flyology.HTTP.Server.Requests is
    end Content_Type_Parameter;
 
    function Authority (X : Applications.Exchange) return String is
-     (X.Request_Header ("Host"));
+      Host : constant String := X.Request_Header ("Host");
+      Target : constant String := X.Request_Target;
+      Scheme_End : Natural := 0;
+   begin
+      if Host /= "" then
+         return Host;
+      elsif Target'Length >= 7
+        and then Ada.Characters.Handling.To_Lower
+          (Target (Target'First .. Target'First + 6)) = "http://"
+      then
+         Scheme_End := Target'First + 6;
+      elsif Target'Length >= 8
+        and then Ada.Characters.Handling.To_Lower
+          (Target (Target'First .. Target'First + 7)) = "https://"
+      then
+         Scheme_End := Target'First + 7;
+      else
+         return "";
+      end if;
+      declare
+         First : constant Natural := Scheme_End + 1;
+         Last  : Natural := Target'Last;
+      begin
+         for Index in First .. Target'Last loop
+            if Target (Index) in '/' | '?' then
+               Last := Index - 1;
+               exit;
+            end if;
+         end loop;
+         return (if Last < First then "" else Target (First .. Last));
+      end;
+   end Authority;
 
 end Flyology.HTTP.Server.Requests;

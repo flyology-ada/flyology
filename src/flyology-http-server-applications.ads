@@ -1,7 +1,7 @@
 with Ada.Real_Time;
 with Ada.Streams;
+with Ada.Task_Identification;
 with GNAT.Sockets;
-with System;
 with Flyology.Cancellation;
 
 --  Supplies a request-scoped application exchange above the raw HTTP engine.
@@ -20,6 +20,16 @@ package Flyology.HTTP.Server.Applications is
    type Request_Body_Policy is
      (Reject_Body, Stream_Body, Buffer_Body, Discard_Request_Body);
 
+   --  Observable request-body lifecycle.
+   --  @enum Body_Pending Admission or consumption has not completed
+   --  @enum Body_Streaming Caller reads decoded chunks
+   --  @enum Body_Buffered Buffered content is available
+   --  @enum Body_Completed No retained content remains to consume
+   --  @enum Body_Rejected Route policy does not accept the pending body
+   type Request_Body_State is
+     (Body_Pending, Body_Streaming, Body_Buffered, Body_Completed,
+      Body_Rejected);
+
    --  Route authentication requirement interpreted by optional middleware.
    --  @enum No_Authentication Route does not request authentication
    --  @enum Optional_Authentication Install a principal when credentials exist
@@ -36,30 +46,30 @@ package Flyology.HTTP.Server.Applications is
    --  High-level response lifecycle observed through this exchange.
    --  @enum Not_Started No response bytes have been written
    --  @enum Completed One complete fixed response was written
-   --  @enum Streaming A streaming response owns the connection
+   --  @enum Streaming_Response A chunked/close-delimited response is active
+   --  @enum Streaming_SSE A server-sent event response is active
    --  @enum Upgraded A protocol upgrade owns the connection
    --  @enum Failed Response completion is unsafe or failed
    type Response_State is
-     (Not_Started, Completed, Streaming, Upgraded, Failed);
+     (Not_Started, Completed, Streaming_Response, Streaming_SSE,
+      Upgraded, Failed);
 
    --  Borrowed request scope. The object is tagged for Ada prefixed calls such
    --  as X.Text, but concrete helpers do not require dynamic dispatch.
-   type Exchange is tagged limited private;
+   type Exchange (<>) is tagged limited private;
 
    --  Construct one exchange around values owned by the active handler.
-   --  Context is opaque here because routing remains generic over the
-   --  application context type. Every borrowed object must outlive the result.
+   --  Access discriminants let Ada reject an exchange whose request,
+   --  connection, or token would not outlive it.
    --  @param Value Parsed request owned by the handler
    --  @param Item Sole-writer HTTP connection owned by the handler
-   --  @param Context Opaque address of the application context
    --  @param Peer Connected peer address
    --  @param Token Optional borrowed cancellation token
    --  @param Deadline Absolute monotonic request deadline
    --  @return Request-scoped exchange
    function Create
-     (Value    : aliased in out Request;
+      (Value    : aliased in out Request;
       Item     : aliased in out Connection;
-      Context  : System.Address;
       Peer     : GNAT.Sockets.Sock_Addr_Type;
       Token    : access Flyology.Cancellation.Token;
       Deadline : Ada.Real_Time.Time) return Exchange;
@@ -87,17 +97,19 @@ package Flyology.HTTP.Server.Applications is
    --  @return Header value or an empty string
    function Request_Header (Item : Exchange; Name : String) return String;
 
-   --  Borrow the raw HTTP connection. Only the active handler may use it and
-   --  no child task may write through it.
+   --  Count physical occurrences of a case-insensitive request field.
    --  @param Item Request exchange
-   --  @return Borrowed raw connection
-   function Connection_Access
-     (Item : in out Exchange) return not null access Connection;
+   --  @param Name Header field name
+   --  @return Physical field count before comma joining
+   function Request_Header_Count
+     (Item : Exchange; Name : String) return Natural;
 
-   --  Return the opaque address of the generic application context.
+   --  Report whether the protocol engine has emitted response bytes. This
+   --  narrow query supports safe error mapping without exposing the borrowed
+   --  connection.
    --  @param Item Request exchange
-   --  @return Borrowed context address
-   function Context_Address (Item : Exchange) return System.Address;
+   --  @return True after response framing begins on the wire
+   function Wire_Response_Started (Item : Exchange) return Boolean;
 
    --  Return the connected peer address supplied by the server adapter.
    --  @param Item Request exchange
@@ -201,6 +213,11 @@ package Flyology.HTTP.Server.Applications is
    --  @param Item Request exchange
    --  @return Current body policy
    function Body_Policy (Item : Exchange) return Request_Body_Policy;
+
+   --  Return the current body lifecycle without forcing body consumption.
+   --  @param Item Request exchange
+   --  @return Current body state
+   function Body_State (Item : Exchange) return Request_Body_State;
 
    --  Report whether the decoded body and trailers are fully consumed.
    --  @param Item Request exchange
@@ -326,12 +343,22 @@ package Flyology.HTTP.Server.Applications is
    --  @param Event Optional event type
    --  @param Id Optional event id
    --  @param Retry Optional retry milliseconds
+   --  @param Include_Id Emit id even when Id is empty
+   --  @param Include_Retry Emit retry even when Retry is zero
    procedure Send_SSE
      (Item  : in out Exchange;
       Data  : String;
       Event : String := "";
       Id    : String := "";
-      Retry : Natural := 0);
+      Retry : Natural := 0;
+      Include_Id : Boolean := False;
+      Include_Retry : Boolean := False);
+
+   --  Send an SSE comment heartbeat without dispatching an application event.
+   --  @param Item Exchange with an active SSE response
+   --  @param Comment Optional comment text
+   procedure Send_SSE_Comment
+     (Item : in out Exchange; Comment : String := "");
 
    --  Complete an active SSE response.
    --  @param Item Request exchange
@@ -356,13 +383,15 @@ package Flyology.HTTP.Server.Applications is
    --  @param Closed True when the peer completed the close handshake
    --  @param Max_Message Maximum retained/reassembled message bytes
    --  @param Timeout Receive quantum capped by the request deadline
+   --  @param Message_Timeout Whole-message deadline, also request-capped
    procedure Receive_WebSocket
      (Item        : in out Exchange;
       Kind        : out WebSocket_Data_Kind;
       Data        : out Ada.Strings.Unbounded.Unbounded_String;
       Closed      : out Boolean;
       Max_Message : Natural := Max_WebSocket_Frame;
-      Timeout     : Duration := 30.0);
+      Timeout     : Duration := 30.0;
+      Message_Timeout : Duration := 30.0);
 
    --  Send one WebSocket message from the sole connection-owner handler.
    --  @param Item Upgraded request exchange
@@ -449,11 +478,11 @@ package Flyology.HTTP.Server.Applications is
       Name  : String;
       Value : String);
 
-private
+   --  Freeze router-owned identity and policy before middleware runs.
+   --  @param Item Configured request exchange
+   procedure Seal_Route (Item : in out Exchange);
 
-   type Request_Access is access all Request;
-   type Connection_Access_Type is access all Connection;
-   type Cancellation_Access is access all Flyology.Cancellation.Token;
+private
 
    type Parameter_Entry is record
       Name  : Unbounded_String;
@@ -462,17 +491,20 @@ private
    type Parameter_Array is
      array (Positive range 1 .. Max_Path_Parameters) of Parameter_Entry;
 
-   type Exchange is tagged limited record
-      Request_Handle    : Request_Access;
-      Connection_Handle : Connection_Access_Type;
-      Context_Handle    : System.Address := System.Null_Address;
+   type Exchange
+     (Request_Handle    : not null access Request;
+      Connection_Handle : not null access Connection;
+      Token_Handle      : access Flyology.Cancellation.Token)
+   is tagged limited record
+      Owner_Task        : Ada.Task_Identification.Task_Id :=
+        Ada.Task_Identification.Current_Task;
       Peer_Value        : GNAT.Sockets.Sock_Addr_Type;
-      Token_Handle      : Cancellation_Access;
       Deadline_Value    : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
       Route_Value       : Unbounded_String;
       Path_Value        : Unbounded_String;
       Parameters        : Parameter_Array;
       Parameter_Count   : Natural := 0;
+      Route_Sealed      : Boolean := False;
       Request_ID_Value  : Unbounded_String;
       Principal_Value   : Unbounded_String;
       Principal_Present : Boolean := False;

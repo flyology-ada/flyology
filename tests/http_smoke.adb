@@ -3,6 +3,7 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Unchecked_Deallocation;
 with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.Bounded_Channels;
@@ -29,6 +30,7 @@ with Flyology.HTTP.Server.Responses;
 with Flyology.HTTP.Server.Routing;
 with Flyology.HTTP.Server.SSE_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers;
+with Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle;
 with Flyology.IO;
 
 procedure HTTP_Smoke is
@@ -49,8 +51,11 @@ procedure HTTP_Smoke is
       Slow        : Boolean := False;
       Slow_After  : Natural := Natural'Last;
       Receive_Calls : Natural := 0;
+      Timeout_On_Call : Natural := 0;
       First_Receive_Max : Natural := Natural'Last;
       Receive_Max : Natural := Natural'Last;
+      Send_Calls : Natural := 0;
+      Timeout_On_Send_Call : Natural := 0;
    end record;
 
    overriding procedure Receive
@@ -81,6 +86,10 @@ procedure HTTP_Smoke is
       Data := (others => 0);
       Last := Data'First - 1;
       Item.Receive_Calls := Item.Receive_Calls + 1;
+      if Item.Timeout_On_Call = Item.Receive_Calls then
+         Item.Timeout_On_Call := 0;
+         raise Flyology.IO.Timeout_Error;
+      end if;
       if Item.Slow or else Item.Receive_Calls > Item.Slow_After then
          if Timeout >= 0.0 and then Timeout < 0.005 then
             raise Flyology.IO.Timeout_Error;
@@ -114,6 +123,14 @@ procedure HTTP_Smoke is
    is
       pragma Unreferenced (Timeout, Token);
    begin
+      Item.Send_Calls := Item.Send_Calls + 1;
+      if Item.Timeout_On_Send_Call = Item.Send_Calls then
+         Item.Timeout_On_Send_Call := 0;
+         if Data'Length > 0 then
+            Append (Item.Output, Character'Val (Data (Data'First)));
+         end if;
+         raise Flyology.IO.Timeout_Error;
+      end if;
       for Value of Data loop
          Append (Item.Output, Character'Val (Value));
       end loop;
@@ -189,6 +206,22 @@ procedure HTTP_Smoke is
          HTTP_Server.Respond (Client, 200, "text/plain", "ok");
          HTTP_Server.Read_Request (Client, Request, Closed);
          pragma Assert (HTTP_Server.Target (Request) = "/next");
+      end;
+
+      Wire.Input := To_Unbounded_String
+        ("POST /quoted HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Transfer-Encoding: chunked" & CRLF & CRLF
+         & "1;note=""a;b"";escaped=""a" & Character'Val (92)
+         & """b""" & CRLF
+         & "x" & CRLF & "0" & CRLF & CRLF);
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request (Client, Request, Closed);
+         pragma Assert (HTTP_Server.Content (Request) = "x");
       end;
    end Check_Chunked_And_Expect;
 
@@ -392,6 +425,7 @@ procedure HTTP_Smoke is
 
    procedure Check_Response_Framing is
       Wire : aliased Memory_Transport;
+      Duplicate_Date_Rejected : Boolean := False;
    begin
       Wire.Input := To_Unbounded_String
         ("head /extension HTTP/1.1" & CRLF
@@ -420,6 +454,23 @@ procedure HTTP_Smoke is
            (Ada.Strings.Fixed.Index
               (Result (Second_HTTP .. Result'Last), "Content-Length") = 0);
       end;
+      Wire.Input := To_Unbounded_String
+        ("GET /date HTTP/1.1" & CRLF & "Host: localhost" & CRLF & CRLF);
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request_Head (Client, Request, Closed);
+         begin
+            HTTP_Server.Respond
+              (Client, 200, "text/plain", "x",
+               "Date: Thu, 01 Jan 1970 00:00:00 GMT" & CRLF);
+         exception
+            when Program_Error => Duplicate_Date_Rejected := True;
+         end;
+      end;
+      pragma Assert (Duplicate_Date_Rejected);
    end Check_Response_Framing;
 
    procedure Check_SSE is
@@ -439,6 +490,10 @@ procedure HTTP_Smoke is
             Event => "update", Id => "42", Retry => 1_000);
          HTTP_Server.Send_Event
            (Client, "safe" & Character'Val (13) & "event: privileged");
+         HTTP_Server.Send_Event
+           (Client, "reset", Id => "", Retry => 0,
+            Include_Id => True, Include_Retry => True);
+         HTTP_Server.Send_SSE_Comment (Client, "heartbeat");
          HTTP_Server.End_SSE (Client);
       end;
       declare
@@ -457,6 +512,13 @@ procedure HTTP_Smoke is
               (Result,
                "data: safe" & Character'Val (10)
                & "data: event: privileged" & Character'Val (10)) /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Result, "id: " & Character'Val (10)
+               & "retry: 0" & Character'Val (10)) /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Result, ": heartbeat" & Character'Val (10)) /= 0);
          pragma Assert
            (Result (Result'Last - 6 .. Result'Last) =
               CRLF & "0" & CRLF & CRLF);
@@ -520,8 +582,7 @@ procedure HTTP_Smoke is
       end;
       pragma Assert (HTTP_Server.Current (Budget).Current = 0);
       pragma Assert
-        (HTTP_Server.Current (Budget).Peak =
-           HTTP_Server.Max_WebSocket_Frame);
+        (HTTP_Server.Current (Budget).Peak in 1 .. 32);
       declare
          Result : constant String := To_String (Wire.Output);
       begin
@@ -535,6 +596,197 @@ procedure HTTP_Smoke is
                Character'Val (16#81#) & Character'Val (2) & "Hi") /= 0);
       end;
    end Check_WebSocket;
+
+   procedure Check_Idle_WebSocket_Budget is
+      Count : constant := 65;
+      Head  : constant String :=
+        "GET /chat HTTP/1.1" & CRLF
+        & "Host: localhost" & CRLF
+        & "Upgrade: websocket" & CRLF
+        & "Connection: Upgrade" & CRLF
+        & "Sec-WebSocket-Version: 13" & CRLF
+        & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF;
+      Budget : aliased HTTP_Server.Ingress_Budget (Limit => 64 * 1_024);
+      type Wire_Access is access all Memory_Transport;
+      type Connection_Access is access all HTTP_Server.Connection;
+      type Wire_Array is array (Positive range <>) of Wire_Access;
+      type Connection_Array is array (Positive range <>) of Connection_Access;
+      Wires   : Wire_Array (1 .. Count) := (others => null);
+      Clients : Connection_Array (1 .. Count) := (others => null);
+      procedure Free_Wire is new Ada.Unchecked_Deallocation
+        (Memory_Transport, Wire_Access);
+      procedure Free_Connection is new Ada.Unchecked_Deallocation
+        (HTTP_Server.Connection, Connection_Access);
+   begin
+      for Index in Clients'Range loop
+         Wires (Index) := new Memory_Transport;
+         Wires (Index).Input := To_Unbounded_String (Head);
+         Clients (Index) := new HTTP_Server.Connection (Wires (Index));
+         HTTP_Server.Configure_Ingress_Budget
+           (Clients (Index).all, Budget'Access);
+         declare
+            Request : HTTP_Server.Request;
+            Closed  : Boolean;
+            Kind    : HTTP_Server.WebSocket_Data_Kind;
+            Data    : Unbounded_String;
+            Timed_Out : Boolean := False;
+         begin
+            HTTP_Server.Read_Request_Head
+              (Clients (Index).all, Request, Closed, Timeout => 1.0);
+            HTTP_Server.Accept_WebSocket
+              (Clients (Index).all, Request, Timeout => 1.0);
+            Wires (Index).Slow := True;
+            begin
+               HTTP_Server.Receive_WebSocket
+                 (Clients (Index).all, Kind, Data, Closed,
+                  Timeout => 0.001, Message_Timeout => 1.0);
+            exception
+               when Flyology.IO.Timeout_Error => Timed_Out := True;
+            end;
+            pragma Assert (Timed_Out);
+            pragma Assert (HTTP_Server.Current (Budget).Current = 0);
+         end;
+      end loop;
+      for Index in Clients'Range loop
+         Free_Connection (Clients (Index));
+         Free_Wire (Wires (Index));
+      end loop;
+   end Check_Idle_WebSocket_Budget;
+
+   procedure Check_Periodic_WebSocket_Pings is
+      function Ping return String is
+         Mask : constant String := "mask";
+      begin
+         return Character'Val (16#89#) & Character'Val (16#80#)
+           & Mask;
+      end Ping;
+      Head : constant String :=
+        "GET /chat HTTP/1.1" & CRLF
+        & "Host: localhost" & CRLF
+        & "Upgrade: websocket" & CRLF
+        & "Connection: Upgrade" & CRLF
+        & "Sec-WebSocket-Version: 13" & CRLF
+        & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF;
+      Wire : aliased Memory_Transport;
+   begin
+      Wire.Input := To_Unbounded_String (Head);
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Kind    : HTTP_Server.WebSocket_Data_Kind;
+         Data    : Unbounded_String;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request_Head (Client, Request, Closed);
+         HTTP_Server.Accept_WebSocket (Client, Request);
+         for Iteration in 1 .. 40 loop
+            Append (Wire.Input, Ping);
+            Wire.Slow_After := Wire.Receive_Calls + 1;
+            begin
+               HTTP_Server.Receive_WebSocket
+                 (Client, Kind, Data, Closed,
+                  Timeout => 0.001, Message_Timeout => 1.0);
+            exception
+               when Flyology.IO.Timeout_Error => null;
+            end;
+         end loop;
+         HTTP_Server.Send_WebSocket (Client, HTTP_Server.Text_Frame, "ok");
+         HTTP_Server.Close_WebSocket (Client);
+      end;
+   end Check_Periodic_WebSocket_Pings;
+
+   procedure Check_WebSocket_Control_Write_Timeout is
+      function Ping return String is
+         Mask : constant String := "mask";
+         Value : Unbounded_String;
+      begin
+         Append (Value, Character'Val (16#89#));
+         Append (Value, Character'Val (16#81#));
+         Append (Value, Mask);
+         Append
+           (Value,
+            Character'Val
+              (Natural
+                 (Ada.Streams.Stream_Element (Character'Pos ('?'))
+                  xor Ada.Streams.Stream_Element
+                    (Character'Pos (Mask (1))))));
+         return To_String (Value);
+      end Ping;
+      Wire : aliased Memory_Transport;
+      Request : HTTP_Server.Request;
+      Closed : Boolean;
+      Kind : HTTP_Server.WebSocket_Data_Kind;
+      Data : Unbounded_String;
+      Timed_Out : Boolean := False;
+      Terminal : Boolean := False;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("GET /chat HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF
+         & Ping);
+      declare
+         Client : HTTP_Server.Connection (Wire'Access);
+      begin
+         HTTP_Server.Read_Request_Head (Client, Request, Closed);
+         HTTP_Server.Accept_WebSocket (Client, Request);
+         Wire.Timeout_On_Send_Call := 2;
+         begin
+            HTTP_Server.Receive_WebSocket
+              (Client, Kind, Data, Closed, Timeout => 1.0);
+         exception
+            when Flyology.IO.Timeout_Error => Timed_Out := True;
+         end;
+         begin
+            HTTP_Server.Send_WebSocket (Client, HTTP_Server.Text_Frame, "x");
+         exception
+            when Program_Error => Terminal := True;
+         end;
+      end;
+      pragma Assert (Timed_Out and Terminal);
+   end Check_WebSocket_Control_Write_Timeout;
+
+   procedure Check_WebSocket_Data_Write_Timeout is
+      Wire : aliased Memory_Transport;
+      Budget : aliased HTTP_Server.Ingress_Budget (Limit => 1_024);
+      Terminal : Boolean := False;
+      Timed_Out : Boolean := False;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("GET /chat HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF);
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Configure_Ingress_Budget (Client, Budget'Access);
+         HTTP_Server.Read_Request_Head (Client, Request, Closed);
+         HTTP_Server.Accept_WebSocket (Client, Request);
+         Wire.Timeout_On_Send_Call := Wire.Send_Calls + 1;
+         begin
+            HTTP_Server.Send_WebSocket
+              (Client, HTTP_Server.Text_Frame, "partial", Timeout => 0.001);
+         exception
+            when Flyology.IO.Timeout_Error => Timed_Out := True;
+         end;
+         begin
+            HTTP_Server.Send_WebSocket
+              (Client, HTTP_Server.Text_Frame, "again");
+         exception
+            when Program_Error => Terminal := True;
+         end;
+      end;
+      pragma Assert (Timed_Out and Terminal);
+      pragma Assert (HTTP_Server.Current (Budget).Current = 0);
+   end Check_WebSocket_Data_Write_Timeout;
 
    procedure Check_WebSocket_Failures is
       function Frame (Payload : String) return String is
@@ -596,6 +848,39 @@ procedure HTTP_Smoke is
          end;
       end;
       pragma Assert (Failed and Terminal);
+      declare
+         Version_Wire : aliased Memory_Transport;
+         Version_Failed : Boolean := False;
+      begin
+         Version_Wire.Input := To_Unbounded_String
+           ("GET /chat HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Upgrade: websocket" & CRLF
+            & "Connection: Upgrade" & CRLF
+            & "Sec-WebSocket-Version: 12" & CRLF
+            & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+            & CRLF & CRLF);
+         declare
+            Client  : HTTP_Server.Connection (Version_Wire'Access);
+            Request : HTTP_Server.Request;
+            Closed  : Boolean;
+         begin
+            HTTP_Server.Read_Request_Head (Client, Request, Closed);
+            begin
+               HTTP_Server.Accept_WebSocket (Client, Request);
+            exception
+               when Flyology.HTTP.Protocol_Error => Version_Failed := True;
+            end;
+         end;
+         pragma Assert (Version_Failed);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Version_Wire.Output), "426 Upgrade Required") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Version_Wire.Output),
+               "Sec-WebSocket-Version: 13") /= 0);
+      end;
    end Check_WebSocket_Failures;
 
    procedure Check_WebSocket_Origin is
@@ -716,6 +1001,43 @@ procedure HTTP_Smoke is
          Handler.Serve (Client, Timeout => 0.001);
       end;
    end Check_Handler_Isolation;
+
+   procedure Check_Handler_Streamed_Limit is
+      procedure Route
+        (Item  : in out HTTP_Server.Connection;
+         Value : HTTP_Server.Request)
+      is
+         pragma Unreferenced (Value);
+         Data     : Ada.Streams.Stream_Element_Array (1 .. 2);
+         Last     : Ada.Streams.Stream_Element_Offset;
+         Finished : Boolean;
+      begin
+         loop
+            HTTP_Server.Read_Body (Item, Data, Last, Finished);
+            exit when Finished;
+         end loop;
+      end Route;
+
+      package Handler is new
+        Flyology.HTTP.Server.Connection_Handlers (Route);
+
+      Wire : aliased Memory_Transport;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("POST /stream HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Transfer-Encoding: chunked" & CRLF & CRLF
+         & "5" & CRLF & "hello" & CRLF
+         & "0" & CRLF & CRLF);
+      declare
+         Client : HTTP_Server.Connection (Wire'Access);
+      begin
+         Handler.Serve (Client, Buffer_Body => False, Max_Body => 4);
+      end;
+      pragma Assert
+        (Ada.Strings.Fixed.Index
+           (To_String (Wire.Output), "413 Content Too Large") /= 0);
+   end Check_Handler_Streamed_Limit;
 
    procedure Check_Application_Failure_Propagates is
       procedure Broken_Route
@@ -845,10 +1167,40 @@ procedure HTTP_Smoke is
             & "Host: example.test:443" & CRLF & CRLF));
       pragma Assert
         (Is_Rejected
+           ("GET /known?x=%ZZ HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF & CRLF));
+      pragma Assert
+        (Is_Rejected
+           ("GET / HTTP/1.1" & CRLF
+            & "Host: [1:::2]" & CRLF & CRLF));
+      pragma Assert
+        (Is_Rejected
            ("POST / HTTP/1.1" & CRLF
             & "Host: localhost" & CRLF
             & "Transfer-Encoding: chunked" & CRLF & CRLF
             & "2" & CRLF & "x" & CRLF & "0" & CRLF & CRLF));
+      pragma Assert
+        (Is_Rejected
+           ("POST / HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Transfer-Encoding: chunked" & CRLF & CRLF
+            & "1;=x" & CRLF & "x" & CRLF & "0" & CRLF & CRLF));
+      pragma Assert
+        (Is_Rejected
+           ("POST / HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Transfer-Encoding: chunked" & CRLF & CRLF
+            & "1;note=""a" & Character'Val (92) & Character'Val (0)
+            & """" & CRLF
+            & "x" & CRLF & "0" & CRLF & CRLF));
+      pragma Assert
+        (Is_Rejected
+           ("GET /bad{path HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF & CRLF));
+      pragma Assert
+        (Is_Rejected
+           ("GET /?bad=| HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF & CRLF));
       pragma Assert (Is_Rejected (Oversized_Header));
    end Check_Rejections;
 
@@ -934,6 +1286,43 @@ procedure HTTP_Smoke is
          X.End_Stream;
       end Stream_Response;
 
+      procedure Explode
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State, X);
+      begin
+         raise Constraint_Error with "expected application failure";
+      end Explode;
+
+      procedure Stamp_Global
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler)
+      is
+      begin
+         X.Add_Header ("X-Global-Middleware", "yes");
+         Next.Call (State, X);
+      end Stamp_Global;
+
+      procedure Pass
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler) is
+      begin
+         Next.Call (State, X);
+      end Pass;
+
+      procedure Bypass_Authentication
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler)
+      is
+         pragma Unreferenced (State, Next);
+      begin
+         X.Text (200, "must-not-bypass-authentication");
+      end Bypass_Authentication;
+
       Routes : Routing.Router (Capacity => 12, Slashes => Routing.Strict_Slashes);
       Admin  : Routing.Router (Capacity => 2, Slashes => Routing.Strict_Slashes);
       State  : Context;
@@ -961,10 +1350,12 @@ procedure HTTP_Smoke is
             pragma Assert
               (Ada.Strings.Fixed.Index
                  (Output, "HTTP/1.1 " & Expected_Status) /= 0);
+            pragma Assert (Ada.Strings.Fixed.Index (Output, "Date: ") /= 0);
             pragma Assert (Ada.Strings.Fixed.Index (Output, Expected) /= 0);
          end;
       end Run;
    begin
+      Routes.Add_Middleware (Stamp_Global'Access);
       Routes.Get ("/", Home'Access, Name => "home");
       Routes.Get ("/users/{id}", User'Access, Name => "users.show");
       Routes.Post
@@ -983,6 +1374,12 @@ procedure HTTP_Smoke is
       Routes.Get
         ("/stream-response", Stream_Response'Access,
          Name => "stream.response");
+      Routes.Get
+        ("/private", Home'Access, Name => "private",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Authentication => Routing.Required_Authentication));
+      Routes.Get ("/explode", Explode'Access, Name => "explode");
       Admin.Get ("/", Home'Access, Name => "index");
       Routes.Mount ("/admin", Admin, Name_Prefix => "admin.");
 
@@ -1039,6 +1436,25 @@ procedure HTTP_Smoke is
         ("GET /missing HTTP/1.1" & CRLF
          & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
          "not-found", "404");
+      Run
+        ("GET /missing HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "X-Global-Middleware: yes", "404");
+
+      Run
+        ("OPTIONS * HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "Allow: OPTIONS, GET, HEAD, POST", "204");
+
+      Run
+        ("GET /private HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "WWW-Authenticate: Bearer", "401");
+
+      Run
+        ("GET /explode HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "internal server error", "500");
 
       Run
         ("GET /users/3/ HTTP/1.1" & CRLF
@@ -1063,6 +1479,57 @@ procedure HTTP_Smoke is
                Rejected := True;
          end;
          pragma Assert (Rejected);
+      end;
+
+      declare
+         Full : Routing.Router
+           (Capacity => 1, Slashes => Routing.Strict_Slashes);
+         Wire : aliased Memory_Transport;
+         Local_State : Context;
+      begin
+         Full.Get ("/full", Home'Access, Name => "full");
+         for Index in 1 .. 16 loop
+            Full.Add_Middleware (Pass'Access);
+            Full.Add_Route_Middleware ("full", Pass'Access);
+         end loop;
+         Wire.Input := To_Unbounded_String
+           ("GET /full HTTP/1.1" & CRLF & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Full.Serve (Local_State, Client, Peer);
+         end;
+         pragma Assert
+           (Ada.Strings.Fixed.Index (To_String (Wire.Output), "200 OK") /= 0);
+      end;
+
+      declare
+         Protected_Routes : Routing.Router
+           (Capacity => 1, Slashes => Routing.Strict_Slashes);
+         Wire : aliased Memory_Transport;
+         Local_State : Context;
+      begin
+         Protected_Routes.Add_Middleware (Bypass_Authentication'Access);
+         Protected_Routes.Get
+           ("/protected", Home'Access, Name => "protected",
+            Policy =>
+              (Routing.Default_Route_Policy with delta
+                 Authentication => Routing.Required_Authentication));
+         Wire.Input := To_Unbounded_String
+           ("GET /protected HTTP/1.1" & CRLF & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Protected_Routes.Serve (Local_State, Client, Peer);
+         end;
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output), "500 Internal Server Error") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output), "must-not-bypass") = 0);
       end;
    end Check_Applications_And_Routing;
 
@@ -1482,10 +1949,6 @@ procedure HTTP_Smoke is
            (Routing.Default_Route_Policy with delta
               Authentication => Routing.Required_Authentication,
               CORS_Policy    => 1));
-      Routes.Options
-        ("/private", Public_Handler'Access, Name => "private.preflight",
-         Policy =>
-           (Routing.Default_Route_Policy with delta CORS_Policy => 1));
       Routes.Get ("/public", Public_Handler'Access, Name => "public");
       Routes.Add_Middleware (IDs.Call'Access);
       Routes.Add_Middleware (Access_Logs.Call'Access);
@@ -1594,6 +2057,28 @@ procedure HTTP_Smoke is
                Rejected := True;
          end;
          pragma Assert (Rejected);
+      end;
+
+      declare
+         Saturating : Flyology.HTTP.Server.Metrics.In_Memory (Capacity => 1);
+      begin
+         Saturating.End_Request
+           (Method => "GET", Route => "bounded", Status => 200,
+            Elapsed => Duration'Last,
+            Request_Bytes => Natural'Last,
+            Response_Bytes => Natural'Last);
+         Saturating.End_Request
+           (Method => "GET", Route => "bounded", Status => 200,
+            Elapsed => 1.0, Request_Bytes => 1, Response_Bytes => 1);
+         declare
+            Values : constant Flyology.HTTP.Server.Metrics.Snapshot :=
+              Saturating.Read;
+         begin
+            pragma Assert (Values.Request_Bytes = Natural'Last);
+            pragma Assert (Values.Response_Bytes = Natural'Last);
+            pragma Assert (Values.Latency_Total = Duration'Last);
+            pragma Assert (Values.Requests = 2);
+         end;
       end;
    end Check_Standard_Middleware;
 
@@ -1736,6 +2221,7 @@ procedure HTTP_Smoke is
          pragma Unreferenced (State);
          Builder : Responses.Builder;
          Options : Responses.Cookie_Options;
+         Rejected : Boolean := False;
       begin
          pragma Assert (Requests.Query (X, "q", 1) = "a b");
          pragma Assert (Requests.Query (X, "q", 2) = "2");
@@ -1745,6 +2231,13 @@ procedure HTTP_Smoke is
          pragma Assert
            (Requests.Content_Type_Parameter (X, "charset") = "UTF-8");
          pragma Assert (Requests.Authority (X) = "example.test");
+         Options.Path := To_Unbounded_String ("/; Secure");
+         begin
+            Responses.Set_Cookie (X, "bad", "value", Options);
+         exception
+            when Program_Error => Rejected := True;
+         end;
+         pragma Assert (Rejected);
          Options.Path := To_Unbounded_String ("/");
          Responses.Set_Cookie (X, "result", "ok", Options);
          Builder.Initialize (201, "text/plain");
@@ -1792,16 +2285,19 @@ procedure HTTP_Smoke is
    end Check_Request_Response_Helpers;
 
    procedure Check_Bounded_Channels is
-      package Channels is new Flyology.Bounded_Channels (Integer);
+      package Channels is new Flyology.Bounded_Channels (Integer, 0);
       Item : Channels.Channel (Capacity => 1);
       Value : Integer;
       Available : Boolean;
       Accepted  : Boolean;
+      Timed_Out : Boolean;
    begin
       Item.Try_Send (1, Accepted);
       pragma Assert (Accepted);
       Item.Try_Send (2, Accepted);
       pragma Assert (not Accepted);
+      Item.Send_For (2, Accepted, 0.0, Timed_Out);
+      pragma Assert (not Accepted and Timed_Out);
       Item.Receive (Value, Available);
       pragma Assert (Available and then Value = 1);
       Item.Send (2, Accepted);
@@ -1811,9 +2307,50 @@ procedure HTTP_Smoke is
       pragma Assert (Available and then Value = 2);
       Item.Receive (Value, Available);
       pragma Assert (not Available and then Item.Is_Closed);
+      Item.Receive_For (Value, Available, 0.0, Timed_Out);
+      pragma Assert (not Available and then not Timed_Out);
       Item.Try_Send (3, Accepted);
       pragma Assert (not Accepted);
    end Check_Bounded_Channels;
+
+   procedure Check_Outbound_Budgets is
+      package SSE renames Flyology.HTTP.Server.SSE_Handlers;
+      package WS renames Flyology.HTTP.Server.WebSocket_Handlers;
+      Budget : aliased HTTP_Server.Outbound_Budget (Limit => 6);
+      Accepted : Boolean;
+   begin
+      declare
+         Item : SSE.Session
+           (Capacity => 4, Byte_Limit => 5, Budget => Budget'Access);
+         Event : SSE.Event_Value;
+      begin
+         Event.Data := To_Unbounded_String ("12345");
+         SSE.Try_Publish (Item, Event, Accepted);
+         pragma Assert (Accepted);
+         Event.Data := To_Unbounded_String ("x");
+         SSE.Try_Publish (Item, Event, Accepted);
+         pragma Assert (not Accepted);
+         pragma Assert (HTTP_Server.Current (Budget).Current = 5);
+      end;
+      pragma Assert (HTTP_Server.Current (Budget).Current = 0);
+      declare
+         Item : WS.Session
+           (Capacity => 4, Byte_Limit => 6, Budget => Budget'Access);
+         Other : WS.Session
+           (Capacity => 1, Byte_Limit => 6, Budget => Budget'Access);
+         Message : WS.Outgoing_Message;
+      begin
+         Message.Data := To_Unbounded_String ("123456");
+         WS.Try_Publish (Item, Message, Accepted);
+         pragma Assert (Accepted);
+         Message.Data := To_Unbounded_String ("x");
+         WS.Try_Publish (Other, Message, Accepted);
+         pragma Assert (not Accepted);
+         pragma Assert (HTTP_Server.Current (Budget).Current = 6);
+      end;
+      pragma Assert (HTTP_Server.Current (Budget).Current = 0);
+      pragma Assert (HTTP_Server.Current (Budget).Denials = 1);
+   end Check_Outbound_Budgets;
 
    procedure Check_High_Level_SSE is
       package Applications renames Flyology.HTTP.Server.Applications;
@@ -1827,15 +2364,37 @@ procedure HTTP_Smoke is
          X     : in out Applications.Exchange)
       is
          pragma Unreferenced (State);
-         Item     : SSE.Session (Capacity => 1);
+         Item     : SSE.Session
+           (Capacity => 1, Byte_Limit => 1_024, Budget => null);
          Event    : SSE.Event_Value;
          Accepted : Boolean;
+         Timed_Out : Boolean;
+         Stop : aliased Flyology.Cancellation.Token;
+         Cancelled : Boolean := False;
       begin
          Event.Data := To_Unbounded_String ("first");
          Event.Event := To_Unbounded_String ("update");
          SSE.Try_Publish (Item, Event, Accepted);
          pragma Assert (Accepted);
          Event.Data := To_Unbounded_String ("overflow");
+         SSE.Try_Publish (Item, Event, Accepted);
+         pragma Assert (not Accepted);
+         SSE.Publish_For
+           (Item, Event, Accepted, Timeout => 0.0,
+            Timed_Out => Timed_Out);
+         pragma Assert (not Accepted and then Timed_Out);
+         Stop.Request;
+         begin
+            SSE.Publish_For
+              (Item, Event, Accepted, Timeout => 1.0,
+               Timed_Out => Timed_Out, Token => Stop'Access);
+         exception
+            when Flyology.Cancellation.Operation_Cancelled =>
+               Cancelled := True;
+         end;
+         pragma Assert (Cancelled);
+         Event.Data := To_Unbounded_String
+           (String'(1 .. SSE.Max_Queued_Message_Bytes + 1 => 'x'));
          SSE.Try_Publish (Item, Event, Accepted);
          pragma Assert (not Accepted);
          SSE.Close (Item);
@@ -1882,7 +2441,72 @@ procedure HTTP_Smoke is
            (Values.Events
               (Flyology.HTTP.Server.Metrics.SSE_Connection) = 1);
       end;
+      declare
+         Head_Wire : aliased Memory_Transport;
+      begin
+         Head_Wire.Input := To_Unbounded_String
+           ("HEAD /events HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Head_Wire'Access);
+         begin
+            Routing.Serve (Routes, State, Client, Peer);
+         end;
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Head_Wire.Output), "405 Method Not Allowed") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Head_Wire.Output), "Allow: GET") /= 0);
+      end;
    end Check_High_Level_SSE;
+
+   procedure Check_Idle_SSE_Deadline is
+      package Applications renames Flyology.HTTP.Server.Applications;
+      package Routing is new Flyology.HTTP.Server.Routing (Boolean);
+      package SSE renames Flyology.HTTP.Server.SSE_Handlers;
+
+      procedure Events
+        (Cancelled : in out Boolean;
+         X         : in out Applications.Exchange)
+      is
+         Item : SSE.Session
+           (Capacity => 1, Byte_Limit => 1_024, Budget => null);
+      begin
+         begin
+            SSE.Run
+              (X, Item, Idle_Quantum => 0.001, Heartbeat => 0.0);
+         exception
+            when others =>
+               Cancelled := SSE.Cancelled (Item);
+         end;
+      end Events;
+
+      Routes : Routing.Router
+        (Capacity => 1, Slashes => Routing.Strict_Slashes);
+      Cancelled : Boolean := False;
+      Peer : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+      Wire : aliased Memory_Transport;
+   begin
+      Routes.Get
+        ("/idle", Events'Access, Name => "idle",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Timeout => 0.01, Upgrade => Routing.Allow_SSE));
+      Wire.Input := To_Unbounded_String
+        ("GET /idle HTTP/1.1" & CRLF & "Host: localhost" & CRLF
+         & "Connection: close" & CRLF & CRLF);
+      declare
+         Client : aliased HTTP_Server.Connection (Wire'Access);
+      begin
+         Routing.Serve (Routes, Cancelled, Client, Peer);
+      end;
+      pragma Assert (Cancelled, To_String (Wire.Output));
+   end Check_Idle_SSE_Deadline;
 
    procedure Check_High_Level_WebSocket is
       package Applications renames Flyology.HTTP.Server.Applications;
@@ -1924,6 +2548,14 @@ procedure HTTP_Smoke is
          WebSockets.Try_Publish
            (Item,
             (Kind => HTTP_Server.Text_Frame,
+             Data => To_Unbounded_String
+               (String'
+                  (1 .. WebSockets.Max_Queued_Message_Bytes + 1 => 'x'))),
+            Accepted);
+         pragma Assert (not Accepted);
+         WebSockets.Try_Publish
+           (Item,
+            (Kind => HTTP_Server.Text_Frame,
              Data => To_Unbounded_String ("open")), Accepted);
          pragma Assert (Accepted);
       end On_Open;
@@ -1958,12 +2590,12 @@ procedure HTTP_Smoke is
          X     : in out Applications.Exchange)
       is
          pragma Unreferenced (State);
-         Item : WebSockets.Session (Capacity => 2);
+         Item : WebSockets.Session
+           (Capacity => 2, Byte_Limit => 1_024, Budget => null);
+         package Chat_Lifecycle is new
+           WebSockets.Lifecycle (On_Open, On_Message, On_Close);
       begin
-         WebSockets.Run
-           (X, Item, On_Open'Unrestricted_Access,
-            On_Message'Unrestricted_Access, On_Close'Unrestricted_Access,
-            Metric_Output => Metrics'Access);
+         Chat_Lifecycle.Run (X, Item, Metric_Output => Metrics'Access);
       end Chat;
 
       Routes : Routing.Router
@@ -2017,7 +2649,106 @@ procedure HTTP_Smoke is
            (Values.Events
               (Flyology.HTTP.Server.Metrics.WebSocket_Message) = 3);
       end;
+      declare
+         Version_Wire : aliased Memory_Transport;
+      begin
+         Version_Wire.Input := To_Unbounded_String
+           ("GET /chat HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Upgrade: websocket" & CRLF
+            & "Connection: Upgrade" & CRLF
+            & "Sec-WebSocket-Version: 12" & CRLF
+            & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Version_Wire'Access);
+         begin
+            Routing.Serve (Routes, State, Client, Peer);
+         end;
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Version_Wire.Output),
+               "426 Upgrade Required") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Version_Wire.Output),
+               "Sec-WebSocket-Version: 13") /= 0);
+      end;
    end Check_High_Level_WebSocket;
+
+   procedure Check_Fragmented_WebSocket_Timeout is
+      function Frame
+        (Final : Boolean; Opcode : Natural; Payload : String) return String
+      is
+         Mask : constant String := "mask";
+         Value : Unbounded_String;
+      begin
+         Append
+           (Value,
+            Character'Val ((if Final then 16#80# else 0) + Opcode));
+         Append (Value, Character'Val (16#80# + Payload'Length));
+         Append (Value, Mask);
+         for Index in Payload'Range loop
+            Append
+              (Value,
+               Character'Val
+                 (Natural
+                    (Ada.Streams.Stream_Element
+                       (Character'Pos (Payload (Index)))
+                     xor Ada.Streams.Stream_Element
+                       (Character'Pos
+                          (Mask ((Index - Payload'First) mod 4 + 1))))));
+         end loop;
+         return To_String (Value);
+      end Frame;
+
+      Head : constant String :=
+        "GET /chat HTTP/1.1" & CRLF
+        & "Host: localhost" & CRLF
+        & "Upgrade: websocket" & CRLF
+        & "Connection: Upgrade" & CRLF
+        & "Sec-WebSocket-Version: 13" & CRLF
+        & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF;
+      First : constant String := Frame (False, 1, "hel");
+      Last  : constant String := Frame (True, 0, "lo");
+      Wire  : aliased Memory_Transport;
+      Value : HTTP_Server.Request;
+      Closed : Boolean;
+      Timed_Out : Boolean := False;
+      Kind : HTTP_Server.WebSocket_Data_Kind;
+      Data : Unbounded_String;
+      Budget : aliased HTTP_Server.Ingress_Budget (Limit => 100);
+   begin
+      Wire.Input := To_Unbounded_String (Head & First & Last);
+      Wire.First_Receive_Max := Head'Length + First'Length;
+      Wire.Timeout_On_Call := 2;
+      declare
+         Client : HTTP_Server.Connection (Wire'Access);
+      begin
+         HTTP_Server.Configure_Ingress_Budget (Client, Budget'Access);
+         HTTP_Server.Read_Request_Head
+           (Client, Value, Closed, Timeout => 1.0);
+         pragma Assert (not Closed);
+         HTTP_Server.Accept_WebSocket (Client, Value, Timeout => 1.0);
+         begin
+            HTTP_Server.Receive_WebSocket
+              (Client, Kind, Data, Closed, Timeout => 0.001,
+               Message_Timeout => 1.0);
+         exception
+            when Flyology.IO.Timeout_Error => Timed_Out := True;
+         end;
+         pragma Assert (Timed_Out);
+         pragma Assert (HTTP_Server.Current (Budget).Current = 3);
+         HTTP_Server.Receive_WebSocket
+           (Client, Kind, Data, Closed, Timeout => 1.0,
+            Message_Timeout => 1.0);
+         pragma Assert (not Closed);
+         pragma Assert (Kind = HTTP_Server.Text_Frame);
+         pragma Assert (To_String (Data) = "hello");
+         pragma Assert (HTTP_Server.Current (Budget).Current = 0);
+         HTTP_Server.Close_WebSocket (Client, Timeout => 1.0);
+      end;
+   end Check_Fragmented_WebSocket_Timeout;
 
    procedure Check_Request_Task_Integration is
       package Applications renames Flyology.HTTP.Server.Applications;
@@ -2045,7 +2776,8 @@ procedure HTTP_Smoke is
          X     : in out Applications.Exchange)
       is
          pragma Unreferenced (State);
-         Item : Operations.Scope (Capacity => 2);
+         Item : Operations.Scope
+           (Capacity => 2, Parent => X.Cancellation);
          First, Second : Operations.Operation_Handle;
       begin
          Request_Work.Configure (Item, X);
@@ -2088,11 +2820,16 @@ begin
    Check_Response_Framing;
    Check_SSE;
    Check_WebSocket;
+   Check_Idle_WebSocket_Budget;
+   Check_Periodic_WebSocket_Pings;
+   Check_WebSocket_Control_Write_Timeout;
+   Check_WebSocket_Data_Write_Timeout;
    Check_WebSocket_Failures;
    Check_WebSocket_Origin;
    Check_Slow_Request_Deadline;
    Check_Slow_Body_Deadline;
    Check_Handler_Isolation;
+   Check_Handler_Streamed_Limit;
    Check_Application_Failure_Propagates;
    Check_Handler_Limits;
    Check_Rejections;
@@ -2102,7 +2839,10 @@ begin
    Check_Admission_Middleware;
    Check_Request_Response_Helpers;
    Check_Bounded_Channels;
+   Check_Outbound_Budgets;
    Check_High_Level_SSE;
+   Check_Idle_SSE_Deadline;
    Check_High_Level_WebSocket;
+   Check_Fragmented_WebSocket_Timeout;
    Check_Request_Task_Integration;
 end HTTP_Smoke;

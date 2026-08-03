@@ -1,7 +1,10 @@
 with Ada.Characters.Handling;
+with Ada.Calendar;
+with Ada.Calendar.Formatting;
 with Ada.Strings.Fixed;
 with Interfaces;
 with Flyology.IO;
+with GNAT.Sockets;
 
 package body Flyology.HTTP.Server is
    use type Ada.Streams.Stream_Element_Offset;
@@ -11,6 +14,48 @@ package body Flyology.HTTP.Server is
    use type Interfaces.Unsigned_64;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
+   WebSocket_Peer_EOF : exception;
+
+   function HTTP_Date return String is
+      Now : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      Year : constant Ada.Calendar.Year_Number :=
+        Ada.Calendar.Formatting.Year (Now, Time_Zone => 0);
+      Month : constant Ada.Calendar.Month_Number :=
+        Ada.Calendar.Formatting.Month (Now, Time_Zone => 0);
+      Day : constant Ada.Calendar.Day_Number :=
+        Ada.Calendar.Formatting.Day (Now, Time_Zone => 0);
+      Hour : constant Ada.Calendar.Formatting.Hour_Number :=
+        Ada.Calendar.Formatting.Hour (Now, Time_Zone => 0);
+      Minute : constant Ada.Calendar.Formatting.Minute_Number :=
+        Ada.Calendar.Formatting.Minute (Now, Time_Zone => 0);
+      Second : constant Ada.Calendar.Formatting.Second_Number :=
+        Ada.Calendar.Formatting.Second (Now);
+      Adjusted_Year : constant Natural :=
+        (if Month < 3 then Natural (Year) - 1 else Natural (Year));
+      Adjusted_Month : constant Natural :=
+        (if Month < 3 then Natural (Month) + 12 else Natural (Month));
+      Weekday : constant Natural :=
+        (Natural (Day) + 13 * (Adjusted_Month + 1) / 5
+         + Adjusted_Year mod 100 + (Adjusted_Year mod 100) / 4
+         + (Adjusted_Year / 100) / 4 + 5 * (Adjusted_Year / 100)) mod 7;
+      Weekdays : constant array (Natural range 0 .. 6) of String (1 .. 3) :=
+        ("Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri");
+      Months : constant array (Positive range 1 .. 12) of String (1 .. 3) :=
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec");
+
+      function Two (Value : Natural) return String is
+        (Character'Val (Character'Pos ('0') + Value / 10)
+         & Character'Val (Character'Pos ('0') + Value mod 10));
+
+      function Four (Value : Natural) return String is
+        (Two (Value / 100) & Two (Value mod 100));
+   begin
+      return Weekdays (Weekday) & ", " & Two (Natural (Day)) & " "
+        & Months (Natural (Month)) & " " & Four (Natural (Year)) & " "
+        & Two (Natural (Hour)) & ":" & Two (Natural (Minute)) & ":"
+        & Two (Natural (Second)) & " GMT";
+   end HTTP_Date;
 
    protected body Ingress_Budget_State is
       procedure Try_Reserve (Bytes : Natural; Granted : out Boolean) is
@@ -58,6 +103,49 @@ package body Flyology.HTTP.Server is
    function Current (Item : Ingress_Budget) return Ingress_Budget_Snapshot is
      (Item.State.Current);
 
+   protected body Outbound_Budget_State is
+      procedure Try_Reserve (Bytes : Natural; Granted : out Boolean) is
+      begin
+         Granted := Bytes <= Limit - Used;
+         if Granted then
+            Used := Used + Bytes;
+            High_Water := Natural'Max (High_Water, Used);
+         elsif Denied < Natural'Last then
+            Denied := Denied + 1;
+         end if;
+      end Try_Reserve;
+
+      procedure Release (Bytes : Natural) is
+      begin
+         if Bytes > Used then
+            raise Program_Error with "HTTP outbound budget underflow";
+         end if;
+         Used := Used - Bytes;
+      end Release;
+
+      function Current return Outbound_Budget_Snapshot is
+        ((Limit   => Limit,
+          Current => Used,
+          Peak    => High_Water,
+          Denials => Denied));
+   end Outbound_Budget_State;
+
+   procedure Try_Reserve
+     (Item : in out Outbound_Budget;
+      Bytes : Natural;
+      Granted : out Boolean) is
+   begin
+      Item.State.Try_Reserve (Bytes, Granted);
+   end Try_Reserve;
+
+   procedure Release (Item : in out Outbound_Budget; Bytes : Natural) is
+   begin
+      Item.State.Release (Bytes);
+   end Release;
+
+   function Current (Item : Outbound_Budget)
+     return Outbound_Budget_Snapshot is (Item.State.Current);
+
    Default_Ingress_Budget : aliased Ingress_Budget
      (Limit => Default_Ingress_Budget_Bytes);
 
@@ -95,6 +183,36 @@ package body Flyology.HTTP.Server is
       Item.Buffered_Bytes := Bytes_To_Reserve;
       Item.Reservation_Budget := Selected;
    end Reserve_Buffered;
+
+   procedure Resize_Buffered
+     (Item : in out Connection;
+      Bytes_To_Retain : Natural)
+   is
+      Granted  : Boolean;
+      Selected : constant Ingress_Budget_Access :=
+        (if Item.Reservation_Budget /= null
+         then Item.Reservation_Budget
+         elsif Item.Budget_Handle /= null
+         then Item.Budget_Handle
+         else Default_Ingress_Budget'Access);
+   begin
+      if Bytes_To_Retain > Item.Buffered_Bytes then
+         Try_Reserve
+           (Selected.all, Bytes_To_Retain - Item.Buffered_Bytes, Granted);
+         if not Granted then
+            raise Resource_Exhausted with
+              "HTTP server ingress byte budget exhausted";
+         end if;
+         Item.Reservation_Budget := Selected;
+      elsif Bytes_To_Retain < Item.Buffered_Bytes then
+         Release
+           (Selected.all, Item.Buffered_Bytes - Bytes_To_Retain);
+      end if;
+      Item.Buffered_Bytes := Bytes_To_Retain;
+      if Bytes_To_Retain = 0 then
+         Item.Reservation_Budget := null;
+      end if;
+   end Resize_Buffered;
 
    overriding procedure Finalize (Item : in out Connection) is
    begin
@@ -214,6 +332,9 @@ package body Flyology.HTTP.Server is
       return Result;
    end Header_Field_Count;
 
+   function Header_Count (Item : Request; Name : String) return Natural is
+     (Header_Field_Count (Item, Name));
+
    function Header (Item : Request; Name : String) return String is
       Block  : constant String := To_String (Item.Header_Block);
       Wanted : constant String := Lower (Name);
@@ -306,6 +427,12 @@ package body Flyology.HTTP.Server is
          Item.Channel.Receive (Buffer, Last, Left, Token);
          Closed := Last < Buffer'First;
          if not Closed then
+            if Item.State = WebSocket then
+               Resize_Buffered
+                 (Item,
+                  Item.Buffered_Bytes
+                    + Natural (Last - Buffer'First + 1));
+            end if;
             Append (Item.Pending, Text (Buffer (Buffer'First .. Last)));
          end if;
       end;
@@ -410,6 +537,45 @@ package body Flyology.HTTP.Server is
    function Valid_Authority (Value : String) return Boolean is
       Closing : Natural;
       Colon   : Natural;
+
+      function Valid_IPv6 (Text : String) return Boolean is
+         Address : GNAT.Sockets.Inet_Addr_Type;
+      begin
+         if Ada.Strings.Fixed.Index (Text, ":") = 0 then
+            return False;
+         end if;
+         Address := GNAT.Sockets.Inet_Addr (Text);
+         return GNAT.Sockets.Image (Address)'Length > 0;
+      exception
+         when others => return False;
+      end Valid_IPv6;
+
+      function Valid_IPvFuture (Text : String) return Boolean is
+         Dot : constant Natural := Ada.Strings.Fixed.Index (Text, ".");
+      begin
+         if Text'Length < 4
+           or else Text (Text'First) not in 'v' | 'V'
+           or else Dot <= Text'First + 1
+           or else Dot = Text'Last
+         then
+            return False;
+         end if;
+         for Index in Text'First + 1 .. Dot - 1 loop
+            if not Is_Hex_Digit (Text (Index)) then
+               return False;
+            end if;
+         end loop;
+         for Index in Dot + 1 .. Text'Last loop
+            if Text (Index) not in
+              'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~'
+                | '!' | '$' | '&' | ''' | '(' | ')' | '*' | '+' | ',' | ';'
+                | '=' | ':'
+            then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Valid_IPvFuture;
    begin
       if Value'Length = 0
         or else Ada.Strings.Fixed.Index (Value, "@") /= 0
@@ -421,16 +587,13 @@ package body Flyology.HTTP.Server is
          if Closing = 0 or else Closing = Value'First + 1 then
             return False;
          end if;
-         for Index in Value'First + 1 .. Closing - 1 loop
-            if Value (Index) not in 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9'
-              and then Value (Index) not in ':' | '.' | '-'
-            then
-               return False;
-            end if;
-         end loop;
-         return Closing = Value'Last
+         return (Valid_IPv6 (Value (Value'First + 1 .. Closing - 1))
+                 or else Valid_IPvFuture
+                   (Value (Value'First + 1 .. Closing - 1)))
+           and then (Closing = Value'Last
            or else (Value (Closing + 1) = ':'
-                    and then Valid_Port (Value (Closing + 2 .. Value'Last)));
+                    and then Valid_Port
+                      (Value (Closing + 2 .. Value'Last))));
       else
          Colon := Ada.Strings.Fixed.Index (Value, ":");
          if Colon = 0 then
@@ -451,7 +614,31 @@ package body Flyology.HTTP.Server is
       Request_Method : constant String := Method (Value);
       Host           : constant String := Header (Value, "Host");
       Scheme_End     : Natural := 0;
+      Index          : Natural := Request_Target'First;
+
+      function Hex_Digit (Item : Character) return Boolean is
+        (Item in '0' .. '9' | 'a' .. 'f' | 'A' .. 'F');
    begin
+      while Index <= Request_Target'Last loop
+         if Character'Pos (Request_Target (Index)) > 127
+           or else Request_Target (Index) in
+             '<' | '>' | '"' | '{' | '}' | '|' | '\' | '^' | '`'
+         then
+            raise Protocol_Error with
+              "invalid raw character in request target";
+         elsif Request_Target (Index) = '%' then
+            if Request_Target'Last - Index < 2
+              or else not Hex_Digit (Request_Target (Index + 1))
+              or else not Hex_Digit (Request_Target (Index + 2))
+            then
+               raise Protocol_Error with
+                 "invalid percent escape in request target";
+            end if;
+            Index := Index + 3;
+         else
+            Index := Index + 1;
+         end if;
+      end loop;
       if Host'Length > 0 and then not Valid_Authority (Host) then
          raise Protocol_Error with "invalid Host authority";
       end if;
@@ -577,18 +764,104 @@ package body Flyology.HTTP.Server is
          if Digit > Maximum_Body
            or else Result > (Maximum_Body - Digit) / 16
          then
-            raise Protocol_Error with "HTTP request body is too large";
+            raise Payload_Too_Large with "HTTP request body is too large";
          end if;
          Result := Result * 16 + Digit;
       end loop;
       if Semicolon /= 0 then
-         for Index in Semicolon + 1 .. Line'Last loop
-            if Character'Pos (Line (Index)) < 32
-              or else Character'Pos (Line (Index)) = 127
-            then
-               raise Protocol_Error with "invalid HTTP chunk extension";
-            end if;
-         end loop;
+         declare
+            Position : Natural := Semicolon + 1;
+         begin
+            while Position <= Line'Last loop
+               declare
+                  Name_First : constant Natural := Position;
+               begin
+                  while Position <= Line'Last
+                    and then Line (Position) not in '=' | ';'
+                  loop
+                     Position := Position + 1;
+                  end loop;
+                  if Position = Name_First then
+                     raise Protocol_Error with
+                       "invalid HTTP chunk extension";
+                  end if;
+                  Validate_Token
+                    (Line (Name_First .. Position - 1),
+                     "chunk extension name");
+                  if Position <= Line'Last
+                    and then Line (Position) = '='
+                  then
+                     Position := Position + 1;
+                     if Position > Line'Last then
+                        raise Protocol_Error with
+                          "empty HTTP chunk extension value";
+                     elsif Line (Position) = '"' then
+                        Position := Position + 1;
+                        loop
+                           if Position > Line'Last then
+                              raise Protocol_Error with
+                                "unterminated quoted chunk extension";
+                           elsif Line (Position) = '"' then
+                              Position := Position + 1;
+                              exit;
+                           elsif Line (Position) = Character'Val (92) then
+                              Position := Position + 1;
+                              if Position > Line'Last
+                                or else
+                                  (Character'Pos (Line (Position)) < 32
+                                   and then Line (Position) /=
+                                     Character'Val (9))
+                                or else Character'Pos (Line (Position)) = 127
+                              then
+                                 raise Protocol_Error with
+                                   "invalid quoted-pair in chunk extension";
+                              end if;
+                              Position := Position + 1;
+                           elsif (Character'Pos (Line (Position)) < 32
+                                  and then Line (Position) /=
+                                    Character'Val (9))
+                             or else Character'Pos (Line (Position)) = 127
+                             or else Line (Position) = '"'
+                           then
+                              raise Protocol_Error with
+                                "invalid quoted chunk extension";
+                           else
+                              Position := Position + 1;
+                           end if;
+                        end loop;
+                     else
+                        declare
+                           Value_First : constant Natural := Position;
+                        begin
+                           while Position <= Line'Last
+                             and then Line (Position) /= ';'
+                           loop
+                              Position := Position + 1;
+                           end loop;
+                           if Position = Value_First then
+                              raise Protocol_Error with
+                                "empty HTTP chunk extension value";
+                           end if;
+                           Validate_Token
+                             (Line (Value_First .. Position - 1),
+                              "chunk extension value");
+                        end;
+                     end if;
+                  end if;
+                  if Position <= Line'Last then
+                     if Line (Position) /= ';' then
+                        raise Protocol_Error with
+                          "invalid bytes after chunk extension";
+                     end if;
+                     Position := Position + 1;
+                     if Position > Line'Last then
+                        raise Protocol_Error with
+                          "empty HTTP chunk extension";
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end;
       end if;
       return Result;
    end Parse_Chunk_Size;
@@ -752,7 +1025,7 @@ package body Flyology.HTTP.Server is
                   raise Protocol_Error with "invalid Content-Length";
             end;
             if Body_Size > Body_Limit then
-               raise Protocol_Error with "HTTP request body is too large";
+               raise Payload_Too_Large with "HTTP request body is too large";
             end if;
          end if;
       end;
@@ -788,7 +1061,7 @@ package body Flyology.HTTP.Server is
               or else Expect_Count > 1
               or else Lower (Trim (Expect_Value)) /= "100-continue"
             then
-               raise Protocol_Error with "unsupported HTTP expectation";
+               raise Expectation_Failed with "unsupported HTTP expectation";
             elsif Chunked or else Body_Size > 0 then
                Item.Continue_Pending := True;
                Item.Body_Accepted := False;
@@ -1006,7 +1279,7 @@ package body Flyology.HTTP.Server is
                      if Chunk_Size = 0 then
                         Finish_Trailers;
                      elsif Item.Body_Total > Item.Body_Limit - Chunk_Size then
-                        raise Protocol_Error with
+                        raise Payload_Too_Large with
                           "HTTP request body is too large";
                      else
                         Item.Body_Remaining := Chunk_Size;
@@ -1092,7 +1365,7 @@ package body Flyology.HTTP.Server is
          raise Program_Error with
            "HTTP body limit cannot change after body consumption";
       elsif Item.Body_Remaining > Maximum then
-         raise Protocol_Error with "HTTP request body is too large";
+         raise Payload_Too_Large with "HTTP request body is too large";
       end if;
       Item.Body_Limit := Maximum;
    end Narrow_Body_Limit;
@@ -1231,7 +1504,7 @@ package body Flyology.HTTP.Server is
                  Lower (Value (Position .. Colon - 1));
             begin
                if Name in "connection" | "content-length" | "content-type"
-                            | "transfer-encoding" | "upgrade"
+                            | "date" | "transfer-encoding" | "upgrade"
                then
                   raise Program_Error with
                     "extra HTTP header conflicts with a managed field";
@@ -1294,6 +1567,7 @@ package body Flyology.HTTP.Server is
          (if Item.Current_Version = HTTP_1_1
           then "HTTP/1.1 " else "HTTP/1.0 ")
          & Decimal (Status) & " " & Reason (Status) & CRLF);
+      Append (Head, "Date: " & HTTP_Date & CRLF);
       if Status not in 204 | 304 then
          Append (Head, "Content-Length: " & Decimal (Payload'Length) & CRLF);
       end if;
@@ -1314,15 +1588,22 @@ package body Flyology.HTTP.Server is
         (Head,
          "Connection: " & (if Must_Close then "close" else "keep-alive")
          & CRLF & CRLF);
-      if not Item.Current_Is_Head
-        and then not Body_Forbidden
-        and then Payload'Length > 0
-      then
-         Write (Item, To_String (Head) & Payload, Timeout, Token);
-      else
-         Write (Item, To_String (Head), Timeout, Token);
-      end if;
       Item.Response_Begun := True;
+      begin
+         if not Item.Current_Is_Head
+           and then not Body_Forbidden
+           and then Payload'Length > 0
+         then
+            Write (Item, To_String (Head) & Payload, Timeout, Token);
+         else
+            Write (Item, To_String (Head), Timeout, Token);
+         end if;
+      exception
+         when others =>
+            Item.Request_Close := True;
+            Item.State := Terminal;
+            raise;
+      end;
       if Must_Close then
          Item.Request_Close := True;
          Item.State := Terminal;
@@ -1388,6 +1669,7 @@ package body Flyology.HTTP.Server is
          (if Item.Current_Version = HTTP_1_1
           then "HTTP/1.1 " else "HTTP/1.0 ")
          & Decimal (Status) & " " & Reason (Status) & CRLF);
+      Append (Head, "Date: " & HTTP_Date & CRLF);
       if Content_Type'Length > 0 then
          Append (Head, "Content-Type: " & Content_Type & CRLF);
       end if;
@@ -1399,10 +1681,17 @@ package body Flyology.HTTP.Server is
         (Head,
          "Connection: " & (if Must_Close then "close" else "keep-alive")
          & CRLF & CRLF);
-      Write (Item, To_String (Head), Timeout, Token);
       Item.Response_Begun := True;
       Item.Request_Close := Must_Close;
       Item.State := Streaming_HTTP;
+      begin
+         Write (Item, To_String (Head), Timeout, Token);
+      exception
+         when others =>
+            Item.Request_Close := True;
+            Item.State := Terminal;
+            raise;
+      end;
    end Begin_Response_Stream;
 
    procedure Write_Response_Chunk
@@ -1417,10 +1706,24 @@ package body Flyology.HTTP.Server is
       elsif Data'Length = 0 or else Item.Current_Is_Head then
          return;
       elsif Item.Current_Version = HTTP_1_1 then
-         Write
-           (Item, Hex (Data'Length) & CRLF & Data & CRLF, Timeout, Token);
+         begin
+            Write
+              (Item, Hex (Data'Length) & CRLF & Data & CRLF, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
       else
-         Write (Item, Data, Timeout, Token);
+         begin
+            Write (Item, Data, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
       end if;
    end Write_Response_Chunk;
 
@@ -1434,7 +1737,14 @@ package body Flyology.HTTP.Server is
          raise Program_Error with "HTTP streaming response is not active";
       end if;
       if Item.Current_Version = HTTP_1_1 and then not Item.Current_Is_Head then
-         Write (Item, "0" & CRLF & CRLF, Timeout, Token);
+         begin
+            Write (Item, "0" & CRLF & CRLF, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
       end if;
       Item.State :=
         (if Item.Request_Close then Terminal else Reading_HTTP);
@@ -1458,19 +1768,27 @@ package body Flyology.HTTP.Server is
          raise Program_Error with "SSE requires HTTP/1.1";
       end if;
       Validate_Extra_Headers (Extra_Headers);
-      Write
-        (Item,
-         "HTTP/1.1 200 OK" & CRLF
-         & "Content-Type: text/event-stream" & CRLF
-         & "Cache-Control: no-cache" & CRLF
-         & "Transfer-Encoding: chunked" & CRLF
-         & Extra_Headers
-         & "Connection: "
-         & (if Item.Request_Close then "close" else "keep-alive")
-         & CRLF & CRLF,
-         Timeout, Token);
       Item.Response_Begun := True;
       Item.State := Streaming_SSE;
+      begin
+         Write
+           (Item,
+            "HTTP/1.1 200 OK" & CRLF
+            & "Date: " & HTTP_Date & CRLF
+            & "Content-Type: text/event-stream" & CRLF
+            & "Cache-Control: no-cache" & CRLF
+            & "Transfer-Encoding: chunked" & CRLF
+            & Extra_Headers
+            & "Connection: "
+            & (if Item.Request_Close then "close" else "keep-alive")
+            & CRLF & CRLF,
+            Timeout, Token);
+      exception
+         when others =>
+            Item.Request_Close := True;
+            Item.State := Terminal;
+            raise;
+      end;
    end Begin_SSE;
 
    procedure Validate_SSE_Field (Value : String; Name : String) is
@@ -1551,7 +1869,9 @@ package body Flyology.HTTP.Server is
       Id      : String := "";
       Retry   : Natural := 0;
       Timeout : Duration := 30.0;
-      Token   : access Flyology.Cancellation.Token := null)
+      Token   : access Flyology.Cancellation.Token := null;
+      Include_Id : Boolean := False;
+      Include_Retry : Boolean := False)
    is
       Payload : Unbounded_String;
       First   : Integer := Data'First;
@@ -1572,10 +1892,10 @@ package body Flyology.HTTP.Server is
       if Event'Length > 0 then
          Append (Payload, "event: " & Event & Character'Val (10));
       end if;
-      if Id'Length > 0 then
+      if Id'Length > 0 or else Include_Id then
          Append (Payload, "id: " & Id & Character'Val (10));
       end if;
-      if Retry > 0 then
+      if Retry > 0 or else Include_Retry then
          Append (Payload, "retry: " & Decimal (Retry) & Character'Val (10));
       end if;
       if Data'Length = 0 then
@@ -1618,10 +1938,80 @@ package body Flyology.HTTP.Server is
       declare
          Value : constant String := To_String (Payload);
       begin
-         Write
-           (Item, Hex (Value'Length) & CRLF & Value & CRLF, Timeout, Token);
+         begin
+            Write
+              (Item, Hex (Value'Length) & CRLF & Value & CRLF, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
       end;
    end Send_Event;
+
+   procedure Send_SSE_Comment
+     (Item    : in out Connection;
+      Comment : String := "";
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null)
+   is
+      Payload : Unbounded_String;
+      First   : Integer := Comment'First;
+   begin
+      if Item.State /= Streaming_SSE then
+         raise Program_Error with "SSE response is not active";
+      elsif not Valid_UTF8 (Comment) then
+         raise Program_Error with "SSE comment must contain valid UTF-8";
+      end if;
+      if Comment'Length = 0 then
+         Append (Payload, ":" & Character'Val (10));
+      else
+         while First <= Comment'Last loop
+            declare
+               Break : Natural := 0;
+               Last  : Integer;
+            begin
+               for Index in First .. Comment'Last loop
+                  if Comment (Index) in
+                    Character'Val (10) | Character'Val (13)
+                  then
+                     Break := Index;
+                     exit;
+                  end if;
+               end loop;
+               Last := (if Break = 0 then Comment'Last else Break - 1);
+               Append (Payload, ":");
+               if Last >= First then
+                  Append (Payload, " " & Comment (First .. Last));
+               end if;
+               Append (Payload, Character'Val (10));
+               exit when Break = 0;
+               First := Break + 1;
+               if Comment (Break) = Character'Val (13)
+                 and then First <= Comment'Last
+                 and then Comment (First) = Character'Val (10)
+               then
+                  First := First + 1;
+               end if;
+            end;
+         end loop;
+      end if;
+      Append (Payload, Character'Val (10));
+      declare
+         Value : constant String := To_String (Payload);
+      begin
+         begin
+            Write
+              (Item, Hex (Value'Length) & CRLF & Value & CRLF, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
+      end;
+   end Send_SSE_Comment;
 
    procedure End_SSE
      (Item    : in out Connection;
@@ -1631,7 +2021,14 @@ package body Flyology.HTTP.Server is
       if Item.State /= Streaming_SSE then
          raise Program_Error with "SSE response is not active";
       end if;
-      Write (Item, "0" & CRLF & CRLF, Timeout, Token);
+      begin
+         Write (Item, "0" & CRLF & CRLF, Timeout, Token);
+      exception
+         when others =>
+            Item.Request_Close := True;
+            Item.State := Terminal;
+            raise;
+      end;
       Item.State := (if Item.Request_Close then Terminal else Reading_HTTP);
    end End_SSE;
 
@@ -1794,6 +2191,7 @@ package body Flyology.HTTP.Server is
    is
       List  : constant String := Header (Item, Name);
       First : Positive := 1;
+      Found : Boolean := False;
    begin
       Validate_Token (Value, "header token");
       while First <= List'Length loop
@@ -1806,13 +2204,13 @@ package body Flyology.HTTP.Server is
          begin
             Validate_Token (Candidate, "header token");
             if Candidate = Value then
-               return True;
+               Found := True;
             end if;
             exit when Comma = 0;
             First := Comma + 1;
          end;
       end loop;
-      return False;
+      return Found;
    end Header_Has_Exact_Token;
 
    procedure Accept_WebSocket
@@ -1831,15 +2229,22 @@ package body Flyology.HTTP.Server is
    begin
       if Item.State /= Reading_HTTP or else Item.Response_Begun then
          raise Program_Error with "HTTP response already started";
-      elsif not Item.Body_Done then
+      elsif not Item.Body_Done or else Item.Body_Total > 0
+        or else Content (Value)'Length > 0
+      then
          raise Program_Error with
-           "WebSocket upgrade request body has not been consumed";
+           "WebSocket upgrade requests must not carry a body";
       end if;
-      if Method (Value) /= "GET"
+      if Trim (Header (Value, "Sec-WebSocket-Version")) /= "13" then
+         Respond
+           (Item, 426, "text/plain", "WebSocket version 13 is required",
+            "Sec-WebSocket-Version: 13" & CRLF,
+            Close => True, Timeout => Timeout, Token => Token);
+         raise Protocol_Error with "unsupported WebSocket version";
+      elsif Method (Value) /= "GET"
         or else Version (Value) /= HTTP_1_1
         or else not Header_Has_Token (Value, "Connection", "upgrade")
         or else not Header_Has_Token (Value, "Upgrade", "websocket")
-        or else Trim (Header (Value, "Sec-WebSocket-Version")) /= "13"
         or else not Valid_WebSocket_Key (Key)
       then
          raise Protocol_Error with "invalid WebSocket upgrade request";
@@ -1852,6 +2257,19 @@ package body Flyology.HTTP.Server is
       then
          raise Protocol_Error with "WebSocket origin was rejected";
       end if;
+      if Header_Field_Count (Value, "Sec-WebSocket-Protocol") > 0 then
+         if Trim (Header (Value, "Sec-WebSocket-Protocol")) = "" then
+            raise Protocol_Error with
+              "empty WebSocket subprotocol offer";
+         end if;
+         declare
+            Validated : constant Boolean := Header_Has_Exact_Token
+              (Value, "Sec-WebSocket-Protocol", "flyology-no-match");
+            pragma Unreferenced (Validated);
+         begin
+            null;
+         end;
+      end if;
       if Protocol'Length > 0 then
          Validate_Token (Protocol, "WebSocket subprotocol");
          if not Header_Has_Exact_Token
@@ -1860,18 +2278,41 @@ package body Flyology.HTTP.Server is
             raise Protocol_Error with "WebSocket subprotocol was not offered";
          end if;
       end if;
-      Write
-        (Item,
-         "HTTP/1.1 101 Switching Protocols" & CRLF
-         & "Upgrade: websocket" & CRLF
-         & "Connection: Upgrade" & CRLF
-         & "Sec-WebSocket-Accept: " & Base64 (SHA1 (Key & GUID)) & CRLF
-         & (if Protocol'Length = 0 then ""
-            else "Sec-WebSocket-Protocol: " & Protocol & CRLF)
-         & CRLF,
-         Timeout, Token);
+      Reserve_Buffered (Item, Length (Item.Pending));
       Item.Response_Begun := True;
       Item.State := WebSocket;
+      Item.WebSocket_Reserved := False;
+      Item.WebSocket_Fragmented := False;
+      Item.WebSocket_Receive_Active := False;
+      Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+      Item.WebSocket_Close_Sent := False;
+      Item.WebSocket_Message := Null_Unbounded_String;
+      Item.WebSocket_Control_Count := 0;
+      begin
+         Write
+           (Item,
+            "HTTP/1.1 101 Switching Protocols" & CRLF
+            & "Date: " & HTTP_Date & CRLF
+            & "Upgrade: websocket" & CRLF
+            & "Connection: Upgrade" & CRLF
+            & "Sec-WebSocket-Accept: " & Base64 (SHA1 (Key & GUID)) & CRLF
+            & (if Protocol'Length = 0 then ""
+               else "Sec-WebSocket-Protocol: " & Protocol & CRLF)
+            & CRLF,
+            Timeout, Token);
+      exception
+         when others =>
+            Release_Buffered (Item);
+            Item.Request_Close := True;
+            Item.State := Terminal;
+            raise;
+      end;
+   exception
+      when others =>
+         if not Item.Response_Begun and then Item.State /= WebSocket then
+            Release_Buffered (Item);
+         end if;
+         raise;
    end Accept_WebSocket;
 
    procedure Ensure_Pending
@@ -1889,7 +2330,7 @@ package body Flyology.HTTP.Server is
             Maximum => Max_WebSocket_Frame + 14);
          if Closed then
             Item.State := Terminal;
-            raise Protocol_Error with "peer closed inside WebSocket frame";
+            raise WebSocket_Peer_EOF;
          end if;
       end loop;
    end Ensure_Pending;
@@ -1933,36 +2374,45 @@ package body Flyology.HTTP.Server is
       Closed  : out Boolean;
       Max_Message : Natural := Max_WebSocket_Frame;
       Timeout : Duration := 30.0;
+      Message_Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null)
    is
       Opcode       : Natural;
       Size         : Interfaces.Unsigned_64;
       Header_Size  : Natural;
       Final        : Boolean;
-      Fragmented   : Boolean := False;
-      Message_Kind : WebSocket_Data_Kind := Text_Frame;
-      Message      : Unbounded_String;
       Message_Limit : constant Natural := Natural'Min
         (Max_Message, Max_WebSocket_Frame);
-      Control_Count : Natural := 0;
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Writing_Control : Boolean := False;
 
       function Time_Left return Duration is
          Elapsed : constant Duration := Ada.Real_Time.To_Duration
            (Ada.Real_Time.Clock - Started);
+         Quantum_Left : constant Duration :=
+           (if Timeout < 0.0 then -1.0
+            elsif Elapsed >= Timeout then 0.0
+            else Timeout - Elapsed);
+         Message_Left : constant Duration :=
+           (if Item.WebSocket_Message_Deadline = Ada.Real_Time.Time_Last
+            then -1.0
+            elsif Ada.Real_Time.Clock >= Item.WebSocket_Message_Deadline
+            then 0.0
+            else Ada.Real_Time.To_Duration
+              (Item.WebSocket_Message_Deadline - Ada.Real_Time.Clock));
       begin
-         if Timeout < 0.0 then
-            return -1.0;
-         elsif Elapsed >= Timeout then
-            return 0.0;
+         if Quantum_Left < 0.0 then
+            return Message_Left;
+         elsif Message_Left < 0.0 then
+            return Quantum_Left;
          else
-            return Timeout - Elapsed;
+            return Duration'Min (Quantum_Left, Message_Left);
          end if;
       end Time_Left;
 
       procedure Check_Deadline is
       begin
-         if Timeout >= 0.0 and then Time_Left <= 0.0 then
+         if Time_Left = 0.0 then
             raise Flyology.IO.Timeout_Error with
               "WebSocket receive deadline expired";
          end if;
@@ -1979,8 +2429,11 @@ package body Flyology.HTTP.Server is
       begin
          Item.State := Terminal;
          begin
-            if Timeout < 0.0 or else Time_Left > 0.0 then
+            if not Item.WebSocket_Close_Sent
+              and then (Timeout < 0.0 or else Time_Left > 0.0)
+            then
                Send_Frame (Item, 8, Payload, Time_Left, Token);
+               Item.WebSocket_Close_Sent := True;
             end if;
          exception
             when others =>
@@ -1990,26 +2443,57 @@ package body Flyology.HTTP.Server is
       end Fail;
 
       procedure Finish_Message is
-         Value : constant String := To_String (Message);
+         Value : constant String := To_String (Item.WebSocket_Message);
       begin
-         if Message_Kind = Text_Frame and then not Valid_UTF8 (Value) then
+         if Item.WebSocket_Message_Kind = Text_Frame
+           and then not Valid_UTF8 (Value)
+         then
             Fail (1_007, "invalid UTF-8 in WebSocket text message");
          end if;
-         Kind := Message_Kind;
-         Data := Message;
-         Release_Buffered (Item);
+         Kind := Item.WebSocket_Message_Kind;
+         Data := Item.WebSocket_Message;
+         Item.WebSocket_Message := Null_Unbounded_String;
+         Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Reserved := False;
+         Item.WebSocket_Message_Limit := 0;
+         Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Receive_Active := False;
+         Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Resize_Buffered (Item, Length (Item.Pending));
       end Finish_Message;
+
+      procedure Abandon_Message is
+      begin
+         Item.Pending := Null_Unbounded_String;
+         Item.WebSocket_Message := Null_Unbounded_String;
+         Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Reserved := False;
+         Item.WebSocket_Message_Limit := 0;
+         Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Receive_Active := False;
+         Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Release_Buffered (Item);
+      end Abandon_Message;
    begin
       if Item.State /= WebSocket then
          raise Program_Error with "WebSocket connection is not active";
       end if;
-      Reserve_Buffered (Item, Message_Limit);
+      if not Item.WebSocket_Receive_Active then
+         Item.WebSocket_Receive_Active := True;
+         Item.WebSocket_Message_Deadline :=
+           (if Message_Timeout < 0.0 then Ada.Real_Time.Time_Last
+            else Started + Ada.Real_Time.To_Time_Span (Message_Timeout));
+         Item.WebSocket_Message_Limit := Message_Limit;
+      elsif Item.WebSocket_Message_Limit /= Message_Limit then
+         raise Program_Error with
+           "WebSocket Max_Message changed during fragmented receive";
+      end if;
       Kind := Text_Frame;
       Data := Null_Unbounded_String;
       Closed := False;
       loop
          Check_Deadline;
-         Ensure_Pending (Item, 2, Started, Timeout, Token);
+         Ensure_Pending (Item, 2, Ada.Real_Time.Clock, Time_Left, Token);
          declare
             Buffer : constant String := To_String (Item.Pending);
             First  : constant Natural := Character'Pos (Buffer (1));
@@ -2028,7 +2512,7 @@ package body Flyology.HTTP.Server is
             Fail (1_002, "fragmented WebSocket control frame");
          end if;
          if Size = 126 then
-            Ensure_Pending (Item, 4, Started, Timeout, Token);
+            Ensure_Pending (Item, 4, Ada.Real_Time.Clock, Time_Left, Token);
             declare
                Buffer : constant String := To_String (Item.Pending);
             begin
@@ -2041,11 +2525,14 @@ package body Flyology.HTTP.Server is
                Fail (1_002, "noncanonical WebSocket frame length");
             end if;
          elsif Size = 127 then
-            Ensure_Pending (Item, 10, Started, Timeout, Token);
+            Ensure_Pending (Item, 10, Ada.Real_Time.Clock, Time_Left, Token);
             Size := 0;
             declare
                Buffer : constant String := To_String (Item.Pending);
             begin
+               if Character'Pos (Buffer (3)) >= 128 then
+                  Fail (1_002, "invalid WebSocket 64-bit frame length");
+               end if;
                for Index in 3 .. 10 loop
                   Size := Interfaces.Shift_Left (Size, 8)
                     or Interfaces.Unsigned_64 (Character'Pos (Buffer (Index)));
@@ -2063,9 +2550,22 @@ package body Flyology.HTTP.Server is
          end if;
          if Opcode >= 8 and then Size > 125 then
             Fail (1_002, "oversized WebSocket control frame");
+         elsif Opcode in 1 | 2
+           and then Size > Interfaces.Unsigned_64 (Message_Limit)
+         then
+            Fail (1_009, "WebSocket message is too large");
+         elsif Opcode = 0
+           and then
+             (Size > Interfaces.Unsigned_64 (Message_Limit)
+              or else Interfaces.Unsigned_64
+                (Length (Item.WebSocket_Message)) >
+                  Interfaces.Unsigned_64 (Message_Limit) - Size)
+         then
+            Fail (1_009, "WebSocket message is too large");
          end if;
          Ensure_Pending
-           (Item, Header_Size + 4 + Natural (Size), Started, Timeout, Token);
+           (Item, Header_Size + 4 + Natural (Size),
+            Ada.Real_Time.Clock, Time_Left, Token);
          declare
             Buffer : constant String := To_String (Item.Pending);
             Mask_First : constant Natural := Header_Size + 1;
@@ -2083,46 +2583,47 @@ package body Flyology.HTTP.Server is
             Consume (Item, Header_Size + 4 + Natural (Size));
             case Opcode is
                when 0 =>
-                  if not Fragmented then
+                  if not Item.WebSocket_Fragmented then
                      Fail (1_002, "unexpected WebSocket continuation frame");
                   elsif Payload'Length > Message_Limit
-                    or else Length (Message) > Message_Limit - Payload'Length
+                    or else Length (Item.WebSocket_Message) >
+                      Message_Limit - Payload'Length
                   then
                      Fail (1_009, "WebSocket message is too large");
                   end if;
-                  Append (Message, Payload);
+                  Append (Item.WebSocket_Message, Payload);
                   if Final then
                      Finish_Message;
                      return;
                   end if;
                when 1 =>
-                  if Fragmented then
+                  if Item.WebSocket_Fragmented then
                      Fail (1_002, "new data frame inside fragmented message");
                   end if;
-                  Message_Kind := Text_Frame;
+                  Item.WebSocket_Message_Kind := Text_Frame;
                   if Payload'Length > Message_Limit then
                      Fail (1_009, "WebSocket message is too large");
                   end if;
-                  Message := To_Unbounded_String (Payload);
+                  Item.WebSocket_Message := To_Unbounded_String (Payload);
                   if Final then
                      Finish_Message;
                      return;
                   end if;
-                  Fragmented := True;
+                  Item.WebSocket_Fragmented := True;
                when 2 =>
-                  if Fragmented then
+                  if Item.WebSocket_Fragmented then
                      Fail (1_002, "new data frame inside fragmented message");
                   end if;
-                  Message_Kind := Binary_Frame;
+                  Item.WebSocket_Message_Kind := Binary_Frame;
                   if Payload'Length > Message_Limit then
                      Fail (1_009, "WebSocket message is too large");
                   end if;
-                  Message := To_Unbounded_String (Payload);
+                  Item.WebSocket_Message := To_Unbounded_String (Payload);
                   if Final then
                      Finish_Message;
                      return;
                   end if;
-                  Fragmented := True;
+                  Item.WebSocket_Fragmented := True;
                when 8 =>
                   if Payload'Length = 1 then
                      Fail (1_002, "invalid WebSocket close frame");
@@ -2141,34 +2642,74 @@ package body Flyology.HTTP.Server is
                         end if;
                      end;
                   end if;
-                  Send_Frame (Item, 8, Payload, Time_Left, Token);
+                  if not Item.WebSocket_Close_Sent then
+                     Writing_Control := True;
+                     Send_Frame (Item, 8, Payload, Time_Left, Token);
+                     Writing_Control := False;
+                     Item.WebSocket_Close_Sent := True;
+                  end if;
                   Item.State := Terminal;
                   Closed := True;
-                  Release_Buffered (Item);
+                  Abandon_Message;
                   return;
                when 9 =>
-                  Control_Count := Control_Count + 1;
-                  if Control_Count > 32 then
+                  Item.WebSocket_Control_Count :=
+                    Item.WebSocket_Control_Count + 1;
+                  if Item.WebSocket_Control_Count > 32 then
                      Fail (1_008, "too many WebSocket control frames");
                   end if;
+                  Writing_Control := True;
                   Send_Frame (Item, 10, Payload, Time_Left, Token);
+                  Writing_Control := False;
                when 10 =>
-                  Control_Count := Control_Count + 1;
-                  if Control_Count > 32 then
+                  Item.WebSocket_Control_Count :=
+                    Item.WebSocket_Control_Count + 1;
+                  if Item.WebSocket_Control_Count > 32 then
                      Fail (1_008, "too many WebSocket control frames");
                   end if;
                when others =>
                   raise Program_Error with "unreachable WebSocket opcode";
             end case;
+            Resize_Buffered
+              (Item,
+               Length (Item.Pending) + Length (Item.WebSocket_Message));
          end;
       end loop;
    exception
+      when Flyology.IO.Timeout_Error =>
+         if Writing_Control
+           or else (Item.WebSocket_Message_Deadline /= Ada.Real_Time.Time_Last
+                    and then Ada.Real_Time.Clock >=
+                      Item.WebSocket_Message_Deadline)
+         then
+            Abandon_Message;
+            Item.State := Terminal;
+         elsif Length (Item.Pending) = 0
+           and then Length (Item.WebSocket_Message) = 0
+           and then not Item.WebSocket_Fragmented
+         then
+            Item.WebSocket_Receive_Active := False;
+            Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+            Item.WebSocket_Message_Limit := 0;
+            Item.WebSocket_Control_Count := 0;
+            Resize_Buffered (Item, 0);
+         end if;
+         raise;
+      when WebSocket_Peer_EOF =>
+         Abandon_Message;
+         Item.State := Terminal;
+         if Item.WebSocket_Close_Sent then
+            Closed := True;
+            return;
+         end if;
+         raise Protocol_Error with "peer closed inside WebSocket frame";
       when Protocol_Error =>
-         Release_Buffered (Item);
+         Abandon_Message;
          Item.State := Terminal;
          raise;
       when others =>
-         Release_Buffered (Item);
+         Abandon_Message;
+         Item.State := Terminal;
          raise;
    end Receive_WebSocket;
 
@@ -2189,6 +2730,17 @@ package body Flyology.HTTP.Server is
       end if;
       Send_Frame
         (Item, (if Kind = Text_Frame then 1 else 2), Data, Timeout, Token);
+   exception
+      when others =>
+         Item.Pending := Null_Unbounded_String;
+         Item.WebSocket_Message := Null_Unbounded_String;
+         Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Receive_Active := False;
+         Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Release_Buffered (Item);
+         Item.Request_Close := True;
+         Item.State := Terminal;
+         raise;
    end Send_WebSocket;
 
    procedure Close_WebSocket
@@ -2202,6 +2754,20 @@ package body Flyology.HTTP.Server is
         ((Code in 1_000 .. 1_015
           and then Code not in 1_004 .. 1_006 | 1_010 | 1_015)
          or else (Code in 3_000 .. 4_999));
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+
+      function Time_Left return Duration is
+         Elapsed : constant Duration := Ada.Real_Time.To_Duration
+           (Ada.Real_Time.Clock - Started);
+      begin
+         if Timeout < 0.0 then
+            return -1.0;
+         elsif Elapsed >= Timeout then
+            return 0.0;
+         else
+            return Timeout - Elapsed;
+         end if;
+      end Time_Left;
    begin
       if Item.State /= WebSocket then
          raise Program_Error with "WebSocket connection is not active";
@@ -2212,11 +2778,45 @@ package body Flyology.HTTP.Server is
       then
          raise Constraint_Error with "invalid WebSocket close payload";
       end if;
+      Item.WebSocket_Message := Null_Unbounded_String;
+      Item.WebSocket_Fragmented := False;
+      Item.WebSocket_Receive_Active := False;
+      Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+      Item.WebSocket_Message_Limit := 0;
+      Resize_Buffered (Item, Length (Item.Pending));
       Send_Frame
         (Item, 8,
          Character'Val (Code / 256) & Character'Val (Code mod 256) & Reason,
-         Timeout, Token);
-      Item.State := Terminal;
+         Time_Left, Token);
+      Item.WebSocket_Close_Sent := True;
+      loop
+         declare
+            Kind   : WebSocket_Data_Kind;
+            Data   : Unbounded_String;
+            Closed : Boolean;
+            Left   : constant Duration := Time_Left;
+         begin
+            if Left = 0.0 then
+               raise Flyology.IO.Timeout_Error with
+                 "WebSocket close handshake expired";
+            end if;
+            Receive_WebSocket
+              (Item, Kind, Data, Closed,
+               Timeout => Left, Message_Timeout => Left, Token => Token);
+            exit when Closed;
+         end;
+      end loop;
+      Release_Buffered (Item);
+   exception
+      when others =>
+         Item.State := Terminal;
+         Item.WebSocket_Message := Null_Unbounded_String;
+         Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Receive_Active := False;
+         Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Item.WebSocket_Message_Limit := 0;
+         Release_Buffered (Item);
+         raise;
    end Close_WebSocket;
 
 end Flyology.HTTP.Server;

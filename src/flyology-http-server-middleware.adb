@@ -1,4 +1,5 @@
 package body Flyology.HTTP.Server.Middleware is
+   use type Ada.Task_Identification.Task_Id;
 
    procedure Add
      (Item      : in out Pipeline;
@@ -28,6 +29,7 @@ package body Flyology.HTTP.Server.Middleware is
               (Owner      => Item,
                Position   => Position + 1,
                Terminal   => Terminal,
+               Owner_Task => Ada.Task_Identification.Current_Task,
                Was_Called => False);
          begin
             Item.Components (Position).all (Context, X, Next);
@@ -51,7 +53,10 @@ package body Flyology.HTTP.Server.Middleware is
       X       : in out App.Exchange)
    is
    begin
-      if Item.Was_Called then
+      if Ada.Task_Identification.Current_Task /= Item.Owner_Task then
+         raise Program_Error with
+           "HTTP middleware continuation called by non-owner task";
+      elsif Item.Was_Called then
          raise Program_Error with "HTTP middleware continuation called twice";
       elsif Item.Owner = null or else Item.Terminal = null then
          raise Program_Error with "invalid HTTP middleware continuation";

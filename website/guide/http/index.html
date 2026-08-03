@@ -199,8 +199,11 @@ end loop;</code></pre></figure>
           </section>
 
           <section id="sse"><span class="step-label">HTTP 12</span><h2>Serialize SSE through a bounded mailbox.</h2>
-            <p>The raw SSE procedures remain available. The optional lifecycle session lets producers publish into a fixed-capacity closeable channel. The handler calling <code>Run</code> is the only connection writer and transport backpressure remains synchronous. A send failure closes admission and requests producer cancellation.</p>
-            <figure class="code-panel"><figcaption>bounded SSE endpoint excerpt</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Session : Flyology.HTTP.Server.SSE_Handlers.Session (4);
+            <p>The raw SSE procedures remain available. The optional lifecycle session lets producers publish into a fixed-capacity, byte-bounded closeable channel. The handler calling <code>Run</code> is the only connection writer and transport backpressure remains synchronous. A send failure closes admission and requests producer cancellation.</p>
+            <figure class="code-panel"><figcaption>bounded SSE endpoint excerpt</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Session : Flyology.HTTP.Server.SSE_Handlers.Session
+  (Capacity   =&gt; 4,
+   Byte_Limit =&gt; Flyology.HTTP.Server.SSE_Handlers.Default_Session_Bytes,
+   Budget     =&gt; null);
 
 Flyology.HTTP.Server.SSE_Handlers.Try_Publish
   (Session, Event, Accepted);
@@ -211,10 +214,11 @@ Flyology.HTTP.Server.SSE_Handlers.Run
 
           <section id="websocket"><span class="step-label">HTTP 13</span><h2>Give WebSocket writes one owner.</h2>
             <p>WebSocket lifecycle endpoints require an explicit browser-origin policy. Incoming messages are reassembled under the shared ingress budget and bounded maximum. Producers receive only a session mailbox; the owner drains it, serializes all frames, processes open/message/close callbacks, and performs a clean close. The maintained example starts two scoped producers without exposing the exchange or connection to either task.</p>
-            <figure class="code-panel"><figcaption>lifecycle configuration</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">WS.Run
+            <figure class="code-panel"><figcaption>lifecycle configuration</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">package Chat_Lifecycle is new
+  WS.Lifecycle (WS_Open, WS_Message, WS_Close);
+
+Chat_Lifecycle.Run
   (X, Session,
-   Open           =&gt; WS_Open'Unrestricted_Access,
-   Message        =&gt; WS_Message'Unrestricted_Access,
    Origin_Policy  =&gt; HTTP.Require_Exact_Origin,
    Allowed_Origin =&gt; "http://127.0.0.1:3000",
    Metric_Output  =&gt; Metrics'Access);</code></pre></figure>
@@ -222,45 +226,49 @@ Flyology.HTTP.Server.SSE_Handlers.Run
           </section>
 
           <section id="parallel"><span class="step-label">HTTP 14</span><h2>Run request work in structured lightweight scopes.</h2>
-            <p><code>Request_Tasks</code> copies the exchange's cancellation token and current absolute deadline into a bounded scope. Child operations receive input, token, and deadline but never the exchange or connection. <code>Join</code> collects results and exception identities. Scope finalization cancels and joins unfinished children, so no detached task can retain borrowed request state.</p>
-            <figure class="code-panel"><figcaption>two parallel operations</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Scope : Request_Operations.Scope (2);
+            <p><code>Request_Tasks</code> borrows the exchange cancellation token through an Ada access discriminant and inherits the current absolute deadline into a bounded scope. Child operations receive input, a scope-owned child token, and the deadline but never the exchange or connection. <code>Join</code> collects results and exception identities. Scope finalization cancels and joins unfinished children, so no detached task can retain borrowed request state.</p>
+            <figure class="code-panel"><figcaption>two parallel operations</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Scope : Request_Operations.Scope (2, X.Cancellation);
 User, Orders : Request_Operations.Operation_Handle;
 
 Request_Work.Configure (Scope, X);
 Request_Operations.Spawn (Scope, 20, User);
 Request_Operations.Spawn (Scope, 1, Orders);
 Request_Operations.Join (Scope);</code></pre></figure>
-            <p>Configure the scope after all deadline-narrowing middleware. Enabling sibling cancellation on an inherited request token also cancels the parent request; the HTTP adapter therefore leaves that policy off unless explicitly selected.</p>
+            <p>Configure the scope after all deadline-narrowing middleware. Parent cancellation is linked downward into a scope-owned token. Sibling failure and scope exit request only that child token, so unrelated request work is not cancelled upward.</p>
           </section>
 
           <section id="native"><span class="step-label">HTTP 15</span><h2>Cross into native work explicitly.</h2>
-            <p><code>Flyology.Native_Executors</code> is a bounded structured scope whose child tasks are designated native when activated. Use it for CPU-heavy operations or foreign calls that may block. The requesting lightweight task waits cooperatively for the scope; it does not change its own designation.</p>
-            <figure class="code-panel"><figcaption>explicit native boundary</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Scope : Native_Operations.Scope (1);
-Work  : Native_Operations.Operation_Handle;
+            <p><code>Flyology.Native_Executors</code> is an application-owned fixed pool whose workers are designated native when explicitly started. Use it for CPU-heavy operations or foreign calls that may block. The requesting lightweight task waits cooperatively; it does not change its own designation.</p>
+            <figure class="code-panel"><figcaption>explicit native boundary</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Pool : aliased Native_Work.Executor (Workers =&gt; 4, Capacity =&gt; 64);
+Work : Native_Work.Operation_Handle (Pool'Access);
+Accepted : Boolean;
+Value : Integer;
 
-Native_Operations.Configure
-  (Scope, X.Cancellation, X.Deadline,
-   Cancel_Siblings_On_Failure =&gt; False);
-Native_Operations.Spawn (Scope, 12, Work);
-Native_Operations.Join (Scope);</code></pre></figure>
-            <p>Executor capacity bounds native pthread creation. A foreign function that cannot observe cancellation may delay scope exit because Ada task-master and join semantics remain authoritative.</p>
+Native_Work.Start (Pool); -- application setup, before concurrent use
+Native_Work.Submit
+  (Pool, 12, X.Cancellation, X.Deadline, Work, Accepted);
+if Accepted then
+   Native_Work.Await
+     (Pool, Work, Value, X.Cancellation, X.Deadline);
+end if;</code></pre></figure>
+            <p><code>Workers</code> is the aggregate pthread bound and <code>Capacity</code> bounds queued, running, and completed-but-unclaimed operations. Each accepted operation receives an executor-owned token; cancelled waits and finalized unawaited handles abandon their result without retaining the request token. Executor finalization joins every worker, so a foreign function that cannot observe cancellation may delay shutdown and needs process isolation when a bounded stop is required.</p>
           </section>
 
           <section id="deployment"><span class="step-label">HTTP 16</span><h2>Size every retained resource.</h2>
-            <p>The ingress budget bounds buffered bodies and retained/reassembled WebSocket messages. It does not cover kernel socket buffers, TLS-provider allocations, descriptors, per-connection parser/header state, task or fiber stacks, application buffers, rate-limit keys, metrics series, mailbox capacity, or native executor threads. Handler capacity, event-loop count, every bounded table, and upstream bulkheads must be chosen together.</p>
+            <p>The ingress budget bounds buffered bodies and retained/reassembled WebSocket messages. Outgoing SSE/WebSocket mailboxes have a 64 KiB per-message ceiling, a 256 KiB default per-session limit, and a shared 64 MiB default outbound budget charged until send or drop. These budgets do not cover kernel socket buffers, TLS-provider allocations, descriptors, per-connection parser/header state, task or fiber stacks, application buffers, rate-limit keys, metrics series, or native executor storage. Handler capacity, event-loop count, every bounded table, and upstream bulkheads must be chosen together.</p>
             <ul><li>Set request and connection deadlines for the deployment, not only defaults.</li><li>Keep header, body, trailer, cookie, WebSocket, and mailbox limits explicit.</li><li>Budget TLS and kernel memory at maximum accepted connection count.</li><li>Put slow upstream systems behind their own bounded scope or bulkhead.</li><li>Drain on shutdown; do not detach work holding borrowed state.</li></ul>
             <p>Response compression currently exposes only a bounded provider boundary. Middleware remains deferred until it can preserve streaming, HEAD/no-body rules, partial-write safety, and sensitive-data policy.</p>
           </section>
 
           <section id="security"><span class="step-label">HTTP 17</span><h2>Review the security boundary before deployment.</h2>
-            <ul><li>Terminate TLS with certificate and key policy appropriate to the deployment; enable HSTS only for intentional HTTPS-only service.</li><li>Keep the server's absolute header/body deadline and decoded limits enabled.</li><li>Use the shared ingress budget and bounded mailbox, metric, rate, and routing capacities.</li><li>Do not trust inbound request IDs or proxy client headers without an explicit trusted-hop policy.</li><li>Use exact CORS origins when credentials are involved and an explicit WebSocket origin policy.</li><li>Never log authorization fields, cookies, bodies, or unbounded raw paths by default.</li><li>Never let child tasks retain an exchange or write the connection.</li><li>Close after partial-response failure; do not attempt replacement framing.</li><li>Keep blocking foreign calls off event-loop pthreads.</li><li>Run the behavioral, stress, documentation, proof, and platform checks for the changed boundary.</li></ul>
+            <ul><li>Terminate TLS with certificate and key policy appropriate to the deployment; enable HSTS only for intentional HTTPS-only service.</li><li>Keep the server's absolute header/body deadline and decoded limits enabled.</li><li>Use shared ingress and outbound budgets plus bounded mailbox, metric, rate, and routing capacities.</li><li>Do not trust inbound request IDs or proxy client headers without an explicit trusted-hop policy.</li><li>Use exact CORS origins when credentials are involved and an explicit WebSocket origin policy.</li><li>Never log authorization fields, cookies, bodies, or unbounded raw paths by default.</li><li>Never let child tasks retain an exchange or write the connection.</li><li>Close after partial-response failure; do not attempt replacement framing.</li><li>Keep blocking foreign calls off event-loop pthreads.</li><li>Run the behavioral, stress, documentation, proof, and platform checks for the changed boundary.</li></ul>
           </section>
 
           <section id="benchmark"><span class="step-label">HTTP 18</span><h2>Benchmark reproducibly with oha.</h2>
             <p>The benchmark runner builds the release profile, prepares a fixed event-loop count, starts identical native and lightweight handler capacities, warms each lane, alternates trial order, and prints the exact <code>oha</code> command and version. Use at least three trials and compare medians and latency tails, not one run.</p>
             <figure class="code-panel"><figcaption>500-connection release campaign</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code>./showcases/run_http_benchmark.sh \
-  100000 500 500 18080 16 3 10000 release</code></pre></figure>
-            <p>Record CPU count, build profile, warm-up, request count, connection concurrency, handler capacity, event-loop count, success/error counts, throughput, average latency, and p50/p90/p99 tails. Use identical method, body, route, and limits for both lanes. The maintained campaign covers routed GET, a middleware-heavy route, a small buffered body, a streamed upload, and admission-control overhead. SSE and WebSocket require protocol-aware tools rather than treating an open stream as an ordinary completed HTTP request.</p>
+  100000 500 500 18080 16 3 10000 release 20 500</code></pre></figure>
+            <p>The final two arguments are lane cooldown and warm-up concurrency; this command warms and measures at 500 connections. Record CPU count, build profile, warm-up, request count, connection concurrency, handler capacity, event-loop count, success/error counts, throughput, average latency, and p50/p90/p99 tails. Use identical method, body, route, and limits for both lanes. The maintained campaign covers routed GET, a middleware-heavy route, a small buffered body, a streamed upload, and admission-control overhead. SSE and WebSocket require protocol-aware tools rather than treating an open stream as an ordinary completed HTTP request.</p>
             <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p>Loopback results describe one host and toolchain. Before retaining a performance change, capture an immediate baseline, change one relevant variable, repeat the same alternating campaign, and compare distributions.</p></aside>
           </section>
         </article>

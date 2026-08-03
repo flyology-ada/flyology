@@ -265,6 +265,8 @@ package Flyology.HTTP.Server.Routing is
    --  @param Connection Sole-writer HTTP connection
    --  @param Peer Connected peer address
    --  @param Timeout Original per-request deadline interval
+   --  @param Max_Connection_Age Absolute lifetime bound for the connection;
+   --  negative disables this additional bound
    --  @param Max_Requests Requests before connection close; zero is unlimited
    --  @param Token Optional cancellation token
    procedure Serve
@@ -273,6 +275,7 @@ package Flyology.HTTP.Server.Routing is
       Connection   : aliased in out Flyology.HTTP.Server.Connection;
       Peer         : GNAT.Sockets.Sock_Addr_Type;
       Timeout      : Duration := 30.0;
+      Max_Connection_Age : Duration := 300.0;
       Max_Requests : Natural := 1_000;
       Token        : access Flyology.Cancellation.Token := null);
 

@@ -19,6 +19,10 @@ package body Flyology.HTTP.Server.Middleware_Errors is
       when Error : Flyology.HTTP.Protocol_Error =>
          Log (Components.Protocol_Failure, Error, X);
          raise;
+      when Error : Flyology.HTTP.Server.Payload_Too_Large |
+           Flyology.HTTP.Server.Expectation_Failed =>
+         Log (Components.Protocol_Failure, Error, X);
+         raise;
       when Error : Flyology.IO.Timeout_Error =>
          Log (Components.Timeout_Failure, Error, X);
          raise;
@@ -47,8 +51,7 @@ package body Flyology.HTTP.Server.Middleware_Errors is
             end;
             if not Handled then
                if X.Response = App.Not_Started
-                 and then not Flyology.HTTP.Server.Response_Started
-                   (X.Connection_Access.all)
+                 and then not X.Wire_Response_Started
                then
                   X.Respond
                     (500,

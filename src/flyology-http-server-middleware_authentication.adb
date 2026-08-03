@@ -23,6 +23,9 @@ package body Flyology.HTTP.Server.Middleware_Authentication is
       if X.Authentication = App.No_Authentication then
          Next.Call (Context, X);
          return;
+      elsif X.Request_Header_Count ("Authorization") > 1 then
+         Reject (X);
+         return;
       elsif Field = "" then
          if X.Authentication = App.Required_Authentication then
             Reject (X);

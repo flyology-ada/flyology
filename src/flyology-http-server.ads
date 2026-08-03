@@ -18,10 +18,17 @@ package Flyology.HTTP.Server is
    --  Process-wide retained-payload budget used by connections that do not
    --  attach a server-specific Ingress_Budget.
    Default_Ingress_Budget_Bytes : constant := 64 * 1_024 * 1_024;
+   --  Process-wide retained outbound-message budget used by high-level SSE
+   --  and WebSocket sessions without an application-supplied budget.
+   Default_Outbound_Budget_Bytes : constant := 64 * 1_024 * 1_024;
 
    --  Raised when a buffered compatibility operation cannot reserve its
    --  payload from the configured shared ingress budget.
    Resource_Exhausted : exception;
+   --  Raised when the declared or decoded body exceeds the active limit.
+   Payload_Too_Large : exception;
+   --  Raised for an unsupported or malformed Expect request field.
+   Expectation_Failed : exception;
 
    --  Snapshot of shared buffered-ingress accounting.
    --  @field Limit Configured maximum reserved bytes
@@ -59,6 +66,33 @@ package Flyology.HTTP.Server is
    --  @param Item Shared server budget
    --  @return Stable accounting snapshot
    function Current (Item : Ingress_Budget) return Ingress_Budget_Snapshot;
+
+   --  Snapshot of shared queued-outbound accounting.
+   subtype Outbound_Budget_Snapshot is Ingress_Budget_Snapshot;
+
+   --  Nonblocking shared budget for application messages retained by the
+   --  optional SSE and WebSocket lifecycle APIs.
+   --  @field Limit Maximum simultaneously retained outbound bytes
+   type Outbound_Budget (Limit : Positive) is limited private;
+
+   --  Attempt to reserve outbound bytes without suspending a producer.
+   --  @param Item Shared application/server budget
+   --  @param Bytes Requested retained bytes
+   --  @param Granted True only when recorded
+   procedure Try_Reserve
+     (Item : in out Outbound_Budget;
+      Bytes : Natural;
+      Granted : out Boolean);
+
+   --  Release a prior outbound reservation.
+   --  @param Item Shared application/server budget
+   --  @param Bytes Reserved bytes to return
+   procedure Release (Item : in out Outbound_Budget; Bytes : Natural);
+
+   --  Read current outbound budget counters.
+   --  @param Item Shared application/server budget
+   --  @return Stable accounting snapshot
+   function Current (Item : Outbound_Budget) return Outbound_Budget_Snapshot;
 
    --  Transport boundary shared by plain and TLS connections. Implementations
    --  retain closing ownership and must preserve Flyology cancellation and
@@ -110,6 +144,11 @@ package Flyology.HTTP.Server is
    --  @param Name Header field name
    --  @return Header value, or an empty string when absent
    function Header (Item : Request; Name : String) return String;
+   --  Count physical occurrences of one case-insensitive request field.
+   --  @param Item Request to inspect
+   --  @param Name Header field name
+   --  @return Physical field count before comma joining
+   function Header_Count (Item : Request; Name : String) return Natural;
    --  Report whether a comma-separated header contains a token.
    --  @param Item Request to inspect
    --  @param Name Header field name
@@ -341,7 +380,8 @@ package Flyology.HTTP.Server is
       Token         : access Flyology.Cancellation.Token := null);
 
    --  Send one SSE event as one HTTP chunk. Embedded newlines in Data become
-   --  repeated data fields. Empty Event, Id, and Retry values are omitted.
+   --  repeated data fields. Empty Event and ordinary default Id/Retry values
+   --  are omitted; include flags allow the valid empty-id reset and retry 0.
    --  @param Item Active SSE response
    --  @param Data Event data
    --  @param Event Optional event type
@@ -349,12 +389,28 @@ package Flyology.HTTP.Server is
    --  @param Retry Optional client retry interval in milliseconds
    --  @param Timeout Transport send deadline
    --  @param Token Optional cancellation source
+   --  @param Include_Id Emit id even when Id is empty
+   --  @param Include_Retry Emit retry even when Retry is zero
    procedure Send_Event
      (Item    : in out Connection;
       Data    : String;
       Event   : String := "";
       Id      : String := "";
       Retry   : Natural := 0;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null;
+      Include_Id : Boolean := False;
+      Include_Retry : Boolean := False);
+
+   --  Send one SSE comment, commonly used as a heartbeat without dispatching
+   --  an application message in EventSource clients.
+   --  @param Item Active SSE response
+   --  @param Comment Comment text; embedded newlines become comment fields
+   --  @param Timeout Transport send deadline
+   --  @param Token Optional cancellation source
+   procedure Send_SSE_Comment
+     (Item    : in out Connection;
+      Comment : String := "";
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
 
@@ -400,15 +456,18 @@ package Flyology.HTTP.Server is
       Token    : access Flyology.Cancellation.Token := null);
 
    --  Receive one complete client message, reassembling fragments within
-   --  Max_Message. One monotonic Timeout covers all fragments and interleaved
-   --  control frames. Ping is answered automatically and close sets Closed.
+   --  Max_Message. Timeout bounds one wait quantum; Message_Timeout is one
+   --  monotonic deadline retained across retry quanta, all fragments, and
+   --  interleaved control frames. Ping is answered automatically and close
+   --  sets Closed.
    --  Client frames must be masked. Protocol failure makes Item terminal.
    --  @param Item Upgraded WebSocket connection
    --  @param Kind Text or binary message kind
    --  @param Data Message payload
    --  @param Closed True after a valid close frame
    --  @param Max_Message Application message limit, capped by frame maximum
-   --  @param Timeout Transport receive/send deadline
+   --  @param Timeout Transport receive/send wait quantum
+   --  @param Message_Timeout Whole-message monotonic deadline
    --  @param Token Optional cancellation source
    --  @exception Resource_Exhausted Shared message reassembly budget is full
    procedure Receive_WebSocket
@@ -418,6 +477,7 @@ package Flyology.HTTP.Server is
       Closed  : out Boolean;
       Max_Message : Natural := Max_WebSocket_Frame;
       Timeout : Duration := 30.0;
+      Message_Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
 
    --  Send one unmasked, final server data frame.
@@ -478,6 +538,23 @@ private
       State : Ingress_Budget_State (Limit);
    end record;
 
+   protected type Outbound_Budget_State (Limit : Positive) is
+      procedure Try_Reserve (Bytes : Natural; Granted : out Boolean);
+      procedure Release (Bytes : Natural);
+      function Current return Outbound_Budget_Snapshot;
+   private
+      Used        : Natural := 0;
+      High_Water  : Natural := 0;
+      Denied      : Natural := 0;
+   end Outbound_Budget_State;
+
+   type Outbound_Budget (Limit : Positive) is limited record
+      State : Outbound_Budget_State (Limit);
+   end record;
+
+   Default_Outbound_Budget : aliased Outbound_Budget
+     (Limit => Default_Outbound_Budget_Bytes);
+
    type Connection (Channel : not null access Transport'Class)
    is limited new Ada.Finalization.Limited_Controlled with
      record
@@ -500,6 +577,16 @@ private
       Body_Started     : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Body_Timeout     : Duration := 0.0;
       Buffered_Bytes   : Natural := 0;
+      WebSocket_Reserved   : Boolean := False;
+      WebSocket_Fragmented : Boolean := False;
+      WebSocket_Receive_Active : Boolean := False;
+      WebSocket_Message_Deadline : Ada.Real_Time.Time :=
+        Ada.Real_Time.Time_Last;
+      WebSocket_Close_Sent : Boolean := False;
+      WebSocket_Message_Kind : WebSocket_Data_Kind := Text_Frame;
+      WebSocket_Message : Unbounded_String;
+      WebSocket_Message_Limit : Natural := 0;
+      WebSocket_Control_Count : Natural := 0;
    end record;
 
    --  Release any active buffered reservation.

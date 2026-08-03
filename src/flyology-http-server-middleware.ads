@@ -1,4 +1,5 @@
 with Ada.Exceptions;
+with Ada.Task_Identification;
 with Flyology.HTTP.Server.Applications;
 
 --  Supplies bounded, synchronous around-handler composition for applications.
@@ -120,6 +121,7 @@ private
       Owner    : Pipeline_Access;
       Position : Positive := 1;
       Terminal : Handler_Access;
+      Owner_Task : Ada.Task_Identification.Task_Id;
       Was_Called : Boolean := False;
    end record;
 

@@ -3,6 +3,7 @@ with Ada.Finalization;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded;
 with Flyology.Cancellation;
+with Interfaces;
 with System;
 
 --  Runs a bounded homogeneous group of child operations with structured Ada
@@ -10,7 +11,6 @@ with System;
 --  @formal Input_Type Immutable operation input
 --  @formal Result_Type Operation result
 --  @formal Execute Child operation implementation
---  @formal Model Fixed task designation selected at child activation
 generic
    type Input_Type is private;
    type Result_Type is private;
@@ -19,31 +19,33 @@ generic
       Token    : access Flyology.Cancellation.Token;
       Deadline : Ada.Real_Time.Time;
       Result   : out Result_Type);
-   Model : Flyology.Execution_Model := Flyology.Lightweight_Task;
 package Flyology.Task_Scopes is
 
    --  Raised when a handle does not identify a spawned operation.
    Invalid_Handle : exception;
 
-   --  Stable index identifying one submitted operation.
-   type Operation_Handle is new Positive;
+   --  Stable identity for one submitted operation. Handles are bound to the
+   --  originating scope and are rejected by every other scope.
+   type Operation_Handle is private;
 
    --  Bounded one-shot structured task group. Capacity bounds both child Ada
    --  tasks and total operations. Join closes admission. Finalization requests
    --  cancellation, closes admission, and joins when Join was omitted.
-   type Scope (Capacity : Positive) is
+   type Scope
+     (Capacity : Positive;
+      Parent   : access Flyology.Cancellation.Token) is
      limited new Ada.Finalization.Limited_Controlled with private;
 
    --  Install inherited cancellation and absolute deadline before Spawn.
-   --  A null token selects a scope-owned token. When sibling cancellation is
-   --  enabled, a child failure requests the inherited token.
+   --  Children always receive a scope-owned token. Parent cancellation is
+   --  linked downward while failure and finalization cancel only this scope.
+   --  Parent is the scope's access discriminant, so Ada enforces that the
+   --  borrowed token outlives Item.
    --  @param Item Task scope
-   --  @param Token Borrowed parent token, or null
    --  @param Deadline Inherited absolute monotonic deadline
    --  @param Cancel_Siblings_On_Failure Whether one failure cancels siblings
    procedure Configure
      (Item       : in out Scope;
-      Token      : access Flyology.Cancellation.Token;
       Deadline   : Ada.Real_Time.Time;
       Cancel_Siblings_On_Failure : Boolean := True);
 
@@ -96,18 +98,23 @@ private
          Cancel_On_Failure : Boolean);
       procedure Submit (Input : Input_Type; Index : out Positive);
       entry Next
-        (Index    : out Positive;
-         Input    : out Input_Type;
-         Stop     : out Boolean;
+        (Index : out Positive; Stop : out Boolean);
+      procedure Operation_Context
+        (Index    : Positive;
          Token    : out Cancellation_Access;
          Deadline : out Ada.Real_Time.Time;
          Cancel_On_Failure : out Boolean);
+      procedure Operation_Input
+        (Index : Positive; Input : out Input_Type);
       procedure Complete (Index : Positive; Value : Result_Type);
       procedure Fail
         (Index : Positive; Occurrence : Ada.Exceptions.Exception_Occurrence);
       procedure Close_Admission;
       entry Await_All;
       procedure Shutdown;
+      procedure Set_Expected_Workers (Count : Natural);
+      procedure Worker_Stopped;
+      entry Await_Workers;
       function Submitted_Count return Natural;
       function Was_Successful (Index : Positive) return Boolean;
       function Result_Value (Index : Positive) return Result_Type;
@@ -131,23 +138,48 @@ private
       Parent_Stop : Cancellation_Access;
       End_Time    : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
       Cancel_On_Failure_Value : Boolean := True;
+      Stopped_Workers : Natural := 0;
+      Expected_Workers : Natural := 0;
+      Expected_Workers_Set : Boolean := False;
    end Shared_State;
 
    task type Worker is
-      pragma Task_Info (Model);
+      pragma Task_Info (Flyology.Lightweight_Task);
       entry Start (State_Address : System.Address);
       entry Stop;
    end Worker;
    type Worker_Array is array (Positive range <>) of Worker;
+   type Worker_Array_Access is access Worker_Array;
 
-   type Scope (Capacity : Positive) is
+   task type Cancellation_Monitor is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      entry Start
+        (Parent : Cancellation_Access;
+         Child  : Cancellation_Access);
+      entry Stop;
+   end Cancellation_Monitor;
+   type Cancellation_Monitor_Access is access Cancellation_Monitor;
+
+   type Scope
+     (Capacity : Positive;
+      Parent   : access Flyology.Cancellation.Token) is
      limited new Ada.Finalization.Limited_Controlled with record
       State       : aliased Shared_State (Capacity);
-      Workers     : Worker_Array (1 .. Capacity);
+      Workers     : Worker_Array_Access;
+      Monitor     : Cancellation_Monitor_Access;
       Local_Stop  : aliased Flyology.Cancellation.Token;
       Token       : Cancellation_Access;
       Is_Configured : Boolean := False;
+      Cleanup_Required : Boolean := False;
       Is_Joined     : Boolean := False;
+      Monitor_Stopped : Boolean := False;
+      Activated_Workers : Natural := 0;
+      Identity : Interfaces.Unsigned_64 := 0;
+   end record;
+
+   type Operation_Handle is record
+      Owner : Interfaces.Unsigned_64 := 0;
+      Index : Positive := 1;
    end record;
 
    --  @exclude

@@ -161,13 +161,6 @@ procedure TLS_Smoke is
         "GET /secure HTTP/1.1" & CRLF
         & "Host: localhost" & CRLF
         & "Connection: close" & CRLF & CRLF;
-      Response_Text : constant String :=
-        "HTTP/1.1 200 OK" & CRLF
-        & "Content-Length: 6" & CRLF
-        & "Content-Type: text/plain" & CRLF
-        & "Connection: close" & CRLF & CRLF
-        & "secure";
-
       function Bytes (Value : String) return Stream_Element_Array is
          Result : Stream_Element_Array
            (1 .. Stream_Element_Offset (Value'Length));
@@ -178,6 +171,18 @@ procedure TLS_Smoke is
          end loop;
          return Result;
       end Bytes;
+
+      function Text
+        (Value : Stream_Element_Array) return String
+      is
+         Result : String (1 .. Integer (Value'Length));
+      begin
+         for Index in Value'Range loop
+            Result (Integer (Index - Value'First + 1)) :=
+              Character'Val (Value (Index));
+         end loop;
+         return Result;
+      end Text;
 
       Client_Socket : Sockets.Socket_Type;
       Server_Socket : Sockets.Socket_Type;
@@ -200,13 +205,38 @@ procedure TLS_Smoke is
          end Server_Task;
 
          task body Client_Task is
-            Response : Stream_Element_Array := Bytes (Response_Text);
+            Response : Stream_Element_Array (1 .. 512);
+            First    : Stream_Element_Offset := Response'First;
+            Last     : Stream_Element_Offset;
          begin
             TLS.Handshake (Client, Timeout => 5.0);
             TLS.Send_All (Client, Bytes (Request_Text), Timeout => 5.0);
-            TLS.Receive_Exactly (Client, Response, Timeout => 5.0);
+            loop
+               TLS.Receive
+                 (Client, Response (First .. Response'Last), Last,
+                  Timeout => 5.0);
+               exit when Last < First;
+               First := Last + 1;
+               if First > Response'Last then
+                  raise Program_Error with "test HTTP response is too large";
+               end if;
+            end loop;
             TLS.Shutdown (Client, Timeout => 5.0);
-            Result.Report (Response = Bytes (Response_Text));
+            declare
+               Value : constant String :=
+                 Text (Response (Response'First .. First - 1));
+            begin
+               Result.Report
+                 (Ada.Strings.Fixed.Index
+                    (Value, "HTTP/1.1 200 OK" & CRLF & "Date: ") = 1
+                  and then Ada.Strings.Fixed.Index
+                    (Value, CRLF & "Content-Length: 6" & CRLF) /= 0
+                  and then Ada.Strings.Fixed.Index
+                    (Value, CRLF & "Content-Type: text/plain" & CRLF) /= 0
+                  and then Ada.Strings.Fixed.Index
+                    (Value, CRLF & "Connection: close" & CRLF & CRLF
+                     & "secure") /= 0);
+            end;
          exception
             when Error : others =>
                Ada.Text_IO.Put_Line

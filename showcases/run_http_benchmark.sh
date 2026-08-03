@@ -15,12 +15,18 @@ loops=${5:-$detected_cpus}
 trials=${6:-3}
 warmup=${7:-10000}
 profile=${8:-release}
+cooldown=${9:-20}
+warmup_concurrency=${10:-$concurrency}
 server_log="$project_root/build/http-benchmark-server.log"
 upload_body="$project_root/build/http-benchmark-upload.bin"
 
 if ! command -v oha >/dev/null 2>&1; then
   printf '%s\n' "oha is required: https://github.com/hatoo/oha"
   exit 1
+fi
+
+if [ "$warmup_concurrency" -gt "$concurrency" ]; then
+  warmup_concurrency=$concurrency
 fi
 
 case "$profile" in
@@ -57,40 +63,40 @@ run_case () {
   case "$name" in
     routed-get|middleware|admission)
       if [ "$warmup" -gt 0 ]; then
-        oha -n "$warmup" -c "$concurrency" --no-tui \
-          "http://127.0.0.1:$port$path" >/dev/null
+        oha -n "$warmup" -c "$warmup_concurrency" --no-tui \
+          "http://127.0.0.1:$active_port$path" >/dev/null
       fi
       printf '\n-- %s --\n' "$name"
       printf '%s\n' \
-        "command: oha -n $requests -c $concurrency --no-tui http://127.0.0.1:$port$path"
+        "command: oha -n $requests -c $concurrency --no-tui http://127.0.0.1:$active_port$path"
       oha -n "$requests" -c "$concurrency" --no-tui \
-        "http://127.0.0.1:$port$path"
+        "http://127.0.0.1:$active_port$path"
       ;;
     buffered)
       if [ "$warmup" -gt 0 ]; then
-        oha -n "$warmup" -c "$concurrency" --no-tui \
+        oha -n "$warmup" -c "$warmup_concurrency" --no-tui \
           -m POST -T application/json -d '{"value":"flyology"}' \
-          "http://127.0.0.1:$port$path" >/dev/null
+          "http://127.0.0.1:$active_port$path" >/dev/null
       fi
       printf '\n-- %s --\n' "$name"
       printf '%s\n' \
-        "command: oha -n $requests -c $concurrency --no-tui -m POST -T application/json -d {\"value\":\"flyology\"} http://127.0.0.1:$port$path"
+        "command: oha -n $requests -c $concurrency --no-tui -m POST -T application/json -d {\"value\":\"flyology\"} http://127.0.0.1:$active_port$path"
       oha -n "$requests" -c "$concurrency" --no-tui \
         -m POST -T application/json -d '{"value":"flyology"}' \
-        "http://127.0.0.1:$port$path"
+        "http://127.0.0.1:$active_port$path"
       ;;
     streamed-upload)
       if [ "$warmup" -gt 0 ]; then
-        oha -n "$warmup" -c "$concurrency" --no-tui \
+        oha -n "$warmup" -c "$warmup_concurrency" --no-tui \
           -m POST -T application/octet-stream -D "$upload_body" \
-          "http://127.0.0.1:$port$path" >/dev/null
+          "http://127.0.0.1:$active_port$path" >/dev/null
       fi
       printf '\n-- %s --\n' "$name"
       printf '%s\n' \
-        "command: oha -n $requests -c $concurrency --no-tui -m POST -T application/octet-stream -D $upload_body http://127.0.0.1:$port$path"
+        "command: oha -n $requests -c $concurrency --no-tui -m POST -T application/octet-stream -D $upload_body http://127.0.0.1:$active_port$path"
       oha -n "$requests" -c "$concurrency" --no-tui \
         -m POST -T application/octet-stream -D "$upload_body" \
-        "http://127.0.0.1:$port$path"
+        "http://127.0.0.1:$active_port$path"
       ;;
   esac
 }
@@ -98,9 +104,15 @@ run_case () {
 run_lane () {
   lane=$1
   trial=$2
+  if [ "$lane" = lightweight ]; then
+    lane_offset=0
+  else
+    lane_offset=1
+  fi
+  active_port=$((port + (trial - 1) * 2 + lane_offset))
   : >"$server_log"
   "$project_root/showcases/bin/http_benchmark_server" \
-    "$lane" 0 "$port" "$handlers" >"$server_log" 2>&1 &
+    "$lane" 0 "$active_port" "$handlers" >"$server_log" 2>&1 &
   server_pid=$!
   cleanup() {
     kill "$server_pid" 2>/dev/null || true
@@ -136,9 +148,12 @@ run_lane () {
   printf '\n== HTTP/1.1 %s handlers, trial %s/%s ==\n' \
     "$lane" "$trial" "$trials"
   printf '%s\n' \
-    "oha $(oha --version)" \
-    "profile=$profile warmup=$warmup" \
+    "$(oha --version)" \
+    "profile=$profile warmup=$warmup warmup_concurrency=$warmup_concurrency" \
+    "cooldown_between_lanes=$cooldown seconds" \
     "requests=$requests concurrency=$concurrency handlers=$handlers" \
+    "logical_cpus=$detected_cpus" \
+    "port=$active_port" \
     "execution_parallelism=$execution_parallelism" \
     "upload_bytes=32768"
 
@@ -150,6 +165,9 @@ run_lane () {
 
   cleanup
   trap - EXIT INT TERM
+  if [ "$cooldown" -gt 0 ]; then
+    sleep "$cooldown"
+  fi
 }
 
 trial=1

@@ -7,6 +7,9 @@ package body Flyology.HTTP.Server.Routing is
    use type Ada.Real_Time.Time;
 
    package App renames Flyology.HTTP.Server.Applications;
+   use type App.Authentication_Mode;
+   use type App.Response_State;
+   use type App.Upgrade_Mode;
 
    Max_Segments : constant := 64;
 
@@ -626,6 +629,45 @@ package body Flyology.HTTP.Server.Routing is
       end if;
    end Admit_Body;
 
+   procedure Require_Authentication
+     (Context : in out App_Context;
+      X       : in out App.Exchange;
+      Next    : in out Components.Next_Handler)
+   is
+   begin
+      if X.Authentication = App.Required_Authentication
+        and then not X.Has_Principal
+      then
+         X.Add_Header ("WWW-Authenticate", "Bearer");
+         X.Problem
+           (401, "authentication-required", "Authentication required");
+      else
+         Next.Call (Context, X);
+      end if;
+   end Require_Authentication;
+
+   procedure Automatic_Response
+     (Context : in out App_Context;
+      X       : in out App.Exchange)
+   is
+      pragma Unreferenced (Context);
+      Name : constant String := X.Route_Name;
+   begin
+      if Name = "flyology.bad_request" then
+         X.Problem (400, "invalid-path", "Request path is malformed");
+      elsif Name = "flyology.redirect" then
+         X.Respond (308, "", "");
+      elsif Name = "flyology.options" then
+         X.No_Content;
+      elsif Name in "flyology.method_not_allowed" |
+        "flyology.cors_preflight"
+      then
+         X.Problem (405, "method-not-allowed", "Method is not allowed");
+      else
+         X.Problem (404, "not-found", "Route does not exist");
+      end if;
+   end Automatic_Response;
+
    procedure Dispatch
      (Item       : in out Router;
       Context    : in out App_Context;
@@ -640,7 +682,7 @@ package body Flyology.HTTP.Server.Routing is
 
       function Decode_For_Dispatch return String is
       begin
-         return Decode_Path (Raw);
+         return (if Raw = "*" then "*" else Decode_Path (Raw));
       exception
          when Route_Error =>
             Invalid_Path := True;
@@ -654,8 +696,9 @@ package body Flyology.HTTP.Server.Routing is
       Selected_Score : Natural := 0;
       Allowed        : Unbounded_String;
       Alternate      : Natural := 0;
+      Preflight_Route : Natural := 0;
       X : aliased App.Exchange := App.Create
-        (Value, Connection, Context'Address, Peer, Token,
+        (Value, Connection, Peer, Token,
          Request_Deadline (Connection));
 
       function Matches (Index : Positive; Ignore : Boolean := False)
@@ -681,9 +724,49 @@ package body Flyology.HTTP.Server.Routing is
             raise Route_Error with "ambiguous HTTP route match";
          end if;
       end Consider;
+
+      procedure Run_Automatic
+        (Name : String;
+         CORS_Policy : Natural := 0)
+      is
+         Pipeline : aliased Components.Pipeline
+           (Capacity => Max_Global_Middleware);
+      begin
+         X.Configure_Route
+           (Name, Path_Value, App.Reject_Body, App.No_Authentication,
+            CORS_Policy, 0, 0, App.No_Upgrade);
+         X.Seal_Route;
+         for Index in 1 .. Item.Middleware_Count loop
+            if Item.Middleware (Index).Stage = Request_Head then
+               Pipeline.Add (Item.Middleware (Index).Component);
+            end if;
+         end loop;
+         for Index in 1 .. Item.Middleware_Count loop
+            if Item.Middleware (Index).Stage = Application then
+               Pipeline.Add (Item.Middleware (Index).Component);
+            end if;
+         end loop;
+         Pipeline.Execute (Context, X, Automatic_Response'Access);
+      end Run_Automatic;
    begin
+      if Request_Method = "OPTIONS" and then Raw = "*" then
+         Add_Allowed (Allowed, "OPTIONS");
+         for Index in 1 .. Item.Count loop
+            Add_Allowed (Allowed, To_String (Item.Routes (Index).Method));
+            if To_String (Item.Routes (Index).Method) = "GET"
+              and then Item.Routes (Index).Policy.Upgrade = No_Upgrade
+            then
+               Add_Allowed (Allowed, "HEAD");
+            end if;
+         end loop;
+         if Length (Allowed) > 0 then
+            X.Add_Header ("Allow", To_String (Allowed));
+         end if;
+         Run_Automatic ("flyology.options");
+         return;
+      end if;
       if Invalid_Path then
-         X.Problem (400, "invalid-path", "Request path is malformed");
+         Run_Automatic ("flyology.bad_request");
          return;
       end if;
       for Index in 1 .. Item.Count loop
@@ -692,13 +775,25 @@ package body Flyology.HTTP.Server.Routing is
                Route_Method : constant String :=
                  To_String (Item.Routes (Index).Method);
             begin
+               if Item.Routes (Index).Policy.CORS_Policy /= 0
+                 and then
+                   (Preflight_Route = 0
+                    or else Specificity
+                      (To_String (Item.Routes (Preflight_Route).Pattern)) <
+                      Specificity (To_String (Item.Routes (Index).Pattern)))
+               then
+                  Preflight_Route := Index;
+               end if;
                Add_Allowed (Allowed, Route_Method);
-               if Route_Method = "GET" then
+               if Route_Method = "GET"
+                 and then Item.Routes (Index).Policy.Upgrade = No_Upgrade
+               then
                   Add_Allowed (Allowed, "HEAD");
                end if;
                if Route_Method = Request_Method then
                   Consider (Index);
                elsif Request_Method = "HEAD" and then Route_Method = "GET"
+                 and then Item.Routes (Index).Policy.Upgrade = No_Upgrade
                then
                   Consider (Index, Is_Fallback => True);
                end if;
@@ -707,7 +802,9 @@ package body Flyology.HTTP.Server.Routing is
            and then (To_String (Item.Routes (Index).Method) = Request_Method
                      or else (Request_Method = "HEAD"
                               and then To_String
-                                (Item.Routes (Index).Method) = "GET"))
+                                (Item.Routes (Index).Method) = "GET"
+                              and then Item.Routes (Index).Policy.Upgrade =
+                                No_Upgrade))
          then
             Alternate := Index;
          end if;
@@ -724,13 +821,26 @@ package body Flyology.HTTP.Server.Routing is
                   then Raw (Raw'First .. Raw'Last - 1)
                   else Raw & "/") & Raw_Query_Suffix (Target_Value);
             begin
-               X.Redirect (308, Location);
+               X.Add_Header ("Location", Location);
             end;
+            --  Redirect responses also pass through global observation and
+            --  security middleware; the Location header was staged above.
+            Run_Automatic ("flyology.redirect");
          elsif Length (Allowed) > 0 then
             X.Add_Header ("Allow", To_String (Allowed));
-            X.Problem (405, "method-not-allowed", "Method is not allowed");
+            if Request_Method = "OPTIONS"
+              and then X.Request_Header
+                ("Access-Control-Request-Method") /= ""
+              and then Preflight_Route /= 0
+            then
+               Run_Automatic
+                 ("flyology.cors_preflight",
+                  Item.Routes (Preflight_Route).Policy.CORS_Policy);
+            else
+               Run_Automatic ("flyology.method_not_allowed");
+            end if;
          else
-            X.Problem (404, "not-found", "Route does not exist");
+            Run_Automatic ("flyology.not_found");
          end if;
          return;
       end if;
@@ -739,7 +849,7 @@ package body Flyology.HTTP.Server.Routing is
          Route : constant Route_Entry := Item.Routes (Selected);
          Pipeline : aliased Components.Pipeline
            (Capacity =>
-              Max_Global_Middleware + Max_Route_Middleware + 1);
+              Max_Global_Middleware + Max_Route_Middleware + 2);
       begin
          X.Configure_Route
            (To_String (Route.Name), Path_Value, Route.Policy.Body_Handling,
@@ -752,6 +862,7 @@ package body Flyology.HTTP.Server.Routing is
          then
             raise Program_Error with "selected HTTP route no longer matches";
          end if;
+         X.Seal_Route;
          if Route.Policy.Timeout >= 0.0 then
             declare
                Candidate : constant Ada.Real_Time.Time := Ada.Real_Time.Clock
@@ -765,7 +876,7 @@ package body Flyology.HTTP.Server.Routing is
          begin
             Narrow_Body_Limit (Connection, Route.Policy.Max_Body);
          exception
-            when Protocol_Error =>
+            when Payload_Too_Large | Protocol_Error =>
                X.Problem (413, "body-too-large", "Request body is too large");
                return;
          end;
@@ -780,6 +891,7 @@ package body Flyology.HTTP.Server.Routing is
                Pipeline.Add (Route.Middleware (Index).Component);
             end if;
          end loop;
+         Pipeline.Add (Require_Authentication'Access);
          Pipeline.Add (Admit_Body'Access);
          for Index in 1 .. Item.Middleware_Count loop
             if Item.Middleware (Index).Stage = Application then
@@ -792,8 +904,15 @@ package body Flyology.HTTP.Server.Routing is
             end if;
          end loop;
          Pipeline.Execute (Context, X, Route.Handler);
-         if not Response_Started (Connection) then
+         if X.Response = App.Not_Started then
             X.No_Content;
+         elsif X.Response in App.Streaming_Response | App.Streaming_SSE |
+           App.Upgraded | App.Failed
+         then
+            --  A lifecycle must finish before its borrowed exchange returns.
+            --  Returning while framing is active makes another HTTP read
+            --  unsafe, so contain the fault to this connection.
+            X.Mark_Failed;
          end if;
       exception
          when Resource_Exhausted =>
@@ -802,12 +921,33 @@ package body Flyology.HTTP.Server.Routing is
                X.Problem
                  (503, "ingress-budget-exhausted",
                   "Server ingress capacity is exhausted");
+            else
+               Connection.Request_Close := True;
             end if;
       end;
    exception
       when Route_Error =>
          if not Response_Started (Connection) then
             X.Problem (400, "invalid-path", "Request path is malformed");
+         end if;
+      when Payload_Too_Large =>
+         if not Response_Started (Connection) then
+            X.Problem (413, "body-too-large", "Request body is too large");
+         else
+            Connection.Request_Close := True;
+         end if;
+      when Expectation_Failed =>
+         if not Response_Started (Connection) then
+            X.Problem
+              (417, "expectation-failed", "Request expectation failed");
+         else
+            Connection.Request_Close := True;
+         end if;
+      when Protocol_Error =>
+         if not Response_Started (Connection) then
+            X.Problem (400, "bad-request", "Request data is malformed");
+         else
+            Connection.Request_Close := True;
          end if;
    end Dispatch;
 
@@ -817,24 +957,84 @@ package body Flyology.HTTP.Server.Routing is
       Connection   : aliased in out Flyology.HTTP.Server.Connection;
       Peer         : GNAT.Sockets.Sock_Addr_Type;
       Timeout      : Duration := 30.0;
+      Max_Connection_Age : Duration := 300.0;
       Max_Requests : Natural := 1_000;
       Token        : access Flyology.Cancellation.Token := null)
    is
       Value  : aliased Request;
       Closed : Boolean;
       Count  : Natural := 0;
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Head_Started : Ada.Real_Time.Time := Started;
+      Head_Budget  : Duration := Timeout;
+
+      function Read_Timeout return Duration is
+         Age_Left : Duration;
+      begin
+         if Max_Connection_Age < 0.0 then
+            return Timeout;
+         end if;
+         Age_Left := Max_Connection_Age - Ada.Real_Time.To_Duration
+           (Ada.Real_Time.Clock - Started);
+         if Age_Left <= 0.0 then
+            return 0.0;
+         elsif Timeout < 0.0 then
+            return Age_Left;
+         else
+            return Duration'Min (Timeout, Age_Left);
+         end if;
+      end Read_Timeout;
+
+      function Head_Time_Left return Duration is
+         Elapsed : constant Duration := Ada.Real_Time.To_Duration
+           (Ada.Real_Time.Clock - Head_Started);
+      begin
+         if Head_Budget < 0.0 then
+            return -1.0;
+         elsif Elapsed >= Head_Budget then
+            return 0.0;
+         else
+            return Head_Budget - Elapsed;
+         end if;
+      end Head_Time_Left;
    begin
       loop
+         exit when Read_Timeout = 0.0;
+         Head_Started := Ada.Real_Time.Clock;
+         Head_Budget := Read_Timeout;
          begin
             Read_Request_Head
-              (Connection, Value, Closed, Timeout, Max_Request_Body, Token);
+              (Connection, Value, Closed, Read_Timeout,
+               Max_Request_Body, Token);
          exception
+            when Payload_Too_Large =>
+               if not Response_Started (Connection)
+                 and then Head_Time_Left /= 0.0
+               then
+                  Respond
+                    (Connection, 413, "text/plain; charset=utf-8",
+                     "request content is too large" & Character'Val (10),
+                     Close => True, Timeout => Head_Time_Left, Token => Token);
+               end if;
+               return;
+            when Expectation_Failed =>
+               if not Response_Started (Connection)
+                 and then Head_Time_Left /= 0.0
+               then
+                  Respond
+                    (Connection, 417, "text/plain; charset=utf-8",
+                     "request expectation failed" & Character'Val (10),
+                     Close => True, Timeout => Head_Time_Left, Token => Token);
+               end if;
+               return;
             when Protocol_Error =>
-               if not Response_Started (Connection) then
+               if not Response_Started (Connection)
+                 and then Head_Time_Left /= 0.0
+               then
                   Respond
                     (Connection, 400, "text/plain; charset=utf-8",
                      "bad request" & Character'Val (10), Close => True,
-                     Timeout => Timeout, Token => Token);
+                     Timeout => Head_Time_Left, Token => Token);
                end if;
                return;
             when Flyology.IO.Timeout_Error |
@@ -848,7 +1048,30 @@ package body Flyology.HTTP.Server.Routing is
          if Max_Requests > 0 and then Count >= Max_Requests then
             Connection.Request_Close := True;
          end if;
-         Dispatch (Item, Context, Connection, Value, Peer, Token);
+         begin
+            Dispatch (Item, Context, Connection, Value, Peer, Token);
+         exception
+            when Flyology.Cancellation.Operation_Cancelled |
+                 Flyology.IO.Timeout_Error |
+                 Flyology.IO.Device_Error |
+                 Flyology.IO.TLS.TLS_Error |
+                 GNAT.Sockets.Socket_Error |
+                 Resource_Exhausted =>
+               return;
+            when others =>
+               if not Response_Started (Connection) then
+                  begin
+                     Respond
+                       (Connection, 500, "text/plain; charset=utf-8",
+                        "internal server error" & Character'Val (10),
+                        Close => True, Timeout => Read_Timeout,
+                        Token => Token);
+                  exception
+                     when others => null;
+                  end;
+               end if;
+               return;
+         end;
          exit when Should_Close (Connection);
       end loop;
    end Serve;

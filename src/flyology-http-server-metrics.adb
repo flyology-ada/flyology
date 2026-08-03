@@ -1,12 +1,21 @@
 package body Flyology.HTTP.Server.Metrics is
 
+   function Saturating_Add (Left, Right : Natural) return Natural is
+     (if Right > Natural'Last - Left then Natural'Last else Left + Right);
+
+   function Saturating_Add
+     (Left, Right : Duration) return Duration is
+     (if Right <= 0.0 then Left
+      elsif Left > Duration'Last - Right then Duration'Last
+      else Left + Right);
+
    function Status_Class (Status : Natural) return Natural is
      (if Status in 100 .. 599 then Status / 100 else 0);
 
    protected body Metric_State is
       procedure Begin_Request is
       begin
-         Value.Active := Value.Active + 1;
+         Value.Active := Saturating_Add (Value.Active, 1);
       end Begin_Request;
 
       procedure End_Request
@@ -23,16 +32,20 @@ package body Flyology.HTTP.Server.Metrics is
          if Value.Active > 0 then
             Value.Active := Value.Active - 1;
          end if;
-         Value.Requests := Value.Requests + 1;
-         Value.Request_Bytes := Value.Request_Bytes + Request_Bytes;
-         Value.Response_Bytes := Value.Response_Bytes + Response_Bytes;
-         Value.Latency_Total := Value.Latency_Total + Elapsed;
+         Value.Requests := Saturating_Add (Value.Requests, 1);
+         Value.Request_Bytes :=
+           Saturating_Add (Value.Request_Bytes, Request_Bytes);
+         Value.Response_Bytes :=
+           Saturating_Add (Value.Response_Bytes, Response_Bytes);
+         Value.Latency_Total :=
+           Saturating_Add (Value.Latency_Total, Elapsed);
          Value.Latency_Max := Duration'Max (Value.Latency_Max, Elapsed);
 
          if Route'Length > Max_Route_Length
            or else Method'Length > Max_Method_Length
          then
-            Value.Dropped_Series := Value.Dropped_Series + 1;
+            Value.Dropped_Series :=
+              Saturating_Add (Value.Dropped_Series, 1);
             return;
          end if;
          for Index in 1 .. Value.Series loop
@@ -48,7 +61,8 @@ package body Flyology.HTTP.Server.Metrics is
          end loop;
          if Found = 0 then
             if Value.Series = Capacity then
-               Value.Dropped_Series := Value.Dropped_Series + 1;
+               Value.Dropped_Series :=
+                 Saturating_Add (Value.Dropped_Series, 1);
                return;
             end if;
             Value.Series := Value.Series + 1;
@@ -64,12 +78,13 @@ package body Flyology.HTTP.Server.Metrics is
                Values (Found).Method (1 .. Method'Length) := Method;
             end if;
          end if;
-         Values (Found).Requests := Values (Found).Requests + 1;
+         Values (Found).Requests :=
+           Saturating_Add (Values (Found).Requests, 1);
       end End_Request;
 
       procedure Count (Kind : Event_Kind) is
       begin
-         Value.Events (Kind) := Value.Events (Kind) + 1;
+         Value.Events (Kind) := Saturating_Add (Value.Events (Kind), 1);
       end Count;
 
       function Read return Snapshot is (Value);

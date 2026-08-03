@@ -29,6 +29,7 @@ with Flyology.HTTP.Server.Requests;
 with Flyology.HTTP.Server.Routing;
 with Flyology.HTTP.Server.SSE_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers;
+with Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle;
 with Flyology.IO.Connections;
 with Flyology.IO.Structured_Servers;
 with Flyology.IO.Timers;
@@ -325,7 +326,11 @@ procedure HTTP_Application_Server is
         (State : in out Application_Context;
          X     : in out App.Exchange)
       is
-         Session  : Flyology.HTTP.Server.SSE_Handlers.Session (4);
+         Session  : Flyology.HTTP.Server.SSE_Handlers.Session
+           (Capacity => 4,
+            Byte_Limit =>
+              Flyology.HTTP.Server.SSE_Handlers.Default_Session_Bytes,
+            Budget => null);
          Accepted : Boolean;
       begin
          Complete (State);
@@ -334,7 +339,9 @@ procedure HTTP_Application_Server is
             (Data  => Ada.Strings.Unbounded.To_Unbounded_String ("ready"),
              Event => Ada.Strings.Unbounded.To_Unbounded_String ("status"),
              Id    => Ada.Strings.Unbounded.To_Unbounded_String ("1"),
-             Retry => 1_000), Accepted);
+             Retry => 1_000,
+             Include_Id => False,
+             Include_Retry => False), Accepted);
          pragma Assert (Accepted);
          Flyology.HTTP.Server.SSE_Handlers.Close (Session);
          Flyology.HTTP.Server.SSE_Handlers.Run
@@ -374,12 +381,22 @@ procedure HTTP_Application_Server is
          end if;
       end WS_Message;
 
+      procedure WS_Closed
+        (X       : in out App.Exchange;
+         Session : in out Flyology.HTTP.Server.WebSocket_Handlers.Session) is
+      begin
+         pragma Unreferenced (X, Session);
+      end WS_Closed;
+
       procedure WebSocket_Echo
         (State : in out Application_Context;
          X     : in out App.Exchange)
       is
          package WS renames Flyology.HTTP.Server.WebSocket_Handlers;
-         Session : aliased WS.Session (16);
+         Session : aliased WS.Session
+           (Capacity => 16,
+            Byte_Limit => WS.Default_Session_Bytes,
+            Budget => null);
          type Session_Access is access all WS.Session;
          task type Producer
            (Item : not null Session_Access;
@@ -389,15 +406,18 @@ procedure HTTP_Application_Server is
 
          task body Producer is
             Accepted : Boolean;
+            Timed_Out : Boolean;
          begin
-            WS.Publish
+            WS.Publish_For
               (Item.all,
                (Kind => HTTP.Text_Frame,
                Data => Ada.Strings.Unbounded.To_Unbounded_String
                   ("producer-" & Text)),
-               Accepted);
-            pragma Assert (Accepted);
+               Accepted, Timeout => 1.0, Timed_Out => Timed_Out);
+            pragma Assert (Accepted and then not Timed_Out);
          end Producer;
+         package WS_Lifecycle is new
+           WS.Lifecycle (WS_Open, WS_Message, WS_Closed);
       begin
          Complete (State);
          declare
@@ -406,9 +426,8 @@ procedure HTTP_Application_Server is
          begin
             null;
          end;
-         WS.Run
-           (X, Session, Open => WS_Open'Unrestricted_Access,
-            Message => WS_Message'Unrestricted_Access,
+         WS_Lifecycle.Run
+           (X, Session,
             Origin_Policy => HTTP.Require_Exact_Origin,
             Allowed_Origin => "http://127.0.0.1:3000",
             Metric_Output => Metrics'Access);
@@ -441,7 +460,7 @@ procedure HTTP_Application_Server is
         (State : in out Application_Context;
          X     : in out App.Exchange)
       is
-         Scope : Request_Operations.Scope (2);
+         Scope : Request_Operations.Scope (2, X.Cancellation);
          User, Orders : Request_Operations.Operation_Handle;
       begin
          Request_Work.Configure (Scope, X);
@@ -473,24 +492,29 @@ procedure HTTP_Application_Server is
 
       package Native_Work is new
         Flyology.Native_Executors (Integer, Integer, CPU_Work);
-      package Native_Operations renames Native_Work.Operations;
+      Native_Pool : aliased Native_Work.Executor
+        (Workers => 4, Capacity => 64);
 
       procedure Native_Boundary
         (State : in out Application_Context;
          X     : in out App.Exchange)
       is
-         Scope : Native_Operations.Scope (1);
-         Work  : Native_Operations.Operation_Handle;
+         Work  : Native_Work.Operation_Handle (Native_Pool'Access);
+         Value : Integer;
+         Accepted : Boolean;
       begin
-         Native_Operations.Configure
-           (Scope, X.Cancellation, X.Deadline,
-            Cancel_Siblings_On_Failure => False);
-         Native_Operations.Spawn (Scope, 12, Work);
-         Native_Operations.Join (Scope);
+         Native_Work.Submit
+           (Native_Pool, 12, X.Cancellation, X.Deadline,
+            Work, Accepted);
+         if not Accepted then
+            X.Problem (503, "native-bulkhead", "Native executor is full");
+            return;
+         end if;
+         Native_Work.Await
+           (Native_Pool, Work, Value, X.Cancellation, X.Deadline);
          Complete (State);
          X.Text
-           (200, "native" & Integer'Image
-              (Native_Operations.Result (Scope, Work)) & ASCII.LF);
+           (200, "native" & Integer'Image (Value) & ASCII.LF);
       end Native_Boundary;
 
       procedure Admin_Status
@@ -536,6 +560,7 @@ procedure HTTP_Application_Server is
         (Capacity => 2, Slashes => Routing.Strict_Slashes);
       Listener : Sockets.Socket_Type;
    begin
+      Native_Work.Start (Native_Pool);
       State.Routes.Add_Middleware (Error_Middleware.Call'Access);
       State.Routes.Add_Middleware (Request_ID_Middleware.Call'Access);
       State.Routes.Add_Middleware (Logging_Middleware.Call'Access);

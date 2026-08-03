@@ -1091,11 +1091,17 @@ upgrade policy and an explicit browser-origin policy. Retained and reassembled
 messages still reserve the shared ingress budget.
 
 `Flyology.Task_Scopes` runs a bounded homogeneous group of child operations as
-ordinary structured Ada tasks. The default child designation is lightweight;
-`Flyology.Native_Executors` is the explicit bounded boundary for CPU-heavy or
-blocking foreign work. `Server.Request_Tasks` inherits request cancellation and
-the current absolute deadline without exposing the borrowed exchange or
-connection to children. Scope exit cancels and joins unfinished work.
+ordinary structured Ada lightweight tasks; native work is available only
+through the separately application-bounded executor. A scope's parent token is
+an access discriminant, so Ada enforces the borrow lifetime.
+`Flyology.Native_Executors` supplies an application-owned fixed native worker
+pool with separately bounded outstanding work for CPU-heavy or blocking foreign
+calls. `Server.Request_Tasks` links request cancellation downward into a private
+scope token and inherits the current absolute deadline without exposing the
+borrowed exchange or connection to children. Scope failure or exit cancels and
+joins only its children; it does not request the parent token. Native operations
+use executor-owned cancellation tokens, and an unawaited handle automatically
+abandons its result so bounded capacity is reclaimed when the worker returns.
 
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
@@ -1122,10 +1128,12 @@ preserves pipelined bytes. Streaming callers explicitly accept
 accept it automatically before body reads.
 One monotonic request timeout covers every incremental header and body read,
 rather than restarting after each byte, so a slow header or body cannot retain
-a handler indefinitely. The same rule covers a complete WebSocket message.
-Handlers also default to 1,000 requests and five minutes per connection; peer
-protocol, timeout, socket, and TLS failures close only that connection, while
-application callback failures still propagate to the structured server.
+a handler indefinitely. WebSocket receive calls use a short retry quantum plus
+a separate monotonic whole-message deadline retained across fragments.
+Handlers also default to 1,000 requests and five minutes per connection. Peer
+protocol, timeout, socket, TLS, and unmapped application callback failures are
+contained to that connection; an unmapped callback failure receives a safe 500
+only before response framing has started.
 
 The parser accepts origin-form, absolute HTTP(S)-form, and `OPTIONS *`, with
 strict Host/authority validation; `CONNECT` and transfer codings other than
@@ -1139,6 +1147,13 @@ payload budget. Server-owned ingress is therefore bounded by the configured
 budget plus per-connection header/parser state; descriptor, kernel socket,
 task/fiber, application-owned buffer, and TLS-provider memory still scale with
 connection capacity.
+
+The optional SSE and WebSocket lifecycle sessions separately cap each queued
+message at 64 KiB, retain at most 256 KiB per session by default, and reserve
+the actual payload bytes from a shared 64 MiB outbound budget until the sole
+connection writer sends or drops the message. Applications may attach a
+smaller shared `Outbound_Budget` to a session. Count limits remain useful for
+work scheduling, but are not used as a substitute for byte accounting.
 
 The runnable `http_server` showcase exposes `/`, `/upload`, `/events`, and
 `/websocket`. `POST /upload` demonstrates streaming body consumption.
@@ -1164,19 +1179,22 @@ The benchmark runner uses `oha` and runs the same loopback keep-alive workloads
 against explicit lightweight and native handler pools:
 
 ```sh
-./showcases/run_http_benchmark.sh 100000 500 500 18080 16 3 10000 release
+./showcases/run_http_benchmark.sh 100000 500 500 18080 16 3 10000 release 20 500
 ```
 
 The campaign includes routed GET, a middleware-heavy GET, a small buffered
 POST, a 32 KiB streamed upload, and rate/bulkhead admission. The arguments are
 measured requests per case, client concurrency, handler capacity,
 port, lightweight event-loop count, paired trial count, and warm-up requests.
-The optional final argument selects the `release` (default) or `development`
-profile. The loop count defaults to the host's logical CPU count. The runner
+The next optional argument selects the `release` (default) or `development`
+profile; the ninth argument is the cooldown in seconds between lane runs and
+defaults to 20, and the tenth is warm-up concurrency (defaulting to measured
+concurrency). The loop count defaults to the host's logical CPU count. The runner
 removes the benchmark-only per-request counter, warms each server, alternates
-lane order, and prints the `oha` version, complete command, profile, and
-execution parallelism with every result. Results are host measurements, not
-portable performance guarantees.
+lane order, and rotates the destination port for each lane/trial so repeated
+short campaigns do not exhaust one client-port tuple. It prints the `oha`
+version, complete command, profile, CPU count, port, and execution parallelism with every
+result. Results are host measurements, not portable performance guarantees.
 
 The website's [HTTP application guide](https://flyology.org/guide/http/)
 progresses from the raw connection through routing, body policy, middleware,

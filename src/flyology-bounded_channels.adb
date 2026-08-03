@@ -24,6 +24,7 @@ package body Flyology.Bounded_Channels is
             return;
          end if;
          Value := Values (Head);
+         Values (Head) := Empty_Value;
          Head := (if Head = Capacity then 1 else Head + 1);
          Count := Count - 1;
          Available := True;
@@ -51,6 +52,7 @@ package body Flyology.Bounded_Channels is
             return;
          end if;
          Value := Values (Head);
+         Values (Head) := Empty_Value;
          Head := (if Head = Capacity then 1 else Head + 1);
          Count := Count - 1;
          Available := True;
@@ -81,6 +83,28 @@ package body Flyology.Bounded_Channels is
       Item.State.Receive (Value, Available);
    end Receive;
 
+   procedure Receive_For
+     (Item      : in out Channel;
+      Value     : out Element_Type;
+      Available : out Boolean;
+      Timeout   : Duration;
+      Timed_Out : out Boolean) is
+   begin
+      Timed_Out := False;
+      if Timeout < 0.0 then
+         Item.State.Receive (Value, Available);
+      else
+         select
+            Item.State.Receive (Value, Available);
+         or
+            delay Timeout;
+            Value := Empty_Value;
+            Available := False;
+            Timed_Out := True;
+         end select;
+      end if;
+   end Receive_For;
+
    procedure Try_Send
      (Item     : in out Channel;
       Value    : Element_Type;
@@ -88,6 +112,27 @@ package body Flyology.Bounded_Channels is
    begin
       Item.State.Try_Send (Value, Accepted);
    end Try_Send;
+
+   procedure Send_For
+     (Item      : in out Channel;
+      Value     : Element_Type;
+      Accepted  : out Boolean;
+      Timeout   : Duration;
+      Timed_Out : out Boolean) is
+   begin
+      Timed_Out := False;
+      if Timeout < 0.0 then
+         Item.State.Send (Value, Accepted);
+      else
+         select
+            Item.State.Send (Value, Accepted);
+         or
+            delay Timeout;
+            Accepted := False;
+            Timed_Out := True;
+         end select;
+      end if;
+   end Send_For;
 
    procedure Try_Receive
      (Item      : in out Channel;

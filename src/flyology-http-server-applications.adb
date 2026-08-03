@@ -2,25 +2,32 @@ with Ada.Strings.Fixed;
 with Flyology.IO;
 
 package body Flyology.HTTP.Server.Applications is
+   use type Ada.Task_Identification.Task_Id;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
 
+   procedure Require_Owner (Item : Exchange) is
+   begin
+      if Ada.Task_Identification.Current_Task /= Item.Owner_Task then
+         raise Program_Error with
+           "HTTP exchange may only be used by its connection-owner task";
+      end if;
+   end Require_Owner;
+
    function Create
-     (Value    : aliased in out Request;
+      (Value    : aliased in out Request;
       Item     : aliased in out Connection;
-      Context  : System.Address;
       Peer     : GNAT.Sockets.Sock_Addr_Type;
       Token    : access Flyology.Cancellation.Token;
       Deadline : Ada.Real_Time.Time) return Exchange
    is
    begin
-      return Result : Exchange do
-         Result.Request_Handle := Value'Unchecked_Access;
-         Result.Connection_Handle := Item'Unchecked_Access;
-         Result.Context_Handle := Context;
+      return Result : Exchange
+        (Request_Handle    => Value'Access,
+         Connection_Handle => Item'Access,
+         Token_Handle      => Token)
+      do
          Result.Peer_Value := Peer;
-         Result.Token_Handle :=
-           (if Token = null then null else Token.all'Unchecked_Access);
          Result.Deadline_Value := Deadline;
       end return;
    end Create;
@@ -37,19 +44,21 @@ package body Flyology.HTTP.Server.Applications is
    function Request_Header (Item : Exchange; Name : String) return String is
      (Header (Item.Request_Handle.all, Name));
 
-   function Connection_Access
-     (Item : in out Exchange) return not null access Connection
-   is (Item.Connection_Handle);
+   function Request_Header_Count
+     (Item : Exchange; Name : String) return Natural
+   is (Header_Count (Item.Request_Handle.all, Name));
 
-   function Context_Address (Item : Exchange) return System.Address is
-     (Item.Context_Handle);
+   function Wire_Response_Started (Item : Exchange) return Boolean is
+     (Flyology.HTTP.Server.Response_Started (Item.Connection_Handle.all));
 
    function Peer (Item : Exchange) return GNAT.Sockets.Sock_Addr_Type is
      (Item.Peer_Value);
 
    function Cancellation
      (Item : Exchange) return access Flyology.Cancellation.Token
-   is (Item.Token_Handle);
+   is
+     (if Item.Token_Handle = null then null
+      else Item.Token_Handle.all'Unchecked_Access);
 
    function Deadline (Item : Exchange) return Ada.Real_Time.Time is
      (Item.Deadline_Value);
@@ -74,6 +83,7 @@ package body Flyology.HTTP.Server.Applications is
    is
       use type Ada.Real_Time.Time;
    begin
+      Require_Owner (Item);
       if Value > Item.Deadline_Value then
          raise Program_Error with "HTTP exchange deadline cannot be extended";
       end if;
@@ -112,6 +122,7 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Set_Request_ID (Item : in out Exchange; Value : String) is
    begin
+      Require_Owner (Item);
       if Value'Length = 0 or else Value'Length > 128 then
          raise Program_Error with "invalid HTTP request id length";
       end if;
@@ -135,6 +146,7 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Set_Principal (Item : in out Exchange; Value : String) is
    begin
+      Require_Owner (Item);
       if Value'Length = 0 or else Value'Length > 256 then
          raise Program_Error with "invalid HTTP principal length";
       end if;
@@ -164,6 +176,32 @@ package body Flyology.HTTP.Server.Applications is
    function Body_Policy (Item : Exchange) return Request_Body_Policy is
      (Item.Body_Mode);
 
+   function Body_State (Item : Exchange) return Request_Body_State is
+   begin
+      case Item.Body_Mode is
+         when Reject_Body =>
+            return
+              (if Flyology.HTTP.Server.Body_Complete
+                    (Item.Connection_Handle.all)
+               then Body_Completed else Body_Rejected);
+         when Stream_Body =>
+            return
+              (if Flyology.HTTP.Server.Body_Complete
+                    (Item.Connection_Handle.all)
+               then Body_Completed else Body_Streaming);
+         when Buffer_Body =>
+            return
+              (if Flyology.HTTP.Server.Body_Complete
+                    (Item.Connection_Handle.all)
+               then Body_Buffered else Body_Pending);
+         when Discard_Request_Body =>
+            return
+              (if Flyology.HTTP.Server.Body_Complete
+                    (Item.Connection_Handle.all)
+               then Body_Completed else Body_Pending);
+      end case;
+   end Body_State;
+
    function Body_Complete (Item : Exchange) return Boolean is
      (Flyology.HTTP.Server.Body_Complete (Item.Connection_Handle.all));
 
@@ -177,6 +215,7 @@ package body Flyology.HTTP.Server.Applications is
       Finished : out Boolean)
    is
    begin
+      Require_Owner (Item);
       if Item.Body_Mode /= Stream_Body then
          raise Program_Error with "route body policy is not streamed";
       end if;
@@ -186,7 +225,16 @@ package body Flyology.HTTP.Server.Applications is
    end Read_Body;
 
    function Content (Item : Exchange) return String is
-     (Flyology.HTTP.Server.Content (Item.Request_Handle.all));
+   begin
+      if Item.Body_Mode /= Buffer_Body
+        or else not Flyology.HTTP.Server.Body_Complete
+          (Item.Connection_Handle.all)
+      then
+         raise Program_Error with
+           "request content is available only after buffered admission";
+      end if;
+      return Flyology.HTTP.Server.Content (Item.Request_Handle.all);
+   end Content;
 
    procedure Validate_Header_Name (Name : String) is
       Separators : constant String := "()<>@,;:" & Character'Val (92)
@@ -223,6 +271,7 @@ package body Flyology.HTTP.Server.Applications is
       Value : String)
    is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Not_Started then
          raise Program_Error with "HTTP response already started";
       end if;
@@ -241,8 +290,16 @@ package body Flyology.HTTP.Server.Applications is
       Is_Head : constant Boolean :=
         Method (Item.Request_Handle.all) = "HEAD";
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Not_Started then
          raise Program_Error with "HTTP exchange response already started";
+      elsif Item.Authentication_Value = Required_Authentication
+        and then not Item.Principal_Present
+        and then Status < 400
+      then
+         raise Program_Error with
+           "required-authentication route cannot send an unauthenticated"
+           & " response";
       end if;
       Flyology.HTTP.Server.Respond
         (Item.Connection_Handle.all, Status, Content_Type, Payload,
@@ -361,8 +418,16 @@ package body Flyology.HTTP.Server.Applications is
       Close        : Boolean := False)
    is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Not_Started then
          raise Program_Error with "HTTP exchange response already started";
+      elsif Item.Authentication_Value = Required_Authentication
+        and then not Item.Principal_Present
+        and then Status < 400
+      then
+         raise Program_Error with
+           "required-authentication route cannot start an unauthenticated"
+           & " stream";
       end if;
       Begin_Response_Stream
         (Item.Connection_Handle.all, Status, Content_Type,
@@ -371,7 +436,7 @@ package body Flyology.HTTP.Server.Applications is
          Timeout       => Remaining (Item),
          Token         => Item.Token_Handle);
       Item.Status_Value := Status;
-      Item.Response_Value := Streaming;
+      Item.Response_Value := Streaming_Response;
    exception
       when others =>
          Item.Response_Value := Failed;
@@ -380,7 +445,8 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Write_Chunk (Item : in out Exchange; Data : String) is
    begin
-      if Item.Response_Value /= Streaming then
+      Require_Owner (Item);
+      if Item.Response_Value /= Streaming_Response then
          raise Program_Error with "HTTP exchange stream is not active";
       end if;
       Write_Response_Chunk
@@ -397,7 +463,8 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure End_Stream (Item : in out Exchange) is
    begin
-      if Item.Response_Value /= Streaming then
+      Require_Owner (Item);
+      if Item.Response_Value /= Streaming_Response then
          raise Program_Error with "HTTP exchange stream is not active";
       end if;
       End_Response_Stream
@@ -411,8 +478,14 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Begin_SSE (Item : in out Exchange) is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Not_Started then
          raise Program_Error with "HTTP exchange response already started";
+      elsif Item.Authentication_Value = Required_Authentication
+        and then not Item.Principal_Present
+      then
+         raise Program_Error with
+           "required-authentication route cannot start unauthenticated SSE";
       elsif Item.Upgrade_Value /= Allow_SSE then
          raise Program_Error with "route does not permit SSE";
       end if;
@@ -422,7 +495,7 @@ package body Flyology.HTTP.Server.Applications is
          Timeout       => Remaining (Item),
          Token         => Item.Token_Handle);
       Item.Status_Value := 200;
-      Item.Response_Value := Streaming;
+      Item.Response_Value := Streaming_SSE;
    exception
       when others =>
          Item.Response_Value := Failed;
@@ -434,15 +507,18 @@ package body Flyology.HTTP.Server.Applications is
       Data  : String;
       Event : String := "";
       Id    : String := "";
-      Retry : Natural := 0)
+      Retry : Natural := 0;
+      Include_Id : Boolean := False;
+      Include_Retry : Boolean := False)
    is
    begin
-      if Item.Response_Value /= Streaming then
+      Require_Owner (Item);
+      if Item.Response_Value /= Streaming_SSE then
          raise Program_Error with "HTTP exchange SSE stream is not active";
       end if;
       Flyology.HTTP.Server.Send_Event
         (Item.Connection_Handle.all, Data, Event, Id, Retry,
-         Remaining (Item), Item.Token_Handle);
+         Remaining (Item), Item.Token_Handle, Include_Id, Include_Retry);
       if Method (Item.Request_Handle.all) /= "HEAD" then
          Item.Response_Length := Item.Response_Length + Data'Length;
       end if;
@@ -452,9 +528,26 @@ package body Flyology.HTTP.Server.Applications is
          raise;
    end Send_SSE;
 
+   procedure Send_SSE_Comment
+     (Item : in out Exchange; Comment : String := "") is
+   begin
+      Require_Owner (Item);
+      if Item.Response_Value /= Streaming_SSE then
+         raise Program_Error with "HTTP exchange SSE stream is not active";
+      end if;
+      Flyology.HTTP.Server.Send_SSE_Comment
+        (Item.Connection_Handle.all, Comment, Remaining (Item),
+         Item.Token_Handle);
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Send_SSE_Comment;
+
    procedure End_SSE (Item : in out Exchange) is
    begin
-      if Item.Response_Value /= Streaming then
+      Require_Owner (Item);
+      if Item.Response_Value /= Streaming_SSE then
          raise Program_Error with "HTTP exchange SSE stream is not active";
       end if;
       Flyology.HTTP.Server.End_SSE
@@ -473,8 +566,15 @@ package body Flyology.HTTP.Server.Applications is
       Allowed_Origin : String := "")
    is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Not_Started then
          raise Program_Error with "HTTP exchange response already started";
+      elsif Item.Authentication_Value = Required_Authentication
+        and then not Item.Principal_Present
+      then
+         raise Program_Error with
+           "required-authentication route cannot upgrade unauthenticated"
+           & " WebSocket";
       elsif Item.Upgrade_Value /= Allow_WebSocket then
          raise Program_Error with "route does not permit WebSocket upgrade";
       end if;
@@ -495,7 +595,8 @@ package body Flyology.HTTP.Server.Applications is
       Data        : out Unbounded_String;
       Closed      : out Boolean;
       Max_Message : Natural := Max_WebSocket_Frame;
-      Timeout     : Duration := 30.0)
+      Timeout     : Duration := 30.0;
+      Message_Timeout : Duration := 30.0)
    is
       Left : constant Duration := Remaining (Item);
       Wait : constant Duration :=
@@ -503,12 +604,17 @@ package body Flyology.HTTP.Server.Applications is
          elsif Timeout < 0.0 then Left
          else Duration'Min (Left, Timeout));
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Upgraded then
          raise Program_Error with "HTTP exchange WebSocket is not active";
       end if;
       Flyology.HTTP.Server.Receive_WebSocket
         (Item.Connection_Handle.all, Kind, Data, Closed, Max_Message,
-         Wait, Item.Token_Handle);
+         Wait,
+         (if Left < 0.0 then Message_Timeout
+          elsif Message_Timeout < 0.0 then Left
+          else Duration'Min (Left, Message_Timeout)),
+         Item.Token_Handle);
    exception
       when Flyology.IO.Timeout_Error =>
          raise;
@@ -523,6 +629,7 @@ package body Flyology.HTTP.Server.Applications is
       Data : String)
    is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Upgraded then
          raise Program_Error with "HTTP exchange WebSocket is not active";
       end if;
@@ -542,6 +649,7 @@ package body Flyology.HTTP.Server.Applications is
       Reason : String := "")
    is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Upgraded then
          raise Program_Error with "HTTP exchange WebSocket is not active";
       end if;
@@ -557,6 +665,7 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Complete_WebSocket (Item : in out Exchange) is
    begin
+      Require_Owner (Item);
       if Item.Response_Value /= Upgraded then
          raise Program_Error with "HTTP exchange WebSocket is not active";
       end if;
@@ -574,6 +683,7 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Mark_Failed (Item : in out Exchange) is
    begin
+      Require_Owner (Item);
       Item.Connection_Handle.Request_Close := True;
       Item.Response_Value := Failed;
    end Mark_Failed;
@@ -583,6 +693,7 @@ package body Flyology.HTTP.Server.Applications is
       Accepted : out Boolean)
    is
    begin
+      Require_Owner (Item);
       Accepted := False;
       case Item.Body_Mode is
          when Reject_Body =>
@@ -620,6 +731,10 @@ package body Flyology.HTTP.Server.Applications is
       Upgrade         : Upgrade_Mode)
    is
    begin
+      Require_Owner (Item);
+      if Item.Route_Sealed then
+         raise Program_Error with "HTTP route metadata is sealed";
+      end if;
       Item.Route_Value := To_Unbounded_String (Name);
       Item.Path_Value := To_Unbounded_String (Normalized_Path);
       Item.Body_Mode := Policy;
@@ -639,7 +754,10 @@ package body Flyology.HTTP.Server.Applications is
       Value : String)
    is
    begin
-      if Has_Parameter (Item, Name) then
+      Require_Owner (Item);
+      if Item.Route_Sealed then
+         raise Program_Error with "HTTP route metadata is sealed";
+      elsif Has_Parameter (Item, Name) then
          raise Program_Error with "duplicate HTTP route parameter";
       elsif Item.Parameter_Count = Max_Path_Parameters then
          raise Program_Error with "too many HTTP route parameters";
@@ -648,5 +766,11 @@ package body Flyology.HTTP.Server.Applications is
       Item.Parameters (Item.Parameter_Count) :=
         (To_Unbounded_String (Name), To_Unbounded_String (Value));
    end Add_Parameter;
+
+   procedure Seal_Route (Item : in out Exchange) is
+   begin
+      Require_Owner (Item);
+      Item.Route_Sealed := True;
+   end Seal_Route;
 
 end Flyology.HTTP.Server.Applications;

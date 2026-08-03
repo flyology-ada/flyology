@@ -1,8 +1,10 @@
 --  Supplies fixed-capacity closeable channels with ordinary Ada entry
 --  semantics. A blocked sender or receiver resumes when the channel closes.
 --  @formal Element_Type Value transferred by the channel
+--  @formal Empty_Value Value assigned after dequeue to release slot storage
 generic
    type Element_Type is private;
+   Empty_Value : Element_Type;
 package Flyology.Bounded_Channels is
 
    --  Fixed-capacity multi-producer, multi-consumer channel.
@@ -29,6 +31,21 @@ package Flyology.Bounded_Channels is
       Value     : out Element_Type;
       Available : out Boolean);
 
+   --  Wait for a value for at most Timeout seconds. A negative timeout waits
+   --  without a deadline. Timed_Out distinguishes an open empty channel from
+   --  a closed and drained channel.
+   --  @param Item Channel
+   --  @param Value Received value when Available
+   --  @param Available Whether a value was returned
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Timed_Out True only when the wait interval expired
+   procedure Receive_For
+     (Item      : in out Channel;
+      Value     : out Element_Type;
+      Available : out Boolean;
+      Timeout   : Duration;
+      Timed_Out : out Boolean);
+
    --  Attempt to enqueue without waiting.
    --  @param Item Channel
    --  @param Value Value to enqueue
@@ -37,6 +54,21 @@ package Flyology.Bounded_Channels is
      (Item     : in out Channel;
       Value    : Element_Type;
       Accepted : out Boolean);
+
+   --  Wait for space for at most Timeout seconds. A negative timeout waits
+   --  without a deadline. Closing the channel returns Accepted false without
+   --  setting Timed_Out.
+   --  @param Item Channel
+   --  @param Value Value to enqueue
+   --  @param Accepted Whether the value was queued
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Timed_Out True only when the wait interval expired
+   procedure Send_For
+     (Item      : in out Channel;
+      Value     : Element_Type;
+      Accepted  : out Boolean;
+      Timeout   : Duration;
+      Timed_Out : out Boolean);
 
    --  Attempt to receive without waiting.
    --  @param Item Channel
