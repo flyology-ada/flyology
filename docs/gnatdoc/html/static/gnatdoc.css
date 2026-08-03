@@ -244,7 +244,7 @@ dt {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  max-width: 42rem;
+  max-width: 48rem;
   margin-block: 3rem;
   gap: 1rem;
 }
@@ -253,6 +253,10 @@ dt {
   color: var(--ink-soft);
   font-size: 0.78rem;
   font-weight: 600;
+}
+
+.api-search-control {
+  position: relative;
 }
 
 .api-search input {
@@ -268,6 +272,64 @@ dt {
 
 .api-search input:focus {
   border-color: var(--violet);
+}
+
+.api-search-results {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  left: 0;
+  z-index: 30;
+  max-height: min(28rem, 65vh);
+  margin: 0;
+  overflow-y: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--paper);
+  box-shadow: 0 1.2rem 3rem color-mix(in oklch, var(--ink) 14%, transparent);
+  list-style: none;
+}
+
+.api-search-results[hidden] {
+  display: none;
+}
+
+.api-search-results li + li {
+  border-top: 1px solid var(--line);
+}
+
+.api-search-results a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  padding: 0.7rem 0.75rem;
+  gap: 1rem;
+  text-decoration: none;
+}
+
+.api-search-results a:hover,
+.api-search-results a:focus-visible {
+  border-radius: 0.35rem;
+  background: var(--surface);
+}
+
+.api-search-result-name {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.api-search-result-kind {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.api-search-empty {
+  padding: 0.85rem 0.75rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
 }
 
 .api-directory {
@@ -324,10 +386,6 @@ dt {
   color: var(--violet);
 }
 
-[data-filter-item][hidden] {
-  display: none;
-}
-
 .api-unit-header {
   padding-block: clamp(4rem, 8vw, 7rem) 3rem;
   border-bottom: 1px solid var(--line);
@@ -344,6 +402,10 @@ dt {
 .api-unit-header h1 {
   max-width: 20ch;
   overflow-wrap: anywhere;
+}
+
+.api-unit-header .api-search {
+  margin-block: 2rem 0;
 }
 
 .api-layout {
@@ -507,6 +569,11 @@ dt {
 
   .api-content dd {
     padding-top: 0;
+  }
+
+  .api-search-results a {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
   }
 
   .entity-index > div {

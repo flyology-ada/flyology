@@ -111,6 +111,32 @@ for (const htmlFile of htmlFiles) {
   }
 }
 
+for (const searchIndex of files.filter((path) => path.endsWith("search-index.js"))) {
+  const source = await readFile(searchIndex, "utf8");
+  const match = source.match(/^window\.FlyologyApiSearch = (\[[\s\S]*\]);\s*$/);
+  if (!match) {
+    failures.push(`${relative(root, searchIndex)}: invalid API search index wrapper`);
+    continue;
+  }
+
+  let entries;
+  try {
+    entries = JSON.parse(match[1]);
+  } catch (error) {
+    failures.push(`${relative(root, searchIndex)}: invalid API search index JSON: ${error.message}`);
+    continue;
+  }
+
+  if (entries.length === 0) failures.push(`${relative(root, searchIndex)}: API search index is empty`);
+  for (const entry of entries) {
+    if (!["name", "qualifiedName", "kind", "href"].every((key) => typeof entry[key] === "string" && entry[key])) {
+      failures.push(`${relative(root, searchIndex)}: malformed API search entry`);
+      continue;
+    }
+    await validateReference(searchIndex, entry.href);
+  }
+}
+
 if (failures.length) {
   failures.forEach((failure) => console.error(failure));
   console.error(`Site check failed with ${failures.length} problem(s).`);

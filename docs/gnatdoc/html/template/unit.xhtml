@@ -7,6 +7,7 @@
     <link rel='icon' href='flyology-mark.svg' type='image/svg+xml'/>
     <link rel='stylesheet' href='gnatdoc.css'/>
     <script src='ada-highlight.js'></script>
+    <script src='search-index.js'></script>
     <script src='gnatdoc.js'></script>
   </head>
   <body class='api-unit-page'>
@@ -34,6 +35,14 @@
       <header class='api-unit-header'>
         <a class='api-breadcrumb' href='index.html'>← All compilation units</a>
         <h1 tal:content='gnatdoc/entity/qualified_name'>Entity Name</h1>
+        <div class='api-search' data-api-search=''>
+          <label for='api-search-input'>Search API names</label>
+          <div class='api-search-control'>
+            <input id='api-search-input' type='search' placeholder='Type, subprogram, field, or other name' autocomplete='off' aria-controls='api-search-results' aria-expanded='false' data-api-search-input=''/>
+            <ul id='api-search-results' class='api-search-results' aria-label='API search results' data-api-search-results='' hidden=''></ul>
+            <p class='visually-hidden' role='status' aria-live='polite' data-api-search-status=''></p>
+          </div>
+        </div>
       </header>
 
       <div class='api-layout'>
@@ -124,19 +133,19 @@
 
             <div tal:omit-tag='' tal:condition='item/documentation/enumeration_literals'>
               <h5>Enumeration literals</h5>
-              <dl><div tal:omit-tag='' tal:repeat='literal item/documentation/enumeration_literals'><dt tal:content='literal/name'>Literal</dt><dd tal:content='literal/description'>Description</dd></div></dl>
+              <dl><div tal:omit-tag='' tal:repeat='literal item/documentation/enumeration_literals'><dt data-search-kind='Enumeration literal' tal:content='literal/name'>Literal</dt><dd tal:content='literal/description'>Description</dd></div></dl>
             </div>
             <div tal:omit-tag='' tal:condition='item/documentation/fields'>
               <h5>Record fields</h5>
-              <dl><div tal:omit-tag='' tal:repeat='formal item/documentation/fields'><dt tal:content='formal/name'>Field</dt><dd tal:content='formal/description'>Description</dd></div></dl>
+              <dl><div tal:omit-tag='' tal:repeat='formal item/documentation/fields'><dt data-search-kind='Record field' tal:content='formal/name'>Field</dt><dd tal:content='formal/description'>Description</dd></div></dl>
             </div>
             <div tal:omit-tag='' tal:condition='item/documentation/formals'>
               <h5>Generic formal parameters</h5>
-              <dl><div tal:omit-tag='' tal:repeat='formal item/documentation/formals'><dt tal:content='formal/name'>Formal</dt><dd tal:content='formal/description'>Description</dd></div></dl>
+              <dl><div tal:omit-tag='' tal:repeat='formal item/documentation/formals'><dt data-search-kind='Generic formal' tal:content='formal/name'>Formal</dt><dd tal:content='formal/description'>Description</dd></div></dl>
             </div>
             <div tal:omit-tag='' tal:condition='item/documentation/parameters'>
               <h5>Parameters</h5>
-              <dl><div tal:omit-tag='' tal:repeat='parameter item/documentation/parameters'><dt tal:content='parameter/name'>Parameter</dt><dd tal:content='parameter/description'>Description</dd></div></dl>
+              <dl><div tal:omit-tag='' tal:repeat='parameter item/documentation/parameters'><dt data-search-kind='Parameter' tal:content='parameter/name'>Parameter</dt><dd tal:content='parameter/description'>Description</dd></div></dl>
             </div>
             <div tal:omit-tag='' tal:condition='item/documentation/returns'>
               <h5>Return value</h5>
@@ -144,7 +153,7 @@
             </div>
             <div tal:omit-tag='' tal:condition='item/documentation/exceptions'>
               <h5>Raised exceptions</h5>
-              <dl><div tal:omit-tag='' tal:repeat='exception item/documentation/exceptions'><dt tal:content='exception/name'>Exception</dt><dd tal:content='exception/description'>Description</dd></div></dl>
+              <dl><div tal:omit-tag='' tal:repeat='exception item/documentation/exceptions'><dt data-search-kind='Exception' tal:content='exception/name'>Exception</dt><dd tal:content='exception/description'>Description</dd></div></dl>
             </div>
           </div>
         </article>

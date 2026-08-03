@@ -1289,8 +1289,12 @@ Generate the public API reference with:
 
 The [documentation script](scripts/docs.sh) runs GNATdoc with
 undocumented-entity warnings enabled and writes the ignored HTML output to
-`docs/api/index.html`. Build the complete GitHub Pages artifact, including the
-guide, architecture notes, and generated API reference, with:
+`docs/api/index.html`. It also builds a client-side name index for compilation
+units, declarations, enumeration literals, record fields, formal parameters,
+parameters, and exceptions. Search is case-insensitive and tolerates nearby
+misspellings while ranking exact and prefix matches first. Build the complete
+GitHub Pages artifact, including the guide, architecture notes, and generated
+API reference, with:
 
 ```sh
 ./scripts/build-site.sh

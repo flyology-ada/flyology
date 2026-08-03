@@ -29,5 +29,7 @@ mkdir -p docs/api/fonts
 cp website/assets/fonts/geologica-latin-variable.woff2 docs/api/fonts/
 cp assets/brand/flyology-mark-transparent.svg docs/api/flyology-mark.svg
 cp website/assets/scripts/ada-highlight.js docs/api/ada-highlight.js
+node scripts/build-api-search-index.mjs docs/api
 
 test -f docs/api/index.html
+test -f docs/api/search-index.js
