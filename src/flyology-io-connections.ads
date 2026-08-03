@@ -209,17 +209,25 @@ private
    type Descriptor_Generation is mod 2 ** 64;
 
    protected type Descriptor_Controller is
-      procedure Adopt (FD : Flyology.IO.Descriptor);
+      --  Publish descriptor, socket, and admission ownership atomically.
+      procedure Adopt
+        (FD     : Flyology.IO.Descriptor;
+         Socket : GNAT.Sockets.Socket_Type;
+         Owner  : Server_Access);
       entry Acquire
         (FD           : out Flyology.IO.Descriptor;
          Generation   : out Descriptor_Generation;
-         Close_Source : out Flyology.IO.Descriptor);
+         Close_Source : out Flyology.IO.Descriptor;
+         Socket       : out GNAT.Sockets.Socket_Type;
+         Owner        : out Server_Access);
       procedure Release (Generation : Descriptor_Generation);
       procedure Begin_Close
         (FD         : out Flyology.IO.Descriptor;
          Generation : out Descriptor_Generation;
          Leader     : out Boolean);
-      entry Await_Drained;
+      entry Await_Drained
+        (Socket : out GNAT.Sockets.Socket_Type;
+         Owner  : out Server_Access);
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
       function Is_Open_State return Boolean;
@@ -229,11 +237,11 @@ private
       Active             : Boolean := False;
       Closing            : Boolean := False;
       Close_Wake         : Flyology.Wake_Sources.Source;
+      Current_Socket     : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Current_Owner      : Server_Access := null;
    end Descriptor_Controller;
 
    type Connection is new Ada.Finalization.Limited_Controlled with record
-      Socket : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
-      Owner  : Server_Access := null;
       Controller : Descriptor_Controller;
    end record;
 

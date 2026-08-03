@@ -2,6 +2,7 @@ with Ada.Real_Time;
 with Ada.Streams;
 with GNAT.Sockets;
 with Flyology;
+with Flyology.Execution_Groups;
 with Flyology.IO.Connections;
 with Flyology.IO.Sockets;
 with Flyology.Observability;
@@ -28,15 +29,19 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (Sample.Interrupt_Waits = 0);
    end Assert_No_Event_Waits;
 
-   procedure Await_Event_Waits (Count : Natural) is
+   procedure Await_Event_Waits
+     (Count : Natural;
+      Group : Flyology.Execution_Groups.Group_Id := 0)
+   is
       Deadline : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
       Sample : Flyology.Observability.Group_Snapshot;
    begin
       loop
-         pragma Assert (Flyology.Observability.Snapshot (0, Sample));
-         exit when Sample.Descriptor_Waits =
-           Flyology.Observability.Counter (Count);
+         if Flyology.Observability.Snapshot (Group, Sample) then
+            exit when Sample.Descriptor_Waits =
+              Flyology.Observability.Counter (Count);
+         end if;
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "descriptor wait did not reach poller";
          end if;
@@ -247,6 +252,368 @@ procedure Descriptor_Ownership_Smoke is
       end if;
    end Run_Cancellation_Close_Race;
 
+   type Adoption_Path is (Take_Path, Accept_Path);
+
+   procedure Run_Close_In_Progress_Re_Adoption
+     (Model : Flyology.Execution_Model;
+      Path  : Adoption_Path)
+   is
+      package Groups renames Flyology.Execution_Groups;
+
+      Original_Manager : aliased Connections.Server (Capacity => 1);
+      Candidate_Manager : aliased Connections.Server (Capacity => 1);
+      Owned : Connections.Connection;
+      Original, Original_Peer : Sockets.Socket_Type;
+      Candidate, Candidate_Peer : Sockets.Socket_Type;
+      Listener : Sockets.Socket_Type := Sockets.No_Socket;
+
+      type Atomic_Boolean is new Boolean with Atomic;
+      Spinning          : aliased Atomic_Boolean := False;
+      Stop_Spinning     : Atomic_Boolean := False;
+      Reader_Done       : aliased Atomic_Boolean := False;
+      Reader_Cancelled  : Atomic_Boolean := False;
+      Close_Done        : aliased Atomic_Boolean := False;
+      Close_OK          : Atomic_Boolean := False;
+      Attempt_Done      : aliased Atomic_Boolean := False;
+      Attempt_Rejected  : Atomic_Boolean := False;
+
+      protected Spinner_Control is
+         procedure Open;
+         entry Wait;
+      private
+         Opened : Boolean := False;
+      end Spinner_Control;
+
+      protected body Spinner_Control is
+         procedure Open is
+         begin
+            Opened := True;
+         end Open;
+
+         entry Wait when Opened is
+         begin
+            null;
+         end Wait;
+      end Spinner_Control;
+
+      procedure Wait_Until (Flag : not null access Atomic_Boolean) is
+         Deadline : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while not Flag.all loop
+            if Ada.Real_Time.Clock >= Deadline then
+               raise Program_Error with "concurrent close test stalled";
+            end if;
+            delay 0.001;
+         end loop;
+      end Wait_Until;
+   begin
+      Sockets.Create_Socket_Pair (Original, Original_Peer);
+      if Path = Take_Path then
+         Sockets.Create_Socket_Pair (Candidate, Candidate_Peer);
+      else
+         Candidate := Sockets.No_Socket;
+         Sockets.Create_Socket (Listener);
+         Sockets.Bind_Socket
+           (Listener,
+            (Family => Sockets.Family_Inet,
+             Addr   => Sockets.Loopback_Inet_Addr,
+             Port   => Sockets.Any_Port));
+         Sockets.Listen_Socket (Listener);
+         Sockets.Create_Socket (Candidate_Peer);
+         Sockets.Connect_Socket
+           (Candidate_Peer, Sockets.Get_Socket_Name (Listener));
+      end if;
+      Connections.Take (Original_Manager, Original, Owned);
+
+      declare
+         task Reader is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Reader;
+
+         task Spinner is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Spinner;
+
+         task Closer is
+            entry Start;
+         end Closer;
+
+         task Attempt is
+            pragma Task_Info (Model);
+            entry Start (Socket : in out Sockets.Socket_Type);
+         end Attempt;
+
+         task body Reader is
+            Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+         begin
+            Groups.Migrate (1);
+            begin
+               Owned.Receive_Exactly (Data);
+            exception
+               when Connections.Operation_Cancelled =>
+                  Reader_Cancelled := True;
+            end;
+            Reader_Done := True;
+         exception
+            when others =>
+               Reader_Done := True;
+         end Reader;
+
+         task body Spinner is
+         begin
+            Groups.Migrate (1);
+            Spinner_Control.Wait;
+            Spinning := True;
+            while not Stop_Spinning loop
+               null;
+            end loop;
+         end Spinner;
+
+         task body Closer is
+         begin
+            accept Start;
+            begin
+               Connections.Close (Owned);
+               Close_OK := True;
+            exception
+               when others =>
+                  null;
+            end;
+            Close_Done := True;
+         end Closer;
+
+         task body Attempt is
+         begin
+            if Model = Flyology.Lightweight_Task then
+               Groups.Migrate (2);
+            end if;
+            accept Start (Socket : in out Sockets.Socket_Type) do
+               begin
+                  if Path = Take_Path then
+                     Connections.Take (Candidate_Manager, Socket, Owned);
+                  else
+                     declare
+                        Peer_Address : Sockets.Sock_Addr_Type;
+                     begin
+                        Connections.Accept_Connection
+                          (Candidate_Manager,
+                           Listener,
+                           Owned,
+                           Peer_Address);
+                     end;
+                  end if;
+               exception
+                  when Program_Error =>
+                     Attempt_Rejected := True;
+                  when others =>
+                     null;
+               end;
+            end Start;
+            Attempt_Done := True;
+         exception
+            when others =>
+               Attempt_Done := True;
+         end Attempt;
+      begin
+         Await_Event_Waits (1, 1);
+         Spinner_Control.Open;
+         Wait_Until (Spinning'Access);
+
+         Closer.Start;
+         declare
+            Deadline : constant Ada.Real_Time.Time :=
+              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+         begin
+            while Connections.Is_Open (Owned) loop
+               if Ada.Real_Time.Clock >= Deadline then
+                  raise Program_Error with "close did not enter closing state";
+               end if;
+               delay 0.001;
+            end loop;
+         end;
+
+         --  Reader cannot release its lease while Spinner monopolizes group 1,
+         --  so Is_Open = False above denotes Closing, not a completed close.
+         Attempt.Start (Candidate);
+         Wait_Until (Attempt_Done'Access);
+         Stop_Spinning := True;
+         Wait_Until (Reader_Done'Access);
+         Wait_Until (Close_Done'Access);
+      end;
+
+      pragma Assert (Attempt_Rejected);
+      pragma Assert
+        ((Path = Take_Path and then Candidate /= Sockets.No_Socket)
+         or else (Path = Accept_Path
+                  and then Candidate = Sockets.No_Socket));
+      pragma Assert (Candidate_Manager.Active = 0);
+      pragma Assert (Reader_Cancelled);
+      pragma Assert (Close_OK);
+      pragma Assert (Original_Manager.Active = 0);
+      pragma Assert (not Connections.Is_Open (Owned));
+
+      Sockets.Close_Socket (Original_Peer);
+      if Candidate /= Sockets.No_Socket then
+         Sockets.Close_Socket (Candidate);
+      end if;
+      Sockets.Close_Socket (Candidate_Peer);
+      if Listener /= Sockets.No_Socket then
+         Sockets.Close_Socket (Listener);
+      end if;
+   end Run_Close_In_Progress_Re_Adoption;
+
+   procedure Run_Competing_Adopters
+     (Model : Flyology.Execution_Model)
+   is
+      package Groups renames Flyology.Execution_Groups;
+
+      First_Manager  : aliased Connections.Server (Capacity => 1);
+      Second_Manager : aliased Connections.Server (Capacity => 1);
+      Owned : Connections.Connection;
+      First, First_Peer : Sockets.Socket_Type;
+      Second, Second_Peer : Sockets.Socket_Type;
+
+      protected Control is
+         procedure Ready;
+         entry Wait_Ready;
+         procedure Open;
+         entry Gate;
+         procedure Finished (Won, Valid : Boolean);
+         entry Wait_Finished (Passed : out Boolean);
+      private
+         Ready_Count    : Natural := 0;
+         Opened         : Boolean := False;
+         Finished_Count : Natural := 0;
+         Winners        : Natural := 0;
+         All_Valid      : Boolean := True;
+      end Control;
+
+      protected body Control is
+         procedure Ready is
+         begin
+            Ready_Count := Ready_Count + 1;
+         end Ready;
+
+         entry Wait_Ready when Ready_Count = 2 is
+         begin
+            null;
+         end Wait_Ready;
+
+         procedure Open is
+         begin
+            Opened := True;
+         end Open;
+
+         entry Gate when Opened is
+         begin
+            null;
+         end Gate;
+
+         procedure Finished (Won, Valid : Boolean) is
+         begin
+            Finished_Count := Finished_Count + 1;
+            if Won then
+               Winners := Winners + 1;
+            end if;
+            All_Valid := All_Valid and Valid;
+         end Finished;
+
+         entry Wait_Finished (Passed : out Boolean)
+           when Finished_Count = 2
+         is
+         begin
+            Passed := All_Valid and Winners = 1;
+         end Wait_Finished;
+      end Control;
+   begin
+      Sockets.Create_Socket_Pair (First, First_Peer);
+      Sockets.Create_Socket_Pair (Second, Second_Peer);
+
+      declare
+         task First_Adopter is
+            pragma Task_Info (Model);
+         end First_Adopter;
+
+         task Second_Adopter is
+            pragma Task_Info (Model);
+         end Second_Adopter;
+
+         task body First_Adopter is
+            Won, Valid : Boolean := False;
+         begin
+            if Model = Flyology.Lightweight_Task then
+               Groups.Migrate (1);
+            end if;
+            Control.Ready;
+            Control.Gate;
+            begin
+               Connections.Take (First_Manager, First, Owned);
+               Won := True;
+               Valid := True;
+            exception
+               when Program_Error =>
+                  Valid := True;
+            end;
+            Control.Finished (Won, Valid);
+         exception
+            when others =>
+               Control.Finished (False, False);
+         end First_Adopter;
+
+         task body Second_Adopter is
+            Won, Valid : Boolean := False;
+         begin
+            if Model = Flyology.Lightweight_Task then
+               Groups.Migrate (2);
+            end if;
+            Control.Ready;
+            Control.Gate;
+            begin
+               Connections.Take (Second_Manager, Second, Owned);
+               Won := True;
+               Valid := True;
+            exception
+               when Program_Error =>
+                  Valid := True;
+            end;
+            Control.Finished (Won, Valid);
+         exception
+            when others =>
+               Control.Finished (False, False);
+         end Second_Adopter;
+
+         Passed : Boolean;
+      begin
+         Control.Wait_Ready;
+         Control.Open;
+         Control.Wait_Finished (Passed);
+         pragma Assert (Passed);
+      end;
+
+      if First = Sockets.No_Socket then
+         pragma Assert (Second /= Sockets.No_Socket);
+         pragma Assert (First_Manager.Active = 1);
+         pragma Assert (Second_Manager.Active = 0);
+      else
+         pragma Assert (Second = Sockets.No_Socket);
+         pragma Assert (First_Manager.Active = 0);
+         pragma Assert (Second_Manager.Active = 1);
+      end if;
+
+      Connections.Close (Owned);
+      pragma Assert (First_Manager.Active = 0);
+      pragma Assert (Second_Manager.Active = 0);
+      if First /= Sockets.No_Socket then
+         Sockets.Close_Socket (First);
+      end if;
+      if Second /= Sockets.No_Socket then
+         Sockets.Close_Socket (Second);
+      end if;
+      Sockets.Close_Socket (First_Peer);
+      Sockets.Close_Socket (Second_Peer);
+   end Run_Competing_Adopters;
+
    procedure Run_Exclusive_Waiters is
       Manager : aliased Connections.Server (Capacity => 1);
       Owned   : Connections.Connection;
@@ -426,6 +793,16 @@ begin
    Run_Close_Reuse (Flyology.Native_Task);
    Run_Cancellation_Close_Race (Flyology.Lightweight_Task);
    Run_Cancellation_Close_Race (Flyology.Native_Task);
+   Run_Close_In_Progress_Re_Adoption
+     (Flyology.Lightweight_Task, Take_Path);
+   Run_Close_In_Progress_Re_Adoption
+     (Flyology.Native_Task, Take_Path);
+   Run_Close_In_Progress_Re_Adoption
+     (Flyology.Lightweight_Task, Accept_Path);
+   Run_Close_In_Progress_Re_Adoption
+     (Flyology.Native_Task, Accept_Path);
+   Run_Competing_Adopters (Flyology.Lightweight_Task);
+   Run_Competing_Adopters (Flyology.Native_Task);
    Run_Exclusive_Waiters;
    Run_Timeout_Close_Reuse;
    Run_Timeout_Readiness_Races (Flyology.Lightweight_Task);
