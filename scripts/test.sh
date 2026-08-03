@@ -155,6 +155,7 @@ for test_main in \
   semantic_parity_smoke \
   stack_pool_smoke \
   stack_size_parity_smoke \
+  suspension_object_smoke \
   stall_watchdog_native_smoke \
   stall_watchdog_smoke \
   structured_server_smoke \
@@ -178,7 +179,8 @@ do
         "$project_root/tests/bin/$test_main"
       ;;
     *)
-      "$project_root/tests/bin/$test_main"
+      "$project_root/scripts/run-with-timeout.sh" 60 \
+        "$project_root/tests/bin/$test_main"
       ;;
   esac
 done

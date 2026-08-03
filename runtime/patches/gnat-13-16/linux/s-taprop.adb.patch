@@ -7,9 +7,15 @@
 +with System.Flyology.Linux_Models;
 +with System.Flyology.Scheduler;
 @@ -196,6 +197,108 @@
-    pragma Import
-      (C, GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
- 
+   pragma Import
+     (C, GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
+
++   function Flyology_Pthread_Stack_Min return C.size_t;
++   pragma Import
++     (C,
++      Flyology_Pthread_Stack_Min,
++      "flyology_linux_pthread_stack_min");
++
 +   function Lightweight_Initialize (Environment : System.Address) return C.int
 +     renames System.Flyology.Scheduler.Initialize;
 +
@@ -373,6 +379,16 @@
        --  Check whether both Dispatching_Domain and CPU are specified for
        --  the task, and the CPU value is not contained within the range of
        --  processors for the domain.
+@@ -928,1 +1171,9 @@
+-      Adjusted_Stack_Size := C.size_t (Stack_Size + Alternate_Stack_Size);
++      --  GNAT 13 and 14 use a 16 KiB minimum on every Linux target, while
++      --  glibc requires 128 KiB on AArch64. Clamp against the active libc so
++      --  pthread_attr_setstacksize cannot reject an otherwise valid native
++      --  task. This is a no-op when GNAT already requests enough space.
++      Adjusted_Stack_Size :=
++        C.size_t'Max
++          (C.size_t (Stack_Size + Alternate_Stack_Size),
++           Flyology_Pthread_Stack_Min);
 @@ -1054,6 +1297,13 @@
        Result : C.int;
  

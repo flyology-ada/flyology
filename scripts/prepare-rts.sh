@@ -259,6 +259,18 @@ patch_root="$project_root/runtime/patches/$patch_family"
 
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
+legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
+case "$compiler_release" in
+  13.2.2|14.1.3|14.2.1)
+    legacy_suspension_spec_patch="$patch_root/legacy/pre-15/a-sytaco.ads.patch"
+    ;;
+  15.1.2|15.3.1)
+    legacy_suspension_spec_patch="$patch_root/legacy/gnat-15/a-sytaco.ads.patch"
+    ;;
+  *)
+    legacy_suspension_spec_patch=
+    ;;
+esac
 
 source_include=$("$compiler" -print-file-name=adainclude)
 source_lib=$("$compiler" -print-file-name=adalib)
@@ -294,6 +306,14 @@ git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$task_state_patch"
+if [ "$compat_family" = gnat-legacy ]; then
+  git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
+    --directory="$generated_include" \
+    "$legacy_suspension_spec_patch"
+  git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
+    --directory="$generated_include" \
+    "$legacy_suspension_body_patch"
+fi
 
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
@@ -322,6 +342,11 @@ fi
   "$generated_include/s-flysch.adb" \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-tassta.adb"
+if [ "$compat_family" = gnat-legacy ]; then
+  "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
+    -I "$generated_include" \
+    "$generated_include/a-sytaco.adb"
+fi
 
 cp \
   s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-flycon.ali \
@@ -329,6 +354,9 @@ cp \
   s-flyfau.ali s-flfien.ali s-flypol.ali \
   s-flscpo.ali s-flysch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
+if [ "$compat_family" = gnat-legacy ]; then
+  cp a-sytaco.ali "$generated_lib/"
+fi
 if [ "$platform" = linux ]; then
   cp s-fllimo.ali "$generated_lib/"
 fi
@@ -348,6 +376,9 @@ ar -r "$generated_lib/libgnarl.a" \
   s-tassta.o \
   context_switch.o \
   platform.o
+if [ "$compat_family" = gnat-legacy ]; then
+  ar -r "$generated_lib/libgnarl.a" a-sytaco.o
+fi
 if [ "$platform" = linux ]; then
   ar -r "$generated_lib/libgnarl.a" s-fllimo.o
 fi

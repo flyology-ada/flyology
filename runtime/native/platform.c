@@ -20,6 +20,20 @@
 #if defined(__linux__)
 static int flyology_linux_selected_file_backend;
 
+/* GNAT 13 and 14 assume a 16 KiB pthread minimum on every Linux target.
+   glibc requires 128 KiB on AArch64, so reject-free native task creation
+   needs the target value supplied by the active C library. */
+size_t flyology_linux_pthread_stack_min(void) {
+#if defined(_SC_THREAD_STACK_MIN)
+    long value = sysconf(_SC_THREAD_STACK_MIN);
+
+    if (value > 0) {
+        return (size_t)value;
+    }
+#endif
+    return (size_t)PTHREAD_STACK_MIN;
+}
+
 void flyology_linux_note_file_backend(int backend) {
     __atomic_store_n(&flyology_linux_selected_file_backend, backend,
                      __ATOMIC_RELAXED);
