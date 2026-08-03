@@ -1085,6 +1085,7 @@ code:not(pre code) {
 .code-panel {
   position: relative;
   margin-block: 1.5rem;
+  margin-inline: 0;
   overflow: hidden;
   border: 1px solid var(--code-line);
   border-radius: var(--radius-md);
@@ -1181,6 +1182,7 @@ code:not(pre code) {
 
 .architecture-figure {
   margin-block: 2rem;
+  margin-inline: 0;
   padding: clamp(1rem, 4vw, 2.5rem);
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -1360,11 +1362,12 @@ code:not(pre code) {
   }
 
   .docs-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .toc {
     position: static;
+    min-width: 0;
   }
 
   .toc ol {
