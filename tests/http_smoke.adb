@@ -5,6 +5,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with GNAT.Sockets;
 with Flyology.Cancellation;
+with Flyology.Bounded_Channels;
 with Flyology.HTTP;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
@@ -25,6 +26,8 @@ with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Requests;
 with Flyology.HTTP.Server.Responses;
 with Flyology.HTTP.Server.Routing;
+with Flyology.HTTP.Server.SSE_Handlers;
+with Flyology.HTTP.Server.WebSocket_Handlers;
 with Flyology.IO;
 
 procedure HTTP_Smoke is
@@ -1787,6 +1790,234 @@ procedure HTTP_Smoke is
       end;
    end Check_Request_Response_Helpers;
 
+   procedure Check_Bounded_Channels is
+      package Channels is new Flyology.Bounded_Channels (Integer);
+      Item : Channels.Channel (Capacity => 1);
+      Value : Integer;
+      Available : Boolean;
+      Accepted  : Boolean;
+   begin
+      Item.Try_Send (1, Accepted);
+      pragma Assert (Accepted);
+      Item.Try_Send (2, Accepted);
+      pragma Assert (not Accepted);
+      Item.Receive (Value, Available);
+      pragma Assert (Available and then Value = 1);
+      Item.Send (2, Accepted);
+      pragma Assert (Accepted and then Item.Length = 1);
+      Item.Close;
+      Item.Receive (Value, Available);
+      pragma Assert (Available and then Value = 2);
+      Item.Receive (Value, Available);
+      pragma Assert (not Available and then Item.Is_Closed);
+      Item.Try_Send (3, Accepted);
+      pragma Assert (not Accepted);
+   end Check_Bounded_Channels;
+
+   procedure Check_High_Level_SSE is
+      package Applications renames Flyology.HTTP.Server.Applications;
+      package Routing is new Flyology.HTTP.Server.Routing (Boolean);
+      package SSE renames Flyology.HTTP.Server.SSE_Handlers;
+
+      Metrics : aliased Flyology.HTTP.Server.Metrics.In_Memory (4);
+
+      procedure Events
+        (State : in out Boolean;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+         Item     : SSE.Session (Capacity => 1);
+         Event    : SSE.Event_Value;
+         Accepted : Boolean;
+      begin
+         Event.Data := To_Unbounded_String ("first");
+         Event.Event := To_Unbounded_String ("update");
+         SSE.Try_Publish (Item, Event, Accepted);
+         pragma Assert (Accepted);
+         Event.Data := To_Unbounded_String ("overflow");
+         SSE.Try_Publish (Item, Event, Accepted);
+         pragma Assert (not Accepted);
+         SSE.Close (Item);
+         SSE.Run (X, Item, Metrics'Access);
+      end Events;
+
+      Routes : Routing.Router
+        (Capacity => 1, Slashes => Routing.Strict_Slashes);
+      State  : Boolean := False;
+      Peer   : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+      Wire : aliased Memory_Transport;
+   begin
+      Routing.Get
+        (Routes,
+         "/events", Events'Access, Name => "events",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade => Routing.Allow_SSE));
+      Wire.Input := To_Unbounded_String
+        ("GET /events HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF);
+      declare
+         Client : aliased HTTP_Server.Connection (Wire'Access);
+      begin
+         Routing.Serve (Routes, State, Client, Peer);
+      end;
+      declare
+         Output : constant String := To_String (Wire.Output);
+         Values : constant Flyology.HTTP.Server.Metrics.Snapshot :=
+           Metrics.Read;
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "text/event-stream") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "event: update") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "data: first") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "overflow") = 0);
+         pragma Assert
+           (Values.Events
+              (Flyology.HTTP.Server.Metrics.SSE_Connection) = 1);
+      end;
+   end Check_High_Level_SSE;
+
+   procedure Check_High_Level_WebSocket is
+      package Applications renames Flyology.HTTP.Server.Applications;
+      package Routing is new Flyology.HTTP.Server.Routing (Boolean);
+      package WebSockets renames
+        Flyology.HTTP.Server.WebSocket_Handlers;
+
+      Metrics : aliased Flyology.HTTP.Server.Metrics.In_Memory (4);
+      Close_Calls : Natural := 0;
+
+      function Frame (Opcode : Natural; Payload : String) return String is
+         Mask : constant String := "mask";
+         Result : Unbounded_String;
+      begin
+         Append (Result, Character'Val (16#80# + Opcode));
+         Append (Result, Character'Val (16#80# + Payload'Length));
+         Append (Result, Mask);
+         for Index in Payload'Range loop
+            Append
+              (Result,
+               Character'Val
+                 (Natural
+                    (Ada.Streams.Stream_Element
+                       (Character'Pos (Payload (Index)))
+                     xor Ada.Streams.Stream_Element
+                       (Character'Pos
+                          (Mask ((Index - Payload'First) mod 4 + 1))))));
+         end loop;
+         return To_String (Result);
+      end Frame;
+
+      procedure On_Open
+        (X    : in out Applications.Exchange;
+         Item : in out WebSockets.Session)
+      is
+         pragma Unreferenced (X);
+         Accepted : Boolean;
+      begin
+         WebSockets.Try_Publish
+           (Item,
+            (Kind => HTTP_Server.Text_Frame,
+             Data => To_Unbounded_String ("open")), Accepted);
+         pragma Assert (Accepted);
+      end On_Open;
+
+      procedure On_Message
+        (X    : in out Applications.Exchange;
+         Item : in out WebSockets.Session;
+         Kind : HTTP_Server.WebSocket_Data_Kind;
+         Data : String)
+      is
+         pragma Unreferenced (X);
+         Accepted : Boolean;
+      begin
+         WebSockets.Try_Publish
+           (Item,
+            (Kind => Kind, Data => To_Unbounded_String ("echo:" & Data)),
+            Accepted);
+         pragma Assert (Accepted);
+      end On_Message;
+
+      procedure On_Close
+        (X    : in out Applications.Exchange;
+         Item : in out WebSockets.Session)
+      is
+         pragma Unreferenced (X, Item);
+      begin
+         Close_Calls := Close_Calls + 1;
+      end On_Close;
+
+      procedure Chat
+        (State : in out Boolean;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+         Item : WebSockets.Session (Capacity => 2);
+      begin
+         WebSockets.Run
+           (X, Item, On_Open'Unrestricted_Access,
+            On_Message'Unrestricted_Access, On_Close'Unrestricted_Access,
+            Metric_Output => Metrics'Access);
+      end Chat;
+
+      Routes : Routing.Router
+        (Capacity => 1, Slashes => Routing.Strict_Slashes);
+      State  : Boolean := False;
+      Peer   : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+      Wire : aliased Memory_Transport;
+   begin
+      Routing.Get
+        (Routes,
+         "/chat", Chat'Access, Name => "chat",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade => Routing.Allow_WebSocket));
+      Wire.Input := To_Unbounded_String
+        ("GET /chat HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF
+         & Frame (1, "hi") & Frame (8, ""));
+      declare
+         Client : aliased HTTP_Server.Connection (Wire'Access);
+      begin
+         Routing.Serve (Routes, State, Client, Peer);
+      end;
+      declare
+         Output : constant String := To_String (Wire.Output);
+         Values : constant Flyology.HTTP.Server.Metrics.Snapshot :=
+           Metrics.Read;
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "101 Switching Protocols") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, Character'Val (16#81#) & Character'Val (4) & "open")
+            /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output,
+               Character'Val (16#81#) & Character'Val (7) & "echo:hi") /= 0);
+         pragma Assert (Close_Calls = 1);
+         pragma Assert
+           (Values.Events
+              (Flyology.HTTP.Server.Metrics.WebSocket_Connection) = 1);
+         pragma Assert
+           (Values.Events
+              (Flyology.HTTP.Server.Metrics.WebSocket_Message) = 3);
+      end;
+   end Check_High_Level_WebSocket;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -1808,4 +2039,7 @@ begin
    Check_Standard_Middleware;
    Check_Admission_Middleware;
    Check_Request_Response_Helpers;
+   Check_Bounded_Channels;
+   Check_High_Level_SSE;
+   Check_High_Level_WebSocket;
 end HTTP_Smoke;

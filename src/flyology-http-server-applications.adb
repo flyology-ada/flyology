@@ -1,4 +1,5 @@
 with Ada.Strings.Fixed;
+with Flyology.IO;
 
 package body Flyology.HTTP.Server.Applications is
 
@@ -408,6 +409,160 @@ package body Flyology.HTTP.Server.Applications is
          raise;
    end End_Stream;
 
+   procedure Begin_SSE (Item : in out Exchange) is
+   begin
+      if Item.Response_Value /= Not_Started then
+         raise Program_Error with "HTTP exchange response already started";
+      elsif Item.Upgrade_Value /= Allow_SSE then
+         raise Program_Error with "route does not permit SSE";
+      end if;
+      Flyology.HTTP.Server.Begin_SSE
+        (Item.Connection_Handle.all,
+         Extra_Headers => To_String (Item.Extra_Headers),
+         Timeout       => Remaining (Item),
+         Token         => Item.Token_Handle);
+      Item.Status_Value := 200;
+      Item.Response_Value := Streaming;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Begin_SSE;
+
+   procedure Send_SSE
+     (Item  : in out Exchange;
+      Data  : String;
+      Event : String := "";
+      Id    : String := "";
+      Retry : Natural := 0)
+   is
+   begin
+      if Item.Response_Value /= Streaming then
+         raise Program_Error with "HTTP exchange SSE stream is not active";
+      end if;
+      Flyology.HTTP.Server.Send_Event
+        (Item.Connection_Handle.all, Data, Event, Id, Retry,
+         Remaining (Item), Item.Token_Handle);
+      if Method (Item.Request_Handle.all) /= "HEAD" then
+         Item.Response_Length := Item.Response_Length + Data'Length;
+      end if;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Send_SSE;
+
+   procedure End_SSE (Item : in out Exchange) is
+   begin
+      if Item.Response_Value /= Streaming then
+         raise Program_Error with "HTTP exchange SSE stream is not active";
+      end if;
+      Flyology.HTTP.Server.End_SSE
+        (Item.Connection_Handle.all, Remaining (Item), Item.Token_Handle);
+      Item.Response_Value := Completed;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end End_SSE;
+
+   procedure Accept_WebSocket
+     (Item           : in out Exchange;
+      Protocol       : String := "";
+      Origin_Policy  : WebSocket_Origin_Policy := Reject_Browser_Origins;
+      Allowed_Origin : String := "")
+   is
+   begin
+      if Item.Response_Value /= Not_Started then
+         raise Program_Error with "HTTP exchange response already started";
+      elsif Item.Upgrade_Value /= Allow_WebSocket then
+         raise Program_Error with "route does not permit WebSocket upgrade";
+      end if;
+      Flyology.HTTP.Server.Accept_WebSocket
+        (Item.Connection_Handle.all, Item.Request_Handle.all, Protocol,
+         Origin_Policy, Allowed_Origin, Remaining (Item), Item.Token_Handle);
+      Item.Status_Value := 101;
+      Item.Response_Value := Upgraded;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Accept_WebSocket;
+
+   procedure Receive_WebSocket
+     (Item        : in out Exchange;
+      Kind        : out WebSocket_Data_Kind;
+      Data        : out Unbounded_String;
+      Closed      : out Boolean;
+      Max_Message : Natural := Max_WebSocket_Frame;
+      Timeout     : Duration := 30.0)
+   is
+      Left : constant Duration := Remaining (Item);
+      Wait : constant Duration :=
+        (if Left < 0.0 then Timeout
+         elsif Timeout < 0.0 then Left
+         else Duration'Min (Left, Timeout));
+   begin
+      if Item.Response_Value /= Upgraded then
+         raise Program_Error with "HTTP exchange WebSocket is not active";
+      end if;
+      Flyology.HTTP.Server.Receive_WebSocket
+        (Item.Connection_Handle.all, Kind, Data, Closed, Max_Message,
+         Wait, Item.Token_Handle);
+   exception
+      when Flyology.IO.Timeout_Error =>
+         raise;
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Receive_WebSocket;
+
+   procedure Send_WebSocket
+     (Item : in out Exchange;
+      Kind : WebSocket_Data_Kind;
+      Data : String)
+   is
+   begin
+      if Item.Response_Value /= Upgraded then
+         raise Program_Error with "HTTP exchange WebSocket is not active";
+      end if;
+      Flyology.HTTP.Server.Send_WebSocket
+        (Item.Connection_Handle.all, Kind, Data, Remaining (Item),
+         Item.Token_Handle);
+      Item.Response_Length := Item.Response_Length + Data'Length;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Send_WebSocket;
+
+   procedure Close_WebSocket
+     (Item   : in out Exchange;
+      Code   : Positive := 1_000;
+      Reason : String := "")
+   is
+   begin
+      if Item.Response_Value /= Upgraded then
+         raise Program_Error with "HTTP exchange WebSocket is not active";
+      end if;
+      Flyology.HTTP.Server.Close_WebSocket
+        (Item.Connection_Handle.all, Code, Reason, Remaining (Item),
+         Item.Token_Handle);
+      Item.Response_Value := Completed;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Close_WebSocket;
+
+   procedure Complete_WebSocket (Item : in out Exchange) is
+   begin
+      if Item.Response_Value /= Upgraded then
+         raise Program_Error with "HTTP exchange WebSocket is not active";
+      end if;
+      Item.Response_Value := Completed;
+   end Complete_WebSocket;
+
    function Response (Item : Exchange) return Response_State is
      (Item.Response_Value);
 
@@ -461,7 +616,8 @@ package body Flyology.HTTP.Server.Applications is
       Authentication  : Authentication_Mode;
       CORS_Policy     : Natural;
       Concurrency     : Natural;
-      Rate_Per_Second : Natural)
+      Rate_Per_Second : Natural;
+      Upgrade         : Upgrade_Mode)
    is
    begin
       Item.Route_Value := To_Unbounded_String (Name);
@@ -471,6 +627,7 @@ package body Flyology.HTTP.Server.Applications is
       Item.CORS_Policy_Value := CORS_Policy;
       Item.Concurrency_Value := Concurrency;
       Item.Rate_Value := Rate_Per_Second;
+      Item.Upgrade_Value := Upgrade;
       Item.Parameter_Count := 0;
       Item.Parameters := (others => (Null_Unbounded_String,
                                      Null_Unbounded_String));

@@ -744,7 +744,8 @@ package body Flyology.HTTP.Server.Routing is
          X.Configure_Route
            (To_String (Route.Name), Path_Value, Route.Policy.Body_Handling,
             Route.Policy.Authentication, Route.Policy.CORS_Policy,
-            Route.Policy.Concurrency, Route.Policy.Rate_Per_Second);
+            Route.Policy.Concurrency, Route.Policy.Rate_Per_Second,
+            Route.Policy.Upgrade);
          if not Match_Path
            (To_String (Route.Pattern), Path_Value,
             Item.Slashes = Ignore_Slashes, Capture => True, X => X'Access)

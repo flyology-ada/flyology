@@ -42,10 +42,17 @@ package Flyology.HTTP.Server.Routing is
      Flyology.HTTP.Server.Applications.Required_Authentication;
 
    --  Upgrade permission for higher-level endpoint adapters.
-   --  @enum No_Upgrade Ordinary HTTP response only
-   --  @enum Allow_SSE SSE lifecycle is permitted
-   --  @enum Allow_WebSocket WebSocket lifecycle is permitted
-   type Upgrade_Policy is (No_Upgrade, Allow_SSE, Allow_WebSocket);
+   subtype Upgrade_Policy is
+     Flyology.HTTP.Server.Applications.Upgrade_Mode;
+   --  Ordinary HTTP responses only.
+   No_Upgrade : constant Upgrade_Policy :=
+     Flyology.HTTP.Server.Applications.No_Upgrade;
+   --  Permit an SSE lifecycle on the route.
+   Allow_SSE : constant Upgrade_Policy :=
+     Flyology.HTTP.Server.Applications.Allow_SSE;
+   --  Permit a WebSocket lifecycle on the route.
+   Allow_WebSocket : constant Upgrade_Policy :=
+     Flyology.HTTP.Server.Applications.Allow_WebSocket;
 
    --  Route-local policy consumed incrementally by optional toolkit layers.
    --  A zero concurrency or rate value means unlimited. CORS_Policy is an

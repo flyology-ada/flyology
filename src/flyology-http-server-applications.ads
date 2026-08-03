@@ -27,6 +27,12 @@ package Flyology.HTTP.Server.Applications is
    type Authentication_Mode is
      (No_Authentication, Optional_Authentication, Required_Authentication);
 
+   --  Route-selected application protocol upgrade.
+   --  @enum No_Upgrade Ordinary HTTP responses only
+   --  @enum Allow_SSE Server-sent event lifecycle is permitted
+   --  @enum Allow_WebSocket WebSocket lifecycle is permitted
+   type Upgrade_Mode is (No_Upgrade, Allow_SSE, Allow_WebSocket);
+
    --  High-level response lifecycle observed through this exchange.
    --  @enum Not_Started No response bytes have been written
    --  @enum Completed One complete fixed response was written
@@ -309,6 +315,78 @@ package Flyology.HTTP.Server.Applications is
    --  @param Item Exchange with an active streaming response
    procedure End_Stream (Item : in out Exchange);
 
+   --  Start a server-sent event response through the raw SSE engine while
+   --  retaining Exchange response observation.
+   --  @param Item Request exchange
+   procedure Begin_SSE (Item : in out Exchange);
+
+   --  Send one SSE event with transport backpressure.
+   --  @param Item Exchange with an active SSE response
+   --  @param Data Event data
+   --  @param Event Optional event type
+   --  @param Id Optional event id
+   --  @param Retry Optional retry milliseconds
+   procedure Send_SSE
+     (Item  : in out Exchange;
+      Data  : String;
+      Event : String := "";
+      Id    : String := "";
+      Retry : Natural := 0);
+
+   --  Complete an active SSE response.
+   --  @param Item Request exchange
+   procedure End_SSE (Item : in out Exchange);
+
+   --  Upgrade through the raw WebSocket engine while retaining Exchange
+   --  response observation. The calling handler remains the sole writer.
+   --  @param Item Request exchange
+   --  @param Protocol Optional selected subprotocol
+   --  @param Origin_Policy Browser-origin policy
+   --  @param Allowed_Origin Exact origin for Require_Exact_Origin
+   procedure Accept_WebSocket
+     (Item           : in out Exchange;
+      Protocol       : String := "";
+      Origin_Policy  : WebSocket_Origin_Policy := Reject_Browser_Origins;
+      Allowed_Origin : String := "");
+
+   --  Receive one complete WebSocket message through the borrowed connection.
+   --  @param Item Upgraded request exchange
+   --  @param Kind Text or binary message kind
+   --  @param Data Complete message payload
+   --  @param Closed True when the peer completed the close handshake
+   --  @param Max_Message Maximum retained/reassembled message bytes
+   --  @param Timeout Receive quantum capped by the request deadline
+   procedure Receive_WebSocket
+     (Item        : in out Exchange;
+      Kind        : out WebSocket_Data_Kind;
+      Data        : out Ada.Strings.Unbounded.Unbounded_String;
+      Closed      : out Boolean;
+      Max_Message : Natural := Max_WebSocket_Frame;
+      Timeout     : Duration := 30.0);
+
+   --  Send one WebSocket message from the sole connection-owner handler.
+   --  @param Item Upgraded request exchange
+   --  @param Kind Text or binary message kind
+   --  @param Data Message payload
+   procedure Send_WebSocket
+     (Item : in out Exchange;
+      Kind : WebSocket_Data_Kind;
+      Data : String);
+
+   --  Complete an upgraded WebSocket with a normal close frame.
+   --  @param Item Upgraded request exchange
+   --  @param Code RFC 6455 close status
+   --  @param Reason Optional UTF-8 close reason
+   procedure Close_WebSocket
+     (Item   : in out Exchange;
+      Code   : Positive := 1_000;
+      Reason : String := "");
+
+   --  Record a peer-initiated WebSocket close already completed by the raw
+   --  protocol engine. Intended for lifecycle adapters.
+   --  @param Item Upgraded request exchange
+   procedure Complete_WebSocket (Item : in out Exchange);
+
    --  Return the high-level response lifecycle.
    --  @param Item Request exchange
    --  @return Current response state
@@ -349,6 +427,7 @@ package Flyology.HTTP.Server.Applications is
    --  @param CORS_Policy Bounded CORS registry slot
    --  @param Concurrency Route concurrency limit
    --  @param Rate_Per_Second Route per-client request rate
+   --  @param Upgrade Permitted application protocol lifecycle
    procedure Configure_Route
      (Item            : in out Exchange;
       Name            : String;
@@ -357,7 +436,8 @@ package Flyology.HTTP.Server.Applications is
       Authentication  : Authentication_Mode;
       CORS_Policy     : Natural;
       Concurrency     : Natural;
-      Rate_Per_Second : Natural);
+      Rate_Per_Second : Natural;
+      Upgrade         : Upgrade_Mode);
 
    --  Append one decoded route parameter. Duplicate names or capacity excess
    --  raise Program_Error. Intended for Flyology router packages.
@@ -401,6 +481,7 @@ private
       CORS_Policy_Value : Natural := 0;
       Concurrency_Value : Natural := 0;
       Rate_Value        : Natural := 0;
+      Upgrade_Value     : Upgrade_Mode := No_Upgrade;
       Extra_Headers     : Unbounded_String;
       Response_Value    : Response_State := Not_Started;
       Status_Value      : Natural := 0;
