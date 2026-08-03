@@ -1,5 +1,7 @@
 with Ada.Streams;
+with Ada.Task_Identification;
 with Ada.Text_IO;
+with Ada.Unchecked_Conversion;
 with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.Connections;
@@ -11,6 +13,20 @@ with System.Tasking;
 procedure Connection_Lifecycle_Smoke is
    package Connections renames Flyology.IO.Connections;
    use type GNAT.Sockets.Socket_Type;
+
+   function To_Internal_Task is new Ada.Unchecked_Conversion
+     (Ada.Task_Identification.Task_Id, System.Tasking.Task_Id);
+
+   type Second_Phase is
+     (Receiving,
+      Receive_Interrupted,
+      Reporting_Entered,
+      Reporting_Done,
+      Returned_From_Report,
+      Closing,
+      Closed);
+   Second_Phase_State : Second_Phase := Receiving with Atomic;
+   Main_Observed_Second : Boolean := False with Atomic;
 
    Manager : aliased Connections.Server (Capacity => 1);
    Token   : aliased Connections.Cancellation_Token;
@@ -51,8 +67,10 @@ procedure Connection_Lifecycle_Smoke is
 
       procedure Second_Finished (Was_Cancelled : Boolean) is
       begin
+         Second_Phase_State := Reporting_Entered;
          All_OK := All_OK and Was_Cancelled;
          Second_Done := True;
+         Second_Phase_State := Reporting_Done;
       end Second_Finished;
 
       procedure Third_Admitted is
@@ -125,7 +143,12 @@ begin
             when Connections.Operation_Cancelled =>
                Was_Cancelled := True;
          end;
+         Second_Phase_State := Receive_Interrupted;
          State.Second_Finished (Was_Cancelled);
+         Second_Phase_State := Returned_From_Report;
+         Second_Phase_State := Closing;
+         Owned.Close;
+         Second_Phase_State := Closed;
       end Second;
 
       task body Completion_Probe is
@@ -136,8 +159,24 @@ begin
          Parent_Wait  : Natural;
          Parent_Awake : Natural;
          Parent_Alive : Natural;
+         Second_Task : System.Tasking.Task_Id;
+         Second_State : System.Tasking.Task_States := System.Tasking.Runnable;
+         Second_Wait  : Natural := 0;
+         Second_Awake : Natural := 0;
+         Second_Alive : Natural := 0;
+         Second_Still_Alive : Boolean;
       begin
          delay 0.500;
+         Second_Still_Alive := not Second'Terminated;
+         if Second_Still_Alive then
+            Second_Task := To_Internal_Task (Second'Identity);
+            System.Task_Primitives.Operations.Write_Lock (Second_Task);
+            Second_State := Second_Task.Common.State;
+            Second_Wait := Second_Task.Common.Wait_Count;
+            Second_Awake := Second_Task.Awake_Count;
+            Second_Alive := Second_Task.Alive_Count;
+            System.Task_Primitives.Operations.Unlock (Second_Task);
+         end if;
          System.Task_Primitives.Operations.Write_Lock (Parent);
          Parent_State := Parent.Common.State;
          Parent_Wait := Parent.Common.Wait_Count;
@@ -147,7 +186,18 @@ begin
          Ada.Text_IO.Put_Line
            ("issue18: first_terminated=" & Boolean'Image (First'Terminated)
             & " second_terminated=" & Boolean'Image (Second'Terminated)
-            & " manager_active=" & Natural'Image (Manager.Active));
+            & " manager_active=" & Natural'Image (Manager.Active)
+            & " main_observed_second=" & Boolean'Image (Main_Observed_Second)
+            & " second_phase="
+            & Second_Phase'Image (Second_Phase_State));
+         if Second_Still_Alive then
+            Ada.Text_IO.Put_Line
+              ("issue18: second_state="
+               & System.Tasking.Task_States'Image (Second_State)
+               & " wait=" & Natural'Image (Second_Wait)
+               & " awake=" & Natural'Image (Second_Awake)
+               & " alive=" & Natural'Image (Second_Alive));
+         end if;
          Ada.Text_IO.Put_Line
            ("issue18: parent_state="
             & System.Tasking.Task_States'Image (Parent_State)
@@ -177,6 +227,7 @@ begin
       State.Wait_Second;
       Token.Request;
       State.Wait_Second_Finished;
+      Main_Observed_Second := True;
    end;
 
    pragma Assert (Manager.Active = 0);
