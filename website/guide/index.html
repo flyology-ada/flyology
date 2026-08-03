@@ -53,8 +53,8 @@
           <p class="toc-title">On this page</p>
           <ol>
             <li><a href="#requirements">Requirements</a></li>
-            <li><a href="#build">Build the crate</a></li>
-            <li><a href="#prepare">Prepare the runtime</a></li>
+            <li><a href="#build">Add the crate</a></li>
+            <li><a href="#prepare">Build with the runtime</a></li>
             <li><a href="#designate">Designate a task</a></li>
             <li><a href="#stacks">Size task stacks</a></li>
             <li><a href="#groups">Choose a group</a></li>
@@ -91,41 +91,46 @@
 
           <section id="build">
             <span class="step-label">STEP 02</span>
-            <h2>Build the public library.</h2>
-            <p>Clone the repository, let Alire select a supported toolchain, and build the crate. Applications must link against a prepared runtime; stock GNARL alone is not sufficient.</p>
+            <h2>Add Flyology to an Alire application.</h2>
+            <p>Flyology is temporarily published through a fork of the Alire community index. Create an application, register that index, and add the crate as a normal dependency.</p>
             <figure class="code-panel">
               <figcaption>shell</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>git clone https://github.com/flyology-ada/flyology.git
-cd flyology
-alr build</code></pre>
+              <pre><code>alr init --bin flyology_app
+cd flyology_app
+alr index --add=git+https://github.com/yrashk/alire-index.git#codex/flyology-test-release \
+  --name=flyology_fork
+alr with flyology</code></pre>
             </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>The extra index is a testing channel, not a community-index release. Remove it when Flyology is available from the standard Alire index.</p>
+            </aside>
           </section>
 
           <section id="prepare">
             <span class="step-label">STEP 03</span>
-            <h2>Prepare a version-matched runtime.</h2>
-            <p>The preparation script copies the active compiler's installed runtime sources into ignored build output, applies the exact patch family, compiles Flyology policy into the runtime, and builds a static RTS.</p>
+            <h2>Build with a version-matched runtime.</h2>
+            <p>The first build runs Flyology's Alire post-fetch action. It copies the active compiler's installed runtime sources into dependency build output, applies the exact patch family, builds the RTS, and exports a GPR configuration that selects it. Stock GNARL is not used for the application link.</p>
             <figure class="code-panel">
-              <figcaption>native default</figcaption>
+              <figcaption>build the application</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>./scripts/prepare-rts.sh</code></pre>
+              <pre><code>alr build</code></pre>
             </figure>
             <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock OS-thread execution, and no event machinery starts until a lightweight task is activated.</p>
             <figure class="code-panel">
               <figcaption>lightweight project default with four shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>FLYOLOGY_DEFAULT=lightweight \
-FLYOLOGY_LOOP_POOL_SIZE=4 \
-  ./scripts/prepare-rts.sh</code></pre>
+              <pre><code>alr exec -- sh -c \
+  'FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=4 "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh"'
+alr build</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p>Preparation settings are compiled into the RTS. They are not read dynamically by the application at startup; after changing one, prepare the RTS again and relink the application with that runtime.</p>
+              <p>Preparation settings are compiled into the RTS. They are not read dynamically by the application at startup; after changing one, rerun the preparation command and <code>alr build</code>.</p>
             </aside>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>FLYOLOGY_RTS_DIR</code></dt><dd>Writes the generated runtime outside the default <code>build/rts</code>. Give each materially different configuration its own directory when comparing builds.</dd></div>
                 <div class="decision-row"><dt><code>FLYOLOGY_DEFAULT</code></dt><dd>Selects <code>native</code> or <code>lightweight</code> for tasks that do not carry an explicit designation.</dd></div>
                 <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement. Groups and their OS threads still start lazily.</dd></div>
                 <div class="decision-row"><dt>Loop placement</dt><dd><code>FLYOLOGY_LOOP_PLACEMENT</code> and <code>FLYOLOGY_LOOP_PLACEMENT_MAP</code> request Linux strict logical-CPU binding or a supported Darwin advisory tag. This places loop threads; it does not change task-to-group assignment.</dd></div>
@@ -150,11 +155,9 @@ end Worker;</code></pre>
             </figure>
             <p>Explicit <code>Flyology.Native_Task</code> and <code>Flyology.Lightweight_Task</code> values override the prepared project default. <code>Flyology.Project_Default</code> requests that default explicitly, which is useful on discriminated task types.</p>
             <figure class="code-panel">
-              <figcaption>build the application with the prepared RTS</figcaption>
+              <figcaption>rebuild after changing the application</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>alr exec -- gprbuild \
-  --RTS="$PWD/build/rts" \
-  -P path/to/application.gpr</code></pre>
+              <pre><code>alr build</code></pre>
             </figure>
           </section>
 
