@@ -189,6 +189,7 @@ for test_main in \
   tls_smoke \
   tls_state_model \
   tcp_native_smoke \
+  wake_source_state_model \
   wait_any_smoke
 do
   if [ "$test_main" = descriptor_ownership_smoke ] || \

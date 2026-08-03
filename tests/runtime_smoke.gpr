@@ -69,6 +69,7 @@ project Runtime_Smoke is
       "tls_smoke.adb",
       "tls_state_model.adb",
       "tcp_native_smoke.adb",
+      "wake_source_state_model.adb",
       "wait_any_smoke.adb");
    for Create_Missing_Dirs use "True";
 

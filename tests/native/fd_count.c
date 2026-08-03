@@ -18,3 +18,15 @@ int flyology_test_open_fd_count(void) {
 int flyology_test_fd_is_open(int fd) {
     return fcntl(fd, F_GETFD) >= 0;
 }
+
+int flyology_test_fd_is_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL);
+
+    return flags >= 0 && (flags & O_NONBLOCK) != 0;
+}
+
+int flyology_test_fd_is_close_on_exec(int fd) {
+    int flags = fcntl(fd, F_GETFD);
+
+    return flags >= 0 && (flags & FD_CLOEXEC) != 0;
+}

@@ -117,6 +117,7 @@ timer_heap_smoke
 tls_smoke
 tls_state_model
 tcp_native_smoke
+wake_source_state_model
 wait_any_smoke'
 
 set --
