@@ -1,4 +1,5 @@
 with Ada.Command_Line;
+with Ada.Streams;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with GNAT.Sockets;
@@ -10,6 +11,8 @@ with Flyology.IO.Connections;
 with Flyology.IO.Structured_Servers;
 
 procedure HTTP_Server is
+   use type Ada.Streams.Stream_Element_Offset;
+
    package HTTP_Engine renames Flyology.HTTP.Server;
    package Sockets renames GNAT.Sockets;
    package Owned renames Flyology.IO.Connections;
@@ -55,6 +58,8 @@ procedure HTTP_Server is
 
       type Context is limited record
          Requests : Request_Counter (Request_Goal);
+         Budget   : aliased HTTP_Engine.Ingress_Budget
+           (Limit => 64 * 1_024 * 1_024);
       end record;
 
       procedure Handle
@@ -95,6 +100,31 @@ procedure HTTP_Server is
                end loop;
                HTTP_Engine.End_SSE
                  (Item, Timeout => 5.0, Token => Cancellation);
+            elsif HTTP_Engine.Target (Value) = "/upload"
+              and then HTTP_Engine.Method (Value) = "POST"
+            then
+               declare
+                  Buffer   : Ada.Streams.Stream_Element_Array (1 .. 16 * 1_024);
+                  Last     : Ada.Streams.Stream_Element_Offset;
+                  Finished : Boolean;
+                  Total    : Natural := 0;
+               begin
+                  HTTP_Engine.Accept_Body (Item, Cancellation);
+                  loop
+                     HTTP_Engine.Read_Body
+                       (Item, Buffer, Last, Finished, Cancellation);
+                     if Last >= Buffer'First then
+                        Total := Total
+                          + Natural (Last - Buffer'First + 1);
+                     end if;
+                     exit when Finished;
+                  end loop;
+                  HTTP_Engine.Respond
+                    (Item, 200, "text/plain; charset=utf-8",
+                     "received" & Natural'Image (Total) & " bytes"
+                     & ASCII.LF,
+                     Timeout => 5.0, Token => Cancellation);
+               end;
             elsif HTTP_Engine.Target (Value) = "/websocket" then
                HTTP_Engine.Accept_WebSocket
                  (Item, Value, Timeout => 5.0, Token => Cancellation);
@@ -122,7 +152,11 @@ procedure HTTP_Server is
          package Handler is new
            Flyology.HTTP.Server.Connection_Handlers (Route);
       begin
-         Handler.Serve (Client, Timeout => 5.0, Token => Cancellation);
+         HTTP_Engine.Configure_Ingress_Budget
+           (Client, State.Budget'Access);
+         Handler.Serve
+           (Client, Timeout => 5.0, Buffer_Body => False,
+            Token => Cancellation);
       end Handle;
 
       package Server_Instance is new Flyology.IO.Structured_Servers

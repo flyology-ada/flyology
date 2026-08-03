@@ -9,6 +9,7 @@ package body Flyology.HTTP.Server.Connection_Handlers is
      (Item               : in out Flyology.HTTP.Server.Connection;
       Timeout            : Duration := 30.0;
       Max_Body           : Natural := Max_Request_Body;
+      Buffer_Body        : Boolean := True;
       Max_Requests       : Natural := 1_000;
       Max_Connection_Age : Duration := 300.0;
       Token              : access Flyology.Cancellation.Token := null)
@@ -49,15 +50,40 @@ package body Flyology.HTTP.Server.Connection_Handlers is
             end;
          end if;
       end Best_Effort_Bad_Request;
+
+      procedure Best_Effort_Overloaded is
+      begin
+         if Item.State = Reading_HTTP and then not Item.Response_Begun then
+            begin
+               Respond
+                 (Item, 503, "text/plain; charset=utf-8",
+                  "server ingress budget exhausted" & Character'Val (10),
+                  Extra_Headers => "Retry-After: 1" & Character'Val (13)
+                    & Character'Val (10),
+                  Close => True, Timeout => Time_Left, Token => Token);
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+      end Best_Effort_Overloaded;
    begin
       while Item.State = Reading_HTTP loop
          if Max_Connection_Age >= 0.0 and then Time_Left <= 0.0 then
             return;
          end if;
          begin
-            Read_Request
-              (Item, Value, Closed, Time_Left, Max_Body, Token);
+            if Buffer_Body then
+               Read_Request
+                 (Item, Value, Closed, Time_Left, Max_Body, Token);
+            else
+               Read_Request_Head
+                 (Item, Value, Closed, Time_Left, Max_Body, Token);
+            end if;
          exception
+            when Resource_Exhausted =>
+               Best_Effort_Overloaded;
+               return;
             when Protocol_Error =>
                Best_Effort_Bad_Request;
                return;
@@ -77,6 +103,9 @@ package body Flyology.HTTP.Server.Connection_Handlers is
          begin
             Handle (Item, Value);
          exception
+            when Resource_Exhausted =>
+               Best_Effort_Overloaded;
+               return;
             when Protocol_Error =>
                Best_Effort_Bad_Request;
                return;

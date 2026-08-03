@@ -1,5 +1,4 @@
 with Ada.Characters.Handling;
-with Ada.Real_Time;
 with Ada.Strings.Fixed;
 with Interfaces;
 with Flyology.IO;
@@ -12,6 +11,107 @@ package body Flyology.HTTP.Server is
    use type Interfaces.Unsigned_64;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
+
+   protected body Ingress_Budget_State is
+      procedure Try_Reserve (Bytes : Natural; Granted : out Boolean) is
+      begin
+         Granted := Bytes <= Limit - Used;
+         if Granted then
+            Used := Used + Bytes;
+            High_Water := Natural'Max (High_Water, Used);
+         else
+            if Denied < Natural'Last then
+               Denied := Denied + 1;
+            end if;
+         end if;
+      end Try_Reserve;
+
+      procedure Release (Bytes : Natural) is
+      begin
+         if Bytes > Used then
+            raise Program_Error with "HTTP ingress budget underflow";
+         end if;
+         Used := Used - Bytes;
+      end Release;
+
+      function Current return Ingress_Budget_Snapshot is
+        ((Limit   => Limit,
+          Current => Used,
+          Peak    => High_Water,
+          Denials => Denied));
+   end Ingress_Budget_State;
+
+   procedure Try_Reserve
+     (Item : in out Ingress_Budget;
+      Bytes : Natural;
+      Granted : out Boolean)
+   is
+   begin
+      Item.State.Try_Reserve (Bytes, Granted);
+   end Try_Reserve;
+
+   procedure Release (Item : in out Ingress_Budget; Bytes : Natural) is
+   begin
+      Item.State.Release (Bytes);
+   end Release;
+
+   function Current (Item : Ingress_Budget) return Ingress_Budget_Snapshot is
+     (Item.State.Current);
+
+   Default_Ingress_Budget : aliased Ingress_Budget
+     (Limit => Default_Ingress_Budget_Bytes);
+
+   procedure Release_Buffered (Item : in out Connection) is
+   begin
+      if Item.Buffered_Bytes > 0 then
+         if Item.Reservation_Budget /= null then
+            Release (Item.Reservation_Budget.all, Item.Buffered_Bytes);
+         end if;
+      end if;
+      Item.Buffered_Bytes := 0;
+      Item.Reservation_Budget := null;
+   end Release_Buffered;
+
+   procedure Reserve_Buffered
+     (Item : in out Connection;
+      Bytes_To_Reserve : Natural)
+   is
+      Granted : Boolean;
+      Selected : constant Ingress_Budget_Access :=
+        (if Item.Budget_Handle = null
+         then Default_Ingress_Budget'Access
+         else Item.Budget_Handle);
+   begin
+      Release_Buffered (Item);
+      if Bytes_To_Reserve = 0 then
+         return;
+      end if;
+      Try_Reserve
+        (Selected.all, Bytes_To_Reserve, Granted);
+      if not Granted then
+         raise Resource_Exhausted with
+           "HTTP server ingress byte budget exhausted";
+      end if;
+      Item.Buffered_Bytes := Bytes_To_Reserve;
+      Item.Reservation_Budget := Selected;
+   end Reserve_Buffered;
+
+   overriding procedure Finalize (Item : in out Connection) is
+   begin
+      Release_Buffered (Item);
+   end Finalize;
+
+   procedure Configure_Ingress_Budget
+     (Item   : in out Connection;
+      Budget : not null access Ingress_Budget)
+   is
+   begin
+      if Item.Buffered_Bytes /= 0 then
+         raise Program_Error with
+           "cannot replace an active HTTP ingress budget";
+      end if;
+      Item.Budget_Handle := Budget.all'Unchecked_Access;
+   end Configure_Ingress_Budget;
 
    function Bytes (Text : String) return Ada.Streams.Stream_Element_Array is
       Result : Ada.Streams.Stream_Element_Array
@@ -194,6 +294,9 @@ package body Flyology.HTTP.Server is
    begin
       if Chunk = 0 then
          raise Protocol_Error with "HTTP protocol buffer limit exceeded";
+      elsif Timeout >= 0.0 and then Elapsed >= Timeout then
+         raise Flyology.IO.Timeout_Error with
+           "HTTP request deadline expired";
       end if;
       declare
          Buffer : Ada.Streams.Stream_Element_Array
@@ -490,73 +593,7 @@ package body Flyology.HTTP.Server is
       return Result;
    end Parse_Chunk_Size;
 
-   procedure Read_Chunked_Body
-     (Item    : in out Connection;
-      Content_Value : out Unbounded_String;
-      Started : Ada.Real_Time.Time;
-      Timeout : Duration;
-      Maximum_Body : Natural;
-      Token   : access Flyology.Cancellation.Token)
-   is
-      Line          : Unbounded_String;
-      Chunk_Size    : Natural;
-      Trailer_Bytes : Natural := 0;
-      Closed        : Boolean;
-   begin
-      Content_Value := Null_Unbounded_String;
-      loop
-         Read_Line
-           (Item, Line, Started, Timeout, Token, Maximum => 1_024);
-         Chunk_Size := Parse_Chunk_Size (To_String (Line), Maximum_Body);
-         exit when Chunk_Size = 0;
-         if Length (Content_Value) > Maximum_Body - Chunk_Size then
-            raise Protocol_Error with "HTTP request body is too large";
-         end if;
-         while Length (Item.Pending) < Chunk_Size + 2 loop
-            Receive_More
-              (Item, Closed, Started, Timeout, Token,
-               Maximum => Chunk_Size + 2);
-            if Closed then
-               raise Protocol_Error with "peer closed inside HTTP chunk";
-            end if;
-         end loop;
-         declare
-            Available : constant String := To_String (Item.Pending);
-         begin
-            if Available (Chunk_Size + 1 .. Chunk_Size + 2) /= CRLF then
-               raise Protocol_Error with "invalid HTTP chunk terminator";
-            end if;
-            Append
-              (Content_Value, Available (Available'First .. Chunk_Size));
-         end;
-         Consume (Item, Chunk_Size + 2);
-      end loop;
-
-      loop
-         if Trailer_Bytes > Max_Header_Bytes - 2 then
-            raise Protocol_Error with "HTTP trailers are too large";
-         end if;
-         Read_Line
-           (Item, Line, Started, Timeout, Token,
-            Maximum => Max_Header_Bytes - Trailer_Bytes - 2);
-         exit when Length (Line) = 0;
-         Trailer_Bytes := Trailer_Bytes + Length (Line) + 2;
-         Validate_Header_Block (To_String (Line));
-         declare
-            Text  : constant String := To_String (Line);
-            Colon : constant Natural := Ada.Strings.Fixed.Index (Text, ":");
-            Name  : constant String := Lower (Text (Text'First .. Colon - 1));
-         begin
-            if Name in "connection" | "content-length" | "host" | "trailer"
-                       | "transfer-encoding" | "upgrade"
-            then
-               raise Protocol_Error with "forbidden HTTP trailer field";
-            end if;
-         end;
-      end loop;
-   end Read_Chunked_Body;
-
-   procedure Read_Request
+   procedure Read_Request_Head
      (Item        : in out Connection;
       Value       : out Request;
       Peer_Closed : out Boolean;
@@ -574,9 +611,24 @@ package body Flyology.HTTP.Server is
    begin
       if Item.State /= Reading_HTTP then
          raise Program_Error with "HTTP connection is not reading requests";
+      elsif not Item.Body_Done then
+         raise Program_Error with
+           "previous HTTP request body has not been consumed";
       end if;
+      Release_Buffered (Item);
       Item.Response_Begun := False;
       Peer_Closed := False;
+      Value.Body_Value := Null_Unbounded_String;
+      Item.Body_Mode := No_Body;
+      Item.Body_Remaining := 0;
+      Item.Body_Total := 0;
+      Item.Body_Limit := Body_Limit;
+      Item.Body_Done := True;
+      Item.Body_Accepted := True;
+      Item.Continue_Pending := False;
+      Item.Chunk_CRLF_Pending := False;
+      Item.Body_Started := Started;
+      Item.Body_Timeout := Timeout;
 
       loop
          declare
@@ -738,38 +790,26 @@ package body Flyology.HTTP.Server is
             then
                raise Protocol_Error with "unsupported HTTP expectation";
             elsif Chunked or else Body_Size > 0 then
-               Write (Item, "HTTP/1.1 100 Continue" & CRLF & CRLF,
-                      Timeout, Token);
+               Item.Continue_Pending := True;
+               Item.Body_Accepted := False;
             end if;
          end if;
       end;
 
+      Consume (Item, Header_End + 3);
       if Chunked then
-         Consume (Item, Header_End + 3);
-         Read_Chunked_Body
-           (Item, Value.Body_Value, Started, Timeout, Body_Limit, Token);
+         Item.Body_Mode := Chunked_Body;
+         Item.Body_Done := False;
+         Item.Body_Accepted := not Item.Continue_Pending;
+      elsif Body_Size > 0 then
+         Item.Body_Mode := Fixed_Body;
+         Item.Body_Remaining := Body_Size;
+         Item.Body_Done := False;
+         Item.Body_Accepted := not Item.Continue_Pending;
       else
-         while Length (Item.Pending) < Header_End + 3 + Body_Size loop
-            Receive_More
-              (Item, Closed, Started, Timeout, Token,
-               Maximum => Header_End + 3 + Body_Size);
-            if Closed then
-               raise Protocol_Error with
-                 "peer closed inside HTTP request body";
-            end if;
-         end loop;
-
-         declare
-            Available : constant String := To_String (Item.Pending);
-            Body_First : constant Natural := Header_End + 4;
-         begin
-            Value.Body_Value :=
-              (if Body_Size = 0
-               then Null_Unbounded_String
-               else To_Unbounded_String
-                 (Available (Body_First .. Body_First + Body_Size - 1)));
-         end;
-         Consume (Item, Header_End + 3 + Body_Size);
+         Item.Body_Mode := No_Body;
+         Item.Body_Done := True;
+         Item.Body_Accepted := True;
       end if;
 
       Value.Keep_Alive :=
@@ -780,6 +820,295 @@ package body Flyology.HTTP.Server is
       Item.Request_Close := not Value.Keep_Alive;
       Item.Current_Is_Head := Method (Value) = "HEAD";
       Item.Current_Version := Value.Version_Value;
+   end Read_Request_Head;
+
+   function Body_Time_Left (Item : Connection) return Duration is
+      Elapsed : constant Duration := Ada.Real_Time.To_Duration
+        (Ada.Real_Time.Clock - Item.Body_Started);
+   begin
+      if Item.Body_Timeout < 0.0 then
+         return -1.0;
+      elsif Elapsed >= Item.Body_Timeout then
+         return 0.0;
+      else
+         return Item.Body_Timeout - Elapsed;
+      end if;
+   end Body_Time_Left;
+
+   procedure Accept_Body
+     (Item  : in out Connection;
+      Token : access Flyology.Cancellation.Token := null)
+   is
+      Left : Duration;
+   begin
+      if Item.State /= Reading_HTTP or else Item.Body_Done then
+         return;
+      elsif Item.Body_Accepted then
+         return;
+      end if;
+      Left := Body_Time_Left (Item);
+      if Item.Body_Timeout >= 0.0 and then Left <= 0.0 then
+         raise Flyology.IO.Timeout_Error with
+           "HTTP request deadline expired";
+      end if;
+      Write
+        (Item, "HTTP/1.1 100 Continue" & CRLF & CRLF,
+         Left, Token);
+      Item.Continue_Pending := False;
+      Item.Body_Accepted := True;
+   end Accept_Body;
+
+   procedure Read_Body
+     (Item     : in out Connection;
+      Data     : out Ada.Streams.Stream_Element_Array;
+      Last     : out Ada.Streams.Stream_Element_Offset;
+      Finished : out Boolean;
+      Token    : access Flyology.Cancellation.Token := null)
+   is
+      Written : Natural := 0;
+      Closed  : Boolean;
+
+      procedure Copy_Pending (Maximum : Natural) is
+         Available : constant String := To_String (Item.Pending);
+         Count     : constant Natural := Natural'Min
+           (Maximum,
+            Natural'Min
+              (Available'Length, Natural (Data'Length) - Written));
+      begin
+         for Index in 1 .. Count loop
+            Data
+              (Data'First
+               + Ada.Streams.Stream_Element_Offset (Written + Index - 1)) :=
+                Ada.Streams.Stream_Element
+                  (Character'Pos (Available (Available'First + Index - 1)));
+         end loop;
+         Consume (Item, Count);
+         Written := Written + Count;
+         Item.Body_Remaining := Item.Body_Remaining - Count;
+         Item.Body_Total := Item.Body_Total + Count;
+      end Copy_Pending;
+
+      procedure Need (Count : Natural; Description : String) is
+      begin
+         while Length (Item.Pending) < Count loop
+            Receive_More
+              (Item, Closed, Item.Body_Started, Item.Body_Timeout, Token,
+               Maximum => Count);
+            if Closed then
+               raise Protocol_Error with
+                 "peer closed inside HTTP " & Description;
+            end if;
+         end loop;
+      end Need;
+
+      procedure Finish_Chunk is
+      begin
+         Need (2, "chunk terminator");
+         declare
+            Available : constant String := To_String (Item.Pending);
+         begin
+            if Available (Available'First .. Available'First + 1) /= CRLF then
+               raise Protocol_Error with "invalid HTTP chunk terminator";
+            end if;
+         end;
+         Consume (Item, 2);
+         Item.Chunk_CRLF_Pending := False;
+      end Finish_Chunk;
+
+      procedure Finish_Trailers is
+         Line          : Unbounded_String;
+         Trailer_Bytes : Natural := 0;
+      begin
+         loop
+            if Trailer_Bytes > Max_Header_Bytes - 2 then
+               raise Protocol_Error with "HTTP trailers are too large";
+            end if;
+            Read_Line
+              (Item, Line, Item.Body_Started, Item.Body_Timeout, Token,
+               Maximum => Max_Header_Bytes - Trailer_Bytes - 2);
+            exit when Length (Line) = 0;
+            Trailer_Bytes := Trailer_Bytes + Length (Line) + 2;
+            Validate_Header_Block (To_String (Line));
+            declare
+               Value : constant String := To_String (Line);
+               Colon : constant Natural :=
+                 Ada.Strings.Fixed.Index (Value, ":");
+               Name  : constant String :=
+                 Lower (Value (Value'First .. Colon - 1));
+            begin
+               if Name in "connection" | "content-length" | "host" | "trailer"
+                          | "transfer-encoding" | "upgrade"
+               then
+                  raise Protocol_Error with "forbidden HTTP trailer field";
+               end if;
+            end;
+         end loop;
+         Item.Body_Mode := No_Body;
+         Item.Body_Done := True;
+      end Finish_Trailers;
+   begin
+      Data := (others => 0);
+      Last := Data'First - 1;
+      Finished := Item.Body_Done;
+      if Data'Length = 0 then
+         raise Constraint_Error with "HTTP body destination is empty";
+      elsif Item.State /= Reading_HTTP then
+         raise Program_Error with "HTTP connection is not reading a body";
+      elsif Item.Body_Done then
+         return;
+      elsif not Item.Body_Accepted then
+         raise Program_Error with
+           "Accept_Body must precede a 100-continue body read";
+      elsif Item.Body_Timeout >= 0.0
+        and then Body_Time_Left (Item) <= 0.0
+      then
+         raise Flyology.IO.Timeout_Error with
+           "HTTP request deadline expired";
+      end if;
+
+      while Written < Natural (Data'Length) and then not Item.Body_Done loop
+         case Item.Body_Mode is
+            when No_Body =>
+               Item.Body_Done := True;
+
+            when Fixed_Body =>
+               if Length (Item.Pending) = 0 then
+                  Receive_More
+                    (Item, Closed, Item.Body_Started, Item.Body_Timeout, Token,
+                     Maximum => Natural'Min
+                       (Item.Body_Remaining,
+                        Natural (Data'Length) - Written));
+                  if Closed then
+                     raise Protocol_Error with
+                       "peer closed inside HTTP request body";
+                  end if;
+               end if;
+               Copy_Pending (Item.Body_Remaining);
+               if Item.Body_Remaining = 0 then
+                  Item.Body_Mode := No_Body;
+                  Item.Body_Done := True;
+               end if;
+
+            when Chunked_Body =>
+               if Item.Chunk_CRLF_Pending then
+                  Finish_Chunk;
+               end if;
+               if Item.Body_Remaining = 0 then
+                  declare
+                     Line       : Unbounded_String;
+                     Chunk_Size : Natural;
+                  begin
+                     Read_Line
+                       (Item, Line, Item.Body_Started, Item.Body_Timeout,
+                        Token, Maximum => 1_024);
+                     Chunk_Size :=
+                       Parse_Chunk_Size (To_String (Line), Item.Body_Limit);
+                     if Chunk_Size = 0 then
+                        Finish_Trailers;
+                     elsif Item.Body_Total > Item.Body_Limit - Chunk_Size then
+                        raise Protocol_Error with
+                          "HTTP request body is too large";
+                     else
+                        Item.Body_Remaining := Chunk_Size;
+                     end if;
+                  end;
+               end if;
+               if not Item.Body_Done and then Item.Body_Remaining > 0 then
+                  if Length (Item.Pending) = 0 then
+                     Receive_More
+                       (Item, Closed, Item.Body_Started, Item.Body_Timeout,
+                        Token,
+                        Maximum => Natural'Min
+                          (Item.Body_Remaining,
+                           Natural (Data'Length) - Written));
+                     if Closed then
+                        raise Protocol_Error with
+                          "peer closed inside HTTP chunk";
+                     end if;
+                  end if;
+                  Copy_Pending (Item.Body_Remaining);
+                  if Item.Body_Remaining = 0 then
+                     Item.Chunk_CRLF_Pending := True;
+                  end if;
+               end if;
+         end case;
+      end loop;
+
+      if Written > 0 then
+         Last :=
+           Data'First + Ada.Streams.Stream_Element_Offset (Written - 1);
+      end if;
+      Finished := Item.Body_Done;
+   end Read_Body;
+
+   procedure Discard_Body
+     (Item  : in out Connection;
+      Token : access Flyology.Cancellation.Token := null)
+   is
+      Buffer   : Ada.Streams.Stream_Element_Array (1 .. 8 * 1_024);
+      Last     : Ada.Streams.Stream_Element_Offset;
+      Finished : Boolean;
+   begin
+      Accept_Body (Item, Token);
+      loop
+         Read_Body (Item, Buffer, Last, Finished, Token);
+         exit when Finished;
+      end loop;
+   end Discard_Body;
+
+   function Body_Complete (Item : Connection) return Boolean is
+     (Item.Body_Done);
+
+   procedure Read_Request
+     (Item        : in out Connection;
+      Value       : out Request;
+      Peer_Closed : out Boolean;
+      Timeout     : Duration := 30.0;
+      Max_Body    : Natural := Max_Request_Body;
+      Token       : access Flyology.Cancellation.Token := null)
+   is
+      Buffer   : Ada.Streams.Stream_Element_Array (1 .. 8 * 1_024);
+      Last     : Ada.Streams.Stream_Element_Offset;
+      Finished : Boolean;
+      Reserved : Natural := 0;
+   begin
+      Read_Request_Head
+        (Item, Value, Peer_Closed, Timeout, Max_Body, Token);
+      if Peer_Closed then
+         return;
+      end if;
+
+      Reserved :=
+        (case Item.Body_Mode is
+            when No_Body      => 0,
+            when Fixed_Body   => Item.Body_Remaining,
+            when Chunked_Body => Item.Body_Limit);
+      Reserve_Buffered (Item, Reserved);
+      Accept_Body (Item, Token);
+      loop
+         Read_Body (Item, Buffer, Last, Finished, Token);
+         if Last >= Buffer'First then
+            Append
+              (Value.Body_Value,
+               Text (Buffer (Buffer'First .. Last)));
+         end if;
+         exit when Finished;
+      end loop;
+
+      if Item.Buffered_Bytes > Item.Body_Total
+      then
+         Release
+           (Item.Reservation_Budget.all,
+            Item.Buffered_Bytes - Item.Body_Total);
+         Item.Buffered_Bytes := Item.Body_Total;
+         if Item.Buffered_Bytes = 0 then
+            Item.Reservation_Budget := null;
+         end if;
+      end if;
+   exception
+      when others =>
+         Release_Buffered (Item);
+         raise;
    end Read_Request;
 
    function Reason (Status : Positive) return String is
@@ -880,7 +1209,8 @@ package body Flyology.HTTP.Server is
       Timeout       : Duration := 30.0;
       Token         : access Flyology.Cancellation.Token := null)
    is
-      Must_Close : constant Boolean := Close or else Item.Request_Close;
+      Must_Close : constant Boolean :=
+        Close or else Item.Request_Close or else not Item.Body_Done;
       Body_Forbidden : constant Boolean := Status in 204 | 205 | 304;
       Head : Unbounded_String;
    begin
@@ -931,6 +1261,7 @@ package body Flyology.HTTP.Server is
       end if;
       Item.Response_Begun := True;
       if Must_Close then
+         Item.Request_Close := True;
          Item.State := Terminal;
       end if;
    end Respond;
@@ -965,6 +1296,8 @@ package body Flyology.HTTP.Server is
    begin
       if Item.State /= Reading_HTTP or else Item.Response_Begun then
          raise Program_Error with "HTTP response already started";
+      elsif not Item.Body_Done then
+         raise Program_Error with "SSE request body has not been consumed";
       end if;
       if Item.Current_Is_Head then
          raise Program_Error with "SSE is not available for HEAD";
@@ -1345,6 +1678,9 @@ package body Flyology.HTTP.Server is
    begin
       if Item.State /= Reading_HTTP or else Item.Response_Begun then
          raise Program_Error with "HTTP response already started";
+      elsif not Item.Body_Done then
+         raise Program_Error with
+           "WebSocket upgrade request body has not been consumed";
       end if;
       if Method (Value) /= "GET"
         or else Version (Value) /= HTTP_1_1
@@ -1508,11 +1844,13 @@ package body Flyology.HTTP.Server is
          end if;
          Kind := Message_Kind;
          Data := Message;
+         Release_Buffered (Item);
       end Finish_Message;
    begin
       if Item.State /= WebSocket then
          raise Program_Error with "WebSocket connection is not active";
       end if;
+      Reserve_Buffered (Item, Message_Limit);
       Kind := Text_Frame;
       Data := Null_Unbounded_String;
       Closed := False;
@@ -1653,6 +1991,7 @@ package body Flyology.HTTP.Server is
                   Send_Frame (Item, 8, Payload, Time_Left, Token);
                   Item.State := Terminal;
                   Closed := True;
+                  Release_Buffered (Item);
                   return;
                when 9 =>
                   Control_Count := Control_Count + 1;
@@ -1672,7 +2011,11 @@ package body Flyology.HTTP.Server is
       end loop;
    exception
       when Protocol_Error =>
+         Release_Buffered (Item);
          Item.State := Terminal;
+         raise;
+      when others =>
+         Release_Buffered (Item);
          raise;
    end Receive_WebSocket;
 

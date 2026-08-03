@@ -963,6 +963,8 @@ connection through `Flyology.HTTP.Server.Connections`:
 
 ```ada
 declare
+   Budget : aliased Flyology.HTTP.Server.Ingress_Budget
+     (Limit => 64 * 1_024 * 1_024);
    Channel : aliased Flyology.HTTP.Server.Connections.Connection_Transport
      (Connection'Unchecked_Access);
    Client : Flyology.HTTP.Server.Connection (Channel'Access);
@@ -979,9 +981,32 @@ declare
    package Handler is new
      Flyology.HTTP.Server.Connection_Handlers (Route);
 begin
-   Handler.Serve (Client, Token => Cancellation);
+   Flyology.HTTP.Server.Configure_Ingress_Budget (Client, Budget'Access);
+   Handler.Serve
+     (Client, Buffer_Body => False, Token => Cancellation);
 end;
 ```
+
+With `Buffer_Body => False`, the callback receives the validated request head
+before its body is retained. It accepts `Expect: 100-continue` only after
+application policy checks, then pulls decoded fixed-length or chunked data into
+caller-owned storage:
+
+```ada
+Flyology.HTTP.Server.Accept_Body (Item, Cancellation);
+loop
+   Flyology.HTTP.Server.Read_Body
+     (Item, Buffer, Last, Finished, Cancellation);
+   Process (Buffer (Buffer'First .. Last));
+   exit when Finished;
+end loop;
+```
+
+The original absolute request deadline covers every streamed read. A handler
+that intentionally ignores a body can send a final response, which forces the
+connection closed, or explicitly call `Discard_Body` under that same deadline.
+The buffered `Read_Request` and default connection handler remain available
+for small payloads.
 
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
@@ -991,7 +1016,8 @@ exact origin. WebSocket client frames must be masked; fragmented messages are
 reassembled with interleaved control-frame handling, ping is answered with
 pong, and close is acknowledged. Text and close reasons are validated as
 UTF-8, close codes are checked, and protocol failure makes the connection
-terminal. Frames and reassembled messages are capped at 1 MiB by default.
+terminal. Frames and reassembled messages are capped at 1 MiB by default and
+their reassembly reserves the configured shared ingress budget.
 
 TLS uses the same HTTP engine after `Flyology.IO.TLS.Take` and `Handshake`.
 `Flyology.HTTP.Server.TLS.Connection_Transport` forwards decrypted reads and
@@ -1002,7 +1028,9 @@ and cryptography; the HTTP package does not duplicate those functions.
 Request headers are capped at 16 KiB and decoded request bodies at 1 MiB, with
 a smaller application limit available per handler. Strict chunked decoding
 includes bounded extensions and trailers, rejects conflicting framing, and
-preserves pipelined bytes. `Expect: 100-continue` is answered before body reads.
+preserves pipelined bytes. Streaming callers explicitly accept
+`Expect: 100-continue` after inspecting the request head; buffered callers
+accept it automatically before body reads.
 One monotonic request timeout covers every incremental header and body read,
 rather than restarting after each byte, so a slow header or body cannot retain
 a handler indefinitely. The same rule covers a complete WebSocket message.
@@ -1012,11 +1040,19 @@ application callback failures still propagate to the structured server.
 
 The parser accepts origin-form, absolute HTTP(S)-form, and `OPTIONS *`, with
 strict Host/authority validation; `CONNECT` and transfer codings other than
-`chunked` are not implemented. Request bodies are currently buffered rather
-than streamed, and there is no server-wide in-flight byte budget, so capacity
-and per-handler body/message limits remain part of deployment sizing.
+`chunked` are not implemented. A 64 MiB process-wide ingress budget safely
+covers connections without explicit configuration. A server-specific
+`Ingress_Budget` can replace it and nonblockingly caps retained buffered
+bodies and WebSocket messages across its connections while reporting current,
+peak, and denied reservations. Streaming request payloads are
+written directly into caller-owned buffers and do not consume that retained
+payload budget. Server-owned ingress is therefore bounded by the configured
+budget plus per-connection header/parser state; descriptor, kernel socket,
+task/fiber, application-owned buffer, and TLS-provider memory still scale with
+connection capacity.
 
-The runnable `http_server` showcase exposes `/`, `/events`, and `/websocket`.
+The runnable `http_server` showcase exposes `/`, `/upload`, `/events`, and
+`/websocket`. `POST /upload` demonstrates streaming body consumption.
 It takes the handler lane, request count before shutdown, port, and handler
 capacity:
 

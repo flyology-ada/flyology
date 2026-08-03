@@ -19,6 +19,8 @@ package Flyology.HTTP.Server.Connection_Handlers is
    --  @param Item HTTP connection
    --  @param Timeout Monotonic deadline interval for each complete request
    --  @param Max_Body Application body limit, capped by Max_Request_Body
+   --  @param Buffer_Body True for compatibility Content buffering; false
+   --     exposes the body through Read_Body during Handle
    --  @param Max_Requests Maximum requests served before closing; zero is
    --     unlimited
    --  @param Max_Connection_Age Maximum connection lifetime in seconds;
@@ -28,6 +30,7 @@ package Flyology.HTTP.Server.Connection_Handlers is
      (Item               : in out Flyology.HTTP.Server.Connection;
       Timeout            : Duration := 30.0;
       Max_Body           : Natural := Max_Request_Body;
+      Buffer_Body        : Boolean := True;
       Max_Requests       : Natural := 1_000;
       Max_Connection_Age : Duration := 300.0;
       Token              : access Flyology.Cancellation.Token := null);

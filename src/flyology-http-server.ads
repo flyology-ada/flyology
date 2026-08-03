@@ -1,4 +1,6 @@
 with Ada.Streams;
+with Ada.Finalization;
+with Ada.Real_Time;
 with Ada.Strings.Unbounded;
 with Flyology.Cancellation;
 
@@ -13,6 +15,50 @@ package Flyology.HTTP.Server is
    Max_Request_Body : constant := 1_024 * 1_024;
    --  Maximum accepted frame, reassembled message, or generated frame payload.
    Max_WebSocket_Frame : constant := 1_024 * 1_024;
+   --  Process-wide retained-payload budget used by connections that do not
+   --  attach a server-specific Ingress_Budget.
+   Default_Ingress_Budget_Bytes : constant := 64 * 1_024 * 1_024;
+
+   --  Raised when a buffered compatibility operation cannot reserve its
+   --  payload from the configured shared ingress budget.
+   Resource_Exhausted : exception;
+
+   --  Snapshot of shared buffered-ingress accounting.
+   --  @field Limit Configured maximum reserved bytes
+   --  @field Current Bytes currently reserved
+   --  @field Peak Highest observed reservation
+   --  @field Denials Failed nonblocking reservation attempts
+   type Ingress_Budget_Snapshot is record
+      Limit   : Positive;
+      Current : Natural;
+      Peak    : Natural;
+      Denials : Natural;
+   end record;
+
+   --  Nonblocking shared budget for retained request bodies and WebSocket
+   --  messages. Streaming operations write into caller-owned buffers and do
+   --  not reserve their payload bytes here.
+   --  @field Limit Maximum simultaneously reserved payload bytes
+   type Ingress_Budget (Limit : Positive) is limited private;
+
+   --  Attempt to reserve Bytes without suspending a handler.
+   --  @param Item Shared server budget
+   --  @param Bytes Requested buffered payload bytes
+   --  @param Granted True only when the reservation was recorded
+   procedure Try_Reserve
+     (Item : in out Ingress_Budget;
+      Bytes : Natural;
+      Granted : out Boolean);
+
+   --  Release a prior successful reservation.
+   --  @param Item Shared server budget
+   --  @param Bytes Reserved bytes to return
+   procedure Release (Item : in out Ingress_Budget; Bytes : Natural);
+
+   --  Read current budget counters.
+   --  @param Item Shared server budget
+   --  @return Stable accounting snapshot
+   function Current (Item : Ingress_Budget) return Ingress_Budget_Snapshot;
 
    --  Transport boundary shared by plain and TLS connections. Implementations
    --  retain closing ownership and must preserve Flyology cancellation and
@@ -83,7 +129,78 @@ package Flyology.HTTP.Server is
    type Connection (Channel : not null access Transport'Class) is limited
      private;
 
-   --  Read and parse the next request. Header and body limits are enforced
+   --  Attach one shared ingress budget before the first request is read.
+   --  The budget must outlive Item and cannot be replaced while bytes are
+   --  reserved.
+   --  @param Item HTTP connection to configure
+   --  @param Budget Shared server budget
+   procedure Configure_Ingress_Budget
+     (Item   : in out Connection;
+      Budget : not null access Ingress_Budget);
+
+   --  Read and validate the next request head without buffering its body.
+   --  Body framing remains attached to Item and must be consumed with
+   --  Read_Body or Discard_Body before another request can be read. One
+   --  monotonic Timeout begins here and covers the complete streamed body.
+   --  Expect: 100-continue is not emitted until Accept_Body is called.
+   --  @param Item HTTP connection
+   --  @param Value Parsed request head on success; Content is empty
+   --  @param Peer_Closed True only when the peer closes between requests
+   --  @param Timeout Absolute header-and-body deadline interval
+   --  @param Max_Body Application body limit, capped by Max_Request_Body
+   --  @param Token Optional cancellation source
+   procedure Read_Request_Head
+     (Item        : in out Connection;
+      Value       : out Request;
+      Peer_Closed : out Boolean;
+      Timeout     : Duration := 30.0;
+      Max_Body    : Natural := Max_Request_Body;
+      Token       : access Flyology.Cancellation.Token := null);
+
+   --  Accept the current request body, sending 100 Continue when requested.
+   --  The original Read_Request_Head deadline remains authoritative.
+   --  @param Item HTTP connection with an unread request body
+   --  @param Token Optional cancellation source
+   procedure Accept_Body
+     (Item  : in out Connection;
+      Token : access Flyology.Cancellation.Token := null);
+
+   --  Stream decoded body bytes into caller-owned storage. Fixed-length and
+   --  chunked framing are removed. Finished becomes true only after all body
+   --  framing and trailers are consumed. The request-head deadline is never
+   --  restarted by incremental reads.
+   --  @param Item HTTP connection with a current request
+   --  @param Data Caller-owned destination
+   --  @param Last Last decoded byte, or Data'First - 1 when none
+   --  @param Finished True after the complete body and trailers
+   --  @param Token Optional cancellation source
+   procedure Read_Body
+     (Item     : in out Connection;
+      Data     : out Ada.Streams.Stream_Element_Array;
+      Last     : out Ada.Streams.Stream_Element_Offset;
+      Finished : out Boolean;
+      Token    : access Flyology.Cancellation.Token := null);
+
+   --  Consume and discard the current body under the original absolute
+   --  deadline. This is explicit because silently draining an unwanted body
+   --  can itself be a slow-client attack.
+   --  @param Item HTTP connection with a current request
+   --  @param Token Optional cancellation source
+   procedure Discard_Body
+     (Item  : in out Connection;
+      Token : access Flyology.Cancellation.Token := null);
+
+   --  Report whether the current request body and trailers are consumed.
+   --  @param Item HTTP connection
+   --  @return True when another request may be parsed after the response
+   function Body_Complete (Item : Connection) return Boolean;
+
+   --  Read and parse the next request, buffering its complete decoded body.
+   --  This compatibility operation is implemented over Read_Request_Head and
+   --  Read_Body. When Item has an ingress budget, fixed bodies reserve their
+   --  declared length and chunked bodies reserve Max_Body before allocation.
+   --  Resource_Exhausted is raised without waiting when reservation fails.
+   --  Header and body limits are enforced
    --  before allocation grows beyond their public bounds. One monotonic
    --  Timeout covers the complete header and decoded body, so incremental
    --  progress cannot extend a slow client's deadline. HTTP/1.1 requires Host.
@@ -94,6 +211,7 @@ package Flyology.HTTP.Server is
    --  @param Max_Body Application body limit, capped by Max_Request_Body
    --  @param Token Optional cancellation source
    --  @exception Protocol_Error Input is malformed, oversized, or unsupported
+   --  @exception Resource_Exhausted Shared buffered ingress budget is full
    procedure Read_Request
      (Item        : in out Connection;
       Value       : out Request;
@@ -217,6 +335,7 @@ package Flyology.HTTP.Server is
    --  @param Max_Message Application message limit, capped by frame maximum
    --  @param Timeout Transport receive/send deadline
    --  @param Token Optional cancellation source
+   --  @exception Resource_Exhausted Shared message reassembly budget is full
    procedure Receive_WebSocket
      (Item    : in out Connection;
       Kind    : out WebSocket_Data_Kind;
@@ -266,14 +385,49 @@ private
 
    type Connection_State is (Reading_HTTP, Streaming_SSE, WebSocket, Terminal);
 
-   type Connection (Channel : not null access Transport'Class) is limited
+   type Request_Body_Mode is (No_Body, Fixed_Body, Chunked_Body);
+   type Ingress_Budget_Access is access all Ingress_Budget;
+
+   protected type Ingress_Budget_State (Limit : Positive) is
+      procedure Try_Reserve (Bytes : Natural; Granted : out Boolean);
+      procedure Release (Bytes : Natural);
+      function Current return Ingress_Budget_Snapshot;
+   private
+      Used        : Natural := 0;
+      High_Water  : Natural := 0;
+      Denied      : Natural := 0;
+   end Ingress_Budget_State;
+
+   type Ingress_Budget (Limit : Positive) is limited record
+      State : Ingress_Budget_State (Limit);
+   end record;
+
+   type Connection (Channel : not null access Transport'Class)
+   is limited new Ada.Finalization.Limited_Controlled with
      record
+      Budget_Handle     : Ingress_Budget_Access := null;
+      Reservation_Budget : Ingress_Budget_Access := null;
       Pending          : Unbounded_String;
       State            : Connection_State := Reading_HTTP;
       Request_Close    : Boolean := False;
       Response_Begun   : Boolean := False;
       Current_Is_Head  : Boolean := False;
       Current_Version  : HTTP_Version := HTTP_1_1;
+      Body_Mode        : Request_Body_Mode := No_Body;
+      Body_Remaining   : Natural := 0;
+      Body_Total       : Natural := 0;
+      Body_Limit       : Natural := 0;
+      Body_Done        : Boolean := True;
+      Body_Accepted    : Boolean := True;
+      Continue_Pending : Boolean := False;
+      Chunk_CRLF_Pending : Boolean := False;
+      Body_Started     : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Body_Timeout     : Duration := 0.0;
+      Buffered_Bytes   : Natural := 0;
    end record;
+
+   --  Release any active buffered reservation.
+   --  @param Item HTTP connection being finalized
+   overriding procedure Finalize (Item : in out Connection);
 
 end Flyology.HTTP.Server;
