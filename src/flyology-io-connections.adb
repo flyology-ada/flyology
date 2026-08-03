@@ -1,9 +1,11 @@
 with Ada.Real_Time;
+with Flyology.Connection_Policy;
 with Flyology.IO.Sockets;
 with Flyology.Time_Math;
 with Interfaces.C;
 
 package body Flyology.IO.Connections is
+   package Policy renames Flyology.Connection_Policy;
    package Sockets renames GNAT.Sockets;
 
    use type Ada.Real_Time.Time;
@@ -87,7 +89,8 @@ package body Flyology.IO.Connections is
          elsif Started_Operations = Natural'Last then
             raise Program_Error with "too many connection operations";
          end if;
-         Started_Operations := Started_Operations + 1;
+         Started_Operations :=
+           Policy.Started_After_Register (Started_Operations);
          Generation.all := Current_Generation;
          Lease_Source := Wake_Sources.Descriptor (Lease_Wake);
          Close_Source := Wake_Sources.Descriptor (Close_Wake);
@@ -111,23 +114,30 @@ package body Flyology.IO.Connections is
          if State.all /= Registered then
             raise Program_Error with "connection operation is not registered";
          end if;
-         if Expected_Generation /= Current_Generation
-           or else Current_FD < 0
-           or else Closing
-           or else Current_Socket = Sockets.No_Socket
-           or else Current_Owner = null
-         then
-            if Started_Operations = 0 then
-               raise Program_Error with "missing connection operation";
-            end if;
-            Started_Operations := Started_Operations - 1;
-            State.all := Unregistered;
-            Result := Lease_Cancelled;
-            return;
-         elsif Active then
-            Result := Lease_Busy;
-            return;
-         end if;
+         case Policy.Classify_Acquire
+           (Generation_Matches => Expected_Generation = Current_Generation,
+            Resources_Open     =>
+              Current_FD >= 0
+              and then Current_Socket /= Sockets.No_Socket
+              and then Current_Owner /= null,
+            Closing            => Closing,
+            Active             => Active)
+         is
+            when Policy.Cancel_Lease =>
+               if Started_Operations = 0 then
+                  raise Program_Error with "missing connection operation";
+               end if;
+               Started_Operations :=
+                 Policy.Started_After_Release (Started_Operations);
+               State.all := Unregistered;
+               Result := Lease_Cancelled;
+               return;
+            when Policy.Wait_For_Lease =>
+               Result := Lease_Busy;
+               return;
+            when Policy.Acquire_Lease =>
+               null;
+         end case;
          if Lease_Signalled then
             Wake_Sources.Consume (Lease_Wake);
             Lease_Signalled := False;
@@ -149,11 +159,10 @@ package body Flyology.IO.Connections is
          then
             raise Program_Error with "stale connection operation withdrawal";
          end if;
-         Started_Operations := Started_Operations - 1;
-         if not Active
-           and then not Closing
-           and then Started_Operations > 0
-           and then not Lease_Signalled
+         Started_Operations :=
+           Policy.Started_After_Release (Started_Operations);
+         if Policy.Should_Wake_Next
+           (Active, Closing, Started_Operations, Lease_Signalled)
          then
             Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
@@ -179,10 +188,10 @@ package body Flyology.IO.Connections is
             raise Program_Error with "stale descriptor operation release";
          end if;
          Active := False;
-         Started_Operations := Started_Operations - 1;
-         if not Closing
-           and then Started_Operations > 0
-           and then not Lease_Signalled
+         Started_Operations :=
+           Policy.Started_After_Release (Started_Operations);
+         if Policy.Should_Wake_Next
+           (Active, Closing, Started_Operations, Lease_Signalled)
          then
             Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
@@ -197,10 +206,10 @@ package body Flyology.IO.Connections is
       begin
          FD := Current_FD;
          Generation := Current_Generation;
-         Leader := Current_FD >= 0 and then not Closing;
+         Leader := Policy.Close_Leader (Current_FD >= 0, Closing);
          if Leader then
             Closing := True;
-            if Started_Operations > 0 then
+            if Policy.Close_Wake_Required (Leader, Started_Operations) then
                Wake_Sources.Signal (Close_Wake);
             end if;
          end if;
@@ -232,12 +241,12 @@ package body Flyology.IO.Connections is
 
       procedure Finish_Close (Generation : Descriptor_Generation) is
       begin
-         if not Closing
-           or else Active
-           or else Started_Operations /= 0
-           or else Generation /= Current_Generation
-           or else Current_Socket /= Sockets.No_Socket
-           or else Current_Owner /= null
+         if not Policy.Finish_Close_Allowed
+           (Closing,
+            Active,
+            Started_Operations,
+            Generation = Current_Generation,
+            Current_Socket = Sockets.No_Socket and then Current_Owner = null)
          then
             raise Program_Error with "stale descriptor close completion";
          end if;
@@ -249,11 +258,11 @@ package body Flyology.IO.Connections is
       end Finish_Close;
 
       function Is_Open_State return Boolean is
-        (Current_FD >= 0 and then not Closing);
+        (Policy.Is_Open (Current_FD >= 0, Closing));
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       function Test_Waiting_Operations return Natural is
-        (Started_Operations - (if Active then 1 else 0));
+        (Policy.Waiting_Operations (Started_Operations, Active));
 
       function Test_Operation_Active return Boolean is (Active);
 
@@ -282,7 +291,7 @@ package body Flyology.IO.Connections is
       begin
          Accepted := not Stopping;
          if Accepted then
-            Active_Count := Active_Count + 1;
+            Active_Count := Policy.Started_After_Register (Active_Count);
          end if;
       end Acquire;
 
@@ -291,7 +300,7 @@ package body Flyology.IO.Connections is
          if Active_Count = 0 then
             raise Program_Error with "connection permit released twice";
          end if;
-         Active_Count := Active_Count - 1;
+         Active_Count := Policy.Started_After_Release (Active_Count);
       end Release;
 
       procedure Request_Shutdown is

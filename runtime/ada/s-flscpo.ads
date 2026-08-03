@@ -149,4 +149,31 @@ is
       else
          Time_Until'Result = Deadline - Now);
 
+   --  Return the parent position in a one-based binary heap.
+   function Heap_Parent (Position : Positive) return Positive
+   with Pre  => Position > 1,
+        Post => Heap_Parent'Result = Position / 2
+          and then Heap_Parent'Result < Position;
+
+   --  Report whether Position has at least one child within Count elements.
+   function Heap_Has_Child
+     (Position : Positive;
+      Count    : Natural) return Boolean
+   with Post =>
+     Heap_Has_Child'Result = (Position <= Count / 2);
+
+   --  Return the first child of Position within a one-based binary heap.
+   function Heap_First_Child
+     (Position : Positive;
+      Count    : Natural) return Positive
+   with Pre  => Position <= Count / 2,
+        Post => Heap_First_Child'Result = Position * 2
+          and then Heap_First_Child'Result <= Count;
+
+   --  Map a nonnegative descriptor to one zero-based wait-table bucket.
+   function Descriptor_Bucket
+     (Descriptor   : Natural;
+      Bucket_Count : Positive) return Natural
+   with Post => Descriptor_Bucket'Result < Bucket_Count;
+
 end System.Flyology.Scheduling_Policy;

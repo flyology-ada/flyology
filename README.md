@@ -1144,12 +1144,22 @@ the infinite-timeout sentinel, non-expired timeout, expiration, remaining-time
 cases, rounding up to poll milliseconds, and saturation at the `poll(2)` integer
 limit.
 
-Two more production policy units prove native `poll` and `accept` result
+The public-library proof boundary also covers native `poll` and `accept` result
 classification, including `EINTR` retry and would-block handling, and regular
 file open validation and exact Darwin `O_RDONLY`/`O_WRONLY`/`O_RDWR`, `O_CREAT`,
 and `O_TRUNC` flag composition for Darwin and Linux. The Ada import of variadic
 `open(2)` remains an ABI boundary and uses GNAT's `C_Variadic_2` calling
 convention.
+
+Production connection and TLS controllers consume proved decisions for lease
+admission, generation replacement, waiter wakeups, close leadership, drain
+completion, and open-state reporting. TLS buffer policy additionally proves
+that provider progress is in range, that wait and peer-close results preserve
+the caller's progress bound, that retry sentinels lie outside the active slice,
+and that advancing a completed slice cannot overflow. Structured-server phase
+changes use proved one-shot start, stop, handler/worker admission, terminal
+drain, and snapshot classifications. Resource destruction, protected-object
+mutual exclusion, and provider calls remain outside SPARK.
 
 The scheduler policy unit proves deadline classification and safe calculation
 of the next poll timeout. It also proves earliest-deadline selection,
@@ -1157,11 +1167,13 @@ maintenance cadence, dispatch-counter safety, and the distinction between
 immediate and deferred fiber destruction, including the in-flight `Migrating`
 phase. Shared/dedicated group classification, dedicated-lane availability, and
 migration admission are exact contracted functions used by the production
-scheduler. Ready tasks live in one FIFO bucket per bounded Ada priority: append,
-removal, and priority changes are constant-time, while choosing the next
-non-empty priority scans only the fixed `System.Any_Priority` range. Those
-intrusive bucket updates, lock ownership, and actual context handoff remain
-outside SPARK.
+scheduler. One-based timer-heap parent/child arithmetic and descriptor-bucket
+indexing are also proved before the scheduler uses them. Ready tasks live in one
+FIFO bucket per bounded Ada priority: append, removal, and priority changes are
+constant-time, while choosing the next non-empty priority scans only the fixed
+`System.Any_Priority` range. Intrusive ready/timer link updates, heap ordering,
+lock ownership, descriptor-generation matching, and the actual context handoff
+remain outside SPARK.
 
 Run the proof through the Alire-provided GNATprove toolchain:
 
@@ -1180,8 +1192,8 @@ target succeeds, and CI checks that marker instead of a change-prone summary or
 check count. A successful run proves every selected flow, functional-contract,
 termination, and run-time-safety check with zero unproved checks. The current
 boundary includes the loss-of-inherited-priority queue-placement choice. Good
-next proof candidates are ready-bucket insertion/removal invariants and
-descriptor wake matching.
+next proof candidates are intrusive ready-bucket and timer-heap invariants, DNS
+wire parsing and cache replacement, and descriptor wake-generation matching.
 
 The GNARL tasking integration, imported system calls, address conversions,
 assembly register swap, and kernel behavior remain trusted boundaries. These

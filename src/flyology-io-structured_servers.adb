@@ -10,6 +10,7 @@ package body Flyology.IO.Structured_Servers is
 
    use type Sockets.Socket_Type;
    use type Interfaces.C.int;
+   use type Policy.Run_Phase;
 
    function C_Close_Listener
      (Descriptor : Interfaces.C.int) return Interfaces.C.int;
@@ -19,30 +20,19 @@ package body Flyology.IO.Structured_Servers is
    protected body Lifecycle is
       procedure Begin_Serve (Expected : Positive) is
       begin
-         case Phase is
-            when Idle =>
-               null;
-            when Stop_Requested =>
-               if Serve_Started then
-                  raise Program_Error with "structured server is one-shot";
-               end if;
-            when Serving | Finished =>
-               raise Program_Error with "structured server is one-shot";
-         end case;
-         Serve_Started := True;
-         if Phase = Idle then
-            Phase := Serving;
+         if not Policy.Begin_Allowed (Phase, Serve_Started) then
+            raise Program_Error with "structured server is one-shot";
          end if;
+         Serve_Started := True;
+         Phase := Policy.Phase_After_Begin (Phase);
          Workers_Done := 0;
          Expected_Workers := Expected;
       end Begin_Serve;
 
       procedure Request_Stop (New_Request : out Boolean) is
       begin
-         New_Request := Phase in Idle | Serving;
-         if New_Request then
-            Phase := Stop_Requested;
-         end if;
+         New_Request := Policy.Stop_Is_New (Phase);
+         Phase := Policy.Phase_After_Stop (Phase);
       end Request_Stop;
 
       entry Await_Stop when Phase = Stop_Requested is
@@ -51,11 +41,11 @@ package body Flyology.IO.Structured_Servers is
       end Await_Stop;
 
       function Stop_Was_Requested return Boolean is
-        (Phase = Stop_Requested or else Phase = Finished);
+        (Policy.Stop_Was_Requested (Phase));
 
       procedure Handler_Started is
       begin
-         if Active >= Expected_Workers then
+         if not Policy.Handler_Start_Allowed (Active, Expected_Workers) then
             raise Program_Error with "handler admission exceeds capacity";
          end if;
          Active := Active + 1;
@@ -81,7 +71,9 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Worker_Finished is
       begin
-         if Workers_Done >= Expected_Workers then
+         if not Policy.Worker_Finish_Allowed
+           (Workers_Done, Expected_Workers)
+         then
             raise Program_Error with
               "structured server worker completion exceeds capacity";
          end if;
@@ -105,9 +97,7 @@ package body Flyology.IO.Structured_Servers is
                    (Information'First .. Information'First + Length - 1);
             end if;
          end if;
-         if Phase in Idle | Serving then
-            Phase := Stop_Requested;
-         end if;
+         Phase := Policy.Phase_After_Stop (Phase);
       end Record_Failure;
 
       procedure Mark_Forced is
@@ -117,7 +107,9 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Finish_Serve is
       begin
-         if Workers_Done /= Expected_Workers or else Active /= 0 then
+         if not Policy.Serve_Finish_Allowed
+           (Workers_Done, Expected_Workers, Active)
+         then
             raise Program_Error with
               "structured server finished with live handlers";
          end if;
@@ -145,8 +137,8 @@ package body Flyology.IO.Structured_Servers is
 
       function Read_Snapshot return Snapshot is
         (Running               =>
-           Serve_Started and then Phase in Serving | Stop_Requested,
-         Shutdown_Requested    => Phase in Stop_Requested | Finished,
+           Policy.Snapshot_Running (Serve_Started, Phase),
+         Shutdown_Requested    => Policy.Snapshot_Shutdown (Phase),
          Forced_Cancellation   => Forced,
          Active_Handlers       => Active,
          Accepted_Connections  => Accepted,

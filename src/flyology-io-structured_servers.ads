@@ -2,6 +2,7 @@ with Ada.Finalization;
 with GNAT.Sockets;
 with Flyology.IO.Connections;
 with System.Multiprocessors;
+private with Flyology.Structured_Server_Policy;
 
 --  Runs a bounded set of handler tasks under one structured Serve call.
 --
@@ -137,7 +138,12 @@ package Flyology.IO.Structured_Servers is
 private
    use Flyology.IO.Connections;
 
-   type Run_Phase is (Idle, Serving, Stop_Requested, Finished);
+   package Policy renames Flyology.Structured_Server_Policy;
+   subtype Run_Phase is Policy.Run_Phase;
+   Idle           : constant Run_Phase := Policy.Idle;
+   Serving        : constant Run_Phase := Policy.Serving;
+   Stop_Requested : constant Run_Phase := Policy.Stop_Requested;
+   Finished       : constant Run_Phase := Policy.Finished;
 
    protected type Lifecycle is
       procedure Begin_Serve (Expected : Positive);

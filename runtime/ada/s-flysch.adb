@@ -851,7 +851,9 @@ package body System.Flyology.Scheduler is
    end Unregister_Locked;
 
    function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index is
-     (IO_Bucket_Index (Natural (Descriptor) mod IO_Bucket_Count));
+     (IO_Bucket_Index
+        (Scheduling.Descriptor_Bucket
+           (Natural (Descriptor), IO_Bucket_Count)));
 
    function Active_IO_Link
      (Item : not null Fiber_Access;
@@ -1299,7 +1301,7 @@ package body System.Flyology.Scheduler is
       Group.Timer_Count := Group.Timer_Count + 1;
       Position := Group.Timer_Count;
       while Position > 1 loop
-         Parent := Position / 2;
+         Parent := Natural (Scheduling.Heap_Parent (Positive (Position)));
          Parent_Item := Group.Timers (Parent);
          exit when Parent_Item.Deadline <= Item.Deadline;
          Group.Timers (Position) := Parent_Item;
@@ -1341,13 +1343,13 @@ package body System.Flyology.Scheduler is
       Group.Timers (Position) := Last;
       Last.Timer_Index := Position;
       if Position > 1 then
-         Parent := Position / 2;
+         Parent := Natural (Scheduling.Heap_Parent (Positive (Position)));
       end if;
       if Position > 1
         and then Last.Deadline < Group.Timers (Parent).Deadline
       then
          while Position > 1 loop
-            Parent := Position / 2;
+            Parent := Natural (Scheduling.Heap_Parent (Positive (Position)));
             exit when Group.Timers (Parent).Deadline <= Last.Deadline;
             Group.Timers (Position) := Group.Timers (Parent);
             Group.Timers (Position).Timer_Index := Position;
@@ -1357,8 +1359,11 @@ package body System.Flyology.Scheduler is
          Last.Timer_Index := Position;
       else
          loop
-            exit when Position > Group.Timer_Count / 2;
-            Child := Position * 2;
+            exit when not Scheduling.Heap_Has_Child
+              (Positive (Position), Group.Timer_Count);
+            Child := Natural
+              (Scheduling.Heap_First_Child
+                 (Positive (Position), Group.Timer_Count));
             if Child < Group.Timer_Count
               and then Group.Timers (Child + 1).Deadline <
                 Group.Timers (Child).Deadline

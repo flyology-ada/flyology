@@ -2,10 +2,12 @@ with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.IO.Sockets;
 with Flyology.Time_Math;
+with Flyology.TLS_Policy;
 with Interfaces.C;
 
 package body Flyology.IO.TLS is
    package Sockets renames GNAT.Sockets;
+   package Policy renames Flyology.TLS_Policy;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
@@ -74,22 +76,27 @@ package body Flyology.IO.TLS is
          Generation.all := Current_Generation;
          Armed.all := False;
          Close_Source := Invalid_Descriptor;
-         if Expected /= Current_Generation then
-            Result := Replaced;
-         elsif Close_In_Progress then
-            Result := Closing;
-         elsif Current_FD < 0 then
-            Result := Closed;
-         else
-            Result := Acquired;
-            Active := True;
-            FD := Current_FD;
-            Close_Source := Wake_Sources.Descriptor (Close_Wake);
-            --  Arm cleanup while abort is still deferred by the protected
-            --  action. The end of this entry call is an abort completion
-            --  point, so arming after return would leave an ownership gap.
-            Armed.all := True;
-         end if;
+         case Policy.Classify_Acquire
+           (Generation_Matches => Expected = Current_Generation,
+            Closing            => Close_In_Progress,
+            Descriptor_Open    => Current_FD >= 0)
+         is
+            when Policy.Reject_Replaced =>
+               Result := Replaced;
+            when Policy.Reject_Closing =>
+               Result := Closing;
+            when Policy.Reject_Closed =>
+               Result := Closed;
+            when Policy.Acquire_Operation =>
+               Result := Acquired;
+               Active := True;
+               FD := Current_FD;
+               Close_Source := Wake_Sources.Descriptor (Close_Wake);
+               --  Arm cleanup while abort is still deferred by the protected
+               --  action. The end of this entry call is an abort completion
+               --  point, so arming after return would leave an ownership gap.
+               Armed.all := True;
+         end case;
       end Acquire;
 
       procedure Release (Generation : Descriptor_Generation) is
@@ -108,7 +115,8 @@ package body Flyology.IO.TLS is
       begin
          FD := Current_FD;
          Generation := Current_Generation;
-         Leader := Current_FD >= 0 and then not Close_In_Progress;
+         Leader := Policy.Close_Leader
+           (Current_FD >= 0, Close_In_Progress);
          if Leader then
             if Active then
                Wake_Sources.Signal (Close_Wake);
@@ -132,9 +140,10 @@ package body Flyology.IO.TLS is
 
       procedure Finish_Close (Generation : Descriptor_Generation) is
       begin
-         if not Close_In_Progress
-           or else Active
-           or else Generation /= Current_Generation
+         if not Policy.Finish_Close_Allowed
+           (Close_In_Progress,
+            Active,
+            Generation = Current_Generation)
          then
             raise Program_Error with "stale TLS close completion";
          end if;
@@ -155,14 +164,24 @@ package body Flyology.IO.TLS is
       is
       begin
          Generation := Current_Generation;
-         State :=
-           (if Close_In_Progress then Closing
-            elsif Current_FD < 0 then Closed
-            else Acquired);
+         case Policy.Classify_Acquire
+           (Generation_Matches => True,
+            Closing            => Close_In_Progress,
+            Descriptor_Open    => Current_FD >= 0)
+         is
+            when Policy.Reject_Closing =>
+               State := Closing;
+            when Policy.Reject_Closed =>
+               State := Closed;
+            when Policy.Acquire_Operation =>
+               State := Acquired;
+            when Policy.Reject_Replaced =>
+               raise Program_Error with "invalid TLS acquisition snapshot";
+         end case;
       end Snapshot_Acquisition;
 
       function Is_Open_State return Boolean is
-        (Current_FD >= 0 and then not Close_In_Progress);
+        (Policy.Is_Open (Current_FD >= 0, Close_In_Progress));
 
       function Close_Requested return Boolean is (Close_In_Progress);
    end Descriptor_Controller;
@@ -236,15 +255,14 @@ package body Flyology.IO.TLS is
       Last  : Ada.Streams.Stream_Element_Offset)
       return Ada.Streams.Stream_Element_Offset
    is
+      Choice : constant Policy.Sentinel_Choice :=
+        Policy.Invalid_Progress_Sentinel (First, Last);
    begin
-      if First > Ada.Streams.Stream_Element_Offset'First then
-         return First - 1;
-      elsif Last < Ada.Streams.Stream_Element_Offset'Last then
-         return Last + 1;
-      else
+      if not Choice.Available then
          raise TLS_Error with
            "TLS buffer range leaves no invalid progress sentinel";
       end if;
+      return Choice.Value;
    end Invalid_Progress_Bound;
 
    procedure Await_Ready
@@ -478,19 +496,21 @@ package body Flyology.IO.TLS is
          Status := Receive_Step (Item.Session.all, Data, Last);
          case Status is
             when Complete =>
-               if Last < Data'First or else Last > Data'Last then
+               if not Policy.Complete_Progress_Valid
+                 (Data'First, Data'Last, Last)
+               then
                   raise TLS_Error with
                     "TLS provider returned an invalid receive bound";
                end if;
                exit;
             when Peer_Closed =>
-               if Last /= Before_Last then
+               if not Policy.Progress_Preserved (Before_Last, Last) then
                   raise TLS_Error with
                     "TLS provider changed receive output on peer close";
                end if;
                exit;
             when Want_Read | Want_Write =>
-               if Last /= Before_Last then
+               if not Policy.Progress_Preserved (Before_Last, Last) then
                   raise TLS_Error with
                     "TLS provider changed receive output while waiting";
                end if;
@@ -530,21 +550,23 @@ package body Flyology.IO.TLS is
            (Item.Session.all, Data (First .. Data'Last), Last);
          case Status is
             when Complete =>
-               if Last < First or else Last > Data'Last then
+               if not Policy.Complete_Progress_Valid
+                 (First, Data'Last, Last)
+               then
                   raise TLS_Error with
                     "TLS provider made no receive progress";
                end if;
                exit when Last = Data'Last;
-               First := Last + 1;
+               First := Policy.Next_Offset (Last);
             when Want_Read | Want_Write =>
-               if Last /= Before_Last then
+               if not Policy.Progress_Preserved (Before_Last, Last) then
                   raise TLS_Error with
                     "TLS provider changed receive output while waiting";
                end if;
                Await_Ready
                  (FD, Status, Started, Timeout, Close_Source, Token);
             when Peer_Closed =>
-               if Last /= Before_Last then
+               if not Policy.Progress_Preserved (Before_Last, Last) then
                   raise TLS_Error with
                     "TLS provider changed receive output on peer close";
                end if;
@@ -584,20 +606,22 @@ package body Flyology.IO.TLS is
            (Item.Session.all, Data (First .. Data'Last), Last);
          case Status is
             when Complete =>
-               if Last < First or else Last > Data'Last then
+               if not Policy.Complete_Progress_Valid
+                 (First, Data'Last, Last)
+               then
                   raise TLS_Error with "TLS provider made no send progress";
                end if;
                exit when Last = Data'Last;
-               First := Last + 1;
+               First := Policy.Next_Offset (Last);
             when Want_Read | Want_Write =>
-               if Last /= Before_Last then
+               if not Policy.Progress_Preserved (Before_Last, Last) then
                   raise TLS_Error with
                     "TLS provider changed send output while waiting";
                end if;
                Await_Ready
                  (FD, Status, Started, Timeout, Close_Source, Token);
             when Peer_Closed =>
-               if Last /= Before_Last then
+               if not Policy.Progress_Preserved (Before_Last, Last) then
                   raise TLS_Error with
                     "TLS provider changed send output on peer close";
                end if;

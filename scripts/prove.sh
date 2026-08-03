@@ -15,10 +15,14 @@ cd "$project_root/proof"
   --output=oneline \
   --output-header \
   --report=all \
+  -f \
   -u \
   flyology-counter_policy.adb \
+  flyology-connection_policy.adb \
   flyology-topology_policy.adb \
   flyology-time_math.adb \
+  flyology-tls_policy.adb \
+  flyology-structured_server_policy.adb \
   flyology-file_open_policy.adb \
   flyology-wait_policy.adb
 
@@ -29,6 +33,7 @@ cd "$project_root/proof"
   --output=oneline \
   --output-header \
   --report=all \
+  -f \
   -u s-flscpo.adb
 
 printf '%s\n' "Flyology SPARK proof suite passed"

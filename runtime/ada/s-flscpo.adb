@@ -103,4 +103,28 @@ is
       end if;
    end Time_Until;
 
+   function Heap_Parent (Position : Positive) return Positive is
+     (Position / 2);
+
+   function Heap_Has_Child
+     (Position : Positive;
+      Count    : Natural) return Boolean
+   is
+     (Position <= Count / 2);
+
+   function Heap_First_Child
+     (Position : Positive;
+      Count    : Natural) return Positive
+   is
+      pragma Unreferenced (Count);
+   begin
+      return Position * 2;
+   end Heap_First_Child;
+
+   function Descriptor_Bucket
+     (Descriptor   : Natural;
+      Bucket_Count : Positive) return Natural
+   is
+     (Descriptor mod Bucket_Count);
+
 end System.Flyology.Scheduling_Policy;
