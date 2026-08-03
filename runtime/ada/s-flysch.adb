@@ -2243,7 +2243,7 @@ package body System.Flyology.Scheduler is
         or else not Scheduling.Valid_Group (Group)
       then
          return -1;
-      elsif not Initialized then
+      elsif In_Fork_Child or else not Initialized then
          return 0;
       end if;
 

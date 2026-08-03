@@ -130,9 +130,15 @@ int flyology_test_fork_exec(const char *program) {
         return -1;
     }
     if (child == 0) {
+        struct runtime_group_snapshot snapshot = {
+            .version = 0xfeedbeefU,
+        };
         struct runtime_placement_status placement;
 
         if (flyology_runtime_observe_lifecycle() != 5 ||
+            flyology_runtime_observe_group(
+                0, &snapshot, sizeof(snapshot)) != 0 ||
+            snapshot.version != 0xfeedbeefU ||
             flyology_runtime_placement_supported(1) != 0 ||
             flyology_runtime_query_group_placement(
                 0, &placement, sizeof(placement)) != 0 ||
@@ -146,7 +152,15 @@ int flyology_test_fork_exec(const char *program) {
     for (int attempt = 0; attempt < 5000; ++attempt) {
         pid_t result = waitpid(child, &status, WNOHANG);
         if (result == child) {
-            return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+            struct runtime_group_snapshot snapshot;
+
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
+                flyology_runtime_observe_group(
+                    0, &snapshot, sizeof(snapshot)) != 1 ||
+                snapshot.version != 2) {
+                return -1;
+            }
+            return 0;
         }
         if (result < 0 && errno != EINTR) {
             return -1;

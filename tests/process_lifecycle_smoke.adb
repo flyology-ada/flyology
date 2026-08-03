@@ -87,6 +87,13 @@ begin
    end if;
    Interfaces.C.Strings.Free (Program);
 
+   if Lifecycle.State /= Lifecycle.Running
+     or else Lifecycle.Created_Groups /= 1
+   then
+      raise Program_Error with
+        "fork child observation changed the parent runtime";
+   end if;
+
    if Arm_Exit_Check (3, 0) /= 0 then
       raise Program_Error with "cannot register process-exit lifecycle check";
    end if;

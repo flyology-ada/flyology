@@ -114,7 +114,8 @@ package System.Flyology.Scheduler is
 
    --  Internal ABI used by Flyology.Observability. Snapshot points at a
    --  caller-owned, C-compatible record and Snapshot_Size permits the ABI to
-   --  reject mismatched clients instead of overwriting a shorter record.
+   --  reject mismatched clients instead of overwriting a shorter record. A
+   --  fork child returns no snapshot before consulting inherited locks.
    function Observe_Group
      (Group         : Interfaces.C.int;
       Snapshot      : System.Address;
