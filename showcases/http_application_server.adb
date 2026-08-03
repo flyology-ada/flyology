@@ -1306,15 +1306,17 @@ procedure HTTP_Application_Server is
          end;
       end SSE_Events;
 
+      package WS renames Flyology.HTTP.Server.WebSocket_Handlers;
+
       procedure WS_Open
         (X       : in out App.Exchange;
-         Session : in out Flyology.HTTP.Server.WebSocket_Handlers.Session)
+         Session : in out WS.Session)
       is
          pragma Unreferenced (X);
          Accepted : Boolean;
       begin
          --  Open callbacks publish into the same bounded owner-drained queue.
-         Flyology.HTTP.Server.WebSocket_Handlers.Try_Publish
+         WS.Try_Publish
            (Session,
             (Kind => HTTP.Text_Frame,
              Data => Bytes.From_Byte_String
@@ -1324,7 +1326,7 @@ procedure HTTP_Application_Server is
 
       procedure WS_Message
         (X       : in out App.Exchange;
-         Session : in out Flyology.HTTP.Server.WebSocket_Handlers.Session;
+         Session : in out WS.Session;
          Kind    : HTTP.WebSocket_Data_Kind;
          Data    : Bytes.Unbounded_Bytes)
       is
@@ -1333,7 +1335,7 @@ procedure HTTP_Application_Server is
       begin
          --  Binary frames remain Unbounded_Bytes. Text conversion occurs only
          --  in the text branch used to prepend the visible echo label.
-         Flyology.HTTP.Server.WebSocket_Handlers.Try_Publish
+         WS.Try_Publish
            (Session,
             (Kind => Kind,
              Data =>
@@ -1343,13 +1345,13 @@ procedure HTTP_Application_Server is
                 else Data)),
             Accepted);
          if not Accepted then
-            Flyology.HTTP.Server.WebSocket_Handlers.Close (Session);
+            WS.Close (Session);
          end if;
       end WS_Message;
 
       procedure WS_Closed
         (X       : in out App.Exchange;
-         Session : in out Flyology.HTTP.Server.WebSocket_Handlers.Session) is
+         Session : in out WS.Session) is
       begin
          pragma Unreferenced (X, Session);
       end WS_Closed;
@@ -1358,7 +1360,6 @@ procedure HTTP_Application_Server is
         (State : in out Application_Context;
          X     : in out App.Exchange)
       is
-         package WS renames Flyology.HTTP.Server.WebSocket_Handlers;
          Session : aliased WS.Session
            (Capacity => 16,
             Byte_Limit => WS.Default_Session_Bytes,

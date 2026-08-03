@@ -159,12 +159,30 @@ SSE.Run
             <div><dt>Backpressure</dt><dd>bounded publish wait</dd></div>
           </dl>
           <figure class="source-panel compact-source">
-            <figcaption><span>origin-gated lifecycle</span><code>WebSocket_Echo</code></figcaption>
-            <pre><code data-ada>WS_Lifecycle.Run
-  (X, Session,
-   Origin_Policy  =&gt; HTTP.Require_Exact_Origin,
-   Allowed_Origin =&gt; Expected_Origin,
-   Metric_Output  =&gt; Metrics'Access);</code></pre>
+            <figcaption><span>binary-safe bounded echo</span><code>WS_Message</code></figcaption>
+            <pre><code data-ada>procedure WS_Message
+  (X       : in out App.Exchange;
+   Session : in out WS.Session;
+   Kind    : HTTP.WebSocket_Data_Kind;
+   Data    : Bytes.Unbounded_Bytes)
+is
+   Accepted : Boolean;
+begin
+   WS.Try_Publish
+     (Session,
+      (Kind =&gt; Kind,
+       Data =&gt;
+         (if Kind = HTTP.Text_Frame
+          then Bytes.From_Byte_String
+            ("flyology: "
+             &amp; Bytes.To_Byte_String (Data))
+          else Data)),
+      Accepted);
+
+   if not Accepted then
+      WS.Close (Session);
+   end if;
+end WS_Message;</code></pre>
           </figure>
         </div>
         <div class="chat-window">
