@@ -72,7 +72,7 @@
           </div>
           <div class="model-note model-note-native">
             <strong>Native task</strong>
-            Runs on its own pthread through stock GNARL.
+            Runs on its own OS thread through stock GNARL.
           </div>
           <div class="code-window">
             <div class="code-titlebar">
@@ -129,14 +129,14 @@ Flyology.IO.Sockets.Receive
           <div class="lane">
             <div class="lane-copy">
               <span class="lane-number">02 / NATIVE</span>
-              <h3>Dedicated pthread</h3>
+              <h3>Dedicated OS thread</h3>
             </div>
-            <div class="lane-flow" aria-label="A native Ada task uses the stock GNARL pthread path">
+            <div class="lane-flow" aria-label="A native Ada task uses the stock GNARL OS-thread path">
               <span class="flow-node">Ada task</span>
               <span class="flow-arrow" aria-hidden="true"></span>
               <span class="flow-node">GNARL</span>
               <span class="flow-arrow" aria-hidden="true"></span>
-              <span class="flow-node flow-node-teal">pthread</span>
+              <span class="flow-node flow-node-teal">OS thread</span>
             </div>
           </div>
         </div>

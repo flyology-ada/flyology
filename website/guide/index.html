@@ -106,7 +106,7 @@ alr build</code></pre>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>./scripts/prepare-rts.sh</code></pre>
             </figure>
-            <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock pthread-backed execution, and no event machinery starts until a lightweight task is activated.</p>
+            <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock OS-thread execution, and no event machinery starts until a lightweight task is activated.</p>
             <figure class="code-panel">
               <figcaption>lightweight project default with four shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -122,8 +122,8 @@ FLYOLOGY_LOOP_POOL_SIZE=4 \
               <dl>
                 <div class="decision-row"><dt><code>FLYOLOGY_RTS_DIR</code></dt><dd>Writes the generated runtime outside the default <code>build/rts</code>. Give each materially different configuration its own directory when comparing builds.</dd></div>
                 <div class="decision-row"><dt><code>FLYOLOGY_DEFAULT</code></dt><dd>Selects <code>native</code> or <code>lightweight</code> for tasks that do not carry an explicit designation.</dd></div>
-                <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement. Groups and their pthreads still start lazily.</dd></div>
-                <div class="decision-row"><dt>Loop placement</dt><dd><code>FLYOLOGY_LOOP_PLACEMENT</code> and <code>FLYOLOGY_LOOP_PLACEMENT_MAP</code> request Linux strict logical-CPU binding or a supported Darwin advisory tag. This places loop pthreads; it does not change task-to-group assignment.</dd></div>
+                <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement. Groups and their OS threads still start lazily.</dd></div>
+                <div class="decision-row"><dt>Loop placement</dt><dd><code>FLYOLOGY_LOOP_PLACEMENT</code> and <code>FLYOLOGY_LOOP_PLACEMENT_MAP</code> request Linux strict logical-CPU binding or a supported Darwin advisory tag. This places loop threads; it does not change task-to-group assignment.</dd></div>
               </dl>
             </div>
           </section>
@@ -204,9 +204,9 @@ task Writer with CPU =&gt; 2 is
    pragma Task_Info (Flyology.Lightweight_Task);
 end Writer;</code></pre>
             </figure>
-            <p>Tasks in one group share a stable loop pthread and schedule cooperatively. Separate groups use separate pthreads and may execute in parallel. Shared group identifiers are <code>0 .. 127</code>; dedicated group identifiers are <code>128 .. 255</code>.</p>
+            <p>Tasks in one group share a stable loop thread and schedule cooperatively. Separate groups use separate OS threads and may execute in parallel. Shared group identifiers are <code>0 .. 127</code>; dedicated group identifiers are <code>128 .. 255</code>.</p>
             <h3>Migration is an explicit safe point</h3>
-            <p>A lightweight task can move to another group without changing Ada task identity, stack, locals, or exception state. Use a scoped thread pin while holding thread-affine foreign state, and use a dedicated group when exclusive pthread ownership is also required.</p>
+            <p>A lightweight task can move to another group without changing Ada task identity, stack, locals, or exception state. Use a scoped thread pin while holding thread-affine foreign state, and use a dedicated group when exclusive OS-thread ownership is also required.</p>
             <figure class="code-panel">
               <figcaption>explicit migration</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -224,7 +224,7 @@ end;</code></pre>
           <section id="io">
             <span class="step-label">STEP 07</span>
             <h2>Use synchronous I/O calls.</h2>
-            <p>Flyology I/O packages expose normal procedure and function calls from either lane. If a lightweight call would block, only that task waits; the loop thread remains available. A native call may block only its pthread.</p>
+            <p>Flyology I/O packages expose normal procedure and function calls from either lane. If a lightweight call would block, only that task waits; the loop thread remains available. A native call may block only its OS thread.</p>
             <figure class="code-panel">
               <figcaption>task-aware I/O</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -248,7 +248,7 @@ Flyology.IO.Files.Read_At
               <dl>
                 <div class="decision-row"><dt>Concurrency</dt><dd>Use a structured server or <code>Connections.Server</code> capacity to cap simultaneously owned connections. A structured server creates exactly <code>Capacity</code> handler tasks for the duration of <code>Serve</code>, including while idle.</dd></div>
                 <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, plan usable stack bytes as peak live tasks multiplied by the observed effective bytes per task. Read <code>Reserved_Bytes</code> for guarded virtual address space and measure RSS for resident memory.</dd></div>
-                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> bounds automatic shared groups, not task count. Start near the CPU parallelism the workload can use and compare measurements; each created group adds pthread, poller, scheduler, and kernel-queue resources.</dd></div>
+                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> bounds automatic shared groups, not task count. Start near the CPU parallelism the workload can use and compare measurements; each created group adds an OS thread plus poller, scheduler, and kernel-queue resources.</dd></div>
                 <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These are separate limits: cancellation is not a timeout, and a fairness quantum is not a hard execution deadline.</dd></div>
               </dl>
             </div>
@@ -341,8 +341,8 @@ end loop;</code></pre>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Use lightweight</dt><dd>High I/O concurrency with cooperative work, explicit task-aware waits, and ordinary Ada task semantics.</dd></div>
-                <div class="decision-row"><dt>Use native</dt><dd>Blocking foreign libraries, kernel scheduling policies, independent pthread execution, or unmodified compatibility behavior.</dd></div>
-                <div class="decision-row"><dt>Use dedicated</dt><dd>A lightweight continuation must temporarily own a stable loop pthread exclusively.</dd></div>
+                <div class="decision-row"><dt>Use native</dt><dd>Blocking foreign libraries, kernel scheduling policies, independent OS-thread execution, or unmodified compatibility behavior.</dd></div>
+                <div class="decision-row"><dt>Use dedicated</dt><dd>A lightweight continuation must temporarily own a stable loop thread exclusively.</dd></div>
               </dl>
             </div>
             <aside class="callout callout-teal">

@@ -68,11 +68,11 @@
           <section id="routing">
             <span class="step-label">ROUTING</span>
             <h2>Tasks use either native or lightweight execution.</h2>
-            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the task either to a guarded fiber stack managed by an execution group or to the stock pthread-backed path.</p>
+            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the task either to a guarded fiber stack managed by an execution group or to the stock OS-thread path.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 760 410">
                 <title id="routing-title">Flyology task routing</title>
-                <desc id="routing-desc">An Ada task passes through GNARL and task primitives, then follows either the lightweight execution-group lane or the native pthread lane.</desc>
+                <desc id="routing-desc">An Ada task passes through GNARL and task primitives, then follows either the lightweight execution-group lane or the native OS-thread lane.</desc>
                 <defs>
                   <marker id="routing-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
                 </defs>
@@ -92,7 +92,7 @@
                 <text class="diagram-muted" x="180" y="378" text-anchor="middle">fiber + scheduler + poller</text>
                 <rect class="diagram-teal" x="450" y="334" width="260" height="58" rx="12"/>
                 <text x="580" y="359" text-anchor="middle" font-size="15" font-weight="600">Native task lane</text>
-                <text class="diagram-muted" x="580" y="378" text-anchor="middle">stock GNARL pthread path</text>
+                <text class="diagram-muted" x="580" y="378" text-anchor="middle">stock GNARL OS-thread path</text>
               </svg>
             </figure>
             <p>The environment task is always native. A task cannot change its lightweight or native designation while alive, though a lightweight task can migrate between event-loop groups at an explicit safe point.</p>
@@ -146,7 +146,7 @@
           <section id="groups">
             <span class="step-label">TOPOLOGY</span>
             <h2>Each group is a scheduling and ownership domain.</h2>
-            <p>An execution group owns one stable loop pthread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work implicitly. Automatic placement, explicit Ada <code class="language-ada">CPU</code> selection, and migration determine where a task runs.</p>
+            <p>An execution group owns one stable loop thread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work implicitly. Automatic placement, explicit Ada <code class="language-ada">CPU</code> selection, and migration determine where a task runs.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="groups-title groups-desc" viewBox="0 0 760 360">
                 <title id="groups-title">Two independent execution groups</title>
@@ -154,7 +154,7 @@
                 <defs><marker id="groups-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--violet)"/></marker></defs>
                 <rect class="diagram-violet" x="30" y="32" width="315" height="290" rx="18"/>
                 <text x="58" y="69" font-size="17" font-weight="600">Group 0</text>
-                <text class="diagram-muted" x="58" y="90">stable loop pthread</text>
+                <text class="diagram-muted" x="58" y="90">stable loop thread</text>
                 <rect class="diagram-box" x="58" y="113" width="116" height="50" rx="10"/><text x="116" y="143" text-anchor="middle" font-size="13">ready queues</text>
                 <rect class="diagram-box" x="200" y="113" width="116" height="50" rx="10"/><text x="258" y="143" text-anchor="middle" font-size="13">deadline heap</text>
                 <rect class="diagram-box" x="58" y="182" width="116" height="50" rx="10"/><text x="116" y="212" text-anchor="middle" font-size="13">descriptor index</text>
@@ -163,7 +163,7 @@
                 <text class="diagram-muted" x="218" y="283">fibers</text>
                 <rect class="diagram-teal" x="415" y="32" width="315" height="290" rx="18"/>
                 <text x="443" y="69" font-size="17" font-weight="600">Group 1</text>
-                <text class="diagram-muted" x="443" y="90">stable loop pthread</text>
+                <text class="diagram-muted" x="443" y="90">stable loop thread</text>
                 <rect class="diagram-box" x="443" y="113" width="116" height="50" rx="10"/><text x="501" y="143" text-anchor="middle" font-size="13">ready queues</text>
                 <rect class="diagram-box" x="585" y="113" width="116" height="50" rx="10"/><text x="643" y="143" text-anchor="middle" font-size="13">deadline heap</text>
                 <rect class="diagram-box" x="443" y="182" width="116" height="50" rx="10"/><text x="501" y="212" text-anchor="middle" font-size="13">descriptor index</text>
@@ -199,7 +199,7 @@
                 <div class="decision-row"><dt>Darwin</dt><dd>POSIX AIO submissions complete through <code>EVFILT_AIO</code> in the group's <code>kqueue</code>.</dd></div>
                 <div class="decision-row"><dt>Linux primary</dt><dd>Each group owns an <code>io_uring</code> engine integrated with its event loop.</dd></div>
                 <div class="decision-row"><dt>Linux fallback</dt><dd>Linux native AIO completion wakes the group through <code>eventfd</code>.</dd></div>
-                <div class="decision-row"><dt>Native callers</dt><dd>Direct positional syscalls block only the native task's pthread.</dd></div>
+                <div class="decision-row"><dt>Native callers</dt><dd>Direct positional syscalls block only the native task's OS thread.</dd></div>
               </dl>
             </div>
             <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p>A submitted file buffer remains kernel-owned until completion. Abort cannot release or reuse it early.</p></aside>
