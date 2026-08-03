@@ -21,6 +21,12 @@ procedure DNS_Smoke is
 
    procedure Run (Model : Flyology.Execution_Model) is
       Cancel_Source : aliased Flyology.Wake_Sources.Source;
+      Search_Name   : constant String (1 .. 60) := (others => 'r');
+      Bare_Name     : constant String (1 .. 60) := (others => 'b');
+      Search_Label  : constant String (1 .. 62) := (others => 's');
+      Long_Search   : constant String :=
+        Search_Label & "." & Search_Label & "."
+        & Search_Label & "." & Search_Label;
 
       protected Control is
          procedure Ready (Address : Sockets.Sock_Addr_Type);
@@ -57,20 +63,29 @@ procedure DNS_Smoke is
       end Control;
 
       function Config_Path
-        (Server : Sockets.Sock_Addr_Type) return String is
+        (Server : Sockets.Sock_Addr_Type;
+         Suffix : String := "") return String is
       begin
          return "/tmp/flyology-dns-smoke-"
            & Ada.Strings.Fixed.Trim
              (Sockets.Port_Type'Image (Server.Port), Ada.Strings.Both)
-           & ".conf";
+           & Suffix & ".conf";
       end Config_Path;
 
-      procedure Write_Config (Server : Sockets.Sock_Addr_Type) is
+      procedure Write_Config
+        (Server : Sockets.Sock_Addr_Type;
+         Search : String := "";
+         Suffix : String := "")
+      is
          File : Flyology.IO.Files.File_Descriptor :=
            Flyology.IO.Files.Invalid_File;
+         Search_Directive : constant String :=
+           (if Search'Length = 0 then ""
+            else "search " & Search & ASCII.LF);
          Text : constant String :=
            ASCII.HT & "nameserver" & ASCII.HT
            & Sockets.Image (Server) & ASCII.HT & ASCII.LF
+           & Search_Directive
            & ASCII.HT & "options" & ASCII.HT
            & "attempts:1 timeout:1" & ASCII.HT & ASCII.LF;
          Data : Streams.Stream_Element_Array
@@ -83,7 +98,7 @@ procedure DNS_Smoke is
                 Character'Pos (Text (Index));
          end loop;
          File := Flyology.IO.Files.Open
-           (Config_Path (Server), Flyology.IO.Files.Write_Only,
+           (Config_Path (Server, Suffix), Flyology.IO.Files.Write_Only,
             Create => True, Truncate => True);
          Flyology.IO.Files.Write_At (File, 0, Data, Last);
          Flyology.IO.Files.Close (File);
@@ -484,6 +499,10 @@ procedure DNS_Smoke is
                   Send_Response (Name, IPv4 => "192.0.2.20");
                elsif Name = "config.test" then
                   Send_Response (Name, IPv4 => "192.0.2.53");
+               elsif Name = Search_Name & ".valid.test" then
+                  Send_Response (Name, IPv4 => "192.0.2.54");
+               elsif Name = Bare_Name then
+                  Send_Response (Name, IPv4 => "192.0.2.55");
                elsif Name = "entropy.test" then
                   if Query (1) = 16#12# and then Query (2) = 16#34# then
                      Send_Response (Name, IPv4 => "192.0.2.99");
@@ -735,6 +754,22 @@ procedure DNS_Smoke is
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.53";
          end;
+         declare
+            Values : constant DNS.Address_Array := DNS.Resolve
+              (Search_Name, DNS.IPv4_Only, Timeout => 1.0,
+               Configuration_Path => Config_Path (Server, "-remaining"));
+         begin
+            OK := OK and then Values'Length = 1
+              and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
+         end;
+         declare
+            Values : constant DNS.Address_Array := DNS.Resolve
+              (Bare_Name, DNS.IPv4_Only, Timeout => 1.0,
+               Configuration_Path => Config_Path (Server, "-bare"));
+         begin
+            OK := OK and then Values'Length = 1
+              and then Sockets.Image (Values (Values'First)) = "192.0.2.55";
+         end;
          DNS.Testing.Use_Deterministic_Transaction_IDs (16#1234#);
          begin
             Expect ("entropy.test", "192.0.2.99");
@@ -800,6 +835,9 @@ procedure DNS_Smoke is
       Control.Get_Address (Address);
       Control.Get_Secondary (Secondary_Address);
       Write_Config (Address);
+      Write_Config
+        (Address, Long_Search & " valid.test", Suffix => "-remaining");
+      Write_Config (Address, Long_Search, Suffix => "-bare");
       Control.Begin_Client;
       select
          Control.Wait_Cancel_Query;
@@ -822,6 +860,12 @@ procedure DNS_Smoke is
       Sockets.Close_Socket (Stopper);
       if Ada.Directories.Exists (Config_Path (Address)) then
          Ada.Directories.Delete_File (Config_Path (Address));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-remaining")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-remaining"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-bare")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-bare"));
       end if;
       pragma Assert (Passed);
    end Run;

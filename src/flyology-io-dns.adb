@@ -1670,10 +1670,21 @@ package body Flyology.IO.DNS is
          end;
       end if;
       for Index in 1 .. Config.Search_Count loop
+         declare
+            Suffix : constant String := Image (Config.Search (Index));
          begin
-            return Try_Name (Name & "." & Image (Config.Search (Index)));
-         exception
-            when Name_Not_Found => null;
+            --  A valid name and search domain can still exceed the DNS name
+            --  limit when combined. Such a candidate is unusable, but it must
+            --  not suppress later search domains or the bare-name fallback.
+            if Name'Length < Max_Name_Length
+              and then Suffix'Length <= Max_Name_Length - Name'Length - 1
+            then
+               begin
+                  return Try_Name (Name & "." & Suffix);
+               exception
+                  when Name_Not_Found => null;
+               end;
+            end if;
          end;
       end loop;
       return Try_Name (Name);
