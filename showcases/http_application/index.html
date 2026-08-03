@@ -81,6 +81,19 @@
           <h2 id="events-title">A stream should feel alive.</h2>
           <p>The producer publishes several typed events through a bounded mailbox. The connection owner drains them in order, applies backpressure, and closes after the final event.</p>
           <button class="button secondary" type="button" data-sse-reconnect>Run another flight</button>
+          <figure class="source-panel compact-source">
+            <figcaption><span>bounded producer and sole writer</span><code>SSE_Events</code></figcaption>
+            <pre><code data-ada>SSE.Publish_For
+  (Session, Event,
+   Accepted,
+   Timeout   =&gt; 1.0,
+   Timed_Out =&gt; Timed_Out);
+
+SSE.Run
+  (X, Session, Metrics'Access,
+   Idle_Quantum =&gt; 0.05,
+   Heartbeat    =&gt; 0.5);</code></pre>
+          </figure>
         </div>
         <div class="telemetry-panel">
           <header>
@@ -103,6 +116,14 @@
             <div><dt>Payload</dt><dd>UTF-8 text or native bytes</dd></div>
             <div><dt>Backpressure</dt><dd>bounded publish wait</dd></div>
           </dl>
+          <figure class="source-panel compact-source">
+            <figcaption><span>origin-gated lifecycle</span><code>WebSocket_Echo</code></figcaption>
+            <pre><code data-ada>WS_Lifecycle.Run
+  (X, Session,
+   Origin_Policy  =&gt; HTTP.Require_Exact_Origin,
+   Allowed_Origin =&gt; Expected_Origin,
+   Metric_Output  =&gt; Metrics'Access);</code></pre>
+          </figure>
         </div>
         <div class="chat-window">
           <header>
@@ -123,6 +144,18 @@
           <p class="section-index">03 · files and request bodies</p>
           <h2 id="files-title">The page serves itself.</h2>
           <p>HTML, CSS, JavaScript, the mark, and the variable font are read positionally with <code>Flyology.IO.Files.Read_At</code>, then written as binary HTTP chunks. Uploads travel the other direction through the streamed request-body API.</p>
+          <figure class="source-panel compact-source">
+            <figcaption><span>completion-driven file response</span><code>Serve_File</code></figcaption>
+            <pre><code data-ada>X.Begin_Stream (200, Content_Type);
+loop
+   Files.Read_At
+     (File, Offset, Buffer, Last,
+      Token =&gt; X.Cancellation);
+   exit when Last &lt; Buffer'First;
+   X.Write_Chunk (Buffer (Buffer'First .. Last));
+end loop;
+X.End_Stream;</code></pre>
+          </figure>
         </div>
         <div class="upload-workbench">
           <form data-upload-form>
@@ -214,41 +247,105 @@
           </div>
         </header>
         <div class="endpoint-list">
-          <button type="button" data-endpoint="/parallel" data-probe-title="Two request-scoped lightweight operations" data-probe-claim="Both children inherit cancellation and the absolute request deadline. Scope exit joins them before the borrowed exchange can disappear." data-expected-status="200">
-            <span class="probe-index">01</span>
-            <span class="probe-copy"><strong>Parallel lightweight work</strong><span>Runs two simulated upstream calls concurrently, joins both results, then writes <code>combined 42</code>.</span><small>Boundary: no child outlives the request scope or writes the connection.</small></span>
-            <span class="probe-route"><code>/parallel</code><span>Run probe</span></span>
-          </button>
-          <button type="button" data-endpoint="/native" data-probe-title="Explicit bounded native execution" data-probe-claim="CPU or blocking foreign work crosses a visible executor boundary. Submission is bounded, and the handler waits cooperatively with its original cancellation and deadline." data-expected-status="200">
-            <span class="probe-index">02</span>
-            <span class="probe-copy"><strong>Bounded native boundary</strong><span>Submits a small calculation to one of four native workers and returns <code>native 144</code>.</span><small>Boundary: a live lightweight task never changes its designation.</small></span>
-            <span class="probe-route"><code>/native</code><span>Run probe</span></span>
-          </button>
-          <button type="button" data-endpoint="/admin/status" data-probe-title="Mounted router with inherited composition" data-probe-claim="The admin router owns its route and middleware, while the parent contributes the /admin prefix and the normalized admin.status route name." data-expected-status="200">
-            <span class="probe-index">03</span>
-            <span class="probe-copy"><strong>Mounted subrouter</strong><span>Resolves a child route through the parent router and applies the subrouter security-header component.</span><small>Boundary: mounting composes route scope without hidden application conventions.</small></span>
-            <span class="probe-route"><code>/admin/status</code><span>Run probe</span></span>
-          </button>
-          <button type="button" data-endpoint="/private" data-token="example-token" data-probe-title="Route-required authentication hook" data-probe-claim="Routing declares authentication as required. The example bearer hook validates the credential and installs a principal before the handler runs." data-expected-status="200">
-            <span class="probe-index">04</span>
-            <span class="probe-copy"><strong>Bearer authentication</strong><span>Sends the documented demo token and lets the handler read the resulting <code>example-user</code> principal.</span><small>Boundary: credentials are consumed by the hook and omitted from access logs.</small></span>
-            <span class="probe-route"><code>/private</code><span>Run probe</span></span>
-          </button>
-          <button type="button" data-endpoint="/error" data-probe-title="Exception mapping before response start" data-probe-claim="The handler raises an unexpected Ada exception. Error middleware logs its detail server-side but exposes only a safe generic problem response." data-expected-status="500">
-            <span class="probe-index">05</span>
-            <span class="probe-copy"><strong>Safe exception mapping</strong><span>Intentionally raises <code>Constraint_Error</code>; an HTTP 500 is the expected successful observation.</span><small>Boundary: application details never leak into the client response.</small></span>
-            <span class="probe-route"><code>/error</code><span>Run probe</span></span>
-          </button>
+          <div class="probe-item">
+            <button type="button" data-endpoint="/parallel" data-probe-title="Two request-scoped lightweight operations" data-probe-claim="Both children inherit cancellation and the absolute request deadline. Scope exit joins them before the borrowed exchange can disappear." data-expected-status="200">
+              <span class="probe-index">01</span>
+              <span class="probe-copy"><strong>Parallel lightweight work</strong><span>Runs two simulated upstream calls concurrently, joins both results, then writes <code>combined 42</code>.</span><small>Boundary: no child outlives the request scope or writes the connection.</small></span>
+              <span class="probe-route"><code>/parallel</code><span>Run probe</span></span>
+            </button>
+            <template data-probe-source>Request_Work.Configure (Scope, X);
+Request_Operations.Spawn (Scope, 20, User);
+Request_Operations.Spawn (Scope, 1, Orders);
+Request_Operations.Join (Scope);
+
+X.Text
+  (200, "combined" &amp; Integer'Image
+     (Request_Operations.Result (Scope, User)
+      + Request_Operations.Result (Scope, Orders)));</template>
+          </div>
+          <div class="probe-item">
+            <button type="button" data-endpoint="/native" data-probe-title="Explicit bounded native execution" data-probe-claim="CPU or blocking foreign work crosses a visible executor boundary. Submission is bounded, and the handler waits cooperatively with its original cancellation and deadline." data-expected-status="200">
+              <span class="probe-index">02</span>
+              <span class="probe-copy"><strong>Bounded native boundary</strong><span>Submits a small calculation to one of four native workers and returns <code>native 144</code>.</span><small>Boundary: a live lightweight task never changes its designation.</small></span>
+              <span class="probe-route"><code>/native</code><span>Run probe</span></span>
+            </button>
+            <template data-probe-source>Native_Work.Submit
+  (Native_Pool, 12,
+   X.Cancellation, X.Deadline,
+   Work, Accepted);
+
+Native_Work.Await
+  (Native_Pool, Work, Value,
+   X.Cancellation, X.Deadline);</template>
+          </div>
+          <div class="probe-item">
+            <button type="button" data-endpoint="/admin/status" data-probe-title="Mounted router with inherited composition" data-probe-claim="The admin router owns its route and middleware, while the parent contributes the /admin prefix and the normalized admin.status route name." data-expected-status="200">
+              <span class="probe-index">03</span>
+              <span class="probe-copy"><strong>Mounted subrouter</strong><span>Resolves a child route through the parent router and applies the subrouter security-header component.</span><small>Boundary: mounting composes route scope without hidden application conventions.</small></span>
+              <span class="probe-route"><code>/admin/status</code><span>Run probe</span></span>
+            </button>
+            <template data-probe-source>Admin_Routes.Get
+  ("/status", Admin_Status'Access,
+   Name =&gt; "status");
+Admin_Routes.Add_Middleware
+  (Security_Middleware.Call'Access,
+   Name =&gt; "admin-security-headers");
+
+State.Routes.Mount
+  ("/admin", Admin_Routes,
+   Name_Prefix =&gt; "admin.");</template>
+          </div>
+          <div class="probe-item">
+            <button type="button" data-endpoint="/private" data-token="example-token" data-probe-title="Route-required authentication hook" data-probe-claim="Routing declares authentication as required. The example bearer hook validates the credential and installs a principal before the handler runs." data-expected-status="200">
+              <span class="probe-index">04</span>
+              <span class="probe-copy"><strong>Bearer authentication</strong><span>Sends the documented demo token and lets the handler read the resulting <code>example-user</code> principal.</span><small>Boundary: credentials are consumed by the hook and omitted from access logs.</small></span>
+              <span class="probe-route"><code>/private</code><span>Run probe</span></span>
+            </button>
+            <template data-probe-source>State.Routes.Get
+  ("/private", Private_Profile'Access,
+   Name =&gt; "private",
+   Policy =&gt;
+     (Routing.Default_Route_Policy with delta
+        Authentication =&gt;
+          Routing.Required_Authentication));
+
+State.Routes.Add_Route_Middleware
+  ("private", Authentication_Middleware.Call'Access);</template>
+          </div>
+          <div class="probe-item">
+            <button type="button" data-endpoint="/error" data-probe-title="Exception mapping before response start" data-probe-claim="The handler raises an unexpected Ada exception. Error middleware logs its detail server-side but exposes only a safe generic problem response." data-expected-status="500">
+              <span class="probe-index">05</span>
+              <span class="probe-copy"><strong>Safe exception mapping</strong><span>Intentionally raises <code>Constraint_Error</code>; an HTTP 500 is the expected successful observation.</span><small>Boundary: application details never leak into the client response.</small></span>
+              <span class="probe-route"><code>/error</code><span>Run probe</span></span>
+            </button>
+            <template data-probe-source>procedure Demonstrate_Error
+  (State : in out Application_Context;
+   X     : in out App.Exchange)
+is
+   pragma Unreferenced (State, X);
+begin
+   raise Constraint_Error with
+     "example application failure";
+end Demonstrate_Error;</template>
+          </div>
         </div>
-        <div class="probe-result" data-probe-state="idle" aria-live="polite">
+        <div class="probe-result" data-probe-state="idle" aria-live="polite" hidden>
           <div class="probe-result-intent">
             <span class="result-label">Selected claim</span>
             <strong data-probe-result-title>No probe selected</strong>
             <p data-probe-result-claim>Choose a row above. The response transcript will show what the browser actually observed rather than assuming the component worked.</p>
             <span class="probe-verdict" data-probe-verdict>waiting for evidence</span>
           </div>
-          <output class="endpoint-output" data-endpoint-output>REQUEST
-Select an endpoint above to send a real request.</output>
+          <div class="probe-evidence">
+            <section class="probe-source" aria-labelledby="probe-source-title">
+              <header><span id="probe-source-title">Relevant Ada</span><code data-probe-source-name>handler excerpt</code></header>
+              <pre><code data-probe-source-output data-ada></code></pre>
+            </section>
+            <section class="probe-response" aria-labelledby="probe-response-title">
+              <header><span id="probe-response-title">Observed response</span><code>browser fetch</code></header>
+              <pre class="endpoint-output" data-endpoint-output></pre>
+            </section>
+          </div>
         </div>
       </section>
     </main>

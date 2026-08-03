@@ -9,6 +9,50 @@
   });
 
   document.querySelector("[data-origin]").textContent = location.host;
+
+  const adaKeywords = new Set([
+    "access", "and", "begin", "body", "case", "constant", "declare",
+    "delta", "do", "else", "elsif", "end", "exception", "exit", "for",
+    "function", "generic", "if", "in", "is", "limited", "loop", "mod",
+    "new", "not", "null", "of", "or", "others", "out", "package",
+    "pragma", "private", "procedure", "raise", "range", "record", "rem",
+    "renames", "return", "reverse", "select", "separate", "subtype",
+    "task", "terminate", "then", "type", "until", "use", "when", "while",
+    "with", "xor"
+  ]);
+  const adaTokenPattern = /(--[^\n]*|"(?:[^"]|"")*"|'[A-Za-z][A-Za-z0-9_]*|\b[A-Za-z][A-Za-z0-9_]*\b|\b\d[\d_]*(?:\.\d[\d_]*)?\b|=>|:=|\/=|<=|>=|\.\.)/g;
+
+  function highlightedToken(className, value) {
+    const token = document.createElement("span");
+    token.className = className;
+    token.textContent = value;
+    return token;
+  }
+
+  function highlightAda(code) {
+    const source = code.textContent;
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    for (const match of source.matchAll(adaTokenPattern)) {
+      if (match.index > cursor) fragment.append(document.createTextNode(source.slice(cursor, match.index)));
+      const value = match[0];
+      const normalized = value.toLowerCase();
+      let className = "tok-identifier";
+      if (value.startsWith("--")) className = "tok-comment";
+      else if (value.startsWith('"')) className = "tok-string";
+      else if (value.startsWith("'")) className = "tok-attribute";
+      else if (/^\d/.test(value)) className = "tok-number";
+      else if (adaKeywords.has(normalized)) className = "tok-keyword";
+      else if (["=>", ":=", "/=", "<=", ">=", ".."].includes(value)) className = "tok-operator";
+      fragment.append(highlightedToken(className, value));
+      cursor = match.index + value.length;
+    }
+    if (cursor < source.length) fragment.append(document.createTextNode(source.slice(cursor)));
+    code.replaceChildren(fragment);
+  }
+
+  document.querySelectorAll("[data-ada]").forEach(highlightAda);
+
   const serverState = document.querySelector("[data-server-state]");
   const serverLabel = document.querySelector("[data-server-label]");
   const requestMetric = document.querySelector("[data-metric-requests]");
@@ -279,27 +323,109 @@
   const probeTitle = document.querySelector("[data-probe-result-title]");
   const probeClaim = document.querySelector("[data-probe-result-claim]");
   const probeVerdict = document.querySelector("[data-probe-verdict]");
+  const probeSource = document.querySelector("[data-probe-source-output]");
+  const probeSourceName = document.querySelector("[data-probe-source-name]");
+
+  function transcriptLine(...parts) {
+    parts.forEach(([className, value]) => endpointOutput.append(highlightedToken(className, value)));
+    endpointOutput.append(document.createTextNode("\n"));
+  }
+
+  function transcriptSpace() {
+    endpointOutput.append(document.createTextNode("\n"));
+  }
+
+  function transcriptHeader(name, value) {
+    transcriptLine(["http-header", name], ["http-punctuation", ": "], ["http-value", value]);
+  }
+
+  function renderJSONBody(body) {
+    let formatted;
+    try {
+      formatted = JSON.stringify(JSON.parse(body), null, 2);
+    } catch (_) {
+      endpointOutput.append(highlightedToken("http-body", body));
+      return;
+    }
+
+    const tokenPattern = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|\b(?:true|false|null)\b/gi;
+    let cursor = 0;
+    for (const match of formatted.matchAll(tokenPattern)) {
+      if (match.index > cursor) endpointOutput.append(document.createTextNode(formatted.slice(cursor, match.index)));
+      const value = match[0];
+      let className = "json-literal";
+      if (value.startsWith('"')) className = formatted.slice(match.index + value.length).match(/^\s*:/) ? "json-key" : "json-string";
+      else if (/^-?\d/.test(value)) className = "json-number";
+      endpointOutput.append(highlightedToken(className, value));
+      cursor = match.index + value.length;
+    }
+    if (cursor < formatted.length) endpointOutput.append(document.createTextNode(formatted.slice(cursor)));
+  }
+
+  function renderRequest(endpoint, state) {
+    endpointOutput.replaceChildren();
+    transcriptLine(["http-label", "REQUEST"]);
+    transcriptLine(["http-method", "GET"], ["http-target", ` ${endpoint}`]);
+    transcriptSpace();
+    transcriptLine(["http-pending", state]);
+  }
+
+  async function renderResponse(endpoint, response) {
+    const body = await response.text();
+    endpointOutput.replaceChildren();
+    transcriptLine(["http-label", "REQUEST"]);
+    transcriptLine(["http-method", "GET"], ["http-target", ` ${endpoint}`]);
+    transcriptSpace();
+    transcriptLine(["http-label", "RESPONSE"]);
+    transcriptLine(
+      ["http-version", "HTTP/1.1 "],
+      [response.ok ? "http-status-success" : "http-status-error", String(response.status)],
+      ["http-reason", ` ${response.statusText}`]
+    );
+    transcriptHeader("x-request-id", response.headers.get("x-request-id") || "not returned");
+    transcriptHeader("content-type", response.headers.get("content-type") || "not returned");
+    transcriptHeader("x-content-type-options", response.headers.get("x-content-type-options") || "not returned");
+    transcriptHeader("content-security-policy", response.headers.get("content-security-policy") || "not returned");
+    transcriptSpace();
+    transcriptLine(["http-label", "BODY"]);
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("json") || /^[\s]*[\[{]/.test(body)) renderJSONBody(body);
+    else endpointOutput.append(highlightedToken("http-body", body));
+  }
+
   document.querySelectorAll("[data-endpoint]").forEach((button) => {
     button.addEventListener("click", async () => {
       const endpoint = button.dataset.endpoint;
       const expectedStatus = Number(button.dataset.expectedStatus);
+      const probeItem = button.closest(".probe-item");
+      const sourceTemplate = probeItem.querySelector("template[data-probe-source]");
       document.querySelectorAll("[data-endpoint]").forEach((candidate) => candidate.setAttribute("aria-pressed", String(candidate === button)));
+      probeItem.append(probeResult);
+      probeResult.hidden = false;
       probeTitle.textContent = button.dataset.probeTitle;
       probeClaim.textContent = button.dataset.probeClaim;
+      probeSource.textContent = sourceTemplate.content.textContent.trim();
+      probeSourceName.textContent = `${endpoint} handler`;
+      highlightAda(probeSource);
       probeResult.dataset.probeState = "running";
       probeVerdict.textContent = "request in flight";
-      endpointOutput.textContent = `REQUEST\nGET ${endpoint}\n\nWaiting for the server…`;
+      renderRequest(endpoint, "Waiting for the server…");
       const headers = button.dataset.token ? { Authorization: `Bearer ${button.dataset.token}` } : {};
       try {
         const response = await fetch(endpoint, { headers, cache: "no-store" });
         const matched = response.status === expectedStatus;
         probeResult.dataset.probeState = matched ? "verified" : "unexpected";
         probeVerdict.textContent = matched ? `expected HTTP ${expectedStatus} observed` : `expected HTTP ${expectedStatus}, observed HTTP ${response.status}`;
-        endpointOutput.textContent = `REQUEST\nGET ${endpoint}\n\nRESPONSE\nHTTP/1.1 ${response.status} ${response.statusText}\nrequest-id: ${response.headers.get("x-request-id") || "not returned"}\ncontent-type: ${response.headers.get("content-type") || "not returned"}\nx-content-type-options: ${response.headers.get("x-content-type-options") || "not returned"}\ncontent-security-policy: ${response.headers.get("content-security-policy") || "not returned"}\n\nBODY\n${await response.text()}`;
+        await renderResponse(endpoint, response);
       } catch (error) {
         probeResult.dataset.probeState = "unexpected";
         probeVerdict.textContent = "transport failed before an HTTP response arrived";
-        endpointOutput.textContent = `REQUEST\nGET ${endpoint}\n\nTRANSPORT ERROR\n${error.message}`;
+        endpointOutput.replaceChildren();
+        transcriptLine(["http-label", "REQUEST"]);
+        transcriptLine(["http-method", "GET"], ["http-target", ` ${endpoint}`]);
+        transcriptSpace();
+        transcriptLine(["http-label", "TRANSPORT ERROR"]);
+        transcriptLine(["http-status-error", error.message]);
       }
     });
   });
