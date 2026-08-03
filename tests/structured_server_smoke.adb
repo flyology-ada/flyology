@@ -291,6 +291,13 @@ procedure Structured_Server_Smoke is
 
          function Handler_Active return Boolean is
            (State.State.Handler_Count = 1);
+
+         function Forced_Cancellation_Completed return Boolean is
+            Sample : constant Structured.Snapshot := Structured.Current (Item);
+         begin
+            return Sample.Forced_Cancellation
+              and then Sample.Active_Handlers = 0;
+         end Forced_Cancellation_Completed;
       begin
          Open_Listener (Listener, Address);
          declare
@@ -310,13 +317,17 @@ procedure Structured_Server_Smoke is
             begin
                Sockets.Create_Socket (Socket);
                Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
-               delay 0.100;
+               State.State.Await_Gate;
                Sockets.Close_Socket (Socket);
             end Client;
          begin
             Wait_Until (Handler_Active'Access,
                         "cancellable handler was not admitted");
             Structured.Request_Shutdown (Item);
+            Wait_Until
+              (Forced_Cancellation_Completed'Access,
+               "drain deadline did not complete handler cancellation");
+            State.State.Release_Gate;
          end;
          declare
             Sample : constant Structured.Snapshot := Structured.Current (Item);
