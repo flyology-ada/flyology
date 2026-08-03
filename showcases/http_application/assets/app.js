@@ -58,23 +58,6 @@
   const requestMetric = document.querySelector("[data-metric-requests]");
   const activeMetric = document.querySelector("[data-metric-active]");
 
-  async function refreshMetrics() {
-    try {
-      const response = await fetch("/metrics", { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const metrics = await response.json();
-      requestMetric.textContent = metrics.requests;
-      activeMetric.textContent = metrics.active;
-      serverState.dataset.serverState = "online";
-      serverLabel.textContent = "server online";
-    } catch (_) {
-      serverState.dataset.serverState = "error";
-      serverLabel.textContent = "server unavailable";
-    }
-  }
-  refreshMetrics();
-  setInterval(refreshMetrics, 3000);
-
   let eventSource;
   const eventLog = document.querySelector("[data-event-log]");
   const sseState = document.querySelector("[data-sse-state]");
@@ -245,11 +228,17 @@
 
   const runtimeSource = new EventSource("/runtime/events");
   runtimeSource.onopen = () => {
+    serverState.dataset.serverState = "online";
+    serverLabel.textContent = "server online";
     runtimeState.dataset.runtimeState = "open";
     runtimeLabel.textContent = "runtime feed live";
   };
   runtimeSource.addEventListener("runtime", (event) => {
     const sample = JSON.parse(event.data);
+    //  One bounded SSE sample drives both metric summaries. The separate
+    //  /metrics JSON handler remains available for tools and direct reads.
+    requestMetric.textContent = formatInteger(sample.http.requests);
+    activeMetric.textContent = formatInteger(sample.http.active);
     document.querySelector("[data-runtime-lane]").textContent = sample.lane;
     document.querySelector("[data-runtime-cpus]").textContent = formatInteger(sample.cpu_count);
     document.querySelector("[data-runtime-created]").textContent = formatInteger(sample.created_groups);
@@ -262,6 +251,8 @@
     renderGroups(sample.groups);
   });
   runtimeSource.onerror = () => {
+    serverState.dataset.serverState = "error";
+    serverLabel.textContent = "server stream reconnecting";
     runtimeState.dataset.runtimeState = "error";
     runtimeLabel.textContent = "runtime feed reconnecting";
   };
