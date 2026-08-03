@@ -2,6 +2,7 @@ with Ada.Strings.Unbounded;
 with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.HTTP.Server.Applications;
+with Flyology.HTTP.Server.Middleware;
 
 --  Provides deterministic method-and-path routing above HTTP.Server.
 --  @formal App_Context Application-owned context passed to every endpoint
@@ -10,13 +11,22 @@ generic
    type App_Context is limited private;
 package Flyology.HTTP.Server.Routing is
 
+   --  Typed middleware API used by this router instance. Applications may
+   --  also instantiate Server.Middleware independently of routing.
+   package Components is new
+     Flyology.HTTP.Server.Middleware (App_Context);
+
    --  Application endpoint invoked with the typed context and borrowed
    --  request exchange.
-   --  @param Context Typed application context
-   --  @param X Borrowed request exchange
-   type Handler_Access is access procedure
-     (Context : in out App_Context;
-      X       : in out Flyology.HTTP.Server.Applications.Exchange);
+   subtype Handler_Access is Components.Handler_Access;
+
+   --  Around-handler component accepted by router middleware registration.
+   subtype Middleware_Access is Components.Middleware_Access;
+
+   --  Middleware execution boundary relative to request-body admission.
+   --  @enum Request_Head Run before body acceptance and 100 Continue
+   --  @enum Application Run after the selected body policy is applied
+   type Middleware_Stage is (Request_Head, Application);
 
    --  Authentication policy interpreted by authentication middleware.
    --  @enum No_Authentication Route does not request authentication
@@ -77,6 +87,28 @@ package Flyology.HTTP.Server.Routing is
      (Capacity : Positive := 64;
       Slashes  : Trailing_Slash_Policy := Strict_Slashes)
    is tagged limited private;
+
+   --  Append global middleware. Global components wrap every matched route in
+   --  registration order and are copied into mounted subrouter routes.
+   --  @param Item Router registry
+   --  @param Component Around-handler component
+   --  @param Stage Body-admission boundary for the component
+   procedure Add_Middleware
+     (Item      : in out Router;
+      Component : not null Middleware_Access;
+      Stage     : Middleware_Stage := Request_Head);
+
+   --  Append middleware to one route selected by its unique configured name.
+   --  Route-local components run after router-global components.
+   --  @param Item Router registry
+   --  @param Name Configured route name
+   --  @param Component Around-handler component
+   --  @param Stage Body-admission boundary for the component
+   procedure Add_Route_Middleware
+     (Item      : in out Router;
+      Name      : String;
+      Component : not null Middleware_Access;
+      Stage     : Middleware_Stage := Request_Head);
 
    --  Register one exact method and path pattern.
    --  @param Item Router registry
@@ -234,12 +266,24 @@ package Flyology.HTTP.Server.Routing is
 private
    use Ada.Strings.Unbounded;
 
+   Max_Global_Middleware : constant := 16;
+   Max_Route_Middleware  : constant := 16;
+
+   type Middleware_Entry is record
+      Component : Middleware_Access;
+      Stage     : Middleware_Stage := Request_Head;
+   end record;
+   type Middleware_Array is
+     array (Positive range <>) of Middleware_Entry;
+
    type Route_Entry is record
       Method  : Unbounded_String;
       Pattern : Unbounded_String;
       Name    : Unbounded_String;
       Handler : Handler_Access;
       Policy  : Route_Policy;
+      Middleware : Middleware_Array (1 .. Max_Route_Middleware);
+      Middleware_Count : Natural := 0;
    end record;
    type Route_Array is array (Positive range <>) of Route_Entry;
 
@@ -249,6 +293,8 @@ private
    is tagged limited record
       Routes : Route_Array (1 .. Capacity);
       Count  : Natural := 0;
+      Middleware : Middleware_Array (1 .. Max_Global_Middleware);
+      Middleware_Count : Natural := 0;
    end record;
 
 end Flyology.HTTP.Server.Routing;

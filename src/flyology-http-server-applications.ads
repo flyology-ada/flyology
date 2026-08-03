@@ -259,6 +259,21 @@ package Flyology.HTTP.Server.Applications is
    --  @return Observed payload bytes
    function Response_Bytes (Item : Exchange) return Natural;
 
+   --  Mark response framing unsafe and require connection close. Error
+   --  middleware uses this after a failure once response bytes may exist.
+   --  @param Item Request exchange
+   procedure Mark_Failed (Item : in out Exchange);
+
+   --  Apply the configured route body policy after request-head middleware
+   --  accepts the request. This is the only application-layer operation that
+   --  may emit delayed 100 Continue. Rejection sends a final response and
+   --  returns Accepted false.
+   --  @param Item Request exchange
+   --  @param Accepted True when downstream application work may run
+   procedure Apply_Body_Policy
+     (Item     : in out Exchange;
+      Accepted : out Boolean);
+
    --  Configure routing metadata before invoking application components.
    --  This integration operation is intended for Flyology router packages.
    --  @param Item Request exchange

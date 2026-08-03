@@ -364,20 +364,65 @@ package body Flyology.HTTP.Server.Routing is
       Name    : String := "";
       Policy  : Route_Policy := Default_Route_Policy)
    is
+      Effective_Name : constant String :=
+        (if Name = "" then Method & " " & Pattern else Name);
    begin
       Check_Add (Item, Method, Pattern);
       if Policy.Max_Body > Max_Request_Body then
          raise Route_Error with "route body limit exceeds server maximum";
       end if;
+      for Index in 1 .. Item.Count loop
+         if To_String (Item.Routes (Index).Name) = Effective_Name then
+            raise Route_Error with "duplicate HTTP route name";
+         end if;
+      end loop;
       Item.Count := Item.Count + 1;
       Item.Routes (Item.Count) :=
         (Method  => To_Unbounded_String (Method),
          Pattern => To_Unbounded_String (Pattern),
-         Name    => To_Unbounded_String
-           (if Name = "" then Method & " " & Pattern else Name),
+         Name    => To_Unbounded_String (Effective_Name),
          Handler => Handler,
-         Policy  => Policy);
+         Policy  => Policy,
+         Middleware => (others => (null, Request_Head)),
+         Middleware_Count => 0);
    end Add;
+
+   procedure Add_Middleware
+     (Item      : in out Router;
+      Component : not null Middleware_Access;
+      Stage     : Middleware_Stage := Request_Head)
+   is
+   begin
+      if Item.Middleware_Count = Max_Global_Middleware then
+         raise Route_Error with "global HTTP middleware capacity exhausted";
+      end if;
+      Item.Middleware_Count := Item.Middleware_Count + 1;
+      Item.Middleware (Item.Middleware_Count) := (Component, Stage);
+   end Add_Middleware;
+
+   procedure Add_Route_Middleware
+     (Item      : in out Router;
+      Name      : String;
+      Component : not null Middleware_Access;
+      Stage     : Middleware_Stage := Request_Head)
+   is
+   begin
+      for Index in 1 .. Item.Count loop
+         if To_String (Item.Routes (Index).Name) = Name then
+            if Item.Routes (Index).Middleware_Count = Max_Route_Middleware
+            then
+               raise Route_Error with
+                 "route HTTP middleware capacity exhausted";
+            end if;
+            Item.Routes (Index).Middleware_Count :=
+              Item.Routes (Index).Middleware_Count + 1;
+            Item.Routes (Index).Middleware
+              (Item.Routes (Index).Middleware_Count) := (Component, Stage);
+            return;
+         end if;
+      end loop;
+      raise Route_Error with "unknown HTTP route name";
+   end Add_Route_Middleware;
 
    procedure Get
      (Item : in out Router; Pattern : String;
@@ -462,15 +507,37 @@ package body Flyology.HTTP.Server.Routing is
       for Index in 1 .. Source.Count loop
          declare
             Mounted_Route : Route_Entry renames Source.Routes (Index);
+            New_Index     : Positive;
          begin
+            if Source.Middleware_Count + Mounted_Route.Middleware_Count >
+              Max_Route_Middleware
+            then
+               raise Route_Error with
+                 "mounted HTTP middleware capacity exhausted";
+            end if;
             Add
               (Item,
                To_String (Mounted_Route.Method),
                Join_Pattern (Prefix, To_String (Mounted_Route.Pattern)),
                Mounted_Route.Handler,
                (if Name_Prefix = "" then To_String (Mounted_Route.Name)
-                else Name_Prefix & To_String (Mounted_Route.Name)),
+               else Name_Prefix & To_String (Mounted_Route.Name)),
                Mounted_Route.Policy);
+            New_Index := Item.Count;
+            for Middleware_Index in 1 .. Source.Middleware_Count loop
+               Item.Routes (New_Index).Middleware_Count :=
+                 Item.Routes (New_Index).Middleware_Count + 1;
+               Item.Routes (New_Index).Middleware
+                 (Item.Routes (New_Index).Middleware_Count) :=
+                   Source.Middleware (Middleware_Index);
+            end loop;
+            for Middleware_Index in 1 .. Mounted_Route.Middleware_Count loop
+               Item.Routes (New_Index).Middleware_Count :=
+                 Item.Routes (New_Index).Middleware_Count + 1;
+               Item.Routes (New_Index).Middleware
+                 (Item.Routes (New_Index).Middleware_Count) :=
+                   Mounted_Route.Middleware (Middleware_Index);
+            end loop;
          end;
       end loop;
    end Mount;
@@ -545,6 +612,19 @@ package body Flyology.HTTP.Server.Routing is
          Append (Allowed, Method);
       end if;
    end Add_Allowed;
+
+   procedure Admit_Body
+     (Context : in out App_Context;
+      X       : in out App.Exchange;
+      Next    : in out Components.Next_Handler)
+   is
+      Accepted : Boolean;
+   begin
+      App.Apply_Body_Policy (X, Accepted);
+      if Accepted then
+         Next.Call (Context, X);
+      end if;
+   end Admit_Body;
 
    procedure Dispatch
      (Item       : in out Router;
@@ -657,6 +737,9 @@ package body Flyology.HTTP.Server.Routing is
 
       declare
          Route : constant Route_Entry := Item.Routes (Selected);
+         Pipeline : aliased Components.Pipeline
+           (Capacity =>
+              Max_Global_Middleware + Max_Route_Middleware + 1);
       begin
          X.Configure_Route
            (To_String (Route.Name), Path_Value, Route.Policy.Body_Handling);
@@ -684,22 +767,28 @@ package body Flyology.HTTP.Server.Routing is
                return;
          end;
 
-         case Route.Policy.Body_Handling is
-            when App.Reject_Body =>
-               if not Flyology.HTTP.Server.Body_Complete (Connection) then
-                  X.Problem
-                    (413, "body-not-accepted", "Route does not accept a body");
-                  return;
-               end if;
-            when App.Stream_Body =>
-               Accept_Body (Connection, Token);
-            when App.Buffer_Body =>
-               Buffer_Request_Body (Connection, Value, Token);
-            when App.Discard_Request_Body =>
-               Discard_Body (Connection, Token);
-         end case;
-
-         Route.Handler.all (Context, X);
+         for Index in 1 .. Item.Middleware_Count loop
+            if Item.Middleware (Index).Stage = Request_Head then
+               Pipeline.Add (Item.Middleware (Index).Component);
+            end if;
+         end loop;
+         for Index in 1 .. Route.Middleware_Count loop
+            if Route.Middleware (Index).Stage = Request_Head then
+               Pipeline.Add (Route.Middleware (Index).Component);
+            end if;
+         end loop;
+         Pipeline.Add (Admit_Body'Access);
+         for Index in 1 .. Item.Middleware_Count loop
+            if Item.Middleware (Index).Stage = Application then
+               Pipeline.Add (Item.Middleware (Index).Component);
+            end if;
+         end loop;
+         for Index in 1 .. Route.Middleware_Count loop
+            if Route.Middleware (Index).Stage = Application then
+               Pipeline.Add (Route.Middleware (Index).Component);
+            end if;
+         end loop;
+         Pipeline.Execute (Context, X, Route.Handler);
          if not Response_Started (Connection) then
             X.No_Content;
          end if;

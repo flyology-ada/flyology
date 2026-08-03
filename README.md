@@ -1042,6 +1042,17 @@ request bytes with `X.Read_Body`; `Begin_Stream`, `Write_Chunk`, and
 backpressure. The active handler remains the sole connection writer. The raw
 SSE and WebSocket APIs remain available through the borrowed connection.
 
+`Server.Middleware` is a separately instantiable, fixed-capacity synchronous
+pipeline. Around components call a single-use continuation to run downstream
+work, may short circuit by responding without that call, and observe the
+completed response after it returns. Routers accept global and named
+route-local components; mounted subrouters retain their own ordering. The
+optional `Middleware_Errors` component re-raises protocol, timeout,
+cancellation, resource, and transport failures without conflating them. An
+application mapper may handle expected exceptions; other application failures
+produce a generic closing 500 before response start, while failures after any
+response bytes force connection close without attempting replacement framing.
+
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
 13 upgrade and client key. Its default origin policy rejects browser `Origin`

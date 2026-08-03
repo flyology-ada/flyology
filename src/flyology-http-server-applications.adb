@@ -369,6 +369,42 @@ package body Flyology.HTTP.Server.Applications is
    function Response_Bytes (Item : Exchange) return Natural is
      (Item.Response_Length);
 
+   procedure Mark_Failed (Item : in out Exchange) is
+   begin
+      Item.Connection_Handle.Request_Close := True;
+      Item.Response_Value := Failed;
+   end Mark_Failed;
+
+   procedure Apply_Body_Policy
+     (Item     : in out Exchange;
+      Accepted : out Boolean)
+   is
+   begin
+      Accepted := False;
+      case Item.Body_Mode is
+         when Reject_Body =>
+            if not Flyology.HTTP.Server.Body_Complete
+              (Item.Connection_Handle.all)
+            then
+               Item.Problem
+                 (413, "body-not-accepted", "Route does not accept a body");
+               return;
+            end if;
+         when Stream_Body =>
+            Flyology.HTTP.Server.Accept_Body
+              (Item.Connection_Handle.all, Item.Token_Handle);
+         when Buffer_Body =>
+            Flyology.HTTP.Server.Buffer_Request_Body
+              (Item.Connection_Handle.all,
+               Item.Request_Handle.all,
+               Item.Token_Handle);
+         when Discard_Request_Body =>
+            Flyology.HTTP.Server.Discard_Body
+              (Item.Connection_Handle.all, Item.Token_Handle);
+      end case;
+      Accepted := True;
+   end Apply_Body_Policy;
+
    procedure Configure_Route
      (Item            : in out Exchange;
       Name            : String;

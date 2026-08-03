@@ -88,6 +88,8 @@ project Flyology is
             "flyology-http-server-applications.ads",
             "flyology-http-server-connection_handlers.ads",
             "flyology-http-server-connections.ads",
+            "flyology-http-server-middleware.ads",
+            "flyology-http-server-middleware_errors.ads",
             "flyology-http-server-routing.ads",
             "flyology-http-server-tls.ads",
             "flyology-io.ads",

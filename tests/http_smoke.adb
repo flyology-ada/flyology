@@ -1,3 +1,4 @@
+with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
@@ -7,6 +8,7 @@ with Flyology.HTTP;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Connection_Handlers;
+with Flyology.HTTP.Server.Middleware_Errors;
 with Flyology.HTTP.Server.Routing;
 with Flyology.IO;
 
@@ -14,6 +16,7 @@ procedure HTTP_Smoke is
    package HTTP_Server renames Flyology.HTTP.Server;
 
    use Ada.Strings.Unbounded;
+   use type Ada.Exceptions.Exception_Id;
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type Flyology.HTTP.HTTP_Version;
@@ -1044,6 +1047,269 @@ procedure HTTP_Smoke is
       end;
    end Check_Applications_And_Routing;
 
+   procedure Check_Middleware is
+      package Applications renames Flyology.HTTP.Server.Applications;
+
+      type Context is record
+         Trace : Unbounded_String;
+      end record;
+
+      package Routing is new Flyology.HTTP.Server.Routing (Context);
+
+      Expected_Failure : exception;
+      Logged           : Natural := 0;
+
+      procedure Log
+        (Kind  : Routing.Components.Failure_Kind;
+         Error : Ada.Exceptions.Exception_Occurrence;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (Kind, Error, X);
+      begin
+         Logged := Logged + 1;
+      end Log;
+
+      procedure Map
+        (State   : in out Context;
+         X       : in out Applications.Exchange;
+         Error   : Ada.Exceptions.Exception_Occurrence;
+         Handled : in out Boolean)
+      is
+         pragma Unreferenced (State);
+      begin
+         if Ada.Exceptions.Exception_Identity (Error) =
+           Expected_Failure'Identity
+         then
+            X.Problem (409, "expected", "Expected application failure");
+            Handled := True;
+         end if;
+      end Map;
+
+      package Errors is new Flyology.HTTP.Server.Middleware_Errors
+        (Context, Routing.Components, Log, Map);
+
+      procedure Outer
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler)
+      is
+      begin
+         Append (State.Trace, "A");
+         Next.Call (State, X);
+         Append (State.Trace, "D");
+      end Outer;
+
+      procedure Inner
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler)
+      is
+      begin
+         Append (State.Trace, "B");
+         Next.Call (State, X);
+         Append (State.Trace, "C");
+      end Inner;
+
+      procedure Short_Circuit
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler)
+      is
+         pragma Unreferenced (Next);
+      begin
+         Append (State.Trace, "S");
+         X.Problem (403, "stopped", "Middleware stopped the request");
+      end Short_Circuit;
+
+      procedure Body_Aware
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Next  : in out Routing.Components.Next_Handler)
+      is
+      begin
+         pragma Assert (X.Content = "hello");
+         Append (State.Trace, "E");
+         Next.Call (State, X);
+         Append (State.Trace, "F");
+      end Body_Aware;
+
+      procedure Normal
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         Append (State.Trace, "H");
+         X.Text (200, "normal");
+      end Normal;
+
+      procedure Expected
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State, X);
+      begin
+         raise Expected_Failure;
+      end Expected;
+
+      procedure Unexpected
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State, X);
+      begin
+         raise Constraint_Error with "private application detail";
+      end Unexpected;
+
+      procedure Partial
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+      begin
+         X.Begin_Stream (200, "text/plain");
+         X.Write_Chunk ("partial");
+         raise Constraint_Error with "failure after response start";
+      end Partial;
+
+      Routes : Routing.Router
+        (Capacity => 7, Slashes => Routing.Strict_Slashes);
+      State : Context;
+      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+
+      function Run
+        (Path    : String;
+         Method  : String := "GET";
+         Headers : String := "";
+         Payload : String := "") return String
+      is
+         Wire : aliased Memory_Transport;
+      begin
+         State.Trace := Null_Unbounded_String;
+         Wire.Input := To_Unbounded_String
+           (Method & " " & Path & " HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & Headers
+            & "Connection: close" & CRLF & CRLF & Payload);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Routes.Serve (State, Client, Peer);
+         end;
+         return To_String (Wire.Output);
+      end Run;
+   begin
+      Routes.Get ("/normal", Normal'Access, Name => "normal");
+      Routes.Get ("/short", Normal'Access, Name => "short");
+      Routes.Get ("/expected", Expected'Access, Name => "expected");
+      Routes.Get ("/unexpected", Unexpected'Access, Name => "unexpected");
+      Routes.Get ("/partial", Partial'Access, Name => "partial");
+      Routes.Post
+        ("/body", Normal'Access, Name => "body",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Body_Handling => Applications.Buffer_Body,
+              Max_Body      => 16));
+      Routes.Post
+        ("/deny-body", Normal'Access, Name => "deny.body",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Body_Handling => Applications.Buffer_Body,
+              Max_Body      => 16));
+      Routes.Add_Middleware (Errors.Call'Access);
+      Routes.Add_Middleware (Outer'Access);
+      Routes.Add_Route_Middleware ("normal", Inner'Access);
+      Routes.Add_Route_Middleware ("short", Short_Circuit'Access);
+      Routes.Add_Route_Middleware
+        ("body", Body_Aware'Access, Stage => Routing.Application);
+      Routes.Add_Route_Middleware ("deny.body", Short_Circuit'Access);
+
+      declare
+         Output : constant String := Run ("/normal");
+      begin
+         pragma Assert (To_String (State.Trace) = "ABHCD");
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "200 OK") /= 0);
+      end;
+
+      declare
+         Output : constant String := Run ("/short");
+      begin
+         pragma Assert (To_String (State.Trace) = "ASD");
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "403 Forbidden") /= 0);
+      end;
+
+      declare
+         Before : constant Natural := Logged;
+         Output : constant String := Run ("/expected");
+      begin
+         pragma Assert (Logged = Before + 1);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "409 Conflict") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "private application detail") = 0);
+      end;
+
+      declare
+         Before : constant Natural := Logged;
+         Output : constant String := Run ("/unexpected");
+      begin
+         pragma Assert (Logged = Before + 1);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "500 Internal Server Error") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "private application detail") = 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "Connection: close") /= 0);
+      end;
+
+      declare
+         Before : constant Natural := Logged;
+         Output : constant String := Run ("/partial");
+      begin
+         pragma Assert (Logged = Before + 1);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "200 OK") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "partial") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "500 Internal Server Error") = 0);
+      end;
+
+      declare
+         Output : constant String := Run
+           ("/body", "POST",
+            "Expect: 100-continue" & CRLF &
+            "Content-Length: 5" & CRLF,
+            "hello");
+      begin
+         pragma Assert (To_String (State.Trace) = "AEHFD");
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "100 Continue") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "200 OK") /= 0);
+      end;
+
+      declare
+         Output : constant String := Run
+           ("/deny-body", "POST",
+            "Expect: 100-continue" & CRLF &
+            "Content-Length: 5" & CRLF,
+            "hello");
+      begin
+         pragma Assert (To_String (State.Trace) = "ASD");
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "100 Continue") = 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "403 Forbidden") /= 0);
+      end;
+   end Check_Middleware;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -1061,4 +1327,5 @@ begin
    Check_Handler_Limits;
    Check_Rejections;
    Check_Applications_And_Routing;
+   Check_Middleware;
 end HTTP_Smoke;
