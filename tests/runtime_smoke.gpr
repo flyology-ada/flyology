@@ -36,6 +36,7 @@ project Runtime_Smoke is
       "io_starvation_smoke.adb",
       "lazy_event_start_smoke.adb",
       "lifecycle_smoke.adb",
+      "linux_poller_fairness_smoke.adb",
       "loop_pool_smoke.adb",
       "loop_thread_placement_smoke.adb",
       "loop_thread_project_placement_smoke.adb",

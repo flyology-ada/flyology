@@ -192,6 +192,11 @@ package body System.Flyology.Poller is
       if Available = 0 then
          return True;
       end if;
+      if Faults.Enabled
+        and then Faults.Fail (Faults.Poller_File_Drain_Pause)
+      then
+         return True;
+      end if;
       if not File_Engines.Drain
         (Item.File_State, Completions, Drained)
         or else Drained > Available
@@ -483,19 +488,34 @@ package body System.Flyology.Poller is
       elsif Faults.Enabled and then Faults.Fail (Faults.Poller_EINTR) then
          return True;
       end if;
-      if not Drain_File_Events (Item, Events, Count) then
-         return False;
-      elsif Count > 0 then
-         return True;
-      end if;
+      --  Every batch probes epoll before it drains queued file completions.
+      --  Thus a full file batch cannot hide descriptor readiness or eventfd
+      --  wakeups. If neither source is ready, the second call performs the
+      --  caller's requested wait; file completions wake that call through the
+      --  file engine's eventfd and are collected by the trailing drain.
       Kernel_Count :=
         Epoll_Wait
           (Item.Descriptor,
            Kernel_Events'Address,
            C.int (Events'Length),
-           Timeout_Milliseconds (Timeout));
+           0);
       if Kernel_Count < 0 then
          return OSI.errno = OSI.EINTR;
+      elsif Kernel_Count = 0 then
+         if not Drain_File_Events (Item, Events, Count) then
+            return False;
+         elsif Count > 0 then
+            return True;
+         end if;
+         Kernel_Count :=
+           Epoll_Wait
+             (Item.Descriptor,
+              Kernel_Events'Address,
+              C.int (Events'Length),
+              Timeout_Milliseconds (Timeout));
+         if Kernel_Count < 0 then
+            return OSI.errno = OSI.EINTR;
+         end if;
       end if;
 
       for Index in 1 .. Natural (Kernel_Count) loop

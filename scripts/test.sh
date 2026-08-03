@@ -338,6 +338,19 @@ then
     file-uring-post-setup-fallback
 fi
 
+#  Exercise the Linux batch boundary with a queued file completion, socket
+#  readiness, and a cross-thread eventfd wake in every iteration. The same
+#  deterministic test runs against io_uring and the forced native-AIO lane.
+if [ "$(uname -s)" = Linux ]; then
+  run_gprbuild \
+    --RTS="$project_root/build/rts" \
+    -f \
+    -P tests/runtime_smoke.gpr \
+    linux_poller_fairness_smoke.adb
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    "$project_root/tests/bin/linux_poller_fairness_smoke"
+fi
+
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=1 \
