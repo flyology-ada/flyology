@@ -132,7 +132,7 @@ done
 
 printf 'coverage: building %s instrumented portable test programs\n' \
   "$ordinary_count"
-"$alr" exec -- gprbuild \
+"$alr" exec -- env -u GPR_CONFIG gprbuild \
   --RTS="$prepared_rts" \
   -f -p -q -j0 \
   -P tests/runtime_smoke.gpr \
@@ -201,7 +201,7 @@ for test_main in $pool_mains; do
   set -- "$@" "$test_main.adb"
 done
 printf '%s\n' "coverage: building three-loop topology programs"
-"$alr" exec -- gprbuild \
+"$alr" exec -- env -u GPR_CONFIG gprbuild \
   --RTS="$pool_rts" \
   -f -p -q -j0 \
   -P tests/runtime_smoke.gpr \
@@ -240,7 +240,7 @@ for test_main in $fault_mains; do
   set -- "$@" "$test_main.adb"
 done
 printf '%s\n' "coverage: building portable fault-policy programs"
-"$alr" exec -- gprbuild \
+"$alr" exec -- env -u GPR_CONFIG gprbuild \
   --RTS="$fault_rts" \
   -f -p -q -j0 \
   -P tests/runtime_smoke.gpr \

@@ -24,14 +24,14 @@ run_gprbuild () {
     compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)
     if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
       current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
-      "$alr" exec -- gprbuild "$@" \
+      "$alr" exec -- env -u GPR_CONFIG gprbuild "$@" \
         -largs "-Wl,-syslibroot,$current_sysroot"
       return
     fi
-    "$alr" exec -- gprbuild "$@"
+    "$alr" exec -- env -u GPR_CONFIG gprbuild "$@"
     return
   fi
-  "$alr" exec -- gprbuild "$@"
+  "$alr" exec -- env -u GPR_CONFIG gprbuild "$@"
 }
 
 # A normal prepared runtime must neither reference the sanitizer interface nor

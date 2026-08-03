@@ -9,12 +9,12 @@ alr=$("$project_root/scripts/find-alr.sh")
 "$project_root/scripts/prepare-rts.sh" >/dev/null
 cd "$showcase_root"
 if [ "$(uname -s)" = Darwin ]; then
-  "$alr" exec -- gprbuild \
+  "$alr" exec -- env -u GPR_CONFIG gprbuild \
     --RTS="$project_root/build/rts" \
     -f -P showcases.gpr \
     loop_thread_placement.adb -largs -nodefaultrpaths
 else
-  "$alr" exec -- gprbuild \
+  "$alr" exec -- env -u GPR_CONFIG gprbuild \
     --RTS="$project_root/build/rts" \
     -f -P showcases.gpr \
     loop_thread_placement.adb
