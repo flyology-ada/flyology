@@ -1,7 +1,6 @@
 with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology_Config;
 with Flyology.IO.Sockets;
@@ -26,7 +25,7 @@ procedure TCP_Native_Smoke is
    pragma Import (C, Get_Socket_Option, "getsockopt");
 
    function SIGPIPE_Is_Disabled
-     (Socket : GNAT.Sockets.Socket_Type) return Boolean
+     (Socket : Flyology.IO.Sockets.Socket_Type) return Boolean
    is
       Value : aliased C.int := 0;
       Size  : aliased C.unsigned := C.unsigned (C.int'Size / 8);
@@ -46,8 +45,8 @@ procedure TCP_Native_Smoke is
         and then Value = 1;
    end SIGPIPE_Is_Disabled;
 
-   Listener : GNAT.Sockets.Socket_Type;
-   Address  : GNAT.Sockets.Sock_Addr_Type;
+   Listener : Flyology.IO.Sockets.Socket_Type;
+   Address  : Flyology.IO.Sockets.Endpoint;
 
    protected Results is
       procedure Report (Passed : Boolean);
@@ -74,14 +73,14 @@ procedure TCP_Native_Smoke is
    end Results;
 
 begin
-   GNAT.Sockets.Create_Socket (Listener);
-   GNAT.Sockets.Bind_Socket
+   Flyology.IO.Sockets.Create_Socket (Listener);
+   Flyology.IO.Sockets.Bind_Socket
      (Listener,
-      (Family => GNAT.Sockets.Family_Inet,
-       Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-       Port   => GNAT.Sockets.Any_Port));
-   GNAT.Sockets.Listen_Socket (Listener);
-   Address := GNAT.Sockets.Get_Socket_Name (Listener);
+      Flyology.IO.Sockets.Network_Endpoint
+        (Flyology.IO.Sockets.Loopback_IPv4,
+         Flyology.IO.Sockets.Any_Port));
+   Flyology.IO.Sockets.Listen_Socket (Listener);
+   Address := Flyology.IO.Sockets.Get_Socket_Name (Listener);
 
    declare
       task Server is
@@ -93,8 +92,8 @@ begin
       end Client;
 
       task body Server is
-         Peer : GNAT.Sockets.Socket_Type;
-         From : GNAT.Sockets.Sock_Addr_Type;
+         Peer : Flyology.IO.Sockets.Socket_Type;
+         From : Flyology.IO.Sockets.Endpoint;
          Data : Stream_Element_Array (1 .. 1);
          Last : Stream_Element_Offset;
          Stage : Natural := 0;
@@ -110,7 +109,7 @@ begin
             and then Data (1) = 42
             and then SIGPIPE_Is_Disabled (Peer));
          Stage := 4;
-         GNAT.Sockets.Close_Socket (Peer);
+         Flyology.IO.Sockets.Close_Socket (Peer);
       exception
          when Occurrence : others =>
             Ada.Text_IO.Put_Line
@@ -127,9 +126,9 @@ begin
          Stage := 1;
          delay 0.020;
          declare
-            Socket : GNAT.Sockets.Socket_Type;
+            Socket : Flyology.IO.Sockets.Socket_Type;
          begin
-            GNAT.Sockets.Create_Socket (Socket);
+            Flyology.IO.Sockets.Create_Socket (Socket);
             Stage := 2;
             Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
             Stage := 3;
@@ -137,7 +136,7 @@ begin
             Stage := 4;
             Results.Report (Last = Data'Last);
             Stage := 5;
-            GNAT.Sockets.Close_Socket (Socket);
+            Flyology.IO.Sockets.Close_Socket (Socket);
          end;
       exception
          when Occurrence : others =>
@@ -150,7 +149,7 @@ begin
       Results.Wait;
    end;
 
-   GNAT.Sockets.Close_Socket (Listener);
+   Flyology.IO.Sockets.Close_Socket (Listener);
    if not Results.Passed then
       raise Program_Error with "native TCP baseline failed";
    end if;

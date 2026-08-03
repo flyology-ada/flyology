@@ -626,6 +626,27 @@ Flyology exposes synchronous operations in:
 
 ### Sockets and descriptors
 
+`Flyology.IO.Sockets` owns its public `Socket_Type`, `IP_Address`, and
+`Endpoint` types. Address values contain network-order octets, a host-order
+port, and an optional IPv6 scope; they do not expose a platform `sockaddr`
+layout. Socket handles have a private representation. `Native_Descriptor`
+borrows the underlying descriptor. Handles are limited: Ada assignment cannot
+copy an owner. `Move`, `Adopt`, and `Release` transfer ownership explicitly and
+leave their source closed or invalid. Default-initialized handles are closed,
+and `Is_Open` reports whether a handle currently owns a descriptor.
+
+`Flyology.IO.Sockets.GNAT_Adapters` provides explicit transfers to and from
+`GNAT.Sockets.Socket_Type`. Its `Adopt` and `Release` procedures invalidate the
+source handle before returning, so integration cannot create two closing
+owners for one descriptor.
+
+The package also provides creation, bind, listen, option, numeric-address, and
+immediate datagram operations. Applications therefore do not need
+`GNAT.Sockets` to construct inputs for task-aware Flyology I/O. A narrow C shim
+uses host headers for address conversion, socket constants, variadic descriptor
+configuration, and `errno` capture; retry, timeout, cancellation, and exception
+policy remain in Ada.
+
 Socket operations use readiness, not callback delivery and not kernel
 completion queues. The lightweight path is:
 
@@ -671,11 +692,11 @@ entries are ready together the lowest index wins. The fixed limit of 32 keeps
 per-fiber scheduler storage predictable and is intended for protocol engines,
 not as a replacement for ownership-aware connection APIs.
 
-Accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are exposed to
-the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
-process-safety convention while retaining the raw nonblocking `accept(2)` retry
-path required by the event loop. Native `poll(2)` waits retry `EINTR` with a
-recomputed remaining monotonic deadline.
+Created and accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are
+exposed to the caller; Linux sends use `MSG_NOSIGNAL`. The nonblocking hot path
+returns ordinary would-block and interrupted results to Ada instead of raising
+and resolving exceptions for expected retry conditions. Native `poll(2)` waits
+retry `EINTR` with a recomputed remaining monotonic deadline.
 
 ### TLS
 
@@ -849,7 +870,7 @@ handler procedure, and the handler task type's execution designation:
 procedure Handle
   (State        : in out App_State;
    Connection   : in out Flyology.IO.Connections.Connection;
-   Peer         : GNAT.Sockets.Sock_Addr_Type;
+   Peer         : Flyology.IO.Sockets.Endpoint;
    Cancellation : not null access
      Flyology.IO.Connections.Cancellation_Token);
 
@@ -863,8 +884,8 @@ Server : aliased HTTP.Server (Capacity => 256);
 HTTP.Serve (Server, Listener, State, Drain_Timeout => 5.0);
 ```
 
-`Serve` takes ownership of an already-bound listening socket and sets the
-caller's value to `No_Socket`. It creates exactly `Capacity` dependent Ada
+`Serve` takes ownership of an already-bound listening socket and leaves the
+caller's limited handle closed. It creates exactly `Capacity` dependent Ada
 handler tasks in a lexical task scope; each task accepts at most one connection
 at a time, so accepted work cannot exceed the bound and overload remains in the
 kernel listen backlog. There is no detached task, hidden worker thread, or
@@ -1169,6 +1190,9 @@ Ada implements scheduling, queues, timeout and backpressure policy, descriptor
 registration, stacks, task routing, and I/O retry logic. It imports the platform
 primitives exposed through the C ABI, including `kqueue`/`kevent64`,
 `epoll`/`eventfd`, `mmap`, `poll`, POSIX AIO, `syscall`, and socket calls. The
+socket bridge marshals Flyology's portable endpoint values through host
+`sockaddr` definitions and captures `errno`; it does not contain readiness or
+retry policy. The
 file engine itself is Ada: platform bodies define explicit representation
 clauses for Darwin `aiocb` and Linux `io_uring`/native-AIO UAPI records, own the
 mapped rings and control blocks, submit operations, and drain completions.
@@ -1199,11 +1223,15 @@ cases, rounding up to poll milliseconds, and saturation at the `poll(2)` integer
 limit.
 
 The public-library proof boundary also covers native `poll` and `accept` result
-classification, including `EINTR` retry and would-block handling, and regular
-file open validation and exact Darwin `O_RDONLY`/`O_WRONLY`/`O_RDWR`, `O_CREAT`,
-and `O_TRUNC` flag composition for Darwin and Linux. The Ada import of variadic
-`open(2)` remains an ABI boundary and uses GNAT's `C_Variadic_2` calling
-convention.
+classification, including `EINTR` retry and would-block handling. Socket policy
+proves the IPv4/IPv6 and stream/datagram ABI encodings, maps host-supplied errno
+constants to portable error kinds, and classifies receive/send retry and connect
+completion decisions. The constants and syscall results remain inputs from the
+C boundary; the decisions made from them are the proved production functions.
+Regular-file policy proves open validation and exact Darwin
+`O_RDONLY`/`O_WRONLY`/`O_RDWR`, `O_CREAT`, and `O_TRUNC` flag composition for
+Darwin and Linux. The Ada import of variadic `open(2)` remains an ABI boundary
+and uses GNAT's `C_Variadic_2` calling convention.
 
 Production connection and TLS controllers consume proved decisions for lease
 admission, generation replacement, waiter wakeups, close leadership, drain
@@ -1255,7 +1283,9 @@ wire parsing and cache replacement, and descriptor wake-generation matching.
 The GNARL tasking integration, imported system calls, address conversions,
 assembly register swap, and kernel behavior remain trusted boundaries. These
 can be wrapped in contracts, but GNATprove cannot establish their implementations
-from this Ada source tree.
+from this Ada source tree. `Socket_Type` is limited, so the Ada compiler rejects
+implicit owner copies; explicit move and adapter behavior remains covered by
+contracts and behavioral tests rather than a linear SPARK ownership proof.
 
 ## Portability boundaries
 
@@ -1266,7 +1296,7 @@ from this Ada source tree.
 | CPU placement | Stable pthread; capability-checked advisory tag only, with no physical-CPU claim | Stable pthread; optional verified one-CPU affinity mask | Windows processor-group adapter |
 | Context switch | AArch64 and x86-64 assembly | AArch64 and x86-64 assembly | One small implementation per additional architecture/ABI |
 | Stack allocation | `mmap` plus guard pages | `mmap` plus guard pages | Platform virtual-memory API |
-| OS calls | Thin Ada imports of Darwin/POSIX interfaces | Thin Ada imports plus header-derived C bridges for Linux syscall numbers and epoll record padding | Per-platform binding body |
+| OS calls | Thin Ada imports plus a header-derived socket/address bridge | Thin Ada imports plus header-derived bridges for sockets, Linux syscall numbers, and epoll record padding | Per-platform binding body |
 | GNARL hook | Versioned GNAT 13–16 Darwin patch | Versioned GNAT 13–16 Linux patch | Add and verify a new family when GNARL source changes |
 
 The scheduler and public I/O semantics are intended to remain Ada and

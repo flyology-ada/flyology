@@ -1,6 +1,6 @@
 with Ada.Finalization;
 with Ada.Streams;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology.Cancellation;
 with Flyology.Wake_Sources;
 
@@ -147,7 +147,7 @@ package Flyology.IO.TLS is
    type Connection is new Ada.Finalization.Limited_Controlled with private;
 
    --  Create a provider session and transfer Socket's sole closing ownership
-   --  to Item. Socket becomes No_Socket only after successful setup. Client
+   --  to Item. Socket becomes closed only after successful setup. Client
    --  sessions require a nonempty Server_Name so providers can perform SNI and
    --  hostname verification. Provider libraries are selected by Backend and
    --  may differ between connections. If setup fails, Socket keeps ownership,
@@ -159,12 +159,12 @@ package Flyology.IO.TLS is
    --  @param Server_Name DNS name verified by a client; empty for a server
    --  @param Item Closed connection that receives the socket and session
    --  @exception TLS_Error Provider setup fails or Backend is unavailable
-   --  @exception GNAT.Sockets.Socket_Error Preparing socket mode fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Preparing socket mode fails
    --  @exception Program_Error Item is open, Socket is invalid, or arguments
    --     do not match Side
    procedure Take
      (Backend     : in out Provider'Class;
-      Socket      : in out GNAT.Sockets.Socket_Type;
+      Socket      : in out Flyology.IO.Sockets.Socket_Type;
       Side        : Role;
       Server_Name : String;
       Item        : in out Connection);
@@ -264,7 +264,7 @@ package Flyology.IO.TLS is
    --  Provider state is destroyed before the descriptor. Concurrent callers
    --  wait for the same close. Closing a closed Item is harmless.
    --  @param Item Connection whose ownership is released
-   --  @exception GNAT.Sockets.Socket_Error The descriptor close fails
+   --  @exception Flyology.IO.Sockets.Socket_Error The descriptor close fails
    --  @exception TLS_Error A downstream session violates the non-raising
    --     finalization contract; descriptor cleanup still completes
    --  @exception Program_Error Internal controller cleanup fails after the
@@ -313,7 +313,7 @@ private
    end Descriptor_Controller;
 
    type Connection is new Ada.Finalization.Limited_Controlled with record
-      Socket     : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Socket     : Flyology.IO.Sockets.Socket_Type;
       Session    : Session_Access := null;
       Controller : Descriptor_Controller;
    end record;

@@ -3,7 +3,7 @@ with Ada.Streams;
 with Fault_Control;
 with Flyology;
 with GNAT.OS_Lib;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Interfaces.C;
 with System;
 with System.Flyology.Poller;
@@ -14,7 +14,6 @@ procedure Linux_Poller_Fairness_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Streams.Stream_Element;
    use type GNAT.OS_Lib.File_Descriptor;
-   use type GNAT.Sockets.Socket_Type;
    use type Interfaces.C.int;
    use type Pollers.Event_Kind;
    use type System.Address;
@@ -29,8 +28,8 @@ procedure Linux_Poller_Fairness_Smoke is
    Poller       : Pollers.Poller;
    Initialized  : Boolean := False;
    File         : GNAT.OS_Lib.File_Descriptor := GNAT.OS_Lib.Invalid_FD;
-   Reader       : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
-   Writer       : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+   Reader       : Flyology.IO.Sockets.Socket_Type;
+   Writer       : Flyology.IO.Sockets.Socket_Type;
    Buffer       : aliased Ada.Streams.Stream_Element_Array (1 .. 1);
    Token        : aliased Interfaces.C.int := 0;
    Error_Code   : Interfaces.C.int;
@@ -49,7 +48,7 @@ procedure Linux_Poller_Fairness_Smoke is
          select
             accept Trigger (Succeeded : out Boolean) do
                begin
-                  GNAT.Sockets.Send_Socket (Writer, Payload, Last);
+                  Flyology.IO.Sockets.Send_Socket (Writer, Payload, Last);
                   Succeeded :=
                     Last = Payload'Last and then Pollers.Wake (Poller);
                exception
@@ -162,13 +161,11 @@ procedure Linux_Poller_Fairness_Smoke is
          when Tasking_Error =>
             null;
       end;
-      if Reader /= GNAT.Sockets.No_Socket then
-         GNAT.Sockets.Close_Socket (Reader);
-         Reader := GNAT.Sockets.No_Socket;
+      if Flyology.IO.Sockets.Is_Open (Reader) then
+         Flyology.IO.Sockets.Close_Socket (Reader);
       end if;
-      if Writer /= GNAT.Sockets.No_Socket then
-         GNAT.Sockets.Close_Socket (Writer);
-         Writer := GNAT.Sockets.No_Socket;
+      if Flyology.IO.Sockets.Is_Open (Writer) then
+         Flyology.IO.Sockets.Close_Socket (Writer);
       end if;
       if File /= GNAT.OS_Lib.Invalid_FD then
          GNAT.OS_Lib.Close (File, Status);
@@ -214,7 +211,7 @@ begin
       end if;
    end;
 
-   GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+   Flyology.IO.Sockets.Create_Socket_Pair (Reader, Writer);
    Fault_Control.Reset;
    Fault_Control.Arm (Fault_Control.File_Uring_Synchronous_Eventfd);
    if not Pollers.Initialize (Poller) then
@@ -266,7 +263,8 @@ begin
          Payload : Ada.Streams.Stream_Element_Array (1 .. 1);
          Last    : Ada.Streams.Stream_Element_Offset;
          Reader_FD : constant Interfaces.C.int :=
-           Interfaces.C.int (GNAT.Sockets.To_C (Reader));
+           Interfaces.C.int
+             (Flyology.IO.Sockets.Native_Descriptor (Reader));
       begin
          Hold_Completed_File (Events, Count);
          if not Pollers.Watch (Poller, Reader_FD, Pollers.Readable) then
@@ -287,7 +285,7 @@ begin
               "file completion hid socket readiness or eventfd wake at" &
               Iteration'Image;
          end if;
-         GNAT.Sockets.Receive_Socket (Reader, Payload, Last);
+         Flyology.IO.Sockets.Receive_Socket (Reader, Payload, Last);
          if Last /= Payload'Last or else Payload (Payload'First) /= 73 then
             raise Program_Error with "socket payload was corrupted";
          end if;

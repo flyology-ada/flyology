@@ -1,18 +1,16 @@
 with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
-with Flyology.IO.Sockets;
 with Flyology.Time_Math;
 with Flyology.TLS_Policy;
 with Interfaces.C;
 
 package body Flyology.IO.TLS is
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
    package Policy renames Flyology.TLS_Policy;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Descriptor;
-   use type Sockets.Socket_Type;
 
    procedure Free is new Ada.Unchecked_Deallocation
      (Session'Class, Session_Access);
@@ -219,7 +217,7 @@ package body Flyology.IO.TLS is
             Guard.Outcome.Provider_Error := True;
       end;
       begin
-         if Guard.Item.Socket /= Sockets.No_Socket then
+         if Sockets.Is_Open (Guard.Item.Socket) then
             Sockets.Close_Socket (Guard.Item.Socket);
          end if;
       exception
@@ -228,7 +226,6 @@ package body Flyology.IO.TLS is
          when others =>
             Guard.Outcome.Controller_Error := True;
       end;
-      Guard.Item.Socket := Sockets.No_Socket;
       begin
          Guard.Item.Controller.Finish_Close (Guard.Outcome.Generation);
       exception
@@ -412,8 +409,8 @@ package body Flyology.IO.TLS is
       FD          : Descriptor;
       New_Session : Session_Access := null;
    begin
-      if Socket = Sockets.No_Socket then
-         raise Program_Error with "cannot give TLS No_Socket";
+      if not Sockets.Is_Open (Socket) then
+         raise Program_Error with "cannot give TLS a closed socket";
       elsif Is_Open (Item) then
          raise Program_Error with "TLS connection already owns a socket";
       elsif Side = Client and then Server_Name'Length = 0 then
@@ -435,8 +432,7 @@ package body Flyology.IO.TLS is
       begin
          Item.Controller.Adopt (FD);
          Item.Session := New_Session;
-         Item.Socket := Socket;
-         Socket := Sockets.No_Socket;
+         Sockets.Move (Socket, Item.Socket);
       exception
          when others =>
             Free (New_Session);

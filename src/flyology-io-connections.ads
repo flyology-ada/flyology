@@ -1,8 +1,8 @@
 with Ada.Finalization;
 with Ada.Streams;
-with GNAT.Sockets;
 with Flyology.Capacity;
 with Flyology.Cancellation;
+with Flyology.IO.Sockets;
 with Flyology.Wake_Sources;
 
 --  Adds ownership, admission control, and cancellation to socket connections.
@@ -36,9 +36,8 @@ package Flyology.IO.Connections is
    --  before closing the socket. Server must outlive the Connection.
    type Connection is new Ada.Finalization.Limited_Controlled with private;
 
-   --  Transfer Socket and one Manager permit to Item. On success Socket
-   --  becomes
-   --  No_Socket and Item is the sole closing owner.
+   --  Transfer Socket and one Manager permit to Item. On success Socket is
+   --  closed and Item is the sole closing owner.
    --  @param Manager Admission controller that must outlive Item
    --  @param Socket Open socket whose ownership transfers on success
    --  @param Item Closed Connection that receives ownership
@@ -46,7 +45,7 @@ package Flyology.IO.Connections is
    --  @exception Program_Error Socket or Item is invalid, or wake setup fails
    procedure Take
      (Manager : aliased in out Server;
-      Socket  : in out GNAT.Sockets.Socket_Type;
+      Socket  : in out Flyology.IO.Sockets.Socket_Type;
       Item    : in out Connection);
 
    --  Acquire capacity before accepting, so a full Manager backpressures the
@@ -68,13 +67,13 @@ package Flyology.IO.Connections is
    --  @exception Operation_Cancelled Shutdown or Token interrupts the accept
    --  @exception Timeout_Error The accept deadline expires
    --  @exception Device_Error Readiness polling fails
-   --  @exception GNAT.Sockets.Socket_Error Accept or socket setup fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Accept or setup fails
    --  @exception Program_Error Item is open or a wake source cannot be created
    procedure Accept_Connection
      (Manager              : aliased in out Server;
-      Listener             : GNAT.Sockets.Socket_Type;
+      Listener             : Flyology.IO.Sockets.Socket_Type;
       Item                 : in out Connection;
-      Address              : out GNAT.Sockets.Sock_Addr_Type;
+      Address              : out Flyology.IO.Sockets.Endpoint;
       Timeout              : Duration := Infinite;
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
@@ -85,7 +84,7 @@ package Flyology.IO.Connections is
    --  Concurrent Close callers wait for the same close. Closing a closed Item
    --  is harmless.
    --  @param Item Connection whose ownership is released
-   --  @exception GNAT.Sockets.Socket_Error The underlying close reports
+   --  @exception Flyology.IO.Sockets.Socket_Error The underlying close reports
    --     failure
    procedure Close (Item : in out Connection);
    --  Query the protected ownership state.
@@ -106,7 +105,7 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The deadline expires
    --  @exception Device_Error Readiness polling fails
-   --  @exception GNAT.Sockets.Socket_Error Socket receive or setup fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Receive or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
    procedure Receive
@@ -129,7 +128,7 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or the peer closes early
-   --  @exception GNAT.Sockets.Socket_Error Socket receive or setup fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Receive or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
    procedure Receive_Exactly
@@ -151,7 +150,7 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or no forward progress is made
-   --  @exception GNAT.Sockets.Socket_Error Socket send or setup fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Socket send or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
    procedure Send_All
@@ -179,7 +178,7 @@ private
       --  Publish descriptor, socket, and admission ownership atomically.
       procedure Adopt
         (FD     : Flyology.IO.Descriptor;
-         Socket : GNAT.Sockets.Socket_Type;
+         Socket : in out Flyology.IO.Sockets.Socket_Type;
          Owner  : Server_Access);
       --  Register an open generation before waiting for its exclusive lease.
       --  Close retains the borrowed sources until Try_Acquire, abandonment, or
@@ -196,19 +195,21 @@ private
          Result       : out Lease_Result;
          FD           : out Flyology.IO.Descriptor;
          Close_Source : out Flyology.IO.Descriptor;
-         Socket       : out GNAT.Sockets.Socket_Type;
+         Socket       : in out Flyology.IO.Sockets.Socket_Type;
          Owner        : out Server_Access);
       --  Withdraw one operation whose lease acquisition did not complete.
       procedure Abandon_Operation (Generation : Descriptor_Generation);
       --  Reject further chunks after Close has marked this leased generation.
       procedure Check_Operation (Generation : Descriptor_Generation);
-      procedure Release (Generation : Descriptor_Generation);
+      procedure Release
+        (Generation : Descriptor_Generation;
+         Socket     : in out Flyology.IO.Sockets.Socket_Type);
       procedure Begin_Close
         (FD         : out Flyology.IO.Descriptor;
          Generation : out Descriptor_Generation;
          Leader     : out Boolean);
       entry Await_Drained
-        (Socket : out GNAT.Sockets.Socket_Type;
+        (Socket : in out Flyology.IO.Sockets.Socket_Type;
          Owner  : out Server_Access);
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
@@ -231,7 +232,7 @@ private
       Lease_Signalled    : Boolean := False;
       Lease_Wake         : Flyology.Wake_Sources.Source;
       Close_Wake         : Flyology.Wake_Sources.Source;
-      Current_Socket     : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Current_Socket     : Flyology.IO.Sockets.Socket_Type;
       Current_Owner      : Server_Access := null;
    end Descriptor_Controller;
 

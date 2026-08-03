@@ -2,18 +2,17 @@ with Ada.Streams;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
-with GNAT.Sockets;
 with Interfaces.C;
 with TLS_Test_Provider;
 
 procedure TLS_State_Model is
    package TLS renames Flyology.IO.TLS;
    package Provider renames TLS_Test_Provider;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use Ada.Streams;
-   use type Sockets.Socket_Type;
    use type Interfaces.C.int;
    use type Provider.Operation_Counts;
 
@@ -51,13 +50,12 @@ procedure TLS_State_Model is
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
    begin
-      if Socket /= Sockets.No_Socket then
+      if Sockets.Is_Open (Socket) then
          Sockets.Close_Socket (Socket);
-         Socket := Sockets.No_Socket;
       end if;
    exception
       when others =>
-         Socket := Sockets.No_Socket;
+         null;
    end Close_If_Open;
 
    procedure Warm_Model (Model : Flyology.Execution_Model) is
@@ -178,7 +176,7 @@ procedure TLS_State_Model is
                case Edge.Action is
                   when Take_Action =>
                      TLS.Take (Backend, Socket, TLS.Server, "", Item);
-                     pragma Assert (Socket = Sockets.No_Socket);
+                     pragma Assert (not Sockets.Is_Open (Socket));
                   when Handshake_Action =>
                      TLS.Handshake (Item, Timeout => 1.0);
                   when Receive_Action =>

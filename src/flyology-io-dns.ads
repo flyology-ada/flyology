@@ -1,5 +1,5 @@
 with Ada.Streams;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 
 --  Resolves host names with nonblocking DNS transports and a bounded cache.
 --
@@ -16,11 +16,11 @@ package Flyology.IO.DNS is
 
    --  Nonempty or null array of resolved internet addresses.
    type Address_Array is
-     array (Positive range <>) of GNAT.Sockets.Inet_Addr_Type;
+     array (Positive range <>) of Flyology.IO.Sockets.IP_Address;
 
    --  Caller-supplied numeric DNS endpoints for Resolve_Using.
    type Name_Server_Array is
-     array (Positive range <>) of GNAT.Sockets.Sock_Addr_Type;
+     array (Positive range <>) of Flyology.IO.Sockets.Endpoint;
 
    --  Raised for a valid negative DNS answer or family mismatch.
    Name_Not_Found     : exception;
@@ -51,7 +51,7 @@ package Flyology.IO.DNS is
    --  @exception Operation_Cancelled An interrupt descriptor is readable
    --  @exception Timeout_Error The overall deadline expires
    --  @exception Device_Error Descriptor polling or transport setup fails
-   --  @exception GNAT.Sockets.Socket_Error A socket operation fails
+   --  @exception Flyology.IO.Sockets.Socket_Error A socket operation fails
    function Resolve
      (Name        : String;
       Family      : Family_Preference := Any_Family;
@@ -79,7 +79,7 @@ package Flyology.IO.DNS is
    --  @exception Operation_Cancelled An interrupt descriptor is readable
    --  @exception Timeout_Error The overall deadline expires
    --  @exception Device_Error Descriptor polling or transport setup fails
-   --  @exception GNAT.Sockets.Socket_Error A socket operation fails
+   --  @exception Flyology.IO.Sockets.Socket_Error A socket operation fails
    function Resolve_Using
      (Name         : String;
       Name_Servers : Name_Server_Array;

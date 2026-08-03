@@ -1,5 +1,5 @@
 with Ada.Finalization;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology.IO.Connections;
 with System.Multiprocessors;
 private with Flyology.Structured_Server_Policy;
@@ -28,7 +28,7 @@ generic
    with procedure Handle
      (Context      : in out Handler_Context;
       Connection   : in out Flyology.IO.Connections.Connection;
-      Peer         : GNAT.Sockets.Sock_Addr_Type;
+      Peer         : Flyology.IO.Sockets.Endpoint;
       Cancellation : not null access
         Flyology.IO.Connections.Cancellation_Token);
 
@@ -86,7 +86,7 @@ package Flyology.IO.Structured_Servers is
    --  @field Capacity Handler task count and connection admission limit
    type Server (Capacity : Positive) is limited private;
 
-   --  Take sole closing ownership of Listener, set it to No_Socket, and serve
+   --  Take sole closing ownership of Listener, leave it closed, and serve
    --  until shutdown or failure. Transient aborted admissions are retried and
    --  descriptor exhaustion backs off without becoming a recorded failure;
    --  structural listener errors still fail the server. The call returns only
@@ -108,11 +108,11 @@ package Flyology.IO.Structured_Servers is
    --  @param Drain_Timeout Grace period before forced cancellation
    --  @exception Program_Error Listener, lifecycle, or wake source is invalid
    --  @exception Server_Failed A handler or admission failure was recorded
-   --  @exception GNAT.Sockets.Socket_Error Listener shutdown or close fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Listener close fails
    --  @exception Tasking_Error Handler task activation fails
    procedure Serve
      (Item          : aliased in out Server;
-      Listener      : in out GNAT.Sockets.Socket_Type;
+      Listener      : in out Flyology.IO.Sockets.Socket_Type;
       Context       : aliased in out Handler_Context;
       Drain_Timeout : Duration := Infinite)
    with Pre => Drain_Timeout = Infinite or else Drain_Timeout >= 0.0;
@@ -187,7 +187,7 @@ private
       State          : Lifecycle;
       Accept_Stop    : aliased Cancellation_Token;
       Handler_Stop   : aliased Cancellation_Token;
-      Owned_Listener : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Owned_Listener : Flyology.IO.Sockets.Socket_Type;
    end record;
 
    --  Request shutdown and cancellation if Item is still serving. Retry the

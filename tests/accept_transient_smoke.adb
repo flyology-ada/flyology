@@ -6,24 +6,22 @@ with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Sockets;
 with Flyology.IO.Structured_Servers;
-with GNAT.Sockets;
 with System.Multiprocessors;
 
 procedure Accept_Transient_Smoke is
    package Connections renames Flyology.IO.Connections;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
    use type Ada.Streams.Stream_Element_Array;
    use type Fault_Control.Point;
-   use type Sockets.Socket_Type;
 
    Injected_Count : constant Positive := 4;
 
    procedure Open_Listener
-     (Listener : out Sockets.Socket_Type;
-      Address  : out Sockets.Sock_Addr_Type)
+     (Listener : in out Sockets.Socket_Type;
+      Address  : out Sockets.Endpoint)
    is
    begin
       Sockets.Create_Socket (Listener);
@@ -33,9 +31,8 @@ procedure Accept_Transient_Smoke is
          (Sockets.Reuse_Address, True));
       Sockets.Bind_Socket
         (Listener,
-         (Family => Sockets.Family_Inet,
-          Addr   => Sockets.Loopback_Inet_Addr,
-          Port   => Sockets.Any_Port));
+         Sockets.Network_Endpoint
+           (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 16);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
@@ -84,7 +81,7 @@ procedure Accept_Transient_Smoke is
       procedure Handle
         (State        : in out Context;
          Connection   : in out Connections.Connection;
-         Peer         : Sockets.Sock_Addr_Type;
+         Peer         : Sockets.Endpoint;
          Cancellation : not null access Connections.Cancellation_Token)
       is
          Data : Ada.Streams.Stream_Element_Array (1 .. 1);
@@ -109,7 +106,7 @@ procedure Accept_Transient_Smoke is
          Item       : aliased Structured.Server (Capacity => 1);
          State      : aliased Context;
          Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Sock_Addr_Type;
+         Address    : Sockets.Endpoint;
          Failed     : Boolean := False with Atomic;
          Client_OK  : Boolean := False with Atomic;
       begin
@@ -134,7 +131,7 @@ procedure Accept_Transient_Smoke is
             end Runner;
 
             task body Client is
-               Socket : Sockets.Socket_Type := Sockets.No_Socket;
+               Socket : Sockets.Socket_Type;
                Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
                  (1 => 73);
                Got    : Ada.Streams.Stream_Element_Array (1 .. 1);
@@ -149,7 +146,7 @@ procedure Accept_Transient_Smoke is
                Structured.Request_Shutdown (Item);
             exception
                when others =>
-                  if Socket /= Sockets.No_Socket then
+                  if Sockets.Is_Open (Socket) then
                      Sockets.Close_Socket (Socket);
                   end if;
                   Structured.Request_Shutdown (Item);
@@ -177,7 +174,7 @@ procedure Accept_Transient_Smoke is
          Item       : aliased Structured.Server (Capacity => 1);
          State      : aliased Context;
          Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Sock_Addr_Type;
+         Address    : Sockets.Endpoint;
          Failed     : Boolean := False with Atomic;
          Started    : Ada.Real_Time.Time;
       begin
@@ -218,7 +215,7 @@ procedure Accept_Transient_Smoke is
 
       procedure Run_Deadline is
          Listener  : Sockets.Socket_Type;
-         Address   : Sockets.Sock_Addr_Type;
+         Address   : Sockets.Endpoint;
          Timed_Out : Boolean := False with Atomic;
       begin
          Open_Listener (Listener, Address);
@@ -231,8 +228,8 @@ procedure Accept_Transient_Smoke is
             end Acceptor;
 
             task body Acceptor is
-               Accepted : Sockets.Socket_Type := Sockets.No_Socket;
-               Peer     : Sockets.Sock_Addr_Type;
+               Accepted : Sockets.Socket_Type;
+               Peer     : Sockets.Endpoint;
             begin
                begin
                   Flyology.IO.Sockets.Accept_Connection
@@ -241,7 +238,7 @@ procedure Accept_Transient_Smoke is
                   when Flyology.IO.Timeout_Error =>
                      Timed_Out := True;
                end;
-               if Accepted /= Sockets.No_Socket then
+               if Sockets.Is_Open (Accepted) then
                   Sockets.Close_Socket (Accepted);
                end if;
             end Acceptor;
@@ -260,7 +257,7 @@ procedure Accept_Transient_Smoke is
          Item       : aliased Structured.Server (Capacity => 1);
          State      : aliased Context;
          Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Sock_Addr_Type;
+         Address    : Sockets.Endpoint;
          Propagated : Boolean := False;
       begin
          Open_Listener (Listener, Address);

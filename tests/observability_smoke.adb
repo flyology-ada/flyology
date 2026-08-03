@@ -1,4 +1,3 @@
-with GNAT.Sockets;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.IO;
@@ -13,8 +12,8 @@ procedure Observability_Smoke is
    use type Interfaces.Unsigned_64;
    use type Observation.Event_Thread_State;
 
-   Reader_Socket : GNAT.Sockets.Socket_Type;
-   Writer_Socket : GNAT.Sockets.Socket_Type;
+   Reader_Socket : Flyology.IO.Sockets.Socket_Type;
+   Writer_Socket : Flyology.IO.Sockets.Socket_Type;
 
    protected Control is
       procedure Started;
@@ -88,7 +87,8 @@ procedure Observability_Smoke is
       and then Sample.Wakeups > Before_Release.Wakeups
       and then Observation.Made_Progress (Before_Release, Sample));
 begin
-   GNAT.Sockets.Create_Socket_Pair (Reader_Socket, Writer_Socket);
+   Flyology.IO.Sockets.Create_Socket_Pair
+     (Reader_Socket, Writer_Socket);
 
    declare
       task Timed is
@@ -126,7 +126,7 @@ begin
       begin
          Control.Started;
          if not Flyology.IO.Wait
-           (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Reader_Socket)),
+           (Flyology.IO.Sockets.Native_Descriptor (Reader_Socket),
             Flyology.IO.For_Read,
             Timeout => 1.0)
          then
@@ -195,6 +195,6 @@ begin
       raise Program_Error with "cumulative observation counters did not move";
    end if;
 
-   GNAT.Sockets.Close_Socket (Reader_Socket);
-   GNAT.Sockets.Close_Socket (Writer_Socket);
+   Flyology.IO.Sockets.Close_Socket (Reader_Socket);
+   Flyology.IO.Sockets.Close_Socket (Writer_Socket);
 end Observability_Smoke;

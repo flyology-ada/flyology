@@ -1,6 +1,5 @@
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.Connections;
 with Flyology.IO.Sockets;
@@ -8,11 +7,10 @@ with Flyology.IO.Structured_Servers;
 
 procedure Structured_HTTP is
    package Connections renames Flyology.IO.Connections;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use Ada.Text_IO;
    use type Ada.Streams.Stream_Element_Array;
-   use type Sockets.Socket_Type;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    Request_Text : constant String := "GET / HTTP/1.0" & CRLF & CRLF;
@@ -89,7 +87,7 @@ procedure Structured_HTTP is
       procedure Handle
         (State        : in out Context;
          Connection   : in out Connections.Connection;
-         Peer         : Sockets.Sock_Addr_Type;
+         Peer         : Sockets.Endpoint;
          Cancellation : not null access Connections.Cancellation_Token)
       is
          Request : Ada.Streams.Stream_Element_Array := Bytes (Request_Text);
@@ -113,7 +111,7 @@ procedure Structured_HTTP is
       Server   : aliased HTTP_Server.Server (Capacity => Handler_Capacity);
       State    : aliased Context;
       Listener : Sockets.Socket_Type;
-      Address  : Sockets.Sock_Addr_Type;
+      Address  : Sockets.Endpoint;
    begin
       Sockets.Create_Socket (Listener);
       Sockets.Set_Socket_Option
@@ -122,9 +120,8 @@ procedure Structured_HTTP is
          (Sockets.Reuse_Address, True));
       Sockets.Bind_Socket
         (Listener,
-         (Family => Sockets.Family_Inet,
-          Addr   => Sockets.Loopback_Inet_Addr,
-          Port   => Sockets.Any_Port));
+         Sockets.Network_Endpoint
+           (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => Request_Count);
       Address := Sockets.Get_Socket_Name (Listener);
 
@@ -149,7 +146,7 @@ procedure Structured_HTTP is
          end Stopper;
 
          task body Client is
-            Socket   : Sockets.Socket_Type := Sockets.No_Socket;
+            Socket   : Sockets.Socket_Type;
             Response : Ada.Streams.Stream_Element_Array :=
               Bytes (Response_Text);
          begin
@@ -163,7 +160,7 @@ procedure Structured_HTTP is
             Sockets.Close_Socket (Socket);
          exception
             when others =>
-               if Socket /= Sockets.No_Socket then
+               if Sockets.Is_Open (Socket) then
                   Sockets.Close_Socket (Socket);
                end if;
                State.State.Client_Done (False);

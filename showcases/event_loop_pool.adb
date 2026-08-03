@@ -2,7 +2,6 @@ with Ada.Command_Line;
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.IO.Sockets;
@@ -18,7 +17,7 @@ procedure Event_Loop_Pool is
    package Observe renames Flyology.Observability;
 
    type Socket_Array is
-     array (Positive range <>) of GNAT.Sockets.Socket_Type;
+     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    type Socket_Array_Access is access Socket_Array;
    type Group_Count_Array is array (Groups.Shared_Group_Id) of Natural;
 
@@ -115,7 +114,8 @@ procedure Event_Loop_Pool is
       Pool     : constant Groups.Loop_Pool_Size := Groups.Configured_Pool_Size;
    begin
       for Index in 1 .. Workers loop
-         GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Servers (Index), Peers (Index));
       end loop;
       for Index in 1 .. Workers loop
          Connections (Index) := new Connection (Index);
@@ -160,8 +160,8 @@ procedure Event_Loop_Pool is
       end loop;
 
       for Index in 1 .. Workers loop
-         GNAT.Sockets.Close_Socket (Servers (Index));
-         GNAT.Sockets.Close_Socket (Peers (Index));
+         Flyology.IO.Sockets.Close_Socket (Servers (Index));
+         Flyology.IO.Sockets.Close_Socket (Peers (Index));
       end loop;
    end Run;
 

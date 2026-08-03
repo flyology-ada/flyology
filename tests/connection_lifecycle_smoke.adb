@@ -1,20 +1,19 @@
 with Ada.Exceptions;
 with Ada.Streams;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.IO.Connections;
 
 procedure Connection_Lifecycle_Smoke is
    package Connections renames Flyology.IO.Connections;
-   use type GNAT.Sockets.Socket_Type;
 
    Manager : aliased Connections.Server (Capacity => 1);
    Token   : aliased Connections.Cancellation_Token;
 
-   Server_One, Peer_One : GNAT.Sockets.Socket_Type;
-   Server_Two, Peer_Two : GNAT.Sockets.Socket_Type;
-   Server_Three, Peer_Three : GNAT.Sockets.Socket_Type;
-   Spare_Server, Spare_Peer : GNAT.Sockets.Socket_Type;
+   Server_One, Peer_One : Flyology.IO.Sockets.Socket_Type;
+   Server_Two, Peer_Two : Flyology.IO.Sockets.Socket_Type;
+   Server_Three, Peer_Three : Flyology.IO.Sockets.Socket_Type;
+   Spare_Server, Spare_Peer : Flyology.IO.Sockets.Socket_Type;
 
    protected State is
       procedure First_Admitted;
@@ -89,10 +88,10 @@ procedure Connection_Lifecycle_Smoke is
    end State;
 
 begin
-   GNAT.Sockets.Create_Socket_Pair (Server_One, Peer_One);
-   GNAT.Sockets.Create_Socket_Pair (Server_Two, Peer_Two);
-   GNAT.Sockets.Create_Socket_Pair (Server_Three, Peer_Three);
-   GNAT.Sockets.Create_Socket_Pair (Spare_Server, Spare_Peer);
+   Flyology.IO.Sockets.Create_Socket_Pair (Server_One, Peer_One);
+   Flyology.IO.Sockets.Create_Socket_Pair (Server_Two, Peer_Two);
+   Flyology.IO.Sockets.Create_Socket_Pair (Server_Three, Peer_Three);
+   Flyology.IO.Sockets.Create_Socket_Pair (Spare_Server, Spare_Peer);
 
    declare
       task First is
@@ -108,7 +107,7 @@ begin
       begin
          Connections.Take (Manager, Server_One, Owned);
          State.First_Admitted;
-         pragma Assert (Server_One = GNAT.Sockets.No_Socket);
+         pragma Assert (not Flyology.IO.Sockets.Is_Open (Server_One));
          State.Wait_First_Release;
          Owned.Close;
       end First;
@@ -179,8 +178,7 @@ begin
             --  forces any admitted receiver to observe EOF if signaling was
             --  itself the failing operation.
             begin
-               GNAT.Sockets.Close_Socket (Peer_Two);
-               Peer_Two := GNAT.Sockets.No_Socket;
+               Flyology.IO.Sockets.Close_Socket (Peer_Two);
             exception
                when others =>
                   null;
@@ -239,8 +237,7 @@ begin
                   null;
             end;
             begin
-               GNAT.Sockets.Close_Socket (Peer_Three);
-               Peer_Three := GNAT.Sockets.No_Socket;
+               Flyology.IO.Sockets.Close_Socket (Peer_Three);
             exception
                when others =>
                   null;
@@ -260,7 +257,7 @@ begin
             Closed := True;
       end;
       pragma Assert (Closed);
-      pragma Assert (Spare_Server /= GNAT.Sockets.No_Socket);
+      pragma Assert (Flyology.IO.Sockets.Is_Open (Spare_Server));
    end;
 
    pragma Assert (Manager.Active = 0);
@@ -268,7 +265,7 @@ begin
 
    declare
       Accept_Manager : aliased Connections.Server (Capacity => 1);
-      Listener : GNAT.Sockets.Socket_Type;
+      Listener : Flyology.IO.Sockets.Socket_Type;
 
       protected Result is
          procedure Finished (Cancelled : Boolean);
@@ -294,13 +291,13 @@ begin
          function Passed return Boolean is (OK);
       end Result;
    begin
-      GNAT.Sockets.Create_Socket (Listener);
-      GNAT.Sockets.Bind_Socket
+      Flyology.IO.Sockets.Create_Socket (Listener);
+      Flyology.IO.Sockets.Bind_Socket
         (Listener,
-         (Family => GNAT.Sockets.Family_Inet,
-          Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-          Port   => GNAT.Sockets.Any_Port));
-      GNAT.Sockets.Listen_Socket (Listener);
+         Flyology.IO.Sockets.Network_Endpoint
+           (Flyology.IO.Sockets.Loopback_IPv4,
+            Flyology.IO.Sockets.Any_Port));
+      Flyology.IO.Sockets.Listen_Socket (Listener);
 
       declare
          task Acceptor is
@@ -309,7 +306,7 @@ begin
 
          task body Acceptor is
             Owned : Connections.Connection;
-            Peer  : GNAT.Sockets.Sock_Addr_Type;
+            Peer  : Flyology.IO.Sockets.Endpoint;
             Was_Cancelled : Boolean := False;
          begin
             begin
@@ -353,8 +350,7 @@ begin
                      null;
                end;
                begin
-                  GNAT.Sockets.Close_Socket (Listener);
-                  Listener := GNAT.Sockets.No_Socket;
+                  Flyology.IO.Sockets.Close_Socket (Listener);
                exception
                   when others =>
                      null;
@@ -364,15 +360,15 @@ begin
       end;
 
       pragma Assert (Result.Passed);
-      if Listener /= GNAT.Sockets.No_Socket then
-         GNAT.Sockets.Close_Socket (Listener);
+      if Flyology.IO.Sockets.Is_Open (Listener) then
+         Flyology.IO.Sockets.Close_Socket (Listener);
       end if;
    end;
 
    declare
       Native_Manager : aliased Connections.Server (Capacity => 1);
       Native_Token   : aliased Connections.Cancellation_Token;
-      Native_Server, Native_Peer : GNAT.Sockets.Socket_Type;
+      Native_Server, Native_Peer : Flyology.IO.Sockets.Socket_Type;
 
       protected Result is
          procedure Finished (Cancelled : Boolean);
@@ -393,7 +389,8 @@ begin
          function Passed return Boolean is (OK);
       end Result;
    begin
-      GNAT.Sockets.Create_Socket_Pair (Native_Server, Native_Peer);
+      Flyology.IO.Sockets.Create_Socket_Pair
+        (Native_Server, Native_Peer);
       declare
          task Native_Worker is
             pragma Task_Info (Flyology.Native_Task);
@@ -435,8 +432,7 @@ begin
                      null;
                end;
                begin
-                  GNAT.Sockets.Close_Socket (Native_Peer);
-                  Native_Peer := GNAT.Sockets.No_Socket;
+                  Flyology.IO.Sockets.Close_Socket (Native_Peer);
                exception
                   when others =>
                      null;
@@ -446,12 +442,12 @@ begin
       end;
       pragma Assert (Result.Passed);
       pragma Assert (Native_Manager.Active = 0);
-      GNAT.Sockets.Close_Socket (Native_Peer);
+      Flyology.IO.Sockets.Close_Socket (Native_Peer);
    end;
 
-   GNAT.Sockets.Close_Socket (Peer_One);
-   GNAT.Sockets.Close_Socket (Peer_Two);
-   GNAT.Sockets.Close_Socket (Peer_Three);
-   GNAT.Sockets.Close_Socket (Spare_Server);
-   GNAT.Sockets.Close_Socket (Spare_Peer);
+   Flyology.IO.Sockets.Close_Socket (Peer_One);
+   Flyology.IO.Sockets.Close_Socket (Peer_Two);
+   Flyology.IO.Sockets.Close_Socket (Peer_Three);
+   Flyology.IO.Sockets.Close_Socket (Spare_Server);
+   Flyology.IO.Sockets.Close_Socket (Spare_Peer);
 end Connection_Lifecycle_Smoke;

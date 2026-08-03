@@ -1,22 +1,21 @@
 with Ada.Real_Time;
 with Ada.Streams;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Connections.Testing;
+with Flyology.IO.Sockets;
 with Interfaces.C;
 
 procedure Connection_State_Model is
    package Connections renames Flyology.IO.Connections;
    package Testing renames Flyology.IO.Connections.Testing;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
-   use type Sockets.Socket_Type;
    use type Testing.Barrier_Point;
 
    function Open_FD_Count return Interfaces.C.int
@@ -34,7 +33,7 @@ procedure Connection_State_Model is
    type Action_Kind is
      (Close_Idempotently,
       Receive_While_Closed,
-      Take_No_Socket,
+      Take_Closed_Socket,
       Adopt_Socket,
       Adopt_While_Open,
       Immediate_Receive,
@@ -63,7 +62,7 @@ procedure Connection_State_Model is
        Closed, Accepting, 0),
       (Receive_While_Closed, Closed, Accepting, Raised_Program_Error,
        Closed, Accepting, 0),
-      (Take_No_Socket, Closed, Accepting, Raised_Program_Error,
+      (Take_Closed_Socket, Closed, Accepting, Raised_Program_Error,
        Closed, Accepting, 0),
       (Adopt_Socket, Closed, Accepting, Returned,
        Open, Accepting, 1),
@@ -96,13 +95,12 @@ procedure Connection_State_Model is
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
    begin
-      if Socket /= Sockets.No_Socket then
+      if Sockets.Is_Open (Socket) then
          Sockets.Close_Socket (Socket);
-         Socket := Sockets.No_Socket;
       end if;
    exception
       when others =>
-         Socket := Sockets.No_Socket;
+         null;
    end Close_If_Open;
 
    procedure Assert_Descriptors
@@ -134,10 +132,10 @@ procedure Connection_State_Model is
          task body Worker is
             Actual_Ownership : Ownership_State := Closed;
             Actual_Admission : Admission_State := Accepting;
-            Owned_Socket     : Sockets.Socket_Type := Sockets.No_Socket;
-            Peer             : Sockets.Socket_Type := Sockets.No_Socket;
-            Candidate        : Sockets.Socket_Type := Sockets.No_Socket;
-            Candidate_Peer   : Sockets.Socket_Type := Sockets.No_Socket;
+            Owned_Socket     : Sockets.Socket_Type;
+            Peer             : Sockets.Socket_Type;
+            Candidate        : Sockets.Socket_Type;
+            Candidate_Peer   : Sockets.Socket_Type;
 
             procedure Assert_State (Step : Transition) is
             begin
@@ -175,13 +173,13 @@ procedure Connection_State_Model is
                            Item.Receive_Exactly (Data, Timeout => 0.0);
                         end;
 
-                     when Take_No_Socket =>
+                     when Take_Closed_Socket =>
                         Connections.Take (Manager, Owned_Socket, Item);
 
                      when Adopt_Socket =>
                         Sockets.Create_Socket_Pair (Owned_Socket, Peer);
                         Connections.Take (Manager, Owned_Socket, Item);
-                        if Owned_Socket /= Sockets.No_Socket then
+                        if Sockets.Is_Open (Owned_Socket) then
                            raise Program_Error with
                              "Take did not consume socket ownership";
                         end if;
@@ -197,7 +195,7 @@ procedure Connection_State_Model is
                            when Connections.Admission_Closed =>
                               Result := Raised_Admission_Closed;
                         end;
-                        if Candidate = Sockets.No_Socket then
+                        if not Sockets.Is_Open (Candidate) then
                            raise Program_Error with
                              "rejected Take consumed caller ownership";
                         end if;
@@ -316,7 +314,7 @@ procedure Connection_State_Model is
       declare
          Manager : aliased Connections.Server (Capacity => 1);
          Item    : Connections.Connection;
-         Server, Peer : Sockets.Socket_Type := Sockets.No_Socket;
+         Server, Peer : Sockets.Socket_Type;
 
          type Operation_Result is
            (Pending, Cancelled, Completed, Failed);
@@ -498,7 +496,6 @@ procedure Connection_State_Model is
    end Run_Generation_Handoff;
 
 begin
-   Sockets.Initialize;
 
    --  Lazy event-loop descriptors are process-lifetime resources. Start the
    --  loop before taking per-scenario descriptor baselines.
@@ -522,5 +519,4 @@ begin
       Run_Generation_Handoff (Flyology.Lightweight_Task, Point);
       Run_Generation_Handoff (Flyology.Native_Task, Point);
    end loop;
-   Sockets.Finalize;
 end Connection_State_Model;

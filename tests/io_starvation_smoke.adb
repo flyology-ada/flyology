@@ -1,6 +1,5 @@
 with Ada.Real_Time;
 with Ada.Streams;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
@@ -9,8 +8,8 @@ procedure IO_Starvation_Smoke is
    use Ada.Real_Time;
    use Ada.Streams;
 
-   Reader_Socket : GNAT.Sockets.Socket_Type;
-   Writer_Socket : GNAT.Sockets.Socket_Type;
+   Reader_Socket : Flyology.IO.Sockets.Socket_Type;
+   Writer_Socket : Flyology.IO.Sockets.Socket_Type;
    Payload       : constant Stream_Element_Array := [1 => 42];
 
    protected Results is
@@ -49,7 +48,8 @@ procedure IO_Starvation_Smoke is
    end Results;
 
 begin
-   GNAT.Sockets.Create_Socket_Pair (Reader_Socket, Writer_Socket);
+   Flyology.IO.Sockets.Create_Socket_Pair
+     (Reader_Socket, Writer_Socket);
 
    declare
       task Spinner is
@@ -99,8 +99,8 @@ begin
       Results.Wait;
    end;
 
-   GNAT.Sockets.Close_Socket (Reader_Socket);
-   GNAT.Sockets.Close_Socket (Writer_Socket);
+   Flyology.IO.Sockets.Close_Socket (Reader_Socket);
+   Flyology.IO.Sockets.Close_Socket (Writer_Socket);
 
    if not Results.Passed then
       raise Program_Error with

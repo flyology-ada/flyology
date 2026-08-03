@@ -1,7 +1,6 @@
 with Ada.Streams;
-with GNAT.Sockets;
-with Flyology;
 with Flyology.IO.Sockets;
+with Flyology;
 
 procedure Stack_Size_Parity_Smoke is
    use Ada.Streams;
@@ -12,7 +11,7 @@ procedure Stack_Size_Parity_Smoke is
    One_Byte       : constant Stream_Element_Array := [1 => 42];
 
    type Socket_Array is
-     array (Positive range <>) of GNAT.Sockets.Socket_Type;
+     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    Servers : Socket_Array (1 .. Task_Count);
    Peers   : Socket_Array (1 .. Task_Count);
 
@@ -61,7 +60,8 @@ procedure Stack_Size_Parity_Smoke is
 
 begin
    for Index in Servers'Range loop
-      GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+      Flyology.IO.Sockets.Create_Socket_Pair
+        (Servers (Index), Peers (Index));
    end loop;
 
    declare
@@ -125,7 +125,7 @@ begin
    end;
 
    for Index in Peers'Range loop
-      GNAT.Sockets.Close_Socket (Servers (Index));
-      GNAT.Sockets.Close_Socket (Peers (Index));
+      Flyology.IO.Sockets.Close_Socket (Servers (Index));
+      Flyology.IO.Sockets.Close_Socket (Peers (Index));
    end loop;
 end Stack_Size_Parity_Smoke;

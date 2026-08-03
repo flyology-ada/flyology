@@ -1,6 +1,5 @@
 with Ada.Streams;
 with Flyology.Execution_Groups;
-with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 
 package body Context_ABI_Support is
@@ -14,22 +13,15 @@ package body Context_ABI_Support is
    pragma Import
      (C, Machine_Probe, "flyology_test_context_probe");
 
-   Reader_Socket : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+   Reader_Socket : access Flyology.IO.Sockets.Socket_Type := null;
    protected Descriptor_Gate is
-      procedure Configure (Reader : GNAT.Sockets.Socket_Type);
       procedure Request;
       entry Wait_For_Request;
-      function Reader return GNAT.Sockets.Socket_Type;
    private
       Requested : Boolean := False;
    end Descriptor_Gate;
 
    protected body Descriptor_Gate is
-      procedure Configure (Reader : GNAT.Sockets.Socket_Type) is
-      begin
-         Reader_Socket := Reader;
-      end Configure;
-
       procedure Request is
       begin
          Requested := True;
@@ -40,12 +32,13 @@ package body Context_ABI_Support is
          Requested := False;
       end Wait_For_Request;
 
-      function Reader return GNAT.Sockets.Socket_Type is (Reader_Socket);
    end Descriptor_Gate;
 
-   procedure Configure (Reader : GNAT.Sockets.Socket_Type) is
+   procedure Configure
+     (Reader : aliased in out Flyology.IO.Sockets.Socket_Type)
+   is
    begin
-      Descriptor_Gate.Configure (Reader);
+      Reader_Socket := Reader'Unchecked_Access;
    end Configure;
 
    procedure Wait_For_Descriptor_Request is
@@ -68,8 +61,10 @@ package body Context_ABI_Support is
             Flyology.IO.Timers.Sleep_For (0.005);
          when Descriptor_Readiness =>
             Descriptor_Gate.Request;
-            Sockets.Receive_Exactly
-              (Descriptor_Gate.Reader, Item, Timeout => 1.0);
+            if Reader_Socket = null then
+               return 1;
+            end if;
+            Sockets.Receive_Exactly (Reader_Socket.all, Item, Timeout => 1.0);
             if Item (1) /= 16#5A# then
                return 1;
             end if;

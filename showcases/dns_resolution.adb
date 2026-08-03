@@ -2,7 +2,7 @@ with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Text_IO;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.IO.DNS;
 
@@ -29,7 +29,8 @@ procedure DNS_Resolution is
          Ada.Text_IO.Put_Line
            (Lane & " resolved " & Host & " in" & Elapsed'Image & " s");
          for Value of Values loop
-            Ada.Text_IO.Put_Line ("  " & GNAT.Sockets.Image (Value));
+            Ada.Text_IO.Put_Line
+              ("  " & Flyology.IO.Sockets.Image (Value));
          end loop;
       end Show;
 
@@ -61,7 +62,6 @@ procedure DNS_Resolution is
 
    type Resolver_Access is access Resolver;
 begin
-   GNAT.Sockets.Initialize;
    declare
       Native  : constant Resolver_Access :=
         new Resolver (Flyology.Native_Task, True);
@@ -71,5 +71,4 @@ begin
    begin
       null;
    end;
-   GNAT.Sockets.Finalize;
 end DNS_Resolution;

@@ -1,14 +1,12 @@
 with Ada.Exceptions;
 with Flyology.Counter_Policy;
-with Flyology.IO.Sockets;
 with GNAT.OS_Lib;
 with Interfaces.C;
 package body Flyology.IO.Structured_Servers is
    package Connections renames Flyology.IO.Connections;
    package Counters renames Flyology.Counter_Policy;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
-   use type Sockets.Socket_Type;
    use type Interfaces.C.int;
    use type Policy.Run_Phase;
 
@@ -174,15 +172,16 @@ package body Flyology.IO.Structured_Servers is
 
    procedure Close_Owned_Listener (Item : in out Server) is
       Result : Interfaces.C.int;
+      Released : Descriptor;
    begin
-      if Item.Owned_Listener /= Sockets.No_Socket then
+      if Sockets.Is_Open (Item.Owned_Listener) then
          Result := C_Close_Listener
            (Flyology.IO.Sockets.Native_Descriptor (Item.Owned_Listener));
          if Result /= 0 then
             raise Sockets.Socket_Error with
               "listener close failed, errno=" & GNAT.OS_Lib.Errno'Image;
          end if;
-         Item.Owned_Listener := Sockets.No_Socket;
+         Sockets.Release (Item.Owned_Listener, Released);
       end if;
    end Close_Owned_Listener;
 
@@ -208,15 +207,14 @@ package body Flyology.IO.Structured_Servers is
       end Force_Handlers;
 
    begin
-      if Listener = Sockets.No_Socket then
+      if not Sockets.Is_Open (Listener) then
          raise Program_Error with
            "structured server requires a listening socket";
       end if;
 
       Item.State.Begin_Serve (Item.Capacity);
       Began := True;
-      Item.Owned_Listener := Listener;
-      Listener := Sockets.No_Socket;
+      Sockets.Move (Listener, Item.Owned_Listener);
 
       declare
          task type Worker with CPU => Handler_CPU is
@@ -249,7 +247,7 @@ package body Flyology.IO.Structured_Servers is
                while not Stop_Worker loop
                   declare
                      Connection : Connections.Connection;
-                     Peer       : Sockets.Sock_Addr_Type;
+                     Peer       : Sockets.Endpoint;
                      Admitted   : Boolean := False;
                      Cancelled  : Boolean := False;
                      Failed     : Boolean := False;
@@ -360,7 +358,7 @@ package body Flyology.IO.Structured_Servers is
                when others =>
                   null;
             end;
-            if Item.Owned_Listener /= Sockets.No_Socket then
+            if Sockets.Is_Open (Item.Owned_Listener) then
                begin
                   Close_Owned_Listener (Item);
                exception

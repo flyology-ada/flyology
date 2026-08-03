@@ -1,22 +1,21 @@
 with Ada.Real_Time;
 with Flyology.Connection_Policy;
-with Flyology.IO.Sockets;
 with Flyology.Time_Math;
 with Interfaces.C;
 
 package body Flyology.IO.Connections is
    package Policy renames Flyology.Connection_Policy;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
-   use type Sockets.Socket_Type;
 
    type Operation_Guard (Item : not null access Connection) is
      new Ada.Finalization.Limited_Controlled with record
       Generation : aliased Descriptor_Generation := 0;
       State      : aliased Operation_State := Unregistered;
+      Socket     : Sockets.Socket_Type;
    end record;
 
    overriding procedure Finalize (Guard : in out Operation_Guard);
@@ -46,12 +45,12 @@ package body Flyology.IO.Connections is
    protected body Descriptor_Controller is
       procedure Adopt
         (FD     : Descriptor;
-         Socket : Sockets.Socket_Type;
+         Socket : in out Sockets.Socket_Type;
          Owner  : Server_Access)
       is
       begin
          if FD < 0
-           or else Socket = Sockets.No_Socket
+           or else not Sockets.Is_Open (Socket)
            or else Flyology.IO.Sockets.Native_Descriptor (Socket) /= FD
            or else Owner = null
            or else Current_FD >= 0
@@ -63,7 +62,7 @@ package body Flyology.IO.Connections is
          end if;
          Wake_Sources.Ensure (Lease_Wake);
          Wake_Sources.Ensure (Close_Wake);
-         Current_Socket := Socket;
+         Sockets.Move (Socket, Current_Socket);
          Current_Owner := Owner;
          Current_FD := FD;
          Current_Generation := Current_Generation + 1;
@@ -82,7 +81,6 @@ package body Flyology.IO.Connections is
          end if;
          if Current_FD < 0
            or else Closing
-           or else Current_Socket = Sockets.No_Socket
            or else Current_Owner = null
          then
             raise Program_Error with "connection is not open";
@@ -107,7 +105,7 @@ package body Flyology.IO.Connections is
          Result       : out Lease_Result;
          FD           : out Descriptor;
          Close_Source : out Descriptor;
-         Socket       : out Sockets.Socket_Type;
+         Socket       : in out Sockets.Socket_Type;
          Owner        : out Server_Access)
       is
       begin
@@ -118,7 +116,6 @@ package body Flyology.IO.Connections is
            (Generation_Matches => Expected_Generation = Current_Generation,
             Resources_Open     =>
               Current_FD >= 0
-              and then Current_Socket /= Sockets.No_Socket
               and then Current_Owner /= null,
             Closing            => Closing,
             Active             => Active)
@@ -145,7 +142,7 @@ package body Flyology.IO.Connections is
          Active := True;
          FD := Current_FD;
          Close_Source := Wake_Sources.Descriptor (Close_Wake);
-         Socket := Current_Socket;
+         Sockets.Move (Current_Socket, Socket);
          Owner := Current_Owner;
          --  Active and the guard state become visible in one protected action.
          --  Finalization after any abort at the call boundary will Release.
@@ -179,7 +176,10 @@ package body Flyology.IO.Connections is
          end if;
       end Check_Operation;
 
-      procedure Release (Generation : Descriptor_Generation) is
+      procedure Release
+        (Generation : Descriptor_Generation;
+         Socket     : in out Sockets.Socket_Type)
+      is
       begin
          if not Active
            or else Generation /= Current_Generation
@@ -187,6 +187,10 @@ package body Flyology.IO.Connections is
          then
             raise Program_Error with "stale descriptor operation release";
          end if;
+         if not Sockets.Is_Open (Socket) then
+            raise Program_Error with "active operation lost socket ownership";
+         end if;
+         Sockets.Move (Socket, Current_Socket);
          Active := False;
          Started_Operations :=
            Policy.Started_After_Release (Started_Operations);
@@ -216,21 +220,20 @@ package body Flyology.IO.Connections is
       end Begin_Close;
 
       entry Await_Drained
-        (Socket : out Sockets.Socket_Type;
+        (Socket : in out Sockets.Socket_Type;
          Owner  : out Server_Access)
         when not Active and then Started_Operations = 0
       is
       begin
          if not Closing
            or else Current_FD < 0
-           or else Current_Socket = Sockets.No_Socket
+           or else not Sockets.Is_Open (Current_Socket)
            or else Current_Owner = null
          then
             raise Program_Error with "invalid descriptor close handoff";
          end if;
-         Socket := Current_Socket;
+         Sockets.Move (Current_Socket, Socket);
          Owner := Current_Owner;
-         Current_Socket := Sockets.No_Socket;
          Current_Owner := null;
       end Await_Drained;
 
@@ -246,7 +249,8 @@ package body Flyology.IO.Connections is
             Active,
             Started_Operations,
             Generation = Current_Generation,
-            Current_Socket = Sockets.No_Socket and then Current_Owner = null)
+            not Sockets.Is_Open (Current_Socket)
+              and then Current_Owner = null)
          then
             raise Program_Error with "stale descriptor close completion";
          end if;
@@ -280,7 +284,7 @@ package body Flyology.IO.Connections is
             Guard.Item.Controller.Abandon_Operation (Guard.Generation);
             Guard.State := Unregistered;
          when Acquired =>
-            Guard.Item.Controller.Release (Guard.Generation);
+            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket);
             Guard.State := Unregistered;
       end case;
    end Finalize;
@@ -326,7 +330,6 @@ package body Flyology.IO.Connections is
       FD            : out Descriptor;
       Guard         : in out Operation_Guard;
       Close_Source  : out Descriptor;
-      Socket        : out Sockets.Socket_Type;
       Owner         : out Server_Access)
    is
       Lease_Source : Descriptor;
@@ -356,7 +359,7 @@ package body Flyology.IO.Connections is
             Result,
             FD,
             Close_Source,
-            Socket,
+            Guard.Socket,
             Owner);
          case Result is
             when Lease_Acquired =>
@@ -419,8 +422,8 @@ package body Flyology.IO.Connections is
       Owner    : Server_Access;
       Reserved : Boolean := False;
    begin
-      if Socket = Sockets.No_Socket then
-         raise Program_Error with "cannot own No_Socket";
+      if not Sockets.Is_Open (Socket) then
+         raise Program_Error with "cannot own a closed socket";
       elsif Is_Open (Item) then
          raise Program_Error with "connection already owns a socket";
       end if;
@@ -433,7 +436,6 @@ package body Flyology.IO.Connections is
             Socket,
             Owner);
          Reserved := False;
-         Socket := Sockets.No_Socket;
       exception
          when others =>
             if Reserved then
@@ -447,13 +449,13 @@ package body Flyology.IO.Connections is
      (Manager              : aliased in out Server;
       Listener             : Sockets.Socket_Type;
       Item                 : in out Connection;
-      Address              : out Sockets.Sock_Addr_Type;
+      Address              : out Sockets.Endpoint;
       Timeout              : Duration := Infinite;
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
       Owner    : Server_Access;
-      Socket   : Sockets.Socket_Type := Sockets.No_Socket;
+      Socket   : Sockets.Socket_Type;
       Reserved : Boolean := False;
       Interrupts : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
@@ -491,7 +493,7 @@ package body Flyology.IO.Connections is
          end if;
          --  Capacity is released before a fallible cleanup close so a close
          --  error cannot strand the admission permit.
-         if Socket /= Sockets.No_Socket then
+         if Sockets.Is_Open (Socket) then
             Sockets.Close_Socket (Socket);
          end if;
          raise;
@@ -516,7 +518,7 @@ package body Flyology.IO.Connections is
       --  observed Close_Wake and acknowledged release. Only then may the OS
       --  recycle the integer descriptor.
       Item.Controller.Await_Drained (Socket, Owner);
-      if Socket /= Sockets.No_Socket then
+      if Sockets.Is_Open (Socket) then
          begin
             Sockets.Close_Socket (Socket);
          exception
@@ -549,15 +551,15 @@ package body Flyology.IO.Connections is
       Interrupt_Count : Natural;
       FD : Descriptor;
       Guard : Operation_Guard (Item'Unchecked_Access);
-      Socket : Sockets.Socket_Type;
       Owner : Server_Access;
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       pragma Unreferenced (Cancellation_Quantum);
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Socket, Owner);
-      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
+         FD, Guard, Interrupts (1), Owner);
+      pragma Assert
+        (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
       Interrupt_Sources
         (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
@@ -565,7 +567,7 @@ package body Flyology.IO.Connections is
 #end if;
       begin
          Flyology.IO.Sockets.Receive
-           (Socket, Data, Last, Remaining (Started, Timeout),
+           (Guard.Socket, Data, Last, Remaining (Started, Timeout),
             Interrupts (1 .. Interrupt_Count + 1));
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
@@ -587,14 +589,14 @@ package body Flyology.IO.Connections is
       Interrupt_Count : Natural;
       FD             : Descriptor;
       Guard          : Operation_Guard (Item'Unchecked_Access);
-      Socket         : Sockets.Socket_Type;
       Owner          : Server_Access;
       pragma Unreferenced (Cancellation_Quantum);
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Socket, Owner);
-      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
+         FD, Guard, Interrupts (1), Owner);
+      pragma Assert
+        (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
@@ -604,7 +606,7 @@ package body Flyology.IO.Connections is
             Test_Barrier (3);
 #end if;
             Flyology.IO.Sockets.Receive
-              (Socket,
+              (Guard.Socket,
                Data (First .. Data'Last),
                Last,
                Remaining (Started, Timeout),
@@ -639,14 +641,14 @@ package body Flyology.IO.Connections is
       Interrupt_Count : Natural;
       FD : Descriptor;
       Guard : Operation_Guard (Item'Unchecked_Access);
-      Socket : Sockets.Socket_Type;
       Owner : Server_Access;
       pragma Unreferenced (Cancellation_Quantum);
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Socket, Owner);
-      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
+         FD, Guard, Interrupts (1), Owner);
+      pragma Assert
+        (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
@@ -661,7 +663,7 @@ package body Flyology.IO.Connections is
 #end if;
             begin
                Flyology.IO.Sockets.Send
-                 (Socket,
+                 (Guard.Socket,
                   Data (First .. Chunk_Last),
                   Last,
                   Remaining (Started, Timeout),

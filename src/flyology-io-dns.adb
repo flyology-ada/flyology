@@ -5,13 +5,12 @@ with Ada.Strings.Fixed;
 with Flyology.DNS_Test_Observations;
 #end if;
 with Flyology.IO.Files;
-with Flyology.IO.Sockets;
 with Interfaces;
 with Interfaces.C;
 with System;
 
 package body Flyology.IO.DNS is
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
    package Streams renames Ada.Streams;
    package U8 renames Interfaces;
    package C renames Interfaces.C;
@@ -21,8 +20,7 @@ package body Flyology.IO.DNS is
    use type U8.Unsigned_32;
    use type Streams.Stream_Element_Offset;
    use type Streams.Stream_Element;
-   use type Sockets.Family_Type;
-   use type Sockets.Socket_Type;
+   use type Sockets.Address_Family;
    use type Flyology.IO.Files.File_Descriptor;
 
    Max_Name_Length      : constant := 253;
@@ -35,7 +33,7 @@ package body Flyology.IO.DNS is
    Max_Records          : constant := 32;
    Max_Cache_Entries    : constant := 64;
    Max_Cache_Key_Length : constant := 512;
-   DNS_Port             : constant Sockets.Port_Type := 53;
+   DNS_Port             : constant Sockets.Port := 53;
    Type_A               : constant Natural := 1;
    Type_CNAME           : constant Natural := 5;
    Type_SOA             : constant Natural := 6;
@@ -50,7 +48,7 @@ package body Flyology.IO.DNS is
    end record;
 
    type Raw_Address is record
-      Family : Sockets.Family_Inet_4_6 := Sockets.Family_Inet;
+      Family : Sockets.Address_Family := Sockets.IPv4;
       Bytes  : Byte_Array (1 .. 16) := (others => 0);
    end record;
    type Raw_Address_Array is array (Positive range <>) of Raw_Address;
@@ -617,7 +615,7 @@ package body Flyology.IO.DNS is
                   Records (Record_Count).Owner := Owner;
                   Records (Record_Count).Kind := Kind;
                   Records (Record_Count).TTL := TTL;
-                  Records (Record_Count).Address.Family := Sockets.Family_Inet;
+                  Records (Record_Count).Address.Family := Sockets.IPv4;
                   for Index in 1 .. 4 loop
                      Records (Record_Count).Address.Bytes (Index) :=
                        Packet (Data_Start + Index - 1);
@@ -630,7 +628,7 @@ package body Flyology.IO.DNS is
                   Records (Record_Count).Kind := Kind;
                   Records (Record_Count).TTL := TTL;
                   Records (Record_Count).Address.Family :=
-                    Sockets.Family_Inet6;
+                    Sockets.IPv6;
                   for Index in 1 .. 16 loop
                      Records (Record_Count).Address.Bytes (Index) :=
                        Packet (Data_Start + Index - 1);
@@ -760,23 +758,22 @@ package body Flyology.IO.DNS is
       end;
    end Validate_Response_For_Testing;
 
-   function To_Public (Value : Raw_Address) return Sockets.Inet_Addr_Type is
+   function To_Public (Value : Raw_Address) return Sockets.IP_Address is
    begin
-      if Value.Family = Sockets.Family_Inet then
+      if Value.Family = Sockets.IPv4 then
          return
-           (Family => Sockets.Family_Inet,
-            Sin_V4 =>
-              (1 => Sockets.Inet_Addr_Comp_Type (Value.Bytes (1)),
-               2 => Sockets.Inet_Addr_Comp_Type (Value.Bytes (2)),
-               3 => Sockets.Inet_Addr_Comp_Type (Value.Bytes (3)),
-               4 => Sockets.Inet_Addr_Comp_Type (Value.Bytes (4))));
+           (Family => Sockets.IPv4,
+            V4 =>
+              (1 => Sockets.Octet (Value.Bytes (1)),
+               2 => Sockets.Octet (Value.Bytes (2)),
+               3 => Sockets.Octet (Value.Bytes (3)),
+               4 => Sockets.Octet (Value.Bytes (4))));
       else
          declare
-            Result : Sockets.Inet_Addr_Type (Sockets.Family_Inet6);
+            Result : Sockets.IP_Address (Sockets.IPv6);
          begin
             for Index in 1 .. 16 loop
-               Result.Sin_V6 (Index) :=
-                 Sockets.Inet_Addr_Comp_Type (Value.Bytes (Index));
+               Result.V6 (Index) := Sockets.Octet (Value.Bytes (Index));
             end loop;
             return Result;
          end;
@@ -794,17 +791,17 @@ package body Flyology.IO.DNS is
       return Result;
    end To_Public;
 
-   function Raw (Value : Sockets.Inet_Addr_Type) return Raw_Address is
+   function Raw (Value : Sockets.IP_Address) return Raw_Address is
       Result : Raw_Address;
    begin
       Result.Family := Value.Family;
-      if Value.Family = Sockets.Family_Inet then
+      if Value.Family = Sockets.IPv4 then
          for Index in 1 .. 4 loop
-            Result.Bytes (Index) := Byte (Value.Sin_V4 (Index));
+            Result.Bytes (Index) := Byte (Value.V4 (Index));
          end loop;
       else
          for Index in 1 .. 16 loop
-            Result.Bytes (Index) := Byte (Value.Sin_V6 (Index));
+            Result.Bytes (Index) := Byte (Value.V6 (Index));
          end loop;
       end if;
       return Result;
@@ -886,7 +883,7 @@ package body Flyology.IO.DNS is
          Address_First : Positive := Text'First;
          Address_Last  : Natural := Text'Last;
          Port_First    : Natural := 0;
-         Port          : Sockets.Port_Type := DNS_Port;
+         Port          : Sockets.Port := DNS_Port;
       begin
          --  Bracketed IPv6 and IPv4 address:port are accepted as a Flyology
          --  extension so deterministic tests and isolated deployments need
@@ -914,16 +911,16 @@ package body Flyology.IO.DNS is
             end loop;
          end if;
          if Port_First /= 0 then
-            Port := Sockets.Port_Type'Value (Text (Port_First .. Text'Last));
+            Port := Sockets.Port'Value (Text (Port_First .. Text'Last));
          end if;
          declare
-            Address : constant Sockets.Inet_Addr_Type :=
-              Sockets.Inet_Addr (Text (Address_First .. Address_Last));
+            Address : constant Sockets.IP_Address :=
+              Sockets.Parse_IP_Address (Text (Address_First .. Address_Last));
          begin
             if Config.Server_Count < Max_Name_Servers then
                Config.Server_Count := Config.Server_Count + 1;
                Config.Servers (Config.Server_Count) :=
-                 Sockets.Network_Socket_Address (Address, Port);
+                 Sockets.Network_Endpoint (Address, Port);
             end if;
          end;
       exception
@@ -1140,7 +1137,7 @@ package body Flyology.IO.DNS is
    end To_Bytes;
 
    function Query_TCP
-     (Server       : Sockets.Sock_Addr_Type;
+     (Server       : Sockets.Endpoint;
       Query        : Byte_Array;
       Expected_ID  : Natural;
       Expected_Name : Name_Buffer;
@@ -1149,7 +1146,7 @@ package body Flyology.IO.DNS is
       Infinite     : Boolean;
       Interrupts   : Interrupt_Set) return Parse_Result
    is
-      Socket : Sockets.Socket_Type := Sockets.No_Socket;
+      Socket : Sockets.Socket_Type;
       Payload : constant Streams.Stream_Element_Array := To_Stream (Query);
       Prefix  : Streams.Stream_Element_Array (1 .. 2);
       Length  : Natural;
@@ -1189,12 +1186,12 @@ package body Flyology.IO.DNS is
       end;
    exception
       when Flyology.IO.Sockets.Operation_Interrupted =>
-         if Socket /= Sockets.No_Socket then
+         if Sockets.Is_Open (Socket) then
             Sockets.Close_Socket (Socket);
          end if;
          raise Operation_Cancelled;
       when others =>
-         if Socket /= Sockets.No_Socket then
+         if Sockets.Is_Open (Socket) then
             Sockets.Close_Socket (Socket);
          end if;
          raise;
@@ -1257,12 +1254,11 @@ package body Flyology.IO.DNS is
                  Build_Query (Name, Kind, ID);
                Query_Data  : constant Streams.Stream_Element_Array :=
                  To_Stream (Query);
-               Selected_Server : constant Sockets.Sock_Addr_Type :=
+               Selected_Server : constant Sockets.Endpoint :=
                  Name_Servers
                    (Name_Servers'First
                     + ((Attempt - 1) mod Name_Servers'Length));
-               Channels    : Socket_Array (1 .. 1) :=
-                 (others => Sockets.No_Socket);
+               Channels    : Socket_Array (1 .. 1);
                Requests    : Wait_Request_Array
                  (1 .. Interrupts'Length + Channels'Length);
                Request_Count : Natural := 0;
@@ -1281,9 +1277,8 @@ package body Flyology.IO.DNS is
                procedure Close_All is
                begin
                   for Channel of Channels loop
-                     if Channel /= Sockets.No_Socket then
+                     if Sockets.Is_Open (Channel) then
                         Sockets.Close_Socket (Channel);
-                        Channel := Sockets.No_Socket;
                      end if;
                   end loop;
                end Close_All;
@@ -1308,10 +1303,6 @@ package body Flyology.IO.DNS is
                declare
                   Last : Streams.Stream_Element_Offset;
                begin
-                  if Selected_Server.Family not in Sockets.Family_Inet_4_6 then
-                     raise Resolution_Failed with
-                       "DNS name server must be an Internet address";
-                  end if;
                   Sockets.Create_Socket
                     (Channels (1), Selected_Server.Family,
                      Sockets.Socket_Datagram);
@@ -1335,7 +1326,7 @@ package body Flyology.IO.DNS is
                loop
 #if FLYOLOGY_DNS_TEST_HOOKS then
                   Flyology.DNS_Test_Observations.Record_Receive_Wait
-                    (After_Close => Channels (1) = Sockets.No_Socket);
+                    (After_Close => not Sockets.Is_Open (Channels (1)));
 #end if;
                   declare
                      Wait_For : constant Duration :=
@@ -1507,26 +1498,26 @@ package body Flyology.IO.DNS is
          end loop;
       end Append;
    begin
-      if Sockets.Is_IPv4_Address (Image (Normalized)) then
+      if Sockets.Is_IP_Address (Image (Normalized), Sockets.IPv4) then
          if Family = IPv6_Only then
             raise Name_Not_Found with Name;
          end if;
-         Values (1) := Raw (Sockets.Inet_Addr (Image (Normalized)));
+         Values (1) := Raw (Sockets.Parse_IP_Address (Image (Normalized)));
          return To_Public (Values, 1);
-      elsif Sockets.Is_IPv6_Address (Image (Normalized)) then
+      elsif Sockets.Is_IP_Address (Image (Normalized), Sockets.IPv6) then
          if Family = IPv4_Only then
             raise Name_Not_Found with Name;
          end if;
-         Values (1) := Raw (Sockets.Inet_Addr (Image (Normalized)));
+         Values (1) := Raw (Sockets.Parse_IP_Address (Image (Normalized)));
          return To_Public (Values, 1);
       elsif Image (Normalized) = "localhost" then
          if Family /= IPv4_Only then
             Count := Count + 1;
-            Values (Count) := Raw (Sockets.Loopback_Inet6_Addr);
+            Values (Count) := Raw (Sockets.Loopback_IPv6);
          end if;
          if Family /= IPv6_Only then
             Count := Count + 1;
-            Values (Count) := Raw (Sockets.Loopback_Inet_Addr);
+            Values (Count) := Raw (Sockets.Loopback_IPv4);
          end if;
          return To_Public (Values, Count);
       end if;
@@ -1628,8 +1619,8 @@ package body Flyology.IO.DNS is
    begin
       --  Numeric and localhost names need neither resolver configuration nor
       --  filesystem access, preserving deterministic startup behavior.
-      if Sockets.Is_IPv4_Address (Name)
-        or else Sockets.Is_IPv6_Address (Name)
+      if Sockets.Is_IP_Address (Name, Sockets.IPv4)
+        or else Sockets.Is_IP_Address (Name, Sockets.IPv6)
         or else Lower (Name) in "localhost" | "localhost."
       then
          declare

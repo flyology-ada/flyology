@@ -1,6 +1,5 @@
 with Ada.Real_Time;
 with Ada.Streams;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.IO.Connections;
@@ -10,18 +9,17 @@ with System.Multiprocessors;
 
 procedure Structured_Server_Smoke is
    package Connections renames Flyology.IO.Connections;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Array;
    use type Flyology.IO.Descriptor;
    use type Flyology.Execution_Groups.Group_Id;
    use type Flyology.Execution_Model;
-   use type Sockets.Socket_Type;
 
    procedure Open_Listener
-     (Listener : out Sockets.Socket_Type;
-      Address  : out Sockets.Sock_Addr_Type)
+     (Listener : in out Sockets.Socket_Type;
+      Address  : out Sockets.Endpoint)
    is
    begin
       Sockets.Create_Socket (Listener);
@@ -31,9 +29,8 @@ procedure Structured_Server_Smoke is
          (Sockets.Reuse_Address, True));
       Sockets.Bind_Socket
         (Listener,
-         (Family => Sockets.Family_Inet,
-          Addr   => Sockets.Loopback_Inet_Addr,
-          Port   => Sockets.Any_Port));
+         Sockets.Network_Endpoint
+           (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 32);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
@@ -92,7 +89,7 @@ procedure Structured_Server_Smoke is
       procedure Handle
         (State        : in out Context;
          Connection   : in out Connections.Connection;
-         Peer         : Sockets.Sock_Addr_Type;
+         Peer         : Sockets.Endpoint;
          Cancellation : not null access Connections.Cancellation_Token)
       is
          Data : Ada.Streams.Stream_Element_Array (1 .. 1);
@@ -146,7 +143,7 @@ procedure Structured_Server_Smoke is
          Item     : aliased Structured.Server (Capacity => 2);
          State    : aliased Context := (Mode => Gated_Echo, others => <>);
          Listener : Sockets.Socket_Type;
-         Address  : Sockets.Sock_Addr_Type;
+         Address  : Sockets.Endpoint;
 
          protected Results is
             procedure Report (OK : Boolean);
@@ -231,7 +228,7 @@ procedure Structured_Server_Smoke is
                   raise;
             end;
          end;
-         pragma Assert (Listener = Sockets.No_Socket);
+         pragma Assert (not Sockets.Is_Open (Listener));
          pragma Assert (Results.Passed);
          declare
             Sample : constant Structured.Snapshot := Structured.Current (Item);
@@ -248,7 +245,7 @@ procedure Structured_Server_Smoke is
          Item     : aliased Structured.Server (Capacity => 1);
          State    : aliased Context := (Mode => Draining_Read, others => <>);
          Listener : Sockets.Socket_Type;
-         Address  : Sockets.Sock_Addr_Type;
+         Address  : Sockets.Endpoint;
 
          function Handler_Active return Boolean is
            (State.State.Handler_Count = 1);
@@ -306,7 +303,7 @@ procedure Structured_Server_Smoke is
          Item     : aliased Structured.Server (Capacity => 1);
          State    : aliased Context := (Mode => Draining_Read, others => <>);
          Listener : Sockets.Socket_Type;
-         Address  : Sockets.Sock_Addr_Type;
+         Address  : Sockets.Endpoint;
 
          function Handler_Active return Boolean is
            (State.State.Handler_Count = 1);
@@ -361,7 +358,7 @@ procedure Structured_Server_Smoke is
          Item     : aliased Structured.Server (Capacity => 1);
          State    : aliased Context := (Mode => Failing, others => <>);
          Listener : Sockets.Socket_Type;
-         Address  : Sockets.Sock_Addr_Type;
+         Address  : Sockets.Endpoint;
          Propagated : Boolean := False with Atomic;
       begin
          Open_Listener (Listener, Address);
@@ -406,7 +403,7 @@ procedure Structured_Server_Smoke is
          Item     : aliased Structured.Server (Capacity => 1);
          State    : aliased Context := (Mode => Draining_Read, others => <>);
          Listener : Sockets.Socket_Type;
-         Address  : Sockets.Sock_Addr_Type;
+         Address  : Sockets.Endpoint;
          Old_FD   : Flyology.IO.Descriptor;
 
          function Is_Running return Boolean is
@@ -442,7 +439,7 @@ procedure Structured_Server_Smoke is
             First_Stop.Go;
             Second_Stop.Go;
          end;
-         pragma Assert (Listener = Sockets.No_Socket);
+         pragma Assert (not Sockets.Is_Open (Listener));
          declare
             Reused : Sockets.Socket_Type;
          begin
@@ -460,14 +457,14 @@ procedure Structured_Server_Smoke is
          Item     : aliased Structured.Server (Capacity => 4);
          State    : aliased Context := (Mode => Draining_Read, others => <>);
          Listener : Sockets.Socket_Type;
-         Address  : Sockets.Sock_Addr_Type;
+         Address  : Sockets.Endpoint;
       begin
          Open_Listener (Listener, Address);
          Structured.Request_Shutdown (Item);
          Structured.Request_Shutdown (Item);
          Structured.Serve
            (Item, Listener, State, Drain_Timeout => 0.1);
-         pragma Assert (Listener = Sockets.No_Socket);
+         pragma Assert (not Sockets.Is_Open (Listener));
          declare
             Sample : constant Structured.Snapshot := Structured.Current (Item);
          begin

@@ -3,7 +3,6 @@ with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Fairness;
@@ -19,12 +18,11 @@ procedure TLS_Smoke is
    package TLS renames Flyology.IO.TLS;
    package TLS_Testing renames Flyology.IO.TLS.Testing;
    package OpenSSL renames Flyology.IO.TLS.OpenSSL;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use Ada.Streams;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
-   use type Sockets.Socket_Type;
 
    Certificate : constant String :=
      "tests/fixtures/tls/server-cert.pem";
@@ -96,8 +94,8 @@ procedure TLS_Smoke is
       TLS.Take
         (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
-      pragma Assert (Client_Socket = Sockets.No_Socket);
-      pragma Assert (Server_Socket = Sockets.No_Socket);
+      pragma Assert (not Sockets.Is_Open (Client_Socket));
+      pragma Assert (not Sockets.Is_Open (Server_Socket));
 
       declare
          task Client_Task is
@@ -399,7 +397,7 @@ procedure TLS_Smoke is
       TLS_Test_Provider.Reset_Telemetry;
       Sockets.Create_Socket_Pair (Socket, Peer);
       TLS.Take (Backend, Socket, TLS.Server, "", Item);
-      pragma Assert (Socket = Sockets.No_Socket);
+      pragma Assert (not Sockets.Is_Open (Socket));
       Sockets.Send_Socket (Peer, Ready, Sent);
       pragma Assert (Sent = Ready'Last);
       TLS.Handshake (Item, Timeout => 1.0);

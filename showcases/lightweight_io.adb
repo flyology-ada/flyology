@@ -2,7 +2,6 @@ with Ada.Directories;
 with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.Files;
 with Flyology.IO.Sockets;
@@ -95,31 +94,30 @@ procedure Lightweight_IO is
         (Server_OK and Client_OK and File_OK and Ticks = 5);
    end Results;
 
-   Server         : GNAT.Sockets.Socket_Type;
-   Server_Address : GNAT.Sockets.Sock_Addr_Type;
+   Server         : Flyology.IO.Sockets.Socket_Type;
+   Server_Address : Flyology.IO.Sockets.Endpoint;
 
 begin
    if Ada.Directories.Exists (File_Path) then
       Ada.Directories.Delete_File (File_Path);
    end if;
 
-   GNAT.Sockets.Create_Socket (Server);
-   GNAT.Sockets.Set_Socket_Option
+   Flyology.IO.Sockets.Create_Socket (Server);
+   Flyology.IO.Sockets.Set_Socket_Option
      (Server,
-      GNAT.Sockets.Socket_Level,
-      (Name => GNAT.Sockets.Reuse_Address, Enabled => True));
-   GNAT.Sockets.Bind_Socket
+      (Name => Flyology.IO.Sockets.Reuse_Address, Enabled => True));
+   Flyology.IO.Sockets.Bind_Socket
      (Server,
-      (Family => GNAT.Sockets.Family_Inet,
-       Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-       Port   => GNAT.Sockets.Any_Port));
-   GNAT.Sockets.Listen_Socket (Server);
-   Server_Address := GNAT.Sockets.Get_Socket_Name (Server);
+      Flyology.IO.Sockets.Network_Endpoint
+        (Flyology.IO.Sockets.Loopback_IPv4,
+         Flyology.IO.Sockets.Any_Port));
+   Flyology.IO.Sockets.Listen_Socket (Server);
+   Server_Address := Flyology.IO.Sockets.Get_Socket_Name (Server);
    Put_Line
      ("listening on descriptor"
       & Flyology.IO.Descriptor'Image
           (Flyology.IO.Sockets.Native_Descriptor (Server))
-      & " at " & GNAT.Sockets.Image (Server_Address));
+      & " at " & Flyology.IO.Sockets.Image (Server_Address));
 
    declare
       task Socket_Server is
@@ -144,8 +142,8 @@ begin
       end File_Writer;
 
       task body Socket_Server is
-         Peer    : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
-         Address : GNAT.Sockets.Sock_Addr_Type;
+         Peer    : Flyology.IO.Sockets.Socket_Type;
+         Address : Flyology.IO.Sockets.Endpoint;
          Request : Stream_Element_Array := Bytes (Request_Text);
          Stage   : Natural := 0;
       begin
@@ -163,7 +161,7 @@ begin
          Put_Line
            ("lightweight socket server resumed on thread="
             & Showcase_Support.Thread_Image);
-         GNAT.Sockets.Close_Socket (Peer);
+         Flyology.IO.Sockets.Close_Socket (Peer);
       exception
          when Occurrence : others =>
             Put_Line
@@ -172,8 +170,8 @@ begin
             begin
                Put_Line
                  ("listening descriptor remains "
-                  & GNAT.Sockets.Image
-                      (GNAT.Sockets.Get_Socket_Name (Server)));
+                  & Flyology.IO.Sockets.Image
+                      (Flyology.IO.Sockets.Get_Socket_Name (Server)));
             exception
                when Nested : others =>
                   Put_Line
@@ -184,13 +182,13 @@ begin
       end Socket_Server;
 
       task body Native_Client is
-         Socket : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+         Socket : Flyology.IO.Sockets.Socket_Type;
          Reply  : Stream_Element_Array := Bytes (Reply_Text);
       begin
          Put_Line ("native socket client starting");
          Flyology.IO.Timers.Sleep_For (0.030);
          Put_Line ("native socket client timer completed");
-         GNAT.Sockets.Create_Socket (Socket);
+         Flyology.IO.Sockets.Create_Socket (Socket);
          Put_Line
            ("native socket client connecting with descriptor"
             & Flyology.IO.Descriptor'Image
@@ -205,7 +203,7 @@ begin
          Put_Line
            ("native socket client completed on thread="
             & Showcase_Support.Thread_Image);
-         GNAT.Sockets.Close_Socket (Socket);
+         Flyology.IO.Sockets.Close_Socket (Socket);
       exception
          when Occurrence : others =>
             Put_Line
@@ -288,7 +286,7 @@ begin
       Results.Wait;
    end;
 
-   GNAT.Sockets.Close_Socket (Server);
+   Flyology.IO.Sockets.Close_Socket (Server);
    Ada.Directories.Delete_File (File_Path);
 
    if not Results.Passed then

@@ -2,7 +2,7 @@ with Ada.Command_Line;
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.IO.Connections;
 with Interfaces.C;
@@ -20,7 +20,8 @@ procedure Cancellation_Density is
    function Process_CPU_Seconds return C.double;
    pragma Import (C, Process_CPU_Seconds, "flyology_process_cpu_seconds");
 
-   type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
+   type Socket_Array is array
+     (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    type Socket_Array_Access is access Socket_Array;
 
    procedure Run
@@ -96,7 +97,8 @@ procedure Cancellation_Density is
       Cancel_Elapsed : Duration;
    begin
       for Index in 1 .. Count loop
-         GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Servers (Index), Peers (Index));
       end loop;
       for Index in 1 .. Count loop
          Workers (Index) := new Worker (Index, Model);
@@ -127,7 +129,7 @@ procedure Cancellation_Density is
          & " s legacy_quantum=10.000 s");
       pragma Assert (Progress.Passed);
       for Peer of Peers.all loop
-         GNAT.Sockets.Close_Socket (Peer);
+         Flyology.IO.Sockets.Close_Socket (Peer);
       end loop;
    end Run;
 

@@ -1,15 +1,17 @@
 with Ada.Streams;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Sockets;
+with Flyology.IO.Sockets.GNAT_Adapters;
+with GNAT.Sockets;
 with Flyology.IO.Timers;
 
 procedure IO_Smoke is
    use Ada.Streams;
+   use type Flyology.IO.Descriptor;
 
-   Event_Socket  : GNAT.Sockets.Socket_Type;
-   Native_Socket : GNAT.Sockets.Socket_Type;
+   Event_Socket  : Flyology.IO.Sockets.Socket_Type;
+   Native_Socket : Flyology.IO.Sockets.Socket_Type;
 
    Event_To_Native : constant Stream_Element_Array := [1, 2, 3, 4];
    Native_To_Event : constant Stream_Element_Array := [5, 6, 7, 8];
@@ -114,7 +116,50 @@ procedure IO_Smoke is
    end Fanout_Results;
 
 begin
-   GNAT.Sockets.Create_Socket_Pair (Event_Socket, Native_Socket);
+   declare
+      Alias    : Flyology.IO.Sockets.Socket_Type;
+      Rejected : Boolean := False;
+   begin
+      begin
+         Flyology.IO.Sockets.Create_Socket_Pair (Alias, Alias);
+      exception
+         when Program_Error =>
+            Rejected := True;
+      end;
+      pragma Assert (Rejected);
+      pragma Assert (not Flyology.IO.Sockets.Is_Open (Alias));
+   end;
+
+   Flyology.IO.Sockets.Create_Socket_Pair
+     (Event_Socket, Native_Socket);
+   declare
+      Released : Flyology.IO.Descriptor;
+      Original : constant Flyology.IO.Descriptor :=
+        Flyology.IO.Sockets.Native_Descriptor (Event_Socket);
+   begin
+      Flyology.IO.Sockets.Release (Event_Socket, Released);
+      pragma Assert (not Flyology.IO.Sockets.Is_Open (Event_Socket));
+      pragma Assert (Released = Original);
+      Flyology.IO.Sockets.Adopt (Released, Event_Socket);
+      pragma Assert (Released = Flyology.IO.Invalid_Descriptor);
+      pragma Assert
+        (Flyology.IO.Sockets.Native_Descriptor (Event_Socket) = Original);
+   end;
+   declare
+      GNAT_Socket : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Original    : constant Flyology.IO.Descriptor :=
+        Flyology.IO.Sockets.Native_Descriptor (Event_Socket);
+   begin
+      Flyology.IO.Sockets.GNAT_Adapters.Release
+        (Event_Socket, GNAT_Socket);
+      pragma Assert (not Flyology.IO.Sockets.Is_Open (Event_Socket));
+      pragma Assert (GNAT.Sockets.To_C (GNAT_Socket) = Integer (Original));
+      Flyology.IO.Sockets.GNAT_Adapters.Adopt
+        (GNAT_Socket, Event_Socket);
+      pragma Assert (GNAT.Sockets.To_C (GNAT_Socket) < 0);
+      pragma Assert
+        (Flyology.IO.Sockets.Native_Descriptor (Event_Socket) = Original);
+   end;
 
    declare
       task Lightweight is
@@ -176,7 +221,7 @@ begin
          Incoming : Stream_Element_Array (1 .. 1);
       begin
          if Flyology.IO.Wait
-           (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+           (Flyology.IO.Sockets.Native_Descriptor (Event_Socket),
             Flyology.IO.For_Read,
             Timeout => 1.0)
          then
@@ -192,7 +237,7 @@ begin
       begin
          Duplex_Results.Writer_Passed
            (Flyology.IO.Wait
-              (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+              (Flyology.IO.Sockets.Native_Descriptor (Event_Socket),
                Flyology.IO.For_Write,
                Timeout => 1.0));
       end Write_Waiter;
@@ -225,7 +270,7 @@ begin
          Fanout_Results.Started;
          Ready :=
            Flyology.IO.Wait
-             (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Event_Socket)),
+             (Flyology.IO.Sockets.Native_Descriptor (Event_Socket),
               Flyology.IO.For_Read,
               Timeout => 1.0);
          Fanout_Results.Finished (Ready);
@@ -287,8 +332,8 @@ begin
       end if;
    end;
 
-   GNAT.Sockets.Close_Socket (Event_Socket);
-   GNAT.Sockets.Close_Socket (Native_Socket);
+   Flyology.IO.Sockets.Close_Socket (Event_Socket);
+   Flyology.IO.Sockets.Close_Socket (Native_Socket);
 
    if not Results.Passed then
       raise Program_Error with "socket-pair I/O failed";

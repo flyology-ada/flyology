@@ -1,7 +1,6 @@
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Unchecked_Deallocation;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.IO.Connections;
@@ -14,7 +13,7 @@ with Interfaces.C;
 procedure Descriptor_Ownership_Smoke is
    package Connections renames Flyology.IO.Connections;
    package Connection_Testing renames Flyology.IO.Connections.Testing;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Streams.Stream_Element_Array;
@@ -24,7 +23,6 @@ procedure Descriptor_Ownership_Smoke is
    use type Flyology.Observability.Counter;
    use type Interfaces.C.int;
    use type Sockets.Error_Type;
-   use type Sockets.Socket_Type;
 
    function C_Dup (FD : Interfaces.C.int) return Interfaces.C.int
      with Import, Convention => C, External_Name => "dup";
@@ -122,7 +120,7 @@ procedure Descriptor_Ownership_Smoke is
    procedure Close_And_Re_Adopt
      (Manager : aliased in out Connections.Server;
       Owned   : in out Connections.Connection;
-      Peer    : Sockets.Socket_Type)
+      Peer    : in out Sockets.Socket_Type)
    is
       Replacement, Replacement_Peer : Sockets.Socket_Type;
    begin
@@ -130,7 +128,7 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (Manager.Active = 0);
       Sockets.Create_Socket_Pair (Replacement, Replacement_Peer);
       Connections.Take (Manager, Replacement, Owned);
-      pragma Assert (Replacement = Sockets.No_Socket);
+      pragma Assert (not Sockets.Is_Open (Replacement));
       Owned.Close;
       pragma Assert (Manager.Active = 0);
       Sockets.Close_Socket (Peer);
@@ -323,7 +321,7 @@ procedure Descriptor_Ownership_Smoke is
       Manager : aliased Connections.Server (Capacity => 1);
       Owned   : Connections.Connection;
       Server, Peer, Observer : Sockets.Socket_Type;
-      Duplicate : Interfaces.C.int;
+      Duplicate : Flyology.IO.Descriptor;
 
       type Receive_Result is
         (Not_Finished, Was_Cancelled, Raised_Other_Exception);
@@ -421,11 +419,12 @@ procedure Descriptor_Ownership_Smoke is
         (1 => 16#5A#);
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
-      Duplicate := C_Dup (Interfaces.C.int (Sockets.To_C (Server)));
+      Duplicate := Flyology.IO.Descriptor
+        (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
       if Duplicate < 0 then
          raise Program_Error with "dup failed in partial receive test";
       end if;
-      Observer := Sockets.To_Ada (Integer (Duplicate));
+      Sockets.Adopt (Duplicate, Observer);
       Connections.Take (Manager, Server, Owned);
 
       declare
@@ -534,7 +533,7 @@ procedure Descriptor_Ownership_Smoke is
       Manager : aliased Connections.Server (Capacity => 1);
       Owned   : Connections.Connection;
       Server, Peer, Observer : Sockets.Socket_Type;
-      Duplicate : Interfaces.C.int;
+      Duplicate : Flyology.IO.Descriptor;
       Token : aliased Connections.Cancellation_Token;
 
       type Operation_Result is
@@ -602,11 +601,12 @@ procedure Descriptor_Ownership_Smoke is
         (1 => 16#33#);
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
-      Duplicate := C_Dup (Interfaces.C.int (Sockets.To_C (Server)));
+      Duplicate := Flyology.IO.Descriptor
+        (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
       if Duplicate < 0 then
          raise Program_Error with "dup failed in queued lease test";
       end if;
-      Observer := Sockets.To_Ada (Integer (Duplicate));
+      Sockets.Adopt (Duplicate, Observer);
       Connections.Take (Manager, Server, Owned);
 
       declare
@@ -726,7 +726,7 @@ procedure Descriptor_Ownership_Smoke is
       Manager : aliased Connections.Server (Capacity => 1);
       Owned   : Connections.Connection;
       Server, Peer, Observer : Sockets.Socket_Type;
-      Duplicate : Interfaces.C.int;
+      Duplicate : Flyology.IO.Descriptor;
       Token : aliased Connections.Cancellation_Token;
       Point : constant Connection_Testing.Barrier_Point :=
         Connection_Testing.Receive_Chunk_Boundary;
@@ -821,12 +821,13 @@ procedure Descriptor_Ownership_Smoke is
       Connection_Testing.Arm (Point);
       Sockets.Create_Socket_Pair
         (Server, Peer, Mode => Sockets.Socket_Datagram);
-      Duplicate := C_Dup (Interfaces.C.int (Sockets.To_C (Server)));
+      Duplicate := Flyology.IO.Descriptor
+        (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
       if Duplicate < 0 then
          raise Program_Error with
            "dup failed in continuous-readability test";
       end if;
-      Observer := Sockets.To_Ada (Integer (Duplicate));
+      Sockets.Adopt (Duplicate, Observer);
       Connections.Take (Manager, Server, Owned);
 
       declare
@@ -1102,7 +1103,7 @@ procedure Descriptor_Ownership_Smoke is
          if Connections.Is_Open (Owned) then
             Owned.Close;
          end if;
-         if Peer /= Sockets.No_Socket then
+         if Sockets.Is_Open (Peer) then
             Sockets.Close_Socket (Peer);
          end if;
          Connection_Testing.Release (Point);
@@ -1145,7 +1146,7 @@ procedure Descriptor_Ownership_Smoke is
       Sockets.Create_Socket_Pair (Server, Peer);
       Old_FD := Flyology.IO.Sockets.Native_Descriptor (Server);
       Connections.Take (Manager, Server, Owned);
-      pragma Assert (Server = Sockets.No_Socket);
+      pragma Assert (not Sockets.Is_Open (Server));
 
       declare
          task Reader is
@@ -1325,7 +1326,7 @@ procedure Descriptor_Ownership_Smoke is
       Owned : Connections.Connection;
       Original, Original_Peer : Sockets.Socket_Type;
       Candidate, Candidate_Peer : Sockets.Socket_Type;
-      Listener : Sockets.Socket_Type := Sockets.No_Socket;
+      Listener : Sockets.Socket_Type;
 
       type Atomic_Boolean is new Boolean with Atomic;
       Spinning          : aliased Atomic_Boolean := False;
@@ -1372,13 +1373,11 @@ procedure Descriptor_Ownership_Smoke is
       if Path = Take_Path then
          Sockets.Create_Socket_Pair (Candidate, Candidate_Peer);
       else
-         Candidate := Sockets.No_Socket;
          Sockets.Create_Socket (Listener);
          Sockets.Bind_Socket
            (Listener,
-            (Family => Sockets.Family_Inet,
-             Addr   => Sockets.Loopback_Inet_Addr,
-             Port   => Sockets.Any_Port));
+            Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
          Sockets.Listen_Socket (Listener);
          Sockets.Create_Socket (Candidate_Peer);
          Sockets.Connect_Socket
@@ -1454,7 +1453,7 @@ procedure Descriptor_Ownership_Smoke is
                      Connections.Take (Candidate_Manager, Socket, Owned);
                   else
                      declare
-                        Peer_Address : Sockets.Sock_Addr_Type;
+                        Peer_Address : Sockets.Endpoint;
                      begin
                         Connections.Accept_Connection
                           (Candidate_Manager,
@@ -1504,9 +1503,9 @@ procedure Descriptor_Ownership_Smoke is
 
       pragma Assert (Attempt_Rejected);
       pragma Assert
-        ((Path = Take_Path and then Candidate /= Sockets.No_Socket)
+        ((Path = Take_Path and then Sockets.Is_Open (Candidate))
          or else (Path = Accept_Path
-                  and then Candidate = Sockets.No_Socket));
+                  and then not Sockets.Is_Open (Candidate)));
       pragma Assert (Candidate_Manager.Active = 0);
       pragma Assert (Reader_Cancelled);
       pragma Assert (Close_OK);
@@ -1514,11 +1513,11 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (not Connections.Is_Open (Owned));
 
       Sockets.Close_Socket (Original_Peer);
-      if Candidate /= Sockets.No_Socket then
+      if Sockets.Is_Open (Candidate) then
          Sockets.Close_Socket (Candidate);
       end if;
       Sockets.Close_Socket (Candidate_Peer);
-      if Listener /= Sockets.No_Socket then
+      if Sockets.Is_Open (Listener) then
          Sockets.Close_Socket (Listener);
       end if;
    end Run_Close_In_Progress_Re_Adoption;
@@ -1651,12 +1650,12 @@ procedure Descriptor_Ownership_Smoke is
          pragma Assert (Passed);
       end;
 
-      if First = Sockets.No_Socket then
-         pragma Assert (Second /= Sockets.No_Socket);
+      if not Sockets.Is_Open (First) then
+         pragma Assert (Sockets.Is_Open (Second));
          pragma Assert (First_Manager.Active = 1);
          pragma Assert (Second_Manager.Active = 0);
       else
-         pragma Assert (Second = Sockets.No_Socket);
+         pragma Assert (not Sockets.Is_Open (Second));
          pragma Assert (First_Manager.Active = 0);
          pragma Assert (Second_Manager.Active = 1);
       end if;
@@ -1664,10 +1663,10 @@ procedure Descriptor_Ownership_Smoke is
       Connections.Close (Owned);
       pragma Assert (First_Manager.Active = 0);
       pragma Assert (Second_Manager.Active = 0);
-      if First /= Sockets.No_Socket then
+      if Sockets.Is_Open (First) then
          Sockets.Close_Socket (First);
       end if;
-      if Second /= Sockets.No_Socket then
+      if Sockets.Is_Open (Second) then
          Sockets.Close_Socket (Second);
       end if;
       Sockets.Close_Socket (First_Peer);
@@ -1848,7 +1847,6 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Timeout_Readiness_Races;
 
 begin
-   Sockets.Initialize;
    Run_Abort_Handoff
      (Flyology.Lightweight_Task, Connection_Testing.After_Registration);
    Run_Abort_Handoff
@@ -1889,5 +1887,4 @@ begin
    Run_Timeout_Close_Reuse;
    Run_Timeout_Readiness_Races (Flyology.Lightweight_Task);
    Run_Timeout_Readiness_Races (Flyology.Native_Task);
-   Sockets.Finalize;
 end Descriptor_Ownership_Smoke;

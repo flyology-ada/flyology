@@ -1,4 +1,3 @@
-with GNAT.Sockets;
 with Fault_Control;
 with Flyology;
 with Flyology.IO;
@@ -9,14 +8,13 @@ with System.Multiprocessors;
 
 procedure Structured_Server_Reuse_Smoke is
    package Connections renames Flyology.IO.Connections;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
 
    use type Flyology.IO.Descriptor;
-   use type Sockets.Socket_Type;
 
    procedure Open_Listener
-     (Listener : out Sockets.Socket_Type;
-      Address  : out Sockets.Sock_Addr_Type)
+     (Listener : in out Sockets.Socket_Type;
+      Address  : out Sockets.Endpoint)
    is
    begin
       Sockets.Create_Socket (Listener);
@@ -26,9 +24,8 @@ procedure Structured_Server_Reuse_Smoke is
          (Sockets.Reuse_Address, True));
       Sockets.Bind_Socket
         (Listener,
-         (Family => Sockets.Family_Inet,
-          Addr   => Sockets.Loopback_Inet_Addr,
-          Port   => Sockets.Any_Port));
+         Sockets.Network_Endpoint
+           (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 4);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
@@ -44,7 +41,7 @@ procedure Structured_Server_Reuse_Smoke is
       procedure Handle
         (State        : in out Context;
          Connection   : in out Connections.Connection;
-         Peer         : Sockets.Sock_Addr_Type;
+         Peer         : Sockets.Endpoint;
          Cancellation : not null access Connections.Cancellation_Token)
       is
          pragma Unreferenced
@@ -61,8 +58,8 @@ procedure Structured_Server_Reuse_Smoke is
          Handler_CPU     => CPU);
 
       procedure Run_Close_Failures (Injected_Count : Positive) is
-         Listener    : Sockets.Socket_Type := Sockets.No_Socket;
-         Address     : Sockets.Sock_Addr_Type;
+         Listener    : Sockets.Socket_Type;
+         Address     : Sockets.Endpoint;
          Old_FD      : Flyology.IO.Descriptor;
          Caller_Owns : Boolean := False;
       begin
@@ -108,9 +105,9 @@ procedure Structured_Server_Reuse_Smoke is
               (not Structured.Current (Item).Forced_Cancellation);
             pragma Assert (Structured.Current (Item).Active_Handlers = 0);
 
-            --  Socket_Type is scalar, so Ada need not copy No_Socket back when
-            --  Serve propagates. The retained value is not caller-owned.
-            Listener := Sockets.No_Socket;
+            --  Limited in-out handles are passed by reference, so ownership
+            --  transfer remains visible even when Serve propagates.
+            pragma Assert (not Sockets.Is_Open (Listener));
 
             --  One-shot rejection occurs before a fresh listener transfers.
             Open_Listener (Listener, Address);
@@ -123,9 +120,8 @@ procedure Structured_Server_Reuse_Smoke is
                   Rejected := True;
             end;
             pragma Assert (Rejected);
-            pragma Assert (Listener /= Sockets.No_Socket);
+            pragma Assert (Sockets.Is_Open (Listener));
             Sockets.Close_Socket (Listener);
-            Listener := Sockets.No_Socket;
             Caller_Owns := False;
          end;
 
@@ -147,7 +143,7 @@ procedure Structured_Server_Reuse_Smoke is
       exception
          when others =>
             Fault_Control.Reset;
-            if Caller_Owns and then Listener /= Sockets.No_Socket then
+            if Caller_Owns and then Sockets.Is_Open (Listener) then
                Sockets.Close_Socket (Listener);
             end if;
             raise;

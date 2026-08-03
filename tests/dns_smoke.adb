@@ -1,21 +1,20 @@
 with Ada.Directories;
 with Ada.Streams;
 with Ada.Strings.Fixed;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.DNS;
 with Flyology.IO.DNS.Testing;
 with Flyology.IO.Files;
+with Flyology.IO.Sockets;
 with Flyology.Wake_Sources;
 
 procedure DNS_Smoke is
    package DNS renames Flyology.IO.DNS;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
    package Streams renames Ada.Streams;
 
    use type Streams.Stream_Element_Offset;
    use type Streams.Stream_Element;
-   use type Sockets.Socket_Type;
    use type Sockets.Selector_Status;
    use type Flyology.IO.Files.File_Descriptor;
 
@@ -29,10 +28,10 @@ procedure DNS_Smoke is
         & Search_Label & "." & Search_Label;
 
       protected Control is
-         procedure Ready (Address : Sockets.Sock_Addr_Type);
-         entry Get_Address (Address : out Sockets.Sock_Addr_Type);
-         procedure Secondary_Ready (Address : Sockets.Sock_Addr_Type);
-         entry Get_Secondary (Address : out Sockets.Sock_Addr_Type);
+         procedure Ready (Address : Sockets.Endpoint);
+         entry Get_Address (Address : out Sockets.Endpoint);
+         procedure Secondary_Ready (Address : Sockets.Endpoint);
+         entry Get_Secondary (Address : out Sockets.Endpoint);
          procedure Begin_Client;
          entry Await_Start;
          procedure Saw_Cancel_Query;
@@ -54,9 +53,9 @@ procedure DNS_Smoke is
       private
          Is_Ready : Boolean := False;
          Can_Start : Boolean := False;
-         Server   : Sockets.Sock_Addr_Type;
+         Server   : Sockets.Endpoint;
          Secondary_Is_Ready : Boolean := False;
-         Secondary : Sockets.Sock_Addr_Type;
+         Secondary : Sockets.Endpoint;
          Cancel_Seen : Boolean := False;
          Missing_Count : Natural := 0;
          A_Count : Natural := 0;
@@ -69,17 +68,17 @@ procedure DNS_Smoke is
       end Control;
 
       function Config_Path
-        (Server : Sockets.Sock_Addr_Type;
+        (Server : Sockets.Endpoint;
          Suffix : String := "") return String is
       begin
          return "/tmp/flyology-dns-smoke-"
            & Ada.Strings.Fixed.Trim
-             (Sockets.Port_Type'Image (Server.Port), Ada.Strings.Both)
+             (Sockets.Port'Image (Server.Port), Ada.Strings.Both)
            & Suffix & ".conf";
       end Config_Path;
 
       procedure Write_Config
-        (Server : Sockets.Sock_Addr_Type;
+        (Server : Sockets.Endpoint;
          Search : String := "";
          Suffix : String := "")
       is
@@ -118,23 +117,23 @@ procedure DNS_Smoke is
       end Write_Config;
 
       protected body Control is
-         procedure Ready (Address : Sockets.Sock_Addr_Type) is
+         procedure Ready (Address : Sockets.Endpoint) is
          begin
             Server := Address;
             Is_Ready := True;
          end Ready;
-         entry Get_Address (Address : out Sockets.Sock_Addr_Type)
+         entry Get_Address (Address : out Sockets.Endpoint)
            when Is_Ready
          is
          begin
             Address := Server;
          end Get_Address;
-         procedure Secondary_Ready (Address : Sockets.Sock_Addr_Type) is
+         procedure Secondary_Ready (Address : Sockets.Endpoint) is
          begin
             Secondary := Address;
             Secondary_Is_Ready := True;
          end Secondary_Ready;
-         entry Get_Secondary (Address : out Sockets.Sock_Addr_Type)
+         entry Get_Secondary (Address : out Sockets.Endpoint)
            when Secondary_Is_Ready
          is
          begin
@@ -203,8 +202,8 @@ procedure DNS_Smoke is
 
       task body Fake_Server is
          UDP, TCP : Sockets.Socket_Type;
-         Peer     : Sockets.Sock_Addr_Type;
-         Bound    : Sockets.Sock_Addr_Type;
+         Peer     : Sockets.Endpoint;
+         Bound    : Sockets.Endpoint;
          Query    : Streams.Stream_Element_Array (1 .. 512);
          Last     : Streams.Stream_Element_Offset;
          Retry_Count : Natural := 0;
@@ -302,14 +301,14 @@ procedure DNS_Smoke is
             Truncated  : Boolean := False;
             Malformed  : Boolean := False;
             TTL        : Natural := 60;
-            Socket     : Sockets.Socket_Type := Sockets.No_Socket)
+            Socket     : access Sockets.Socket_Type := null)
          is
             Response : Streams.Stream_Element_Array (1 .. 512) := (others => 0);
             Position : Streams.Stream_Element_Offset := 1;
             Question_Last : Streams.Stream_Element_Offset := 13;
             Sent_Last : Streams.Stream_Element_Offset;
-            Address : Sockets.Inet_Addr_Type;
-            Destination : constant Sockets.Sock_Addr_Type := Peer;
+            Address : Sockets.IP_Address;
+            Destination : constant Sockets.Endpoint := Peer;
          begin
             while Query (Question_Last) /= 0 loop
                Question_Last := Question_Last
@@ -364,24 +363,24 @@ procedure DNS_Smoke is
                   Put_U32 (Response, Position, TTL);
                   if IPv6'Length = 0 then
                      Put_U16 (Response, Position, 4);
-                     Address := Sockets.Inet_Addr (IPv4);
-                     for Index in Address.Sin_V4'Range loop
+                     Address := Sockets.Parse_IP_Address (IPv4);
+                     for Index in Address.V4'Range loop
                         Response (Position) :=
-                          Streams.Stream_Element (Address.Sin_V4 (Index));
+                          Streams.Stream_Element (Address.V4 (Index));
                         Position := Position + 1;
                      end loop;
                   else
                      Put_U16 (Response, Position, 16);
-                     Address := Sockets.Inet_Addr (IPv6);
-                     for Index in Address.Sin_V6'Range loop
+                     Address := Sockets.Parse_IP_Address (IPv6);
+                     for Index in Address.V6'Range loop
                         Response (Position) :=
-                          Streams.Stream_Element (Address.Sin_V6 (Index));
+                          Streams.Stream_Element (Address.V6 (Index));
                         Position := Position + 1;
                      end loop;
                   end if;
                end if;
             end if;
-            if Socket = Sockets.No_Socket then
+            if Socket = null then
                Sockets.Send_Socket
                  (UDP, Response (1 .. Position - 1), Sent_Last, Destination);
             else
@@ -392,22 +391,22 @@ procedure DNS_Smoke is
                     ((Natural (Position - 1) / 256) mod 256);
                   Prefix (2) := Streams.Stream_Element
                     (Natural (Position - 1) mod 256);
-                  Sockets.Send_Socket (Socket, Prefix, Sent_Last);
+                  Sockets.Send_Socket (Socket.all, Prefix, Sent_Last);
                   Sockets.Send_Socket
-                    (Socket, Response (1 .. Position - 1), Sent_Last);
+                    (Socket.all, Response (1 .. Position - 1), Sent_Last);
                end;
             end if;
             pragma Unreferenced (Name);
          end Send_Response;
       begin
          Sockets.Create_Socket
-           (UDP, Sockets.Family_Inet, Sockets.Socket_Datagram);
+           (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
          Sockets.Bind_Socket
-           (UDP, Sockets.Network_Socket_Address
-              (Sockets.Loopback_Inet_Addr, Sockets.Any_Port));
+           (UDP, Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
          Bound := Sockets.Get_Socket_Name (UDP);
          Sockets.Create_Socket
-           (TCP, Sockets.Family_Inet, Sockets.Socket_Stream);
+           (TCP, Sockets.IPv4, Sockets.Socket_Stream);
          Sockets.Set_Socket_Option
            (TCP, Sockets.Socket_Level,
             (Name => Sockets.Reuse_Address, Enabled => True));
@@ -458,8 +457,8 @@ procedure DNS_Smoke is
                elsif Name = "tcp.test" then
                   Send_Response (Name, Truncated => True);
                   declare
-                     Connection : Sockets.Socket_Type;
-                     Address    : Sockets.Sock_Addr_Type;
+                     Connection : aliased Sockets.Socket_Type;
+                     Address    : Sockets.Endpoint;
                      Prefix     : Streams.Stream_Element_Array (1 .. 2);
                      TCP_Last   : Streams.Stream_Element_Offset;
                      Length     : Natural;
@@ -483,15 +482,16 @@ procedure DNS_Smoke is
                            TCP_Last);
                         Last := Streams.Stream_Element_Offset (Length);
                         Send_Response
-                          (Name, IPv4 => "198.51.100.9", Socket => Connection);
+                          (Name, IPv4 => "198.51.100.9",
+                           Socket => Connection'Access);
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
                elsif Name = "tcp-silent.test" then
                   Send_Response (Name, Truncated => True);
                   declare
-                     Connection : Sockets.Socket_Type;
-                     Address    : Sockets.Sock_Addr_Type;
+                     Connection : aliased Sockets.Socket_Type;
+                     Address    : Sockets.Endpoint;
                      Status     : Sockets.Selector_Status;
                   begin
                      Sockets.Accept_Socket
@@ -506,8 +506,8 @@ procedure DNS_Smoke is
                   Control.TCP_Truncated_Query;
                   Send_Response (Name, Truncated => True);
                   declare
-                     Connection : Sockets.Socket_Type;
-                     Address    : Sockets.Sock_Addr_Type;
+                     Connection : aliased Sockets.Socket_Type;
+                     Address    : Sockets.Endpoint;
                      Prefix     : Streams.Stream_Element_Array (1 .. 2);
                      TCP_Last   : Streams.Stream_Element_Offset;
                      Length     : Natural;
@@ -531,7 +531,8 @@ procedure DNS_Smoke is
                            TCP_Last);
                         Last := Streams.Stream_Element_Offset (Length);
                         Send_Response
-                          (Name, Truncated => True, Socket => Connection);
+                          (Name, Truncated => True,
+                           Socket => Connection'Access);
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
@@ -586,8 +587,8 @@ procedure DNS_Smoke is
 
       task body Secondary_Server is
          UDP      : Sockets.Socket_Type;
-         Peer     : Sockets.Sock_Addr_Type;
-         Bound    : Sockets.Sock_Addr_Type;
+         Peer     : Sockets.Endpoint;
+         Bound    : Sockets.Endpoint;
          Query    : Streams.Stream_Element_Array (1 .. 512);
          Response : Streams.Stream_Element_Array (1 .. 512);
          Last     : Streams.Stream_Element_Offset;
@@ -647,8 +648,8 @@ procedure DNS_Smoke is
             Position : Streams.Stream_Element_Offset := 3;
             Question_Last : Streams.Stream_Element_Offset := 13;
             Sent_Last : Streams.Stream_Element_Offset;
-            Address : constant Sockets.Inet_Addr_Type :=
-              Sockets.Inet_Addr (Address_Image);
+            Address : constant Sockets.IP_Address :=
+              Sockets.Parse_IP_Address (Address_Image);
          begin
             Response := (others => 0);
             while Query (Question_Last) /= 0 loop
@@ -672,9 +673,9 @@ procedure DNS_Smoke is
             Put_U16 (Position, 1);
             Put_U32 (Position, 60);
             Put_U16 (Position, 4);
-            for Index in Address.Sin_V4'Range loop
+            for Index in Address.V4'Range loop
                Response (Position) :=
-                 Streams.Stream_Element (Address.Sin_V4 (Index));
+                 Streams.Stream_Element (Address.V4 (Index));
                Position := Position + 1;
             end loop;
             Sockets.Send_Socket
@@ -682,10 +683,10 @@ procedure DNS_Smoke is
          end Send_A;
       begin
          Sockets.Create_Socket
-           (UDP, Sockets.Family_Inet, Sockets.Socket_Datagram);
+           (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
          Sockets.Bind_Socket
-           (UDP, Sockets.Network_Socket_Address
-              (Sockets.Loopback_Inet_Addr, Sockets.Any_Port));
+           (UDP, Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
          Bound := Sockets.Get_Socket_Name (UDP);
          Control.Secondary_Ready (Bound);
          loop
@@ -709,8 +710,8 @@ procedure DNS_Smoke is
       end Client;
 
       task body Client is
-         Server : Sockets.Sock_Addr_Type;
-         Secondary : Sockets.Sock_Addr_Type;
+         Server : Sockets.Endpoint;
+         Secondary : Sockets.Endpoint;
          Servers : DNS.Name_Server_Array (1 .. 1);
          OK : Boolean := True;
          Cancelled : Boolean := False;
@@ -910,8 +911,8 @@ procedure DNS_Smoke is
          when others => Control.Finished (False);
       end Client;
 
-      Address : Sockets.Sock_Addr_Type;
-      Secondary_Address : Sockets.Sock_Addr_Type;
+      Address : Sockets.Endpoint;
+      Secondary_Address : Sockets.Endpoint;
       Stopper : Sockets.Socket_Type;
       Stop_Data : constant Streams.Stream_Element_Array :=
         (1 => Character'Pos ('s'), 2 => Character'Pos ('t'),
@@ -942,7 +943,7 @@ procedure DNS_Smoke is
          Passed := False;
       end select;
       Sockets.Create_Socket
-        (Stopper, Sockets.Family_Inet, Sockets.Socket_Datagram);
+        (Stopper, Sockets.IPv4, Sockets.Socket_Datagram);
       Sockets.Send_Socket (Stopper, Stop_Data, Last, Address);
       Sockets.Send_Socket (Stopper, Stop_Data, Last, Secondary_Address);
       Sockets.Close_Socket (Stopper);
@@ -959,13 +960,11 @@ procedure DNS_Smoke is
    end Run;
 
 begin
-   Sockets.Initialize;
    declare
       Native_Passed : constant Boolean := Run (Flyology.Native_Task);
       Lightweight_Passed : constant Boolean :=
         Run (Flyology.Lightweight_Task);
    begin
-      Sockets.Finalize;
       pragma Assert (Native_Passed, "native DNS lifecycle checks failed");
       pragma Assert
         (Lightweight_Passed, "lightweight DNS lifecycle checks failed");

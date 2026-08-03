@@ -1,4 +1,4 @@
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Interfaces.C;
 
 --  Test-only dispatcher called through the machine-state conformance probe.
@@ -11,7 +11,8 @@ package Context_ABI_Support is
    Descriptor_Readiness : constant Action_Code := 3;
    Cross_Group_Move     : constant Action_Code := 4;
 
-   procedure Configure (Reader : GNAT.Sockets.Socket_Type);
+   procedure Configure
+     (Reader : aliased in out Flyology.IO.Sockets.Socket_Type);
 
    procedure Wait_For_Descriptor_Request;
 

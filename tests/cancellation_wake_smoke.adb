@@ -1,6 +1,6 @@
 with Ada.Real_Time;
 with Ada.Streams;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Connections;
@@ -13,7 +13,8 @@ procedure Cancellation_Wake_Smoke is
    use type Interfaces.Unsigned_64;
 
    Scale : constant Positive := 64;
-   type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
+   type Socket_Array is array
+     (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
 
    procedure Run_Token_Wake is
       Manager : aliased Connections.Server (Capacity => Scale);
@@ -92,7 +93,8 @@ procedure Cancellation_Wake_Smoke is
       Park_Deadline : Ada.Real_Time.Time;
    begin
       for Index in Servers'Range loop
-         GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Servers (Index), Peers (Index));
       end loop;
       for Index in Servers'Range loop
          Workers (Index) :=
@@ -121,20 +123,20 @@ procedure Cancellation_Wake_Smoke is
       pragma Assert (Progress.Passed);
       pragma Assert (Manager.Active = 0);
       for Peer of Peers loop
-         GNAT.Sockets.Close_Socket (Peer);
+         Flyology.IO.Sockets.Close_Socket (Peer);
       end loop;
    end Run_Token_Wake;
 
    procedure Run_Immediate_And_Timeout is
       Manager : aliased Connections.Server (Capacity => 1);
       Token   : aliased Connections.Cancellation_Token;
-      Server, Peer : GNAT.Sockets.Socket_Type;
+      Server, Peer : Flyology.IO.Sockets.Socket_Type;
       Owned   : Connections.Connection;
       Data    : Ada.Streams.Stream_Element_Array (1 .. 1);
       Cancelled : Boolean := False;
       Timed_Out : Boolean := False;
    begin
-      GNAT.Sockets.Create_Socket_Pair (Server, Peer);
+      Flyology.IO.Sockets.Create_Socket_Pair (Server, Peer);
       Connections.Take (Manager, Server, Owned);
       Token.Request;
       begin
@@ -146,9 +148,9 @@ procedure Cancellation_Wake_Smoke is
       end;
       pragma Assert (Cancelled);
       Owned.Close;
-      GNAT.Sockets.Close_Socket (Peer);
+      Flyology.IO.Sockets.Close_Socket (Peer);
 
-      GNAT.Sockets.Create_Socket_Pair (Server, Peer);
+      Flyology.IO.Sockets.Create_Socket_Pair (Server, Peer);
       declare
          Timeout_Manager : aliased Connections.Server (Capacity => 1);
          Timeout_Owned   : Connections.Connection;
@@ -163,12 +165,12 @@ procedure Cancellation_Wake_Smoke is
          end;
       end;
       pragma Assert (Timed_Out);
-      GNAT.Sockets.Close_Socket (Peer);
+      Flyology.IO.Sockets.Close_Socket (Peer);
    end Run_Immediate_And_Timeout;
 
    procedure Run_Shutdown_Wake is
       Manager : aliased Connections.Server (Capacity => 1);
-      Server, Peer : GNAT.Sockets.Socket_Type;
+      Server, Peer : Flyology.IO.Sockets.Socket_Type;
 
       protected Result is
          procedure Started;
@@ -196,7 +198,7 @@ procedure Cancellation_Wake_Smoke is
          function Passed return Boolean is (OK);
       end Result;
    begin
-      GNAT.Sockets.Create_Socket_Pair (Server, Peer);
+      Flyology.IO.Sockets.Create_Socket_Pair (Server, Peer);
       declare
          task Worker is
             pragma Task_Info (Flyology.Lightweight_Task);
@@ -224,7 +226,7 @@ procedure Cancellation_Wake_Smoke is
          Result.Wait;
       end;
       pragma Assert (Result.Passed);
-      GNAT.Sockets.Close_Socket (Peer);
+      Flyology.IO.Sockets.Close_Socket (Peer);
    end Run_Shutdown_Wake;
 
 begin

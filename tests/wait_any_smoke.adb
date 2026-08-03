@@ -1,6 +1,5 @@
 with Ada.Streams;
 with Ada.Real_Time;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Sockets;
@@ -38,17 +37,17 @@ procedure Wait_Any_Smoke is
    end Runner;
 
    task body Runner is
-      Left_1, Right_1 : GNAT.Sockets.Socket_Type;
-      Left_2, Right_2 : GNAT.Sockets.Socket_Type;
+      Left_1, Right_1 : Flyology.IO.Sockets.Socket_Type;
+      Left_2, Right_2 : Flyology.IO.Sockets.Socket_Type;
       Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
       Last : Ada.Streams.Stream_Element_Offset;
       Passed : Boolean := False;
    begin
-      GNAT.Sockets.Create_Socket_Pair (Left_1, Right_1);
-      GNAT.Sockets.Create_Socket_Pair (Left_2, Right_2);
+      Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
+      Flyology.IO.Sockets.Create_Socket_Pair (Left_2, Right_2);
       Flyology.IO.Sockets.Prepare (Left_1);
       Flyology.IO.Sockets.Prepare (Left_2);
-      GNAT.Sockets.Send_Socket (Right_2, Data, Last);
+      Flyology.IO.Sockets.Send_Socket (Right_2, Data, Last);
       pragma Assert (Last = Data'Last);
 
       declare
@@ -78,7 +77,7 @@ procedure Wait_Any_Smoke is
       --  Right_2 became ready first, but both distinct descriptors are ready
       --  before this event-loop maintenance pass. Lowest caller index wins,
       --  independent of kernel event ordering.
-      GNAT.Sockets.Send_Socket (Right_1, Data, Last);
+      Flyology.IO.Sockets.Send_Socket (Right_1, Data, Last);
       declare
          Requests : constant Flyology.IO.Wait_Request_Array (7 .. 8) :=
            [7 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
@@ -89,7 +88,7 @@ procedure Wait_Any_Smoke is
          Drained : Ada.Streams.Stream_Element_Array (1 .. 1);
       begin
          Passed := Passed and then Got = 7;
-         GNAT.Sockets.Receive_Socket (Left_1, Drained, Last);
+         Flyology.IO.Sockets.Receive_Socket (Left_1, Drained, Last);
       end;
 
       declare
@@ -143,9 +142,10 @@ procedure Wait_Any_Smoke is
       --  second makes the lightweight reverse-registration path arm it before the
       --  closed descriptor fails, exercising transactional rollback.
       declare
-         Closed_Left, Closed_Right : GNAT.Sockets.Socket_Type;
+         Closed_Left, Closed_Right : Flyology.IO.Sockets.Socket_Type;
       begin
-         GNAT.Sockets.Create_Socket_Pair (Closed_Left, Closed_Right);
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Closed_Left, Closed_Right);
          declare
             Closed_FD : constant Flyology.IO.Descriptor :=
               Flyology.IO.Sockets.Native_Descriptor (Closed_Left);
@@ -155,7 +155,7 @@ procedure Wait_Any_Smoke is
                      Flyology.IO.For_Write)];
             Rejected : Boolean := False;
          begin
-            GNAT.Sockets.Close_Socket (Closed_Left);
+            Flyology.IO.Sockets.Close_Socket (Closed_Left);
             begin
                declare
                   Ignored : constant Natural :=
@@ -169,7 +169,7 @@ procedure Wait_Any_Smoke is
             end;
             Passed := Passed and Rejected;
          end;
-         GNAT.Sockets.Close_Socket (Closed_Right);
+         Flyology.IO.Sockets.Close_Socket (Closed_Right);
       end;
 
       declare
@@ -190,14 +190,14 @@ procedure Wait_Any_Smoke is
          Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.01) = 0;
       end;
 
-      GNAT.Sockets.Close_Socket (Left_1);
-      GNAT.Sockets.Close_Socket (Right_1);
-      GNAT.Sockets.Close_Socket (Left_2);
-      GNAT.Sockets.Close_Socket (Right_2);
+      Flyology.IO.Sockets.Close_Socket (Left_1);
+      Flyology.IO.Sockets.Close_Socket (Right_1);
+      Flyology.IO.Sockets.Close_Socket (Left_2);
+      Flyology.IO.Sockets.Close_Socket (Right_2);
 
       --  A timed-out wait must leave no registration that can act on a later
       --  descriptor generation reusing the same integer.
-      GNAT.Sockets.Create_Socket_Pair (Left_1, Right_1);
+      Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
       Flyology.IO.Sockets.Prepare (Left_1);
       declare
          Request : constant Flyology.IO.Wait_Request_Array :=
@@ -206,11 +206,11 @@ procedure Wait_Any_Smoke is
       begin
          Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.005) = 0;
       end;
-      GNAT.Sockets.Close_Socket (Left_1);
-      GNAT.Sockets.Close_Socket (Right_1);
-      GNAT.Sockets.Create_Socket_Pair (Left_1, Right_1);
+      Flyology.IO.Sockets.Close_Socket (Left_1);
+      Flyology.IO.Sockets.Close_Socket (Right_1);
+      Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
       Flyology.IO.Sockets.Prepare (Left_1);
-      GNAT.Sockets.Send_Socket (Right_1, Data, Last);
+      Flyology.IO.Sockets.Send_Socket (Right_1, Data, Last);
       declare
          Request : constant Flyology.IO.Wait_Request_Array :=
            [1 => (Flyology.IO.Sockets.Native_Descriptor (Left_1),
@@ -218,8 +218,8 @@ procedure Wait_Any_Smoke is
       begin
          Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.1) = 1;
       end;
-      GNAT.Sockets.Close_Socket (Left_1);
-      GNAT.Sockets.Close_Socket (Right_1);
+      Flyology.IO.Sockets.Close_Socket (Left_1);
+      Flyology.IO.Sockets.Close_Socket (Right_1);
       Result.Set (Passed);
    exception
       when others =>
@@ -232,7 +232,6 @@ procedure Wait_Any_Smoke is
    pragma Unreferenced (Native, Lightweight);
    Passed  : Boolean;
 begin
-   GNAT.Sockets.Initialize;
    Native := new Runner (Flyology.Native_Task);
    Result.Wait (Passed);
    pragma Assert (Passed);
@@ -292,11 +291,11 @@ begin
       end Followup_Waiter;
 
       type Abortable_Access is access Abortable_Waiter;
-      Left, Right : GNAT.Sockets.Socket_Type;
+      Left, Right : Flyology.IO.Sockets.Socket_Type;
       Data : constant Ada.Streams.Stream_Element_Array := [1 => 99];
       Last : Ada.Streams.Stream_Element_Offset;
    begin
-      GNAT.Sockets.Create_Socket_Pair (Left, Right);
+      Flyology.IO.Sockets.Create_Socket_Pair (Left, Right);
       Flyology.IO.Sockets.Prepare (Left);
       declare
          FD : constant Flyology.IO.Descriptor :=
@@ -315,7 +314,7 @@ begin
             delay 0.001;
          end loop;
 
-         GNAT.Sockets.Send_Socket (Right, Data, Last);
+         Flyology.IO.Sockets.Send_Socket (Right, Data, Last);
          pragma Assert (Last = Data'Last);
          declare
             Followup : Followup_Waiter (FD);
@@ -330,8 +329,7 @@ begin
             pragma Assert (Passed);
          end;
       end;
-      GNAT.Sockets.Close_Socket (Left);
-      GNAT.Sockets.Close_Socket (Right);
+      Flyology.IO.Sockets.Close_Socket (Left);
+      Flyology.IO.Sockets.Close_Socket (Right);
    end;
-   GNAT.Sockets.Finalize;
 end Wait_Any_Smoke;

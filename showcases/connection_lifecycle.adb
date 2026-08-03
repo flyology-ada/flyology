@@ -1,19 +1,18 @@
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.IO.Connections;
 
 procedure Connection_Lifecycle is
    use Ada.Text_IO;
-   use type GNAT.Sockets.Socket_Type;
    package Connections renames Flyology.IO.Connections;
 
    Worker_Count : constant := 5;
    Capacity     : constant := 2;
 
    type Socket_Array is
-     array (Positive range <>) of GNAT.Sockets.Socket_Type;
+     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    Servers : Socket_Array (1 .. Worker_Count);
    Peers   : Socket_Array (1 .. Worker_Count);
    Manager : aliased Connections.Server (Capacity => Capacity);
@@ -73,7 +72,8 @@ procedure Connection_Lifecycle is
 
 begin
    for Index in Servers'Range loop
-      GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+      Flyology.IO.Sockets.Create_Socket_Pair
+        (Servers (Index), Peers (Index));
    end loop;
 
    declare
@@ -130,9 +130,9 @@ begin
    end;
 
    for Index in Peers'Range loop
-      GNAT.Sockets.Close_Socket (Peers (Index));
-      if Servers (Index) /= GNAT.Sockets.No_Socket then
-         GNAT.Sockets.Close_Socket (Servers (Index));
+      Flyology.IO.Sockets.Close_Socket (Peers (Index));
+      if Flyology.IO.Sockets.Is_Open (Servers (Index)) then
+         Flyology.IO.Sockets.Close_Socket (Servers (Index));
       end if;
    end loop;
 end Connection_Lifecycle;

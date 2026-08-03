@@ -6,7 +6,6 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.IO;
@@ -171,15 +170,11 @@ begin
    for Batch in 1 .. Batch_Count loop
       declare
          type Socket_Array is
-           array (Positive range <>) of GNAT.Sockets.Socket_Type;
-         Readers : Socket_Array (1 .. Width) :=
-           (others => GNAT.Sockets.No_Socket);
-         Peers   : Socket_Array (1 .. Width) :=
-           (others => GNAT.Sockets.No_Socket);
-         Interrupt_Readers : Socket_Array (1 .. Width) :=
-           (others => GNAT.Sockets.No_Socket);
-         Interrupt_Peers : Socket_Array (1 .. Width) :=
-           (others => GNAT.Sockets.No_Socket);
+           array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+         Readers : Socket_Array (1 .. Width);
+         Peers   : Socket_Array (1 .. Width);
+         Interrupt_Readers : Socket_Array (1 .. Width);
+         Interrupt_Peers : Socket_Array (1 .. Width);
          State : Progress (Width);
 
          type Natural_Array is array (Positive range <>) of Natural;
@@ -246,21 +241,21 @@ begin
                delay 0.0;
             end if;
             OK := OK and then Flyology.IO.Wait_Interruptibly
-              (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
+              (Flyology.IO.Sockets.Native_Descriptor (Readers (Index)),
                Flyology.IO.For_Read,
                Timeout    => 0.0,
                Interrupts =>
-                 (1 => Flyology.IO.Descriptor
-                    (GNAT.Sockets.To_C (Interrupt_Readers (Index)))))
+                 (1 => Flyology.IO.Sockets.Native_Descriptor
+                    (Interrupt_Readers (Index))))
               = Flyology.IO.Timed_Out;
             State.Started;
             Outcome := Flyology.IO.Wait_Interruptibly
-              (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
+              (Flyology.IO.Sockets.Native_Descriptor (Readers (Index)),
                Flyology.IO.For_Read,
                Timeout    => 2.0,
                Interrupts =>
-                 (1 => Flyology.IO.Descriptor
-                    (GNAT.Sockets.To_C (Interrupt_Readers (Index)))));
+                 (1 => Flyology.IO.Sockets.Native_Descriptor
+                    (Interrupt_Readers (Index))));
             if Will_Interrupt then
                OK := OK and then Outcome = Flyology.IO.Interrupted;
             else
@@ -291,8 +286,9 @@ begin
       begin
          for Index in 1 .. Width loop
             Plans (Index) := Random_Natural.Random (Generator) mod 100_000;
-            GNAT.Sockets.Create_Socket_Pair (Readers (Index), Peers (Index));
-            GNAT.Sockets.Create_Socket_Pair
+            Flyology.IO.Sockets.Create_Socket_Pair
+              (Readers (Index), Peers (Index));
+            Flyology.IO.Sockets.Create_Socket_Pair
               (Interrupt_Readers (Index), Interrupt_Peers (Index));
             Workers (Index) :=
               new Worker
@@ -326,10 +322,10 @@ begin
                delay 0.001;
             end loop;
             Free_Worker (Workers (Index));
-            GNAT.Sockets.Close_Socket (Readers (Index));
-            GNAT.Sockets.Close_Socket (Peers (Index));
-            GNAT.Sockets.Close_Socket (Interrupt_Readers (Index));
-            GNAT.Sockets.Close_Socket (Interrupt_Peers (Index));
+            Flyology.IO.Sockets.Close_Socket (Readers (Index));
+            Flyology.IO.Sockets.Close_Socket (Peers (Index));
+            Flyology.IO.Sockets.Close_Socket (Interrupt_Readers (Index));
+            Flyology.IO.Sockets.Close_Socket (Interrupt_Peers (Index));
          end loop;
       end;
 

@@ -2,7 +2,6 @@ with Ada.Command_Line;
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.Sockets;
 with Flyology.Observability;
@@ -73,7 +72,7 @@ procedure Connection_Density is
    end Progress;
 
    type Socket_Array is
-     array (Positive range <>) of GNAT.Sockets.Socket_Type;
+     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    type Socket_Array_Access is access Socket_Array;
 
    function MiB (Bytes : C.long_long) return Long_Float is
@@ -198,7 +197,8 @@ procedure Connection_Density is
       Release_Elapsed : Duration;
    begin
       for Index in 1 .. Connections loop
-         GNAT.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Servers (Index), Peers (Index));
       end loop;
       for Index in 1 .. Connections loop
          Workers (Index) := new Connection (Index, Model);
@@ -238,8 +238,8 @@ procedure Connection_Density is
          Release_Elapsed);
 
       for Index in 1 .. Connections loop
-         GNAT.Sockets.Close_Socket (Servers (Index));
-         GNAT.Sockets.Close_Socket (Peers (Index));
+         Flyology.IO.Sockets.Close_Socket (Servers (Index));
+         Flyology.IO.Sockets.Close_Socket (Peers (Index));
       end loop;
    end Run;
 

@@ -5,7 +5,7 @@ with Ada.Streams;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Fault_Control;
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Connections;
@@ -18,7 +18,6 @@ procedure Fault_Injection_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Fault_Control.File_Cancel_Backend;
    use type Fault_Control.Point;
-   use type GNAT.Sockets.Socket_Type;
    use type Interfaces.C.int;
 
    package IO renames Flyology.IO;
@@ -108,8 +107,8 @@ procedure Fault_Injection_Smoke is
    end Expect_Discard_Failure_Recovery;
 
    procedure Test_Watch_Error is
-      Reader : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
-      Writer : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Reader : Flyology.IO.Sockets.Socket_Type;
+      Writer : Flyology.IO.Sockets.Socket_Type;
       Failed_As_Device_Error : Boolean := False with Atomic;
 
       task type Waiter is
@@ -120,7 +119,7 @@ procedure Fault_Injection_Smoke is
       begin
          begin
             if IO.Wait
-              (IO.Descriptor (GNAT.Sockets.To_C (Reader)),
+              (Flyology.IO.Sockets.Native_Descriptor (Reader),
                IO.For_Read,
                Timeout => 0.1)
             then
@@ -137,7 +136,7 @@ procedure Fault_Injection_Smoke is
         (Waiter, Waiter_Access);
       Item : Waiter_Access;
    begin
-      GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+      Flyology.IO.Sockets.Create_Socket_Pair (Reader, Writer);
       Fault_Control.Reset;
       Fault_Control.Arm (Fault_Control.Poller_Watch);
       Item := new Waiter;
@@ -153,8 +152,8 @@ procedure Fault_Injection_Smoke is
          end loop;
       end;
       Free_Waiter (Item);
-      GNAT.Sockets.Close_Socket (Reader);
-      GNAT.Sockets.Close_Socket (Writer);
+      Flyology.IO.Sockets.Close_Socket (Reader);
+      Flyology.IO.Sockets.Close_Socket (Writer);
       if not Failed_As_Device_Error then
          raise Program_Error with "watch failure did not become Device_Error";
       end if;
@@ -162,20 +161,20 @@ procedure Fault_Injection_Smoke is
       Warm_Group;
    exception
       when others =>
-         if Reader /= GNAT.Sockets.No_Socket then
-            GNAT.Sockets.Close_Socket (Reader);
+         if Flyology.IO.Sockets.Is_Open (Reader) then
+            Flyology.IO.Sockets.Close_Socket (Reader);
          end if;
-         if Writer /= GNAT.Sockets.No_Socket then
-            GNAT.Sockets.Close_Socket (Writer);
+         if Flyology.IO.Sockets.Is_Open (Writer) then
+            Flyology.IO.Sockets.Close_Socket (Writer);
          end if;
          raise;
    end Test_Watch_Error;
 
    procedure Test_Multi_Watch_Rollback is
-      type Socket_Array is array (Positive range <>) of GNAT.Sockets.Socket_Type;
-      Readers : Socket_Array (1 .. 4) := (others => GNAT.Sockets.No_Socket);
-      Writers : Socket_Array (Readers'Range) :=
-        (others => GNAT.Sockets.No_Socket);
+      type Socket_Array is array
+        (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+      Readers : Socket_Array (1 .. 4);
+      Writers : Socket_Array (Readers'Range);
       Failed : Boolean := False with Atomic;
       Retry_Ready : Boolean := False with Atomic;
       Reused_FD : IO.Descriptor;
@@ -189,12 +188,12 @@ procedure Fault_Injection_Smoke is
       begin
          begin
             Outcome := IO.Wait_Interruptibly
-              (IO.Descriptor (GNAT.Sockets.To_C (Readers (1))),
+              (Flyology.IO.Sockets.Native_Descriptor (Readers (1)),
                IO.For_Read,
                0.1,
-               (1 => IO.Descriptor (GNAT.Sockets.To_C (Readers (2))),
-                2 => IO.Descriptor (GNAT.Sockets.To_C (Readers (3))),
-                3 => IO.Descriptor (GNAT.Sockets.To_C (Readers (4)))));
+               (1 => Flyology.IO.Sockets.Native_Descriptor (Readers (2)),
+                2 => Flyology.IO.Sockets.Native_Descriptor (Readers (3)),
+                3 => Flyology.IO.Sockets.Native_Descriptor (Readers (4))));
          exception
             when IO.Device_Error =>
                Failed := True;
@@ -207,9 +206,10 @@ procedure Fault_Injection_Smoke is
       Item : Failed_Waiter_Access;
    begin
       for Index in Readers'Range loop
-         GNAT.Sockets.Create_Socket_Pair (Readers (Index), Writers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Readers (Index), Writers (Index));
       end loop;
-      Reused_FD := IO.Descriptor (GNAT.Sockets.To_C (Readers (1)));
+      Reused_FD := Flyology.IO.Sockets.Native_Descriptor (Readers (1));
       Fault_Control.Reset;
       --  Let the primary and first interrupt arm, then fail the second
       --  interrupt. Both earlier kernel watches must be rolled back.
@@ -234,13 +234,13 @@ procedure Fault_Injection_Smoke is
          raise Program_Error with "later watch failure was not surfaced";
       end if;
       for Index in Readers'Range loop
-         GNAT.Sockets.Close_Socket (Readers (Index));
-         GNAT.Sockets.Close_Socket (Writers (Index));
+         Flyology.IO.Sockets.Close_Socket (Readers (Index));
+         Flyology.IO.Sockets.Close_Socket (Writers (Index));
       end loop;
 
       Fault_Control.Reset;
-      GNAT.Sockets.Create_Socket_Pair (Readers (1), Writers (1));
-      if IO.Descriptor (GNAT.Sockets.To_C (Readers (1))) /= Reused_FD then
+      Flyology.IO.Sockets.Create_Socket_Pair (Readers (1), Writers (1));
+      if Flyology.IO.Sockets.Native_Descriptor (Readers (1)) /= Reused_FD then
          raise Program_Error with "descriptor reuse precondition failed";
       end if;
       declare
@@ -256,13 +256,13 @@ procedure Fault_Injection_Smoke is
               (Reused_FD, IO.For_Read, Timeout => 0.1);
          end Retry;
       begin
-         GNAT.Sockets.Send_Socket (Writers (1), Data, Last);
+         Flyology.IO.Sockets.Send_Socket (Writers (1), Data, Last);
       end;
       if not Retry_Ready then
          raise Program_Error with "rolled-back descriptor poisoned reuse";
       end if;
-      GNAT.Sockets.Close_Socket (Readers (1));
-      GNAT.Sockets.Close_Socket (Writers (1));
+      Flyology.IO.Sockets.Close_Socket (Readers (1));
+      Flyology.IO.Sockets.Close_Socket (Writers (1));
    end Test_Multi_Watch_Rollback;
 
    procedure Test_EINTR is
@@ -590,8 +590,8 @@ procedure Fault_Injection_Smoke is
    procedure Test_Cross_Domain_Cancellation is
       Path : constant String := "/tmp/flyology-cancel-file.data";
       File : Files.File_Descriptor := Files.Invalid_File;
-      Reader : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
-      Writer : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
+      Reader : Flyology.IO.Sockets.Socket_Type;
+      Writer : Flyology.IO.Sockets.Socket_Type;
       Manager : aliased Connections.Server (1);
       Connection : Connections.Connection;
       Token : aliased Connections.Cancellation_Token;
@@ -677,7 +677,7 @@ procedure Fault_Injection_Smoke is
       end if;
       File := Files.Open
         (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
-      GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+      Flyology.IO.Sockets.Create_Socket_Pair (Reader, Writer);
       Connections.Take (Manager, Reader, Connection);
 
       Fault_Control.Reset;
@@ -744,8 +744,8 @@ procedure Fault_Injection_Smoke is
 
       Fault_Control.Reset;
       Connections.Close (Connection);
-      if Writer /= GNAT.Sockets.No_Socket then
-         GNAT.Sockets.Close_Socket (Writer);
+      if Flyology.IO.Sockets.Is_Open (Writer) then
+         Flyology.IO.Sockets.Close_Socket (Writer);
       end if;
       Files.Close (File);
       Ada.Directories.Delete_File (Path);
@@ -753,11 +753,11 @@ procedure Fault_Injection_Smoke is
       when others =>
          Fault_Control.Reset;
          Connections.Close (Connection);
-         if Reader /= GNAT.Sockets.No_Socket then
-            GNAT.Sockets.Close_Socket (Reader);
+         if Flyology.IO.Sockets.Is_Open (Reader) then
+            Flyology.IO.Sockets.Close_Socket (Reader);
          end if;
-         if Writer /= GNAT.Sockets.No_Socket then
-            GNAT.Sockets.Close_Socket (Writer);
+         if Flyology.IO.Sockets.Is_Open (Writer) then
+            Flyology.IO.Sockets.Close_Socket (Writer);
          end if;
          Files.Close (File);
          if Ada.Directories.Exists (Path) then

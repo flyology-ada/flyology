@@ -1,7 +1,6 @@
 with Ada.Streams;
 with Flyology;
 with Flyology.IO.Sockets;
-with GNAT.Sockets;
 with Interfaces.C;
 with Context_ABI_Support;
 
@@ -10,8 +9,8 @@ procedure Context_ABI_Matrix is
 
    use type Interfaces.C.unsigned;
 
-   Reader : GNAT.Sockets.Socket_Type;
-   Writer : GNAT.Sockets.Socket_Type;
+   Reader : aliased Flyology.IO.Sockets.Socket_Type;
+   Writer : Flyology.IO.Sockets.Socket_Type;
 
    protected Results is
       procedure Report_Lightweight (Mask : Interfaces.C.unsigned);
@@ -62,7 +61,7 @@ procedure Context_ABI_Matrix is
    end Results;
 
 begin
-   GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+   Flyology.IO.Sockets.Create_Socket_Pair (Reader, Writer);
    Support.Configure (Reader);
 
    declare
@@ -119,8 +118,8 @@ begin
       Results.Wait;
    end;
 
-   GNAT.Sockets.Close_Socket (Reader);
-   GNAT.Sockets.Close_Socket (Writer);
+   Flyology.IO.Sockets.Close_Socket (Reader);
+   Flyology.IO.Sockets.Close_Socket (Writer);
 
    if not Results.Passed then
       raise Program_Error with
