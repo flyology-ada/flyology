@@ -105,6 +105,7 @@ project Flyology is
             "flyology-http-server-middleware_rate_limits.ads",
             "flyology-http-server-middleware_security_headers.ads",
             "flyology-http-server-requests.ads",
+            "flyology-http-server-request_tasks.ads",
             "flyology-http-server-responses.ads",
             "flyology-http-server-routing.ads",
             "flyology-http-server-sse_handlers.ads",
@@ -123,9 +124,11 @@ project Flyology is
             "flyology-io-timers.ads",
             "flyology-observability.ads",
             "flyology-observability-stall_watchdogs.ads",
-            "flyology-process_lifecycle.ads",
-            "flyology-wake_sources.ads",
-            "flyology-worker_pools.ads");
+             "flyology-native_executors.ads",
+             "flyology-process_lifecycle.ads",
+             "flyology-task_scopes.ads",
+             "flyology-wake_sources.ads",
+             "flyology-worker_pools.ads");
    end case;
    for Object_Dir use "obj/" & Flyology_Config.Build_Profile;
    for Create_Missing_Dirs use "True";

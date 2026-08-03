@@ -24,6 +24,7 @@ with Flyology.HTTP.Server.Middleware_Request_IDs;
 with Flyology.HTTP.Server.Middleware_Rate_Limits;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Requests;
+with Flyology.HTTP.Server.Request_Tasks;
 with Flyology.HTTP.Server.Responses;
 with Flyology.HTTP.Server.Routing;
 with Flyology.HTTP.Server.SSE_Handlers;
@@ -2018,6 +2019,67 @@ procedure HTTP_Smoke is
       end;
    end Check_High_Level_WebSocket;
 
+   procedure Check_Request_Task_Integration is
+      package Applications renames Flyology.HTTP.Server.Applications;
+
+      procedure Double
+        (Input    : Integer;
+         Token    : access Flyology.Cancellation.Token;
+         Deadline : Ada.Real_Time.Time;
+         Result   : out Integer)
+      is
+         use type Ada.Real_Time.Time;
+      begin
+         pragma Assert (Token /= null);
+         pragma Assert (Deadline /= Ada.Real_Time.Time_Last);
+         Result := Input * 2;
+      end Double;
+
+      package Request_Work is new
+        Flyology.HTTP.Server.Request_Tasks (Integer, Integer, Double);
+      package Operations renames Request_Work.Operations;
+      package Routing is new Flyology.HTTP.Server.Routing (Boolean);
+
+      procedure Parallel
+        (State : in out Boolean;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+         Item : Operations.Scope (Capacity => 2);
+         First, Second : Operations.Operation_Handle;
+      begin
+         Request_Work.Configure (Item, X);
+         Operations.Spawn (Item, 20, First);
+         Operations.Spawn (Item, 1, Second);
+         Operations.Join (Item);
+         X.Text
+           (200, Integer'Image (Operations.Result (Item, First)
+                                + Operations.Result (Item, Second)));
+      end Parallel;
+
+      Routes : Routing.Router
+        (Capacity => 1, Slashes => Routing.Strict_Slashes);
+      State : Boolean := False;
+      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+      Wire : aliased Memory_Transport;
+   begin
+      Routing.Get
+        (Routes, "/parallel", Parallel'Access, Name => "parallel");
+      Wire.Input := To_Unbounded_String
+        ("GET /parallel HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF);
+      declare
+         Client : aliased HTTP_Server.Connection (Wire'Access);
+      begin
+         Routing.Serve (Routes, State, Client, Peer);
+      end;
+      pragma Assert
+        (Ada.Strings.Fixed.Index (To_String (Wire.Output), " 42") /= 0);
+   end Check_Request_Task_Integration;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -2042,4 +2104,5 @@ begin
    Check_Bounded_Channels;
    Check_High_Level_SSE;
    Check_High_Level_WebSocket;
+   Check_Request_Task_Integration;
 end HTTP_Smoke;
