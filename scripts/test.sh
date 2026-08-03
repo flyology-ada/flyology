@@ -231,9 +231,26 @@ if [ "$loop_placement" != none ]; then
   "$project_root/tests/bin/loop_thread_project_placement_smoke"
 fi
 
+#  Transient accept behavior depends on errno results that are difficult to
+#  produce deterministically from a client. Exercise the production retry,
+#  deadline, cancellation, and structural-error paths through the test-only C
+#  seam, with an outer timeout so a retry regression cannot hang CI.
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+FLYOLOGY_TEST_FAULTS=1 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  accept_transient_smoke.adb
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$project_root/tests/bin/accept_transient_smoke"
+
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=1 \
+FLYOLOGY_TEST_FAULTS=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 
 #  Prove that a separate Alire workspace can locate the crate, prepare its own

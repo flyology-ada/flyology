@@ -111,8 +111,12 @@ package Flyology.IO.Sockets is
       Interrupt_2 : Descriptor := Invalid_Descriptor;
       Interrupt_3 : Descriptor := Invalid_Descriptor);
 
-   --  Accept one connection and configure it for Flyology I/O. Timeout and
-   --  interrupt behavior match Receive, with one deadline across retries.
+   --  Accept one connection and configure it for Flyology I/O. Aborted
+   --  backlog entries and protocol-level admission errors are retried.
+   --  Process or system descriptor exhaustion is retried with exponential
+   --  backoff capped at 50 milliseconds; interrupt descriptors remain part of
+   --  that wait. Other listener errors fail. Timeout and interrupt behavior
+   --  match Receive, with one deadline across all retries and backoff.
    --  @param Server Open listening socket; ownership is retained
    --  @param Socket Newly accepted socket owned by the caller on return
    --  @param Address Accepted peer address

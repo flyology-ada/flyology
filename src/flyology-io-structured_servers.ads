@@ -80,10 +80,13 @@ package Flyology.IO.Structured_Servers is
    type Server (Capacity : Positive) is limited private;
 
    --  Take sole closing ownership of Listener, set it to No_Socket, and serve
-   --  until shutdown or failure. The call returns only after all handler tasks
-   --  terminate. Shutdown first stops admission. Infinite waits indefinitely;
-   --  zero forces cancellation immediately; other values are seconds. One
-   --  deadline covers the drain. Connection I/O wakes on cancellation, while
+   --  until shutdown or failure. Transient aborted admissions are retried and
+   --  descriptor exhaustion backs off without becoming a recorded failure;
+   --  structural listener errors still fail the server. The call returns only
+   --  after all handler tasks terminate. Shutdown first stops admission.
+   --  Infinite waits indefinitely; zero forces cancellation immediately;
+   --  other values are seconds. One deadline covers the drain. Connection I/O
+   --  wakes on cancellation, while
    --  CPU-only Handle code must poll Cancellation.Requested cooperatively.
    --  Lightweight handlers suspend on event-loop I/O; native handlers block
    --  their threads.

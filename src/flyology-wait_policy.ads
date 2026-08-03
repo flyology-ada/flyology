@@ -13,6 +13,12 @@ is
 
    type Poll_Action is (Return_Ready, Return_Timeout, Retry, Fail);
    type Error_Action is (Wait_For_Ready, Retry_Operation, Fail_Operation);
+   type Accept_Error_Action is
+     (Wait_For_Connection,
+      Retry_Accept,
+      Retry_Transient,
+      Backoff_Descriptor_Pressure,
+      Fail_Accept);
 
    function Classify
      (Result            : C.int;
@@ -39,5 +45,33 @@ is
          Classify_Error'Result = Retry_Operation
       else
          Classify_Error'Result = Fail_Operation);
+
+   function Classify_Accept_Error
+     (Error_Code               : C.int;
+      Would_Block_Error        : C.int;
+      Interrupted_Error        : C.int;
+      Connection_Aborted_Error : C.int;
+      Protocol_Error           : C.int;
+      Process_File_Limit_Error : C.int;
+      System_File_Limit_Error  : C.int) return Accept_Error_Action
+   with Post =>
+     (if Error_Code = Would_Block_Error then
+         Classify_Accept_Error'Result = Wait_For_Connection
+      elsif Error_Code = Interrupted_Error then
+         Classify_Accept_Error'Result = Retry_Accept
+      elsif Error_Code >= 0
+        and then
+          (Error_Code = Connection_Aborted_Error
+           or else Error_Code = Protocol_Error)
+      then
+         Classify_Accept_Error'Result = Retry_Transient
+      elsif Error_Code >= 0
+        and then
+          (Error_Code = Process_File_Limit_Error
+           or else Error_Code = System_File_Limit_Error)
+      then
+         Classify_Accept_Error'Result = Backoff_Descriptor_Pressure
+      else
+         Classify_Accept_Error'Result = Fail_Accept);
 
 end Flyology.Wait_Policy;

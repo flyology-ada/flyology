@@ -26,7 +26,31 @@ package body Flyology.IO.Sockets is
      (Socket  : Interfaces.C.int;
       Address : System.Address;
       Length  : System.Address) return Interfaces.C.int;
-   pragma Import (C, C_Accept, "accept");
+   pragma Import (C, C_Accept, "flyology_accept");
+
+   function C_Errno_Connection_Aborted return Interfaces.C.int;
+   pragma Import
+     (C, C_Errno_Connection_Aborted,
+      "flyology_errno_connection_aborted");
+   function C_Errno_Protocol_Error return Interfaces.C.int;
+   pragma Import
+     (C, C_Errno_Protocol_Error, "flyology_errno_protocol_error");
+   function C_Errno_Process_File_Limit return Interfaces.C.int;
+   pragma Import
+     (C, C_Errno_Process_File_Limit,
+      "flyology_errno_process_file_limit");
+   function C_Errno_System_File_Limit return Interfaces.C.int;
+   pragma Import
+     (C, C_Errno_System_File_Limit,
+      "flyology_errno_system_file_limit");
+
+   Connection_Aborted_Error : constant Interfaces.C.int :=
+     C_Errno_Connection_Aborted;
+   Protocol_Error : constant Interfaces.C.int := C_Errno_Protocol_Error;
+   Process_File_Limit_Error : constant Interfaces.C.int :=
+     C_Errno_Process_File_Limit;
+   System_File_Limit_Error : constant Interfaces.C.int :=
+     C_Errno_System_File_Limit;
 
    --  GNAT implements this as SO_NOSIGPIPE where the platform needs a socket
    --  option and as the appropriate no-op/send-time policy elsewhere.
@@ -274,6 +298,51 @@ package body Flyology.IO.Sockets is
       Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Accepted : Sockets.Socket_Type := Sockets.No_Socket;
       Peer      : Sockets.Sock_Addr_Type := Sockets.No_Sock_Addr;
+      Pressure_Backoff : Duration := 0.001;
+
+      procedure Pause_Before_Retry (Requested : Duration) is
+         Requests : Wait_Request_Array (1 .. 3);
+         Count    : Natural := 0;
+         Left     : constant Duration := Remaining (Started, Timeout);
+         Pause    : Duration;
+
+         procedure Add (FD : Descriptor) is
+         begin
+            if FD >= 0 then
+               Count := Count + 1;
+               Requests (Count) := (FD => FD, Condition => For_Read);
+            end if;
+         end Add;
+      begin
+         if Timeout >= 0.0 and then Left <= 0.0 then
+            raise Timeout_Error with "socket operation timed out";
+         end if;
+         Pause :=
+           (if Requested <= 0.0 then 0.0
+            elsif Timeout < 0.0 then Requested
+            else Duration'Min (Requested, Left));
+
+         Add (Interrupt_1);
+         Add (Interrupt_2);
+         Add (Interrupt_3);
+         if Count > 0 then
+            if Wait_Any (Requests (1 .. Count), Pause) /= 0 then
+               raise Operation_Interrupted with
+                 "socket operation interrupted";
+            end if;
+         elsif Pause > 0.0 then
+            delay Pause;
+         end if;
+         if Pause = 0.0 then
+            --  Continuous aborted admissions must not monopolize a
+            --  lightweight task's execution group.
+            delay 0.0;
+         end if;
+
+         if Timeout >= 0.0 and then Remaining (Started, Timeout) <= 0.0 then
+            raise Timeout_Error with "socket operation timed out";
+         end if;
+      end Pause_Before_Retry;
    begin
       Prepare (Server);
       loop
@@ -287,18 +356,28 @@ package body Flyology.IO.Sockets is
          begin
             if Result < 0 then
                Error_Code := GNAT.OS_Lib.Errno;
-               case Wait_Policy.Classify_Error
+               case Wait_Policy.Classify_Accept_Error
                  (Interfaces.C.int (Error_Code),
                   Interfaces.C.int (System.OS_Constants.EWOULDBLOCK),
-                  Interfaces.C.int (System.OS_Constants.EINTR))
+                  Interfaces.C.int (System.OS_Constants.EINTR),
+                  Connection_Aborted_Error,
+                  Protocol_Error,
+                  Process_File_Limit_Error,
+                  System_File_Limit_Error)
                is
-                  when Wait_Policy.Wait_For_Ready =>
+                  when Wait_Policy.Wait_For_Connection =>
                      Wait_For
                        (Server, For_Read, Started, Timeout,
                         Interrupt_1, Interrupt_2, Interrupt_3);
-                  when Wait_Policy.Retry_Operation =>
-                     null;
-                  when Wait_Policy.Fail_Operation =>
+                  when Wait_Policy.Retry_Accept =>
+                     Pause_Before_Retry (0.0);
+                  when Wait_Policy.Retry_Transient =>
+                     Pause_Before_Retry (0.0);
+                  when Wait_Policy.Backoff_Descriptor_Pressure =>
+                     Pause_Before_Retry (Pressure_Backoff);
+                     Pressure_Backoff :=
+                       Duration'Min (Pressure_Backoff * 2, 0.050);
+                  when Wait_Policy.Fail_Accept =>
                      raise Sockets.Socket_Error with
                        "accept failed, errno=" & Error_Code'Image;
                end case;

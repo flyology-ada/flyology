@@ -677,6 +677,12 @@ listener is closed. The snapshot also reports active, accepted, completed, and
 cancelled counts plus whether deadline cancellation was needed. Thus no handler
 outlives `Serve`, its context, the server object, or their Ada master.
 
+An aborted backlog entry or protocol-level admission error is retried rather
+than treated as a server failure. Process-wide or system-wide descriptor
+exhaustion uses exponential backoff capped at 50 milliseconds; shutdown and
+other cancellation wake that backoff. Listener state errors such as an invalid
+descriptor remain structural failures and stop the server.
+
 The structured guarantee applies to `Serve`. Direct use of `Connections`, raw
 socket operations, interrupt descriptors, and descriptor waits remains
 deliberately unstructured: those APIs are compatibility/building blocks whose
@@ -982,13 +988,15 @@ GNATprove is a dependency of the nested `proof` development crate, not of the
 published Flyology library. Applications therefore do not download proof tooling
 merely because they depend on the runtime API.
 
-[scripts/prove.sh](scripts/prove.sh) prints the authoritative check totals in its two GNATprove
-success summaries; the totals change as contracts and policy units evolve. A
-successful run proves every selected flow, functional-contract, termination,
-and run-time-safety check with zero unproved checks. The current boundary
-includes the loss-of-inherited-priority queue-placement choice. Good next proof
-candidates are ready-bucket insertion/removal invariants and descriptor wake
-matching.
+[scripts/prove.sh](scripts/prove.sh) prints the authoritative check totals in
+its GNATprove success summaries; the totals change as contracts and policy
+units evolve. Its final suite marker is emitted only after every selected proof
+target succeeds, and CI checks that marker instead of a change-prone summary or
+check count. A successful run proves every selected flow, functional-contract,
+termination, and run-time-safety check with zero unproved checks. The current
+boundary includes the loss-of-inherited-priority queue-placement choice. Good
+next proof candidates are ready-bucket insertion/removal invariants and
+descriptor wake matching.
 
 The GNARL tasking integration, imported system calls, address conversions,
 assembly register swap, and kernel behavior remain trusted boundaries. These
@@ -1218,16 +1226,24 @@ FLYOLOGY_STRESS_SEEDS="42" FLYOLOGY_STRESS_BATCHES=50 \
   FLYOLOGY_STRESS_WIDTH=64 ./scripts/stress.sh
 ```
 
-The same runner rebuilds a test-only RTS with `FLYOLOGY_TEST_FAULTS=1` and
+The stress runner rebuilds a test-only RTS with `FLYOLOGY_TEST_FAULTS=1` and
 exercises deterministic failure counters for fiber allocation, stack mapping,
 group startup, poller watch/wait/wake, interrupted poll waits, and file-queue
 saturation. Recoverable failures must surface to Ada and permit a subsequent
-task to run; poller failures that violate scheduler progress must terminate the
-isolated subprocess with `SIGABRT`. The runner restores a normal, fault-disabled
-RTS before exiting. The selected production configuration exposes a compile-time
-false constant, so fault conditions and their cross-language hook calls are
-eliminated from scheduler, poller, and context objects; production contains no
-random decision logic or fault-hook call overhead.
+task to run; poller failures that violate
+scheduler progress must terminate the isolated subprocess with `SIGABRT`. The
+runner restores a normal, fault-disabled RTS before exiting. The selected
+production configuration exposes a compile-time false constant, so fault
+conditions and their cross-language hook calls are eliminated from scheduler,
+poller, and context objects; production contains no random decision logic or
+fault-hook call overhead.
+
+The normal `scripts/test.sh` run also builds a fault-enabled RTS for one bounded
+accept regression. It injects aborted admissions, protocol errors, descriptor
+pressure, and a structural listener error through the host's errno constants.
+Both task lanes check recovery, bounded retry, deadline, shutdown, and
+escalation behavior under an outer timeout, so hosted macOS and Linux jobs
+exercise this server policy directly.
 
 The longer campaign is deliberately opt-in:
 
@@ -1337,7 +1353,9 @@ Current smoke coverage includes:
 - structured listener ownership and bounded handler pools in both lanes,
   overload backpressure, handler-failure propagation, concurrent idempotent
   shutdown, accept cancellation, graceful drain, deadline cancellation,
-  final scope joining, and listener descriptor reuse;
+  transient admission recovery, descriptor-pressure backoff, structural
+  listener-failure escalation, final scope joining, and listener descriptor
+  reuse;
 - descriptor-readiness fairness under a continuously yielding lightweight task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;

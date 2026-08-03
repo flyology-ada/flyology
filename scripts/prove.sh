@@ -15,7 +15,10 @@ cd "$project_root/proof"
   --output=oneline \
   --output-header \
   --report=all \
-  flyology-time_math.adb
+  -u \
+  flyology-time_math.adb \
+  flyology-file_open_policy.adb \
+  flyology-wait_policy.adb
 
 "$alr" gnatprove \
   -P "$project_root/proof/runtime_policy.gpr" \
@@ -24,4 +27,6 @@ cd "$project_root/proof"
   --output=oneline \
   --output-header \
   --report=all \
-  s-flscpo.adb
+  -u s-flscpo.adb
+
+printf '%s\n' "Flyology SPARK proof suite passed"

@@ -21,7 +21,12 @@ package Fault_Control is
       File_Cancel_Delete_Failure,
       File_Cancel_Admin_Delay,
       File_Cancel_Synthetic,
-      File_Cancel_Stale_Event);
+      File_Cancel_Stale_Event,
+      Accept_Connection_Aborted,
+      Accept_Protocol_Error,
+      Accept_Process_File_Limit,
+      Accept_System_File_Limit,
+      Accept_Bad_Descriptor);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -42,7 +47,12 @@ package Fault_Control is
       File_Cancel_Delete_Failure   => 16,
       File_Cancel_Admin_Delay      => 17,
       File_Cancel_Synthetic        => 18,
-      File_Cancel_Stale_Event      => 19);
+      File_Cancel_Stale_Event      => 19,
+      Accept_Connection_Aborted    => 20,
+      Accept_Protocol_Error        => 21,
+      Accept_Process_File_Limit    => 22,
+      Accept_System_File_Limit     => 23,
+      Accept_Bad_Descriptor        => 24);
 
    function Enabled return Boolean;
    procedure Reset;

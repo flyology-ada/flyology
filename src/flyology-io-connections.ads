@@ -83,11 +83,12 @@ package Flyology.IO.Connections is
       Item    : in out Connection);
 
    --  Acquire capacity before accepting, so a full Manager backpressures the
-   --  listening socket. One Timeout deadline spans accept retries. Negative is
-   --  unlimited and zero is immediate. Cancellation_Quantum must be positive
-   --  for compatibility but is ignored; wake-source readiness notices
-   --  cancellation without periodic polling. Lightweight tasks suspend;
-   --  native tasks block their threads.
+   --  listening socket. Transient aborted admissions are retried; descriptor
+   --  exhaustion uses interruptible bounded backoff. One Timeout deadline
+   --  spans readiness, retries, and backoff. Negative is unlimited and zero is
+   --  immediate. Cancellation_Quantum must be positive for compatibility but
+   --  is ignored; wake-source readiness notices cancellation without periodic
+   --  polling. Lightweight tasks suspend; native tasks block their threads.
    --  @param Manager Admission controller that must outlive Item
    --  @param Listener Open listening socket; ownership is retained
    --  @param Item Closed Connection that receives the accepted socket

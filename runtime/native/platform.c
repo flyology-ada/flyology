@@ -3,6 +3,7 @@
 #endif
 
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <pthread.h>
 #include <errno.h>
 #include <stdint.h>
@@ -287,10 +288,16 @@ int flyology_in_fork_child(void) {
            __atomic_load_n(flyology_fork_child_flag, __ATOMIC_RELAXED) != 0;
 }
 
+#define FLYOLOGY_FAULT_ACCEPT_CONNECTION_ABORTED 20
+#define FLYOLOGY_FAULT_ACCEPT_PROTOCOL_ERROR 21
+#define FLYOLOGY_FAULT_ACCEPT_PROCESS_LIMIT 22
+#define FLYOLOGY_FAULT_ACCEPT_SYSTEM_LIMIT 23
+#define FLYOLOGY_FAULT_ACCEPT_BAD_DESCRIPTOR 24
+
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 19
+#define FLYOLOGY_FAULT_POINT_COUNT 24
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
@@ -523,6 +530,70 @@ int flyology_test_fault_hit(int point) {
     return 0;
 }
 #endif
+
+/* Keep errno values that GNAT's generated OS constants do not expose in the
+   host-header bridge.  -1 denotes an unavailable condition and cannot collide
+   with errno captured after a failed accept. */
+int flyology_errno_connection_aborted(void) {
+#ifdef ECONNABORTED
+    return ECONNABORTED;
+#else
+    return -1;
+#endif
+}
+
+int flyology_errno_protocol_error(void) {
+#ifdef EPROTO
+    return EPROTO;
+#else
+    return -1;
+#endif
+}
+
+int flyology_errno_process_file_limit(void) {
+#ifdef EMFILE
+    return EMFILE;
+#else
+    return -1;
+#endif
+}
+
+int flyology_errno_system_file_limit(void) {
+#ifdef ENFILE
+    return ENFILE;
+#else
+    return -1;
+#endif
+}
+
+/* The production path remains one direct accept call.  Deterministic errno
+   injection exists only in explicitly fault-enabled test runtimes. */
+int flyology_accept(int socket, void *address, void *length) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    if (flyology_test_fault_hit(
+            FLYOLOGY_FAULT_ACCEPT_CONNECTION_ABORTED)) {
+        errno = ECONNABORTED;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_PROTOCOL_ERROR)) {
+        errno = EPROTO;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_PROCESS_LIMIT)) {
+        errno = EMFILE;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_SYSTEM_LIMIT)) {
+        errno = ENFILE;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_BAD_DESCRIPTOR)) {
+        errno = EBADF;
+        return -1;
+    }
+#endif
+    return accept(socket, (struct sockaddr *)address, (socklen_t *)length);
+}
 
 int flyology_map_anonymous(void) {
     return MAP_ANONYMOUS;
