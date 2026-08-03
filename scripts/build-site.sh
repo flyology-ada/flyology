@@ -23,6 +23,7 @@ cp -R "$project_root/docs/api/." "$site_output/api/"
 touch "$site_output/.nojekyll"
 
 test -f "$site_output/index.html"
+test "$(cat "$site_output/CNAME")" = "flyology.org"
 test -f "$site_output/guide/index.html"
 test -f "$site_output/architecture/index.html"
 test -f "$site_output/api/index.html"

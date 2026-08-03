@@ -11,9 +11,9 @@
 </p>
 
 <p align="center">
-  <a href="https://yrashk.github.io/flyology/">Guide</a> ·
-  <a href="https://yrashk.github.io/flyology/architecture/">Architecture</a> ·
-  <a href="https://yrashk.github.io/flyology/api/">API reference</a>
+  <a href="https://flyology.org/">Guide</a> ·
+  <a href="https://flyology.org/architecture/">Architecture</a> ·
+  <a href="https://flyology.org/api/">API reference</a>
 </p>
 
 Flyology adds an explicit lightweight execution lane to ordinary Ada tasking.
