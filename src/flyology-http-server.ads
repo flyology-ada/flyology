@@ -195,6 +195,40 @@ package Flyology.HTTP.Server is
    --  @return True when another request may be parsed after the response
    function Body_Complete (Item : Connection) return Boolean;
 
+   --  Return the absolute monotonic deadline established for the current
+   --  request. Time_Last represents an unlimited deadline.
+   --  @param Item HTTP connection
+   --  @return Original or narrowed request deadline
+   function Request_Deadline (Item : Connection) return Ada.Real_Time.Time;
+
+   --  Shorten the current request deadline. A later value is rejected so no
+   --  application layer can restart or extend slow-client protection.
+   --  @param Item HTTP connection with a current request
+   --  @param Deadline Earlier absolute monotonic deadline
+   procedure Narrow_Request_Deadline
+     (Item     : in out Connection;
+      Deadline : Ada.Real_Time.Time);
+
+   --  Reduce the decoded body limit after request-head routing. This must be
+   --  called before body consumption and can never increase the parser limit.
+   --  @param Item HTTP connection with an unread request body
+   --  @param Maximum New decoded-body maximum
+   procedure Narrow_Body_Limit
+     (Item    : in out Connection;
+      Maximum : Natural);
+
+   --  Buffer the current decoded body into Value under the configured shared
+   --  ingress budget. This is the routed equivalent of Read_Request's body
+   --  phase and preserves the request-head deadline.
+   --  @param Item HTTP connection with an unread body
+   --  @param Value Request head previously read from Item
+   --  @param Token Optional cancellation source
+   --  @exception Resource_Exhausted Shared buffered ingress budget is full
+   procedure Buffer_Request_Body
+     (Item  : in out Connection;
+      Value : in out Request;
+      Token : access Flyology.Cancellation.Token := null);
+
    --  Read and parse the next request, buffering its complete decoded body.
    --  This compatibility operation is implemented over Read_Request_Head and
    --  Read_Body. When Item has an ingress budget, fixed bodies reserve their
@@ -243,6 +277,47 @@ package Flyology.HTTP.Server is
       Close         : Boolean := False;
       Timeout       : Duration := 30.0;
       Token         : access Flyology.Cancellation.Token := null);
+
+   --  Start an arbitrary streaming response. HTTP/1.1 uses chunked framing;
+   --  HTTP/1.0 uses connection-close delimiting. The handler remains the sole
+   --  writer until End_Response_Stream completes.
+   --  @param Item HTTP connection
+   --  @param Status HTTP status
+   --  @param Content_Type Media type, or empty to omit
+   --  @param Extra_Headers Additional validated response fields
+   --  @param Close Force connection closure after the stream
+   --  @param Timeout Transport send deadline
+   --  @param Token Optional cancellation source
+   procedure Begin_Response_Stream
+     (Item          : in out Connection;
+      Status        : Positive;
+      Content_Type  : String;
+      Extra_Headers : String := "";
+      Close         : Boolean := False;
+      Timeout       : Duration := 30.0;
+      Token         : access Flyology.Cancellation.Token := null);
+
+   --  Send one streaming response chunk with transport backpressure.
+   --  Empty data is a no-op and HEAD suppresses data bytes.
+   --  @param Item Active streaming response
+   --  @param Data Response bytes
+   --  @param Timeout Transport send deadline
+   --  @param Token Optional cancellation source
+   procedure Write_Response_Chunk
+     (Item    : in out Connection;
+      Data    : String;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null);
+
+   --  Complete a streaming response and release the connection for another
+   --  request when persistence remains safe.
+   --  @param Item Active streaming response
+   --  @param Timeout Transport send deadline
+   --  @param Token Optional cancellation source
+   procedure End_Response_Stream
+     (Item    : in out Connection;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null);
 
    --  Report whether the last request or response requires transport close.
    --  @param Item HTTP connection
@@ -383,7 +458,8 @@ private
       Keep_Alive    : Boolean := False;
    end record;
 
-   type Connection_State is (Reading_HTTP, Streaming_SSE, WebSocket, Terminal);
+   type Connection_State is
+     (Reading_HTTP, Streaming_HTTP, Streaming_SSE, WebSocket, Terminal);
 
    type Request_Body_Mode is (No_Body, Fixed_Body, Chunked_Body);
    type Ingress_Budget_Access is access all Ingress_Budget;

@@ -1,10 +1,13 @@
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.HTTP;
 with Flyology.HTTP.Server;
+with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Connection_Handlers;
+with Flyology.HTTP.Server.Routing;
 with Flyology.IO;
 
 procedure HTTP_Smoke is
@@ -827,6 +830,220 @@ procedure HTTP_Smoke is
       pragma Assert (Is_Rejected (Oversized_Header));
    end Check_Rejections;
 
+   procedure Check_Applications_And_Routing is
+      package Applications renames Flyology.HTTP.Server.Applications;
+
+      type Context is record
+         Calls      : Natural := 0;
+         Last_Value : Unbounded_String;
+      end record;
+
+      package Routing is new Flyology.HTTP.Server.Routing (Context);
+
+      procedure Home
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         State.Calls := State.Calls + 1;
+         X.Text (200, "home");
+      end Home;
+
+      procedure User
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         State.Calls := State.Calls + 1;
+         State.Last_Value := To_Unbounded_String (X.Parameter ("id"));
+         X.Text (200, "user " & X.Parameter ("id"));
+      end User;
+
+      procedure Asset
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         State.Calls := State.Calls + 1;
+         State.Last_Value := To_Unbounded_String (X.Parameter ("path"));
+         X.Text (200, X.Parameter ("path"));
+      end Asset;
+
+      procedure Buffered
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         State.Calls := State.Calls + 1;
+         State.Last_Value := To_Unbounded_String (X.Content);
+         X.Text (200, X.Content);
+      end Buffered;
+
+      procedure Streamed
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         Buffer   : Ada.Streams.Stream_Element_Array (1 .. 2);
+         Last     : Ada.Streams.Stream_Element_Offset;
+         Finished : Boolean;
+         Value    : Unbounded_String;
+      begin
+         State.Calls := State.Calls + 1;
+         loop
+            X.Read_Body (Buffer, Last, Finished);
+            for Index in Buffer'First .. Last loop
+               Append (Value, Character'Val (Buffer (Index)));
+            end loop;
+            exit when Finished;
+         end loop;
+         State.Last_Value := Value;
+         X.Text (200, To_String (Value));
+      end Streamed;
+
+      procedure Stream_Response
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         State.Calls := State.Calls + 1;
+         X.Begin_Stream (200, "text/plain");
+         X.Write_Chunk ("one");
+         X.Write_Chunk ("two");
+         X.End_Stream;
+      end Stream_Response;
+
+      Routes : Routing.Router (Capacity => 12, Slashes => Routing.Strict_Slashes);
+      Admin  : Routing.Router (Capacity => 2, Slashes => Routing.Strict_Slashes);
+      State  : Context;
+      Peer   : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+
+      procedure Run
+        (Input : String;
+         Expected : String;
+         Expected_Status : String := "200")
+      is
+         Wire : aliased Memory_Transport;
+      begin
+         Wire.Input := To_Unbounded_String (Input);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Routes.Serve (State, Client, Peer);
+         end;
+         declare
+            Output : constant String := To_String (Wire.Output);
+         begin
+            pragma Assert
+              (Ada.Strings.Fixed.Index
+                 (Output, "HTTP/1.1 " & Expected_Status) /= 0);
+            pragma Assert (Ada.Strings.Fixed.Index (Output, Expected) /= 0);
+         end;
+      end Run;
+   begin
+      Routes.Get ("/", Home'Access, Name => "home");
+      Routes.Get ("/users/{id}", User'Access, Name => "users.show");
+      Routes.Post
+        ("/users/{id}", Buffered'Access, Name => "users.update",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Body_Handling => Applications.Buffer_Body,
+              Max_Body      => 64));
+      Routes.Get ("/assets/{*path}", Asset'Access, Name => "assets.show");
+      Routes.Post
+        ("/stream", Streamed'Access, Name => "stream",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Body_Handling => Applications.Stream_Body,
+              Max_Body      => 64));
+      Routes.Get
+        ("/stream-response", Stream_Response'Access,
+         Name => "stream.response");
+      Admin.Get ("/", Home'Access, Name => "index");
+      Routes.Mount ("/admin", Admin, Name_Prefix => "admin.");
+
+      Run
+        ("GET /users/%31 HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "user 1");
+      pragma Assert (To_String (State.Last_Value) = "1");
+
+      Run
+        ("HEAD /users/9 HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "Content-Length: 6");
+
+      Run
+        ("GET /assets/css/site.css HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "css/site.css");
+      pragma Assert (To_String (State.Last_Value) = "css/site.css");
+
+      Run
+        ("POST /users/2 HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Expect: 100-continue" & CRLF
+         & "Content-Length: 5" & CRLF
+         & "Connection: close" & CRLF & CRLF & "hello",
+         "100 Continue");
+      pragma Assert (To_String (State.Last_Value) = "hello");
+
+      Run
+        ("POST /stream HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Content-Length: 5" & CRLF
+         & "Connection: close" & CRLF & CRLF & "world",
+         "world");
+      pragma Assert (To_String (State.Last_Value) = "world");
+
+      Run
+        ("GET /stream-response HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "3" & CRLF & "one" & CRLF & "3" & CRLF & "two" & CRLF);
+
+      Run
+        ("GET /admin HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "home");
+
+      Run
+        ("PUT /users/3 HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "Allow: GET, HEAD, POST", "405");
+
+      Run
+        ("GET /missing HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "not-found", "404");
+
+      Run
+        ("GET /users/3/ HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "not-found", "404");
+
+      Run
+        ("GET /users/a%2Fb HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "invalid-path", "400");
+
+      declare
+         Ambiguous : Routing.Router
+           (Capacity => 2, Slashes => Routing.Strict_Slashes);
+         Rejected  : Boolean := False;
+      begin
+         Ambiguous.Get ("/{left}/x", Home'Access);
+         begin
+            Ambiguous.Get ("/x/{right}", Home'Access);
+         exception
+            when Routing.Route_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
+   end Check_Applications_And_Routing;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -843,4 +1060,5 @@ begin
    Check_Application_Failure_Propagates;
    Check_Handler_Limits;
    Check_Rejections;
+   Check_Applications_And_Routing;
 end HTTP_Smoke;

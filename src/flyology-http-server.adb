@@ -1059,25 +1059,57 @@ package body Flyology.HTTP.Server is
    function Body_Complete (Item : Connection) return Boolean is
      (Item.Body_Done);
 
-   procedure Read_Request
-     (Item        : in out Connection;
-      Value       : out Request;
-      Peer_Closed : out Boolean;
-      Timeout     : Duration := 30.0;
-      Max_Body    : Natural := Max_Request_Body;
-      Token       : access Flyology.Cancellation.Token := null)
+   function Request_Deadline (Item : Connection) return Ada.Real_Time.Time is
+     (if Item.Body_Timeout < 0.0
+      then Ada.Real_Time.Time_Last
+      else Item.Body_Started
+        + Ada.Real_Time.To_Time_Span (Item.Body_Timeout));
+
+   procedure Narrow_Request_Deadline
+     (Item     : in out Connection;
+      Deadline : Ada.Real_Time.Time)
+   is
+      Current : constant Ada.Real_Time.Time := Request_Deadline (Item);
+   begin
+      if Deadline > Current then
+         raise Program_Error with "HTTP request deadline cannot be extended";
+      elsif Deadline <= Item.Body_Started then
+         Item.Body_Timeout := 0.0;
+      elsif Deadline < Current then
+         Item.Body_Timeout := Ada.Real_Time.To_Duration
+           (Deadline - Item.Body_Started);
+      end if;
+   end Narrow_Request_Deadline;
+
+   procedure Narrow_Body_Limit
+     (Item    : in out Connection;
+      Maximum : Natural)
+   is
+   begin
+      if Maximum > Item.Body_Limit then
+         raise Program_Error with "HTTP body limit cannot be extended";
+      elsif Item.Body_Total /= 0 then
+         raise Program_Error with
+           "HTTP body limit cannot change after body consumption";
+      elsif Item.Body_Remaining > Maximum then
+         raise Protocol_Error with "HTTP request body is too large";
+      end if;
+      Item.Body_Limit := Maximum;
+   end Narrow_Body_Limit;
+
+   procedure Buffer_Request_Body
+     (Item  : in out Connection;
+      Value : in out Request;
+      Token : access Flyology.Cancellation.Token := null)
    is
       Buffer   : Ada.Streams.Stream_Element_Array (1 .. 8 * 1_024);
       Last     : Ada.Streams.Stream_Element_Offset;
       Finished : Boolean;
       Reserved : Natural := 0;
    begin
-      Read_Request_Head
-        (Item, Value, Peer_Closed, Timeout, Max_Body, Token);
-      if Peer_Closed then
+      if Item.Body_Done then
          return;
       end if;
-
       Reserved :=
         (case Item.Body_Mode is
             when No_Body      => 0,
@@ -1095,8 +1127,7 @@ package body Flyology.HTTP.Server is
          exit when Finished;
       end loop;
 
-      if Item.Buffered_Bytes > Item.Body_Total
-      then
+      if Item.Buffered_Bytes > Item.Body_Total then
          Release
            (Item.Reservation_Budget.all,
             Item.Buffered_Bytes - Item.Body_Total);
@@ -1109,6 +1140,23 @@ package body Flyology.HTTP.Server is
       when others =>
          Release_Buffered (Item);
          raise;
+   end Buffer_Request_Body;
+
+   procedure Read_Request
+     (Item        : in out Connection;
+      Value       : out Request;
+      Peer_Closed : out Boolean;
+      Timeout     : Duration := 30.0;
+      Max_Body    : Natural := Max_Request_Body;
+      Token       : access Flyology.Cancellation.Token := null)
+   is
+   begin
+      Read_Request_Head
+        (Item, Value, Peer_Closed, Timeout, Max_Body, Token);
+      if Peer_Closed then
+         return;
+      end if;
+      Buffer_Request_Body (Item, Value, Token);
    end Read_Request;
 
    function Reason (Status : Positive) return String is
@@ -1118,15 +1166,30 @@ package body Flyology.HTTP.Server is
          when 200 => return "OK";
          when 201 => return "Created";
          when 202 => return "Accepted";
+         when 203 => return "Non-Authoritative Information";
          when 204 => return "No Content";
+         when 205 => return "Reset Content";
+         when 206 => return "Partial Content";
+         when 301 => return "Moved Permanently";
+         when 302 => return "Found";
+         when 303 => return "See Other";
+         when 304 => return "Not Modified";
+         when 307 => return "Temporary Redirect";
+         when 308 => return "Permanent Redirect";
          when 400 => return "Bad Request";
          when 401 => return "Unauthorized";
          when 403 => return "Forbidden";
          when 404 => return "Not Found";
          when 405 => return "Method Not Allowed";
+         when 406 => return "Not Acceptable";
          when 408 => return "Request Timeout";
+         when 409 => return "Conflict";
+         when 410 => return "Gone";
          when 413 => return "Content Too Large";
+         when 415 => return "Unsupported Media Type";
+         when 422 => return "Unprocessable Content";
          when 426 => return "Upgrade Required";
+         when 429 => return "Too Many Requests";
          when 500 => return "Internal Server Error";
          when 501 => return "Not Implemented";
          when 503 => return "Service Unavailable";
@@ -1286,6 +1349,96 @@ package body Flyology.HTTP.Server is
       end loop;
       return Buffer (Cursor .. Buffer'Last);
    end Hex;
+
+   procedure Begin_Response_Stream
+     (Item          : in out Connection;
+      Status        : Positive;
+      Content_Type  : String;
+      Extra_Headers : String := "";
+      Close         : Boolean := False;
+      Timeout       : Duration := 30.0;
+      Token         : access Flyology.Cancellation.Token := null)
+   is
+      Must_Close : constant Boolean :=
+        Close
+        or else Item.Request_Close
+        or else Item.Current_Version = HTTP_1_0;
+      Head : Unbounded_String;
+   begin
+      if Item.State /= Reading_HTTP or else Item.Response_Begun then
+         raise Program_Error with "HTTP response already started";
+      elsif not Item.Body_Done then
+         raise Program_Error with
+           "streaming response requires a consumed request body";
+      elsif Status not in 200 .. 599 then
+         raise Constraint_Error with
+           "final HTTP status must be 200 through 599";
+      elsif Status in 204 | 205 | 304 then
+         raise Program_Error with
+           "HTTP status does not permit a streaming response";
+      end if;
+      Validate_Extra_Headers (Extra_Headers);
+      for Value of Content_Type loop
+         if Character'Pos (Value) < 32 or else Character'Pos (Value) = 127 then
+            raise Program_Error with "invalid HTTP content type";
+         end if;
+      end loop;
+      Append
+        (Head,
+         (if Item.Current_Version = HTTP_1_1
+          then "HTTP/1.1 " else "HTTP/1.0 ")
+         & Decimal (Status) & " " & Reason (Status) & CRLF);
+      if Content_Type'Length > 0 then
+         Append (Head, "Content-Type: " & Content_Type & CRLF);
+      end if;
+      if Item.Current_Version = HTTP_1_1 then
+         Append (Head, "Transfer-Encoding: chunked" & CRLF);
+      end if;
+      Append (Head, Extra_Headers);
+      Append
+        (Head,
+         "Connection: " & (if Must_Close then "close" else "keep-alive")
+         & CRLF & CRLF);
+      Write (Item, To_String (Head), Timeout, Token);
+      Item.Response_Begun := True;
+      Item.Request_Close := Must_Close;
+      Item.State := Streaming_HTTP;
+   end Begin_Response_Stream;
+
+   procedure Write_Response_Chunk
+     (Item    : in out Connection;
+      Data    : String;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null)
+   is
+   begin
+      if Item.State /= Streaming_HTTP then
+         raise Program_Error with "HTTP streaming response is not active";
+      elsif Data'Length = 0 or else Item.Current_Is_Head then
+         return;
+      elsif Item.Current_Version = HTTP_1_1 then
+         Write
+           (Item, Hex (Data'Length) & CRLF & Data & CRLF, Timeout, Token);
+      else
+         Write (Item, Data, Timeout, Token);
+      end if;
+   end Write_Response_Chunk;
+
+   procedure End_Response_Stream
+     (Item    : in out Connection;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null)
+   is
+   begin
+      if Item.State /= Streaming_HTTP then
+         raise Program_Error with "HTTP streaming response is not active";
+      end if;
+      if Item.Current_Version = HTTP_1_1 and then not Item.Current_Is_Head then
+         Write (Item, "0" & CRLF & CRLF, Timeout, Token);
+      end if;
+      Item.State :=
+        (if Item.Request_Close then Terminal else Reading_HTTP);
+   end End_Response_Stream;
 
    procedure Begin_SSE
      (Item          : in out Connection;

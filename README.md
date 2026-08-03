@@ -1008,6 +1008,40 @@ connection closed, or explicitly call `Discard_Body` under that same deadline.
 The buffered `Read_Request` and default connection handler remain available
 for small payloads.
 
+Higher-level application facilities are optional. `Flyology.HTTP.Server` and
+`Connection_Handlers` remain directly usable; `Applications.Exchange` adds a
+borrowed request scope with body and response helpers, while the generic
+`Routing` package adds typed application context, named routes, parameters,
+subrouter mounting, body policy, and deadline narrowing:
+
+```ada
+package Routes is new
+  Flyology.HTTP.Server.Routing (App_Context);
+
+procedure Show_User
+  (State : in out App_Context;
+   X     : in out Flyology.HTTP.Server.Applications.Exchange) is
+begin
+   State.Requests := State.Requests + 1;
+   X.Text (200, "user " & X.Parameter ("id") & ASCII.LF);
+end Show_User;
+
+Router.Get
+  ("/users/{id}", Show_User'Access, Name => "users.show");
+```
+
+Route patterns contain static segments, `{name}` parameters, or one final
+`{*remainder}`. Paths are split before percent-decoding, encoded separators and
+malformed UTF-8 are rejected, and `+` remains a literal plus in a path. Routers
+provide automatic 404, 405 with `Allow`, and HEAD fallback to GET. Trailing
+slash behavior is selected explicitly when the bounded router is declared.
+
+`Exchange` does not require buffering. A `Stream_Body` route pulls decoded
+request bytes with `X.Read_Body`; `Begin_Stream`, `Write_Chunk`, and
+`End_Stream` provide a general response stream with synchronous transport
+backpressure. The active handler remains the sole connection writer. The raw
+SSE and WebSocket APIs remain available through the borrowed connection.
+
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
 13 upgrade and client key. Its default origin policy rejects browser `Origin`
