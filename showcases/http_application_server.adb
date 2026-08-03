@@ -43,6 +43,7 @@ with Flyology.Observability;
 
 procedure HTTP_Application_Server is
    use type Ada.Streams.Stream_Element_Offset;
+   use type Flyology.Observability.Counter;
    use type Flyology.HTTP.Server.WebSocket_Data_Kind;
    use type Flyology.IO.Files.File_Descriptor;
    use type Flyology.IO.Files.File_Offset;
@@ -184,9 +185,92 @@ procedure HTTP_Application_Server is
          end Put;
       end Log_Lock;
 
+      Access_Log_Capacity  : constant Positive := 64;
+      Access_Log_Max_Bytes : constant Positive := 1_024;
+
+      subtype Access_Log_Index is Natural range 0 .. Access_Log_Capacity - 1;
+
+      type Access_Log_Entry is record
+         Sequence : Observation.Counter := 0;
+         Length   : Natural range 0 .. Access_Log_Max_Bytes := 0;
+         Data     : String (1 .. Access_Log_Max_Bytes) := (others => ' ');
+      end record;
+
+      type Access_Log_Entries is
+        array (Access_Log_Index) of Access_Log_Entry;
+
+      --  Logging must never wait for a browser. Completed request records are
+      --  copied into a fixed ring, and each SSE subscriber advances its own
+      --  cursor over the retained window. Slow subscribers observe a gap
+      --  count instead of applying backpressure to request completion.
+      protected type Access_Log_Buffer is
+         procedure Append (Value : String);
+         procedure Read_After
+           (After     : Observation.Counter;
+            Value     : out Access_Log_Entry;
+            Available : out Boolean;
+            Dropped   : out Observation.Counter);
+      private
+         Entries       : Access_Log_Entries;
+         Head          : Access_Log_Index := 0;
+         Count         : Natural range 0 .. Access_Log_Capacity := 0;
+         Next_Sequence : Observation.Counter := 1;
+      end Access_Log_Buffer;
+
+      protected body Access_Log_Buffer is
+         procedure Append (Value : String) is
+            Overflow : constant String :=
+              "{""type"":""access-log-record-too-large""}";
+            Stored   : constant String :=
+              (if Value'Length <= Access_Log_Max_Bytes then Value else Overflow);
+            Slot     : Access_Log_Index;
+         begin
+            if Count = Access_Log_Capacity then
+               Slot := Head;
+               Head := Access_Log_Index
+                 ((Natural (Head) + 1) mod Access_Log_Capacity);
+            else
+               Slot := Access_Log_Index
+                 ((Natural (Head) + Count) mod Access_Log_Capacity);
+               Count := Count + 1;
+            end if;
+            Entries (Slot).Sequence := Next_Sequence;
+            Entries (Slot).Length := Stored'Length;
+            Entries (Slot).Data (1 .. Stored'Length) := Stored;
+            Next_Sequence := Next_Sequence + 1;
+         end Append;
+
+         procedure Read_After
+           (After     : Observation.Counter;
+            Value     : out Access_Log_Entry;
+            Available : out Boolean;
+            Dropped   : out Observation.Counter)
+         is
+            Slot : Access_Log_Index;
+         begin
+            Value := (others => <>);
+            Available := False;
+            Dropped := 0;
+            if Count = 0 then
+               return;
+            end if;
+            for Offset in 0 .. Count - 1 loop
+               Slot := Access_Log_Index
+                 ((Natural (Head) + Offset) mod Access_Log_Capacity);
+               if Entries (Slot).Sequence > After then
+                  Value := Entries (Slot);
+                  Available := True;
+                  Dropped := Entries (Slot).Sequence - After - 1;
+                  return;
+               end if;
+            end loop;
+         end Read_After;
+      end Access_Log_Buffer;
+
       type Console_Logger is limited new
         Flyology.HTTP.Server.Logging.Sink with record
          Lock : Log_Lock;
+         Feed : Access_Log_Buffer;
       end record;
 
       overriding procedure Write
@@ -201,14 +285,31 @@ procedure HTTP_Application_Server is
          Response_Bytes : Natural;
          Elapsed        : Duration)
       is
-         pragma Unreferenced
-           (Target, Peer, Request_Bytes, Response_Bytes, Elapsed);
+         pragma Unreferenced (Target);
       begin
+         declare
+            Record_JSON : constant String :=
+              "{""method"":" & JSON_Quote (Method)
+              & ",""route"":" & JSON_Quote (Route)
+              & ",""status"":" & Compact (Status)
+              & ",""request_id"":" & JSON_Quote (Request_ID)
+              & ",""peer"":" & JSON_Quote (Sockets.Image (Peer))
+              & ",""request_bytes"":" & Compact (Request_Bytes)
+              & ",""response_bytes"":" & Compact (Response_Bytes)
+              & ",""elapsed"":" & Compact (Elapsed) & "}";
+         begin
+            Item.Feed.Append (Record_JSON);
+         end;
          Item.Lock.Put
            (Method & " " & Route & " status="
             & Ada.Strings.Fixed.Trim
                 (Natural'Image (Status), Ada.Strings.Both)
             & " request_id=" & Request_ID);
+      exception
+         when others =>
+            --  A diagnostic sink cannot be allowed to fail the request it
+            --  observes. Middleware also guards this boundary independently.
+            null;
       end Write;
 
       Logger  : aliased Console_Logger;
@@ -746,6 +847,99 @@ procedure HTTP_Application_Server is
          end;
       end Runtime_Events;
 
+      procedure Request_Log_Events
+        (State : in out Application_Context;
+         X     : in out App.Exchange)
+      is
+         package SSE renames Flyology.HTTP.Server.SSE_Handlers;
+         Session : aliased SSE.Session
+           (Capacity   => 16,
+            Byte_Limit => SSE.Default_Session_Bytes,
+            Budget     => null);
+         type Session_Access is access all SSE.Session;
+
+         function Event_JSON
+           (Value   : Access_Log_Entry;
+            Dropped : Observation.Counter) return String is
+           ("{""sequence"":" & Compact (Value.Sequence)
+            & ",""dropped_before"":" & Compact (Dropped)
+            & ",""entry"":" & Value.Data (1 .. Value.Length) & "}");
+
+         function Requested_Cursor return Observation.Counter is
+            Value : constant String := X.Request_Header ("Last-Event-ID");
+         begin
+            return
+              (if Value = "" then 0 else Observation.Counter'Value (Value));
+         exception
+            when Constraint_Error =>
+               --  An invalid or out-of-range cursor gets a bounded replay;
+               --  it never reaches the protected ring as attacker text.
+               return 0;
+         end Requested_Cursor;
+
+         task type Producer
+           (Item  : not null Session_Access;
+            Start : Observation.Counter)
+         is
+            pragma Task_Info (Model);
+         end Producer;
+
+         task body Producer is
+            Cursor    : Observation.Counter := Start;
+            Value     : Access_Log_Entry;
+            Dropped   : Observation.Counter;
+            Available : Boolean;
+            Accepted  : Boolean;
+            Timed_Out : Boolean;
+         begin
+            loop
+               exit when SSE.Cancelled (Item.all);
+               Logger.Feed.Read_After
+                 (Cursor, Value, Available, Dropped);
+               if Available then
+                  SSE.Publish_For
+                    (Item.all,
+                     (Data => Ada.Strings.Unbounded.To_Unbounded_String
+                        (Event_JSON (Value, Dropped)),
+                      Event => Ada.Strings.Unbounded.To_Unbounded_String
+                        ("request"),
+                      Id => Ada.Strings.Unbounded.To_Unbounded_String
+                        (Compact (Value.Sequence)),
+                      Retry         => 1_000,
+                      Include_Id    => True,
+                      Include_Retry => Cursor = 0),
+                     Accepted, Timeout => 0.5, Timed_Out => Timed_Out);
+                  if Accepted then
+                     Cursor := Value.Sequence;
+                  elsif not Timed_Out then
+                     exit;
+                  end if;
+               else
+                  --  The access-log callback only copies into the fixed ring.
+                  --  This request-scoped producer waits cooperatively for the
+                  --  next cursor check and never writes the connection.
+                  Flyology.IO.Timers.Sleep_For (0.10);
+               end if;
+            end loop;
+            SSE.Close (Item.all);
+         exception
+            when others =>
+               SSE.Close (Item.all);
+         end Producer;
+      begin
+         Complete (State);
+         declare
+            Source : Producer
+              (Session'Unchecked_Access, Requested_Cursor);
+         begin
+            --  Run remains the sole response writer even while application
+            --  requests complete concurrently on either handler lane.
+            SSE.Run
+              (X, Session, Metrics'Access,
+               Idle_Quantum => 0.05, Heartbeat => 5.0);
+         end;
+      end Request_Log_Events;
+
       procedure Private_Profile
         (State : in out Application_Context;
          X     : in out App.Exchange) is
@@ -1180,6 +1374,14 @@ procedure HTTP_Application_Server is
            (Routing.Default_Route_Policy with delta
               Upgrade => Routing.Allow_SSE,
               Timeout => 110.0));
+      State.Routes.Get
+        ("/request-log/events", Request_Log_Events'Access,
+         Name => "request-log.events",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade     => Routing.Allow_SSE,
+              Timeout     => 110.0,
+              Concurrency => 8));
       State.Routes.Get
         ("/private", Private_Profile'Access, Name => "private",
          Policy =>

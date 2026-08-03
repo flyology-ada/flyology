@@ -79,11 +79,21 @@
         <div class="section-intro">
           <p class="section-index">01 · server-sent events</p>
           <h2 id="events-title">A stream should feel alive.</h2>
-          <p>The producer publishes several typed events through a bounded mailbox. The connection owner drains them in order, applies backpressure, and closes after the final event.</p>
-          <button class="button secondary" type="button" data-sse-reconnect>Run another flight</button>
+          <p>Switch between a finite lifecycle sequence and this server’s completed request log. Both sources cross a bounded mailbox; only the connection owner writes the event stream.</p>
+          <div class="stream-controls">
+            <div class="stream-tabs" role="tablist" aria-label="Server-sent event source">
+              <button id="stream-flight-tab" type="button" role="tab" aria-selected="true" aria-controls="event-stream-panel" data-sse-stream="flight">
+                <strong>Flight sequence</strong><span>six typed events, then close</span>
+              </button>
+              <button id="stream-requests-tab" type="button" role="tab" aria-selected="false" aria-controls="event-stream-panel" tabindex="-1" data-sse-stream="requests">
+                <strong>Request log</strong><span>live completed requests</span>
+              </button>
+            </div>
+            <button class="stream-restart" type="button" data-sse-reconnect>Replay flight</button>
+          </div>
           <figure class="source-panel compact-source">
-            <figcaption><span>bounded producer and sole writer</span><code>SSE_Events</code></figcaption>
-            <pre><code data-ada>SSE.Publish_For
+            <figcaption><span data-sse-source-caption>bounded producer and sole writer</span><code data-sse-source-name>SSE_Events</code></figcaption>
+            <pre><code data-ada data-sse-source-code>SSE.Publish_For
   (Session, Event,
    Accepted,
    Timeout   =&gt; 1.0,
@@ -94,11 +104,43 @@ SSE.Run
    Idle_Quantum =&gt; 0.05,
    Heartbeat    =&gt; 0.5);</code></pre>
           </figure>
+          <template data-sse-source-template="flight">SSE.Publish_For
+  (Session, Event,
+   Accepted,
+   Timeout   =&gt; 1.0,
+   Timed_Out =&gt; Timed_Out);
+
+SSE.Run
+  (X, Session, Metrics'Access,
+   Idle_Quantum =&gt; 0.05,
+   Heartbeat    =&gt; 0.5);</template>
+          <template data-sse-source-template="requests">Logger.Feed.Read_After
+  (Cursor, Value, Available, Dropped);
+
+SSE.Publish_For
+  (Item.all,
+   (Data =&gt; To_Unbounded_String
+      (Event_JSON (Value, Dropped)),
+    Event =&gt; To_Unbounded_String ("request"),
+    Id =&gt; To_Unbounded_String
+      (Compact (Value.Sequence)),
+    Retry =&gt; 1_000,
+    Include_Id =&gt; True,
+    Include_Retry =&gt; Cursor = 0),
+   Accepted,
+   Timeout   =&gt; 0.5,
+   Timed_Out =&gt; Timed_Out);
+
+--  The request task remains the sole writer.
+SSE.Run
+  (X, Session, Metrics'Access,
+   Idle_Quantum =&gt; 0.05,
+   Heartbeat    =&gt; 5.0);</template>
         </div>
-        <div class="telemetry-panel">
+        <div class="telemetry-panel" id="event-stream-panel" role="tabpanel" aria-labelledby="stream-flight-tab">
           <header>
             <div><span class="status-dot" data-sse-state="waiting"></span><strong data-sse-label>waiting for stream</strong></div>
-            <code>GET /events</code>
+            <code data-sse-route>GET /events</code>
           </header>
           <ol class="event-log" data-event-log aria-live="polite" aria-label="Incoming server events">
             <li class="empty-state">The next event will appear here.</li>

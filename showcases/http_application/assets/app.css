@@ -140,6 +140,18 @@ h2 { max-width: 12ch; font-size: clamp(2.5rem, 5vw, 4.7rem); font-weight: 590; }
 .tok-comment { color: color-mix(in oklch, var(--inverse) 43%, transparent); font-style: italic; }
 .tok-operator { color: oklch(82% 0.11 75); }
 .tok-identifier { color: color-mix(in oklch, var(--inverse) 88%, transparent); }
+.stream-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; margin-top: 1.8rem; gap: .65rem; }
+.stream-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: .72rem; background: var(--paper); overflow: hidden; }
+.stream-tabs button { min-width: 0; padding: .72rem .78rem; border: 0; background: transparent; text-align: left; cursor: pointer; transition: background 180ms var(--ease), color 180ms var(--ease); }
+.stream-tabs button + button { border-left: 1px solid var(--line); }
+.stream-tabs button:hover { background: var(--surface); }
+.stream-tabs button:focus-visible { position: relative; z-index: 1; outline-offset: -3px; }
+.stream-tabs button[aria-selected="true"] { background: var(--surface-strong); color: var(--violet-deep); }
+.stream-tabs strong, .stream-tabs span { display: block; }
+.stream-tabs strong { font-size: .78rem; font-weight: 620; }
+.stream-tabs span { margin-top: .18rem; color: var(--ink-soft); font-size: .64rem; }
+.stream-restart { padding: .55rem .85rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--paper); color: var(--violet-deep); font-size: .72rem; font-weight: 600; cursor: pointer; }
+.stream-restart:hover { background: var(--surface-strong); }
 .events-section { display: grid; grid-template-columns: minmax(18rem, .75fr) minmax(28rem, 1.25fr); gap: clamp(3rem, 8vw, 8rem); }
 .telemetry-panel, .chat-window, .upload-workbench { border: 1px solid var(--code-line); border-radius: .9rem; background: var(--code); color: var(--inverse); overflow: hidden; box-shadow: 0 1.7rem 4rem color-mix(in oklch, var(--code) 23%, transparent); }
 .telemetry-panel > header, .chat-window > header { display: flex; align-items: center; justify-content: space-between; min-height: 3.5rem; padding: .8rem 1rem; border-bottom: 1px solid var(--code-line); }
@@ -149,9 +161,11 @@ h2 { max-width: 12ch; font-size: clamp(2.5rem, 5vw, 4.7rem); font-weight: 590; }
 .event-log li { display: grid; grid-template-columns: 3rem 1fr auto; align-items: center; padding: 1rem 1.2rem; border-bottom: 1px solid var(--code-line); gap: 1rem; }
 .event-log .empty-state { display: block; padding: 2rem; color: color-mix(in oklch, var(--inverse) 56%, transparent); }
 .event-sequence { display: grid; place-items: center; width: 2.3rem; height: 2.3rem; border: 1px solid var(--violet); border-radius: 50%; color: var(--violet); font-family: var(--mono); font-size: .75rem; }
+.event-row.request .event-sequence { border-color: var(--teal); color: var(--teal); }
 .event-copy strong { display: block; font-weight: 560; }
 .event-copy span { color: color-mix(in oklch, var(--inverse) 62%, transparent); font-size: .82rem; }
 .event-time { color: var(--teal); font-family: var(--mono); font-size: .72rem; }
+.event-log .event-gap { display: block; padding: .7rem 1.2rem; color: oklch(82% 0.11 75); font-family: var(--mono); font-size: .7rem; }
 
 .chat-section { display: grid; grid-template-columns: minmax(20rem, .75fr) minmax(30rem, 1.25fr); align-items: start; gap: clamp(3rem, 8vw, 8rem); }
 .protocol-notes { margin: 2.5rem 0 0; border-block: 1px solid var(--line); }
@@ -301,6 +315,8 @@ footer p { max-width: 52ch; margin: 0; color: var(--ink-soft); font-size: .84rem
   .probe-key div { border-bottom: 1px solid var(--line); }
   .probe-key div:last-child { border-bottom: 0; }
   .middleware-path { grid-template-columns: 1fr; gap: .35rem; }
+  .stream-controls { grid-template-columns: 1fr; }
+  .stream-restart { min-height: 2.7rem; }
   .endpoint-list button { grid-template-columns: 2rem 1fr; }
   .probe-route { grid-column: 2; justify-items: start; grid-auto-flow: column; }
   .probe-evidence { grid-template-columns: 1fr; }

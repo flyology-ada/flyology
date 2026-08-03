@@ -62,45 +62,149 @@
   const eventLog = document.querySelector("[data-event-log]");
   const sseState = document.querySelector("[data-sse-state]");
   const sseLabel = document.querySelector("[data-sse-label]");
+  const sseRoute = document.querySelector("[data-sse-route]");
+  const ssePanel = document.querySelector("#event-stream-panel");
+  const sseRestart = document.querySelector("[data-sse-reconnect]");
+  const sseSourceCode = document.querySelector("[data-sse-source-code]");
+  const sseSourceName = document.querySelector("[data-sse-source-name]");
+  const sseSourceCaption = document.querySelector("[data-sse-source-caption]");
+  const streamTabs = [...document.querySelectorAll("[data-sse-stream]")];
+  const streamDefinitions = {
+    flight: {
+      url: "/events",
+      event: "flight",
+      route: "GET /events",
+      opening: "opening flight stream",
+      open: "flight stream connected",
+      empty: "The first lifecycle event will appear here.",
+      restart: "Replay flight",
+      sourceName: "SSE_Events",
+      sourceCaption: "bounded producer and sole writer"
+    },
+    requests: {
+      url: "/request-log/events",
+      event: "request",
+      route: "GET /request-log/events",
+      opening: "opening request log",
+      open: "request log live",
+      empty: "Waiting for a completed request. Try a probe below.",
+      restart: "Reconnect log",
+      sourceName: "Request_Log_Events",
+      sourceCaption: "bounded access-log cursor and sole writer"
+    }
+  };
+  let selectedStream = "flight";
 
   function setSSEState(state, label) {
     sseState.dataset.sseState = state;
     sseLabel.textContent = label;
   }
 
+  function receivedTime() {
+    return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function eventRow(sequenceValue, titleValue, detailValue, kind = "flight") {
+    const item = document.createElement("li");
+    item.className = `event-row ${kind}`;
+    const sequence = document.createElement("span");
+    sequence.className = "event-sequence";
+    sequence.textContent = String(sequenceValue).padStart(2, "0");
+    const copy = document.createElement("div");
+    copy.className = "event-copy";
+    const title = document.createElement("strong");
+    title.textContent = titleValue;
+    const detail = document.createElement("span");
+    detail.textContent = detailValue;
+    copy.append(title, detail);
+    const time = document.createElement("time");
+    time.className = "event-time";
+    time.textContent = receivedTime();
+    item.append(sequence, copy, time);
+    eventLog.append(item);
+    eventLog.scrollTop = eventLog.scrollHeight;
+  }
+
+  function requestDetail(entry) {
+    const status = entry.status === 0 ? "status unavailable" : `HTTP ${entry.status}`;
+    return `${status} · ${entry.request_id} · ${formatInteger(entry.request_bytes)} B in / ${formatInteger(entry.response_bytes)} B out · ${(Number(entry.elapsed) * 1000).toFixed(1)} ms`;
+  }
+
+  function showDroppedRequests(count) {
+    if (!count) return;
+    const item = document.createElement("li");
+    item.className = "event-gap";
+    item.textContent = `${formatInteger(count)} older request records fell outside the 64-entry retained window.`;
+    eventLog.append(item);
+  }
+
   function connectEvents() {
     if (eventSource) eventSource.close();
+    const definition = streamDefinitions[selectedStream];
     eventLog.replaceChildren();
-    setSSEState("waiting", "opening event stream");
-    eventSource = new EventSource("/events");
-    eventSource.onopen = () => setSSEState("open", "stream connected");
-    eventSource.addEventListener("flight", (event) => {
+    const empty = document.createElement("li");
+    empty.className = "empty-state";
+    empty.textContent = definition.empty;
+    eventLog.append(empty);
+    setSSEState("waiting", definition.opening);
+    const source = new EventSource(definition.url);
+    eventSource = source;
+    source.onopen = () => {
+      if (eventSource === source) setSSEState("open", definition.open);
+    };
+    source.addEventListener(definition.event, (event) => {
+      if (eventSource !== source) return;
+      eventLog.querySelector(".empty-state")?.remove();
       const value = JSON.parse(event.data);
-      const item = document.createElement("li");
-      const sequence = document.createElement("span");
-      sequence.className = "event-sequence";
-      sequence.textContent = String(value.sequence).padStart(2, "0");
-      const copy = document.createElement("div");
-      copy.className = "event-copy";
-      const title = document.createElement("strong");
-      title.textContent = value.phase;
-      const detail = document.createElement("span");
-      detail.textContent = value.detail;
-      copy.append(title, detail);
-      const time = document.createElement("time");
-      time.className = "event-time";
-      time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      item.append(sequence, copy, time);
-      eventLog.append(item);
-      eventLog.scrollTop = eventLog.scrollHeight;
+      if (selectedStream === "flight") {
+        eventRow(value.sequence, value.phase, value.detail);
+      } else {
+        showDroppedRequests(value.dropped_before);
+        eventRow(value.sequence, `${value.entry.method} ${value.entry.route || "unmatched"}`, requestDetail(value.entry), "request");
+      }
     });
-    eventSource.addEventListener("complete", () => {
+    source.addEventListener("complete", () => {
+      if (eventSource !== source || selectedStream !== "flight") return;
       setSSEState("open", "flight complete");
-      eventSource.close();
+      source.close();
     });
-    eventSource.onerror = () => setSSEState("error", "stream interrupted");
+    source.onerror = () => {
+      if (eventSource === source) setSSEState("error", `${selectedStream === "flight" ? "flight stream" : "request log"} reconnecting`);
+    };
   }
-  document.querySelector("[data-sse-reconnect]").addEventListener("click", connectEvents);
+
+  function selectStream(name, moveFocus = false) {
+    selectedStream = name;
+    const definition = streamDefinitions[name];
+    streamTabs.forEach((tab) => {
+      const selected = tab.dataset.sseStream === name;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && moveFocus) tab.focus();
+    });
+    const selectedTab = streamTabs.find((tab) => tab.dataset.sseStream === name);
+    ssePanel.setAttribute("aria-labelledby", selectedTab.id);
+    sseRoute.textContent = definition.route;
+    sseRestart.textContent = definition.restart;
+    sseSourceName.textContent = definition.sourceName;
+    sseSourceCaption.textContent = definition.sourceCaption;
+    const template = document.querySelector(`[data-sse-source-template="${name}"]`);
+    sseSourceCode.textContent = template.content.textContent.trim();
+    highlightAda(sseSourceCode);
+    connectEvents();
+  }
+
+  streamTabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => selectStream(tab.dataset.sseStream));
+    tab.addEventListener("keydown", (event) => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      event.preventDefault();
+      const offset = event.key === "ArrowRight" ? 1 : -1;
+      const next = (index + offset + streamTabs.length) % streamTabs.length;
+      selectStream(streamTabs[next].dataset.sseStream, true);
+    });
+  });
+  sseRestart.addEventListener("click", connectEvents);
   connectEvents();
 
   let socket;
