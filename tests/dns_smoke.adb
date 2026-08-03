@@ -19,7 +19,7 @@ procedure DNS_Smoke is
    use type Sockets.Selector_Status;
    use type Flyology.IO.Files.File_Descriptor;
 
-   procedure Run (Model : Flyology.Execution_Model) is
+   function Run (Model : Flyology.Execution_Model) return Boolean is
       Cancel_Source : aliased Flyology.Wake_Sources.Source;
       Search_Name   : constant String (1 .. 60) := (others => 'r');
       Bare_Name     : constant String (1 .. 60) := (others => 'b');
@@ -45,6 +45,10 @@ procedure DNS_Smoke is
          function Alias_Queries return Natural;
          procedure Chain_Query;
          function Chain_Queries return Natural;
+         procedure TCP_Truncated_Query;
+         function TCP_Truncated_Queries return Natural;
+         procedure Recursive_Failure_Query;
+         function Recursive_Failure_Queries return Natural;
          procedure Finished (Passed : Boolean);
          entry Wait_Finished (Passed : out Boolean);
       private
@@ -58,6 +62,8 @@ procedure DNS_Smoke is
          A_Count : Natural := 0;
          Alias_Count : Natural := 0;
          Chain_Count : Natural := 0;
+         TCP_Truncated_Count : Natural := 0;
+         Recursive_Failure_Count : Natural := 0;
          Is_Finished : Boolean := False;
          All_OK : Boolean := False;
       end Control;
@@ -170,6 +176,18 @@ procedure DNS_Smoke is
             Chain_Count := Chain_Count + 1;
          end Chain_Query;
          function Chain_Queries return Natural is (Chain_Count);
+         procedure TCP_Truncated_Query is
+         begin
+            TCP_Truncated_Count := TCP_Truncated_Count + 1;
+         end TCP_Truncated_Query;
+         function TCP_Truncated_Queries return Natural is
+           (TCP_Truncated_Count);
+         procedure Recursive_Failure_Query is
+         begin
+            Recursive_Failure_Count := Recursive_Failure_Count + 1;
+         end Recursive_Failure_Query;
+         function Recursive_Failure_Queries return Natural is
+           (Recursive_Failure_Count);
          procedure Finished (Passed : Boolean) is
          begin
             All_OK := Passed;
@@ -484,6 +502,46 @@ procedure DNS_Smoke is
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
+               elsif Name = "tcp-truncated.test" then
+                  Control.TCP_Truncated_Query;
+                  Send_Response (Name, Truncated => True);
+                  declare
+                     Connection : Sockets.Socket_Type;
+                     Address    : Sockets.Sock_Addr_Type;
+                     Prefix     : Streams.Stream_Element_Array (1 .. 2);
+                     TCP_Last   : Streams.Stream_Element_Offset;
+                     Length     : Natural;
+                     Status     : Sockets.Selector_Status;
+                  begin
+                     Sockets.Accept_Socket
+                       (TCP, Connection, Address, Timeout => 1.0,
+                        Status => Status);
+                     if Status = Sockets.Completed then
+                        Sockets.Set_Socket_Option
+                          (Connection, Sockets.Socket_Level,
+                           (Name => Sockets.Receive_Timeout,
+                            Timeout => 1.0));
+                        Sockets.Receive_Socket (Connection, Prefix, TCP_Last);
+                        Length :=
+                          Natural (Prefix (1)) * 256 + Natural (Prefix (2));
+                        Sockets.Receive_Socket
+                          (Connection,
+                           Query
+                             (1 .. Streams.Stream_Element_Offset (Length)),
+                           TCP_Last);
+                        Last := Streams.Stream_Element_Offset (Length);
+                        Send_Response
+                          (Name, Truncated => True, Socket => Connection);
+                        Sockets.Close_Socket (Connection);
+                     end if;
+                  end;
+               elsif Name = "recursive-failure.test" then
+                  Control.Recursive_Failure_Query;
+                  Send_Response (Name, CNAME => "recursive-target.test");
+               elsif Name = "recursive-target.test" then
+                  Control.Recursive_Failure_Query;
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.70", Malformed => True);
                elsif Name = "dual.test" then
                   if Query_Type = 1 then
                      Send_Response (Name, IPv4 => "192.0.2.66");
@@ -675,6 +733,25 @@ procedure DNS_Smoke is
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = Address;
          end Expect_IPv6;
+
+         procedure Expect_Malformed (Name : String) is
+            Raised : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array := DNS.Resolve_Using
+                    (Name, Servers, DNS.IPv4_Only, Timeout => 1.0,
+                     Attempts => 1, Retry_Interval => 0.1);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Malformed_Response => Raised := True;
+               when others => null;
+            end;
+            OK := OK and Raised;
+         end Expect_Malformed;
       begin
          Control.Await_Start;
          Control.Get_Address (Server);
@@ -706,6 +783,16 @@ procedure DNS_Smoke is
          Expect ("malformed.test", "192.0.2.2");
          Expect ("retry.test", "198.51.100.4");
          Expect ("tcp.test", "198.51.100.9");
+         DNS.Testing.Reset_Receive_Waits;
+         Expect_Malformed ("tcp-truncated.test");
+         OK := OK
+           and then Control.TCP_Truncated_Queries = 1
+           and then DNS.Testing.Post_Close_Receive_Waits = 0;
+         DNS.Testing.Reset_Receive_Waits;
+         Expect_Malformed ("recursive-failure.test");
+         OK := OK
+           and then Control.Recursive_Failure_Queries = 2
+           and then DNS.Testing.Post_Close_Receive_Waits = 0;
          declare
             Ordered : constant DNS.Name_Server_Array := [Server, Secondary];
             Reversed : constant DNS.Name_Server_Array := [Secondary, Server];
@@ -867,12 +954,19 @@ procedure DNS_Smoke is
       if Ada.Directories.Exists (Config_Path (Address, "-bare")) then
          Ada.Directories.Delete_File (Config_Path (Address, "-bare"));
       end if;
-      pragma Assert (Passed);
+      return Passed;
    end Run;
 
 begin
    Sockets.Initialize;
-   Run (Flyology.Native_Task);
-   Run (Flyology.Lightweight_Task);
-   Sockets.Finalize;
+   declare
+      Native_Passed : constant Boolean := Run (Flyology.Native_Task);
+      Lightweight_Passed : constant Boolean :=
+        Run (Flyology.Lightweight_Task);
+   begin
+      Sockets.Finalize;
+      pragma Assert (Native_Passed, "native DNS lifecycle checks failed");
+      pragma Assert
+        (Lightweight_Passed, "lightweight DNS lifecycle checks failed");
+   end;
 end DNS_Smoke;

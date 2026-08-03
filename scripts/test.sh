@@ -6,6 +6,11 @@ alr=$("$project_root/scripts/find-alr.sh")
 
 cd "$project_root"
 
+#  DNS lifecycle regressions observe the receive-loop boundary. The project
+#  default is false, so normal builds compile the observation calls away.
+FLYOLOGY_DNS_TEST_HOOKS=true
+export FLYOLOGY_DNS_TEST_HOOKS
+
 run_gprbuild () {
   if [ "$(uname -s)" = Darwin ]; then
     compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)

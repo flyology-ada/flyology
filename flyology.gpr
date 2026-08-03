@@ -1,6 +1,17 @@
 with "config/flyology_config.gpr";
 project Flyology is
 
+   type DNS_Test_Hooks_Type is ("false", "true");
+   DNS_Test_Hooks : DNS_Test_Hooks_Type :=
+     external ("FLYOLOGY_DNS_TEST_HOOKS", "false");
+   DNS_Test_Hook_Switch := "-gnateDFLYOLOGY_DNS_TEST_HOOKS=False";
+   case DNS_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         DNS_Test_Hook_Switch := "-gnateDFLYOLOGY_DNS_TEST_HOOKS=True";
+   end case;
+
    for Languages use ("Ada");
 
    for Library_Name use "Flyology";
@@ -51,7 +62,8 @@ project Flyology is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        Flyology_Config.Ada_Compiler_Switches & ("-gnatwJ");
+        Flyology_Config.Ada_Compiler_Switches
+        & ("-gnatwJ", DNS_Test_Hook_Switch);
    end Compiler;
 
    package Binder is

@@ -1,6 +1,9 @@
 with Ada.Characters.Handling;
 with Ada.Real_Time;
 with Ada.Strings.Fixed;
+#if FLYOLOGY_DNS_TEST_HOOKS then
+with Flyology.DNS_Test_Observations;
+#end if;
 with Flyology.IO.Files;
 with Flyology.IO.Sockets;
 with Interfaces;
@@ -1334,6 +1337,10 @@ package body Flyology.IO.DNS is
                end;
 
                loop
+#if FLYOLOGY_DNS_TEST_HOOKS then
+                  Flyology.DNS_Test_Observations.Record_Receive_Wait
+                    (After_Close => Channels (1) = Sockets.No_Socket);
+#end if;
                   declare
                      Wait_For : constant Duration :=
                        (if Infinite
@@ -1360,11 +1367,18 @@ package body Flyology.IO.DNS is
                              (1 .. Max_Packet_Length);
                            Last : Streams.Stream_Element_Offset;
                            Parsed : Parse_Result;
+                           Response_Committed : Boolean := False;
                         begin
                            Sockets.Receive_Socket
                              (Channels (Channel_Index), Data, Last);
                            Parsed := Parse_Response
                              (To_Bytes (Data, Last), ID, Name, Kind);
+                           --  A validated datagram commits this attempt to its
+                           --  result or TCP fallback. Close UDP before either
+                           --  path so no later handler can wait on its stale
+                           --  descriptor.
+                           Response_Committed := True;
+                           Close_All;
                            if Parsed.Outcome = Truncated then
                               Parsed := Query_TCP
                                 (Selected_Server,
@@ -1372,7 +1386,6 @@ package body Flyology.IO.DNS is
                                  Attempt_Deadline, False,
                                  Interrupt_1, Interrupt_2, Interrupt_3);
                            end if;
-                           Close_All;
                            case Parsed.Outcome is
                               when Answer =>
                                  Cache.Store
@@ -1430,13 +1443,17 @@ package body Flyology.IO.DNS is
                               --  off-path datagrams; another configured
                               --  server or retry can still supply an answer.
                               Last_Error_Was_Malformed := True;
+                              exit when Response_Committed;
                            when Timeout_Error
                               | Device_Error
                               | Sockets.Socket_Error =>
                               --  TCP fallback is still one attempt against
                               --  one server. A silent or broken TCP endpoint
                               --  must not suppress a healthy later server.
-                              null;
+                              if Response_Committed then
+                                 Last_Transport_Failed := True;
+                                 exit;
+                              end if;
                         end;
                      end if;
                   end;

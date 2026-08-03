@@ -14,6 +14,15 @@ package Flyology.IO.DNS.Testing is
    --  Restore the process-global production OS-entropy mode.
    procedure Use_OS_Transaction_IDs;
 
+   --  Reset the receive-wait observations collected by a test-hooks build.
+   --  A normal production build compiles this operation to a no-op.
+   procedure Reset_Receive_Waits;
+
+   --  Return receive waits attempted after the UDP socket was closed. The
+   --  value is zero in a normal production build.
+   --  @return Number of invalid post-close receive waits
+   function Post_Close_Receive_Waits return Natural;
+
    --  Exercise the production response parser without network I/O.
    --  @param Packet Wire-format DNS response
    --  @param Expected_ID Expected transaction identifier
