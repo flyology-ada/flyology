@@ -1,16 +1,14 @@
 package body Flyology.IO.TLS.Testing is
 
-   function Operation_Active (Item : Connection) return Boolean is
-     (Item.Controller.Operation_Is_Active);
-
-   function Queued_Operations (Item : Connection) return Natural is
-     (Item.Controller.Queued_Acquisitions);
-
-   function Close_In_Progress (Item : Connection) return Boolean is
-     (Item.Controller.Close_Is_In_Progress);
-
-   function Generation (Item : Connection) return Interfaces.Unsigned_64 is
-     (Interfaces.Unsigned_64 (Item.Controller.Generation_State));
+   function Generation
+     (Item : in out Connection) return Interfaces.Unsigned_64
+   is
+      State    : Acquire_Result;
+      Snapshot : Descriptor_Generation;
+   begin
+      Item.Controller.Snapshot_Acquisition (State, Snapshot);
+      return Interfaces.Unsigned_64 (Snapshot);
+   end Generation;
 
    procedure Attempt_Stale_Acquisition
      (Item         : in out Connection;

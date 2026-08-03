@@ -151,6 +151,7 @@ package Flyology.IO.TLS is
    --  @param Server_Name DNS name verified by a client; empty for a server
    --  @param Item Closed connection that receives the socket and session
    --  @exception TLS_Error Provider setup fails or Backend is unavailable
+   --  @exception GNAT.Sockets.Socket_Error Preparing socket mode fails
    --  @exception Program_Error Item is open, Socket is invalid, or arguments
    --     do not match Side
    procedure Take
@@ -295,10 +296,6 @@ private
          Generation : out Descriptor_Generation);
       function Is_Open_State return Boolean;
       function Close_Requested return Boolean;
-      function Operation_Is_Active return Boolean;
-      function Queued_Acquisitions return Natural;
-      function Close_Is_In_Progress return Boolean;
-      function Generation_State return Descriptor_Generation;
    private
       Current_FD         : Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;

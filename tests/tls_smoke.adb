@@ -820,6 +820,7 @@ procedure TLS_Smoke is
    end Run_Concurrent_Close;
 
    procedure Run_Queued_Close (Model : Flyology.Execution_Model) is
+      Backend        : TLS_Test_Provider.Provider;
       Socket         : Sockets.Socket_Type;
       Peer           : Sockets.Socket_Type;
       Item           : TLS.Connection;
@@ -828,11 +829,14 @@ procedure TLS_Smoke is
       protected Progress is
          procedure Release_Queued;
          entry Start_Queued;
+         procedure Queued_Started;
+         entry Wait_Queued_Started;
          procedure Finished (Passed : Boolean);
          entry Wait_Finished;
          function Passed return Boolean;
       private
          Queued_Go : Boolean := False;
+         Queued_In : Boolean := False;
          Done      : Natural := 0;
          Is_OK     : Boolean := True;
       end Progress;
@@ -846,6 +850,14 @@ procedure TLS_Smoke is
          begin
             null;
          end Start_Queued;
+         procedure Queued_Started is
+         begin
+            Queued_In := True;
+         end Queued_Started;
+         entry Wait_Queued_Started when Queued_In is
+         begin
+            null;
+         end Wait_Queued_Started;
          procedure Finished (Passed : Boolean) is
          begin
             Is_OK := Is_OK and Passed;
@@ -858,8 +870,9 @@ procedure TLS_Smoke is
          function Passed return Boolean is (Is_OK);
       end Progress;
    begin
+      TLS_Test_Provider.Set_Block_Handshake (Backend);
       Sockets.Create_Socket_Pair (Socket, Peer);
-      TLS.Take (Client_Backend, Socket, TLS.Client, "localhost", Item);
+      TLS.Take (Backend, Socket, TLS.Client, "localhost", Item);
       declare
          task Active_Operation is
             pragma Task_Info (Model);
@@ -890,6 +903,7 @@ procedure TLS_Smoke is
             Cancelled : Boolean := False;
          begin
             Progress.Start_Queued;
+            Progress.Queued_Started;
             begin
                TLS.Handshake (Item);
             exception
@@ -905,13 +919,10 @@ procedure TLS_Smoke is
          task body Closer is
             Closed : Boolean := False;
          begin
-            while not TLS_Testing.Operation_Active (Item) loop
-               Flyology.Fairness.Yield_Now;
-            end loop;
+            TLS_Test_Provider.Wait_Handshake_Blocked;
             Progress.Release_Queued;
-            while TLS_Testing.Queued_Operations (Item) = 0 loop
-               Flyology.Fairness.Yield_Now;
-            end loop;
+            Progress.Wait_Queued_Started;
+            delay 0.010;
             TLS.Close (Item);
             Closed := not TLS.Is_Open (Item);
             Progress.Finished (Closed);
@@ -920,6 +931,10 @@ procedure TLS_Smoke is
                Progress.Finished (False);
          end Closer;
       begin
+         while TLS.Is_Open (Item) loop
+            Flyology.Fairness.Yield_Now;
+         end loop;
+         TLS_Test_Provider.Release_Handshake;
          Progress.Wait_Finished;
       end;
       pragma Assert (Progress.Passed);
@@ -992,7 +1007,7 @@ procedure TLS_Smoke is
          end Closer;
       begin
          TLS_Test_Provider.Wait_Handshake_Blocked;
-         while not TLS_Testing.Close_In_Progress (Item) loop
+         while TLS.Is_Open (Item) loop
             Flyology.Fairness.Yield_Now;
          end loop;
          abort Closer;
@@ -1001,7 +1016,6 @@ procedure TLS_Smoke is
 
       pragma Assert (Progress.Passed);
       pragma Assert (not TLS.Is_Open (Item));
-      pragma Assert (not TLS_Testing.Close_In_Progress (Item));
 
       --  A completed abort-deferred close leaves the controller reusable.
       Sockets.Create_Socket_Pair (Replacement, New_Peer);
@@ -1034,7 +1048,6 @@ procedure TLS_Smoke is
          abort Worker;
       end;
 
-      pragma Assert (not TLS_Testing.Operation_Active (Item));
       TLS.Close (Item);
       Sockets.Close_Socket (Peer);
    end Run_Aborted_Operation;
@@ -1065,6 +1078,133 @@ procedure TLS_Smoke is
       end;
       pragma Assert (Rejected = 3);
    end Run_Empty_Closed_Validation;
+
+   procedure Run_Empty_Control (Model : Flyology.Execution_Model) is
+      Backend : TLS_Test_Provider.Provider;
+      Socket  : Sockets.Socket_Type;
+      Peer    : Sockets.Socket_Type;
+      Item    : TLS.Connection;
+      Token   : aliased Flyology.Cancellation.Token;
+
+      protected Progress is
+         procedure Empty_Finished (Passed : Boolean);
+         procedure Holder_Finished (Passed : Boolean);
+         entry Wait_Empty;
+         entry Wait_All;
+         function Passed return Boolean;
+      private
+         Empty_Done  : Boolean := False;
+         Holder_Done : Boolean := False;
+         Is_OK       : Boolean := True;
+      end Progress;
+
+      protected body Progress is
+         procedure Empty_Finished (Passed : Boolean) is
+         begin
+            Is_OK := Is_OK and Passed;
+            Empty_Done := True;
+         end Empty_Finished;
+
+         procedure Holder_Finished (Passed : Boolean) is
+         begin
+            Is_OK := Is_OK and Passed;
+            Holder_Done := True;
+         end Holder_Finished;
+
+         entry Wait_Empty when Empty_Done is
+         begin
+            null;
+         end Wait_Empty;
+
+         entry Wait_All when Empty_Done and Holder_Done is
+         begin
+            null;
+         end Wait_All;
+
+         function Passed return Boolean is (Is_OK);
+      end Progress;
+   begin
+      TLS_Test_Provider.Set_Block_Handshake (Backend);
+      Sockets.Create_Socket_Pair (Socket, Peer);
+      TLS.Take (Backend, Socket, TLS.Client, "localhost", Item);
+      Token.Request;
+      declare
+         task Holder is
+            pragma Task_Info (Model);
+         end Holder;
+
+         task Empty_Caller is
+            pragma Task_Info (Model);
+         end Empty_Caller;
+
+         task body Holder is
+         begin
+            TLS.Handshake (Item, Timeout => 1.0);
+            Progress.Holder_Finished (True);
+         exception
+            when others =>
+               Progress.Holder_Finished (False);
+         end Holder;
+
+         task body Empty_Caller is
+            Empty     : Stream_Element_Array (1 .. 0);
+            Last      : Stream_Element_Offset;
+            Cancelled : Natural := 0;
+            Timed_Out : Natural := 0;
+         begin
+            begin
+               TLS.Receive (Item, Empty, Last, Token => Token'Access);
+            exception
+               when TLS.Operation_Cancelled =>
+                  Cancelled := Cancelled + 1;
+            end;
+            begin
+               TLS.Receive_Exactly (Item, Empty, Token => Token'Access);
+            exception
+               when TLS.Operation_Cancelled =>
+                  Cancelled := Cancelled + 1;
+            end;
+            begin
+               TLS.Send_All (Item, Empty, Token => Token'Access);
+            exception
+               when TLS.Operation_Cancelled =>
+                  Cancelled := Cancelled + 1;
+            end;
+
+            TLS_Test_Provider.Wait_Handshake_Blocked;
+            begin
+               TLS.Receive (Item, Empty, Last, Timeout => 0.0);
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Timed_Out := Timed_Out + 1;
+            end;
+            begin
+               TLS.Receive_Exactly (Item, Empty, Timeout => 0.0);
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Timed_Out := Timed_Out + 1;
+            end;
+            begin
+               TLS.Send_All (Item, Empty, Timeout => 0.0);
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Timed_Out := Timed_Out + 1;
+            end;
+            Progress.Empty_Finished
+              (Cancelled = 3 and then Timed_Out = 3);
+         exception
+            when others =>
+               Progress.Empty_Finished (False);
+         end Empty_Caller;
+      begin
+         Progress.Wait_Empty;
+         TLS_Test_Provider.Release_Handshake;
+         Progress.Wait_All;
+      end;
+      pragma Assert (Progress.Passed);
+      TLS.Close (Item);
+      Sockets.Close_Socket (Peer);
+   end Run_Empty_Control;
 
    procedure Run_Generation_Reuse is
       Backend      : TLS_Test_Provider.Provider;
@@ -1170,6 +1310,8 @@ begin
    Run_Provider_Selection;
    Run_Provider_Result_Validation;
    Run_Empty_Closed_Validation;
+   Run_Empty_Control (Flyology.Lightweight_Task);
+   Run_Empty_Control (Flyology.Native_Task);
    Run_Generation_Reuse;
    Run_Close_Finalization_Fault;
    Run_Loader_Error;

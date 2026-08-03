@@ -165,15 +165,6 @@ package body Flyology.IO.TLS is
         (Current_FD >= 0 and then not Close_In_Progress);
 
       function Close_Requested return Boolean is (Close_In_Progress);
-
-      function Operation_Is_Active return Boolean is (Active);
-
-      function Queued_Acquisitions return Natural is (Acquire'Count);
-
-      function Close_Is_In_Progress return Boolean is (Close_In_Progress);
-
-      function Generation_State return Descriptor_Generation is
-        (Current_Generation);
    end Descriptor_Controller;
 
    overriding procedure Initialize (Guard : in out Close_Guard) is
@@ -305,12 +296,6 @@ package body Flyology.IO.TLS is
             raise Program_Error with "invalid TLS acquisition snapshot";
       end case;
    end Snapshot_Operation;
-
-   procedure Validate_Operation_Start (Item : in out Connection) is
-      Ignored : Descriptor_Generation;
-   begin
-      Snapshot_Operation (Item, Ignored);
-   end Validate_Operation_Start;
 
    procedure Acquire_Operation
      (Item         : in out Connection;
@@ -464,13 +449,11 @@ package body Flyology.IO.TLS is
       Before_Last  : Ada.Streams.Stream_Element_Offset;
    begin
       Last := Data'First - 1;
-      if Data'Length = 0 then
-         Validate_Operation_Start (Item);
-         return;
-      end if;
-
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      if Data'Length = 0 then
+         return;
+      end if;
       loop
          Check_Cancelled (Item, Token);
          Before_Last := Last;
@@ -515,13 +498,11 @@ package body Flyology.IO.TLS is
       First        : Ada.Streams.Stream_Element_Offset := Data'First;
       Last         : Ada.Streams.Stream_Element_Offset;
    begin
-      if Data'Length = 0 then
-         Validate_Operation_Start (Item);
-         return;
-      end if;
-
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      if Data'Length = 0 then
+         return;
+      end if;
       while First <= Data'Last loop
          Check_Cancelled (Item, Token);
          Last := First;
@@ -565,13 +546,11 @@ package body Flyology.IO.TLS is
       First        : Ada.Streams.Stream_Element_Offset := Data'First;
       Last         : Ada.Streams.Stream_Element_Offset;
    begin
-      if Data'Length = 0 then
-         Validate_Operation_Start (Item);
-         return;
-      end if;
-
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      if Data'Length = 0 then
+         return;
+      end if;
       while First <= Data'Last loop
          Check_Cancelled (Item, Token);
          Last := First;

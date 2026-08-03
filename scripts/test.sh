@@ -26,7 +26,15 @@ run_gprbuild () {
   "$alr" exec -- gprbuild "$@"
 }
 
+#  The controller test child lives under tests. Verify that the production
+#  archive contains neither that child nor the removed observer entry points.
 "$alr" build
+if nm -g "$project_root/lib/libFlyology.a" | \
+     grep -Ei 'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state' >/dev/null
+then
+  echo "production library exposes TLS test symbols" >&2
+  exit 1
+fi
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \
