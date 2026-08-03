@@ -84,6 +84,7 @@ connection_state_model
 descriptor_ownership_smoke
 dns_smoke
 dns_parser_smoke
+dns_parser_matrix
 execution_groups_smoke
 fairness_smoke
 file_cancellation_smoke

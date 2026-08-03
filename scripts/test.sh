@@ -156,6 +156,7 @@ for test_main in \
   descriptor_ownership_smoke \
   dns_smoke \
   dns_parser_smoke \
+  dns_parser_matrix \
   execution_groups_smoke \
   fairness_smoke \
   file_cancellation_smoke \
@@ -204,6 +205,10 @@ do
     "$test_main.adb"
   case "$test_main" in
     dns_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$project_root/tests/bin/$test_main"
+      ;;
+    dns_parser_matrix)
       "$project_root/scripts/run-with-timeout.sh" 20 \
         "$project_root/tests/bin/$test_main"
       ;;
