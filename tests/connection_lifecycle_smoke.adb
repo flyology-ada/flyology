@@ -1,7 +1,10 @@
 with Ada.Streams;
+with Ada.Text_IO;
 with GNAT.Sockets;
 with Flyology;
 with Flyology.IO.Connections;
+with Flyology.Observability;
+with Interfaces;
 
 procedure Connection_Lifecycle_Smoke is
    package Connections renames Flyology.IO.Connections;
@@ -90,6 +93,10 @@ begin
          pragma Task_Info (Flyology.Lightweight_Task);
       end Second;
 
+      task Completion_Probe is
+         pragma Task_Info (Flyology.Native_Task);
+      end Completion_Probe;
+
       task body First is
          Owned : Connections.Connection;
       begin
@@ -119,7 +126,28 @@ begin
          State.Second_Finished (Was_Cancelled);
       end Second;
 
-      pragma Unreferenced (First, Second);
+      task body Completion_Probe is
+         Sample : Flyology.Observability.Group_Snapshot;
+      begin
+         delay 0.100;
+         Ada.Text_IO.Put_Line
+           ("issue18: first_terminated=" & Boolean'Image (First'Terminated)
+            & " second_terminated=" & Boolean'Image (Second'Terminated));
+         if Flyology.Observability.Snapshot (0, Sample) then
+            Ada.Text_IO.Put_Line
+              ("issue18: members=" & Interfaces.Unsigned_64'Image (Sample.Members)
+               & " ready=" & Interfaces.Unsigned_64'Image (Sample.Ready)
+               & " running=" & Interfaces.Unsigned_64'Image (Sample.Running)
+               & " waiting=" & Interfaces.Unsigned_64'Image (Sample.Waiting)
+               & " timers=" & Interfaces.Unsigned_64'Image (Sample.Timer_Waits)
+               & " descriptors="
+               & Interfaces.Unsigned_64'Image (Sample.Descriptor_Waits));
+         else
+            Ada.Text_IO.Put_Line ("issue18: group snapshot unavailable");
+         end if;
+      end Completion_Probe;
+
+      pragma Unreferenced (First, Second, Completion_Probe);
    begin
       State.Wait_First;
       delay 0.010;
