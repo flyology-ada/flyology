@@ -1302,6 +1302,26 @@ Run the bounded, reproducible concurrency and fault campaign with:
 ./scripts/stress.sh
 ```
 
+Generate a source-coverage baseline with:
+
+```sh
+./scripts/coverage.sh
+```
+
+This requires the Alire `gnatcov_bin` tool crate on `PATH`. The script runs the
+portable behavioral programs selected by `scripts/coverage.sh` and consolidates
+statement and decision coverage for the Ada units in the Flyology library
+project. It writes a stable summary, a detailed text report, and annotated
+`xcov` sources under `coverage/`; those generated files are ignored. The Alire
+GNATcoverage binary does not include its dynamic HTML reporter.
+
+The baseline deliberately excludes generated configuration, test sources, the
+prepared custom RTS, C bridges, and assembly. Source instrumentation still
+links and runs against that prepared RTS, but `prepare-rts.sh` compiles runtime
+units before the GPR instrumentation build. Existing behavioral, ABI, fault,
+sanitizer, and architecture-specific tests remain the evidence for those
+boundaries.
+
 ### AddressSanitizer builds
 
 AddressSanitizer awareness is opt-in when preparing the runtime:

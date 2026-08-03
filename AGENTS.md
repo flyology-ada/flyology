@@ -198,6 +198,9 @@ required by the changed boundary.
   prove. Never hardcode the total in prose; it changes with contracts.
 - `./scripts/docs.sh`: GNATdoc HTML generation. It must produce
   `docs/api/index.html` with zero undocumented-entity warnings or errors.
+- `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
+  Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
+  generated traces and reports remain outside version control.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
   benchmark before changing a performance table or claim.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.
