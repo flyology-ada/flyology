@@ -243,6 +243,75 @@ The reservation is consumed when its task migrates out, immediately making the
 empty lane reusable. Call `Create_Dedicated` again before re-entering it; if no
 other task claimed the lane, the API normally returns the same group id.
 
+### Thread-per-core and ownership sharding
+
+Flyology execution groups can support a thread-per-core-shaped architecture:
+configure a shared group for each application shard, optionally place each
+group's loop pthread, and keep a shard's mutable state in tasks that run on that
+group. The group is the stable scheduling and ownership domain. It is not a
+physical-core identifier. Configured groups start lazily, and the operating
+system may move an unplaced loop pthread between processors.
+
+`Flyology.Execution_Groups.Topology` maps a key deterministically into the
+configured shared pool and gives an explicit name to an ownership-boundary
+crossing:
+
+```ada
+with Flyology.Execution_Groups;
+with Flyology.Execution_Groups.Topology;
+
+declare
+   package Groups renames Flyology.Execution_Groups;
+   package Topology renames Flyology.Execution_Groups.Topology;
+   Target : constant Topology.Shard_Id :=
+     Topology.Shard_For_Hash (Request_Hash);
+begin
+   Topology.Cross_To_Shard (Target);
+   pragma Assert (Groups.Current = Target);
+   Handle_Owned_State;
+end;
+```
+
+The default mapping is `Hash mod Configured_Pool_Size`. The pool size is
+compiled into the prepared runtime and does not change while a process is
+running. Preparing another runtime with a different pool size can remap keys.
+The overload taking an explicit `Shard_Count` is available when an application
+must keep a stored partitioning scheme independent of loop configuration.
+Crossing targets are limited to configured shared-pool ids; dedicated groups
+are not shards in this policy.
+
+Migration alone does not make arbitrary data share-nothing. The application
+must assign each mutable object to a shard and arrange that only its owner
+mutates it. Ada task entries, protected message queues, or task-aware sockets
+can carry cross-shard work. A native task can send those messages but cannot
+migrate; a lightweight task can either send a message remotely or cross at the
+explicit safe point. GNARL and the runtime still use synchronization internally,
+so this architecture is not a claim that the process executes without locks.
+
+Each group has its own ready queues, deadline heap, descriptor index, poller,
+and stable loop pthread. There is no implicit work stealing between groups;
+automatic placement and explicit crossings determine ownership. Topology
+changes still use the short-held global topology lock. Within a group,
+scheduling remains cooperative: CPU work must suspend or call a fairness
+checkpoint, and an arbitrary blocking foreign call can stop every task on that
+loop. Use Flyology's task-aware I/O or an explicit native-task boundary for
+blocking work.
+
+Linux `Strict_CPU` placement can bind a loop pthread to one available logical
+CPU. This may be used to construct a pinned layout, but it does not identify a
+physical core and it does not reserve that CPU from other processes. Darwin
+offers only advisory affinity tags where supported; current Apple-silicon
+Darwin reports them unavailable. `Current` remains the authoritative group
+identity, while `Current_Processor` is only optional host observation.
+
+The runnable showcase creates one task-owned counter per configured shard,
+routes work from both native and lightweight callers, and explicitly crosses a
+lightweight caller through every shard:
+
+```sh
+./showcases/run_thread_per_core.sh 4 1000
+```
+
 The same Flyology I/O call also works from either kind of task:
 
 ```ada
@@ -1391,6 +1460,10 @@ Current smoke coverage includes:
   `CPU` override, round-robin distribution across three lazy loops, native
   `CPU` behavior, and automatic-placement interaction with scoped pins and
   dedicated groups;
+- deterministic hash-to-shard boundaries and distribution, runtime-independent
+  fixed-count mapping, native crossing rejection, configured-pool validation,
+  and
+  lightweight safe-point crossings;
 - capability-checked loop-thread placement, invalid value rejection, pre-start
   and idempotent configuration, immutable post-start policy, dedicated-group
   placement, Darwin no-hard-pin behavior, and Linux runtime verification that
@@ -1484,6 +1557,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/stall_watchdog
 ./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
+./showcases/run_thread_per_core.sh 4 1000
 ./showcases/run_connection_density.sh
 ```
 
@@ -1519,6 +1593,8 @@ The examples demonstrate:
   from a sustained, runnable event loop that is not making progress;
 - repeated socket-readiness waves over one loop and a configured loop pool,
   including per-group task distribution and poll/dispatch counters;
+- task-owned state sharded across configured groups, with rendezvous messages
+  from native and lightweight callers and explicit lightweight crossings;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
 

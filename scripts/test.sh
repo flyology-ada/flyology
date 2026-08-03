@@ -264,6 +264,12 @@ run_gprbuild \
   -P tests/runtime_smoke.gpr \
   loop_pool_smoke.adb
 "$project_root/tests/bin/loop_pool_smoke"
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  topology_smoke.adb
+"$project_root/tests/bin/topology_smoke"
 
 #  Exercise a compiled project-level policy independently from the public
 #  pre-start API. Darwin tags are advisory; Linux masks are strict and use the

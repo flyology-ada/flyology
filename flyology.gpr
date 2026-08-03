@@ -65,6 +65,7 @@ project Flyology is
            ("flyology.ads",
             "flyology-cancellation.ads",
             "flyology-execution_groups.ads",
+            "flyology-execution_groups-topology.ads",
             "flyology-fairness.ads",
             "flyology-io.ads",
             "flyology-io-connections.ads",

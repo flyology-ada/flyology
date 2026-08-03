@@ -29,5 +29,8 @@ done
 printf '\n== event_loop_pool ==\n'
 "$project_root/showcases/run_event_loop_pool.sh"
 
+printf '\n== thread_per_core ==\n'
+"$project_root/showcases/run_thread_per_core.sh"
+
 printf '\n== connection_density ==\n'
 "$project_root/showcases/run_connection_density.sh"
