@@ -1744,10 +1744,13 @@ alr with flyology --use /path/to/flyology
 ```
 
 Alire makes `flyology.gpr` available to the consumer and exports
-`FLYOLOGY_ROOT` as the deployed dependency root. Prepare a consumer-owned RTS,
-then compile the application with that runtime:
+`FLYOLOGY_ROOT` as the dependency root. First generate the Alire build
+environment; this materializes an indexed dependency without attempting to link
+the application against the stock RTS. Prepare a consumer-owned RTS, then
+compile the application with that runtime:
 
 ```sh
+alr build --stop-after=generation
 alr exec -- sh -c \
   'FLYOLOGY_RTS_DIR="$PWD/build/flyology-rts" \
    "$FLYOLOGY_ROOT/scripts/prepare-rts.sh"'
