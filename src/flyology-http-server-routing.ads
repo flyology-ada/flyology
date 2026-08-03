@@ -101,15 +101,92 @@ package Flyology.HTTP.Server.Routing is
       Slashes  : Trailing_Slash_Policy := Strict_Slashes)
    is tagged limited private;
 
+   --  Immutable copy of one registered route's public configuration.
+   --  Introspection is intended for diagnostics after setup; it is not part of
+   --  request dispatch and adds no work to the routing hot path.
+   --  @field Method Configured HTTP method
+   --  @field Pattern Configured path pattern
+   --  @field Name Stable route name
+   --  @field Policy Route-local application policy
+   --  @field Middleware_Count Route-local or mounted middleware count
+   type Route_Description is record
+      Method           : Ada.Strings.Unbounded.Unbounded_String;
+      Pattern          : Ada.Strings.Unbounded.Unbounded_String;
+      Name             : Ada.Strings.Unbounded.Unbounded_String;
+      Policy           : Route_Policy;
+      Middleware_Count : Natural;
+   end record;
+
+   --  Immutable copy of one middleware registration.
+   --  An empty name means the application used the source-compatible unnamed
+   --  registration form.
+   --  @field Name Application-provided diagnostic name
+   --  @field Stage Body-admission boundary where the component runs
+   type Middleware_Description is record
+      Name  : Ada.Strings.Unbounded.Unbounded_String;
+      Stage : Middleware_Stage;
+   end record;
+
+   --  Return the number of configured routes without allocating.
+   --  Registration and introspection must not occur concurrently.
+   --  @param Item Router registry
+   --  @return Number of routes in registration order
+   function Route_Count (Item : Router) return Natural;
+
+   --  Copy one configured route description.
+   --  @param Item Router registry
+   --  @param Index One-based registration index
+   --  @return Owned route metadata that may outlive the router
+   --  @exception Constraint_Error Index is outside 1 .. Route_Count
+   function Describe_Route
+     (Item  : Router;
+      Index : Positive) return Route_Description;
+
+   --  Return the number of global middleware registrations.
+   --  @param Item Router registry
+   --  @return Global middleware count in registration order
+   function Global_Middleware_Count (Item : Router) return Natural;
+
+   --  Copy one global middleware description.
+   --  @param Item Router registry
+   --  @param Index One-based registration index
+   --  @return Owned middleware metadata
+   --  @exception Constraint_Error Index is outside the configured range
+   function Describe_Global_Middleware
+     (Item  : Router;
+      Index : Positive) return Middleware_Description;
+
+   --  Return route-local and mounted middleware count for one route.
+   --  @param Item Router registry
+   --  @param Route_Index One-based route registration index
+   --  @return Middleware count in execution order after global components
+   --  @exception Constraint_Error Route_Index is outside the configured range
+   function Route_Middleware_Count
+     (Item        : Router;
+      Route_Index : Positive) return Natural;
+
+   --  Copy one route-local or mounted middleware description.
+   --  @param Item Router registry
+   --  @param Route_Index One-based route registration index
+   --  @param Middleware_Index One-based middleware index for that route
+   --  @return Owned middleware metadata
+   --  @exception Constraint_Error Either index is outside its configured range
+   function Describe_Route_Middleware
+     (Item             : Router;
+      Route_Index      : Positive;
+      Middleware_Index : Positive) return Middleware_Description;
+
    --  Append global middleware. Global components wrap every matched route in
    --  registration order and are copied into mounted subrouter routes.
    --  @param Item Router registry
    --  @param Component Around-handler component
    --  @param Stage Body-admission boundary for the component
+   --  @param Name Optional stable diagnostic name for introspection
    procedure Add_Middleware
      (Item      : in out Router;
       Component : not null Middleware_Access;
-      Stage     : Middleware_Stage := Request_Head);
+      Stage     : Middleware_Stage := Request_Head;
+      Name      : String := "");
 
    --  Append middleware to one route selected by its unique configured name.
    --  Route-local components run after router-global components.
@@ -117,11 +194,13 @@ package Flyology.HTTP.Server.Routing is
    --  @param Name Configured route name
    --  @param Component Around-handler component
    --  @param Stage Body-admission boundary for the component
+   --  @param Middleware_Name Optional stable diagnostic name
    procedure Add_Route_Middleware
      (Item      : in out Router;
       Name      : String;
       Component : not null Middleware_Access;
-      Stage     : Middleware_Stage := Request_Head);
+      Stage     : Middleware_Stage := Request_Head;
+      Middleware_Name : String := "");
 
    --  Register one exact method and path pattern.
    --  @param Item Router registry
@@ -291,6 +370,7 @@ private
    type Middleware_Entry is record
       Component : Middleware_Access;
       Stage     : Middleware_Stage := Request_Head;
+      Name      : Unbounded_String;
    end record;
    type Middleware_Array is
      array (Positive range <>) of Middleware_Entry;

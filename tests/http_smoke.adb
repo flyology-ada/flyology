@@ -1465,7 +1465,8 @@ procedure HTTP_Smoke is
          end;
       end Run;
    begin
-      Routes.Add_Middleware (Stamp_Global'Access);
+      Routes.Add_Middleware
+        (Stamp_Global'Access, Name => "response-stamp");
       Routes.Get ("/", Home'Access, Name => "home");
       Routes.Get ("/users/{id}", User'Access, Name => "users.show");
       Routes.Post
@@ -1491,7 +1492,54 @@ procedure HTTP_Smoke is
               Authentication => Routing.Required_Authentication));
       Routes.Get ("/explode", Explode'Access, Name => "explode");
       Admin.Get ("/", Home'Access, Name => "index");
+      Admin.Add_Middleware
+        (Pass'Access, Stage => Routing.Application,
+         Name => "admin-security");
       Routes.Mount ("/admin", Admin, Name_Prefix => "admin.");
+
+      pragma Assert (Routes.Route_Count = 9);
+      pragma Assert (Routes.Global_Middleware_Count = 1);
+      declare
+         Home_Route : constant Routing.Route_Description :=
+           Routes.Describe_Route (1);
+         Admin_Route : constant Routing.Route_Description :=
+           Routes.Describe_Route (9);
+         Global_Component : constant Routing.Middleware_Description :=
+           Routes.Describe_Global_Middleware (1);
+         Mounted_Component : constant Routing.Middleware_Description :=
+           Routes.Describe_Route_Middleware (9, 1);
+      begin
+         pragma Assert (To_String (Home_Route.Method) = "GET");
+         pragma Assert (To_String (Home_Route.Pattern) = "/");
+         pragma Assert (To_String (Home_Route.Name) = "home");
+         pragma Assert (Home_Route.Middleware_Count = 0);
+         pragma Assert (To_String (Admin_Route.Pattern) = "/admin");
+         pragma Assert (To_String (Admin_Route.Name) = "admin.index");
+         pragma Assert (Routes.Route_Middleware_Count (9) = 1);
+         pragma Assert
+           (To_String (Global_Component.Name) = "response-stamp");
+         pragma Assert
+           (To_String (Mounted_Component.Name) = "admin-security");
+         pragma Assert
+           (Routing.Middleware_Stage'Pos (Mounted_Component.Stage) =
+              Routing.Middleware_Stage'Pos (Routing.Application));
+      end;
+      declare
+         Rejected : Boolean := False;
+      begin
+         begin
+            declare
+               Invalid : constant Routing.Route_Description :=
+                 Routes.Describe_Route (10);
+            begin
+               pragma Unreferenced (Invalid);
+            end;
+         exception
+            when Constraint_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
 
       Run
         ("GET /users/%31 HTTP/1.1" & CRLF

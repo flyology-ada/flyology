@@ -359,6 +359,73 @@ package body Flyology.HTTP.Server.Routing is
       end loop;
    end Check_Add;
 
+   function Route_Count (Item : Router) return Natural is (Item.Count);
+
+   function Describe_Route
+     (Item  : Router;
+      Index : Positive) return Route_Description
+   is
+   begin
+      if Index > Item.Count then
+         raise Constraint_Error with "HTTP route introspection index invalid";
+      end if;
+      return
+        (Method           => Item.Routes (Index).Method,
+         Pattern          => Item.Routes (Index).Pattern,
+         Name             => Item.Routes (Index).Name,
+         Policy           => Item.Routes (Index).Policy,
+         Middleware_Count => Item.Routes (Index).Middleware_Count);
+   end Describe_Route;
+
+   function Global_Middleware_Count (Item : Router) return Natural is
+     (Item.Middleware_Count);
+
+   function Describe_Global_Middleware
+     (Item  : Router;
+      Index : Positive) return Middleware_Description
+   is
+   begin
+      if Index > Item.Middleware_Count then
+         raise Constraint_Error with
+           "HTTP global middleware introspection index invalid";
+      end if;
+      return
+        (Name  => Item.Middleware (Index).Name,
+         Stage => Item.Middleware (Index).Stage);
+   end Describe_Global_Middleware;
+
+   function Route_Middleware_Count
+     (Item        : Router;
+      Route_Index : Positive) return Natural
+   is
+   begin
+      if Route_Index > Item.Count then
+         raise Constraint_Error with "HTTP route introspection index invalid";
+      end if;
+      return Item.Routes (Route_Index).Middleware_Count;
+   end Route_Middleware_Count;
+
+   function Describe_Route_Middleware
+     (Item             : Router;
+      Route_Index      : Positive;
+      Middleware_Index : Positive) return Middleware_Description
+   is
+   begin
+      if Route_Index > Item.Count then
+         raise Constraint_Error with "HTTP route introspection index invalid";
+      elsif Middleware_Index >
+        Item.Routes (Route_Index).Middleware_Count
+      then
+         raise Constraint_Error with
+           "HTTP route middleware introspection index invalid";
+      end if;
+      return
+        (Name  => Item.Routes (Route_Index).Middleware
+                    (Middleware_Index).Name,
+         Stage => Item.Routes (Route_Index).Middleware
+                    (Middleware_Index).Stage);
+   end Describe_Route_Middleware;
+
    procedure Add
      (Item    : in out Router;
       Method  : String;
@@ -386,28 +453,37 @@ package body Flyology.HTTP.Server.Routing is
          Name    => To_Unbounded_String (Effective_Name),
          Handler => Handler,
          Policy  => Policy,
-         Middleware => (others => (null, Request_Head)),
+         Middleware =>
+           (others =>
+              (Component => null,
+               Stage     => Request_Head,
+               Name      => Null_Unbounded_String)),
          Middleware_Count => 0);
    end Add;
 
    procedure Add_Middleware
      (Item      : in out Router;
       Component : not null Middleware_Access;
-      Stage     : Middleware_Stage := Request_Head)
+      Stage     : Middleware_Stage := Request_Head;
+      Name      : String := "")
    is
    begin
       if Item.Middleware_Count = Max_Global_Middleware then
          raise Route_Error with "global HTTP middleware capacity exhausted";
       end if;
       Item.Middleware_Count := Item.Middleware_Count + 1;
-      Item.Middleware (Item.Middleware_Count) := (Component, Stage);
+      Item.Middleware (Item.Middleware_Count) :=
+        (Component => Component,
+         Stage     => Stage,
+         Name      => To_Unbounded_String (Name));
    end Add_Middleware;
 
    procedure Add_Route_Middleware
      (Item      : in out Router;
       Name      : String;
       Component : not null Middleware_Access;
-      Stage     : Middleware_Stage := Request_Head)
+      Stage     : Middleware_Stage := Request_Head;
+      Middleware_Name : String := "")
    is
    begin
       for Index in 1 .. Item.Count loop
@@ -420,7 +496,10 @@ package body Flyology.HTTP.Server.Routing is
             Item.Routes (Index).Middleware_Count :=
               Item.Routes (Index).Middleware_Count + 1;
             Item.Routes (Index).Middleware
-              (Item.Routes (Index).Middleware_Count) := (Component, Stage);
+              (Item.Routes (Index).Middleware_Count) :=
+                (Component => Component,
+                 Stage     => Stage,
+                 Name      => To_Unbounded_String (Middleware_Name));
             return;
          end if;
       end loop;
