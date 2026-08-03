@@ -63,6 +63,30 @@ procedure Observability_Smoke is
 
    Before_Release : Observation.Group_Snapshot;
    After_Release  : Observation.Group_Snapshot;
+   Parked_Observed : Boolean := False;
+   Completion_Observed : Boolean := False;
+
+   function Parked (Sample : Observation.Group_Snapshot) return Boolean is
+     (Sample.Thread_State = Observation.Running
+      and then Sample.Members = 3
+      and then Sample.Pinned_Members = 1
+      and then Sample.Waiting = 3
+      and then Sample.Ready = 0
+      and then Sample.Running = 0
+      and then Sample.Timer_Waits = 2
+      and then Sample.Descriptor_Waits = 1
+      and then Sample.Interrupt_Waits = 0
+      and then Sample.File_Waits = 0
+      and then Sample.Pending_File_Submissions = 0
+      and then Sample.Dispatches >= 3);
+
+   function Completed (Sample : Observation.Group_Snapshot) return Boolean is
+     (Sample.Members = 0
+      and then Sample.Dispatches > Before_Release.Dispatches
+      and then Sample.Poll_Batches > Before_Release.Poll_Batches
+      and then Sample.Poll_Events > Before_Release.Poll_Events
+      and then Sample.Wakeups > Before_Release.Wakeups
+      and then Observation.Made_Progress (Before_Release, Sample));
 begin
    GNAT.Sockets.Create_Socket_Pair (Reader_Socket, Writer_Socket);
 
@@ -78,6 +102,18 @@ begin
       task Rendezvous is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Rendezvous;
+
+      Released : Boolean := False;
+
+      procedure Release_All is
+      begin
+         if not Released then
+            Released := True;
+            Control.Open;
+            Flyology.IO.Sockets.Send_All
+              (Writer_Socket, [1 => 42], Timeout => 1.0);
+         end if;
+      end Release_All;
 
       task body Timed is
       begin
@@ -111,44 +147,51 @@ begin
          end;
       end Rendezvous;
    begin
-      Control.Wait_Until_Started;
-      delay 0.020;
-      if not Observation.Snapshot (0, Before_Release) then
-         raise Program_Error with "event group was not observable";
-      end if;
-      if Before_Release.Thread_State /= Observation.Running
-        or else Before_Release.Members /= 3
-        or else Before_Release.Pinned_Members /= 1
-        or else Before_Release.Waiting /= 3
-        or else Before_Release.Ready /= 0
-        or else Before_Release.Running /= 0
-        or else Before_Release.Timer_Waits /= 2
-        or else Before_Release.Descriptor_Waits /= 1
-        or else Before_Release.Interrupt_Waits /= 0
-        or else Before_Release.File_Waits /= 0
-        or else Before_Release.Pending_File_Submissions /= 0
-        or else Before_Release.Dispatches < 3
-      then
-         raise Program_Error with "parked group snapshot is inconsistent";
-      end if;
+      begin
+         select
+            Control.Wait_Until_Started;
+         or
+            delay 2.0;
+            raise Program_Error with "observation tasks did not start";
+         end select;
+         for Attempt in 1 .. 2_000 loop
+            Parked_Observed := Observation.Snapshot (0, Before_Release)
+              and then Parked (Before_Release);
+            exit when Parked_Observed;
+            delay 0.001;
+         end loop;
+         if not Parked_Observed then
+            raise Program_Error with "parked group snapshot is inconsistent";
+         end if;
 
-      Control.Open;
-      Flyology.IO.Sockets.Send_All
-        (Writer_Socket, [1 => 42], Timeout => 1.0);
-      Control.Wait_Until_Finished;
+         Release_All;
+         select
+            Control.Wait_Until_Finished;
+         or
+            delay 2.0;
+            raise Program_Error with "observation tasks did not finish";
+         end select;
+      exception
+         when others =>
+            --  A diagnostic failure must still open both task gates so the
+            --  enclosing master can expose the original exception.
+            begin
+               Release_All;
+            exception
+               when others =>
+                  null;
+            end;
+            raise;
+      end;
    end;
 
-   delay 0.010;
-   if not Observation.Snapshot (0, After_Release) then
-      raise Program_Error with "completed event group disappeared";
-   end if;
-   if After_Release.Members /= 0
-     or else After_Release.Dispatches <= Before_Release.Dispatches
-     or else After_Release.Poll_Batches <= Before_Release.Poll_Batches
-     or else After_Release.Poll_Events <= Before_Release.Poll_Events
-     or else After_Release.Wakeups <= Before_Release.Wakeups
-     or else not Observation.Made_Progress (Before_Release, After_Release)
-   then
+   for Attempt in 1 .. 2_000 loop
+      Completion_Observed := Observation.Snapshot (0, After_Release)
+        and then Completed (After_Release);
+      exit when Completion_Observed;
+      delay 0.001;
+   end loop;
+   if not Completion_Observed then
       raise Program_Error with "cumulative observation counters did not move";
    end if;
 

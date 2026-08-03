@@ -1,3 +1,4 @@
+with Ada.Exceptions;
 with Ada.Streams;
 with GNAT.Sockets;
 with Flyology;
@@ -17,11 +18,13 @@ procedure Connection_Lifecycle_Smoke is
 
    protected State is
       procedure First_Admitted;
+      procedure Release_First;
       procedure Second_Admitted;
       procedure Second_Finished (Was_Cancelled : Boolean);
       procedure Third_Admitted;
       procedure Third_Finished (Was_Cancelled : Boolean);
       entry Wait_First;
+      entry Wait_First_Release;
       entry Wait_Second;
       entry Wait_Second_Finished;
       entry Wait_Third;
@@ -29,6 +32,7 @@ procedure Connection_Lifecycle_Smoke is
       function Passed return Boolean;
    private
       First_In, Second_In, Second_Done : Boolean := False;
+      First_Released : Boolean := False;
       Third_In, Third_Done : Boolean := False;
       All_OK : Boolean := True;
    end State;
@@ -38,6 +42,11 @@ procedure Connection_Lifecycle_Smoke is
       begin
          First_In := True;
       end First_Admitted;
+
+      procedure Release_First is
+      begin
+         First_Released := True;
+      end Release_First;
 
       procedure Second_Admitted is
       begin
@@ -62,6 +71,10 @@ procedure Connection_Lifecycle_Smoke is
       end Third_Finished;
 
       entry Wait_First when First_In is begin null; end Wait_First;
+      entry Wait_First_Release when First_Released is
+      begin
+         null;
+      end Wait_First_Release;
       entry Wait_Second when Second_In is begin null; end Wait_Second;
       entry Wait_Second_Finished when Second_Done is
       begin
@@ -94,9 +107,9 @@ begin
          Owned : Connections.Connection;
       begin
          Connections.Take (Manager, Server_One, Owned);
-         pragma Assert (Server_One = GNAT.Sockets.No_Socket);
          State.First_Admitted;
-         delay 0.050;
+         pragma Assert (Server_One = GNAT.Sockets.No_Socket);
+         State.Wait_First_Release;
          Owned.Close;
       end First;
 
@@ -121,13 +134,59 @@ begin
 
       pragma Unreferenced (First, Second);
    begin
-      State.Wait_First;
-      delay 0.010;
-      pragma Assert (Manager.Active = 1);
-      pragma Assert (Manager.Waiting = 1);
-      State.Wait_Second;
-      Token.Request;
-      State.Wait_Second_Finished;
+      begin
+         select
+            State.Wait_First;
+         or
+            delay 2.0;
+            raise Program_Error with "first connection was not admitted";
+         end select;
+         pragma Assert (Manager.Active = 1);
+         for Attempt in 1 .. 2_000 loop
+            exit when Manager.Waiting = 1;
+            delay 0.001;
+         end loop;
+         if Manager.Waiting /= 1 then
+            raise Program_Error with
+              "second connection did not reach admission queue";
+         end if;
+         State.Release_First;
+         select
+            State.Wait_Second;
+         or
+            delay 2.0;
+            raise Program_Error with "second connection was not admitted";
+         end select;
+         Token.Request;
+         select
+            State.Wait_Second_Finished;
+         or
+            delay 2.0;
+            raise Program_Error with "second connection did not cancel";
+         end select;
+      exception
+         when Occurrence : others =>
+            --  Do not let a test failure strand either dependent task while
+            --  the enclosing master is being completed.
+            State.Release_First;
+            begin
+               Token.Request;
+            exception
+               when others =>
+                  null;
+            end;
+            --  Closing the peer is independent of the cancellation pipe and
+            --  forces any admitted receiver to observe EOF if signaling was
+            --  itself the failing operation.
+            begin
+               GNAT.Sockets.Close_Socket (Peer_Two);
+               Peer_Two := GNAT.Sockets.No_Socket;
+            exception
+               when others =>
+                  null;
+            end;
+            Ada.Exceptions.Reraise_Occurrence (Occurrence);
+      end;
    end;
 
    pragma Assert (Manager.Active = 0);
@@ -156,10 +215,38 @@ begin
 
       pragma Unreferenced (Third);
    begin
-      State.Wait_Third;
-      Manager.Request_Shutdown;
-      Manager.Await_Drained;
-      State.Wait_Third_Finished;
+      begin
+         select
+            State.Wait_Third;
+         or
+            delay 2.0;
+            raise Program_Error with "third connection was not admitted";
+         end select;
+         Manager.Request_Shutdown;
+         Manager.Await_Drained;
+         select
+            State.Wait_Third_Finished;
+         or
+            delay 2.0;
+            raise Program_Error with "third connection did not shut down";
+         end select;
+      exception
+         when Occurrence : others =>
+            begin
+               Manager.Request_Shutdown;
+            exception
+               when others =>
+                  null;
+            end;
+            begin
+               GNAT.Sockets.Close_Socket (Peer_Three);
+               Peer_Three := GNAT.Sockets.No_Socket;
+            exception
+               when others =>
+                  null;
+            end;
+            Ada.Exceptions.Reraise_Occurrence (Occurrence);
+      end;
    end;
 
    declare
@@ -241,18 +328,45 @@ begin
 
          pragma Unreferenced (Acceptor);
       begin
-         for Attempt in 1 .. 1_000 loop
-            exit when Accept_Manager.Active = 1;
-            delay 0.001;
-         end loop;
-         pragma Assert (Accept_Manager.Active = 1);
-         Accept_Manager.Request_Shutdown;
-         Accept_Manager.Await_Drained;
-         Result.Wait;
+         begin
+            for Attempt in 1 .. 2_000 loop
+               exit when Accept_Manager.Active = 1;
+               delay 0.001;
+            end loop;
+            if Accept_Manager.Active /= 1 then
+               raise Program_Error with "acceptor did not reserve capacity";
+            end if;
+            Accept_Manager.Request_Shutdown;
+            Accept_Manager.Await_Drained;
+            select
+               Result.Wait;
+            or
+               delay 2.0;
+               raise Program_Error with "acceptor did not cancel";
+            end select;
+         exception
+            when Occurrence : others =>
+               begin
+                  Accept_Manager.Request_Shutdown;
+               exception
+                  when others =>
+                     null;
+               end;
+               begin
+                  GNAT.Sockets.Close_Socket (Listener);
+                  Listener := GNAT.Sockets.No_Socket;
+               exception
+                  when others =>
+                     null;
+               end;
+               Ada.Exceptions.Reraise_Occurrence (Occurrence);
+         end;
       end;
 
       pragma Assert (Result.Passed);
-      GNAT.Sockets.Close_Socket (Listener);
+      if Listener /= GNAT.Sockets.No_Socket then
+         GNAT.Sockets.Close_Socket (Listener);
+      end if;
    end;
 
    declare
@@ -303,9 +417,32 @@ begin
             Result.Finished (Was_Cancelled);
          end Native_Worker;
       begin
-         delay 0.020;
-         Native_Token.Request;
-         Result.Wait;
+         begin
+            delay 0.020;
+            Native_Token.Request;
+            select
+               Result.Wait;
+            or
+               delay 2.0;
+               raise Program_Error with "native connection did not cancel";
+            end select;
+         exception
+            when Occurrence : others =>
+               begin
+                  Native_Token.Request;
+               exception
+                  when others =>
+                     null;
+               end;
+               begin
+                  GNAT.Sockets.Close_Socket (Native_Peer);
+                  Native_Peer := GNAT.Sockets.No_Socket;
+               exception
+                  when others =>
+                     null;
+               end;
+               Ada.Exceptions.Reraise_Occurrence (Occurrence);
+         end;
       end;
       pragma Assert (Result.Passed);
       pragma Assert (Native_Manager.Active = 0);
