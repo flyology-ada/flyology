@@ -348,19 +348,20 @@ package body Flyology.IO.Connections is
    end Remaining;
 
    procedure Interrupt_Sources
-     (Owner       : not null Server_Access;
-      Token       : access Cancellation_Token;
-      Interrupt_1 : out Descriptor;
-      Interrupt_2 : out Descriptor)
+     (Owner   : not null Server_Access;
+      Token   : access Cancellation_Token;
+      Sources : out Interrupt_Set;
+      Count   : out Natural)
    is
       Shutdown : Boolean;
       Cancel   : Boolean := False;
    begin
-      Owner.Wait_Source (Interrupt_1, Shutdown);
-      if Token = null then
-         Interrupt_2 := Invalid_Descriptor;
-      else
-         Token.Wait_Source (Interrupt_2, Cancel);
+      Sources := (others => Invalid_Descriptor);
+      Count := 1;
+      Owner.Wait_Source (Sources (Sources'First), Shutdown);
+      if Token /= null then
+         Count := 2;
+         Token.Wait_Source (Sources (Sources'First + 1), Cancel);
       end if;
       if Shutdown or else Cancel then
          raise Operation_Cancelled;
@@ -381,8 +382,8 @@ package body Flyology.IO.Connections is
       Lease_Source : Descriptor;
       Initial_Close_Source : Descriptor;
       Initial_Owner : Server_Access;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
+      Interrupts : Interrupt_Set (1 .. 3);
+      Interrupt_Count : Natural;
       Outcome : Wait_Outcome := Timed_Out;
       Result : Lease_Result := Lease_Busy;
    begin
@@ -396,8 +397,9 @@ package body Flyology.IO.Connections is
       Test_Barrier (0);
 #end if;
       loop
+         Interrupts (1) := Initial_Close_Source;
          Interrupt_Sources
-           (Initial_Owner, Token, Interrupt_1, Interrupt_2);
+           (Initial_Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
          Item.Controller.Try_Acquire
            (Guard.Generation,
             Guard.State'Access,
@@ -430,9 +432,7 @@ package body Flyology.IO.Connections is
            (Lease_Source,
             For_Read,
             Remaining (Started, Timeout),
-            Initial_Close_Source,
-            Interrupt_1,
-            Interrupt_2);
+            Interrupts (1 .. Interrupt_Count + 1));
          if Outcome /= Ready then
             case Outcome is
                when Timed_Out =>
@@ -505,10 +505,8 @@ package body Flyology.IO.Connections is
       Owner    : Server_Access;
       Socket   : Sockets.Socket_Type := Sockets.No_Socket;
       Reserved : Boolean := False;
-      Shutdown : Boolean;
-      Cancel   : Boolean := False;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
+      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
       pragma Unreferenced (Cancellation_Quantum);
    begin
       if Is_Open (Item) then
@@ -517,19 +515,13 @@ package body Flyology.IO.Connections is
       Reserve (Manager, Owner);
       Reserved := True;
 
-      Manager.Wait_Source (Interrupt_1, Shutdown);
-      if Token = null then
-         Interrupt_2 := Invalid_Descriptor;
-      else
-         Token.Wait_Source (Interrupt_2, Cancel);
-      end if;
-      if Shutdown or else Cancel then
-         raise Operation_Cancelled;
-      end if;
+      Interrupt_Sources
+        (Owner, Token, Interrupts, Interrupt_Count);
 
       begin
          Flyology.IO.Sockets.Accept_Connection
-           (Listener, Socket, Address, Timeout, Interrupt_1, Interrupt_2);
+           (Listener, Socket, Address, Timeout,
+            Interrupts (1 .. Interrupt_Count));
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
@@ -603,9 +595,8 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Close_Interrupt : Descriptor;
+      Interrupts : Interrupt_Set (1 .. 3);
+      Interrupt_Count : Natural;
       FD : Descriptor;
       Guard : Operation_Guard (Item'Unchecked_Access);
       Socket : Sockets.Socket_Type;
@@ -615,16 +606,17 @@ package body Flyology.IO.Connections is
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Close_Interrupt, Socket, Owner);
+         FD, Guard, Interrupts (1), Socket, Owner);
       pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
-      Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
+      Interrupt_Sources
+        (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (3);
 #end if;
       begin
          Flyology.IO.Sockets.Receive
            (Socket, Data, Last, Remaining (Started, Timeout),
-            Close_Interrupt, Interrupt_1, Interrupt_2);
+            Interrupts (1 .. Interrupt_Count + 1));
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
@@ -641,9 +633,8 @@ package body Flyology.IO.Connections is
       Started        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First          : Ada.Streams.Stream_Element_Offset := Data'First;
       Last           : Ada.Streams.Stream_Element_Offset;
-      Interrupt_1    : Descriptor;
-      Interrupt_2    : Descriptor;
-      Close_Interrupt : Descriptor;
+      Interrupts     : Interrupt_Set (1 .. 3);
+      Interrupt_Count : Natural;
       FD             : Descriptor;
       Guard          : Operation_Guard (Item'Unchecked_Access);
       Socket         : Sockets.Socket_Type;
@@ -652,12 +643,13 @@ package body Flyology.IO.Connections is
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Close_Interrupt, Socket, Owner);
+         FD, Guard, Interrupts (1), Socket, Owner);
       pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
-            Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
+            Interrupt_Sources
+              (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
             Test_Barrier (3);
 #end if;
@@ -666,9 +658,7 @@ package body Flyology.IO.Connections is
                Data (First .. Data'Last),
                Last,
                Remaining (Started, Timeout),
-               Close_Interrupt,
-               Interrupt_1,
-               Interrupt_2);
+               Interrupts (1 .. Interrupt_Count + 1));
             if Last < First then
                raise Device_Error with "connection closed while receiving";
             end if;
@@ -695,9 +685,8 @@ package body Flyology.IO.Connections is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First   : Ada.Streams.Stream_Element_Offset := Data'First;
       Last    : Ada.Streams.Stream_Element_Offset;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Close_Interrupt : Descriptor;
+      Interrupts : Interrupt_Set (1 .. 3);
+      Interrupt_Count : Natural;
       FD : Descriptor;
       Guard : Operation_Guard (Item'Unchecked_Access);
       Socket : Sockets.Socket_Type;
@@ -706,12 +695,13 @@ package body Flyology.IO.Connections is
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Close_Interrupt, Socket, Owner);
+         FD, Guard, Interrupts (1), Socket, Owner);
       pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Socket));
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
-            Interrupt_Sources (Owner, Token, Interrupt_1, Interrupt_2);
+            Interrupt_Sources
+              (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
             declare
                Chunk_Last : constant Ada.Streams.Stream_Element_Offset :=
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
@@ -725,9 +715,7 @@ package body Flyology.IO.Connections is
                   Data (First .. Chunk_Last),
                   Last,
                   Remaining (Started, Timeout),
-                  Close_Interrupt,
-                  Interrupt_1,
-                  Interrupt_2);
+                  Interrupts (1 .. Interrupt_Count + 1));
             end;
             if Last < First then
                raise Device_Error with "connection closed while sending";

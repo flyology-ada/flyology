@@ -22,6 +22,13 @@ package Flyology.IO with Preelaborate is
    subtype Descriptor is Interfaces.C.int;
    --  Sentinel denoting no descriptor.
    Invalid_Descriptor : constant Descriptor := Interfaces.C.int (-1);
+   --  Readable wake descriptors composed into an interruptible wait. The
+   --  wait observes but never reads or closes them; their owners must outlive
+   --  the call.
+   type Interrupt_Set is array (Positive range <>) of Descriptor;
+   --  Empty interrupt set used when no wake source is present.
+   No_Interrupts : constant Interrupt_Set (1 .. 0) :=
+     (others => Invalid_Descriptor);
    --  Readiness condition requested from the poller.
    --  @enum For_Read The descriptor can be read without blocking
    --  @enum For_Write The descriptor can be written without blocking
@@ -29,7 +36,7 @@ package Flyology.IO with Preelaborate is
    --  Result from an interruptible wait.
    --  @enum Ready The primary descriptor became ready
    --  @enum Timed_Out The deadline expired
-   --  @enum Interrupted An optional interrupt descriptor became readable
+   --  @enum Interrupted A member of the interrupt set became readable
    type Wait_Outcome is (Ready, Timed_Out, Interrupted);
 
    --  One descriptor readiness request.
@@ -78,23 +85,21 @@ package Flyology.IO with Preelaborate is
       Timeout  : Duration := Infinite) return Natural
      with Pre => Requests'Length <= Max_Wait_Requests;
 
-   --  Wait for FD or any readable optional interrupt source. Interrupt
+   --  Wait for FD or any readable interrupt source. Interrupt
    --  descriptors are neither read nor closed. Timeout and lane behavior
    --  match Wait; one deadline spans native EINTR retries.
    --  @param FD Primary valid descriptor
    --  @param Condition Primary readiness condition
    --  @param Timeout Deadline interval in seconds
-   --  @param Interrupt_1 Optional readable wake descriptor
-   --  @param Interrupt_2 Optional readable wake descriptor
-   --  @param Interrupt_3 Optional readable wake descriptor
+   --  @param Interrupts At most Max_Wait_Requests - 1 readable wake
+   --     descriptors
    --  @return Ready, Timed_Out, or Interrupted
    --  @exception Device_Error FD is invalid or the poller fails
    function Wait_Interruptibly
      (FD          : Descriptor;
       Condition   : Wait_Kind;
       Timeout     : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor) return Wait_Outcome;
+      Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome
+     with Pre => Interrupts'Length < Max_Wait_Requests;
 
 end Flyology.IO;

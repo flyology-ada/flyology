@@ -85,8 +85,9 @@ procedure Sanitizer_Fiber_Smoke is
         (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Primary_Reader)),
          Flyology.IO.For_Read,
          Timeout => 5.0,
-         Interrupt_1 =>
-           Flyology.IO.Descriptor (GNAT.Sockets.To_C (Interrupt_Reader)));
+         Interrupts =>
+           (1 => Flyology.IO.Descriptor
+              (GNAT.Sockets.To_C (Interrupt_Reader))));
       Results.Finished (Outcome = Flyology.IO.Interrupted);
    exception
       when others =>

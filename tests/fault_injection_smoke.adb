@@ -192,9 +192,9 @@ procedure Fault_Injection_Smoke is
               (IO.Descriptor (GNAT.Sockets.To_C (Readers (1))),
                IO.For_Read,
                0.1,
-               IO.Descriptor (GNAT.Sockets.To_C (Readers (2))),
-               IO.Descriptor (GNAT.Sockets.To_C (Readers (3))),
-               IO.Descriptor (GNAT.Sockets.To_C (Readers (4))));
+               (1 => IO.Descriptor (GNAT.Sockets.To_C (Readers (2))),
+                2 => IO.Descriptor (GNAT.Sockets.To_C (Readers (3))),
+                3 => IO.Descriptor (GNAT.Sockets.To_C (Readers (4)))));
          exception
             when IO.Device_Error =>
                Failed := True;

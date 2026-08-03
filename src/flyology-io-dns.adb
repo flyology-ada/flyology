@@ -1147,9 +1147,7 @@ package body Flyology.IO.DNS is
       Expected_Kind : Natural;
       Deadline     : Ada.Real_Time.Time;
       Infinite     : Boolean;
-      Interrupt_1  : Descriptor;
-      Interrupt_2  : Descriptor;
-      Interrupt_3  : Descriptor) return Parse_Result
+      Interrupts   : Interrupt_Set) return Parse_Result
    is
       Socket : Sockets.Socket_Type := Sockets.No_Socket;
       Payload : constant Streams.Stream_Element_Array := To_Stream (Query);
@@ -1159,18 +1157,18 @@ package body Flyology.IO.DNS is
       Sockets.Create_Socket (Socket, Server.Family, Sockets.Socket_Stream);
       Flyology.IO.Sockets.Connect
         (Socket, Server, Remaining (Deadline, Infinite),
-         Interrupt_1, Interrupt_2, Interrupt_3);
+         Interrupts);
       Prefix (1) := Streams.Stream_Element ((Query'Length / 256) mod 256);
       Prefix (2) := Streams.Stream_Element (Query'Length mod 256);
       Flyology.IO.Sockets.Send_All
         (Socket, Prefix, Remaining (Deadline, Infinite),
-         Interrupt_1, Interrupt_2, Interrupt_3);
+         Interrupts);
       Flyology.IO.Sockets.Send_All
         (Socket, Payload, Remaining (Deadline, Infinite),
-         Interrupt_1, Interrupt_2, Interrupt_3);
+         Interrupts);
       Flyology.IO.Sockets.Receive_Exactly
         (Socket, Prefix, Remaining (Deadline, Infinite),
-         Interrupt_1, Interrupt_2, Interrupt_3);
+         Interrupts);
       Length := Natural (Prefix (1)) * 256 + Natural (Prefix (2));
       if Length < 12 or else Length > Max_TCP_Packet_Length then
          raise Malformed_Response with "invalid TCP DNS message length";
@@ -1182,7 +1180,7 @@ package body Flyology.IO.DNS is
       begin
          Flyology.IO.Sockets.Receive_Exactly
            (Socket, Payload_In, Remaining (Deadline, Infinite),
-            Interrupt_1, Interrupt_2, Interrupt_3);
+            Interrupts);
          Result := Parse_Response
            (To_Bytes (Payload_In, Payload_In'Last), Expected_ID,
             Expected_Name, Expected_Kind);
@@ -1210,9 +1208,7 @@ package body Flyology.IO.DNS is
       Per_Attempt   : Duration;
       Deadline      : Ada.Real_Time.Time;
       Infinite      : Boolean;
-      Interrupt_1   : Descriptor;
-      Interrupt_2   : Descriptor;
-      Interrupt_3   : Descriptor;
+      Interrupts    : Interrupt_Set;
       CNAME_Depth   : Natural := 0) return Parse_Result
    is
       type Socket_Array is array (Positive range <>) of Sockets.Socket_Type;
@@ -1268,7 +1264,7 @@ package body Flyology.IO.DNS is
                Channels    : Socket_Array (1 .. 1) :=
                  (others => Sockets.No_Socket);
                Requests    : Wait_Request_Array
-                 (1 .. Max_Name_Servers + 3);
+                 (1 .. Interrupts'Length + Channels'Length);
                Request_Count : Natural := 0;
                Socket_Request_First : Positive := 1;
                Attempt_Time : constant Duration :=
@@ -1304,9 +1300,9 @@ package body Flyology.IO.DNS is
             begin
                --  Interrupt sources share the same kernel wait as resolver
                --  sockets. They are never consumed or closed here.
-               Add_Request (Interrupt_1, For_Read);
-               Add_Request (Interrupt_2, For_Read);
-               Add_Request (Interrupt_3, For_Read);
+               for Interrupt of Interrupts loop
+                  Add_Request (Interrupt, For_Read);
+               end loop;
                Socket_Request_First := Request_Count + 1;
 
                declare
@@ -1327,7 +1323,7 @@ package body Flyology.IO.DNS is
                   Flyology.IO.Sockets.Send
                     (Channels (1), Query_Data, Last,
                      Remaining (Deadline, Infinite),
-                     Interrupt_1, Interrupt_2, Interrupt_3);
+                     Interrupts);
                   if Last /= Query_Data'Last then
                      raise Resolution_Failed with "partial DNS datagram";
                   end if;
@@ -1384,7 +1380,7 @@ package body Flyology.IO.DNS is
                                 (Selected_Server,
                                  Query, ID, Name, Kind,
                                  Attempt_Deadline, False,
-                                 Interrupt_1, Interrupt_2, Interrupt_3);
+                                 Interrupts);
                            end if;
                            case Parsed.Outcome is
                               when Answer =>
@@ -1412,9 +1408,7 @@ package body Flyology.IO.DNS is
                                             Per_Attempt,
                                             Deadline,
                                             Infinite,
-                                            Interrupt_1,
-                                            Interrupt_2,
-                                            Interrupt_3,
+                                            Interrupts,
                                             CNAME_Depth + 1);
                                        Composed : Parse_Result := Alias_Result;
                                     begin
@@ -1491,9 +1485,7 @@ package body Flyology.IO.DNS is
       Attempts      : Positive;
       Per_Attempt   : Duration;
       Started       : Ada.Real_Time.Time;
-      Interrupt_1   : Descriptor;
-      Interrupt_2   : Descriptor;
-      Interrupt_3   : Descriptor) return Address_Array
+      Interrupts    : Interrupt_Set) return Address_Array
    is
       Normalized : constant Name_Buffer := To_Name (Name);
       Infinite   : constant Boolean := Timeout < 0.0;
@@ -1543,11 +1535,11 @@ package body Flyology.IO.DNS is
          when IPv4_Only =>
             Append (Query_Kind
               (Normalized, Type_A, Name_Servers, Attempts, Per_Attempt,
-               Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
+               Deadline, Infinite, Interrupts));
          when IPv6_Only =>
             Append (Query_Kind
               (Normalized, Type_AAAA, Name_Servers, Attempts, Per_Attempt,
-               Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
+               Deadline, Infinite, Interrupts));
          when Any_Family =>
             declare
                AAAA_Deadline : constant Ada.Real_Time.Time :=
@@ -1561,7 +1553,7 @@ package body Flyology.IO.DNS is
                   Append (Query_Kind
                     (Normalized, Type_AAAA, Name_Servers, Attempts,
                      Per_Attempt, AAAA_Deadline, Infinite,
-                     Interrupt_1, Interrupt_2, Interrupt_3));
+                     Interrupts));
                exception
                   when Name_Not_Found => null;
                   when Malformed_Response => Malformed_Failed := True;
@@ -1574,7 +1566,7 @@ package body Flyology.IO.DNS is
             begin
                Append (Query_Kind
                  (Normalized, Type_A, Name_Servers, Attempts, Per_Attempt,
-                  Deadline, Infinite, Interrupt_1, Interrupt_2, Interrupt_3));
+                  Deadline, Infinite, Interrupts));
             exception
                when Name_Not_Found => null;
                when Malformed_Response => Malformed_Failed := True;
@@ -1604,24 +1596,19 @@ package body Flyology.IO.DNS is
       Timeout      : Duration := 5.0;
       Attempts     : Positive := 2;
       Retry_Interval : Duration := 1.0;
-      Interrupt_1  : Descriptor := Invalid_Descriptor;
-      Interrupt_2  : Descriptor := Invalid_Descriptor;
-      Interrupt_3  : Descriptor := Invalid_Descriptor) return Address_Array
+      Interrupts   : Interrupt_Set := No_Interrupts) return Address_Array
    is
    begin
       return Resolve_Core
         (Name, Name_Servers, Family, Timeout, Attempts, Retry_Interval,
-         Ada.Real_Time.Clock,
-         Interrupt_1, Interrupt_2, Interrupt_3);
+         Ada.Real_Time.Clock, Interrupts);
    end Resolve_Using;
 
    function Resolve
      (Name        : String;
       Family      : Family_Preference := Any_Family;
       Timeout     : Duration := 5.0;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor;
+      Interrupts  : Interrupt_Set := No_Interrupts;
       Configuration_Path : String := "/etc/resolv.conf")
       return Address_Array
    is
@@ -1636,7 +1623,7 @@ package body Flyology.IO.DNS is
          return Resolve_Core
            (Candidate, Config.Servers (1 .. Config.Server_Count), Family,
             Timeout, Config.Attempts, Config.Per_Attempt, Started,
-            Interrupt_1, Interrupt_2, Interrupt_3);
+            Interrupts);
       end Try_Name;
    begin
       --  Numeric and localhost names need neither resolver configuration nor
@@ -1650,7 +1637,7 @@ package body Flyology.IO.DNS is
          begin
             return Resolve_Core
               (Name, Empty, Family, Timeout, 1, 1.0, Started,
-               Interrupt_1, Interrupt_2, Interrupt_3);
+               Interrupts);
          end;
       end if;
 

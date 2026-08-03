@@ -36,19 +36,11 @@ package body Flyology.IO is
    pragma Import
      (C, Runtime_In_Lightweight_Task, "flyology_runtime_in_lightweight_task");
 
-   function Runtime_Wait_IO
-     (FD                  : C.int;
-      For_Write           : C.int;
-      Timeout_Nanoseconds : C.long_long;
-      Interrupt_1         : C.int;
-      Interrupt_2         : C.int;
-      Interrupt_3         : C.int) return C.int;
-   pragma Import (C, Runtime_Wait_IO, "flyology_runtime_wait_io");
-
    function Runtime_Wait_IO_Many
      (Requests            : System.Address;
       Count               : C.unsigned;
-      Timeout_Nanoseconds : C.long_long) return C.int;
+      Timeout_Nanoseconds : C.long_long;
+      Interrupt_Wait      : C.int) return C.int;
    pragma Import
      (C, Runtime_Wait_IO_Many, "flyology_runtime_wait_io_many");
 
@@ -98,9 +90,10 @@ package body Flyology.IO is
       return Outcome = Ready;
    end Wait;
 
-   function Wait_Any
+   function Wait_Any_Internal
      (Requests : Wait_Request_Array;
-      Timeout  : Duration := Infinite) return Natural
+      Timeout  : Duration;
+      Interrupt_Wait : Boolean) return Natural
    is
       Started : constant Duration := Clock;
       Result  : C.int;
@@ -168,7 +161,8 @@ package body Flyology.IO is
             Result := Runtime_Wait_IO_Many
               (Runtime_Items'Address,
                C.unsigned (Requests'Length),
-               Time_Math.To_Nanoseconds (Timeout));
+               Time_Math.To_Nanoseconds (Timeout),
+               (if Interrupt_Wait then 1 else 0));
             if Result < 0
               or else Natural (Result) > Requests'Length
             then
@@ -249,118 +243,47 @@ package body Flyology.IO is
             end case;
          end loop;
       end;
-   end Wait_Any;
+   end Wait_Any_Internal;
+
+   function Wait_Any
+     (Requests : Wait_Request_Array;
+      Timeout  : Duration := Infinite) return Natural is
+     (Wait_Any_Internal (Requests, Timeout, False));
 
    function Wait_Interruptibly
      (FD          : Descriptor;
       Condition   : Wait_Kind;
       Timeout     : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor) return Wait_Outcome
+      Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome
    is
-      Started : constant Duration := Clock;
-      Result  : C.int;
-      Count   : Positive := 1;
    begin
       if FD < 0 then
          raise Device_Error with "invalid descriptor";
+      elsif Interrupts'Length >= Max_Wait_Requests then
+         raise Device_Error with "too many interrupt descriptors";
       end if;
 
-      --  A zero-time probe is nonblocking and must inspect readiness rather
-      --  than let an already-expired scheduler timer win the race.  This is
-      --  the same native/lightweight parity rule used by Wait_Any.
-      if Is_Lightweight_Task and then Timeout /= 0.0 then
-         Result :=
-           Runtime_Wait_IO
-              (FD,
-              (if Condition = For_Write then 1 else 0),
-              Time_Math.To_Nanoseconds (Timeout),
-              Interrupt_1,
-              Interrupt_2,
-              Interrupt_3);
-         if Result < 0 then
-            raise Device_Error with "event-loop readiness wait failed";
+      declare
+         Requests : Wait_Request_Array (1 .. Interrupts'Length + 1);
+         Result   : Natural;
+      begin
+         Requests (1) := (FD => FD, Condition => Condition);
+         for Index in Interrupts'Range loop
+            Requests (Index - Interrupts'First + 2) :=
+              (FD => Interrupts (Index), Condition => For_Read);
+         end loop;
+
+         Result := Wait_Any_Internal
+           (Requests, Timeout, Interrupts'Length > 0);
+
+         if Result = 0 then
+            return Timed_Out;
+         elsif Result = Requests'First then
+            return Ready;
+         else
+            return Interrupted;
          end if;
-         return
-           (case Result is
-              when 0      => Ready,
-              when 1      => Timed_Out,
-              when 2 | 3 | 4 => Interrupted,
-              when others => raise Device_Error with
-                "invalid event-loop readiness result");
-      end if;
-
-      if Interrupt_1 >= 0 then
-         Count := Count + 1;
-      end if;
-      if Interrupt_2 >= 0 then
-         Count := Count + 1;
-      end if;
-      if Interrupt_3 >= 0 then
-         Count := Count + 1;
-      end if;
-
-      loop
-         declare
-            Elapsed : constant Duration := Clock - Started;
-            Remaining : constant Duration :=
-              Time_Math.Remaining (Timeout, Elapsed);
-            Items : Poll_Descriptor_Array (1 .. Count);
-            Next  : Positive := 2;
-         begin
-            Items (1) :=
-              (FD              => FD,
-               Events          =>
-                 (if Condition = For_Read then POLLIN else POLLOUT),
-               Returned_Events => 0);
-            if Interrupt_1 >= 0 then
-               Items (Next) :=
-                 (FD => Interrupt_1, Events => POLLIN, Returned_Events => 0);
-               Next := Next + 1;
-            end if;
-            if Interrupt_2 >= 0 then
-               Items (Next) :=
-                 (FD => Interrupt_2, Events => POLLIN, Returned_Events => 0);
-               Next := Next + 1;
-            end if;
-            if Interrupt_3 >= 0 then
-               Items (Next) :=
-                 (FD => Interrupt_3, Events => POLLIN, Returned_Events => 0);
-            end if;
-            Result :=
-              Poll
-                (Items'Address,
-                 C.unsigned (Count),
-                 Time_Math.To_Milliseconds (Remaining));
-            if Result > 0 then
-               if Items (1).Returned_Events /= 0 then
-                  return Ready;
-               end if;
-               for Index in 2 .. Count loop
-                  if Items (Index).Returned_Events /= 0 then
-                     return Interrupted;
-                  end if;
-               end loop;
-            end if;
-         end;
-
-         case Wait_Policy.Classify
-           (Result,
-            (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0),
-            C.int (System.OS_Constants.EINTR))
-         is
-            when Wait_Policy.Return_Ready =>
-               --  Readiness was classified above so this cannot be reached.
-               raise Device_Error with "poll returned no matching event";
-            when Wait_Policy.Return_Timeout =>
-               return Timed_Out;
-            when Wait_Policy.Retry =>
-               null;
-            when Wait_Policy.Fail =>
-               raise Device_Error with "poll failed";
-         end case;
-      end loop;
+      end;
    end Wait_Interruptibly;
 
 end Flyology.IO;

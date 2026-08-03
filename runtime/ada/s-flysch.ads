@@ -144,20 +144,14 @@ package System.Flyology.Scheduler is
    pragma Export
      (C, In_Lightweight_Task, "flyology_runtime_in_lightweight_task");
 
-   function Wait_IO
-     (Descriptor          : Interfaces.C.int;
-      For_Write           : Interfaces.C.int;
-      Timeout_Nanoseconds : Interfaces.C.long_long;
-      Interrupt_1         : Interfaces.C.int;
-      Interrupt_2         : Interfaces.C.int;
-      Interrupt_3         : Interfaces.C.int)
-      return Interfaces.C.int;
-   pragma Export (C, Wait_IO, "flyology_runtime_wait_io");
-
+   --  Register Count descriptor/interest pairs. Interrupt_Wait is 1 when the
+   --  set combines a primary descriptor with lifecycle wake descriptors; it
+   --  affects observability only, not readiness selection.
    function Wait_IO_Many
      (Requests            : System.Address;
       Count               : Interfaces.C.unsigned;
-      Timeout_Nanoseconds : Interfaces.C.long_long)
+      Timeout_Nanoseconds : Interfaces.C.long_long;
+      Interrupt_Wait      : Interfaces.C.int)
       return Interfaces.C.int;
    pragma Export (C, Wait_IO_Many, "flyology_runtime_wait_io_many");
 

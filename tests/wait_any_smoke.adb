@@ -9,6 +9,7 @@ procedure Wait_Any_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
+   use type Flyology.IO.Wait_Outcome;
 
    protected Result is
       procedure Set (Passed : Boolean);
@@ -58,6 +59,20 @@ procedure Wait_Any_Smoke is
                   Flyology.IO.For_Read)];
       begin
          Passed := Flyology.IO.Wait_Any (Requests, 1.0) = 8;
+      end;
+
+      --  Interrupt sets are not tied to the three ownership sources used by
+      --  structured connections. Raw callers can compose any bounded number
+      --  of wake descriptors, and caller index bounds need not start at one.
+      declare
+         Interrupts : constant Flyology.IO.Interrupt_Set (5 .. 8) :=
+           [others => Flyology.IO.Sockets.Native_Descriptor (Left_2)];
+      begin
+         Passed := Passed and then Flyology.IO.Wait_Interruptibly
+           (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+            Flyology.IO.For_Read,
+            1.0,
+            Interrupts) = Flyology.IO.Interrupted;
       end;
 
       --  Right_2 became ready first, but both distinct descriptors are ready

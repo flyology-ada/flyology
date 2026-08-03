@@ -248,17 +248,19 @@ begin
             OK := OK and then Flyology.IO.Wait_Interruptibly
               (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
                Flyology.IO.For_Read,
-               Timeout     => 0.0,
-               Interrupt_1 => Flyology.IO.Descriptor
-                 (GNAT.Sockets.To_C (Interrupt_Readers (Index))))
+               Timeout    => 0.0,
+               Interrupts =>
+                 (1 => Flyology.IO.Descriptor
+                    (GNAT.Sockets.To_C (Interrupt_Readers (Index)))))
               = Flyology.IO.Timed_Out;
             State.Started;
             Outcome := Flyology.IO.Wait_Interruptibly
               (Flyology.IO.Descriptor (GNAT.Sockets.To_C (Readers (Index))),
                Flyology.IO.For_Read,
-               Timeout     => 2.0,
-               Interrupt_1 => Flyology.IO.Descriptor
-                 (GNAT.Sockets.To_C (Interrupt_Readers (Index))));
+               Timeout    => 2.0,
+               Interrupts =>
+                 (1 => Flyology.IO.Descriptor
+                    (GNAT.Sockets.To_C (Interrupt_Readers (Index)))));
             if Will_Interrupt then
                OK := OK and then Outcome = Flyology.IO.Interrupted;
             else

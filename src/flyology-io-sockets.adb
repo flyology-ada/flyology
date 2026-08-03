@@ -69,27 +69,21 @@ package body Flyology.IO.Sockets is
       Condition : Wait_Kind;
       Started   : Ada.Real_Time.Time;
       Timeout   : Duration;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Interrupt_3 : Descriptor);
+      Interrupts : Interrupt_Set);
 
    procedure Receive_Prepared
      (Socket  : Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Interrupt_3 : Descriptor);
+      Interrupts : Interrupt_Set);
 
    procedure Send_Prepared
      (Socket  : Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Interrupt_3 : Descriptor);
+      Interrupts : Interrupt_Set);
 
    function Remaining
      (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration
@@ -109,14 +103,12 @@ package body Flyology.IO.Sockets is
       Condition : Wait_Kind;
       Started   : Ada.Real_Time.Time;
       Timeout   : Duration;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Interrupt_3 : Descriptor)
+      Interrupts : Interrupt_Set)
    is
       Outcome : constant Wait_Outcome :=
         Wait_Interruptibly
           (To_Descriptor (Socket), Condition, Remaining (Started, Timeout),
-           Interrupt_1, Interrupt_2, Interrupt_3);
+           Interrupts);
    begin
       case Outcome is
          when Ready => null;
@@ -139,15 +131,11 @@ package body Flyology.IO.Sockets is
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor)
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
    begin
       Prepare (Socket);
-      Receive_Prepared
-        (Socket, Item, Last, Timeout,
-         Interrupt_1, Interrupt_2, Interrupt_3);
+      Receive_Prepared (Socket, Item, Last, Timeout, Interrupts);
    end Receive;
 
    procedure Receive_Prepared
@@ -155,9 +143,7 @@ package body Flyology.IO.Sockets is
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Interrupt_3 : Descriptor)
+      Interrupts : Interrupt_Set)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
@@ -170,8 +156,7 @@ package body Flyology.IO.Sockets is
                case Sockets.Resolve_Exception (Occurrence) is
                   when Sockets.Resource_Temporarily_Unavailable =>
                      Wait_For
-                       (Socket, For_Read, Started, Timeout,
-                        Interrupt_1, Interrupt_2, Interrupt_3);
+                       (Socket, For_Read, Started, Timeout, Interrupts);
                   when Sockets.Interrupted_System_Call =>
                      null;
                   when others =>
@@ -185,9 +170,7 @@ package body Flyology.IO.Sockets is
      (Socket  : Sockets.Socket_Type;
       Item    : out Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor)
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First   : Ada.Streams.Stream_Element_Offset := Item'First;
@@ -200,9 +183,7 @@ package body Flyology.IO.Sockets is
             Item (First .. Item'Last),
             Last,
             Remaining (Started, Timeout),
-            Interrupt_1,
-            Interrupt_2,
-            Interrupt_3);
+            Interrupts);
          if Last < First then
             raise Device_Error with "socket closed while receiving";
          end if;
@@ -215,15 +196,11 @@ package body Flyology.IO.Sockets is
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor)
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
    begin
       Prepare (Socket);
-      Send_Prepared
-        (Socket, Item, Last, Timeout,
-         Interrupt_1, Interrupt_2, Interrupt_3);
+      Send_Prepared (Socket, Item, Last, Timeout, Interrupts);
    end Send;
 
    procedure Send_Prepared
@@ -231,9 +208,7 @@ package body Flyology.IO.Sockets is
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration;
-      Interrupt_1 : Descriptor;
-      Interrupt_2 : Descriptor;
-      Interrupt_3 : Descriptor)
+      Interrupts : Interrupt_Set)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
@@ -246,8 +221,7 @@ package body Flyology.IO.Sockets is
                case Sockets.Resolve_Exception (Occurrence) is
                   when Sockets.Resource_Temporarily_Unavailable =>
                      Wait_For
-                       (Socket, For_Write, Started, Timeout,
-                        Interrupt_1, Interrupt_2, Interrupt_3);
+                       (Socket, For_Write, Started, Timeout, Interrupts);
                   when Sockets.Interrupted_System_Call =>
                      null;
                   when others =>
@@ -261,9 +235,7 @@ package body Flyology.IO.Sockets is
      (Socket  : Sockets.Socket_Type;
       Item    : Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor)
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       First   : Ada.Streams.Stream_Element_Offset := Item'First;
@@ -276,9 +248,7 @@ package body Flyology.IO.Sockets is
             Item (First .. Item'Last),
             Last,
             Remaining (Started, Timeout),
-            Interrupt_1,
-            Interrupt_2,
-            Interrupt_3);
+            Interrupts);
          if Last < First then
             raise Device_Error with "socket closed while sending";
          end if;
@@ -291,9 +261,7 @@ package body Flyology.IO.Sockets is
       Socket  : out Sockets.Socket_Type;
       Address : out Sockets.Sock_Addr_Type;
       Timeout : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor)
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
       Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Accepted : Sockets.Socket_Type := Sockets.No_Socket;
@@ -301,18 +269,9 @@ package body Flyology.IO.Sockets is
       Pressure_Backoff : Duration := 0.001;
 
       procedure Pause_Before_Retry (Requested : Duration) is
-         Requests : Wait_Request_Array (1 .. 3);
-         Count    : Natural := 0;
+         Requests : Wait_Request_Array (Interrupts'Range);
          Left     : constant Duration := Remaining (Started, Timeout);
          Pause    : Duration;
-
-         procedure Add (FD : Descriptor) is
-         begin
-            if FD >= 0 then
-               Count := Count + 1;
-               Requests (Count) := (FD => FD, Condition => For_Read);
-            end if;
-         end Add;
       begin
          if Timeout >= 0.0 and then Left <= 0.0 then
             raise Timeout_Error with "socket operation timed out";
@@ -322,11 +281,12 @@ package body Flyology.IO.Sockets is
             elsif Timeout < 0.0 then Requested
             else Duration'Min (Requested, Left));
 
-         Add (Interrupt_1);
-         Add (Interrupt_2);
-         Add (Interrupt_3);
-         if Count > 0 then
-            if Wait_Any (Requests (1 .. Count), Pause) /= 0 then
+         for Index in Interrupts'Range loop
+            Requests (Index) :=
+              (FD => Interrupts (Index), Condition => For_Read);
+         end loop;
+         if Requests'Length > 0 then
+            if Wait_Any (Requests, Pause) /= 0 then
                raise Operation_Interrupted with
                  "socket operation interrupted";
             end if;
@@ -367,8 +327,7 @@ package body Flyology.IO.Sockets is
                is
                   when Wait_Policy.Wait_For_Connection =>
                      Wait_For
-                       (Server, For_Read, Started, Timeout,
-                        Interrupt_1, Interrupt_2, Interrupt_3);
+                       (Server, For_Read, Started, Timeout, Interrupts);
                   when Wait_Policy.Retry_Accept =>
                      Pause_Before_Retry (0.0);
                   when Wait_Policy.Retry_Transient =>
@@ -404,9 +363,7 @@ package body Flyology.IO.Sockets is
      (Socket  : Sockets.Socket_Type;
       Server  : Sockets.Sock_Addr_Type;
       Timeout : Duration := Infinite;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor)
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Pending : Boolean := False;
@@ -429,9 +386,7 @@ package body Flyology.IO.Sockets is
       end;
 
       if Pending then
-         Wait_For
-           (Socket, For_Write, Started, Timeout,
-            Interrupt_1, Interrupt_2, Interrupt_3);
+         Wait_For (Socket, For_Write, Started, Timeout, Interrupts);
          declare
             Result : constant Sockets.Option_Type :=
               Sockets.Get_Socket_Option

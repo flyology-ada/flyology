@@ -84,10 +84,7 @@ package body System.Flyology.Scheduler is
    subtype IO_Bucket_Index is Natural range 0 .. IO_Bucket_Count - 1;
    Max_IO_Link_Count : constant := 32;
    subtype IO_Link_Kind is Positive range 1 .. Max_IO_Link_Count;
-   Primary_IO       : constant IO_Link_Kind := 1;
-   First_Interrupt  : constant IO_Link_Kind := 2;
-   Second_Interrupt : constant IO_Link_Kind := 3;
-   Third_Interrupt  : constant IO_Link_Kind := 4;
+   Primary_IO : constant IO_Link_Kind := 1;
 
    type Runtime_Wait_Request is record
       Descriptor : C.int;
@@ -187,9 +184,10 @@ package body System.Flyology.Scheduler is
       IO_Wait    : Boolean := False;
       IO_Interrupt_Wait : Boolean := False;
       IO_Result  : C.int := 0;
-      IO_Timeout_Result : C.int := 1;
-      Inline_IO_Links : aliased IO_Wait_Link_Array
-        (Primary_IO .. Third_Interrupt);
+      --  File cancellation needs one descriptor link that outlives the
+      --  submission call. Descriptor-set waits keep their bounded link array
+      --  on the suspended fiber's stack instead.
+      Inline_IO_Links : aliased IO_Wait_Link_Array (1 .. 1);
       Active_IO_Links : IO_Wait_Link_Access := null;
       Active_IO_Link_Count : Natural range 0 .. Max_IO_Link_Count := 0;
       File_Wait  : Boolean := False;
@@ -1658,7 +1656,7 @@ package body System.Flyology.Scheduler is
                Remove_Timer_Locked (Group, Item);
                Item.Timed_Out := True;
                if Item.IO_Wait then
-                  Item.IO_Result := Item.IO_Timeout_Result;
+                  Item.IO_Result := 0;
                end if;
                Remove_IO_Waits_Locked (Group, Item);
                Enqueue (Group, Item);
@@ -2518,126 +2516,11 @@ package body System.Flyology.Scheduler is
    function In_Lightweight_Task return C.int is
      (if Current_Task = System.Null_Address then 0 else 1);
 
-   function Wait_IO
-     (Descriptor          : C.int;
-      For_Write           : C.int;
-      Timeout_Nanoseconds : C.long_long;
-      Interrupt_1         : C.int;
-      Interrupt_2         : C.int;
-      Interrupt_3         : C.int) return C.int
-   is
-      Group     : constant Loop_Group_Access := Thread_Group;
-      Item      : Fiber_Access;
-      Condition : constant Pollers.Interest :=
-        (if For_Write = 0 then Pollers.Readable else Pollers.Writable);
-      Whole     : C.long_long;
-      Remainder : C.long_long;
-      Timeout   : Duration;
-      function Arm
-        (FD       : C.int;
-         Interest : Pollers.Interest;
-         Kind     : IO_Link_Kind) return Boolean;
-
-      procedure Roll_Back_Watches;
-
-      function Arm
-        (FD       : C.int;
-         Interest : Pollers.Interest;
-         Kind     : IO_Link_Kind) return Boolean
-      is
-         Needs_Kernel_Watch : Boolean;
-      begin
-         if FD < 0 then
-            return True;
-         end if;
-         Needs_Kernel_Watch :=
-           not IO_Interest_Registered_Locked (Group, FD, Interest);
-         if Needs_Kernel_Watch
-           and then not Pollers.Watch
-             (Group.Scheduler_Poller, FD, Interest)
-         then
-            return False;
-         end if;
-         Register_IO_Wait_Locked
-           (Group, Item, FD, Interest, Kind,
-            (if Kind = Primary_IO then 0 else C.int (Kind)));
-         return True;
-      end Arm;
-
-      procedure Roll_Back_Watches is
-      begin
-         Remove_IO_Waits_Locked (Group, Item);
-      end Roll_Back_Watches;
-   begin
-      --  Only this group's event thread writes Current_Fiber while a fiber is
-      --  running; the unlocked read validates same-thread call context. The
-      --  state transition uses the locked read below.
-      if not Is_Event_Thread
-        or else Group.Current_Fiber = null
-        or else Descriptor < 0
-      then
-         return -1;
-      end if;
-
-      if Timeout_Nanoseconds < 0 then
-         Timeout := No_Deadline;
-      else
-         Whole := Timeout_Nanoseconds / 1_000_000_000;
-         Remainder := Timeout_Nanoseconds mod 1_000_000_000;
-         Timeout := Duration (Whole)
-           + Duration (Remainder) / 1_000_000_000;
-      end if;
-
-      Lock_Group (Group);
-      Item := Group.Current_Fiber;
-      Item.Active_IO_Links :=
-        Item.Inline_IO_Links (Primary_IO)'Unchecked_Access;
-      Item.Active_IO_Link_Count := Third_Interrupt;
-      Item.Deadline :=
-        (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
-      Item.Timed_Out := False;
-      Item.IO_Result := 0;
-      Item.IO_Timeout_Result := 1;
-      Item.IO_Interrupt_Wait :=
-        Interrupt_1 >= 0 or else Interrupt_2 >= 0 or else Interrupt_3 >= 0;
-      Item.State := Waiting;
-      if not Register_Timer_Locked (Group, Item) then
-         Item.State := Running;
-         Item.Deadline := No_Deadline;
-         Item.IO_Interrupt_Wait := False;
-         Item.Active_IO_Links := null;
-         Item.Active_IO_Link_Count := 0;
-         Unlock_Group (Group);
-         return -1;
-      elsif not Arm (Descriptor, Condition, Primary_IO)
-        or else not Arm
-          (Interrupt_1, Pollers.Readable, First_Interrupt)
-        or else not Arm
-          (Interrupt_2, Pollers.Readable, Second_Interrupt)
-        or else not Arm
-          (Interrupt_3, Pollers.Readable, Third_Interrupt)
-      then
-         Roll_Back_Watches;
-         Remove_Timer_Locked (Group, Item);
-         Item.State := Running;
-         Item.Active_IO_Links := null;
-         Item.Active_IO_Link_Count := 0;
-         Unlock_Group (Group);
-         return -1;
-      end if;
-      --  A task that blocks never entered its lowered-priority ready queue.
-      --  Its eventual readiness event uses ordinary FIFO wake placement.
-      Item.Enqueue_At_Head := False;
-      Contexts.Switch (Item.Context, Group.Scheduler_Context);
-      Item.Active_IO_Links := null;
-      Item.Active_IO_Link_Count := 0;
-      return Item.IO_Result;
-   end Wait_IO;
-
    function Wait_IO_Many
      (Requests            : System.Address;
       Count               : C.unsigned;
-      Timeout_Nanoseconds : C.long_long) return C.int
+      Timeout_Nanoseconds : C.long_long;
+      Interrupt_Wait      : C.int) return C.int
    is
       Group     : constant Loop_Group_Access := Thread_Group;
       Item      : Fiber_Access;
@@ -2685,13 +2568,14 @@ package body System.Flyology.Scheduler is
          return True;
       end Arm;
    begin
-      --  As with Wait_IO, Current_Fiber belongs exclusively to this event
-      --  thread until the locked state transition below.
+      --  Current_Fiber belongs exclusively to this event thread until the
+      --  locked state transition below.
       if not Is_Event_Thread
         or else Group.Current_Fiber = null
         or else Requests = System.Null_Address
         or else Count = 0
         or else Count > C.unsigned (Max_IO_Link_Count)
+        or else Interrupt_Wait not in 0 | 1
       then
          return -1;
       end if;
@@ -2713,8 +2597,7 @@ package body System.Flyology.Scheduler is
         (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
       Item.Timed_Out := False;
       Item.IO_Result := 0;
-      Item.IO_Timeout_Result := 0;
-      Item.IO_Interrupt_Wait := False;
+      Item.IO_Interrupt_Wait := Interrupt_Wait /= 0;
       Item.State := Waiting;
       if not Register_Timer_Locked (Group, Item) then
          Item.State := Running;

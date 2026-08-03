@@ -275,21 +275,25 @@ package body Flyology.IO.TLS is
    is
       Token_Source : Descriptor := Invalid_Descriptor;
       Cancelled    : Boolean := False;
+      Interrupts   : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Positive := 1;
       Outcome      : Wait_Outcome;
    begin
+      Interrupts (1) := Close_Source;
       if Token /= null then
          Token.Wait_Source (Token_Source, Cancelled);
          if Cancelled then
             raise Operation_Cancelled;
          end if;
+         Interrupt_Count := 2;
+         Interrupts (2) := Token_Source;
       end if;
 
       Outcome := Wait_Interruptibly
-        (FD,
-         (if Status = Want_Read then For_Read else For_Write),
-         Remaining (Started, Timeout),
-         Interrupt_1 => Close_Source,
-         Interrupt_2 => Token_Source);
+         (FD,
+          (if Status = Want_Read then For_Read else For_Write),
+          Remaining (Started, Timeout),
+         Interrupts (1 .. Interrupt_Count));
       case Outcome is
          when Ready =>
             null;

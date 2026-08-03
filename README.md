@@ -766,6 +766,12 @@ tasks observe it in `poll`, while lightweight tasks observe it through their loo
 the connection descriptor and without periodic timer wakeups. One signal wakes
 all operations registered with that source.
 
+The raw I/O boundary represents these independent wake descriptors as an
+`Interrupt_Set` rather than fixed close/shutdown/token parameters. This keeps
+owner-specific policy in `Connections`, TLS, and other structured layers while
+allowing low-level callers to compose a bounded set of lifecycle sources. Raw
+waits observe set members for readability but never consume or close them.
+
 `Flyology.Cancellation.Token` is the canonical one-shot token shared by
 connection and file I/O. `Connections.Cancellation_Token` and
 `Files.Cancellation_Token` are source-compatible subtypes of it, and both
@@ -781,7 +787,7 @@ admission, releases tasks queued at the capacity gate with `Admission_Closed`,
 and causes active lifecycle I/O to raise `Operation_Cancelled`;
 `Await_Drained` returns after all owners release. Raw `Flyology.IO.Sockets`
 remains the lower-level mechanism when an application needs different ownership
-or cancellation policy. Its optional interrupt descriptors and the raw
+or cancellation policy. Its explicit interrupt sets and the raw
 descriptor-wait APIs are unsafe lifetime building blocks: callers retain their
 ownership, close serialization, and wake-source lifetime responsibility.
 

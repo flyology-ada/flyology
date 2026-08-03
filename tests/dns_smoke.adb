@@ -895,7 +895,8 @@ procedure DNS_Smoke is
             declare
                Ignored : constant DNS.Address_Array := DNS.Resolve_Using
                  ("cancel.test", Servers, DNS.IPv4_Only, Timeout => 5.0,
-                  Interrupt_1 => Flyology.Wake_Sources.Descriptor (Cancel_Source));
+                  Interrupts =>
+                    (1 => Flyology.Wake_Sources.Descriptor (Cancel_Source)));
                pragma Unreferenced (Ignored);
             begin
                null;

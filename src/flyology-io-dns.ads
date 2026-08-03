@@ -28,7 +28,7 @@ package Flyology.IO.DNS is
    Resolution_Failed  : exception;
    --  Raised when no valid result can be obtained from malformed responses.
    Malformed_Response : exception;
-   --  Raised when an optional interrupt descriptor becomes readable.
+   --  Raised when a member of the resolver's interrupt set becomes readable.
    Operation_Cancelled : exception;
 
    --  Resolve through numeric servers in Configuration_Path. Search domains,
@@ -42,9 +42,7 @@ package Flyology.IO.DNS is
    --  @param Name Host name, numeric address, or localhost
    --  @param Family Requested result family
    --  @param Timeout Overall deadline interval in seconds
-   --  @param Interrupt_1 Optional readable cancellation descriptor
-   --  @param Interrupt_2 Optional readable cancellation descriptor
-   --  @param Interrupt_3 Optional readable cancellation descriptor
+   --  @param Interrupts Readable cancellation sources owned by the caller
    --  @param Configuration_Path Resolver configuration file
    --  @return Resolved addresses in resolver response order
    --  @exception Name_Not_Found No address exists for Name and Family
@@ -58,11 +56,10 @@ package Flyology.IO.DNS is
      (Name        : String;
       Family      : Family_Preference := Any_Family;
       Timeout     : Duration := 5.0;
-      Interrupt_1 : Descriptor := Invalid_Descriptor;
-      Interrupt_2 : Descriptor := Invalid_Descriptor;
-      Interrupt_3 : Descriptor := Invalid_Descriptor;
+      Interrupts  : Interrupt_Set := No_Interrupts;
       Configuration_Path : String := "/etc/resolv.conf")
-      return Address_Array;
+      return Address_Array
+     with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Resolve through explicit numeric DNS endpoints without search-domain
    --  expansion. Timeout is one deadline across family queries, Attempts, and
@@ -74,9 +71,7 @@ package Flyology.IO.DNS is
    --  @param Timeout Overall deadline interval in seconds
    --  @param Attempts Attempts made for each query kind
    --  @param Retry_Interval Maximum seconds allocated per attempt
-   --  @param Interrupt_1 Optional readable cancellation descriptor
-   --  @param Interrupt_2 Optional readable cancellation descriptor
-   --  @param Interrupt_3 Optional readable cancellation descriptor
+   --  @param Interrupts Readable cancellation sources owned by the caller
    --  @return Resolved addresses in resolver response order
    --  @exception Name_Not_Found No address exists for Name and Family
    --  @exception Resolution_Failed Servers or retry interval are unusable
@@ -92,9 +87,9 @@ package Flyology.IO.DNS is
       Timeout      : Duration := 5.0;
       Attempts     : Positive := 2;
       Retry_Interval : Duration := 1.0;
-      Interrupt_1  : Descriptor := Invalid_Descriptor;
-      Interrupt_2  : Descriptor := Invalid_Descriptor;
-      Interrupt_3  : Descriptor := Invalid_Descriptor) return Address_Array;
+      Interrupts     : Interrupt_Set := No_Interrupts)
+      return Address_Array
+     with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Atomically remove all process-local positive and negative cache entries.
    --  The cache owns no descriptors or background tasks and is safe to use
