@@ -186,6 +186,23 @@ do
       ;;
   esac
   printf '%s\n' "test: PASS $test_main"
+
+  #  Temporary issue #18 diagnostic: exercise the already-built processes
+  #  repeatedly under hosted Darwin scheduling without paying another build.
+  if [ "${GITHUB_ACTIONS:-}" = true ] && [ "$(uname -s)" = Darwin ]; then
+    case "$test_main" in
+      connection_lifecycle_smoke|observability_smoke)
+        printf '%s\n' "test: BEGIN 100 hosted repeats of $test_main"
+        repeat=1
+        while [ "$repeat" -le 100 ]; do
+          "$project_root/scripts/run-with-timeout.sh" 60 \
+            "$project_root/tests/bin/$test_main"
+          repeat=$((repeat + 1))
+        done
+        printf '%s\n' "test: PASS 100 hosted repeats of $test_main"
+        ;;
+    esac
+  fi
 done
 
 #  Exercise automatic placement separately because the pool policy is compiled
