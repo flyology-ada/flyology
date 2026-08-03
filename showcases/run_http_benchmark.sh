@@ -16,6 +16,7 @@ trials=${6:-3}
 warmup=${7:-10000}
 profile=${8:-release}
 server_log="$project_root/build/http-benchmark-server.log"
+upload_body="$project_root/build/http-benchmark-upload.bin"
 
 if ! command -v oha >/dev/null 2>&1; then
   printf '%s\n' "oha is required: https://github.com/hatoo/oha"
@@ -42,13 +43,63 @@ FLYOLOGY_SHOWCASE_PROFILE="$profile" "$alr" exec -- gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
   -P showcases/showcases.gpr \
-  http_server.adb
+  http_benchmark_server.adb
+
+mkdir -p "$project_root/build"
+dd if=/dev/zero of="$upload_body" bs=1024 count=32 2>/dev/null
+
+run_case () {
+  lane=$1
+  trial=$2
+  name=$3
+  path=$4
+
+  case "$name" in
+    routed-get|middleware|admission)
+      if [ "$warmup" -gt 0 ]; then
+        oha -n "$warmup" -c "$concurrency" --no-tui \
+          "http://127.0.0.1:$port$path" >/dev/null
+      fi
+      printf '\n-- %s --\n' "$name"
+      printf '%s\n' \
+        "command: oha -n $requests -c $concurrency --no-tui http://127.0.0.1:$port$path"
+      oha -n "$requests" -c "$concurrency" --no-tui \
+        "http://127.0.0.1:$port$path"
+      ;;
+    buffered)
+      if [ "$warmup" -gt 0 ]; then
+        oha -n "$warmup" -c "$concurrency" --no-tui \
+          -m POST -T application/json -d '{"value":"flyology"}' \
+          "http://127.0.0.1:$port$path" >/dev/null
+      fi
+      printf '\n-- %s --\n' "$name"
+      printf '%s\n' \
+        "command: oha -n $requests -c $concurrency --no-tui -m POST -T application/json -d {\"value\":\"flyology\"} http://127.0.0.1:$port$path"
+      oha -n "$requests" -c "$concurrency" --no-tui \
+        -m POST -T application/json -d '{"value":"flyology"}' \
+        "http://127.0.0.1:$port$path"
+      ;;
+    streamed-upload)
+      if [ "$warmup" -gt 0 ]; then
+        oha -n "$warmup" -c "$concurrency" --no-tui \
+          -m POST -T application/octet-stream -D "$upload_body" \
+          "http://127.0.0.1:$port$path" >/dev/null
+      fi
+      printf '\n-- %s --\n' "$name"
+      printf '%s\n' \
+        "command: oha -n $requests -c $concurrency --no-tui -m POST -T application/octet-stream -D $upload_body http://127.0.0.1:$port$path"
+      oha -n "$requests" -c "$concurrency" --no-tui \
+        -m POST -T application/octet-stream -D "$upload_body" \
+        "http://127.0.0.1:$port$path"
+      ;;
+  esac
+}
 
 run_lane () {
   lane=$1
   trial=$2
   : >"$server_log"
-  "$project_root/showcases/bin/http_server" \
+  "$project_root/showcases/bin/http_benchmark_server" \
     "$lane" 0 "$port" "$handlers" >"$server_log" 2>&1 &
   server_pid=$!
   cleanup() {
@@ -77,11 +128,6 @@ run_lane () {
     exit 1
   fi
 
-  if [ "$warmup" -gt 0 ]; then
-    oha -n "$warmup" -c "$concurrency" --no-tui \
-      "http://127.0.0.1:$port/" >/dev/null
-  fi
-
   if [ "$lane" = lightweight ]; then
     execution_parallelism="$loops event-loop pthreads"
   else
@@ -94,9 +140,13 @@ run_lane () {
     "profile=$profile warmup=$warmup" \
     "requests=$requests concurrency=$concurrency handlers=$handlers" \
     "execution_parallelism=$execution_parallelism" \
-    "command: oha -n $requests -c $concurrency --no-tui http://127.0.0.1:$port/"
-  oha -n "$requests" -c "$concurrency" --no-tui \
-    "http://127.0.0.1:$port/"
+    "upload_bytes=32768"
+
+  run_case "$lane" "$trial" routed-get /route
+  run_case "$lane" "$trial" middleware /middleware
+  run_case "$lane" "$trial" buffered /buffered
+  run_case "$lane" "$trial" streamed-upload /upload
+  run_case "$lane" "$trial" admission /admission
 
   cleanup
   trap - EXIT INT TERM

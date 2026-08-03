@@ -1083,6 +1083,20 @@ until the response-transform hook can preserve streaming, HEAD and no-body
 semantics, output bounds, and safe handling after partial writes. Applications
 must also assess secret-bearing compression side channels before enabling it.
 
+`Server.SSE_Handlers` and `Server.WebSocket_Handlers` add optional lifecycle
+adapters without replacing the raw protocol calls. Producers publish through
+fixed-capacity closeable channels, while the handler running the lifecycle is
+the only connection writer. WebSocket lifecycle routes require the route's
+upgrade policy and an explicit browser-origin policy. Retained and reassembled
+messages still reserve the shared ingress budget.
+
+`Flyology.Task_Scopes` runs a bounded homogeneous group of child operations as
+ordinary structured Ada tasks. The default child designation is lightweight;
+`Flyology.Native_Executors` is the explicit bounded boundary for CPU-heavy or
+blocking foreign work. `Server.Request_Tasks` inherits request cancellation and
+the current absolute deadline without exposing the borrowed exchange or
+connection to children. Scope exit cancels and joins unfinished work.
+
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
 13 upgrade and client key. Its default origin policy rejects browser `Origin`
@@ -1146,14 +1160,16 @@ private key, and OpenSSL library directory:
   tests/fixtures/tls/server-key.pem
 ```
 
-The benchmark runner uses `oha` and runs the same loopback keep-alive workload
+The benchmark runner uses `oha` and runs the same loopback keep-alive workloads
 against explicit lightweight and native handler pools:
 
 ```sh
-./showcases/run_http_benchmark.sh 100000 256 256 18080 16 3 10000 release
+./showcases/run_http_benchmark.sh 100000 500 500 18080 16 3 10000 release
 ```
 
-The arguments are measured requests, client concurrency, handler capacity,
+The campaign includes routed GET, a middleware-heavy GET, a small buffered
+POST, a 32 KiB streamed upload, and rate/bulkhead admission. The arguments are
+measured requests per case, client concurrency, handler capacity,
 port, lightweight event-loop count, paired trial count, and warm-up requests.
 The optional final argument selects the `release` (default) or `development`
 profile. The loop count defaults to the host's logical CPU count. The runner
@@ -1161,6 +1177,11 @@ removes the benchmark-only per-request counter, warms each server, alternates
 lane order, and prints the `oha` version, complete command, profile, and
 execution parallelism with every result. Results are host measurements, not
 portable performance guarantees.
+
+The website's [HTTP application guide](https://flyology.org/guide/http/)
+progresses from the raw connection through routing, body policy, middleware,
+streaming lifecycles, structured request work, deployment sizing, and the
+reproducible benchmark campaign.
 
 ### Timers
 
