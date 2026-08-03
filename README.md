@@ -454,6 +454,8 @@ Flyology exposes synchronous-looking operations in:
   send operations.
 - `Flyology.IO.Connections`: bounded admission, single-owner sockets,
   cancellation tokens, and descriptor-generation-safe close.
+- `Flyology.IO.TLS`: provider-neutral nonblocking TLS sessions with owned
+  sockets, shared deadlines, cancellation, and orderly shutdown.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
 - `Flyology.IO.Files`: open, close, positional read, and positional write.
@@ -514,6 +516,59 @@ the caller; Linux sends use `MSG_NOSIGNAL`. This matches GNAT.Sockets'
 process-safety convention while retaining the raw nonblocking `accept(2)` retry
 path required by the event loop. Native `poll(2)` waits retry `EINTR` with a
 recomputed remaining monotonic deadline.
+
+### TLS
+
+`Flyology.IO.TLS` owns TLS orchestration but not cryptography. An application
+passes a provider object when it transfers a connected socket into a limited
+TLS connection. The connection becomes the socket's sole closing owner. It
+serializes provider calls, maps `Want_Read` and `Want_Write` to the same
+`kqueue`/`epoll` readiness waits used by plain sockets, and keeps one monotonic
+deadline across every retry. A lightweight task suspends on its event loop; a
+native task blocks only its pthread.
+
+The shipped `Flyology.IO.TLS.OpenSSL` adapter supports OpenSSL 3.x. It loads
+`libssl` and `libcrypto` at run time, so building or linking Flyology does not
+require a TLS library. Applications may select an installation directory when
+initializing a provider and may use different provider objects for different
+connections. The directory must contain a matched OpenSSL 3 library pair;
+the adapter verifies that `libssl` is bound to the selected `libcrypto`, and
+OpenSSL 1.x and 4.x are rejected. Code modules and provider contexts remain
+loaded only while a provider or one of its sessions retains them. A session
+therefore remains usable after its provider object is finalized.
+
+Client configuration is secure by default and has no insecure mode: it verifies
+the peer chain, sends SNI, and verifies the requested DNS hostname. An empty CA
+path selects OpenSSL's default trust store. Server configuration requires a PEM
+certificate chain and matching private key. The shipped server adapter does not
+request client certificates. Provider initialization synchronously loads code,
+trust data, certificates, and keys, so it should run before event loops start or
+from a native task. Flyology neither reads TLS records itself nor contains
+cryptographic primitives.
+
+The adapter boundary is public. A downstream crate can implement another
+provider by returning nonblocking `Complete`, `Want_Read`, `Want_Write`,
+`Peer_Closed`, or `Failed` steps. Flyology currently tests only OpenSSL 3.
+`tlsada`/libtls remains a possible downstream adapter but would add an Alire and
+system-libltls dependency. wolfSSL remains possible downstream under its
+GPL/commercial licensing terms. OpenSSL states that releases from 3.0 onward
+use [Apache License 2.0](https://openssl-library.org/source/license/); its
+nonblocking guide documents the
+[`WANT_READ`/`WANT_WRITE` contract](https://docs.openssl.org/master/man7/ossl-guide-tls-client-non-block/).
+
+`Shutdown` completes the bidirectional `close_notify` exchange under one
+deadline. `Close` is separately idempotent: it wakes and drains any active
+operation, destroys provider session state, and only then closes the socket.
+Cancellation never releases provider-owned state while a provider call is
+active. A peer transport close without `close_notify` is a `TLS_Error`.
+Calls queued behind another operation on the same TLS connection retain the
+same original deadline and notice token or concurrent-close cancellation
+within a 10 ms scheduling quantum; active provider readiness waits use wake
+descriptors and do not poll at that quantum.
+On Linux, each OpenSSL call temporarily blocks `SIGPIPE` on its pthread, removes
+only a signal created by that call, and restores the exact prior mask before
+returning to Ada. Darwin applies `SO_NOSIGPIPE` to the owned socket. A task never
+suspends while the temporary Linux signal mask is installed.
 
 ### DNS resolution
 
@@ -926,6 +981,7 @@ async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 | Use readiness-and-retry I/O | It maps directly to nonblocking sockets and keeps control in Ada | Arbitrary blocking libc or foreign calls cannot be intercepted transparently |
 | Use kernel-completion file I/O | Disk operations must not stall an event-loop pthread or require hidden workers | Darwin AIO and Linux `io_uring`/native AIO add platform ABI code, bounded submission queues, and backend-specific cancellation handshakes |
 | Make connection lifetime explicit | High-density servers need a bound on accepted work and one authority to close each descriptor | Generation-tagged limited owners cancel and drain the exact active operation before releasing an OS descriptor for reuse |
+| Keep TLS providers selectable | Readiness, deadlines, and descriptor ownership are Flyology policy; protocol and cryptography belong to maintained TLS libraries | OpenSSL 3 is the shipped adapter; other libraries implement the public provider boundary |
 | Put runtime logic in Ada | Types, task coordination, errors, and policies remain inspectable in the target language | OS entry points are imported from C system interfaces; only register switching is assembly |
 | Generate a static custom RTS | The experiment works without a compiler fork and can fail closed on mismatched sources | Builds require a matching installed runtime from the tested GNAT 13–16 family |
 
@@ -943,6 +999,11 @@ The shared Linux rings require acquire/release ordering against the kernel.
 Flyology uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
 not expose the corresponding store operation, so the narrow C ABI shim calls
 the compiler's `__atomic_store_n` intrinsic; no worker runtime is involved.
+
+The OpenSSL adapter adds a C ABI table for dynamically resolved OpenSSL 3
+functions. Ada owns session lifetime, readiness retry, timeout, cancellation,
+and socket-close policy. The bridge translates provider return codes and does
+not implement TLS records or cryptographic operations.
 
 The only assembly is the minimal context swap needed to save and restore the
 callee-saved machine state. Rewriting a system-call declaration in Ada would
@@ -1035,7 +1096,8 @@ rather than hidden behind a claim of universal portability.
   differences such as the GNAT 16 `timespec` move.
 - [`runtime/patches`](runtime/patches): versioned Darwin/Linux GNARL
   task-primitives integration and its tested-release manifest.
-- [`src`](src): public task-aware I/O packages.
+- [`src`](src): public task-aware I/O packages and the optional dynamic TLS
+  provider bridge.
 - [`tests`](tests): behavioral and semantic-parity programs covering tasking,
   I/O, lifecycle, stress, fault injection, sanitizers, and observability; the
   detailed scope is listed under [CI and releases](#ci-and-releases).
@@ -1350,6 +1412,12 @@ Current smoke coverage includes:
 - generation-tagged connection close under forced descriptor-number reuse,
   simultaneous cancellation/close, readiness/timeout races in both lanes,
   exclusive same-descriptor waiters, and removal of all poller registrations;
+- OpenSSL 3 handshake, hostname verification, backpressured partial transfer,
+  orderly `close_notify`, abrupt peer failure, timeout, immediate cancellation,
+  queued cancellation and timeout, concurrent close, provider lifetime,
+  mismatched-library rejection, provider result validation, explicit
+  provider-directory selection, and native/lightweight parity over local
+  socket pairs;
 - structured listener ownership and bounded handler pools in both lanes,
   overload backpressure, handler-failure propagation, concurrent idempotent
   shutdown, accept cancellation, graceful drain, deadline cancellation,
@@ -1621,6 +1689,10 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   arbitrary callback that loops in CPU code or blocks in an unrelated foreign
   call; such a handler must inspect its cancellation token or use explicit
   fairness/native boundaries.
+- The shipped TLS provider requires an OpenSSL 3.x shared-library installation
+  at run time. Automatic lookup covers the system loader and conventional
+  Homebrew OpenSSL 3 paths; other installations must pass their library
+  directory explicitly. Only OpenSSL 3 is tested in this repository.
 - Fiber guard pages make stack overflow fail fast. Each loop pthread has an
   alternate signal stack on which GNARL can translate the guard fault into Ada
   `Storage_Error`; this stack is thread state and is intentionally not stored
