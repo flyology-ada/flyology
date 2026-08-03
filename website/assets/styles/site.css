@@ -1251,6 +1251,10 @@ code:not(pre code) {
   text-align: center;
 }
 
+.state-rail li + li {
+  margin-top: 0;
+}
+
 .state-rail li:last-child {
   border-right: 0;
 }
