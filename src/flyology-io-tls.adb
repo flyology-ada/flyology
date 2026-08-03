@@ -34,8 +34,15 @@ package body Flyology.IO.TLS is
       Outcome : not null access Close_Outcome)
    is new Ada.Finalization.Limited_Controlled with null record;
 
+   type Operation_Guard (Item : not null access Connection) is
+     new Ada.Finalization.Limited_Controlled with record
+      Generation : aliased Descriptor_Generation := 0;
+      Armed      : aliased Boolean := False;
+   end record;
+
    overriding procedure Initialize (Guard : in out Close_Guard);
    overriding procedure Finalize (Guard : in out Close_Guard);
+   overriding procedure Finalize (Guard : in out Operation_Guard);
 
    protected body Descriptor_Controller is
       procedure Adopt (FD : Descriptor) is
@@ -56,14 +63,16 @@ package body Flyology.IO.TLS is
       entry Acquire
         (Expected     : Descriptor_Generation;
          FD           : out Descriptor;
-         Generation   : out Descriptor_Generation;
+         Generation   : not null access Descriptor_Generation;
+         Armed        : not null access Boolean;
          Close_Source : out Descriptor;
          Result       : out Acquire_Result)
         when not Active
       is
       begin
          FD := Invalid_Descriptor;
-         Generation := Current_Generation;
+         Generation.all := Current_Generation;
+         Armed.all := False;
          Close_Source := Invalid_Descriptor;
          if Expected /= Current_Generation then
             Result := Replaced;
@@ -76,6 +85,10 @@ package body Flyology.IO.TLS is
             Active := True;
             FD := Current_FD;
             Close_Source := Wake_Sources.Descriptor (Close_Wake);
+            --  Arm cleanup while abort is still deferred by the protected
+            --  action. The end of this entry call is an abort completion
+            --  point, so arming after return would leave an ownership gap.
+            Armed.all := True;
          end if;
       end Acquire;
 
@@ -170,6 +183,14 @@ package body Flyology.IO.TLS is
          Guard.Outcome.Generation,
          Guard.Outcome.Leader);
    end Initialize;
+
+   overriding procedure Finalize (Guard : in out Operation_Guard) is
+   begin
+      if Guard.Armed then
+         Guard.Item.Controller.Release (Guard.Generation);
+         Guard.Armed := False;
+      end if;
+   end Finalize;
 
    overriding procedure Finalize (Guard : in out Close_Guard) is
    begin
@@ -297,7 +318,7 @@ package body Flyology.IO.TLS is
       Timeout      : Duration;
       Token        : access Flyology.Cancellation.Token;
       FD           : out Descriptor;
-      Generation   : out Descriptor_Generation;
+      Guard        : in out Operation_Guard;
       Close_Source : out Descriptor)
    is
       Wait_Slice    : Duration;
@@ -313,7 +334,12 @@ package body Flyology.IO.TLS is
          if Left = 0.0 then
             select
                Item.Controller.Acquire
-                 (Expected, FD, Generation, Close_Source, Acquire_State);
+                 (Expected,
+                  FD,
+                  Guard.Generation'Access,
+                  Guard.Armed'Access,
+                  Close_Source,
+                  Acquire_State);
                case Acquire_State is
                   when Acquired =>
                      return;
@@ -330,7 +356,12 @@ package body Flyology.IO.TLS is
            (if Left < 0.0 then 0.010 else Duration'Min (Left, 0.010));
          select
             Item.Controller.Acquire
-              (Expected, FD, Generation, Close_Source, Acquire_State);
+              (Expected,
+               FD,
+               Guard.Generation'Access,
+               Guard.Armed'Access,
+               Close_Source,
+               Acquire_State);
             case Acquire_State is
                when Acquired =>
                   return;
@@ -397,32 +428,25 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Generation   : Descriptor_Generation;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
       Close_Source : Descriptor;
       Status       : Step_Status;
    begin
       Acquire_Operation
-        (Item, Started, Timeout, Token, FD, Generation, Close_Source);
-      begin
-         loop
-            Check_Cancelled (Item, Token);
-            Status := Handshake_Step (Item.Session.all);
-            case Status is
-               when Complete =>
-                  exit;
-               when Want_Read | Want_Write =>
-                  Await_Ready
-                    (FD, Status, Started, Timeout, Close_Source, Token);
-               when Peer_Closed | Failed =>
-                  Raise_Provider_Error (Item.Session.all);
-            end case;
-         end loop;
-         Item.Controller.Release (Generation);
-      exception
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
-      end;
+        (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      loop
+         Check_Cancelled (Item, Token);
+         Status := Handshake_Step (Item.Session.all);
+         case Status is
+            when Complete =>
+               exit;
+            when Want_Read | Want_Write =>
+               Await_Ready
+                 (FD, Status, Started, Timeout, Close_Source, Token);
+            when Peer_Closed | Failed =>
+               Raise_Provider_Error (Item.Session.all);
+         end case;
+      end loop;
    end Handshake;
 
    procedure Receive
@@ -434,7 +458,7 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Generation   : Descriptor_Generation;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
       Close_Source : Descriptor;
       Status       : Step_Status;
       Before_Last  : Ada.Streams.Stream_Element_Offset;
@@ -446,42 +470,35 @@ package body Flyology.IO.TLS is
       end if;
 
       Acquire_Operation
-        (Item, Started, Timeout, Token, FD, Generation, Close_Source);
-      begin
-         loop
-            Check_Cancelled (Item, Token);
-            Before_Last := Last;
-            Status := Receive_Step (Item.Session.all, Data, Last);
-            case Status is
-               when Complete =>
-                  if Last < Data'First or else Last > Data'Last then
-                     raise TLS_Error with
-                       "TLS provider returned an invalid receive bound";
-                  end if;
-                  exit;
-               when Peer_Closed =>
-                  if Last /= Before_Last then
-                     raise TLS_Error with
-                       "TLS provider changed receive output on peer close";
-                  end if;
-                  exit;
-               when Want_Read | Want_Write =>
-                  if Last /= Before_Last then
-                     raise TLS_Error with
-                       "TLS provider changed receive output while waiting";
-                  end if;
-                  Await_Ready
-                    (FD, Status, Started, Timeout, Close_Source, Token);
-               when Failed =>
-                  Raise_Provider_Error (Item.Session.all);
-            end case;
-         end loop;
-         Item.Controller.Release (Generation);
-      exception
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
-      end;
+        (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      loop
+         Check_Cancelled (Item, Token);
+         Before_Last := Last;
+         Status := Receive_Step (Item.Session.all, Data, Last);
+         case Status is
+            when Complete =>
+               if Last < Data'First or else Last > Data'Last then
+                  raise TLS_Error with
+                    "TLS provider returned an invalid receive bound";
+               end if;
+               exit;
+            when Peer_Closed =>
+               if Last /= Before_Last then
+                  raise TLS_Error with
+                    "TLS provider changed receive output on peer close";
+               end if;
+               exit;
+            when Want_Read | Want_Write =>
+               if Last /= Before_Last then
+                  raise TLS_Error with
+                    "TLS provider changed receive output while waiting";
+               end if;
+               Await_Ready
+                 (FD, Status, Started, Timeout, Close_Source, Token);
+            when Failed =>
+               Raise_Provider_Error (Item.Session.all);
+         end case;
+      end loop;
    end Receive;
 
    procedure Receive_Exactly
@@ -492,7 +509,7 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Generation   : Descriptor_Generation;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
       Close_Source : Descriptor;
       Status       : Step_Status;
       First        : Ada.Streams.Stream_Element_Offset := Data'First;
@@ -504,41 +521,34 @@ package body Flyology.IO.TLS is
       end if;
 
       Acquire_Operation
-        (Item, Started, Timeout, Token, FD, Generation, Close_Source);
-      begin
-         while First <= Data'Last loop
-            Check_Cancelled (Item, Token);
-            Last := First;
-            Status := Receive_Step
-              (Item.Session.all, Data (First .. Data'Last), Last);
-            case Status is
-               when Complete =>
-                  if Last < First or else Last > Data'Last then
-                     raise TLS_Error with
-                       "TLS provider made no receive progress";
-                  end if;
-                  exit when Last = Data'Last;
-                  First := Last + 1;
-               when Want_Read | Want_Write =>
-                  if Last /= First then
-                     raise TLS_Error with
-                       "TLS provider changed receive output while waiting";
-                  end if;
-                  Await_Ready
-                    (FD, Status, Started, Timeout, Close_Source, Token);
-               when Peer_Closed =>
+        (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      while First <= Data'Last loop
+         Check_Cancelled (Item, Token);
+         Last := First;
+         Status := Receive_Step
+           (Item.Session.all, Data (First .. Data'Last), Last);
+         case Status is
+            when Complete =>
+               if Last < First or else Last > Data'Last then
                   raise TLS_Error with
-                    "TLS peer closed before receive completed";
-               when Failed =>
-                  Raise_Provider_Error (Item.Session.all);
-            end case;
-         end loop;
-         Item.Controller.Release (Generation);
-      exception
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
-      end;
+                    "TLS provider made no receive progress";
+               end if;
+               exit when Last = Data'Last;
+               First := Last + 1;
+            when Want_Read | Want_Write =>
+               if Last /= First then
+                  raise TLS_Error with
+                    "TLS provider changed receive output while waiting";
+               end if;
+               Await_Ready
+                 (FD, Status, Started, Timeout, Close_Source, Token);
+            when Peer_Closed =>
+               raise TLS_Error with
+                 "TLS peer closed before receive completed";
+            when Failed =>
+               Raise_Provider_Error (Item.Session.all);
+         end case;
+      end loop;
    end Receive_Exactly;
 
    procedure Send_All
@@ -549,7 +559,7 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Generation   : Descriptor_Generation;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
       Close_Source : Descriptor;
       Status       : Step_Status;
       First        : Ada.Streams.Stream_Element_Offset := Data'First;
@@ -561,37 +571,30 @@ package body Flyology.IO.TLS is
       end if;
 
       Acquire_Operation
-        (Item, Started, Timeout, Token, FD, Generation, Close_Source);
-      begin
-         while First <= Data'Last loop
-            Check_Cancelled (Item, Token);
-            Last := First;
-            Status := Send_Step
-              (Item.Session.all, Data (First .. Data'Last), Last);
-            case Status is
-               when Complete =>
-                  if Last < First or else Last > Data'Last then
-                     raise TLS_Error with "TLS provider made no send progress";
-                  end if;
-                  exit when Last = Data'Last;
-                  First := Last + 1;
-               when Want_Read | Want_Write =>
-                  if Last /= First then
-                     raise TLS_Error with
-                       "TLS provider changed send output while waiting";
-                  end if;
-                  Await_Ready
-                    (FD, Status, Started, Timeout, Close_Source, Token);
-               when Peer_Closed | Failed =>
-                  Raise_Provider_Error (Item.Session.all);
-            end case;
-         end loop;
-         Item.Controller.Release (Generation);
-      exception
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
-      end;
+        (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      while First <= Data'Last loop
+         Check_Cancelled (Item, Token);
+         Last := First;
+         Status := Send_Step
+           (Item.Session.all, Data (First .. Data'Last), Last);
+         case Status is
+            when Complete =>
+               if Last < First or else Last > Data'Last then
+                  raise TLS_Error with "TLS provider made no send progress";
+               end if;
+               exit when Last = Data'Last;
+               First := Last + 1;
+            when Want_Read | Want_Write =>
+               if Last /= First then
+                  raise TLS_Error with
+                    "TLS provider changed send output while waiting";
+               end if;
+               Await_Ready
+                 (FD, Status, Started, Timeout, Close_Source, Token);
+            when Peer_Closed | Failed =>
+               Raise_Provider_Error (Item.Session.all);
+         end case;
+      end loop;
    end Send_All;
 
    procedure Shutdown
@@ -601,32 +604,25 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Generation   : Descriptor_Generation;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
       Close_Source : Descriptor;
       Status       : Step_Status;
    begin
       Acquire_Operation
-        (Item, Started, Timeout, Token, FD, Generation, Close_Source);
-      begin
-         loop
-            Check_Cancelled (Item, Token);
-            Status := Shutdown_Step (Item.Session.all);
-            case Status is
-               when Complete =>
-                  exit;
-               when Want_Read | Want_Write =>
-                  Await_Ready
-                    (FD, Status, Started, Timeout, Close_Source, Token);
-               when Peer_Closed | Failed =>
-                  Raise_Provider_Error (Item.Session.all);
-            end case;
-         end loop;
-         Item.Controller.Release (Generation);
-      exception
-         when others =>
-            Item.Controller.Release (Generation);
-            raise;
-      end;
+        (Item, Started, Timeout, Token, FD, Guard, Close_Source);
+      loop
+         Check_Cancelled (Item, Token);
+         Status := Shutdown_Step (Item.Session.all);
+         case Status is
+            when Complete =>
+               exit;
+            when Want_Read | Want_Write =>
+               Await_Ready
+                 (FD, Status, Started, Timeout, Close_Source, Token);
+            when Peer_Closed | Failed =>
+               Raise_Provider_Error (Item.Session.all);
+         end case;
+      end loop;
    end Shutdown;
 
    procedure Close (Item : in out Connection) is

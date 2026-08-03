@@ -277,7 +277,8 @@ private
       entry Acquire
         (Expected     : Descriptor_Generation;
          FD           : out Descriptor;
-         Generation   : out Descriptor_Generation;
+         Generation   : not null access Descriptor_Generation;
+         Armed        : not null access Boolean;
          Close_Source : out Descriptor;
          Result       : out Acquire_Result);
       procedure Release (Generation : Descriptor_Generation);

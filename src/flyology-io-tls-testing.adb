@@ -18,18 +18,20 @@ package body Flyology.IO.TLS.Testing is
       Was_Replaced : out Boolean)
    is
       FD           : Descriptor;
-      Actual       : Descriptor_Generation;
+      Actual       : aliased Descriptor_Generation;
+      Armed        : aliased Boolean := False;
       Close_Source : Descriptor;
       Result       : Acquire_Result;
    begin
       Item.Controller.Acquire
         (Descriptor_Generation (Snapshot),
          FD,
-         Actual,
+         Actual'Access,
+         Armed'Access,
          Close_Source,
          Result);
       Was_Replaced := Result = Replaced;
-      if Result = Acquired then
+      if Armed then
          Item.Controller.Release (Actual);
       end if;
    end Attempt_Stale_Acquisition;

@@ -1011,6 +1011,34 @@ procedure TLS_Smoke is
       Sockets.Close_Socket (New_Peer);
    end Run_Aborted_Close;
 
+   procedure Run_Aborted_Operation (Model : Flyology.Execution_Model) is
+      Backend : TLS_Test_Provider.Provider;
+      Socket  : Sockets.Socket_Type;
+      Peer    : Sockets.Socket_Type;
+      Item    : TLS.Connection;
+   begin
+      TLS_Test_Provider.Set_Block_Handshake (Backend);
+      Sockets.Create_Socket_Pair (Socket, Peer);
+      TLS.Take (Backend, Socket, TLS.Client, "localhost", Item);
+      declare
+         task Worker is
+            pragma Task_Info (Model);
+         end Worker;
+
+         task body Worker is
+         begin
+            TLS.Handshake (Item);
+         end Worker;
+      begin
+         TLS_Test_Provider.Wait_Handshake_Blocked;
+         abort Worker;
+      end;
+
+      pragma Assert (not TLS_Testing.Operation_Active (Item));
+      TLS.Close (Item);
+      Sockets.Close_Socket (Peer);
+   end Run_Aborted_Operation;
+
    procedure Run_Empty_Closed_Validation is
       Item     : TLS.Connection;
       Empty    : Stream_Element_Array (1 .. 0);
@@ -1156,6 +1184,8 @@ begin
    Run_Concurrent_Close (Flyology.Native_Task);
    Run_Queued_Close (Flyology.Lightweight_Task);
    Run_Queued_Close (Flyology.Native_Task);
+   Run_Aborted_Operation (Flyology.Lightweight_Task);
+   Run_Aborted_Operation (Flyology.Native_Task);
    Run_Aborted_Close (Flyology.Lightweight_Task);
    Run_Aborted_Close (Flyology.Native_Task);
 end TLS_Smoke;
