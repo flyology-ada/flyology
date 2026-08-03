@@ -562,9 +562,10 @@ operation, destroys provider session state, and only then closes the socket.
 Cancellation never releases provider-owned state while a provider call is
 active. A peer transport close without `close_notify` is a `TLS_Error`.
 Calls queued behind another operation on the same TLS connection retain the
-same original deadline and notice token or concurrent-close cancellation
-within a 10 ms scheduling quantum; active provider readiness waits use wake
-descriptors and do not poll at that quantum.
+same original deadline. They accept the shared `Flyology.Cancellation.Token`
+and notice either a token request or a concurrent close within a 10 ms
+scheduling quantum; active provider readiness waits use wake descriptors and
+do not poll at that quantum.
 On Linux, each OpenSSL call temporarily blocks `SIGPIPE` on its pthread, removes
 only a signal created by that call, and restores the exact prior mask before
 returning to Ada. Darwin applies `SO_NOSIGPIPE` to the owned socket. A task never

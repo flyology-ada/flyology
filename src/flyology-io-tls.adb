@@ -140,7 +140,7 @@ package body Flyology.IO.TLS is
       Started      : Ada.Real_Time.Time;
       Timeout      : Duration;
       Close_Source : Descriptor;
-      Token        : access Connections.Cancellation_Token)
+      Token        : access Flyology.Cancellation.Token)
    is
       Token_Source : Descriptor := Invalid_Descriptor;
       Cancelled    : Boolean := False;
@@ -171,7 +171,7 @@ package body Flyology.IO.TLS is
 
    procedure Check_Cancelled
      (Item  : Connection;
-      Token : access Connections.Cancellation_Token)
+      Token : access Flyology.Cancellation.Token)
    is
    begin
       if Item.Controller.Close_Requested
@@ -185,7 +185,7 @@ package body Flyology.IO.TLS is
      (Item         : in out Connection;
       Started      : Ada.Real_Time.Time;
       Timeout      : Duration;
-      Token        : access Connections.Cancellation_Token;
+      Token        : access Flyology.Cancellation.Token;
       FD           : out Descriptor;
       Generation   : out Descriptor_Generation;
       Close_Source : out Descriptor)
@@ -289,7 +289,7 @@ package body Flyology.IO.TLS is
    procedure Handshake
      (Item    : in out Connection;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null)
+      Token   : access Flyology.Cancellation.Token := null)
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
@@ -326,7 +326,7 @@ package body Flyology.IO.TLS is
       Data    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null)
+      Token   : access Flyology.Cancellation.Token := null)
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
@@ -383,7 +383,7 @@ package body Flyology.IO.TLS is
      (Item    : in out Connection;
       Data    : out Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null)
+      Token   : access Flyology.Cancellation.Token := null)
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
@@ -439,7 +439,7 @@ package body Flyology.IO.TLS is
      (Item    : in out Connection;
       Data    : Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null)
+      Token   : access Flyology.Cancellation.Token := null)
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
@@ -490,7 +490,7 @@ package body Flyology.IO.TLS is
    procedure Shutdown
      (Item    : in out Connection;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null)
+      Token   : access Flyology.Cancellation.Token := null)
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;

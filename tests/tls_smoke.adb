@@ -5,8 +5,8 @@ with Ada.Streams;
 with Ada.Text_IO;
 with GNAT.Sockets;
 with Flyology;
+with Flyology.Cancellation;
 with Flyology.IO;
-with Flyology.IO.Connections;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
 with Flyology.IO.TLS.OpenSSL;
@@ -196,7 +196,7 @@ procedure TLS_Smoke is
       Client_Socket : Sockets.Socket_Type;
       Silent_Peer   : Sockets.Socket_Type;
       Client        : TLS.Connection;
-      Token         : aliased Flyology.IO.Connections.Cancellation_Token;
+      Token         : aliased Flyology.Cancellation.Token;
 
       protected Progress is
          procedure Started;
@@ -561,7 +561,7 @@ procedure TLS_Smoke is
       Socket : Sockets.Socket_Type;
       Peer   : Sockets.Socket_Type;
       Item   : TLS.Connection;
-      Token  : aliased Flyology.IO.Connections.Cancellation_Token;
+      Token  : aliased Flyology.Cancellation.Token;
       Result : Outcome;
    begin
       Sockets.Create_Socket_Pair (Socket, Peer);
@@ -609,8 +609,8 @@ procedure TLS_Smoke is
       Socket       : Sockets.Socket_Type;
       Peer         : Sockets.Socket_Type;
       Item         : TLS.Connection;
-      Holder_Token : aliased Flyology.IO.Connections.Cancellation_Token;
-      Queued_Token : aliased Flyology.IO.Connections.Cancellation_Token;
+      Holder_Token : aliased Flyology.Cancellation.Token;
+      Queued_Token : aliased Flyology.Cancellation.Token;
 
       protected Progress is
          procedure Holder_Started;

@@ -1,7 +1,7 @@
 with Ada.Finalization;
 with Ada.Streams;
 with GNAT.Sockets;
-with Flyology.IO.Connections;
+with Flyology.Cancellation;
 with Flyology.Wake_Sources;
 
 --  Runs provider-neutral TLS sessions over Flyology socket readiness.
@@ -22,7 +22,7 @@ package Flyology.IO.TLS is
 
    --  Raised when a token or concurrent Close interrupts an operation.
    Operation_Cancelled : exception renames
-     Flyology.IO.Connections.Operation_Cancelled;
+     Flyology.Cancellation.Operation_Cancelled;
 
    --  TLS endpoint role.
    --  @enum Client Initiates a handshake and verifies Server_Name
@@ -174,7 +174,7 @@ package Flyology.IO.TLS is
    procedure Handshake
      (Item    : in out Connection;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null);
+      Token   : access Flyology.Cancellation.Token := null);
 
    --  Receive one decrypted chunk. Last is Data'First - 1 after an orderly
    --  close_notify. One deadline spans WANT_READ and WANT_WRITE retries.
@@ -194,7 +194,7 @@ package Flyology.IO.TLS is
       Data    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null);
+      Token   : access Flyology.Cancellation.Token := null);
 
    --  Fill Data under one deadline. An orderly close before Data is full is a
    --  TLS_Error. Lane and cancellation behavior match Handshake.
@@ -211,7 +211,7 @@ package Flyology.IO.TLS is
      (Item    : in out Connection;
       Data    : out Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null);
+      Token   : access Flyology.Cancellation.Token := null);
 
    --  Encrypt and send all Data under one deadline. Partial provider progress
    --  and all WANT retries share that deadline. Lane, cancellation, and
@@ -229,7 +229,7 @@ package Flyology.IO.TLS is
      (Item    : in out Connection;
       Data    : Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null);
+      Token   : access Flyology.Cancellation.Token := null);
 
    --  Exchange TLS close_notify alerts without closing the owned socket. One
    --  deadline spans the complete bidirectional shutdown and all WANT retries.
@@ -246,7 +246,7 @@ package Flyology.IO.TLS is
    procedure Shutdown
      (Item    : in out Connection;
       Timeout : Duration := Infinite;
-      Token   : access Connections.Cancellation_Token := null);
+      Token   : access Flyology.Cancellation.Token := null);
 
    --  Cancel an active operation, destroy provider state, and close the
    --  socket.
