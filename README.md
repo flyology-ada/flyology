@@ -39,6 +39,7 @@ based on the surviving correspondence.
 - [Architecture](#architecture)
   - [GNARL integration boundary](#gnarl-integration-boundary)
   - [Context switching is not event polling](#context-switching-is-not-event-polling)
+- [Concurrency primitives](#concurrency-primitives)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
   - [TLS](#tls)
@@ -558,6 +559,52 @@ It deliberately does not interrupt arbitrary Ada instructions; code that never
 calls a runtime suspension or checkpoint remains cooperative and can still own
 the loop until it returns.
 
+## Concurrency primitives
+
+Flyology supplies a small coordination layer for bounded work. These packages
+use ordinary Ada protected entries and task scopes; they do not introduce an
+executor, detached tasks, or a second scheduling model. A protected entry wait
+suspends a lightweight task cooperatively and retains normal GNARL behavior for
+a native task.
+
+`Flyology.Capacity.Gate` admits a fixed number of concurrent holders. It offers
+blocking, nonblocking, and timed acquisition, terminal shutdown, waiter and
+active counts, and a drain barrier. `Flyology.IO.Connections.Server` is a
+source-compatible subtype of this general gate, so connection admission and
+application capacity control share the same implementation. The caller remains
+responsible for pairing every successful acquisition with `Release`.
+
+`Flyology.Channels.Bounded` is generic over a definite element type. Each
+channel is a fixed-storage MPMC FIFO with blocking and nonblocking operations,
+relative-deadline wrappers, current-state snapshots, and terminal close-and-
+drain behavior. Closing rejects queued and later senders but preserves FIFO
+delivery of values already accepted. The channel owns no task and performs no
+allocation after elaboration.
+
+```ada
+package Jobs is new Flyology.Channels.Bounded (Job);
+
+Queue : Jobs.Channel (Capacity => 256);
+
+Queue.Send (Next_Job);
+Queue.Close;
+Queue.Await_Drained;
+```
+
+`Flyology.Worker_Pools` builds a one-shot structured worker scope on that
+channel. Its generic parameters fix the worker callback, lightweight/native
+designation, and CPU or execution-group selection. `Run` creates exactly the
+configured worker count and does not return until shutdown closes the queue,
+accepted jobs drain, and every dependent task joins. Callback failures close
+admission, request the shared cancellation token, retain the first exception,
+and are reported as `Pool_Failed` after the workers join. The shared context
+must provide its own synchronization when workers can execute concurrently.
+
+`Flyology.Cancellation.Token.Await_Request` provides a protected-entry wait for
+task-only coordination. Descriptor-backed wakeup remains available through
+`Wait_Source` when cancellation must participate in a socket or file wait; a
+task-only request does not allocate an OS descriptor.
+
 ## Task-aware I/O
 
 Flyology exposes synchronous operations in:
@@ -760,11 +807,12 @@ must outlive its admitted owners.
 
 Operations register both an optional per-operation `Cancellation_Token` and the
 server shutdown source in the same kernel wait as the socket. A token request
-or `Request_Shutdown` writes a persistent nonblocking wake descriptor: native
-tasks observe it in `poll`, while lightweight tasks observe it through their loop's
-`kqueue`/`epoll` poller. The suspended call resumes immediately without closing
-the connection descriptor and without periodic timer wakeups. One signal wakes
-all operations registered with that source.
+or `Request_Shutdown` signals the persistent nonblocking descriptor borrowed by
+registered operations: native tasks observe it in `poll`, while lightweight
+tasks observe it through their loop's `kqueue`/`epoll` poller. A task-only
+request allocates no descriptor. The suspended call resumes immediately without
+closing the connection descriptor and without periodic timer wakeups. One
+signal wakes all operations registered with that source.
 
 The raw I/O boundary represents these independent wake descriptors as an
 `Interrupt_Set` rather than fixed close/shutdown/token parameters. This keeps
@@ -1164,8 +1212,11 @@ that provider progress is in range, that wait and peer-close results preserve
 the caller's progress bound, that retry sentinels lie outside the active slice,
 and that advancing a completed slice cannot overflow. Structured-server phase
 changes use proved one-shot start, stop, handler/worker admission, terminal
-drain, and snapshot classifications. Resource destruction, protected-object
-mutual exclusion, and provider calls remain outside SPARK.
+drain, and snapshot classifications. Capacity gates and bounded channels use
+proved admission, close/drain, counter, and circular-index transitions. Worker
+pools likewise consume proved start, completion classification, worker join,
+and terminal-state decisions. Resource destruction, task activation,
+protected-object mutual exclusion, and provider calls remain outside SPARK.
 
 The scheduler policy unit proves deadline classification and safe calculation
 of the next poll timeout. It also proves earliest-deadline selection,

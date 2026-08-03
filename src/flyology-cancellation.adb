@@ -6,10 +6,20 @@ package body Flyology.Cancellation is
       procedure Request is
       begin
          if not Is_Requested then
-            Wake_Sources.Signal (Wake);
+            --  Avoid creating an OS descriptor for task-only cancellation.
+            --  Wait_Source observes Is_Requested under this same lock; an
+            --  already borrowed descriptor remains persistent and is woken.
+            if Wake_Sources.Descriptor (Wake) >= 0 then
+               Wake_Sources.Signal (Wake);
+            end if;
             Is_Requested := True;
          end if;
       end Request;
+
+      entry Await_Request when Is_Requested is
+      begin
+         null;
+      end Await_Request;
 
       function Requested return Boolean is (Is_Requested);
 

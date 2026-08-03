@@ -36,6 +36,19 @@ project Flyology is
            "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
    end case;
 
+   type Worker_Pool_Test_Hooks_Type is ("false", "true");
+   Worker_Pool_Test_Hooks : Worker_Pool_Test_Hooks_Type :=
+     external ("FLYOLOGY_WORKER_POOL_TEST_HOOKS", "false");
+   Worker_Pool_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=False";
+   case Worker_Pool_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Worker_Pool_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=True";
+   end case;
+
    for Languages use ("Ada", "C");
 
    for Library_Name use "Flyology";
@@ -63,7 +76,10 @@ project Flyology is
          --  Private proof helpers exclude themselves from generated docs.
          for Source_Files use
            ("flyology.ads",
+            "flyology-capacity.ads",
             "flyology-cancellation.ads",
+            "flyology-channels.ads",
+            "flyology-channels-bounded.ads",
             "flyology-execution_groups.ads",
             "flyology-execution_groups-topology.ads",
             "flyology-fairness.ads",
@@ -81,7 +97,8 @@ project Flyology is
             "flyology-observability.ads",
             "flyology-observability-stall_watchdogs.ads",
             "flyology-process_lifecycle.ads",
-            "flyology-wake_sources.ads");
+            "flyology-wake_sources.ads",
+            "flyology-worker_pools.ads");
    end case;
    for Object_Dir use "obj/" & Flyology_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
@@ -95,7 +112,8 @@ project Flyology is
    package Compiler is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
-        & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch);
+        & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
+           Worker_Pool_Test_Hook_Switch);
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch);
    end Compiler;

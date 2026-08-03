@@ -14,6 +14,19 @@ project Runtime_Smoke is
            "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
    end case;
 
+   type Worker_Pool_Test_Hooks_Type is ("false", "true");
+   Worker_Pool_Test_Hooks : Worker_Pool_Test_Hooks_Type :=
+     external ("FLYOLOGY_WORKER_POOL_TEST_HOOKS", "false");
+   Worker_Pool_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=False";
+   case Worker_Pool_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Worker_Pool_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=True";
+   end case;
+
    for Languages use ("Ada", "C");
    for Source_Dirs use (".", "native");
    for Object_Dir use "obj/runtime_smoke";
@@ -23,6 +36,7 @@ project Runtime_Smoke is
       "cancellation_wake_smoke.adb",
       "connection_lifecycle_smoke.adb",
       "connection_state_model.adb",
+      "concurrency_primitives_smoke.adb",
       "context_abi_matrix.adb",
       "descriptor_ownership_smoke.adb",
       "dns_smoke.adb",
@@ -78,6 +92,6 @@ project Runtime_Smoke is
    package Compiler is
       for Default_Switches ("Ada") use
         ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
-         Connection_Test_Hook_Switch);
+         Connection_Test_Hook_Switch, Worker_Pool_Test_Hook_Switch);
    end Compiler;
 end Runtime_Smoke;

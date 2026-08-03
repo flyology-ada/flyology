@@ -61,8 +61,10 @@ export GPR_PROJECT_PATH LD_LIBRARY_PATH DYLD_LIBRARY_PATH
 FLYOLOGY_DNS_TEST_HOOKS=true
 FLYOLOGY_TLS_TEST_HOOKS=true
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
+FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
 export FLYOLOGY_DNS_TEST_HOOKS FLYOLOGY_TLS_TEST_HOOKS
 export FLYOLOGY_CONNECTION_TEST_HOOKS
+export FLYOLOGY_WORKER_POOL_TEST_HOOKS
 
 printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
 "$alr" exec -- "$gnatcov" instrument \
@@ -81,6 +83,7 @@ printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
 ordinary_mains='cancellation_wake_smoke
 connection_lifecycle_smoke
 connection_state_model
+concurrency_primitives_smoke
 descriptor_ownership_smoke
 dns_smoke
 dns_parser_smoke

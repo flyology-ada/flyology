@@ -284,56 +284,6 @@ package body Flyology.IO.Connections is
             Guard.State := Unregistered;
       end case;
    end Finalize;
-   protected body Server is
-      entry Acquire (Accepted : out Boolean)
-        when Stopping or else Active_Count < Capacity
-      is
-      begin
-         Accepted := not Stopping;
-         if Accepted then
-            Active_Count := Policy.Started_After_Register (Active_Count);
-         end if;
-      end Acquire;
-
-      procedure Release is
-      begin
-         if Active_Count = 0 then
-            raise Program_Error with "connection permit released twice";
-         end if;
-         Active_Count := Policy.Started_After_Release (Active_Count);
-      end Release;
-
-      procedure Request_Shutdown is
-      begin
-         if not Stopping then
-            Wake_Sources.Signal (Wake);
-            Stopping := True;
-         end if;
-      end Request_Shutdown;
-
-      entry Await_Drained when Stopping and then Active_Count = 0 is
-      begin
-         null;
-      end Await_Drained;
-
-      function Shutdown_Requested return Boolean is (Stopping);
-      function Active return Natural is (Active_Count);
-      function Waiting return Natural is (Acquire'Count);
-
-      procedure Wait_Source
-        (FD : out Descriptor; Already_Requested : out Boolean)
-      is
-      begin
-         Already_Requested := Stopping;
-         if Stopping then
-            FD := Invalid_Descriptor;
-         else
-            Wake_Sources.Ensure (Wake);
-            FD := Wake_Sources.Descriptor (Wake);
-         end if;
-      end Wait_Source;
-   end Server;
-
    function Remaining
      (Started : Ada.Real_Time.Time;
       Timeout : Duration) return Duration

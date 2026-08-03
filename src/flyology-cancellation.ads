@@ -21,9 +21,13 @@ package Flyology.Cancellation is
    --  borrowing operations have left scope.
    protected type Token is
       --  Record cancellation and wake every operation waiting on this token.
-      --  Raises Program_Error when wake descriptor creation or signaling
-      --  fails.
+      --  Raises Program_Error when an existing borrowed wake descriptor cannot
+      --  be signalled.
       procedure Request;
+      --  Wait until Request records terminal cancellation. This protected
+      --  entry is useful for task coordination that does not involve an OS
+      --  descriptor.
+      entry Await_Request;
       --  Inspect the one-shot state without allocating a wake descriptor.
       --  @return True after Request has completed
       function Requested return Boolean;

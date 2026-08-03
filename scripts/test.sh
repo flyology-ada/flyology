@@ -33,7 +33,7 @@ FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
 if nm -g "$project_root/lib/libFlyology.a" | \
-     grep -Ei 'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)' >/dev/null
+     grep -Ei 'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_' >/dev/null
 then
   echo "production library exposes test-only symbols" >&2
   exit 1
@@ -153,6 +153,7 @@ for test_main in \
   cancellation_wake_smoke \
   connection_lifecycle_smoke \
   connection_state_model \
+  concurrency_primitives_smoke \
   context_abi_matrix \
   descriptor_ownership_smoke \
   dns_smoke \
@@ -198,6 +199,11 @@ do
     export FLYOLOGY_CONNECTION_TEST_HOOKS=true
   else
     unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+  fi
+  if [ "$test_main" = concurrency_primitives_smoke ]; then
+    export FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+  else
+    unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
   fi
   printf '%s\n' "test: BEGIN $test_main"
   run_gprbuild \
@@ -268,6 +274,7 @@ do
   printf '%s\n' "test: PASS $test_main"
 done
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 
 #  Exercise automatic placement separately because the pool policy is compiled
 #  into the prepared RTS. The ordinary suite above intentionally retains the

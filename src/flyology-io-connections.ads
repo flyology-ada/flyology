@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Streams;
 with GNAT.Sockets;
+with Flyology.Capacity;
 with Flyology.Cancellation;
 with Flyology.Wake_Sources;
 
@@ -22,45 +23,10 @@ package Flyology.IO.Connections is
    --  idempotent. The token must outlive every operation using it.
    subtype Cancellation_Token is Flyology.Cancellation.Token;
 
-   --  Thread-safe connection admission controller. Acquire suspends when
-   --  Capacity is full: lightweight tasks suspend cooperatively and native
-   --  tasks block their threads. The object must outlive every Connection
-   --  admitted through it.
-   protected type Server
-     (Capacity : Positive)  --  Maximum concurrently owned connections
-   is
-      --  Wait for capacity or shutdown.
-      entry Acquire
-        (Accepted : out Boolean);  --  Whether a permit was acquired
-      --  Release one acquired permit.
-      --  @exception Program_Error No permit is active
-      procedure Release;
-      --  Idempotently close admission and wake waiters.
-      --  @exception Program_Error The shutdown descriptor cannot be signalled
-      procedure Request_Shutdown;
-      --  Wait until shutdown was requested and all permits were released.
-      entry Await_Drained;
-      --  Report whether shutdown has been requested.
-      --  @return True after Request_Shutdown
-      function Shutdown_Requested return Boolean;
-      --  Return the number of active permits.
-      --  @return Current admitted connection count
-      function Active return Natural;
-      --  Return the number of callers queued at Acquire.
-      --  @return Current Acquire entry count
-      function Waiting return Natural;
-      --  Return the borrowed shutdown descriptor without consuming it.
-      --  @exception Program_Error The shutdown descriptor cannot be created
-      procedure Wait_Source
-        (FD : out Flyology.IO.Descriptor;  --  Borrowed readiness descriptor
-         Already_Requested : out Boolean);
-         --  Whether shutdown already started
-   private
-      Active_Count : Natural := 0;  --  Current admitted connections
-      Stopping     : Boolean := False;  --  Whether admission is closed
-      Wake :
-        Flyology.Wake_Sources.Source;  --  Shutdown readiness source
-   end Server;
+   --  General bounded admission gate used for connection ownership. Existing
+   --  Server declarations remain source-compatible; the implementation is
+   --  shared with non-I/O capacity control through Flyology.Capacity.
+   subtype Server is Flyology.Capacity.Gate;
 
    --  Sole closing owner of one socket and one Server admission permit.
    --  Finalize calls Close. At most one I/O operation holds the active lease,
