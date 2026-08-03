@@ -1,6 +1,19 @@
 with "../flyology.gpr";
 
 project Runtime_Smoke is
+   type Connection_Test_Hooks_Type is ("false", "true");
+   Connection_Test_Hooks : Connection_Test_Hooks_Type :=
+     external ("FLYOLOGY_CONNECTION_TEST_HOOKS", "false");
+   Connection_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False";
+   case Connection_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Connection_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
+   end case;
+
    for Languages use ("Ada", "C");
    for Source_Dirs use (".", "native");
    for Object_Dir use "obj/runtime_smoke";
@@ -53,6 +66,7 @@ project Runtime_Smoke is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
+         Connection_Test_Hook_Switch);
    end Compiler;
 end Runtime_Smoke;

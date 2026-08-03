@@ -41,6 +41,12 @@ fi
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
+if nm -g "$project_root/lib/libFlyology.a" | \
+     grep -Ei 'test_waiting_operations|test_operation_active|test_close_requested' >/dev/null
+then
+  echo "production library exposes connection-controller test symbols" >&2
+  exit 1
+fi
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \

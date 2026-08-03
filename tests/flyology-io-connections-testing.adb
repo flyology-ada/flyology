@@ -1,22 +1,10 @@
 with Ada.Real_Time;
 with Interfaces.C;
-with System.Address_To_Access_Conversions;
 
 package body Flyology.IO.Connections.Testing is
 
    use type Ada.Real_Time.Time;
    use type Interfaces.C.int;
-
-   type Controller_Data is record
-      Current_FD         : Flyology.IO.Descriptor;
-      Current_Generation : Descriptor_Generation;
-      Active             : Boolean with Atomic;
-      Closing            : Boolean with Atomic;
-      Started_Operations : Natural with Atomic;
-   end record;
-
-   package Data_Conversions is new System.Address_To_Access_Conversions
-     (Controller_Data);
 
    procedure C_Reset
      with Import,
@@ -35,24 +23,14 @@ package body Flyology.IO.Connections.Testing is
           Convention => C,
           External_Name => "flyology_test_connection_barrier_release";
 
-   function Data (Item : Connection)
-      return Data_Conversions.Object_Pointer is
-     (Data_Conversions.To_Pointer (Item.Controller'Address));
-
    function Waiting_Operations (Item : Connection) return Natural is
-      Controller : constant Data_Conversions.Object_Pointer := Data (Item);
-      Started : constant Natural := Controller.Started_Operations;
-   begin
-      --  These fields are atomic in the controller. The layout mirror remains
-      --  confined to this smoke-test child and adds no production observer.
-      return Started - (if Controller.Active then 1 else 0);
-   end Waiting_Operations;
+     (Item.Controller.Test_Waiting_Operations);
 
    function Operation_Active (Item : Connection) return Boolean is
-     (Data (Item).Active);
+     (Item.Controller.Test_Operation_Active);
 
    function Close_Requested (Item : Connection) return Boolean is
-     (Data (Item).Closing);
+     (Item.Controller.Test_Close_Requested);
 
    procedure Reset_Barriers is
    begin

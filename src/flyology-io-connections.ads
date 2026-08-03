@@ -63,10 +63,11 @@ package Flyology.IO.Connections is
    end Server;
 
    --  Sole closing owner of one socket and one Server admission permit.
-   --  Finalize calls Close. Close is idempotent and may run concurrently with
-   --  one I/O operation; that operation is cancelled before the socket closes.
-   --  Other operations on the same Connection are serialized. Server must
-   --  outlive the Connection.
+   --  Finalize calls Close. At most one I/O operation holds the active lease,
+   --  while multiple callers may be registered or queued for it. Close is
+   --  idempotent and may run concurrently with all of them: it cancels and
+   --  drains the active operation and every registered or queued operation
+   --  before closing the socket. Server must outlive the Connection.
    type Connection is new Ada.Finalization.Limited_Controlled with private;
 
    --  Transfer Socket and one Manager permit to Item. On success Socket
@@ -113,9 +114,10 @@ package Flyology.IO.Connections is
       Token                : access Cancellation_Token := null)
    with Pre => Cancellation_Quantum > 0.0;
 
-   --  Cancel any active operation, close Item's socket, and release its Server
-   --  permit. Concurrent callers wait for the same close. Closing a closed
-   --  Item is harmless.
+   --  Cancel and drain the active operation and every registered or queued
+   --  caller, close Item's socket, and release its Server permit.
+   --  Concurrent Close callers wait for the same close. Closing a closed Item
+   --  is harmless.
    --  @param Item Connection whose ownership is released
    --  @exception GNAT.Sockets.Socket_Error The underlying close reports
    --     failure
@@ -245,6 +247,13 @@ private
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
       function Is_Open_State return Boolean;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      --  Test-only observations are protected operations so tests never
+      --  depend on the controller's private memory layout.
+      function Test_Waiting_Operations return Natural;
+      function Test_Operation_Active return Boolean;
+      function Test_Close_Requested return Boolean;
+#end if;
    private
       Current_FD         : Flyology.IO.Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;

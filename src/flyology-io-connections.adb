@@ -251,6 +251,15 @@ package body Flyology.IO.Connections is
       function Is_Open_State return Boolean is
         (Current_FD >= 0 and then not Closing);
 
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      function Test_Waiting_Operations return Natural is
+        (Started_Operations - (if Active then 1 else 0));
+
+      function Test_Operation_Active return Boolean is (Active);
+
+      function Test_Close_Requested return Boolean is (Closing);
+#end if;
+
    end Descriptor_Controller;
 
    overriding procedure Finalize (Guard : in out Operation_Guard) is
