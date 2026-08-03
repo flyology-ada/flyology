@@ -50,6 +50,7 @@ project Runtime_Smoke is
       "ready_queue_smoke.adb",
       "reap_finalize_race_smoke.adb",
       "runtime_smoke.adb",
+      "semantic_conformance_matrix.adb",
       "stress_randomized.adb",
       "semantic_parity_smoke.adb",
       "stack_guard_smoke.adb",

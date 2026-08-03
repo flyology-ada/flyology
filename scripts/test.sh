@@ -276,6 +276,13 @@ run_gprbuild \
   -P tests/runtime_smoke.gpr \
   topology_smoke.adb
 "$project_root/tests/bin/topology_smoke"
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  semantic_conformance_matrix.adb
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$project_root/tests/bin/semantic_conformance_matrix"
 
 #  Exercise a compiled project-level policy independently from the public
 #  pre-start API. Darwin tags are advisory; Linux masks are strict and use the
