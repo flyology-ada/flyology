@@ -1,3 +1,4 @@
+with Ada.Characters.Handling;
 with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Real_Time;
@@ -28,6 +29,7 @@ with Flyology.HTTP.Server.Middleware_Rate_Limits;
 with Flyology.HTTP.Server.Middleware_Request_IDs;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Request_Tasks;
+with Flyology.HTTP.Server.Requests;
 with Flyology.HTTP.Server.Routing;
 with Flyology.HTTP.Server.SSE_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers;
@@ -51,6 +53,7 @@ procedure HTTP_Application_Server is
    package Files renames Flyology.IO.Files;
    package Groups renames Flyology.Execution_Groups;
    package Observation renames Flyology.Observability;
+   package Request_Helpers renames Flyology.HTTP.Server.Requests;
    package Sockets renames GNAT.Sockets;
    package Owned renames Flyology.IO.Connections;
 
@@ -940,8 +943,26 @@ procedure HTTP_Application_Server is
          end Producer;
          package WS_Lifecycle is new
            WS.Lifecycle (WS_Open, WS_Message, WS_Closed);
+         --  The browser serializes its Origin from the URL used to open the
+         --  page. Derive the one permitted origin from the already validated
+         --  request authority so both localhost and 127.0.0.1 remain exact
+         --  same-origin deployments rather than weakening this to Allow_Any.
+         Expected_Origin : constant String :=
+           "http://"
+           & Ada.Characters.Handling.To_Lower
+               (Request_Helpers.Authority (X));
       begin
          Complete (State);
+         --  Reject at the application boundary first so policy refusal has a
+         --  useful HTTP status and access-log value. Accept_WebSocket repeats
+         --  the exact check as the protocol-layer defense in depth.
+         if X.Request_Header_Count ("Origin") /= 1
+           or else X.Request_Header ("Origin") /= Expected_Origin
+         then
+            X.Problem
+              (403, "websocket-origin", "WebSocket origin is not allowed");
+            return;
+         end if;
          declare
             First  : Producer (Session'Unchecked_Access, 'a');
             Second : Producer (Session'Unchecked_Access, 'b');
@@ -950,7 +971,7 @@ procedure HTTP_Application_Server is
             WS_Lifecycle.Run
               (X, Session,
                Origin_Policy => HTTP.Require_Exact_Origin,
-               Allowed_Origin => Origin,
+               Allowed_Origin => Expected_Origin,
                Metric_Output => Metrics'Access);
          end;
       end WebSocket_Echo;

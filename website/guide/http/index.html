@@ -241,11 +241,17 @@ end if;</code></pre></figure>
             <figure class="code-panel"><figcaption>lifecycle configuration</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">package Chat_Lifecycle is new
   WS.Lifecycle (WS_Open, WS_Message, WS_Close);
 
+Expected_Origin : constant String :=
+  "http://"
+  &amp; Ada.Characters.Handling.To_Lower
+      (Request_Helpers.Authority (X));
+
 Chat_Lifecycle.Run
   (X, Session,
    Origin_Policy  =&gt; HTTP.Require_Exact_Origin,
-   Allowed_Origin =&gt; "http://127.0.0.1:18082",
+   Allowed_Origin =&gt; Expected_Origin,
    Metric_Output  =&gt; Metrics'Access);</code></pre></figure>
+            <p>The direct HTTP showcase derives one exact expected origin from the core-validated request authority, so the same binary works at either <code>localhost</code> or <code>127.0.0.1</code> without allowing arbitrary origins. A TLS deployment would use <code>https://</code>; applications behind a trusted proxy must derive public authority and scheme only through an explicit trusted-hop policy.</p>
             <p>The raw RFC 6455 API remains usable for applications needing a different lifecycle. Client masking, UTF-8, close codes, control frames, fragmentation, size limits, and terminal protocol failures remain core invariants.</p>
           </section>
 
