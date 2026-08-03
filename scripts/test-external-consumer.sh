@@ -16,22 +16,27 @@ cd "$consumer_root"
 
 "$alr" --non-interactive with flyology --use="$project_root"
 
+#  Verify that an ordinary Alire build runs the dependency's post-fetch action
+#  and selects the generated native-default RTS through GPR_CONFIG.
+"$alr" build
+"$consumer_root/build/bin/external_consumer" native
+
 run_gprbuild () {
   if [ "$(uname -s)" = Darwin ]; then
     compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)
     if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
       current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
-      "$alr" exec -- gprbuild "$@" \
+      "$alr" exec -- env -u GPR_CONFIG gprbuild "$@" \
         -largs "-Wl,-syslibroot,$current_sysroot" -nodefaultrpaths
       return
     fi
-    "$alr" exec -- gprbuild "$@" -largs -nodefaultrpaths
+    "$alr" exec -- env -u GPR_CONFIG gprbuild "$@" -largs -nodefaultrpaths
     return
   fi
-  "$alr" exec -- gprbuild "$@"
+  "$alr" exec -- env -u GPR_CONFIG gprbuild "$@"
 }
 
-for execution_default in native lightweight; do
+for execution_default in lightweight; do
   rts_root="$consumer_root/build/rts-$execution_default"
   ALR="$alr" \
   FLYOLOGY_CONSUMER_RTS="$rts_root" \

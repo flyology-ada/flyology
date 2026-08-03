@@ -1744,31 +1744,27 @@ alr with flyology --use /path/to/flyology
 ```
 
 Alire makes `flyology.gpr` available to the consumer and exports
-`FLYOLOGY_ROOT` as the dependency root. First generate the Alire build
-environment; this materializes an indexed dependency without attempting to link
-the application against the stock RTS. Prepare a consumer-owned RTS, then
-compile the application with that runtime:
+`FLYOLOGY_ROOT` as the dependency root. On the first build after fetching an
+indexed release, Flyology prepares a native-default RTS and a GPR configuration
+that selects it. The application then builds with the ordinary Alire command:
 
 ```sh
-alr build --stop-after=generation
-alr exec -- sh -c \
-  'FLYOLOGY_RTS_DIR="$PWD/build/flyology-rts" \
-   "$FLYOLOGY_ROOT/scripts/prepare-rts.sh"'
-alr exec -- gprbuild --RTS="$PWD/build/flyology-rts" -P app.gpr
+alr build
 ```
 
 The application's GPR file may explicitly `with "flyology.gpr"`; Alire also
 supports its normal automatic GPR dependency wiring. No `../../src` paths or
-imports of runtime implementation units are required. Building an executable
-without `--RTS` is intentionally unsupported: the public library imports the
-Flyology hooks supplied by the prepared runtime, and the stock GNARL does not
-define them.
+imports of runtime implementation units are required, and no explicit `--RTS`
+argument is needed. `alr with flyology` only records and fetches the dependency;
+as with other Alire crates, `alr build` performs the actual build and runs the
+one-time runtime preparation action.
 
 `scripts/test-external-consumer.sh` copies a small consumer into a fresh
-temporary workspace, adds Flyology through an Alire path pin, prepares native-
-and lightweight-default runtimes under that workspace, and runs both variants. It
-also verifies the native default is inert before and after an ordinary task and
-that event machinery appears only for the lightweight opt-in.
+temporary workspace, adds Flyology through an Alire path pin, verifies the
+automatic native-default build, and prepares a separate lightweight-default RTS
+to run the other variant. It also verifies the native default is inert before
+and after an ordinary task and that event machinery appears only for the
+lightweight opt-in.
 
 Run the complete verification suite with:
 

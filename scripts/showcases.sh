@@ -13,7 +13,7 @@ FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=1 \
 #  exact topology.
 (
   cd "$project_root/showcases"
-  "$alr" exec -- gprbuild \
+  "$alr" exec -- env -u GPR_CONFIG gprbuild \
     --RTS="$project_root/build/rts" \
     -f \
     -P showcases.gpr
@@ -49,7 +49,7 @@ FLYOLOGY_DEFAULT=lightweight \
   "$project_root/showcases/prepare-rts.sh" >/dev/null
 (
   cd "$project_root/showcases"
-  "$alr" exec -- gprbuild \
+  "$alr" exec -- env -u GPR_CONFIG gprbuild \
     --RTS="$project_root/build/rts" \
     -f \
     -P showcases.gpr \
