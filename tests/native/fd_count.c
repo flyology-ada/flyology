@@ -14,3 +14,7 @@ int flyology_test_open_fd_count(void) {
     }
     return count;
 }
+
+int flyology_test_fd_is_open(int fd) {
+    return fcntl(fd, F_GETFD) >= 0;
+}

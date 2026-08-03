@@ -186,6 +186,7 @@ for test_main in \
   thread_affinity_smoke \
   timer_heap_smoke \
   tls_smoke \
+  tls_state_model \
   tcp_native_smoke \
   wait_any_smoke
 do
@@ -247,6 +248,10 @@ do
         "$project_root/scripts/run-with-timeout.sh" 90 \
           "$project_root/tests/bin/$test_main"
       fi
+      ;;
+    tls_state_model)
+      "$project_root/scripts/run-with-timeout.sh" 30 \
+        "$project_root/tests/bin/$test_main"
       ;;
     *)
       "$project_root/scripts/run-with-timeout.sh" 60 \

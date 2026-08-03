@@ -1,15 +1,21 @@
 with Ada.Streams;
+with Interfaces.C;
 
 package body TLS_Test_Provider is
    package TLS renames Flyology.IO.TLS;
    use Ada.Streams;
+   use type Interfaces.C.int;
+   use type TLS.Step_Status;
 
    type Test_Session is new TLS.Session with record
+      FD            : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
       Fail_Finalize : Boolean := False;
       Block_Handshake : Boolean := False;
       Behavior      : Receive_Behavior := Return_Data;
       Send_Mode     : Send_Behavior := Return_Progress;
       Peer_Close    : Peer_Close_Point := No_Peer_Close;
+      Scripts       : Stored_Scripts;
+      Positions     : Operation_Counts := [others => 0];
       Handshakes    : Natural := 0;
       Receives      : Natural := 0;
       Sends         : Natural := 0;
@@ -31,14 +37,40 @@ package body TLS_Test_Provider is
    overriding function Error_Message (Item : Test_Session) return String;
    overriding procedure Finalize (Item : in out Test_Session);
 
+   function Next_Step
+     (Scripts     : Stored_Scripts;
+      Positions   : in out Operation_Counts;
+      Operation   : Operation_Kind;
+      Is_Scripted : out Boolean) return Script_Step;
+
+   procedure Apply_Output
+     (Step       : Script_Step;
+      Data_First : Stream_Element_Offset;
+      Data_Last  : Stream_Element_Offset;
+      Last       : in out Stream_Element_Offset);
+
+   function FD_Is_Open (FD : Interfaces.C.int) return Interfaces.C.int
+     with Import, Convention => C,
+          External_Name => "flyology_test_fd_is_open";
+
    protected Telemetry is
       procedure Reset;
+      procedure Reset_State;
       procedure Saw_Want;
       procedure Saw_Partial;
       procedure Read (Wants : out Natural; Partials : out Natural);
+      procedure Session_Created;
+      procedure Session_Finalized (FD_Was_Open : Boolean);
+      procedure Saw_Call (Operation : Operation_Kind);
+      procedure Read_State (State : out State_Telemetry);
+      entry Wait_Handshake;
+      entry Wait_Receive;
+      entry Wait_Send;
+      entry Wait_Shutdown;
    private
       Wants    : Natural := 0;
       Partials : Natural := 0;
+      State    : State_Telemetry;
    end Telemetry;
 
    protected Handshake_Block is
@@ -95,6 +127,59 @@ package body TLS_Test_Provider is
          Wants := Telemetry.Wants;
          Partials := Telemetry.Partials;
       end Read;
+      procedure Reset_State is
+      begin
+         if State.Sessions_Live /= 0 then
+            raise Program_Error with
+              "cannot reset TLS telemetry while sessions are live";
+         end if;
+         State := (others => <>);
+      end Reset_State;
+      procedure Session_Created is
+      begin
+         State.Sessions_Created := State.Sessions_Created + 1;
+         State.Sessions_Live := State.Sessions_Live + 1;
+      end Session_Created;
+      procedure Session_Finalized (FD_Was_Open : Boolean) is
+      begin
+         State.Sessions_Finalized := State.Sessions_Finalized + 1;
+         if State.Sessions_Live = 0 then
+            raise Program_Error with "TLS session telemetry underflow";
+         end if;
+         State.Sessions_Live := State.Sessions_Live - 1;
+         if FD_Was_Open then
+            State.Finalized_While_FD_Open :=
+              State.Finalized_While_FD_Open + 1;
+         end if;
+      end Session_Finalized;
+      procedure Saw_Call (Operation : Operation_Kind) is
+      begin
+         State.Calls (Operation) := State.Calls (Operation) + 1;
+      end Saw_Call;
+      procedure Read_State (State : out State_Telemetry) is
+      begin
+         State := Telemetry.State;
+      end Read_State;
+      entry Wait_Handshake when State.Calls (Handshake_Operation) >= 1
+      is
+      begin
+         null;
+      end Wait_Handshake;
+      entry Wait_Receive when State.Calls (Receive_Operation) >= 1
+      is
+      begin
+         null;
+      end Wait_Receive;
+      entry Wait_Send when State.Calls (Send_Operation) >= 1
+      is
+      begin
+         null;
+      end Wait_Send;
+      entry Wait_Shutdown when State.Calls (Shutdown_Operation) >= 1
+      is
+      begin
+         null;
+      end Wait_Shutdown;
    end Telemetry;
 
    procedure Set_Finalize_Failure (Item : in out Provider) is
@@ -138,6 +223,24 @@ package body TLS_Test_Provider is
       Item.Peer_Close := Point;
    end Set_Peer_Close;
 
+   procedure Set_Script
+     (Item      : in out Provider;
+      Operation : Operation_Kind;
+      Steps     : Step_Script)
+   is
+   begin
+      if Steps'Length > Maximum_Script_Length then
+         raise Constraint_Error with "TLS test script is too long";
+      end if;
+      Item.Scripts (Operation).Length := Steps'Length;
+      if Steps'Length > 0 then
+         for Offset in 0 .. Steps'Length - 1 loop
+            Item.Scripts (Operation).Steps (Offset + 1) :=
+              Steps (Steps'First + Offset);
+         end loop;
+      end if;
+   end Set_Script;
+
    procedure Reset_Telemetry is
    begin
       Telemetry.Reset;
@@ -150,6 +253,30 @@ package body TLS_Test_Provider is
    begin
       Telemetry.Read (Want_Results, Partial_Progress);
    end Get_Telemetry;
+
+   procedure Reset_State_Telemetry is
+   begin
+      Telemetry.Reset_State;
+   end Reset_State_Telemetry;
+
+   procedure Get_State_Telemetry (State : out State_Telemetry) is
+   begin
+      Telemetry.Read_State (State);
+   end Get_State_Telemetry;
+
+   procedure Wait_For_First_Call (Operation : Operation_Kind) is
+   begin
+      case Operation is
+         when Handshake_Operation =>
+            Telemetry.Wait_Handshake;
+         when Receive_Operation =>
+            Telemetry.Wait_Receive;
+         when Send_Operation =>
+            Telemetry.Wait_Send;
+         when Shutdown_Operation =>
+            Telemetry.Wait_Shutdown;
+      end case;
+   end Wait_For_First_Call;
 
    overriding function Name (Item : Provider) return String is
       pragma Unreferenced (Item);
@@ -169,25 +296,82 @@ package body TLS_Test_Provider is
       Side        : TLS.Role;
       Server_Name : String) return TLS.Session_Access
    is
-      pragma Unreferenced (FD, Side, Server_Name);
+      pragma Unreferenced (Side, Server_Name);
+      Result : TLS.Session_Access;
    begin
-      return new Test_Session'
+      Result := new Test_Session'
         (TLS.Session with
+         FD            => FD,
          Fail_Finalize => Item.Fail_Finalize,
          Block_Handshake => Item.Block_Handshake,
          Behavior      => Item.Behavior,
          Send_Mode     => Item.Send_Mode,
          Peer_Close    => Item.Peer_Close,
+         Scripts       => Item.Scripts,
+         Positions     => [others => 0],
          Handshakes    => 0,
          Receives      => 0,
          Sends         => 0,
          Shutdowns     => 0);
+      Telemetry.Session_Created;
+      return Result;
    end Create_Session;
+
+   function Next_Step
+     (Scripts     : Stored_Scripts;
+      Positions   : in out Operation_Counts;
+      Operation   : Operation_Kind;
+      Is_Scripted : out Boolean) return Script_Step
+   is
+      Script : Stored_Script renames Scripts (Operation);
+   begin
+      Telemetry.Saw_Call (Operation);
+      Is_Scripted := Script.Length > 0;
+      if not Is_Scripted then
+         return (others => <>);
+      end if;
+
+      Positions (Operation) := Positions (Operation) + 1;
+      if Positions (Operation) > Script.Length then
+         raise Program_Error with "TLS test provider script exhausted";
+      end if;
+      return Script.Steps (Positions (Operation));
+   end Next_Step;
+
+   procedure Apply_Output
+     (Step       : Script_Step;
+      Data_First : Stream_Element_Offset;
+      Data_Last  : Stream_Element_Offset;
+      Last       : in out Stream_Element_Offset)
+   is
+   begin
+      case Step.Effect is
+         when Preserve_Output =>
+            null;
+         when Advance_Output =>
+            if Step.Count = 0 then
+               null;
+            else
+               Last := Data_First + Stream_Element_Offset (Step.Count - 1);
+            end if;
+         when Before_First =>
+            Last := Data_First - 1;
+         when After_Last =>
+            Last := Data_Last + 1;
+      end case;
+   end Apply_Output;
 
    overriding function Handshake_Step
      (Item : in out Test_Session) return TLS.Step_Status
    is
+      Is_Scripted : Boolean;
+      Step        : constant Script_Step :=
+        Next_Step
+          (Item.Scripts, Item.Positions, Handshake_Operation, Is_Scripted);
    begin
+      if Is_Scripted then
+         return Step.Status;
+      end if;
       Item.Handshakes := Item.Handshakes + 1;
       if Item.Peer_Close = Handshake_Peer_Close then
          return TLS.Peer_Closed;
@@ -208,7 +392,20 @@ package body TLS_Test_Provider is
       Data : out Stream_Element_Array;
       Last : in out Stream_Element_Offset) return TLS.Step_Status
    is
+      Is_Scripted : Boolean;
+      Step        : constant Script_Step :=
+        Next_Step
+          (Item.Scripts, Item.Positions, Receive_Operation, Is_Scripted);
    begin
+      if Is_Scripted then
+         Apply_Output (Step, Data'First, Data'Last, Last);
+         if Step.Status = TLS.Complete
+           and then Last in Data'Range
+         then
+            Data (Data'First .. Last) := [others => 42];
+         end if;
+         return Step.Status;
+      end if;
       Item.Receives := Item.Receives + 1;
       if Item.Receives = 1 then
          Telemetry.Saw_Want;
@@ -240,7 +437,15 @@ package body TLS_Test_Provider is
       Data : Stream_Element_Array;
       Last : in out Stream_Element_Offset) return TLS.Step_Status
    is
+      Is_Scripted : Boolean;
+      Step        : constant Script_Step :=
+        Next_Step
+          (Item.Scripts, Item.Positions, Send_Operation, Is_Scripted);
    begin
+      if Is_Scripted then
+         Apply_Output (Step, Data'First, Data'Last, Last);
+         return Step.Status;
+      end if;
       Item.Sends := Item.Sends + 1;
       if Item.Peer_Close = Send_Peer_Close then
          return TLS.Peer_Closed;
@@ -262,7 +467,14 @@ package body TLS_Test_Provider is
    overriding function Shutdown_Step
      (Item : in out Test_Session) return TLS.Step_Status
    is
+      Is_Scripted : Boolean;
+      Step        : constant Script_Step :=
+        Next_Step
+          (Item.Scripts, Item.Positions, Shutdown_Operation, Is_Scripted);
    begin
+      if Is_Scripted then
+         return Step.Status;
+      end if;
       Item.Shutdowns := Item.Shutdowns + 1;
       if Item.Peer_Close = Shutdown_Peer_Close then
          return TLS.Peer_Closed;
@@ -282,6 +494,8 @@ package body TLS_Test_Provider is
 
    overriding procedure Finalize (Item : in out Test_Session) is
    begin
+      Telemetry.Session_Finalized
+        (FD_Is_Open (Interfaces.C.int (Item.FD)) /= 0);
       if Item.Fail_Finalize then
          raise Program_Error with "injected provider finalization failure";
       end if;

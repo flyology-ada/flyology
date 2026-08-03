@@ -114,6 +114,7 @@ structured_server_smoke
 thread_affinity_smoke
 timer_heap_smoke
 tls_smoke
+tls_state_model
 tcp_native_smoke
 wait_any_smoke'
 
