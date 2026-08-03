@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Build, configure, and evaluate Flyology with a prepared GNAT runtime.">
+    <meta name="description" content="Build, configure, size, budget, observe, and evaluate Flyology with a prepared GNAT runtime.">
     <meta name="theme-color" content="#17213d">
     <title>Guide · Flyology</title>
     <link rel="canonical" href="https://flyology.org/guide/">
@@ -43,9 +43,9 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Guide</li></ol>
-          <h1>From checkout to first lightweight task.</h1>
+          <h1>From first task to a measured configuration.</h1>
         </div>
-        <p class="doc-hero-copy">Prepare a version-matched GNAT runtime, keep native behavior as the default, then opt one ordinary Ada task into the lightweight execution lane.</p>
+        <p class="doc-hero-copy">Prepare a version-matched GNAT runtime, opt ordinary Ada tasks into the lightweight lane, then size their stacks and budget concurrency, execution groups, deadlines, and cooperative CPU work.</p>
       </header>
 
       <div class="docs-layout">
@@ -56,9 +56,11 @@
             <li><a href="#build">Build the crate</a></li>
             <li><a href="#prepare">Prepare the runtime</a></li>
             <li><a href="#designate">Designate a task</a></li>
+            <li><a href="#stacks">Size task stacks</a></li>
             <li><a href="#groups">Choose a group</a></li>
             <li><a href="#io">Use task-aware I/O</a></li>
-            <li><a href="#fairness">Preserve fairness</a></li>
+            <li><a href="#budgets">Set resource budgets</a></li>
+            <li><a href="#observe">Observe and adjust</a></li>
             <li><a href="#verify">Verify behavior</a></li>
             <li><a href="#constraints">Constraints</a></li>
           </ol>
@@ -114,8 +116,16 @@ FLYOLOGY_LOOP_POOL_SIZE=4 \
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p>Preparation settings are compiled into the RTS. They are not read dynamically by the application at startup.</p>
+              <p>Preparation settings are compiled into the RTS. They are not read dynamically by the application at startup; after changing one, prepare the RTS again and relink the application with that runtime.</p>
             </aside>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>FLYOLOGY_RTS_DIR</code></dt><dd>Writes the generated runtime outside the default <code>build/rts</code>. Give each materially different configuration its own directory when comparing builds.</dd></div>
+                <div class="decision-row"><dt><code>FLYOLOGY_DEFAULT</code></dt><dd>Selects <code>native</code> or <code>lightweight</code> for tasks that do not carry an explicit designation.</dd></div>
+                <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement. Groups and their pthreads still start lazily.</dd></div>
+                <div class="decision-row"><dt>Loop placement</dt><dd><code>FLYOLOGY_LOOP_PLACEMENT</code> and <code>FLYOLOGY_LOOP_PLACEMENT_MAP</code> request Linux strict logical-CPU binding or a supported Darwin advisory tag. This places loop pthreads; it does not change task-to-group assignment.</dd></div>
+              </dl>
+            </div>
           </section>
 
           <section id="designate">
@@ -143,8 +153,44 @@ end Worker;</code></pre>
             </figure>
           </section>
 
-          <section id="groups">
+          <section id="stacks">
             <span class="step-label">STEP 05</span>
+            <h2>Size each task stack deliberately.</h2>
+            <p>Ada's <code>Storage_Size</code> is the stack-size control for both native and lightweight tasks. Put the pragma in the task or task-type declaration, use a named constant so the choice is reviewable, and size for the deepest real call path: local objects, recursion, exception propagation, and foreign calls all consume stack.</p>
+            <figure class="code-panel">
+              <figcaption>a task type with a 64 KiB requested stack</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Worker_Stack_Size : constant := 64 * 1_024;
+
+task type Worker (Kind : Flyology.Execution_Model) is
+   pragma Task_Info (Kind);
+   pragma Storage_Size (Worker_Stack_Size);
+end Worker;</code></pre>
+            </figure>
+            <p>The requested value is not the task's complete memory footprint or necessarily the final usable mapping size. GNARL adds its conservative alternate-signal-stack allowance, and Flyology rounds a lightweight stack to the host page size. Lightweight stacks are placed in guarded arenas; each slot carries at least 64 KiB of inaccessible guard address space. Native tasks instead retain the host pthread implementation and its platform minimums.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Do not find the minimum by waiting for a guard fault.</strong> A guard improves failure behavior but cannot prove every stack path safe. Exercise worst-case nesting and exception paths, include margin, and repeat the test on every supported compiler and host.</p>
+            </aside>
+            <p><code>Flyology.Observability.Stack_Pool</code> reports the effective lightweight result. <code>Live_Usable_Bytes</code> is the aggregate usable size after GNARL adjustment and page rounding; <code>Reserved_Bytes</code> is the exact virtual address space held by live arenas, including guards. Reserved address space is not resident memory, so measure process RSS separately.</p>
+            <figure class="code-panel">
+              <figcaption>inspect the lightweight stack pool</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Pool : constant Flyology.Observability.Stack_Pool_Snapshot :=
+     Flyology.Observability.Stack_Pool;
+begin
+   Ada.Text_IO.Put_Line
+     ("live=" &amp; Pool.Live_Stacks'Image
+      &amp; " usable bytes=" &amp; Pool.Live_Usable_Bytes'Image
+      &amp; " reserved bytes=" &amp; Pool.Reserved_Bytes'Image);
+end;</code></pre>
+            </figure>
+            <p>If every live lightweight task in a sample uses the same declaration, divide <code>Live_Usable_Bytes</code> by <code>Live_Stacks</code> to obtain its effective usable size. With mixed task sizes that quotient is only an average. The current structured-server generic owns its handler task type and uses the compiler/runtime default stack size; <code>Storage_Size</code> applies directly to task types declared by the application.</p>
+          </section>
+
+          <section id="groups">
+            <span class="step-label">STEP 06</span>
             <h2>Choose an execution group.</h2>
             <p>A lightweight task without a specific Ada CPU is placed into the configured shared pool by deterministic round robin. A <code>CPU</code> aspect selects an exact Flyology execution group instead.</p>
             <figure class="code-panel">
@@ -176,7 +222,7 @@ end;</code></pre>
           </section>
 
           <section id="io">
-            <span class="step-label">STEP 06</span>
+            <span class="step-label">STEP 07</span>
             <h2>Use synchronous I/O calls.</h2>
             <p>Flyology I/O packages expose normal procedure and function calls from either lane. If a lightweight call would block, only that task waits; the loop thread remains available. A native call may block only its pthread.</p>
             <figure class="code-panel">
@@ -194,10 +240,37 @@ Flyology.IO.Files.Read_At
             <p><a href="../api/">Browse the generated API reference</a></p>
           </section>
 
-          <section id="fairness">
-            <span class="step-label">STEP 07</span>
-            <h2>Add fairness checkpoints to CPU-bound work.</h2>
-            <p>A CPU-bound lightweight task can monopolize its group until it reaches a runtime suspension, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities choose among ready fibers within a group, but they do not preempt arbitrary lightweight instructions.</p>
+          <section id="budgets">
+            <span class="step-label">STEP 08</span>
+            <h2>Set resource budgets before load testing.</h2>
+            <p>Flyology does not turn one number into a complete capacity plan. Bound the resources the application owns, set latency limits at operation boundaries, and then measure them together under representative peak load.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Concurrency</dt><dd>Use a structured server or <code>Connections.Server</code> capacity to cap simultaneously owned connections. A structured server creates exactly <code>Capacity</code> handler tasks for the duration of <code>Serve</code>, including while idle.</dd></div>
+                <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, plan usable stack bytes as peak live tasks multiplied by the observed effective bytes per task. Read <code>Reserved_Bytes</code> for guarded virtual address space and measure RSS for resident memory.</dd></div>
+                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> bounds automatic shared groups, not task count. Start near the CPU parallelism the workload can use and compare measurements; each created group adds pthread, poller, scheduler, and kernel-queue resources.</dd></div>
+                <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These are separate limits: cancellation is not a timeout, and a fairness quantum is not a hard execution deadline.</dd></div>
+              </dl>
+            </div>
+
+            <h3>Bound admission, not just the listen backlog</h3>
+            <p>The structured-server capacity is both the maximum active handlers and an eager task-resource budget. Excess work remains in the kernel listen backlog instead of becoming an unbounded user-space task or connection queue.</p>
+            <figure class="code-panel">
+              <figcaption>bounded structured service</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Handler_Capacity : constant Positive := 256;
+
+Server : aliased HTTP.Server (Capacity =&gt; Handler_Capacity);
+
+HTTP.Serve
+  (Server, Listener, State, Drain_Timeout =&gt; 5.0);</code></pre>
+            </figure>
+
+            <h3>Give an operation one meaningful deadline</h3>
+            <p><code>Receive_Exactly</code> and <code>Send_All</code> apply one timeout across the whole multi-step operation rather than restarting it for every partial transfer. DNS resolution similarly applies its overall timeout across family queries, retry rounds, and transport fallback. Prefer finite deadlines at service boundaries; reserve <code>Infinite</code> for scopes whose shutdown and cancellation path is otherwise explicit.</p>
+
+            <h3>Add checkpoints to bounded units of CPU work</h3>
+            <p>A CPU-bound lightweight task can monopolize its group until it reaches a runtime suspension, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities choose among ready fibers within a group, but they do not preempt arbitrary lightweight instructions. A new <code>Yield_Budget</code> defaults to a 2 ms quantum; configure it when the service needs a different cooperative slice.</p>
             <figure class="code-panel">
               <figcaption>time-budgeted fairness</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -209,14 +282,40 @@ while More_Work loop
    Budget.Checkpoint;
 end loop;</code></pre>
             </figure>
+            <p>Choose a quantum below the same-group scheduling delay the application can tolerate, then measure it. The value is elapsed wall-clock time between eligible yields, not reserved CPU time. Put <code>Checkpoint</code> after a bounded unit of work: if <code>Process_One_Item</code> itself can run for 50 ms, a 250 µs quantum cannot take effect until that call returns. Very small quanta also increase clock reads and scheduler transfers.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p>An arbitrary blocking foreign call can stop every lightweight task in its group. Put unpredictable blocking work on a native task or migrate to a dedicated group first.</p>
             </aside>
           </section>
 
+          <section id="observe">
+            <span class="step-label">STEP 09</span>
+            <h2>Observe, compare, and adjust one knob.</h2>
+            <p>Take snapshots at idle, representative load, and recovery. Group snapshots are coherent but briefly hold scheduler locks and cost <code>O(group members)</code>, so sample periodically rather than per request. Lifetime counters wrap and do not reset; compare two samples instead of treating one cumulative value as a rate.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Healthy waiting</dt><dd>A high <code>Waiting</code> count accompanied by timer, descriptor, interrupt, or file waits normally means concurrency is parked in the intended kernel-backed path.</dd></div>
+                <div class="decision-row"><dt>Runnable pressure</dt><dd>A persistently high <code>Ready</code> count means runnable work is sharing the group. Compare dispatch progress, CPU use, checkpoint placement, and the result of adding a group.</dd></div>
+                <div class="decision-row"><dt>Possible stall</dt><dd>Ready or running work without changes in dispatch or polling counters is a loop-lag signal. <code>Stall_Watchdogs</code> can sample this condition from a native monitor task; it diagnoses but does not preempt.</dd></div>
+                <div class="decision-row"><dt>File pressure</dt><dd><code>Pending_File_Submissions</code> shows file operations waiting behind the bounded kernel completion queue. It is backpressure, not a hidden worker-thread queue.</dd></div>
+                <div class="decision-row"><dt>Stack pressure</dt><dd>Track live stacks, effective usable bytes, guarded virtual reservation, process RSS, and task-creation failures together. None of those values alone is a complete memory limit.</dd></div>
+              </dl>
+            </div>
+            <figure class="code-panel">
+              <figcaption>repeatable sizing and pool comparisons</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./scripts/showcases.sh
+
+# After the showcase build, choose smaller local counts if needed:
+./showcases/run_connection_density.sh 1000 10000
+./showcases/run_event_loop_pool.sh 1024 20 4</code></pre>
+            </figure>
+            <p>The density run compares lightweight and native tasks with the same requested stack size and reports RSS, virtual address space, thread count, and lightweight stack-pool counters. The pool run compares one event loop with a configured pool under repeated readiness waves. Treat either result as a measurement of that host and workload, not a universal sizing constant.</p>
+          </section>
+
           <section id="verify">
-            <span class="step-label">STEP 08</span>
+            <span class="step-label">STEP 10</span>
             <h2>Run the checks for your changes.</h2>
             <p>The repository scripts are authoritative for behavioral tests, proofs, documentation, stress campaigns, and showcases.</p>
             <figure class="code-panel">
@@ -236,7 +335,7 @@ end loop;</code></pre>
           </section>
 
           <section id="constraints">
-            <span class="step-label">STEP 09</span>
+            <span class="step-label">STEP 11</span>
             <h2>Know when to stay native.</h2>
             <p>Flyology is experimental. Keep a task native when its correctness depends on kernel real-time scheduling, forced preemption, stock GNARL CPU affinity, unpredictable foreign blocking, or a host and compiler combination outside the verified patch matrix.</p>
             <div class="decision-list">
