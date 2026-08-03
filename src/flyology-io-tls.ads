@@ -132,7 +132,8 @@ package Flyology.IO.TLS is
    --  Send_All, and Shutdown are serialized. Close may run concurrently: it
    --  wakes the active operation, waits for it to release provider state,
    --  destroys the TLS session, then closes the descriptor. Other concurrent
-   --  operations wait their turn.
+   --  operations wait their turn. Take is the only non-concurrent operation:
+   --  callers must give it exclusive access to a closed Connection.
    --  Operations queued behind an active provider call recheck cancellation
    --  and their original deadline at intervals of at most 10 milliseconds.
    type Connection is new Ada.Finalization.Limited_Controlled with private;
@@ -143,6 +144,7 @@ package Flyology.IO.TLS is
    --  hostname verification. Provider libraries are selected by Backend and
    --  may differ between connections. If setup fails, Socket keeps ownership,
    --  but its descriptor may already have been changed to nonblocking mode.
+   --  Take must not run concurrently with any other operation on Item.
    --  @param Backend Initialized TLS provider
    --  @param Socket Connected socket transferred on success
    --  @param Side Client or server handshake role
