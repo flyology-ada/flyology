@@ -233,14 +233,6 @@ dt {
   border-bottom: 1px solid var(--line);
 }
 
-.api-kicker {
-  margin-bottom: 1.2rem;
-  color: var(--violet);
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
 .api-hero p {
   max-width: 54ch;
   margin: 0;
