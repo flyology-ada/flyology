@@ -1544,6 +1544,11 @@ Current smoke coverage includes:
   maximum-ceiling protected operation, nested and access-type task masters,
   abort during activation/delay/entry wait/finalization, and rendezvous in both
   directions across the native/lightweight boundary;
+- a four-way native/lightweight termination matrix covering task entry
+  families, calls to normally and exceptionally terminated tasks, partial
+  sibling activation failure with abort cleanup, abort during an active
+  rendezvous, nested asynchronous transfer of control, all three
+  `Ada.Task_Termination` causes, and an explicit cross-group entry-family call;
 - lightweight/native socket-pair transfer, simultaneous read/write watches on one
   descriptor, bounded multi-descriptor waits, lowest-index simultaneous
   readiness, partial-registration rollback, abort cleanup, descriptor reuse,

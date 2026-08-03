@@ -185,6 +185,7 @@ done
 #  identical, so all traces consolidate into one report.
 pool_mains='loop_pool_smoke
 semantic_conformance_matrix
+semantic_termination_matrix
 topology_smoke'
 printf '%s\n' "coverage: preparing the three-loop topology RTS"
 FLYOLOGY_DEFAULT=native \
