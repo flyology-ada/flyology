@@ -164,6 +164,7 @@ for test_main in \
   file_cancellation_smoke \
   files_smoke \
   flyology-counter_policy_smoke \
+  http_smoke \
   io_smoke \
   io_starvation_smoke \
   lazy_event_start_smoke \

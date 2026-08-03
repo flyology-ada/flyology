@@ -6,6 +6,8 @@ with Ada.Text_IO;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Fairness;
+with Flyology.HTTP.Server;
+with Flyology.HTTP.Server.TLS;
 with Flyology.IO;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
@@ -15,6 +17,7 @@ with Interfaces.C;
 with TLS_Test_Provider;
 
 procedure TLS_Smoke is
+   package HTTP_Server renames Flyology.HTTP.Server;
    package TLS renames Flyology.IO.TLS;
    package TLS_Testing renames Flyology.IO.TLS.Testing;
    package OpenSSL renames Flyology.IO.TLS.OpenSSL;
@@ -151,6 +154,96 @@ procedure TLS_Smoke is
       TLS.Close (Client);
       TLS.Close (Server);
    end Run_Exchange;
+
+   procedure Run_HTTP_Exchange (Model : Flyology.Execution_Model) is
+      CRLF : constant String := Character'Val (13) & Character'Val (10);
+      Request_Text : constant String :=
+        "GET /secure HTTP/1.1" & CRLF
+        & "Host: localhost" & CRLF
+        & "Connection: close" & CRLF & CRLF;
+      Response_Text : constant String :=
+        "HTTP/1.1 200 OK" & CRLF
+        & "Content-Length: 6" & CRLF
+        & "Content-Type: text/plain" & CRLF
+        & "Connection: close" & CRLF & CRLF
+        & "secure";
+
+      function Bytes (Value : String) return Stream_Element_Array is
+         Result : Stream_Element_Array
+           (1 .. Stream_Element_Offset (Value'Length));
+      begin
+         for Index in Value'Range loop
+            Result (Stream_Element_Offset (Index - Value'First + 1)) :=
+              Stream_Element (Character'Pos (Value (Index)));
+         end loop;
+         return Result;
+      end Bytes;
+
+      Client_Socket : Sockets.Socket_Type;
+      Server_Socket : Sockets.Socket_Type;
+      Client        : TLS.Connection;
+      Server        : aliased TLS.Connection;
+      Result        : Outcome;
+   begin
+      Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
+      TLS.Take
+        (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
+      TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
+
+      declare
+         task Client_Task is
+            pragma Task_Info (Model);
+         end Client_Task;
+
+         task Server_Task is
+            pragma Task_Info (Model);
+         end Server_Task;
+
+         task body Client_Task is
+            Response : Stream_Element_Array := Bytes (Response_Text);
+         begin
+            TLS.Handshake (Client, Timeout => 5.0);
+            TLS.Send_All (Client, Bytes (Request_Text), Timeout => 5.0);
+            TLS.Receive_Exactly (Client, Response, Timeout => 5.0);
+            TLS.Shutdown (Client, Timeout => 5.0);
+            Result.Report (Response = Bytes (Response_Text));
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Client_Task;
+
+         task body Server_Task is
+            Channel : aliased HTTP_Server.TLS.Connection_Transport
+              (Server'Access);
+            HTTP_Connection : HTTP_Server.Connection (Channel'Access);
+            Request : HTTP_Server.Request;
+            Closed  : Boolean;
+         begin
+            TLS.Handshake (Server, Timeout => 5.0);
+            HTTP_Server.Read_Request
+              (HTTP_Connection, Request, Closed, Timeout => 5.0);
+            HTTP_Server.Respond
+              (HTTP_Connection, 200, "text/plain", "secure", Timeout => 5.0);
+            TLS.Shutdown (Server, Timeout => 5.0);
+            Result.Report
+              (not Closed
+               and then HTTP_Server.Target (Request) = "/secure");
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Server_Task;
+      begin
+         Result.Wait;
+      end;
+
+      pragma Assert (Result.Passed);
+      TLS.Close (Client);
+      TLS.Close (Server);
+   end Run_HTTP_Exchange;
 
    procedure Run_Timeout (Model : Flyology.Execution_Model) is
       Client_Socket : Sockets.Socket_Type;
@@ -1400,6 +1493,8 @@ begin
 
    Run_Exchange (Flyology.Lightweight_Task);
    Run_Exchange (Flyology.Native_Task);
+   Run_HTTP_Exchange (Flyology.Lightweight_Task);
+   Run_HTTP_Exchange (Flyology.Native_Task);
    Run_Timeout (Flyology.Lightweight_Task);
    Run_Timeout (Flyology.Native_Task);
    Run_Cancellation (Flyology.Lightweight_Task);

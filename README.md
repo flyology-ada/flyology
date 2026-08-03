@@ -46,6 +46,7 @@ based on the surviving correspondence.
   - [DNS resolution](#dns-resolution)
   - [Connection lifecycle](#connection-lifecycle)
   - [Structured servers](#structured-servers)
+  - [HTTP server](#http-server)
   - [Timers](#timers)
   - [Regular files](#regular-files)
 - [Runtime observability](#runtime-observability)
@@ -618,6 +619,8 @@ Flyology exposes synchronous operations in:
   sockets, shared deadlines, cancellation, and orderly shutdown.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
+- `Flyology.HTTP.Server`: HTTP/1.1 persistent requests, fixed-length messages,
+  server-sent events, WebSocket upgrades and frames, and plain/TLS transports.
 - `Flyology.IO.Files`: open, close, positional read, and positional write.
 - `Flyology.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
   resolver worker thread.
@@ -944,6 +947,95 @@ shutdown necessarily propagates and catches `Operation_Cancelled` on a lightweig
 stack, which crosses the fully instrumented Ada exception-propagation boundary
 called out in [AddressSanitizer builds](#addresssanitizer-builds). Ordinary
 macOS and Linux runs exercise those exception paths in both handler lanes.
+
+### HTTP server
+
+`Flyology.HTTP` holds protocol concepts that can be shared by a future client
+and the current server. `Flyology.HTTP.Server` is the server-side connection
+engine. It reads persistent HTTP/1.0 and HTTP/1.1 requests, requires `Host` for
+HTTP/1.1, handles fixed-length request bodies, emits fixed-length responses,
+and preserves pipelined bytes for the next request. `HEAD` responses declare
+the representation length without sending the representation.
+
+The engine is transport-neutral. A structured plain handler borrows its owned
+connection through `Flyology.HTTP.Server.Connections`:
+
+```ada
+declare
+   Channel : aliased Flyology.HTTP.Server.Connections.Connection_Transport
+     (Connection'Unchecked_Access);
+   Client : Flyology.HTTP.Server.Connection (Channel'Access);
+
+   procedure Route
+     (Item  : in out Flyology.HTTP.Server.Connection;
+      Value : Flyology.HTTP.Server.Request) is
+   begin
+      Flyology.HTTP.Server.Respond
+        (Item, 200, "text/plain", "hello" & ASCII.LF,
+         Token => Cancellation);
+   end Route;
+
+   package Handler is new
+     Flyology.HTTP.Server.Connection_Handlers (Route);
+begin
+   Handler.Serve (Client, Token => Cancellation);
+end;
+```
+
+`Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
+`text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
+13 upgrade and client key. WebSocket client frames must be masked; ping is
+answered with pong, close is acknowledged, and text or binary messages can be
+sent and received with synchronous calls. Frames are currently limited to 1
+MiB and fragmented messages are rejected. UTF-8 validation remains application
+policy.
+
+TLS uses the same HTTP engine after `Flyology.IO.TLS.Take` and `Handshake`.
+`Flyology.HTTP.Server.TLS.Connection_Transport` forwards decrypted reads and
+encrypted writes while the TLS connection retains sole closing ownership. The
+shipped OpenSSL provider therefore supplies TLS records, certificate handling,
+and cryptography; the HTTP package does not duplicate those functions.
+
+Request headers are capped at 16 KiB and request bodies at 1 MiB. One monotonic
+request timeout covers every incremental header and body read, rather than
+restarting after each byte, so a slow header or slow fixed-length body cannot
+retain a handler indefinitely. The same rule covers a complete WebSocket
+frame. Applications choose the timeout passed to `Read_Request` or
+`Connection_Handlers.Serve`; the example uses five seconds. Request
+`Transfer-Encoding` is currently rejected, so chunked request bodies are not
+part of this first server boundary.
+
+The runnable `http_server` showcase exposes `/`, `/events`, and `/websocket`.
+It takes the handler lane, request count before shutdown, port, and handler
+capacity:
+
+```sh
+./showcases/bin/http_server lightweight 100 18080 64
+./showcases/bin/http_server native 100 18080 64
+```
+
+`https_server` accepts one HTTPS request on a lightweight task and demonstrates
+the OpenSSL transport adapter. Its optional arguments are port, certificate,
+private key, and OpenSSL library directory:
+
+```sh
+./showcases/bin/https_server 18443 \
+  tests/fixtures/tls/server-cert.pem \
+  tests/fixtures/tls/server-key.pem
+```
+
+The benchmark runner uses `oha` and runs the same loopback keep-alive workload
+against explicit lightweight and native handler pools:
+
+```sh
+./showcases/run_http_benchmark.sh 100000 256 256 18080 16
+```
+
+The arguments are requests, client concurrency, handler capacity, port, and
+lightweight event-loop count. The loop count defaults to the host's logical CPU
+count. The runner prints the `oha` version, complete command, and execution
+parallelism with both result sets; results are host measurements, not portable
+performance guarantees.
 
 ### Timers
 
@@ -1731,6 +1823,8 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/cancellation_density lightweight 1000
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/structured_http
+./showcases/bin/http_server lightweight 100 18080 64
+./showcases/bin/https_server 18443
 ./showcases/bin/lightweight_vs_native
 ./showcases/bin/lightweight_io
 ./showcases/bin/lightweight_file_io
@@ -1741,6 +1835,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
 ./showcases/run_connection_density.sh
+./showcases/run_http_benchmark.sh
 ```
 
 The examples demonstrate:
@@ -1754,6 +1849,10 @@ The examples demonstrate:
 - a deterministic HTTP/1.0-style server run with the same scoped API over
   event-loop and native handler task types, with bounded admission, listener
   ownership, client-driven completion, and signal-independent shutdown;
+- an HTTP/1.1 server with persistent connections, SSE and WebSocket routes,
+  plus a one-request HTTPS example over the dynamically loaded OpenSSL adapter;
+- an `oha` loopback benchmark that uses identical request, concurrency, route,
+  and capacity settings for explicit lightweight and native handler pools;
 - cancellation-enabled connection density with one second of idle process-CPU
   measurement and immediate release from a deliberately ten-second legacy
   quantum;

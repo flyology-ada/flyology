@@ -18,6 +18,8 @@ project Showcases is
       "lightweight_pipeline.adb",
       "lightweight_vs_native.adb",
       "hybrid_blocking_bridge.adb",
+      "http_server.adb",
+      "https_server.adb",
       "loop_thread_placement.adb",
       "many_lightweight_tasks.adb",
       "priority_scheduling.adb",
