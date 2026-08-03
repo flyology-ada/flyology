@@ -28,5 +28,6 @@ export FLYOLOGY_DOCUMENTATION=true
 mkdir -p docs/api/fonts
 cp website/assets/fonts/geologica-latin-variable.woff2 docs/api/fonts/
 cp assets/brand/flyology-mark-transparent.svg docs/api/flyology-mark.svg
+cp website/assets/scripts/ada-highlight.js docs/api/ada-highlight.js
 
 test -f docs/api/index.html

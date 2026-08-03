@@ -445,6 +445,25 @@ dt {
   tab-size: 3;
 }
 
+.token-keyword {
+  color: oklch(79% 0.13 285);
+}
+
+.token-type,
+.token-string,
+.token-number,
+.token-attribute {
+  color: oklch(82% 0.1 185);
+}
+
+.token-comment {
+  color: oklch(65% 0.035 270);
+}
+
+.token-operator {
+  color: oklch(76% 0.045 270);
+}
+
 .api-footer {
   border-top: 1px solid var(--line);
 }

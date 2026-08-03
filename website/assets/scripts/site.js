@@ -7,49 +7,6 @@
     ? "dark"
     : "light";
 
-  const adaKeywords = new Set(
-    "abort abs abstract accept access aliased all and array at begin body case constant declare delay delta digits do else elsif end entry exception exit for function generic goto if in interface is limited loop mod new not null of or others out overriding package parallel pragma private procedure protected raise range record rem renames requeue return reverse select separate some subtype synchronized tagged task terminate then type until use when while with xor"
-      .split(" ")
-  );
-  const adaTokenPattern = /--[^\n]*|"(?:[^"]|"")*"|\b[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+\b|\b[A-Za-z][A-Za-z0-9_]*\b|\b\d[\d_]*(?:\.\d[\d_]*)?\b|=>|:=|\.\./g;
-
-  function escapeHtml(value) {
-    return value
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
-  }
-
-  function adaTokenClass(token) {
-    if (token.startsWith("--")) return "token-comment";
-    if (token.startsWith('"')) return "token-string";
-    if (/^\d/.test(token)) return "token-number";
-    if (token.includes(".")) return token === ".." ? "token-operator" : "token-type";
-    if (adaKeywords.has(token.toLowerCase())) return "token-keyword";
-    if (/^(true|false)$/i.test(token)) return "token-number";
-    if (/^[A-Za-z]/.test(token)) return "";
-    return "token-operator";
-  }
-
-  function highlightAda(code) {
-    const source = code.textContent;
-    let highlighted = "";
-    let previousIndex = 0;
-
-    source.replace(adaTokenPattern, function (token, offset) {
-      const tokenClass = adaTokenClass(token);
-      highlighted += escapeHtml(source.slice(previousIndex, offset));
-      highlighted += tokenClass
-        ? '<span class="' + tokenClass + '">' + escapeHtml(token) + "</span>"
-        : escapeHtml(token);
-      previousIndex = offset + token.length;
-      return token;
-    });
-
-    highlighted += escapeHtml(source.slice(previousIndex));
-    code.innerHTML = highlighted;
-  }
-
   root.dataset.theme = storedTheme || preferredTheme;
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -88,7 +45,7 @@
       });
     }
 
-    document.querySelectorAll("code.language-ada").forEach(highlightAda);
+    window.FlyologyAda.highlightAll("code.language-ada");
 
     document.querySelectorAll("[data-copy]").forEach(function (button) {
       button.addEventListener("click", async function () {

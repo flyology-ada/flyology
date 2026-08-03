@@ -9,6 +9,7 @@
     <link rel="canonical" href="https://flyology.org/architecture/">
     <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../assets/styles/site.css">
+    <script src="../assets/scripts/ada-highlight.js"></script>
     <script src="../assets/scripts/site.js"></script>
   </head>
   <body>
@@ -66,7 +67,7 @@
           <section id="routing">
             <span class="step-label">ROUTING</span>
             <h2>One Ada tasking model, two execution lanes.</h2>
-            <p>The integration point is <code>System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the continuation to either a guarded fiber stack or the stock pthread-backed path.</p>
+            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the continuation to either a guarded fiber stack or the stock pthread-backed path.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 760 410">
                 <title id="routing-title">Flyology task routing</title>
@@ -129,7 +130,7 @@
           <section id="groups">
             <span class="step-label">TOPOLOGY</span>
             <h2>Each group is a scheduling and ownership domain.</h2>
-            <p>An execution group owns one stable loop pthread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work implicitly. Automatic placement, explicit Ada <code>CPU</code> selection, and migration determine where a task runs.</p>
+            <p>An execution group owns one stable loop pthread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work implicitly. Automatic placement, explicit Ada <code class="language-ada">CPU</code> selection, and migration determine where a task runs.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="groups-title groups-desc" viewBox="0 0 760 360">
                 <title id="groups-title">Two independent execution groups</title>
@@ -156,7 +157,7 @@
                 <path class="diagram-accent" d="M320 278c40 35 80 35 120 0" marker-end="url(#groups-arrow)"/>
               </svg>
             </figure>
-            <p>Shared identifiers are <code>0 .. 127</code>. Dedicated identifiers are <code>128 .. 255</code>. Migrating out of a dedicated group consumes its reservation, so a task must call <code>Create_Dedicated</code> again before re-entering.</p>
+            <p>Shared identifiers are <code class="language-ada">0 .. 127</code>. Dedicated identifiers are <code class="language-ada">128 .. 255</code>. Migrating out of a dedicated group consumes its reservation, so a task must call <code class="language-ada">Create_Dedicated</code> again before re-entering.</p>
           </section>
 
           <section id="readiness">
@@ -194,7 +195,7 @@
             <p>The C and assembly bridge contains Linux syscall numbers, native <code>epoll_event</code> layout, thread placement, virtual-memory operations, test hooks, and ABI register swaps. Scheduler, queue, timeout, backpressure, file-engine, and retry policy remain in Ada.</p>
             <ul>
               <li><strong>Contexts:</strong> AArch64 and x86-64 implementations preserve all ABI-required callee-saved integer, floating-point, stack, frame, and control state.</li>
-              <li><strong>Stacks:</strong> guarded <code>mmap</code> arenas detect overflow through the supported GNARL signal path and surface Ada <code>Storage_Error</code>.</li>
+              <li><strong>Stacks:</strong> guarded <code>mmap</code> arenas detect overflow through the supported GNARL signal path and surface Ada <code class="language-ada">Storage_Error</code>.</li>
               <li><strong>Patches:</strong> exact GNAT source-context patch families fail closed instead of weakening a hunk for an unverified compiler.</li>
               <li><strong>Finalization:</strong> event machinery is one-shot and tears down only after GNARL task masters and controlled library objects are complete.</li>
             </ul>

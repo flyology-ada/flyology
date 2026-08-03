@@ -6,6 +6,8 @@
   root.dataset.theme = stored || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
   document.addEventListener("DOMContentLoaded", function () {
+    window.FlyologyAda.highlightAll(".api-content pre code, .ada-code-snippet code");
+
     const themeButton = document.querySelector("[data-theme-toggle]");
     if (themeButton) {
       themeButton.addEventListener("click", function () {

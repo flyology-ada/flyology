@@ -563,7 +563,8 @@ code:not(pre code) {
 }
 
 .token-string,
-.token-number {
+.token-number,
+.token-attribute {
   color: oklch(82% 0.1 185);
 }
 
