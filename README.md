@@ -23,6 +23,44 @@ feathers, and planning a book she called *Flyology*. This history is documented
 in a [study of Lovelace's early education](https://doi.org/10.1080/17498430.2017.1325297)
 based on the surviving correspondence.
 
+## Table of contents
+
+- [Status](#status)
+- [Programming model](#programming-model)
+  - [Execution groups and live migration](#execution-groups-and-live-migration)
+  - [Thread-per-core and ownership sharding](#thread-per-core-and-ownership-sharding)
+- [Priority and real-time contract](#priority-and-real-time-contract)
+- [Architecture](#architecture)
+  - [GNARL integration boundary](#gnarl-integration-boundary)
+  - [Context switching is not event polling](#context-switching-is-not-event-polling)
+- [Task-aware I/O](#task-aware-io)
+  - [Sockets and descriptors](#sockets-and-descriptors)
+  - [TLS](#tls)
+  - [DNS resolution](#dns-resolution)
+  - [Connection lifecycle](#connection-lifecycle)
+  - [Structured servers](#structured-servers)
+  - [Timers](#timers)
+  - [Regular files](#regular-files)
+- [Runtime observability](#runtime-observability)
+  - [Sampled stall watchdog](#sampled-stall-watchdog)
+- [Process lifecycle](#process-lifecycle)
+- [Design decisions](#design-decisions)
+- [Ada, C, and assembly boundary](#ada-c-and-assembly-boundary)
+- [SPARK proof boundary](#spark-proof-boundary)
+- [Portability boundaries](#portability-boundaries)
+- [Repository layout](#repository-layout)
+- [Build and test](#build-and-test)
+  - [Use as an Alire dependency](#use-as-an-alire-dependency)
+  - [AddressSanitizer builds](#addresssanitizer-builds)
+  - [CI and releases](#ci-and-releases)
+- [Showcases](#showcases)
+  - [Event-loop pool showcase](#event-loop-pool-showcase)
+  - [Connection-density showcase](#connection-density-showcase)
+  - [Cancellation-density showcase](#cancellation-density-showcase)
+- [Performance snapshot](#performance-snapshot)
+- [Current constraints](#current-constraints)
+- [License](#license)
+
 ## Status
 
 Flyology is experimental. This checkout is verified on macOS/AArch64 with
