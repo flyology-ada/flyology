@@ -201,10 +201,12 @@ static void destroy_module(struct fly_module *module)
    atomic_fetch_sub_explicit(&live_modules, 1, memory_order_relaxed);
 }
 
+#if FLYOLOGY_TLS_TEST_HOOKS
 unsigned flyology_tls_openssl_live_modules(void)
 {
    return atomic_load_explicit(&live_modules, memory_order_relaxed);
 }
+#endif
 
 static struct fly_module *load_from_directory(const char *directory,
                                                char *error, size_t error_size)

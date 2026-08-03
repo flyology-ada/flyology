@@ -12,6 +12,17 @@ project Flyology is
          DNS_Test_Hook_Switch := "-gnateDFLYOLOGY_DNS_TEST_HOOKS=True";
    end case;
 
+   type TLS_Test_Hooks_Type is ("false", "true");
+   TLS_Test_Hooks : TLS_Test_Hooks_Type :=
+     external ("FLYOLOGY_TLS_TEST_HOOKS", "false");
+   TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=0";
+   case TLS_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=1";
+   end case;
+
    for Languages use ("Ada", "C");
 
    for Library_Name use "Flyology";
@@ -70,7 +81,8 @@ project Flyology is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
         & ("-gnatwJ", DNS_Test_Hook_Switch);
-      for Default_Switches ("C") use ("-std=c11", "-Wall", "-Wextra");
+      for Default_Switches ("C") use
+        ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch);
    end Compiler;
 
    package Binder is
