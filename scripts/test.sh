@@ -249,6 +249,24 @@ do
 done
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 
+#  Temporary issue #18 hosted stress. This branch is not merged.
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "$(uname -s)" = Darwin ]; then
+  for repeated_test in \
+    connection_lifecycle_smoke \
+    observability_smoke \
+    structured_server_smoke
+  do
+    printf '%s\n' "test: BEGIN 100 hosted repeats of $repeated_test"
+    repetition=1
+    while [ "$repetition" -le 100 ]; do
+      "$project_root/scripts/run-with-timeout.sh" 10 \
+        "$project_root/tests/bin/$repeated_test"
+      repetition=$((repetition + 1))
+    done
+    printf '%s\n' "test: PASS 100 hosted repeats of $repeated_test"
+  done
+fi
+
 #  Exercise automatic placement separately because the pool policy is compiled
 #  into the prepared RTS. The ordinary suite above intentionally retains the
 #  compatibility default of one lazily created loop.
