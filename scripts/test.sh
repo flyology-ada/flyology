@@ -152,6 +152,7 @@ fi
 for test_main in \
   cancellation_wake_smoke \
   connection_lifecycle_smoke \
+  connection_state_model \
   descriptor_ownership_smoke \
   dns_smoke \
   dns_parser_smoke \
@@ -188,7 +189,8 @@ for test_main in \
   tcp_native_smoke \
   wait_any_smoke
 do
-  if [ "$test_main" = descriptor_ownership_smoke ]; then
+  if [ "$test_main" = descriptor_ownership_smoke ] || \
+     [ "$test_main" = connection_state_model ]; then
     export FLYOLOGY_CONNECTION_TEST_HOOKS=true
   else
     unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
@@ -206,6 +208,10 @@ do
       ;;
     process_lifecycle_smoke|process_exit_live_task_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
+        "$project_root/tests/bin/$test_main"
+      ;;
+    connection_state_model)
+      "$project_root/scripts/run-with-timeout.sh" 30 \
         "$project_root/tests/bin/$test_main"
       ;;
     tls_smoke)
