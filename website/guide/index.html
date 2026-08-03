@@ -123,7 +123,7 @@ FLYOLOGY_LOOP_POOL_SIZE=4 \
             <figure class="code-panel">
               <figcaption>worker.ads</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>with Flyology;
+              <pre><code class="language-ada">with Flyology;
 
 package Worker is
    task Connection is
@@ -148,7 +148,7 @@ end Worker;</code></pre>
             <figure class="code-panel">
               <figcaption>explicit shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>task Parser with CPU =&gt; 1 is
+              <pre><code class="language-ada">task Parser with CPU =&gt; 1 is
    pragma Task_Info (Flyology.Lightweight_Task);
 end Parser;
 
@@ -162,7 +162,7 @@ end Writer;</code></pre>
             <figure class="code-panel">
               <figcaption>explicit migration</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>declare
+              <pre><code class="language-ada">declare
    package Groups renames Flyology.Execution_Groups;
    Home : constant Groups.Group_Id := Groups.Current;
 begin
@@ -180,7 +180,7 @@ end;</code></pre>
             <figure class="code-panel">
               <figcaption>task-aware I/O</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>Flyology.IO.Timers.Sleep_For (0.050);
+              <pre><code class="language-ada">Flyology.IO.Timers.Sleep_For (0.050);
 
 Flyology.IO.Sockets.Receive
   (Socket, Buffer, Last, Timeout =&gt; 1.0);
@@ -199,7 +199,7 @@ Flyology.IO.Files.Read_At
             <figure class="code-panel">
               <figcaption>time-budgeted fairness</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>Budget : Flyology.Fairness.Yield_Budget;
+              <pre><code class="language-ada">Budget : Flyology.Fairness.Yield_Budget;
 
 Budget.Configure (Ada.Real_Time.Microseconds (250));
 while More_Work loop

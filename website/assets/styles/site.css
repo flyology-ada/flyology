@@ -562,6 +562,15 @@ code:not(pre code) {
   color: oklch(65% 0.035 270);
 }
 
+.token-string,
+.token-number {
+  color: oklch(82% 0.1 185);
+}
+
+.token-operator {
+  color: oklch(76% 0.045 270);
+}
+
 .status-strip {
   border-block: 1px solid var(--line);
   background: var(--surface);
