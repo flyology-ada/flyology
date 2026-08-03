@@ -147,16 +147,31 @@
   });
 
   const endpointOutput = document.querySelector("[data-endpoint-output]");
+  const probeResult = document.querySelector("[data-probe-state]");
+  const probeTitle = document.querySelector("[data-probe-result-title]");
+  const probeClaim = document.querySelector("[data-probe-result-claim]");
+  const probeVerdict = document.querySelector("[data-probe-verdict]");
   document.querySelectorAll("[data-endpoint]").forEach((button) => {
     button.addEventListener("click", async () => {
       const endpoint = button.dataset.endpoint;
-      endpointOutput.textContent = `GET ${endpoint}\nwaiting…`;
+      const expectedStatus = Number(button.dataset.expectedStatus);
+      document.querySelectorAll("[data-endpoint]").forEach((candidate) => candidate.setAttribute("aria-pressed", String(candidate === button)));
+      probeTitle.textContent = button.dataset.probeTitle;
+      probeClaim.textContent = button.dataset.probeClaim;
+      probeResult.dataset.probeState = "running";
+      probeVerdict.textContent = "request in flight";
+      endpointOutput.textContent = `REQUEST\nGET ${endpoint}\n\nWaiting for the server…`;
       const headers = button.dataset.token ? { Authorization: `Bearer ${button.dataset.token}` } : {};
       try {
         const response = await fetch(endpoint, { headers, cache: "no-store" });
-        endpointOutput.textContent = `GET ${endpoint}\n${response.status} ${response.statusText}\nrequest-id: ${response.headers.get("x-request-id") || "not returned"}\n\n${await response.text()}`;
+        const matched = response.status === expectedStatus;
+        probeResult.dataset.probeState = matched ? "verified" : "unexpected";
+        probeVerdict.textContent = matched ? `expected HTTP ${expectedStatus} observed` : `expected HTTP ${expectedStatus}, observed HTTP ${response.status}`;
+        endpointOutput.textContent = `REQUEST\nGET ${endpoint}\n\nRESPONSE\nHTTP/1.1 ${response.status} ${response.statusText}\nrequest-id: ${response.headers.get("x-request-id") || "not returned"}\ncontent-type: ${response.headers.get("content-type") || "not returned"}\nx-content-type-options: ${response.headers.get("x-content-type-options") || "not returned"}\ncontent-security-policy: ${response.headers.get("content-security-policy") || "not returned"}\n\nBODY\n${await response.text()}`;
       } catch (error) {
-        endpointOutput.textContent = `GET ${endpoint}\nrequest failed: ${error.message}`;
+        probeResult.dataset.probeState = "unexpected";
+        probeVerdict.textContent = "transport failed before an HTTP response arrived";
+        endpointOutput.textContent = `REQUEST\nGET ${endpoint}\n\nTRANSPORT ERROR\n${error.message}`;
       }
     });
   });

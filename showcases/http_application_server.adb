@@ -49,6 +49,8 @@ procedure HTTP_Application_Server is
    package Sockets renames GNAT.Sockets;
    package Owned renames Flyology.IO.Connections;
 
+   --  Keep the command line compatible with the benchmark showcases. A zero
+   --  request goal leaves the interactive server running until it is stopped.
    Lane : constant String :=
      (if Ada.Command_Line.Argument_Count >= 1
       then Ada.Command_Line.Argument (1) else "lightweight");
@@ -73,11 +75,15 @@ procedure HTTP_Application_Server is
    Origin : constant String :=
      "http://127.0.0.1:" & Compact (Natural (Port));
 
+   --  Instantiate the same application once per execution model. Handler code
+   --  below remains ordinary synchronous Ada in either instantiation.
    generic
       Model : Flyology.Execution_Model;
    procedure Run;
 
    procedure Run is
+      --  The finite request goal lets scripts shut the showcase down cleanly.
+      --  The protected counter is shared safely by concurrent handlers.
       protected type Request_Counter (Goal : Natural) is
          procedure Completed;
          entry Await_Goal;
@@ -103,9 +109,13 @@ procedure HTTP_Application_Server is
          Calls : Natural := 0;
       end record;
 
+      --  Routing is generic over application state, so handlers receive the
+      --  state directly without a global registry or untyped context lookup.
       package Routing is new
         Flyology.HTTP.Server.Routing (Application_Context);
 
+      --  Access-log callbacks may arrive from multiple native handler tasks or
+      --  event loops. Serialize only the example console sink, not requests.
       protected type Log_Lock is
          procedure Put (Value : String);
       end Log_Lock;
@@ -145,8 +155,11 @@ procedure HTTP_Application_Server is
       end Write;
 
       Logger  : aliased Console_Logger;
+      --  The implementation is intentionally bounded to 64 route label slots.
       Metrics : aliased Flyology.HTTP.Server.Metrics.In_Memory (64);
 
+      --  This demo is same-origin. Credentials stay disabled so an origin can
+      --  never be reflected together with credentialed CORS access.
       CORS_Policy : aliased constant Flyology.HTTP.Server.CORS.Policy :=
         Flyology.HTTP.Server.CORS.Create
           (Allowed_Origins   => Origin,
@@ -166,6 +179,8 @@ procedure HTTP_Application_Server is
          return CORS_Policy'Unchecked_Access;
       end Resolve_CORS;
 
+      --  This fixed token demonstrates the authentication hook only. Real
+      --  applications should delegate identity verification to their policy.
       procedure Authenticate
         (Scheme        : String;
          Credential    : String;
@@ -180,6 +195,8 @@ procedure HTTP_Application_Server is
             else Ada.Strings.Unbounded.Null_Unbounded_String);
       end Authenticate;
 
+      --  Peer socket identity is safe for this direct listener. A deployment
+      --  behind proxies needs an explicit trusted-hop extraction policy.
       function Client_Key (X : App.Exchange) return String is
         (Sockets.Image (X.Peer));
 
@@ -238,6 +255,8 @@ procedure HTTP_Application_Server is
 
       Requests : Request_Counter (Request_Goal);
 
+      --  Count only requests that reached an application handler. Rejections
+      --  performed before dispatch remain visible through metrics instead.
       procedure Complete (State : in out Application_Context) is
       begin
          State.Calls := State.Calls + 1;
@@ -269,6 +288,9 @@ procedure HTTP_Application_Server is
 
          X.Add_Header
            ("Cache-Control", (if Cache then "public, max-age=3600" else "no-store"));
+         --  Read_At returns bytes, and the binary Write_Chunk overload keeps
+         --  them as bytes through HTTP chunk framing. Each write applies
+         --  transport backpressure before this buffer is reused.
          X.Begin_Stream (200, Content_Type);
          loop
             Files.Read_At
@@ -281,6 +303,8 @@ procedure HTTP_Application_Server is
          X.End_Stream;
       exception
          when others =>
+            --  File ownership stays local if cancellation, timeout, or a
+            --  disconnected client interrupts the response stream.
             if File /= Files.Invalid_File then
                begin
                   Files.Close (File);
@@ -291,6 +315,8 @@ procedure HTTP_Application_Server is
             raise;
       end Serve_File;
 
+      --  Only fixed route handlers select filesystem paths. No untrusted URL
+      --  segment is joined to Project_Root in this showcase.
       procedure Home
         (State : in out Application_Context;
          X     : in out App.Exchange) is
@@ -367,6 +393,8 @@ procedure HTTP_Application_Server is
          Finished : Boolean;
          Total    : Natural := 0;
       begin
+         --  Stream_Body means the exchange never materializes the complete
+         --  upload. Read_Body is deadline-aware and charges shared ingress.
          loop
             X.Read_Body (Buffer, Last, Finished);
             if Last >= Buffer'First then
@@ -384,6 +412,8 @@ procedure HTTP_Application_Server is
       is
       begin
          Complete (State);
+         --  Begin, write, and end all happen on the connection owner. The
+         --  exchange prevents another task from writing this response.
          X.Begin_Stream (200, "text/plain; charset=utf-8");
          X.Write_Chunk ("first" & ASCII.LF);
          X.Write_Chunk ("second" & ASCII.LF);
@@ -421,6 +451,8 @@ procedure HTTP_Application_Server is
       is
          pragma Unreferenced (State, X);
       begin
+         --  The outer error middleware logs this detail, but the browser sees
+         --  only its generic safe problem response.
          raise Constraint_Error with "example application failure";
       end Demonstrate_Error;
 
@@ -435,6 +467,8 @@ procedure HTTP_Application_Server is
               SSE.Default_Session_Bytes,
             Budget => null);
 
+         --  The producer is nested inside the request task master. Its access
+         --  to Session remains valid until the nested scope joins it.
          type Session_Access is access all SSE.Session;
 
          function Phase (Sequence : Positive) return String is
@@ -482,6 +516,8 @@ procedure HTTP_Application_Server is
                    Include_Id => True,
                    Include_Retry => Sequence = 1),
                   Accepted, Timeout => 1.0, Timed_Out => Timed_Out);
+               --  Publish_For waits only within its explicit bound when the
+               --  three-slot mailbox is full. It never writes the socket.
                exit when not Accepted or else Timed_Out;
             end loop;
             if not SSE.Cancelled (Item.all) then
@@ -506,6 +542,8 @@ procedure HTTP_Application_Server is
          declare
             Source : Producer (Session'Unchecked_Access);
          begin
+            --  Run is the sole response writer. It drains events in order,
+            --  emits heartbeats while idle, and notices client cancellation.
             SSE.Run
               (X, Session, Metrics'Access,
                Idle_Quantum => 0.05, Heartbeat => 0.5);
@@ -519,6 +557,7 @@ procedure HTTP_Application_Server is
          pragma Unreferenced (X);
          Accepted : Boolean;
       begin
+         --  Open callbacks publish into the same bounded owner-drained queue.
          Flyology.HTTP.Server.WebSocket_Handlers.Try_Publish
            (Session,
             (Kind => HTTP.Text_Frame,
@@ -536,6 +575,8 @@ procedure HTTP_Application_Server is
          pragma Unreferenced (X);
          Accepted : Boolean;
       begin
+         --  Binary frames remain Unbounded_Bytes. Text conversion occurs only
+         --  in the text branch used to prepend the visible echo label.
          Flyology.HTTP.Server.WebSocket_Handlers.Try_Publish
            (Session,
             (Kind => Kind,
@@ -566,6 +607,8 @@ procedure HTTP_Application_Server is
            (Capacity => 16,
             Byte_Limit => WS.Default_Session_Bytes,
             Budget => null);
+         --  Producers may retain the bounded mailbox during this request, but
+         --  none receives the borrowed exchange or connection.
          type Session_Access is access all WS.Session;
          task type Producer
            (Item : not null Session_Access;
@@ -586,6 +629,7 @@ procedure HTTP_Application_Server is
                   ("system: producer " & Text
                    & " published without owning the connection")),
                Accepted, Timeout => 1.0, Timed_Out => Timed_Out);
+            --  The lifecycle owner below is the only task that emits frames.
             pragma Assert (Accepted and then not Timed_Out);
          end Producer;
          package WS_Lifecycle is new
@@ -596,6 +640,7 @@ procedure HTTP_Application_Server is
             First  : Producer (Session'Unchecked_Access, 'a');
             Second : Producer (Session'Unchecked_Access, 'b');
          begin
+            --  Origin validation precedes the lifecycle upgrade and callbacks.
             WS_Lifecycle.Run
               (X, Session,
                Origin_Policy => HTTP.Require_Exact_Origin,
@@ -634,10 +679,14 @@ procedure HTTP_Application_Server is
          Scope : Request_Operations.Scope (2, X.Cancellation);
          User, Orders : Request_Operations.Operation_Handle;
       begin
+         --  Configure copies the exchange cancellation token and absolute
+         --  deadline into the scope. Children cannot extend either value.
          Request_Work.Configure (Scope, X);
          Request_Operations.Spawn (Scope, 20, User);
          Request_Operations.Spawn (Scope, 1, Orders);
          Request_Operations.Join (Scope);
+         --  Results are read only after Join. Scope finalization also cancels
+         --  and joins unfinished children on an exceptional exit.
          Complete (State);
          X.Text
            (200, "combined"
@@ -674,6 +723,8 @@ procedure HTTP_Application_Server is
          Value : Integer;
          Accepted : Boolean;
       begin
+         --  Blocking or CPU-heavy work crosses an explicit bounded boundary.
+         --  The current lightweight task does not become a native task.
          Native_Work.Submit
            (Native_Pool, 12, X.Cancellation, X.Deadline,
             Work, Accepted);
@@ -710,10 +761,15 @@ procedure HTTP_Application_Server is
          Peer         : Sockets.Sock_Addr_Type;
          Cancellation : not null access Owned.Cancellation_Token)
       is
+         --  Connection_Transport borrows the structured server's owning
+         --  connection. HTTP.Connection adds protocol state without taking
+         --  closing ownership away from the structured server.
          Channel : aliased HTTP.Connections.Connection_Transport
            (Connection'Unchecked_Access);
          Client : aliased HTTP.Connection (Channel'Access);
       begin
+         --  Every connection charges buffered or retained request bytes to the
+         --  same 64 MiB ingress budget before application body consumption.
          HTTP.Configure_Ingress_Budget (Client, State.Budget'Access);
          State.Routes.Serve
            (State.Application, Client, Peer,
@@ -733,6 +789,8 @@ procedure HTTP_Application_Server is
         (Capacity => 2, Slashes => Routing.Strict_Slashes);
       Listener : Sockets.Socket_Type;
    begin
+      --  Registration order is execution order around the route. Error
+      --  mapping is outermost so failures in later components are contained.
       State.Routes.Add_Middleware (Error_Middleware.Call'Access);
       State.Routes.Add_Middleware (Request_ID_Middleware.Call'Access);
       State.Routes.Add_Middleware (Logging_Middleware.Call'Access);
@@ -743,6 +801,8 @@ procedure HTTP_Application_Server is
       State.Routes.Add_Middleware
         (Security_Middleware.Call'Access, Stage => Routing.Application);
 
+      --  Static assets use ordinary routes and the same middleware as dynamic
+      --  handlers. The low-level server remains usable without this router.
       State.Routes.Get ("/", Home'Access, Name => "home");
       State.Routes.Get
         ("/assets/app.css", Application_CSS'Access, Name => "assets.css");
@@ -759,12 +819,14 @@ procedure HTTP_Application_Server is
         ("/echo", Buffered_Echo'Access, Name => "echo",
          Policy =>
            (Routing.Default_Route_Policy with delta
+              --  Buffer only this small body after routing and admission.
               Body_Handling => App.Buffer_Body,
               Max_Body      => 64 * 1_024));
       State.Routes.Post
         ("/upload", Upload'Access, Name => "upload",
          Policy =>
            (Routing.Default_Route_Policy with delta
+              --  Upload bytes are pulled incrementally by the handler.
               Body_Handling => App.Stream_Body,
               Timeout       => 30.0));
       State.Routes.Add_Route_Middleware
@@ -789,6 +851,7 @@ procedure HTTP_Application_Server is
         ("/events", SSE_Events'Access, Name => "events",
          Policy =>
            (Routing.Default_Route_Policy with delta
+              --  Upgrade eligibility and lifetime are explicit route policy.
               Upgrade => Routing.Allow_SSE,
               Timeout => 8.0));
       State.Routes.Get
@@ -811,6 +874,8 @@ procedure HTTP_Application_Server is
       Admin_Routes.Get
         ("/status", Admin_Status'Access, Name => "status");
       Admin_Routes.Add_Middleware (Security_Middleware.Call'Access);
+      --  Mount keeps child policy and prefixes names so logs and metrics use
+      --  bounded "admin.*" labels instead of arbitrary raw paths.
       State.Routes.Mount
         ("/admin", Admin_Routes, Name_Prefix => "admin.");
 
@@ -824,6 +889,8 @@ procedure HTTP_Application_Server is
           Port   => Port));
       Sockets.Listen_Socket (Listener, Length => Capacity);
 
+      --  Start workers only after listener setup succeeds. A bind or listen
+      --  failure therefore cannot leave a partially initialized executor.
       Native_Work.Start (Native_Pool);
 
       Ada.Text_IO.Put_Line
@@ -832,6 +899,8 @@ procedure HTTP_Application_Server is
       Ada.Text_IO.Flush;
 
       declare
+         --  Shutdown coordination is native and independent of the selected
+         --  handler model. Goal zero keeps this entry closed indefinitely.
          task Stopper is
             pragma Task_Info (Flyology.Native_Task);
          end Stopper;

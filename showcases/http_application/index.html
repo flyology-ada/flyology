@@ -140,16 +140,56 @@
         <header>
           <p class="section-index">04 · optional application toolkit</p>
           <h2 id="toolkit-title">Probe each layer.</h2>
-          <p>These calls use the same router, request IDs, access logs, metrics, security headers, rate limiter, bulkheads, and deadline narrowing as the live demos.</p>
+          <div class="toolkit-intro">
+            <p>Each control sends a real request through the complete application stack. Pick a probe to compare the intended invariant with the status, headers, request ID, and body that came back.</p>
+            <dl class="probe-key">
+              <div><dt>Mechanism</dt><dd>the component being exercised</dd></div>
+              <div><dt>Boundary</dt><dd>the behavior it must preserve</dd></div>
+              <div><dt>Evidence</dt><dd>the response observed in this browser</dd></div>
+            </dl>
+            <div class="middleware-path" aria-label="Middleware shared by every probe">
+              <span>Shared path</span>
+              <code>errors → request ID → access log → metrics → CORS → rate limit → bulkhead → route policy → handler → security headers</code>
+            </div>
+          </div>
         </header>
         <div class="endpoint-list">
-          <button type="button" data-endpoint="/parallel"><span>Parallel lightweight work</span><code>/parallel</code></button>
-          <button type="button" data-endpoint="/native"><span>Bounded native boundary</span><code>/native</code></button>
-          <button type="button" data-endpoint="/admin/status"><span>Mounted subrouter</span><code>/admin/status</code></button>
-          <button type="button" data-endpoint="/private" data-token="example-token"><span>Bearer authentication</span><code>/private</code></button>
-          <button type="button" data-endpoint="/error"><span>Safe exception mapping</span><code>/error</code></button>
+          <button type="button" data-endpoint="/parallel" data-probe-title="Two request-scoped lightweight operations" data-probe-claim="Both children inherit cancellation and the absolute request deadline. Scope exit joins them before the borrowed exchange can disappear." data-expected-status="200">
+            <span class="probe-index">01</span>
+            <span class="probe-copy"><strong>Parallel lightweight work</strong><span>Runs two simulated upstream calls concurrently, joins both results, then writes <code>combined 42</code>.</span><small>Boundary: no child outlives the request scope or writes the connection.</small></span>
+            <span class="probe-route"><code>/parallel</code><span>Run probe</span></span>
+          </button>
+          <button type="button" data-endpoint="/native" data-probe-title="Explicit bounded native execution" data-probe-claim="CPU or blocking foreign work crosses a visible executor boundary. Submission is bounded, and the handler waits cooperatively with its original cancellation and deadline." data-expected-status="200">
+            <span class="probe-index">02</span>
+            <span class="probe-copy"><strong>Bounded native boundary</strong><span>Submits a small calculation to one of four native workers and returns <code>native 144</code>.</span><small>Boundary: a live lightweight task never changes its designation.</small></span>
+            <span class="probe-route"><code>/native</code><span>Run probe</span></span>
+          </button>
+          <button type="button" data-endpoint="/admin/status" data-probe-title="Mounted router with inherited composition" data-probe-claim="The admin router owns its route and middleware, while the parent contributes the /admin prefix and the normalized admin.status route name." data-expected-status="200">
+            <span class="probe-index">03</span>
+            <span class="probe-copy"><strong>Mounted subrouter</strong><span>Resolves a child route through the parent router and applies the subrouter security-header component.</span><small>Boundary: mounting composes route scope without hidden application conventions.</small></span>
+            <span class="probe-route"><code>/admin/status</code><span>Run probe</span></span>
+          </button>
+          <button type="button" data-endpoint="/private" data-token="example-token" data-probe-title="Route-required authentication hook" data-probe-claim="Routing declares authentication as required. The example bearer hook validates the credential and installs a principal before the handler runs." data-expected-status="200">
+            <span class="probe-index">04</span>
+            <span class="probe-copy"><strong>Bearer authentication</strong><span>Sends the documented demo token and lets the handler read the resulting <code>example-user</code> principal.</span><small>Boundary: credentials are consumed by the hook and omitted from access logs.</small></span>
+            <span class="probe-route"><code>/private</code><span>Run probe</span></span>
+          </button>
+          <button type="button" data-endpoint="/error" data-probe-title="Exception mapping before response start" data-probe-claim="The handler raises an unexpected Ada exception. Error middleware logs its detail server-side but exposes only a safe generic problem response." data-expected-status="500">
+            <span class="probe-index">05</span>
+            <span class="probe-copy"><strong>Safe exception mapping</strong><span>Intentionally raises <code>Constraint_Error</code>; an HTTP 500 is the expected successful observation.</span><small>Boundary: application details never leak into the client response.</small></span>
+            <span class="probe-route"><code>/error</code><span>Run probe</span></span>
+          </button>
         </div>
-        <output class="endpoint-output" data-endpoint-output>Select an endpoint to inspect its response.</output>
+        <div class="probe-result" data-probe-state="idle" aria-live="polite">
+          <div class="probe-result-intent">
+            <span class="result-label">Selected claim</span>
+            <strong data-probe-result-title>No probe selected</strong>
+            <p data-probe-result-claim>Choose a row above. The response transcript will show what the browser actually observed rather than assuming the component worked.</p>
+            <span class="probe-verdict" data-probe-verdict>waiting for evidence</span>
+          </div>
+          <output class="endpoint-output" data-endpoint-output>REQUEST
+Select an endpoint above to send a real request.</output>
+        </div>
       </section>
     </main>
 
