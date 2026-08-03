@@ -560,16 +560,21 @@ nonblocking guide documents the
 deadline. `Close` is separately idempotent: it wakes and drains any active
 operation, destroys provider session state, and only then closes the socket.
 Cancellation never releases provider-owned state while a provider call is
-active. A peer transport close without `close_notify` is a `TLS_Error`.
+active. Leader cleanup runs in an abort-deferred controlled finalizer, so an
+aborted closer cannot leave the connection permanently closing. A peer
+transport close without `close_notify` is a `TLS_Error`.
 Calls queued behind another operation on the same TLS connection retain the
 same original deadline. They accept the shared `Flyology.Cancellation.Token`
 and notice either a token request or a concurrent close within a 10 ms
 scheduling quantum; active provider readiness waits use wake descriptors and
-do not poll at that quantum.
+do not poll at that quantum. Each queued call retains the connection generation
+it observed at entry and is cancelled if the object is closed and reused before
+acquisition.
 On Linux, each OpenSSL call temporarily blocks `SIGPIPE` on its pthread, removes
-only a signal created by that call, and restores the exact prior mask before
-returning to Ada. Darwin applies `SO_NOSIGPIPE` to the owned socket. A task never
-suspends while the temporary Linux signal mask is installed.
+one newly pending signal when none was pending before the call, and restores the
+exact prior mask before returning to Ada. Darwin applies `SO_NOSIGPIPE` to the
+owned socket. A task never suspends while the temporary Linux signal mask is
+installed.
 
 ### DNS resolution
 

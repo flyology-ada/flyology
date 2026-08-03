@@ -6,6 +6,7 @@ package body TLS_Test_Provider is
 
    type Test_Session is new TLS.Session with record
       Fail_Finalize : Boolean := False;
+      Block_Handshake : Boolean := False;
       Behavior      : Receive_Behavior := Return_Data;
       Handshakes    : Natural := 0;
       Receives      : Natural := 0;
@@ -38,6 +39,41 @@ package body TLS_Test_Provider is
       Partials : Natural := 0;
    end Telemetry;
 
+   protected Handshake_Block is
+      procedure Reset;
+      procedure Enter;
+      entry Wait_Entered;
+      entry Wait_Release;
+      procedure Release;
+   private
+      Has_Entered  : Boolean := False;
+      Is_Released  : Boolean := False;
+   end Handshake_Block;
+
+   protected body Handshake_Block is
+      procedure Reset is
+      begin
+         Has_Entered := False;
+         Is_Released := False;
+      end Reset;
+      procedure Enter is
+      begin
+         Has_Entered := True;
+      end Enter;
+      entry Wait_Entered when Has_Entered is
+      begin
+         null;
+      end Wait_Entered;
+      entry Wait_Release when Is_Released is
+      begin
+         null;
+      end Wait_Release;
+      procedure Release is
+      begin
+         Is_Released := True;
+      end Release;
+   end Handshake_Block;
+
    protected body Telemetry is
       procedure Reset is
       begin
@@ -63,6 +99,22 @@ package body TLS_Test_Provider is
    begin
       Item.Fail_Finalize := True;
    end Set_Finalize_Failure;
+
+   procedure Set_Block_Handshake (Item : in out Provider) is
+   begin
+      Item.Block_Handshake := True;
+      Handshake_Block.Reset;
+   end Set_Block_Handshake;
+
+   procedure Wait_Handshake_Blocked is
+   begin
+      Handshake_Block.Wait_Entered;
+   end Wait_Handshake_Blocked;
+
+   procedure Release_Handshake is
+   begin
+      Handshake_Block.Release;
+   end Release_Handshake;
 
    procedure Set_Receive_Behavior
      (Item     : in out Provider;
@@ -108,6 +160,7 @@ package body TLS_Test_Provider is
       return new Test_Session'
         (TLS.Session with
          Fail_Finalize => Item.Fail_Finalize,
+         Block_Handshake => Item.Block_Handshake,
          Behavior      => Item.Behavior,
          Handshakes    => 0,
          Receives      => 0,
@@ -120,6 +173,10 @@ package body TLS_Test_Provider is
    is
    begin
       Item.Handshakes := Item.Handshakes + 1;
+      if Item.Block_Handshake and then Item.Handshakes = 1 then
+         Handshake_Block.Enter;
+         Handshake_Block.Wait_Release;
+      end if;
       if Item.Handshakes = 1 then
          Telemetry.Saw_Want;
          return TLS.Want_Write;

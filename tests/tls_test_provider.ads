@@ -8,6 +8,9 @@ package TLS_Test_Provider is
    type Provider is new Flyology.IO.TLS.Provider with private;
 
    procedure Set_Finalize_Failure (Item : in out Provider);
+   procedure Set_Block_Handshake (Item : in out Provider);
+   procedure Wait_Handshake_Blocked;
+   procedure Release_Handshake;
    procedure Set_Receive_Behavior
      (Item     : in out Provider;
       Behavior : Receive_Behavior);
@@ -27,6 +30,7 @@ package TLS_Test_Provider is
 private
    type Provider is new Flyology.IO.TLS.Provider with record
       Fail_Finalize : Boolean := False;
+      Block_Handshake : Boolean := False;
       Behavior      : Receive_Behavior := Return_Data;
    end record;
 end TLS_Test_Provider;

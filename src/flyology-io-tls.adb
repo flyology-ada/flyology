@@ -20,6 +20,23 @@ package body Flyology.IO.TLS is
    procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
    pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
 
+   type Close_Outcome is record
+      FD               : Descriptor := Invalid_Descriptor;
+      Generation       : Descriptor_Generation := 0;
+      Leader           : Boolean := False;
+      Provider_Error   : Boolean := False;
+      Socket_Error     : Boolean := False;
+      Controller_Error : Boolean := False;
+   end record;
+
+   type Close_Guard
+     (Item    : not null access Connection;
+      Outcome : not null access Close_Outcome)
+   is new Ada.Finalization.Limited_Controlled with null record;
+
+   overriding procedure Initialize (Guard : in out Close_Guard);
+   overriding procedure Finalize (Guard : in out Close_Guard);
+
    protected body Descriptor_Controller is
       procedure Adopt (FD : Descriptor) is
       begin
@@ -37,7 +54,8 @@ package body Flyology.IO.TLS is
       end Adopt;
 
       entry Acquire
-        (FD           : out Descriptor;
+        (Expected     : Descriptor_Generation;
+         FD           : out Descriptor;
          Generation   : out Descriptor_Generation;
          Close_Source : out Descriptor;
          Result       : out Acquire_Result)
@@ -47,7 +65,9 @@ package body Flyology.IO.TLS is
          FD := Invalid_Descriptor;
          Generation := Current_Generation;
          Close_Source := Invalid_Descriptor;
-         if Close_In_Progress then
+         if Expected /= Current_Generation then
+            Result := Replaced;
+         elsif Close_In_Progress then
             Result := Closing;
          elsif Current_FD < 0 then
             Result := Closed;
@@ -106,20 +126,85 @@ package body Flyology.IO.TLS is
             raise Program_Error with "stale TLS close completion";
          end if;
          Current_FD := Invalid_Descriptor;
-         Wake_Sources.Release (Close_Wake);
+         begin
+            Wake_Sources.Release (Close_Wake);
+         exception
+            when others =>
+               Close_In_Progress := False;
+               raise;
+         end;
          Close_In_Progress := False;
       end Finish_Close;
 
-      function Acquisition_State return Acquire_Result is
-        (if Close_In_Progress then Closing
-         elsif Current_FD < 0 then Closed
-         else Acquired);
+      procedure Snapshot_Acquisition
+        (State      : out Acquire_Result;
+         Generation : out Descriptor_Generation)
+      is
+      begin
+         Generation := Current_Generation;
+         State :=
+           (if Close_In_Progress then Closing
+            elsif Current_FD < 0 then Closed
+            else Acquired);
+      end Snapshot_Acquisition;
 
       function Is_Open_State return Boolean is
         (Current_FD >= 0 and then not Close_In_Progress);
 
       function Close_Requested return Boolean is (Close_In_Progress);
+
+      function Operation_Is_Active return Boolean is (Active);
+
+      function Queued_Acquisitions return Natural is (Acquire'Count);
+
+      function Close_Is_In_Progress return Boolean is (Close_In_Progress);
+
+      function Generation_State return Descriptor_Generation is
+        (Current_Generation);
    end Descriptor_Controller;
+
+   overriding procedure Initialize (Guard : in out Close_Guard) is
+   begin
+      Guard.Item.Controller.Begin_Close
+        (Guard.Outcome.FD,
+         Guard.Outcome.Generation,
+         Guard.Outcome.Leader);
+   end Initialize;
+
+   overriding procedure Finalize (Guard : in out Close_Guard) is
+   begin
+      if not Guard.Outcome.Leader then
+         return;
+      end if;
+
+      Guard.Item.Controller.Await_Drained;
+      begin
+         Free (Guard.Item.Session);
+      exception
+         when others =>
+            --  A provider finalizer is contractually non-raising. Keep the
+            --  remaining close cleanup inside this abort-deferred finalizer.
+            Guard.Item.Session := null;
+            Guard.Outcome.Provider_Error := True;
+      end;
+      begin
+         if Guard.Item.Socket /= Sockets.No_Socket then
+            Sockets.Close_Socket (Guard.Item.Socket);
+         end if;
+      exception
+         when Sockets.Socket_Error =>
+            Guard.Outcome.Socket_Error := True;
+         when others =>
+            Guard.Outcome.Controller_Error := True;
+      end;
+      Guard.Item.Socket := Sockets.No_Socket;
+      begin
+         Guard.Item.Controller.Finish_Close (Guard.Outcome.Generation);
+      exception
+         when others =>
+            Guard.Outcome.Controller_Error := True;
+      end;
+   end Finalize;
 
    function Remaining
      (Started : Ada.Real_Time.Time;
@@ -181,6 +266,25 @@ package body Flyology.IO.TLS is
       end if;
    end Check_Cancelled;
 
+   procedure Snapshot_Operation
+     (Item       : in out Connection;
+      Generation : out Descriptor_Generation)
+   is
+      State : Acquire_Result;
+   begin
+      Item.Controller.Snapshot_Acquisition (State, Generation);
+      case State is
+         when Acquired =>
+            null;
+         when Closing =>
+            raise Operation_Cancelled;
+         when Closed =>
+            raise Program_Error with "TLS connection is not open";
+         when Replaced =>
+            raise Program_Error with "invalid TLS acquisition snapshot";
+      end case;
+   end Snapshot_Operation;
+
    procedure Acquire_Operation
      (Item         : in out Connection;
       Started      : Ada.Real_Time.Time;
@@ -193,15 +297,9 @@ package body Flyology.IO.TLS is
       Wait_Slice    : Duration;
       Left          : Duration;
       Acquire_State : Acquire_Result;
+      Expected      : Descriptor_Generation;
    begin
-      case Item.Controller.Acquisition_State is
-         when Acquired =>
-            null;
-         when Closing =>
-            raise Operation_Cancelled;
-         when Closed =>
-            raise Program_Error with "TLS connection is not open";
-      end case;
+      Snapshot_Operation (Item, Expected);
 
       loop
          Check_Cancelled (Item, Token);
@@ -209,11 +307,11 @@ package body Flyology.IO.TLS is
          if Left = 0.0 then
             select
                Item.Controller.Acquire
-                 (FD, Generation, Close_Source, Acquire_State);
+                 (Expected, FD, Generation, Close_Source, Acquire_State);
                case Acquire_State is
                   when Acquired =>
                      return;
-                  when Closing | Closed =>
+                  when Closing | Closed | Replaced =>
                      raise Operation_Cancelled;
                end case;
             else
@@ -226,11 +324,11 @@ package body Flyology.IO.TLS is
            (if Left < 0.0 then 0.010 else Duration'Min (Left, 0.010));
          select
             Item.Controller.Acquire
-              (FD, Generation, Close_Source, Acquire_State);
+              (Expected, FD, Generation, Close_Source, Acquire_State);
             case Acquire_State is
                when Acquired =>
                   return;
-               when Closing | Closed =>
+               when Closing | Closed | Replaced =>
                   raise Operation_Cancelled;
             end case;
          or
@@ -523,44 +621,31 @@ package body Flyology.IO.TLS is
    end Shutdown;
 
    procedure Close (Item : in out Connection) is
-      FD         : Descriptor;
-      Generation : Descriptor_Generation;
-      Leader     : Boolean;
-      Close_Error    : Boolean := False;
-      Provider_Error : Boolean := False;
+      Outcome : aliased Close_Outcome;
    begin
-      Item.Controller.Begin_Close (FD, Generation, Leader);
-      if not Leader then
-         if FD >= 0 then
+      --  Initialize publishes the leader state and Finalize performs all
+      --  leader cleanup. Both controlled hooks are abort-deferred, so an
+      --  abort cannot strand Close_In_Progress between those two transitions.
+      declare
+         Guard : Close_Guard (Item'Unchecked_Access, Outcome'Access);
+         pragma Unreferenced (Guard);
+      begin
+         null;
+      end;
+
+      if not Outcome.Leader then
+         if Outcome.FD >= 0 then
             Item.Controller.Await_Closed;
          end if;
          return;
       end if;
 
-      Item.Controller.Await_Drained;
-      begin
-         Free (Item.Session);
-      exception
-         when others =>
-            --  A provider finalizer is contractually non-raising. Preserve
-            --  descriptor cleanup and make the violation visible afterwards.
-            Item.Session := null;
-            Provider_Error := True;
-      end;
-      begin
-         if Item.Socket /= Sockets.No_Socket then
-            Sockets.Close_Socket (Item.Socket);
-         end if;
-      exception
-         when Sockets.Socket_Error =>
-            Close_Error := True;
-      end;
-      Item.Socket := Sockets.No_Socket;
-      Item.Controller.Finish_Close (Generation);
-      if Provider_Error then
+      if Outcome.Provider_Error then
          raise TLS_Error with "TLS provider session finalization failed";
-      elsif Close_Error then
+      elsif Outcome.Socket_Error then
          raise Sockets.Socket_Error with "TLS socket close failed";
+      elsif Outcome.Controller_Error then
+         raise Program_Error with "TLS connection controller cleanup failed";
       end if;
    end Close;
 
