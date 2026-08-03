@@ -1,5 +1,6 @@
 with Ada.Command_Line;
 with Ada.Streams;
+with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with GNAT.Sockets;
 with Flyology;
@@ -182,7 +183,8 @@ procedure HTTP_Server is
 
       Ada.Text_IO.Put_Line
         ("READY " & Lane & " http://127.0.0.1:"
-         & Sockets.Port_Type'Image (Port) & "/");
+         & Ada.Strings.Fixed.Trim
+             (Sockets.Port_Type'Image (Port), Ada.Strings.Both) & "/");
       Ada.Text_IO.Flush;
 
       declare

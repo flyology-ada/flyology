@@ -7,6 +7,7 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with GNAT.Sockets;
 with Flyology;
+with Flyology.Bytes;
 with Flyology.Cancellation;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
@@ -25,21 +26,26 @@ with Flyology.HTTP.Server.Middleware_Rate_Limits;
 with Flyology.HTTP.Server.Middleware_Request_IDs;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Request_Tasks;
-with Flyology.HTTP.Server.Requests;
 with Flyology.HTTP.Server.Routing;
 with Flyology.HTTP.Server.SSE_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle;
 with Flyology.IO.Connections;
+with Flyology.IO.Files;
 with Flyology.IO.Structured_Servers;
 with Flyology.IO.Timers;
 with Flyology.Native_Executors;
 
 procedure HTTP_Application_Server is
    use type Ada.Streams.Stream_Element_Offset;
+   use type Flyology.HTTP.Server.WebSocket_Data_Kind;
+   use type Flyology.IO.Files.File_Descriptor;
+   use type Flyology.IO.Files.File_Offset;
 
    package HTTP renames Flyology.HTTP.Server;
    package App renames Flyology.HTTP.Server.Applications;
+   package Bytes renames Flyology.Bytes;
+   package Files renames Flyology.IO.Files;
    package Sockets renames GNAT.Sockets;
    package Owned renames Flyology.IO.Connections;
 
@@ -55,6 +61,17 @@ procedure HTTP_Application_Server is
    Capacity : constant Positive :=
      (if Ada.Command_Line.Argument_Count >= 4
       then Positive'Value (Ada.Command_Line.Argument (4)) else 256);
+   Project_Root : constant String :=
+     (if Ada.Command_Line.Argument_Count >= 5
+      then Ada.Command_Line.Argument (5) else ".");
+   Showcase_Root : constant String :=
+     Project_Root & "/showcases/http_application";
+
+   function Compact (Value : Natural) return String is
+     (Ada.Strings.Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
+
+   Origin : constant String :=
+     "http://127.0.0.1:" & Compact (Natural (Port));
 
    generic
       Model : Flyology.Execution_Model;
@@ -132,7 +149,7 @@ procedure HTTP_Application_Server is
 
       CORS_Policy : aliased constant Flyology.HTTP.Server.CORS.Policy :=
         Flyology.HTTP.Server.CORS.Create
-          (Allowed_Origins   => "http://127.0.0.1:3000",
+          (Allowed_Origins   => Origin,
            Allowed_Methods   => "GET, POST, OPTIONS",
            Allowed_Headers   => "Authorization, Content-Type",
            Exposed_Headers   => "X-Request-ID",
@@ -200,7 +217,10 @@ procedure HTTP_Application_Server is
       package Security_Middleware is new
         Flyology.HTTP.Server.Middleware_Security_Headers
           (Application_Context, Routing.Components,
-           Content_Security_Policy => "default-src 'self'",
+           Content_Security_Policy =>
+             "default-src 'self'; object-src 'none'; base-uri 'none'; "
+             & "frame-ancestors 'none'; connect-src 'self' ws://127.0.0.1:"
+             & Compact (Natural (Port)),
            Permissions_Policy      => "camera=(), microphone=()",
            Enable_HSTS             => False);
       package Rate_Middleware is new
@@ -214,7 +234,7 @@ procedure HTTP_Application_Server is
            Metric_Output => Metrics'Access);
       package Deadline_Middleware is new
         Flyology.HTTP.Server.Middleware_Deadlines
-          (Application_Context, Routing.Components, Maximum => 4.0);
+          (Application_Context, Routing.Components, Maximum => 20.0);
 
       Requests : Request_Counter (Request_Goal);
 
@@ -224,19 +244,101 @@ procedure HTTP_Application_Server is
          Requests.Completed;
       end Complete;
 
-      procedure Home
-        (State : in out Application_Context;
-         X     : in out App.Exchange)
+      procedure Serve_File
+        (State        : in out Application_Context;
+         X            : in out App.Exchange;
+         Path         : String;
+         Content_Type : String;
+         Cache        : Boolean := True)
       is
-         Name : constant String :=
-           Flyology.HTTP.Server.Requests.Query (X, "name");
+         File   : Files.File_Descriptor := Files.Invalid_File;
+         Buffer : Ada.Streams.Stream_Element_Array (1 .. 32 * 1_024);
+         Last   : Ada.Streams.Stream_Element_Offset;
+         Offset : Files.File_Offset := 0;
       begin
          Complete (State);
-         X.Text
-           (200, "flyology"
-            & (if Name'Length = 0 then "" else " for " & Name)
-            & ASCII.LF);
+         begin
+            File := Files.Open (Path);
+         exception
+            when Flyology.IO.Device_Error =>
+               X.Problem
+                 (500, "showcase-asset-missing",
+                  "A maintained showcase asset could not be opened");
+               return;
+         end;
+
+         X.Add_Header
+           ("Cache-Control", (if Cache then "public, max-age=3600" else "no-store"));
+         X.Begin_Stream (200, Content_Type);
+         loop
+            Files.Read_At
+              (File, Offset, Buffer, Last, Token => X.Cancellation);
+            exit when Last < Buffer'First;
+            X.Write_Chunk (Buffer (Buffer'First .. Last));
+            Offset := Offset + Files.File_Offset (Last - Buffer'First + 1);
+         end loop;
+         Files.Close (File);
+         X.End_Stream;
+      exception
+         when others =>
+            if File /= Files.Invalid_File then
+               begin
+                  Files.Close (File);
+               exception
+                  when others => null;
+               end;
+            end if;
+            raise;
+      end Serve_File;
+
+      procedure Home
+        (State : in out Application_Context;
+         X     : in out App.Exchange) is
+      begin
+         Serve_File
+           (State, X, Showcase_Root & "/index.html",
+            "text/html; charset=utf-8", Cache => False);
       end Home;
+
+      procedure Application_CSS
+        (State : in out Application_Context;
+         X     : in out App.Exchange) is
+      begin
+         Serve_File
+           (State, X, Showcase_Root & "/assets/app.css",
+            "text/css; charset=utf-8", Cache => False);
+      end Application_CSS;
+
+      procedure Application_JS
+        (State : in out Application_Context;
+         X     : in out App.Exchange) is
+      begin
+         Serve_File
+           (State, X, Showcase_Root & "/assets/app.js",
+            "text/javascript; charset=utf-8", Cache => False);
+      end Application_JS;
+
+      procedure Brand_Mark
+        (State : in out Application_Context;
+         X     : in out App.Exchange) is
+      begin
+         Serve_File
+           (State, X,
+            Project_Root & "/assets/brand/flyology-mark-transparent.svg",
+            "image/svg+xml");
+      end Brand_Mark;
+
+      procedure Geologica_Font
+        (State : in out Application_Context;
+         X     : in out App.Exchange) is
+      begin
+         Serve_File
+           (State, X,
+            Project_Root
+            & "/website/assets/fonts/geologica-latin-variable.woff2",
+            "font/woff2");
+      end Geologica_Font;
+
 
       procedure Show_User
         (State : in out Application_Context;
@@ -326,26 +428,88 @@ procedure HTTP_Application_Server is
         (State : in out Application_Context;
          X     : in out App.Exchange)
       is
-         Session  : Flyology.HTTP.Server.SSE_Handlers.Session
-           (Capacity => 4,
+         package SSE renames Flyology.HTTP.Server.SSE_Handlers;
+         Session  : aliased SSE.Session
+           (Capacity => 3,
             Byte_Limit =>
-              Flyology.HTTP.Server.SSE_Handlers.Default_Session_Bytes,
+              SSE.Default_Session_Bytes,
             Budget => null);
-         Accepted : Boolean;
+
+         type Session_Access is access all SSE.Session;
+
+         function Phase (Sequence : Positive) return String is
+           (case Sequence is
+               when 1 => "request accepted",
+               when 2 => "route selected",
+               when 3 => "lightweight task suspended",
+               when 4 => "file completion received",
+               when 5 => "mailbox backpressure released",
+               when others => "response owner flushed");
+
+         function Detail (Sequence : Positive) return String is
+           (case Sequence is
+               when 1 => "The request head passed bounded admission.",
+               when 2 => "Route policy admitted an SSE lifecycle.",
+               when 3 => "The event loop is free while the producer waits.",
+               when 4 => "Read_At returned ownership of its buffer.",
+               when 5 => "The sole writer drained another queued event.",
+               when others => "The final typed event is on the wire.");
+
+         task type Producer (Item : not null Session_Access) is
+            pragma Task_Info (Model);
+         end Producer;
+
+         task body Producer is
+            Accepted : Boolean;
+            Timed_Out : Boolean;
+         begin
+            for Sequence in 1 .. 6 loop
+               exit when SSE.Cancelled (Item.all);
+               Flyology.IO.Timers.Sleep_For
+                 ((if Sequence = 4 then 0.9 else 0.32));
+               SSE.Publish_For
+                 (Item.all,
+                  (Data => Ada.Strings.Unbounded.To_Unbounded_String
+                     ("{""sequence"":" & Compact (Sequence)
+                      & ",""phase"":""" & Phase (Sequence)
+                      & """,""detail"":""" & Detail (Sequence)
+                      & """}"),
+                   Event => Ada.Strings.Unbounded.To_Unbounded_String
+                     ("flight"),
+                   Id => Ada.Strings.Unbounded.To_Unbounded_String
+                     (Compact (Sequence)),
+                   Retry => 1_000,
+                   Include_Id => True,
+                   Include_Retry => Sequence = 1),
+                  Accepted, Timeout => 1.0, Timed_Out => Timed_Out);
+               exit when not Accepted or else Timed_Out;
+            end loop;
+            if not SSE.Cancelled (Item.all) then
+               SSE.Publish_For
+                 (Item.all,
+                  (Data => Ada.Strings.Unbounded.To_Unbounded_String ("{}"),
+                   Event => Ada.Strings.Unbounded.To_Unbounded_String
+                     ("complete"),
+                   Id => Ada.Strings.Unbounded.Null_Unbounded_String,
+                   Retry => 0,
+                   Include_Id => False,
+                   Include_Retry => False),
+                  Accepted, Timeout => 1.0, Timed_Out => Timed_Out);
+            end if;
+            SSE.Close (Item.all);
+         exception
+            when others =>
+               SSE.Close (Item.all);
+         end Producer;
       begin
          Complete (State);
-         Flyology.HTTP.Server.SSE_Handlers.Try_Publish
-           (Session,
-            (Data  => Ada.Strings.Unbounded.To_Unbounded_String ("ready"),
-             Event => Ada.Strings.Unbounded.To_Unbounded_String ("status"),
-             Id    => Ada.Strings.Unbounded.To_Unbounded_String ("1"),
-             Retry => 1_000,
-             Include_Id => False,
-             Include_Retry => False), Accepted);
-         pragma Assert (Accepted);
-         Flyology.HTTP.Server.SSE_Handlers.Close (Session);
-         Flyology.HTTP.Server.SSE_Handlers.Run
-           (X, Session, Metrics'Access);
+         declare
+            Source : Producer (Session'Unchecked_Access);
+         begin
+            SSE.Run
+              (X, Session, Metrics'Access,
+               Idle_Quantum => 0.05, Heartbeat => 0.5);
+         end;
       end SSE_Events;
 
       procedure WS_Open
@@ -358,7 +522,8 @@ procedure HTTP_Application_Server is
          Flyology.HTTP.Server.WebSocket_Handlers.Try_Publish
            (Session,
             (Kind => HTTP.Text_Frame,
-             Data => Ada.Strings.Unbounded.To_Unbounded_String ("ready")),
+             Data => Bytes.From_Byte_String
+               ("system: WebSocket accepted; the connection owner is ready")),
             Accepted);
       end WS_Open;
 
@@ -366,7 +531,7 @@ procedure HTTP_Application_Server is
         (X       : in out App.Exchange;
          Session : in out Flyology.HTTP.Server.WebSocket_Handlers.Session;
          Kind    : HTTP.WebSocket_Data_Kind;
-         Data    : String)
+         Data    : Bytes.Unbounded_Bytes)
       is
          pragma Unreferenced (X);
          Accepted : Boolean;
@@ -374,7 +539,11 @@ procedure HTTP_Application_Server is
          Flyology.HTTP.Server.WebSocket_Handlers.Try_Publish
            (Session,
             (Kind => Kind,
-             Data => Ada.Strings.Unbounded.To_Unbounded_String (Data)),
+             Data =>
+               (if Kind = HTTP.Text_Frame
+                then Bytes.From_Byte_String
+                  ("flyology: " & Bytes.To_Byte_String (Data))
+                else Data)),
             Accepted);
          if not Accepted then
             Flyology.HTTP.Server.WebSocket_Handlers.Close (Session);
@@ -408,11 +577,14 @@ procedure HTTP_Application_Server is
             Accepted : Boolean;
             Timed_Out : Boolean;
          begin
+            Flyology.IO.Timers.Sleep_For
+              ((if Text = 'a' then 0.08 else 0.22));
             WS.Publish_For
               (Item.all,
                (Kind => HTTP.Text_Frame,
-               Data => Ada.Strings.Unbounded.To_Unbounded_String
-                  ("producer-" & Text)),
+                Data => Bytes.From_Byte_String
+                  ("system: producer " & Text
+                   & " published without owning the connection")),
                Accepted, Timeout => 1.0, Timed_Out => Timed_Out);
             pragma Assert (Accepted and then not Timed_Out);
          end Producer;
@@ -424,13 +596,12 @@ procedure HTTP_Application_Server is
             First  : Producer (Session'Unchecked_Access, 'a');
             Second : Producer (Session'Unchecked_Access, 'b');
          begin
-            null;
+            WS_Lifecycle.Run
+              (X, Session,
+               Origin_Policy => HTTP.Require_Exact_Origin,
+               Allowed_Origin => Origin,
+               Metric_Output => Metrics'Access);
          end;
-         WS_Lifecycle.Run
-           (X, Session,
-            Origin_Policy => HTTP.Require_Exact_Origin,
-            Allowed_Origin => "http://127.0.0.1:3000",
-            Metric_Output => Metrics'Access);
       end WebSocket_Echo;
 
       procedure Simulated_Upstream
@@ -528,7 +699,7 @@ procedure HTTP_Application_Server is
       type Context is limited record
          Application : Application_Context;
          Routes      : Routing.Router
-           (Capacity => 20, Slashes => Routing.Strict_Slashes);
+           (Capacity => 24, Slashes => Routing.Strict_Slashes);
          Budget      : aliased HTTP.Ingress_Budget
            (Limit => 64 * 1_024 * 1_024);
       end record;
@@ -546,7 +717,9 @@ procedure HTTP_Application_Server is
          HTTP.Configure_Ingress_Budget (Client, State.Budget'Access);
          State.Routes.Serve
            (State.Application, Client, Peer,
-            Timeout => 5.0, Token => Cancellation);
+            Timeout        => 120.0,
+            Token          => Cancellation,
+            Header_Timeout => 10.0);
       end Handle;
 
       package Server_Instance is new Flyology.IO.Structured_Servers
@@ -560,7 +733,6 @@ procedure HTTP_Application_Server is
         (Capacity => 2, Slashes => Routing.Strict_Slashes);
       Listener : Sockets.Socket_Type;
    begin
-      Native_Work.Start (Native_Pool);
       State.Routes.Add_Middleware (Error_Middleware.Call'Access);
       State.Routes.Add_Middleware (Request_ID_Middleware.Call'Access);
       State.Routes.Add_Middleware (Logging_Middleware.Call'Access);
@@ -568,11 +740,19 @@ procedure HTTP_Application_Server is
       State.Routes.Add_Middleware (CORS_Middleware.Call'Access);
       State.Routes.Add_Middleware (Rate_Middleware.Call'Access);
       State.Routes.Add_Middleware (Bulkhead_Middleware.Call'Access);
-      State.Routes.Add_Middleware (Deadline_Middleware.Call'Access);
       State.Routes.Add_Middleware
         (Security_Middleware.Call'Access, Stage => Routing.Application);
 
       State.Routes.Get ("/", Home'Access, Name => "home");
+      State.Routes.Get
+        ("/assets/app.css", Application_CSS'Access, Name => "assets.css");
+      State.Routes.Get
+        ("/assets/app.js", Application_JS'Access, Name => "assets.js");
+      State.Routes.Get
+        ("/assets/mark.svg", Brand_Mark'Access, Name => "assets.mark");
+      State.Routes.Get
+        ("/assets/geologica.woff2", Geologica_Font'Access,
+         Name => "assets.font");
       State.Routes.Get
         ("/users/{id}", Show_User'Access, Name => "users.show");
       State.Routes.Post
@@ -585,7 +765,10 @@ procedure HTTP_Application_Server is
         ("/upload", Upload'Access, Name => "upload",
          Policy =>
            (Routing.Default_Route_Policy with delta
-              Body_Handling => App.Stream_Body));
+              Body_Handling => App.Stream_Body,
+              Timeout       => 30.0));
+      State.Routes.Add_Route_Middleware
+        ("upload", Deadline_Middleware.Call'Access);
       State.Routes.Get
         ("/stream", Stream_Response'Access, Name => "stream");
       State.Routes.Get
@@ -606,13 +789,15 @@ procedure HTTP_Application_Server is
         ("/events", SSE_Events'Access, Name => "events",
          Policy =>
            (Routing.Default_Route_Policy with delta
-              Upgrade => Routing.Allow_SSE));
+              Upgrade => Routing.Allow_SSE,
+              Timeout => 8.0));
       State.Routes.Get
         ("/chat", WebSocket_Echo'Access, Name => "chat",
          Policy =>
            (Routing.Default_Route_Policy with delta
               Upgrade     => Routing.Allow_WebSocket,
-              CORS_Policy => 1));
+              CORS_Policy => 1,
+              Timeout     => 90.0));
       State.Routes.Get
         ("/parallel", Parallel_Work'Access, Name => "parallel",
          Policy =>
@@ -639,9 +824,11 @@ procedure HTTP_Application_Server is
           Port   => Port));
       Sockets.Listen_Socket (Listener, Length => Capacity);
 
+      Native_Work.Start (Native_Pool);
+
       Ada.Text_IO.Put_Line
         ("READY " & Lane & " http://127.0.0.1:"
-         & Sockets.Port_Type'Image (Port) & "/");
+         & Compact (Natural (Port)) & "/");
       Ada.Text_IO.Flush;
 
       declare

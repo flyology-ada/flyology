@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A live kitchen-sink application for Flyology.HTTP.Server.Applications.">
+    <meta name="theme-color" content="#17213d">
+    <title>Flight deck · Flyology HTTP</title>
+    <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/assets/app.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to live demos</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Kitchen-sink navigation">
+        <a class="brand" href="/" aria-label="Flyology HTTP flight deck">
+          <img src="/assets/mark.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <div class="nav-links">
+          <a href="#events">SSE</a>
+          <a href="#chat">WebSocket</a>
+          <a href="#files">File I/O</a>
+          <a href="#toolkit">Toolkit</a>
+        </div>
+        <div class="nav-tools">
+          <span class="server-state" data-server-state="connecting">
+            <span aria-hidden="true"></span><b data-server-label>connecting</b>
+          </span>
+          <button class="icon-button" type="button" data-theme-toggle aria-label="Change color theme">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">HTTP.Server.Applications · live workbench</p>
+          <h1 id="hero-title">A real application on ordinary Ada calls.</h1>
+          <p class="lede">This page, its type, and every interaction below are served by the same Flyology process. Watch an SSE stream cross the event loop, join a WebSocket chat, upload a file, and inspect the middleware around each request.</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#events">Open live feed</a>
+            <a class="button secondary" href="/metrics" target="_blank" rel="noreferrer">Raw metrics JSON</a>
+          </div>
+        </div>
+
+        <div class="flight-map" aria-label="Request path from browser to application and back">
+          <div class="map-label">live request path</div>
+          <svg viewBox="0 0 620 320" role="img" aria-labelledby="map-title map-desc">
+            <title id="map-title">Flyology HTTP request path</title>
+            <desc id="map-desc">A browser request moves through the router, a lightweight task, file or network input and returns through the sole connection writer.</desc>
+            <path class="route-path" d="M70 160 C170 36 272 36 324 132 S448 282 550 160"/>
+            <path class="route-path route-active" d="M70 160 C170 36 272 36 324 132 S448 282 550 160"/>
+            <g class="map-node node-browser" transform="translate(70 160)"><circle r="37"/><text y="5">browser</text></g>
+            <g class="map-node node-router" transform="translate(258 78)"><circle r="42"/><text y="5">router</text></g>
+            <g class="map-node node-task" transform="translate(366 206)"><circle r="48"/><text y="-3">lightweight</text><text y="15">task</text></g>
+            <g class="map-node node-writer" transform="translate(550 160)"><circle r="42"/><text y="-3">sole</text><text y="15">writer</text></g>
+          </svg>
+          <dl class="map-facts">
+            <div><dt>Protocol</dt><dd>HTTP/1.1</dd></div>
+            <div><dt>Ingress</dt><dd>bounded</dd></div>
+            <div><dt>Writes</dt><dd>serialized</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="live-strip" aria-label="Live server measurements">
+        <div><span>requests observed</span><strong data-metric-requests>0</strong></div>
+        <div><span>active now</span><strong data-metric-active>0</strong></div>
+        <div><span>asset transport</span><strong>Flyology.IO.Files</strong></div>
+        <div><span>browser origin</span><strong data-origin>local</strong></div>
+      </section>
+
+      <section class="demo-section events-section" id="events" aria-labelledby="events-title">
+        <div class="section-intro">
+          <p class="section-index">01 · server-sent events</p>
+          <h2 id="events-title">A stream should feel alive.</h2>
+          <p>The producer publishes several typed events through a bounded mailbox. The connection owner drains them in order, applies backpressure, and closes after the final event.</p>
+          <button class="button secondary" type="button" data-sse-reconnect>Run another flight</button>
+        </div>
+        <div class="telemetry-panel">
+          <header>
+            <div><span class="status-dot" data-sse-state="waiting"></span><strong data-sse-label>waiting for stream</strong></div>
+            <code>GET /events</code>
+          </header>
+          <ol class="event-log" data-event-log aria-live="polite" aria-label="Incoming server events">
+            <li class="empty-state">The next event will appear here.</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="demo-section chat-section" id="chat" aria-labelledby="chat-title">
+        <div class="chat-copy">
+          <p class="section-index">02 · WebSocket</p>
+          <h2 id="chat-title">One writer, many voices.</h2>
+          <p>System producers and browser messages share a bounded outgoing mailbox. Only the lifecycle owner writes frames to the connection.</p>
+          <dl class="protocol-notes">
+            <div><dt>Origin</dt><dd>exact same-origin policy</dd></div>
+            <div><dt>Payload</dt><dd>UTF-8 text or native bytes</dd></div>
+            <div><dt>Backpressure</dt><dd>bounded publish wait</dd></div>
+          </dl>
+        </div>
+        <div class="chat-window">
+          <header>
+            <div><span class="status-dot" data-chat-state="connecting"></span><strong data-chat-label>connecting</strong></div>
+            <button type="button" class="text-button" data-chat-reconnect>Reconnect</button>
+          </header>
+          <div class="messages" data-chat-messages role="log" aria-live="polite" aria-label="Chat messages"></div>
+          <form class="chat-form" data-chat-form>
+            <label><span>Name</span><input name="name" maxlength="24" value="Ada" autocomplete="nickname"></label>
+            <label class="message-field"><span>Message</span><input name="message" maxlength="240" placeholder="Ask the flight deck…" autocomplete="off" required></label>
+            <button class="send-button" type="submit">Send</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="demo-section files-section" id="files" aria-labelledby="files-title">
+        <div class="section-intro">
+          <p class="section-index">03 · files and request bodies</p>
+          <h2 id="files-title">The page serves itself.</h2>
+          <p>HTML, CSS, JavaScript, the mark, and the variable font are read positionally with <code>Flyology.IO.Files.Read_At</code>, then written as binary HTTP chunks. Uploads travel the other direction through the streamed request-body API.</p>
+        </div>
+        <div class="upload-workbench">
+          <form data-upload-form>
+            <label class="drop-field">
+              <input type="file" name="file" required>
+              <span class="drop-title">Choose any local file</span>
+              <span data-file-label>Nothing selected yet</span>
+            </label>
+            <button class="button primary" type="submit">Stream upload</button>
+          </form>
+          <output data-upload-output>Ready to send a bounded, streamed body.</output>
+        </div>
+      </section>
+
+      <section class="toolkit-section" id="toolkit" aria-labelledby="toolkit-title">
+        <header>
+          <p class="section-index">04 · optional application toolkit</p>
+          <h2 id="toolkit-title">Probe each layer.</h2>
+          <p>These calls use the same router, request IDs, access logs, metrics, security headers, rate limiter, bulkheads, and deadline narrowing as the live demos.</p>
+        </header>
+        <div class="endpoint-list">
+          <button type="button" data-endpoint="/parallel"><span>Parallel lightweight work</span><code>/parallel</code></button>
+          <button type="button" data-endpoint="/native"><span>Bounded native boundary</span><code>/native</code></button>
+          <button type="button" data-endpoint="/admin/status"><span>Mounted subrouter</span><code>/admin/status</code></button>
+          <button type="button" data-endpoint="/private" data-token="example-token"><span>Bearer authentication</span><code>/private</code></button>
+          <button type="button" data-endpoint="/error"><span>Safe exception mapping</span><code>/error</code></button>
+        </div>
+        <output class="endpoint-output" data-endpoint-output>Select an endpoint to inspect its response.</output>
+      </section>
+    </main>
+
+    <footer>
+      <div><img src="/assets/mark.svg" alt=""><strong>Flyology HTTP flight deck</strong></div>
+      <p>Experimental software. The demo makes ownership and limits visible; it does not claim production qualification.</p>
+    </footer>
+  </body>
+</html>

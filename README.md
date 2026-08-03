@@ -1137,8 +1137,11 @@ preserves pipelined bytes. Streaming callers explicitly accept
 accept it automatically before body reads.
 One monotonic request timeout covers every incremental header and body read,
 rather than restarting after each byte, so a slow header or body cannot retain
-a handler indefinitely. WebSocket receive calls use a short retry quantum plus
-a separate monotonic whole-message deadline retained across fragments.
+a handler indefinitely. Routers may additionally impose a shorter absolute
+header timeout while retaining an explicitly longer complete-request deadline
+for admitted SSE or WebSocket lifecycles; both clocks start before the first
+header byte. WebSocket receive calls use a short retry quantum plus a separate
+monotonic whole-message deadline retained across fragments.
 Handlers also default to 1,000 requests and five minutes per connection. Peer
 protocol, timeout, socket, TLS, and unmapped application callback failures are
 contained to that connection; an unmapped callback failure receives a safe 500
@@ -1173,6 +1176,24 @@ capacity:
 ./showcases/bin/http_server lightweight 100 18080 64
 ./showcases/bin/http_server native 100 18080 64
 ```
+
+The `http_application_server` showcase is a same-origin kitchen-sink
+application. Its responsive HTML, CSS, JavaScript, logo, and variable font are
+read positionally with `Flyology.IO.Files.Read_At` and emitted as binary
+streaming response chunks. The UI exercises a multi-item SSE flight feed with
+heartbeats, a WebSocket chat with two concurrent mailbox producers and one
+connection writer, streamed file upload, metrics, authentication, mounted
+routing, structured lightweight work, and a bounded native boundary:
+
+```sh
+./scripts/showcases.sh
+./showcases/bin/http_application_server lightweight 0 18082 256 .
+# open http://127.0.0.1:18082/
+```
+
+The fifth argument is the project root used to locate maintained assets; `.`
+is correct when launched from the repository root. Select `native` instead of
+`lightweight` to run the identical application on native handlers.
 
 `https_server` accepts one HTTPS request on a lightweight task and demonstrates
 the OpenSSL transport adapter. Its optional arguments are port, certificate,

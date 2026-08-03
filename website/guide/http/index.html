@@ -66,7 +66,7 @@
           <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">i</span><p>Flyology is experimental. This guide describes implemented behavior and maintained examples; it is not a production-qualification claim. Code excerpts come from <a href="https://github.com/yrashk/flyology/blob/main/showcases/http_application_server.adb"><code>showcases/http_application_server.adb</code></a>, which the showcase build compile-checks.</p></aside>
 
           <section id="start"><span class="step-label">HTTP 01</span><h2>Start the HTTP server.</h2>
-            <p>The maintained server owns a listening socket through <code>Flyology.IO.Structured_Servers</code>. Each admitted handler wraps its owned connection in the HTTP transport, installs a shared ingress budget, and serves persistent requests under one cancellation token and per-request timeout.</p>
+            <p>The maintained server owns a listening socket through <code>Flyology.IO.Structured_Servers</code>. Each admitted handler wraps its owned connection in the HTTP transport, installs a shared ingress budget, and serves persistent requests under one cancellation token. The kitchen-sink page is a real same-origin application: its HTML, CSS, JavaScript, brand mark, and variable font are read through <code>Flyology.IO.Files.Read_At</code>, while its UI drives SSE, WebSocket chat, streamed upload, middleware, and structured request work.</p>
             <figure class="code-panel"><figcaption>connection handler excerpt</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Channel : aliased HTTP.Connections.Connection_Transport
   (Connection'Unchecked_Access);
 Client : aliased HTTP.Connection (Channel'Access);
@@ -74,11 +74,15 @@ Client : aliased HTTP.Connection (Channel'Access);
 HTTP.Configure_Ingress_Budget (Client, State.Budget'Access);
 State.Routes.Serve
   (State.Application, Client, Peer,
-   Timeout =&gt; 5.0, Token =&gt; Cancellation);</code></pre></figure>
+   Timeout        =&gt; 120.0,
+   Token          =&gt; Cancellation,
+   Header_Timeout =&gt; 10.0);</code></pre></figure>
+            <p>The complete-request deadline remains absolute, but the shorter header deadline rejects an incremental slow header first. Admitted routes narrow the longer deadline for ordinary work; explicitly long-lived SSE and WebSocket routes retain bounded lifecycle time.</p>
             <p>Build with the prepared RTS, then choose the handler lane explicitly:</p>
             <figure class="code-panel"><figcaption>shell</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code>./scripts/showcases.sh
-./showcases/bin/http_application_server lightweight 0 18082 256
-./showcases/bin/http_application_server native 0 18082 256</code></pre></figure>
+./showcases/bin/http_application_server lightweight 0 18082 256 .
+./showcases/bin/http_application_server native 0 18082 256 .
+# open http://127.0.0.1:18082/</code></pre></figure>
           </section>
 
           <section id="low-level"><span class="step-label">HTTP 02</span><h2>Keep the low-level connection API available.</h2>
@@ -193,23 +197,22 @@ State.Routes.Add_Route_Middleware
    end if;
    exit when Finished;
 end loop;</code></pre></figure>
-            <p>Routing, authorization, body policy, ingress capacity, and other request-head middleware finish before <code>100 Continue</code> is sent. The header and decoded-body reads share the original absolute request deadline: sending one byte at a time cannot restart it. A fixed <code>Content-Length</code> and chunked transfer coding follow the same policy.</p>
+            <p>Routing, authorization, body policy, ingress capacity, and other request-head middleware finish before <code>100 Continue</code> is sent. Header and complete-request clocks both begin before the first header byte. A route can narrow the latter after admission, but sending one byte at a time cannot restart either deadline. Fixed <code>Content-Length</code> and chunked transfer coding follow the same policy.</p>
+            <p>The browser demo also exercises the response direction: maintained static assets are read into a bounded 32 KiB <code>Stream_Element_Array</code> and passed directly to the binary <code>X.Write_Chunk</code> overload.</p>
             <figure class="code-panel"><figcaption>exercise delayed Continue</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code>curl --http1.1 -H 'Expect: 100-continue' \
   --data-binary @large.bin http://127.0.0.1:18082/upload</code></pre></figure>
           </section>
 
           <section id="sse"><span class="step-label">HTTP 12</span><h2>Serialize SSE through a bounded mailbox.</h2>
-            <p>The raw SSE procedures remain available. The optional lifecycle session lets producers publish into a fixed-capacity, byte-bounded closeable channel. The handler calling <code>Run</code> is the only connection writer and transport backpressure remains synchronous. A send failure closes admission and requests producer cancellation.</p>
+            <p>The raw SSE procedures remain available. The optional lifecycle session lets producers publish into a fixed-capacity, byte-bounded closeable channel. The maintained browser feed starts a producer concurrently with <code>Run</code>, sends six named <code>flight</code> events, emits heartbeats while one step pauses, and finishes with a <code>complete</code> event. The handler calling <code>Run</code> is the only connection writer and transport backpressure remains synchronous. A send failure closes admission and requests producer cancellation.</p>
             <figure class="code-panel"><figcaption>bounded SSE endpoint excerpt</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Session : Flyology.HTTP.Server.SSE_Handlers.Session
-  (Capacity   =&gt; 4,
+  (Capacity   =&gt; 3,
    Byte_Limit =&gt; Flyology.HTTP.Server.SSE_Handlers.Default_Session_Bytes,
    Budget     =&gt; null);
 
-Flyology.HTTP.Server.SSE_Handlers.Try_Publish
-  (Session, Event, Accepted);
-Flyology.HTTP.Server.SSE_Handlers.Close (Session);
 Flyology.HTTP.Server.SSE_Handlers.Run
-  (X, Session, Metrics'Access);</code></pre></figure>
+  (X, Session, Metrics'Access,
+   Idle_Quantum =&gt; 0.05, Heartbeat =&gt; 0.5);</code></pre></figure>
           </section>
 
           <section id="websocket"><span class="step-label">HTTP 13</span><h2>Give WebSocket writes one owner.</h2>
@@ -228,7 +231,7 @@ end if;</code></pre></figure>
 Chat_Lifecycle.Run
   (X, Session,
    Origin_Policy  =&gt; HTTP.Require_Exact_Origin,
-   Allowed_Origin =&gt; "http://127.0.0.1:3000",
+   Allowed_Origin =&gt; "http://127.0.0.1:18082",
    Metric_Output  =&gt; Metrics'Access);</code></pre></figure>
             <p>The raw RFC 6455 API remains usable for applications needing a different lifecycle. Client masking, UTF-8, close codes, control frames, fragmentation, size limits, and terminal protocol failures remain core invariants.</p>
           </section>
@@ -264,12 +267,12 @@ end if;</code></pre></figure>
 
           <section id="deployment"><span class="step-label">HTTP 16</span><h2>Size every retained resource.</h2>
             <p>The ingress budget bounds buffered bodies and retained/reassembled WebSocket messages. Outgoing SSE/WebSocket mailboxes have a 64 KiB per-message ceiling, a 256 KiB default per-session limit, and a shared 64 MiB default outbound budget charged until send or drop. These budgets do not cover kernel socket buffers, TLS-provider allocations, descriptors, per-connection parser/header state, task or fiber stacks, application buffers, rate-limit keys, metrics series, or native executor storage. Handler capacity, event-loop count, every bounded table, and upstream bulkheads must be chosen together.</p>
-            <ul><li>Set request and connection deadlines for the deployment, not only defaults.</li><li>Keep header, body, trailer, cookie, WebSocket, and mailbox limits explicit.</li><li>Budget TLS and kernel memory at maximum accepted connection count.</li><li>Put slow upstream systems behind their own bounded scope or bulkhead.</li><li>Drain on shutdown; do not detach work holding borrowed state.</li></ul>
+            <ul><li>Set distinct slow-header, complete-request, route, and connection deadlines for the deployment, not only defaults.</li><li>Keep header, body, trailer, cookie, WebSocket, and mailbox limits explicit.</li><li>Budget TLS and kernel memory at maximum accepted connection count.</li><li>Put slow upstream systems behind their own bounded scope or bulkhead.</li><li>Drain on shutdown; do not detach work holding borrowed state.</li></ul>
             <p>Response compression currently exposes only a bounded provider boundary. Middleware remains deferred until it can preserve streaming, HEAD/no-body rules, partial-write safety, and sensitive-data policy.</p>
           </section>
 
           <section id="security"><span class="step-label">HTTP 17</span><h2>Review the security boundary before deployment.</h2>
-            <ul><li>Terminate TLS with certificate and key policy appropriate to the deployment; enable HSTS only for intentional HTTPS-only service.</li><li>Keep the server's absolute header/body deadline and decoded limits enabled.</li><li>Use shared ingress and outbound budgets plus bounded mailbox, metric, rate, and routing capacities.</li><li>Do not trust inbound request IDs or proxy client headers without an explicit trusted-hop policy.</li><li>Use exact CORS origins when credentials are involved and an explicit WebSocket origin policy.</li><li>Never log authorization fields, cookies, bodies, or unbounded raw paths by default.</li><li>Never let child tasks retain an exchange or write the connection.</li><li>Close after partial-response failure; do not attempt replacement framing.</li><li>Keep blocking foreign calls off event-loop pthreads.</li><li>Run the behavioral, stress, documentation, proof, and platform checks for the changed boundary.</li></ul>
+            <ul><li>Terminate TLS with certificate and key policy appropriate to the deployment; enable HSTS only for intentional HTTPS-only service.</li><li>Keep the server's absolute slow-header and complete-request deadlines plus decoded limits enabled.</li><li>Use shared ingress and outbound budgets plus bounded mailbox, metric, rate, and routing capacities.</li><li>Do not trust inbound request IDs or proxy client headers without an explicit trusted-hop policy.</li><li>Use exact CORS origins when credentials are involved and an explicit WebSocket origin policy.</li><li>Never log authorization fields, cookies, bodies, or unbounded raw paths by default.</li><li>Never let child tasks retain an exchange or write the connection.</li><li>Close after partial-response failure; do not attempt replacement framing.</li><li>Keep blocking foreign calls off event-loop pthreads.</li><li>Run the behavioral, stress, documentation, proof, and platform checks for the changed boundary.</li></ul>
           </section>
 
           <section id="benchmark"><span class="step-label">HTTP 18</span><h2>Benchmark reproducibly with oha.</h2>

@@ -1,4 +1,5 @@
 with Ada.Command_Line;
+with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with GNAT.Sockets;
 with Flyology;
@@ -49,7 +50,9 @@ begin
        Port   => Port));
    Sockets.Listen_Socket (Listener, Length => 16);
    Ada.Text_IO.Put_Line
-     ("READY https://127.0.0.1:" & Sockets.Port_Type'Image (Port) & "/");
+     ("READY https://127.0.0.1:"
+      & Ada.Strings.Fixed.Trim
+          (Sockets.Port_Type'Image (Port), Ada.Strings.Both) & "/");
    Ada.Text_IO.Flush;
 
    declare
