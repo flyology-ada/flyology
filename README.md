@@ -1073,6 +1073,16 @@ an explicit client-key function, so proxy forwarding headers are trusted only
 when application policy says so; retained keys are capped, old entries are
 evicted, and the table is sharded to avoid one global hot-path lock.
 
+`Server.Requests` lazily parses repeated query values, bounded cookies,
+content-type parameters, and authority only when a handler asks for them;
+query plus signs become spaces while path plus signs remain literal.
+`Server.Responses` provides validated cookies and a fixed-response builder in
+addition to the direct exchange helpers. `Server.Compression` currently lands
+only the bounded encoder provider boundary. Compression middleware is deferred
+until the response-transform hook can preserve streaming, HEAD and no-body
+semantics, output bounds, and safe handling after partial writes. Applications
+must also assess secret-bearing compression side channels before enabling it.
+
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
 13 upgrade and client key. Its default origin policy rejects browser `Origin`

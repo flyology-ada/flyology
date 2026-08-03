@@ -22,6 +22,8 @@ with Flyology.HTTP.Server.Middleware_Metrics;
 with Flyology.HTTP.Server.Middleware_Request_IDs;
 with Flyology.HTTP.Server.Middleware_Rate_Limits;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
+with Flyology.HTTP.Server.Requests;
+with Flyology.HTTP.Server.Responses;
 with Flyology.HTTP.Server.Routing;
 with Flyology.IO;
 
@@ -1716,6 +1718,75 @@ procedure HTTP_Smoke is
       end;
    end Check_Admission_Middleware;
 
+   procedure Check_Request_Response_Helpers is
+      package Applications renames Flyology.HTTP.Server.Applications;
+      package Requests renames Flyology.HTTP.Server.Requests;
+      package Responses renames Flyology.HTTP.Server.Responses;
+      type Context is null record;
+      package Routing is new Flyology.HTTP.Server.Routing (Context);
+
+      procedure Helpers
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+         Builder : Responses.Builder;
+         Options : Responses.Cookie_Options;
+      begin
+         pragma Assert (Requests.Query (X, "q", 1) = "a b");
+         pragma Assert (Requests.Query (X, "q", 2) = "2");
+         pragma Assert (Requests.Has_Query (X, "empty"));
+         pragma Assert (Requests.Cookie (X, "session") = "first");
+         pragma Assert (Requests.Media_Type (X) = "text/plain");
+         pragma Assert
+           (Requests.Content_Type_Parameter (X, "charset") = "UTF-8");
+         pragma Assert (Requests.Authority (X) = "example.test");
+         Options.Path := To_Unbounded_String ("/");
+         Responses.Set_Cookie (X, "result", "ok", Options);
+         Builder.Initialize (201, "text/plain");
+         Builder.Add_Header ("X-Helper", "yes");
+         Builder.Set_Payload ("built");
+         Builder.Send (X);
+      end Helpers;
+
+      Routes : Routing.Router
+        (Capacity => 1, Slashes => Routing.Strict_Slashes);
+      State : Context;
+      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+      Wire : aliased Memory_Transport;
+   begin
+      Routes.Get ("/helpers", Helpers'Access, Name => "helpers");
+      Wire.Input := To_Unbounded_String
+        ("GET /helpers?q=a+b&q=%32&empty HTTP/1.1" & CRLF
+         & "Host: example.test" & CRLF
+         & "Cookie: session=first; session=second" & CRLF
+         & "Content-Type: Text/Plain; charset=""UTF-8""" & CRLF
+         & "Connection: close" & CRLF & CRLF);
+      declare
+         Client : aliased HTTP_Server.Connection (Wire'Access);
+      begin
+         Routes.Serve (State, Client, Peer);
+      end;
+      declare
+         Output : constant String := To_String (Wire.Output);
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "201 Created") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "X-Helper: yes") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output,
+               "Set-Cookie: result=ok; Path=/; Secure; HttpOnly; " &
+               "SameSite=Lax") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "built") /= 0);
+      end;
+   end Check_Request_Response_Helpers;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -1736,4 +1807,5 @@ begin
    Check_Middleware;
    Check_Standard_Middleware;
    Check_Admission_Middleware;
+   Check_Request_Response_Helpers;
 end HTTP_Smoke;
