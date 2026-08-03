@@ -77,6 +77,79 @@ procedure Stack_Pool_Smoke is
       end if;
    end Wait_Until_Empty;
 
+   --  Task-body completion can precede the scheduler-side stack release. No
+   --  new stack is allocated in either wait below, so release counters must
+   --  move monotonically toward the expected intermediate state.
+   procedure Wait_For_Live_Count
+     (Expected : Observation.Counter;
+      Value    : out Observation.Stack_Pool_Snapshot)
+   is
+      Previous : Observation.Stack_Pool_Snapshot := Observation.Stack_Pool;
+   begin
+      Value := Previous;
+      for Attempt in 1 .. 100 loop
+         if Attempt > 1 then
+            delay 0.001;
+            Value := Observation.Stack_Pool;
+         end if;
+
+         if Value.Live_Stacks < Expected
+           or else Value.Live_Stacks > Previous.Live_Stacks
+         then
+            Print_Snapshot ("invalid live-stack transition:", Value);
+            raise Program_Error with
+              "live stack count moved away from completion";
+         end if;
+
+         if Value.Live_Stacks = Expected then
+            return;
+         end if;
+
+         Previous := Value;
+      end loop;
+
+      Print_Snapshot ("live-stack wait timed out:", Value);
+      raise Program_Error with "live stack release was not observed";
+   end Wait_For_Live_Count;
+
+   procedure Wait_For_Releases
+     (Expected_Live      : Observation.Counter;
+      Expected_Discarded : Observation.Counter;
+      Value              : out Observation.Stack_Pool_Snapshot)
+   is
+      Previous : Observation.Stack_Pool_Snapshot := Observation.Stack_Pool;
+   begin
+      Value := Previous;
+      for Attempt in 1 .. 100 loop
+         if Attempt > 1 then
+            delay 0.001;
+            Value := Observation.Stack_Pool;
+         end if;
+
+         if Value.Live_Stacks < Expected_Live
+           or else Value.Discarded_Stacks > Expected_Discarded
+           or else Value.Live_Stacks > Previous.Live_Stacks
+           or else Value.Discarded_Stacks < Previous.Discarded_Stacks
+         then
+            Print_Snapshot ("invalid release transition:", Value);
+            raise Program_Error with
+              "stack-pool release counters moved away from completion";
+         end if;
+
+         if Value.Live_Stacks = Expected_Live
+           and then Value.Discarded_Stacks = Expected_Discarded
+         then
+            return;
+         end if;
+
+         Previous := Value;
+      end loop;
+
+      Print_Snapshot ("release wait timed out:", Value);
+      raise Program_Error with
+        "stack-pool releases did not become observable";
+   end Wait_For_Releases;
+
    procedure Test_Partial_Churn is
       Original_Count    : constant := 64;
       Replacement_Count : constant := Original_Count / 2;
@@ -220,17 +293,18 @@ procedure Stack_Pool_Smoke is
       for Index in 1 .. Replacement_Count loop
          Free (Originals (Index));
       end loop;
-      Partial := Observation.Stack_Pool;
-      if Partial.Live_Stacks /= Replacement_Count
-        or else Partial.Active_Arenas
+      Wait_For_Releases
+        (Expected_Live      => Replacement_Count,
+         Expected_Discarded =>
+           Before.Discarded_Stacks + Replacement_Count,
+         Value              => Partial);
+      if Partial.Active_Arenas
           /= During.Active_Arenas
              - Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
         or else Partial.Arena_Mappings /= During.Arena_Mappings
         or else Partial.Arena_Unmappings
           /= Before.Arena_Unmappings
              + Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
-        or else Partial.Discarded_Stacks
-          /= Before.Discarded_Stacks + Replacement_Count
       then
          Failed := True;
       end if;
@@ -405,7 +479,7 @@ procedure Stack_Pool_Smoke is
       Control.Release_Head;
       Control.Wait_Head_Finished;
       Free (Head_Worker);
-      After_Head := Observation.Stack_Pool;
+      Wait_For_Live_Count (Expected => 1, Value => After_Head);
       if After_Head.Live_Stacks /= 1
         or else After_Head.Active_Arenas /= 1
         or else After_Head.Arena_Unmappings /= Before.Arena_Unmappings + 1
