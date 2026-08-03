@@ -78,7 +78,7 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 
 ## I/O invariants
 
-- Public I/O keeps normal blocking-looking Ada calls and works from either
+- Public I/O keeps normal synchronous Ada call semantics and works from either
   lane. A lightweight call suspends only its task; a native call may block only
   its pthread. Preserve `out` values, exceptions, retry deadlines, and ownership
   semantics across both paths.

@@ -6,9 +6,9 @@ with Flyology.Wake_Sources;
 
 --  Runs provider-neutral TLS sessions over Flyology socket readiness.
 --
---  A Connection is an ordinary blocking-looking Ada object. Lightweight tasks
---  suspend on WANT_READ or WANT_WRITE; native tasks block their pthread. The
---  selected provider performs TLS and cryptography outside this package.
+--  A Connection provides ordinary synchronous Ada operations. Lightweight
+--  tasks suspend on WANT_READ or WANT_WRITE; native tasks block their pthread.
+--  The selected provider performs TLS and cryptography outside this package.
 --
 --  Example:
 --

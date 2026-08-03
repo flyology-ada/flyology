@@ -175,7 +175,7 @@ end;</code></pre>
 
           <section id="io">
             <span class="step-label">STEP 06</span>
-            <h2>Keep synchronous-looking calls.</h2>
+            <h2>Keep synchronous calls.</h2>
             <p>Flyology I/O packages expose normal procedure and function calls from either lane. In a lightweight task, a would-block result suspends only that task's fiber. In a native task, the wait may block only its pthread.</p>
             <figure class="code-panel">
               <figcaption>task-aware I/O</figcaption>

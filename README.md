@@ -19,7 +19,7 @@
 Flyology adds an explicit lightweight execution lane to ordinary Ada tasking.
 Selected tasks share event-loop pthreads as fibers while keeping Ada rendezvous,
 protected objects, exceptions, task activation, masters, and normal
-blocking-looking control flow. Undesignated tasks remain native by default, and
+synchronous control flow. Undesignated tasks remain native by default, and
 either lane can be selected explicitly. Flyology adds no `async` dialect; the
 closest familiar comparison is an opt-in Ada analogue of Java virtual threads.
 
@@ -560,7 +560,7 @@ the loop until it returns.
 
 ## Task-aware I/O
 
-Flyology exposes synchronous-looking operations in:
+Flyology exposes synchronous operations in:
 
 - `Flyology.IO.Timers`: relative and absolute sleeps.
 - `Flyology.IO.Sockets`: connect, accept, partial/exact receive, and partial/all

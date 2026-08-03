@@ -48,7 +48,7 @@
           <p class="eyebrow">Experimental GNAT runtime integration</p>
           <h1 id="hero-title">Lightweight tasks. Ordinary Ada.</h1>
           <p class="hero-lede">
-            Flyology adds an explicit lightweight execution lane to ordinary Ada tasking, without introducing a new async model. Selected tasks run cooperatively as fibers on shared event-loop threads, while rendezvous, protected objects, exceptions, and blocking-looking control flow stay ordinary Ada.
+            Flyology adds an explicit lightweight execution lane to ordinary Ada tasking, without introducing a new async model. Selected tasks run cooperatively as fibers on shared event-loop threads, while rendezvous, protected objects, exceptions, and synchronous control flow stay ordinary Ada.
           </p>
           <div class="actions">
             <a class="button button-primary" href="guide/">
@@ -82,7 +82,7 @@
      (<span class="token-type">Flyology.Lightweight_Task</span>);
 <span class="token-keyword">end</span> Connection;
 
-<span class="token-comment">-- Still ordinary blocking-looking Ada.</span>
+<span class="token-comment">-- An ordinary synchronous Ada call.</span>
 Flyology.IO.Sockets.Receive
   (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
           </div>
@@ -158,7 +158,7 @@ Flyology.IO.Sockets.Receive
           </li>
           <li class="mechanic-item">
             <span class="mechanic-index">03</span>
-            <div><h3>Stackful contexts</h3><p>Guarded <code>mmap</code> stacks and a small register swap preserve locals, exception state, Ada task identity, and blocking-looking control flow.</p></div>
+            <div><h3>Stackful contexts</h3><p>Guarded <code>mmap</code> stacks and a small register swap preserve locals, exception state, Ada task identity, and synchronous control flow.</p></div>
           </li>
           <li class="mechanic-item">
             <span class="mechanic-index">04</span>
@@ -171,7 +171,7 @@ Flyology.IO.Sockets.Receive
         <div class="io-inner">
           <div>
             <p class="eyebrow">Task-aware I/O</p>
-            <h2 id="io-title">Calls look blocking. The lightweight task does not block its loop.</h2>
+            <h2 id="io-title">Calls stay synchronous. A lightweight wait does not block its loop.</h2>
             <p class="io-intro">The same public operation works from either lane. Values, exceptions, retry deadlines, and ownership rules stay consistent while the waiting mechanism changes underneath.</p>
           </div>
           <ul class="io-list">
