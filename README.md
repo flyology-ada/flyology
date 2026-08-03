@@ -1064,6 +1064,15 @@ origin with credentials, validate preflights, and emit `Vary` fields for the
 request values that affect a response. HSTS remains disabled unless an
 application explicitly configures it for a TLS deployment.
 
+Admission-control middleware can narrow the current absolute deadline, enforce
+nonblocking global and per-route bulkheads, and apply bounded per-client,
+per-route token buckets. Deadline layers cannot extend the server or route
+deadline. Bulkhead permits are controlled values released during normal return,
+exception unwinding, cancellation, and task finalization. Rate limiting requires
+an explicit client-key function, so proxy forwarding headers are trusted only
+when application policy says so; retained keys are capped, old entries are
+evicted, and the table is sharded to avoid one global hot-path lock.
+
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
 13 upgrade and client key. Its default origin policy rejects browser `Origin`

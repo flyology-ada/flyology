@@ -1,4 +1,5 @@
 with Ada.Exceptions;
+with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
@@ -12,11 +13,14 @@ with Flyology.HTTP.Server.CORS;
 with Flyology.HTTP.Server.Logging;
 with Flyology.HTTP.Server.Metrics;
 with Flyology.HTTP.Server.Middleware_Authentication;
+with Flyology.HTTP.Server.Middleware_Bulkheads;
 with Flyology.HTTP.Server.Middleware_CORS;
+with Flyology.HTTP.Server.Middleware_Deadlines;
 with Flyology.HTTP.Server.Middleware_Errors;
 with Flyology.HTTP.Server.Middleware_Logging;
 with Flyology.HTTP.Server.Middleware_Metrics;
 with Flyology.HTTP.Server.Middleware_Request_IDs;
+with Flyology.HTTP.Server.Middleware_Rate_Limits;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Routing;
 with Flyology.IO;
@@ -1587,6 +1591,131 @@ procedure HTTP_Smoke is
       end;
    end Check_Standard_Middleware;
 
+   procedure Check_Admission_Middleware is
+      use type Ada.Real_Time.Time;
+      package Applications renames Flyology.HTTP.Server.Applications;
+
+      type Context is record
+         Calls : Natural := 0;
+      end record;
+      package Routing is new Flyology.HTTP.Server.Routing (Context);
+
+      Clock_Value : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Permit_Calls : Natural := 0;
+      function Test_Clock return Ada.Real_Time.Time is (Clock_Value);
+      function Client_Key (X : Applications.Exchange) return String is
+        (X.Request_Header ("X-Client"));
+
+      package Rates is new Flyology.HTTP.Server.Middleware_Rate_Limits
+        (Context, Routing.Components, Client_Key,
+         Capacity => 1, Clock => Test_Clock);
+      package Bulkheads is new Flyology.HTTP.Server.Middleware_Bulkheads
+        (Context, Routing.Components, Route_Capacity => 4);
+      package Deadlines is new Flyology.HTTP.Server.Middleware_Deadlines
+        (Context, Routing.Components, Maximum => 1.0, Clock => Test_Clock);
+
+      procedure Limited_Handler
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         State.Calls := State.Calls + 1;
+         pragma Assert
+           (X.Deadline <= Clock_Value + Ada.Real_Time.Seconds (1));
+         X.Text (200, "limited");
+      end Limited_Handler;
+
+      procedure Fails_Once
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+      begin
+         Permit_Calls := Permit_Calls + 1;
+         if Permit_Calls = 1 then
+            raise Constraint_Error with "first request fails";
+         end if;
+         X.Text (200, "recovered");
+      end Fails_Once;
+
+      Routes : Routing.Router
+        (Capacity => 2, Slashes => Routing.Strict_Slashes);
+      State : Context;
+      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+
+      function Run (Path, Key : String) return String is
+         Wire : aliased Memory_Transport;
+      begin
+         Wire.Input := To_Unbounded_String
+           ("GET " & Path & " HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "X-Client: " & Key & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            begin
+               Routes.Serve (State, Client, Peer);
+            exception
+               when Constraint_Error =>
+                  null;
+            end;
+         end;
+         return To_String (Wire.Output);
+      end Run;
+   begin
+      Routes.Get
+        ("/limited", Limited_Handler'Access, Name => "limited",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Rate_Per_Second => 2,
+              Concurrency     => 1));
+      Routes.Get
+        ("/permit", Fails_Once'Access, Name => "permit",
+         Policy =>
+           (Routing.Default_Route_Policy with delta Concurrency => 1));
+      Routes.Add_Middleware (Deadlines.Call'Access);
+      Routes.Add_Middleware (Rates.Call'Access);
+      Routes.Add_Middleware (Bulkheads.Call'Access);
+
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/limited", "a"), "200 OK") /= 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/limited", "a"), "200 OK") /= 0);
+      declare
+         Output : constant String := Run ("/limited", "a");
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "429 Too Many Requests") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "Retry-After: 1") /= 0);
+      end;
+      Clock_Value := Clock_Value + Ada.Real_Time.Milliseconds (500);
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/limited", "a"), "200 OK") /= 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/limited", "b"), "200 OK") /= 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/limited", "a"), "200 OK") /= 0);
+
+      Permit_Calls := 0;
+      declare
+         Ignored : constant String := Run ("/permit", "a");
+         pragma Unreferenced (Ignored);
+      begin
+         null;
+      end;
+      declare
+         Output : constant String := Run ("/permit", "a");
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "200 OK") /= 0, Output);
+      end;
+   end Check_Admission_Middleware;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -1606,4 +1735,5 @@ begin
    Check_Applications_And_Routing;
    Check_Middleware;
    Check_Standard_Middleware;
+   Check_Admission_Middleware;
 end HTTP_Smoke;

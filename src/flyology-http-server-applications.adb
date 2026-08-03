@@ -154,6 +154,12 @@ package body Flyology.HTTP.Server.Applications is
    function CORS_Policy (Item : Exchange) return Natural is
      (Item.CORS_Policy_Value);
 
+   function Concurrency_Limit (Item : Exchange) return Natural is
+     (Item.Concurrency_Value);
+
+   function Rate_Per_Second (Item : Exchange) return Natural is
+     (Item.Rate_Value);
+
    function Body_Policy (Item : Exchange) return Request_Body_Policy is
      (Item.Body_Mode);
 
@@ -453,7 +459,9 @@ package body Flyology.HTTP.Server.Applications is
       Normalized_Path : String;
       Policy          : Request_Body_Policy;
       Authentication  : Authentication_Mode;
-      CORS_Policy     : Natural)
+      CORS_Policy     : Natural;
+      Concurrency     : Natural;
+      Rate_Per_Second : Natural)
    is
    begin
       Item.Route_Value := To_Unbounded_String (Name);
@@ -461,6 +469,8 @@ package body Flyology.HTTP.Server.Applications is
       Item.Body_Mode := Policy;
       Item.Authentication_Value := Authentication;
       Item.CORS_Policy_Value := CORS_Policy;
+      Item.Concurrency_Value := Concurrency;
+      Item.Rate_Value := Rate_Per_Second;
       Item.Parameter_Count := 0;
       Item.Parameters := (others => (Null_Unbounded_String,
                                      Null_Unbounded_String));

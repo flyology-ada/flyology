@@ -181,6 +181,16 @@ package Flyology.HTTP.Server.Applications is
    --  @return CORS policy slot or zero
    function CORS_Policy (Item : Exchange) return Natural;
 
+   --  Return the route concurrency limit; zero means unlimited.
+   --  @param Item Request exchange
+   --  @return Route concurrency bound
+   function Concurrency_Limit (Item : Exchange) return Natural;
+
+   --  Return the route per-client request rate; zero means unlimited.
+   --  @param Item Request exchange
+   --  @return Requests per second
+   function Rate_Per_Second (Item : Exchange) return Natural;
+
    --  Return the route-selected body policy.
    --  @param Item Request exchange
    --  @return Current body policy
@@ -337,13 +347,17 @@ package Flyology.HTTP.Server.Applications is
    --  @param Policy Route body policy
    --  @param Authentication Route authentication requirement
    --  @param CORS_Policy Bounded CORS registry slot
+   --  @param Concurrency Route concurrency limit
+   --  @param Rate_Per_Second Route per-client request rate
    procedure Configure_Route
      (Item            : in out Exchange;
       Name            : String;
       Normalized_Path : String;
       Policy          : Request_Body_Policy;
       Authentication  : Authentication_Mode;
-      CORS_Policy     : Natural);
+      CORS_Policy     : Natural;
+      Concurrency     : Natural;
+      Rate_Per_Second : Natural);
 
    --  Append one decoded route parameter. Duplicate names or capacity excess
    --  raise Program_Error. Intended for Flyology router packages.
@@ -385,6 +399,8 @@ private
       Body_Mode         : Request_Body_Policy := Reject_Body;
       Authentication_Value : Authentication_Mode := No_Authentication;
       CORS_Policy_Value : Natural := 0;
+      Concurrency_Value : Natural := 0;
+      Rate_Value        : Natural := 0;
       Extra_Headers     : Unbounded_String;
       Response_Value    : Response_State := Not_Started;
       Status_Value      : Natural := 0;
