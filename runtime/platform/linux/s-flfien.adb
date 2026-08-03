@@ -1069,19 +1069,33 @@ package body System.Flyology.File_Engine is
          Note_Uring_CQ_Capacity (C.unsigned (State.CQ_Capacity));
       end if;
 
-      Result :=
-        Linux_IO_Uring_Register
-          (State.Ring_FD,
-           C.unsigned (IORING_REGISTER_EVENTFD_ASYNC),
-           Wake_Copy'Address,
-           1);
-      if Result < 0 and then C.int (OSI.errno) = EINVAL then
+      if Faults.Enabled
+        and then Faults.Fail (Faults.File_Uring_Synchronous_Eventfd)
+      then
+         --  A fault-enabled fairness regression needs every completion,
+         --  including an inline regular-file completion, to notify epoll.
+         --  Production retains the lower-traffic asynchronous registration.
          Result :=
            Linux_IO_Uring_Register
              (State.Ring_FD,
               C.unsigned (IORING_REGISTER_EVENTFD),
               Wake_Copy'Address,
               1);
+      else
+         Result :=
+           Linux_IO_Uring_Register
+             (State.Ring_FD,
+              C.unsigned (IORING_REGISTER_EVENTFD_ASYNC),
+              Wake_Copy'Address,
+              1);
+         if Result < 0 and then C.int (OSI.errno) = EINVAL then
+            Result :=
+              Linux_IO_Uring_Register
+                (State.Ring_FD,
+                 C.unsigned (IORING_REGISTER_EVENTFD),
+                 Wake_Copy'Address,
+                 1);
+         end if;
       end if;
       if Result < 0 then
          return Initialize_Native_AIO (Item, State, Wake_FD);

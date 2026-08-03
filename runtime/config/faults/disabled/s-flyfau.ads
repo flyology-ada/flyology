@@ -36,7 +36,8 @@ package System.Flyology.Faults is
       File_Uring_Flush_EBUSY,
       File_Uring_Probe_Unsupported,
       File_Uring_Post_Setup_Failure,
-      Poller_File_Drain_Pause);
+      Poller_File_Drain_Pause,
+      File_Uring_Synchronous_Eventfd);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -71,7 +72,8 @@ package System.Flyology.Faults is
       File_Uring_Flush_EBUSY      => 30,
       File_Uring_Probe_Unsupported => 31,
       File_Uring_Post_Setup_Failure => 32,
-      Poller_File_Drain_Pause        => 33);
+      Poller_File_Drain_Pause        => 33,
+      File_Uring_Synchronous_Eventfd => 34);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);

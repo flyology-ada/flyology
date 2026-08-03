@@ -19,6 +19,10 @@ procedure Linux_Poller_Fairness_Smoke is
    use type Pollers.Event_Kind;
    use type System.Address;
 
+   function Selected_Linux_Backend return Interfaces.C.int;
+   pragma Import
+     (C, Selected_Linux_Backend, "flyology_linux_file_backend");
+
    Path : constant String := "/tmp/flyology-poller-fairness.data";
    Iterations : constant Positive := 128;
 
@@ -211,10 +215,25 @@ begin
    end;
 
    GNAT.Sockets.Create_Socket_Pair (Reader, Writer);
+   Fault_Control.Reset;
+   Fault_Control.Arm (Fault_Control.File_Uring_Synchronous_Eventfd);
    if not Pollers.Initialize (Poller) then
       raise Program_Error with "could not initialize Linux poller";
    end if;
    Initialized := True;
+   if Selected_Linux_Backend = 1 then
+      if Fault_Control.Calls
+        (Fault_Control.File_Uring_Synchronous_Eventfd) /= 1
+      then
+         raise Program_Error with
+           "io_uring did not select synchronous eventfd for fairness test";
+      end if;
+   elsif Fault_Control.Calls
+     (Fault_Control.File_Uring_Synchronous_Eventfd) /= 0
+   then
+      raise Program_Error with
+        "native AIO reached the io_uring eventfd registration seam";
+   end if;
    Fault_Control.Reset;
 
    --  A one-element batch can be filled by a file completion. Consuming the
