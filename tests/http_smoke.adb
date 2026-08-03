@@ -1957,8 +1957,12 @@ procedure HTTP_Smoke is
    procedure Check_Standard_Middleware is
       package Applications renames Flyology.HTTP.Server.Applications;
 
+      type Generated_ID_Mode is (Valid_ID, Invalid_ID, Oversized_ID);
+
       type Context is record
-         Principal : Unbounded_String;
+         Principal          : Unbounded_String;
+         Generated_ID_Count : Natural := 0;
+         Generated_ID       : Generated_ID_Mode := Valid_ID;
       end record;
 
       package Routing is new Flyology.HTTP.Server.Routing (Context);
@@ -2019,6 +2023,27 @@ procedure HTTP_Smoke is
             else Null_Unbounded_String);
       end Authenticate;
 
+      procedure Generate_Request_ID
+        (State : in out Context;
+         X     : Applications.Exchange;
+         Value : out Unbounded_String)
+      is
+      begin
+         State.Generated_ID_Count := State.Generated_ID_Count + 1;
+         case State.Generated_ID is
+            when Valid_ID =>
+               Value := To_Unbounded_String
+                 ("custom-" & X.Request_Method & "-"
+                  & Ada.Strings.Fixed.Trim
+                      (Natural'Image (State.Generated_ID_Count),
+                       Ada.Strings.Both));
+            when Invalid_ID =>
+               Value := To_Unbounded_String ("invalid generated value");
+            when Oversized_ID =>
+               Value := To_Unbounded_String (String'(1 .. 129 => 'a'));
+         end case;
+      end Generate_Request_ID;
+
       Allowed : aliased constant Flyology.HTTP.Server.CORS.Policy :=
         Flyology.HTTP.Server.CORS.Create
           (Allowed_Origins   => "https://app.example",
@@ -2041,6 +2066,12 @@ procedure HTTP_Smoke is
 
       package IDs is new Flyology.HTTP.Server.Middleware_Request_IDs
         (Context, Routing.Components, Trust_Inbound => True);
+      package Generated_IDs is new
+        Flyology.HTTP.Server.Middleware_Request_IDs
+          (Context, Routing.Components,
+           Trust_Inbound => False,
+           Header_Name   => "X-Trace-ID",
+           Generate      => Generate_Request_ID'Access);
       package Auth is new Flyology.HTTP.Server.Middleware_Authentication
         (Context, Routing.Components, Authenticate);
       package CORS_Layer is new Flyology.HTTP.Server.Middleware_CORS
@@ -2077,6 +2108,8 @@ procedure HTTP_Smoke is
 
       Routes : Routing.Router
         (Capacity => 3, Slashes => Routing.Strict_Slashes);
+      Generated_ID_Routes : Routing.Router
+        (Capacity => 1, Slashes => Routing.Strict_Slashes);
       State : Context;
       Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
         (Family => GNAT.Sockets.Family_Inet,
@@ -2100,6 +2133,28 @@ procedure HTTP_Smoke is
          end;
          return To_String (Wire.Output);
       end Run;
+
+      function Run_With_Generated_ID
+        (Headers : String := "") return String
+      is
+         Wire : aliased Memory_Transport;
+      begin
+         Wire.Input := To_Unbounded_String
+           ("GET /public HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF & Headers
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Generated_ID_Routes.Serve (State, Client, Peer);
+         exception
+            when Constraint_Error =>
+               --  Invalid generator output is rejected before any response
+               --  header or downstream handler can observe the value.
+               null;
+         end;
+         return To_String (Wire.Output);
+      end Run_With_Generated_ID;
    begin
       Routes.Get
         ("/private", Private_Handler'Access, Name => "private",
@@ -2114,6 +2169,45 @@ procedure HTTP_Smoke is
       Routes.Add_Middleware (Headers.Call'Access);
       Routes.Add_Middleware (CORS_Layer.Call'Access);
       Routes.Add_Middleware (Auth.Call'Access);
+      Generated_ID_Routes.Get
+        ("/public", Public_Handler'Access, Name => "generated-id");
+      Generated_ID_Routes.Add_Middleware (Generated_IDs.Call'Access);
+
+      declare
+         Output : constant String := Run_With_Generated_ID
+           ("X-Trace-ID: ignored-inbound" & CRLF);
+      begin
+         pragma Assert (State.Generated_ID_Count = 1);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "X-Trace-ID: custom-GET-1") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "ignored-inbound") = 0);
+      end;
+
+      State.Generated_ID := Invalid_ID;
+      declare
+         Output : constant String := Run_With_Generated_ID;
+      begin
+         pragma Assert (State.Generated_ID_Count = 2);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "500 Internal Server Error") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "X-Trace-ID:") = 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "invalid generated value") = 0);
+      end;
+      State.Generated_ID := Oversized_ID;
+      declare
+         Output : constant String := Run_With_Generated_ID;
+      begin
+         pragma Assert (State.Generated_ID_Count = 3);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "500 Internal Server Error") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "X-Trace-ID:") = 0);
+      end;
+      State.Generated_ID := Valid_ID;
 
       declare
          Output : constant String := Run

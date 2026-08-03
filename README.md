@@ -1079,7 +1079,12 @@ response bytes force connection close without attempting replacement framing.
 Optional typed middleware packages provide request IDs, access logging,
 bounded-cardinality metrics, authentication hooks, CORS, and browser security
 headers. Inbound request IDs are trusted only when the application selects that
-policy and valid identifiers cannot contain header separators. Logging omits
+policy and valid identifiers cannot contain header separators. The request-ID
+component uses its bounded, protected `fly-N` counter by default, or an optional
+application callback can derive an identifier from explicit application state
+and a read-only borrowed exchange. Callback output is subject to the same safe
+character set and 128-byte maximum before it can enter exchange state, response
+headers, logs, or metrics. Logging omits
 the original target by default and never receives authorization, cookies, or
 body content. Authentication delegates credential verification to application
 code and installs only its bounded principal. CORS policies reject wildcard

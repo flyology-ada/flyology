@@ -38,13 +38,13 @@ package body Flyology.HTTP.Server.Middleware_Request_IDs is
       return True;
    end Valid;
 
-   function Generate return String is
+   function Generate_Default return String is
       Value : Natural;
    begin
       Generator.Take (Value);
       return "fly-" & Ada.Strings.Fixed.Trim
         (Natural'Image (Value), Ada.Strings.Both);
-   end Generate;
+   end Generate_Default;
 
    procedure Call
      (Context : in out App_Context;
@@ -52,12 +52,33 @@ package body Flyology.HTTP.Server.Middleware_Request_IDs is
       Next    : in out Components.Next_Handler)
    is
       Inbound : constant String := X.Request_Header (Header_Name);
-      Value   : constant String :=
-        (if Trust_Inbound and then Valid (Inbound)
-         then Inbound else Generate);
+      Generated : Ada.Strings.Unbounded.Unbounded_String;
    begin
-      X.Set_Request_ID (Value);
-      X.Add_Header (Header_Name, Value);
+      if Trust_Inbound and then Valid (Inbound) then
+         Generated := Ada.Strings.Unbounded.To_Unbounded_String (Inbound);
+      elsif Generate = null then
+         Generated := Ada.Strings.Unbounded.To_Unbounded_String
+           (Generate_Default);
+      else
+         --  X is a read-only borrow for the duration of this call. A custom
+         --  generator must not retain it or return attacker-controlled bytes
+         --  without its own normalization policy.
+         Generate (Context, X, Generated);
+         if not Valid (Ada.Strings.Unbounded.To_String (Generated)) then
+            raise Constraint_Error with
+              "request ID generator returned an invalid value";
+         end if;
+      end if;
+
+      declare
+         Value : constant String :=
+           Ada.Strings.Unbounded.To_String (Generated);
+      begin
+         --  Validation precedes both mutations, so a bad custom value cannot
+         --  enter exchange state, response headers, logs, or metrics.
+         X.Set_Request_ID (Value);
+         X.Add_Header (Header_Name, Value);
+      end;
       Next.Call (Context, X);
    end Call;
 
