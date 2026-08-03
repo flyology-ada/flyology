@@ -214,6 +214,14 @@ Flyology.HTTP.Server.SSE_Handlers.Run
 
           <section id="websocket"><span class="step-label">HTTP 13</span><h2>Give WebSocket writes one owner.</h2>
             <p>WebSocket lifecycle endpoints require an explicit browser-origin policy. Incoming messages are reassembled under the shared ingress budget and bounded maximum. Producers receive only a session mailbox; the owner drains it, serializes all frames, processes open/message/close callbacks, and performs a clean close. The maintained example starts two scoped producers without exposing the exchange or connection to either task.</p>
+            <p>Application payloads are byte-native. A binary send accepts <code>Ada.Streams.Stream_Element_Array</code> directly; a receive returns owned <code>Flyology.Bytes.Unbounded_Bytes</code> because the reassembled length is known only at runtime, and <code>To_Array</code> produces the standard contiguous byte array. The wrapper uses a definite vector internally and hides its index and capacity policy. Text helpers perform an explicitly named one-to-one byte-string mapping; they do not reinterpret arbitrary binary data as characters.</p>
+            <figure class="code-panel"><figcaption>binary message echo</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Data : Flyology.Bytes.Unbounded_Bytes;
+Kind : HTTP.WebSocket_Data_Kind;
+
+X.Receive_WebSocket (Kind, Data, Closed);
+if not Closed and then Kind = HTTP.Binary_Frame then
+   X.Send_WebSocket (Kind, Flyology.Bytes.To_Array (Data));
+end if;</code></pre></figure>
             <figure class="code-panel"><figcaption>lifecycle configuration</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">package Chat_Lifecycle is new
   WS.Lifecycle (WS_Open, WS_Message, WS_Close);
 

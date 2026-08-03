@@ -2,6 +2,7 @@ with Ada.Streams;
 with Ada.Finalization;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded;
+with Flyology.Bytes;
 with Flyology.Cancellation;
 
 --  Provides a bounded HTTP/1.1 connection engine over a task-aware transport.
@@ -473,7 +474,7 @@ package Flyology.HTTP.Server is
    procedure Receive_WebSocket
      (Item    : in out Connection;
       Kind    : out WebSocket_Data_Kind;
-      Data    : out Ada.Strings.Unbounded.Unbounded_String;
+      Data    : out Flyology.Bytes.Unbounded_Bytes;
       Closed  : out Boolean;
       Max_Message : Natural := Max_WebSocket_Frame;
       Timeout : Duration := 30.0;
@@ -489,6 +490,18 @@ package Flyology.HTTP.Server is
    procedure Send_WebSocket
      (Item    : in out Connection;
       Kind    : WebSocket_Data_Kind;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null);
+
+   --  Send one unmasked, final UTF-8 text frame. Data is interpreted as UTF-8
+   --  encoded octets and validated before any frame bytes are written.
+   --  @param Item Upgraded WebSocket connection
+   --  @param Data UTF-8 byte string
+   --  @param Timeout Transport send deadline
+   --  @param Token Optional cancellation source
+   procedure Send_WebSocket
+     (Item    : in out Connection;
       Data    : String;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
@@ -584,7 +597,7 @@ private
         Ada.Real_Time.Time_Last;
       WebSocket_Close_Sent : Boolean := False;
       WebSocket_Message_Kind : WebSocket_Data_Kind := Text_Frame;
-      WebSocket_Message : Unbounded_String;
+      WebSocket_Message : Flyology.Bytes.Unbounded_Bytes;
       WebSocket_Message_Limit : Natural := 0;
       WebSocket_Control_Count : Natural := 0;
    end record;

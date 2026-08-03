@@ -1,5 +1,6 @@
 with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Metrics;
+with Flyology.Bytes;
 
 --  Accessibility-safe WebSocket lifecycle adapter for nested application
 --  callbacks. Instantiate it in the callbacks' scope; Run is synchronous.
@@ -13,7 +14,7 @@ generic
      (X    : in out Applications.Exchange;
       Item : in out Session;
       Kind : WebSocket_Data_Kind;
-      Data : String);
+      Data : Flyology.Bytes.Unbounded_Bytes);
    with procedure Closed
      (X : in out Applications.Exchange; Item : in out Session);
 package Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle is

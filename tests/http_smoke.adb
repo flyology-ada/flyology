@@ -7,6 +7,7 @@ with Ada.Unchecked_Deallocation;
 with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.Bounded_Channels;
+with Flyology.Bytes;
 with Flyology.HTTP;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
@@ -35,10 +36,12 @@ with Flyology.IO;
 
 procedure HTTP_Smoke is
    package HTTP_Server renames Flyology.HTTP.Server;
+   package Bytes renames Flyology.Bytes;
 
    use Ada.Strings.Unbounded;
    use type Ada.Exceptions.Exception_Id;
    use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
    use type Flyology.HTTP.HTTP_Version;
    use type HTTP_Server.WebSocket_Data_Kind;
@@ -565,7 +568,7 @@ procedure HTTP_Smoke is
       declare
          Client : HTTP_Server.Connection (Wire'Access);
          Request : HTTP_Server.Request;
-         Message : Unbounded_String;
+         Message : Bytes.Unbounded_Bytes;
          Kind : HTTP_Server.WebSocket_Data_Kind;
          Closed : Boolean;
       begin
@@ -576,8 +579,9 @@ procedure HTTP_Smoke is
            (Client, Kind, Message, Closed);
          pragma Assert (not Closed);
          pragma Assert (Kind = HTTP_Server.Text_Frame);
-         pragma Assert (To_String (Message) = "Hi");
-         HTTP_Server.Send_WebSocket (Client, Kind, To_String (Message));
+         pragma Assert (Bytes.To_Byte_String (Message) = "Hi");
+         HTTP_Server.Send_WebSocket
+           (Client, Kind, Bytes.To_Array (Message));
          HTTP_Server.Close_WebSocket (Client);
       end;
       pragma Assert (HTTP_Server.Current (Budget).Current = 0);
@@ -596,6 +600,66 @@ procedure HTTP_Smoke is
                Character'Val (16#81#) & Character'Val (2) & "Hi") /= 0);
       end;
    end Check_WebSocket;
+
+   procedure Check_WebSocket_Binary_Bytes is
+      Payload : constant String :=
+        Character'Val (0) & Character'Val (128) & Character'Val (255);
+
+      function Frame return String is
+         Mask   : constant String := "mask";
+         Result : Unbounded_String;
+      begin
+         Append (Result, Character'Val (16#82#));
+         Append (Result, Character'Val (16#80# + Payload'Length));
+         Append (Result, Mask);
+         for Index in Payload'Range loop
+            Append
+              (Result,
+               Character'Val
+                 (Natural
+                    (Ada.Streams.Stream_Element
+                       (Character'Pos (Payload (Index)))
+                     xor Ada.Streams.Stream_Element
+                       (Character'Pos
+                          (Mask ((Index - Payload'First) mod 4 + 1))))));
+         end loop;
+         return To_String (Result);
+      end Frame;
+
+      Wire : aliased Memory_Transport;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("GET /binary HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF
+         & Frame);
+      declare
+         Client   : HTTP_Server.Connection (Wire'Access);
+         Request  : HTTP_Server.Request;
+         Message  : Bytes.Unbounded_Bytes;
+         Kind     : HTTP_Server.WebSocket_Data_Kind;
+         Closed   : Boolean;
+         Expected : constant Ada.Streams.Stream_Element_Array :=
+           (1 => 0, 2 => 128, 3 => 255);
+      begin
+         HTTP_Server.Read_Request (Client, Request, Closed);
+         HTTP_Server.Accept_WebSocket (Client, Request);
+         HTTP_Server.Receive_WebSocket (Client, Kind, Message, Closed);
+         pragma Assert (not Closed);
+         pragma Assert (Kind = HTTP_Server.Binary_Frame);
+         pragma Assert (Bytes.To_Array (Message) = Expected);
+         HTTP_Server.Send_WebSocket
+           (Client, HTTP_Server.Binary_Frame, Bytes.To_Array (Message));
+         HTTP_Server.Close_WebSocket (Client);
+      end;
+      pragma Assert
+        (Ada.Strings.Fixed.Index
+           (To_String (Wire.Output),
+            Character'Val (16#82#) & Character'Val (3) & Payload) /= 0);
+   end Check_WebSocket_Binary_Bytes;
 
    procedure Check_Idle_WebSocket_Budget is
       Count : constant := 65;
@@ -628,7 +692,7 @@ procedure HTTP_Smoke is
             Request : HTTP_Server.Request;
             Closed  : Boolean;
             Kind    : HTTP_Server.WebSocket_Data_Kind;
-            Data    : Unbounded_String;
+            Data    : Bytes.Unbounded_Bytes;
             Timed_Out : Boolean := False;
          begin
             HTTP_Server.Read_Request_Head
@@ -674,7 +738,7 @@ procedure HTTP_Smoke is
          Client  : HTTP_Server.Connection (Wire'Access);
          Request : HTTP_Server.Request;
          Kind    : HTTP_Server.WebSocket_Data_Kind;
-         Data    : Unbounded_String;
+         Data    : Bytes.Unbounded_Bytes;
          Closed  : Boolean;
       begin
          HTTP_Server.Read_Request_Head (Client, Request, Closed);
@@ -690,7 +754,7 @@ procedure HTTP_Smoke is
                when Flyology.IO.Timeout_Error => null;
             end;
          end loop;
-         HTTP_Server.Send_WebSocket (Client, HTTP_Server.Text_Frame, "ok");
+         HTTP_Server.Send_WebSocket (Client, "ok");
          HTTP_Server.Close_WebSocket (Client);
       end;
    end Check_Periodic_WebSocket_Pings;
@@ -716,7 +780,7 @@ procedure HTTP_Smoke is
       Request : HTTP_Server.Request;
       Closed : Boolean;
       Kind : HTTP_Server.WebSocket_Data_Kind;
-      Data : Unbounded_String;
+      Data : Bytes.Unbounded_Bytes;
       Timed_Out : Boolean := False;
       Terminal : Boolean := False;
    begin
@@ -741,7 +805,7 @@ procedure HTTP_Smoke is
             when Flyology.IO.Timeout_Error => Timed_Out := True;
          end;
          begin
-            HTTP_Server.Send_WebSocket (Client, HTTP_Server.Text_Frame, "x");
+            HTTP_Server.Send_WebSocket (Client, "x");
          exception
             when Program_Error => Terminal := True;
          end;
@@ -773,13 +837,12 @@ procedure HTTP_Smoke is
          Wire.Timeout_On_Send_Call := Wire.Send_Calls + 1;
          begin
             HTTP_Server.Send_WebSocket
-              (Client, HTTP_Server.Text_Frame, "partial", Timeout => 0.001);
+              (Client, "partial", Timeout => 0.001);
          exception
             when Flyology.IO.Timeout_Error => Timed_Out := True;
          end;
          begin
-            HTTP_Server.Send_WebSocket
-              (Client, HTTP_Server.Text_Frame, "again");
+            HTTP_Server.Send_WebSocket (Client, "again");
          exception
             when Program_Error => Terminal := True;
          end;
@@ -825,7 +888,7 @@ procedure HTTP_Smoke is
       declare
          Client  : HTTP_Server.Connection (Wire'Access);
          Request : HTTP_Server.Request;
-         Message : Unbounded_String;
+         Message : Bytes.Unbounded_Bytes;
          Kind    : HTTP_Server.WebSocket_Data_Kind;
          Closed  : Boolean;
       begin
@@ -2340,10 +2403,10 @@ procedure HTTP_Smoke is
            (Capacity => 1, Byte_Limit => 6, Budget => Budget'Access);
          Message : WS.Outgoing_Message;
       begin
-         Message.Data := To_Unbounded_String ("123456");
+         Message.Data := Bytes.From_Byte_String ("123456");
          WS.Try_Publish (Item, Message, Accepted);
          pragma Assert (Accepted);
-         Message.Data := To_Unbounded_String ("x");
+         Message.Data := Bytes.From_Byte_String ("x");
          WS.Try_Publish (Other, Message, Accepted);
          pragma Assert (not Accepted);
          pragma Assert (HTTP_Server.Current (Budget).Current = 6);
@@ -2548,7 +2611,7 @@ procedure HTTP_Smoke is
          WebSockets.Try_Publish
            (Item,
             (Kind => HTTP_Server.Text_Frame,
-             Data => To_Unbounded_String
+             Data => Bytes.From_Byte_String
                (String'
                   (1 .. WebSockets.Max_Queued_Message_Bytes + 1 => 'x'))),
             Accepted);
@@ -2556,7 +2619,7 @@ procedure HTTP_Smoke is
          WebSockets.Try_Publish
            (Item,
             (Kind => HTTP_Server.Text_Frame,
-             Data => To_Unbounded_String ("open")), Accepted);
+             Data => Bytes.From_Byte_String ("open")), Accepted);
          pragma Assert (Accepted);
       end On_Open;
 
@@ -2564,14 +2627,16 @@ procedure HTTP_Smoke is
         (X    : in out Applications.Exchange;
          Item : in out WebSockets.Session;
          Kind : HTTP_Server.WebSocket_Data_Kind;
-         Data : String)
+         Data : Bytes.Unbounded_Bytes)
       is
          pragma Unreferenced (X);
          Accepted : Boolean;
       begin
          WebSockets.Try_Publish
            (Item,
-            (Kind => Kind, Data => To_Unbounded_String ("echo:" & Data)),
+            (Kind => Kind,
+             Data => Bytes.From_Byte_String
+               ("echo:" & Bytes.To_Byte_String (Data))),
             Accepted);
          pragma Assert (Accepted);
       end On_Message;
@@ -2716,7 +2781,7 @@ procedure HTTP_Smoke is
       Closed : Boolean;
       Timed_Out : Boolean := False;
       Kind : HTTP_Server.WebSocket_Data_Kind;
-      Data : Unbounded_String;
+      Data : Bytes.Unbounded_Bytes;
       Budget : aliased HTTP_Server.Ingress_Budget (Limit => 100);
    begin
       Wire.Input := To_Unbounded_String (Head & First & Last);
@@ -2744,7 +2809,7 @@ procedure HTTP_Smoke is
             Message_Timeout => 1.0);
          pragma Assert (not Closed);
          pragma Assert (Kind = HTTP_Server.Text_Frame);
-         pragma Assert (To_String (Data) = "hello");
+         pragma Assert (Bytes.To_Byte_String (Data) = "hello");
          pragma Assert (HTTP_Server.Current (Budget).Current = 0);
          HTTP_Server.Close_WebSocket (Client, Timeout => 1.0);
       end;
@@ -2820,6 +2885,7 @@ begin
    Check_Response_Framing;
    Check_SSE;
    Check_WebSocket;
+   Check_WebSocket_Binary_Bytes;
    Check_Idle_WebSocket_Budget;
    Check_Periodic_WebSocket_Pings;
    Check_WebSocket_Control_Write_Timeout;

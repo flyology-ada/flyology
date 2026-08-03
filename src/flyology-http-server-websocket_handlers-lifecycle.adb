@@ -22,7 +22,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle is
         (Value_X    : in out Applications.Exchange;
          Value_Item : in out Session;
          Value_Kind : WebSocket_Data_Kind;
-         Value_Data : String) is
+         Value_Data : Flyology.Bytes.Unbounded_Bytes) is
       begin
          Message (Value_X, Value_Item, Value_Kind, Value_Data);
       end Call_Message;

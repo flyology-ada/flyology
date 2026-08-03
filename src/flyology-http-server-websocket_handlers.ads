@@ -1,6 +1,6 @@
-with Ada.Strings.Unbounded;
 with Ada.Finalization;
 with Flyology.Bounded_Channels;
+with Flyology.Bytes;
 with Flyology.Cancellation;
 with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Metrics;
@@ -13,7 +13,7 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
    --  @field Data Complete message payload
    type Outgoing_Message is record
       Kind : WebSocket_Data_Kind := Text_Frame;
-      Data : Ada.Strings.Unbounded.Unbounded_String;
+      Data : Flyology.Bytes.Unbounded_Bytes;
    end record;
 
    --  Maximum payload bytes retained by one queued message.
@@ -92,7 +92,7 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
      (X    : in out Applications.Exchange;
       Item : in out Session;
       Kind : WebSocket_Data_Kind;
-      Data : String);
+      Data : Flyology.Bytes.Unbounded_Bytes);
 
    --  Lifecycle callback invoked once after a peer or server close.
    --  @param X Borrowed request exchange
@@ -125,7 +125,7 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
         (X    : in out Applications.Exchange;
          Item : in out Session;
          Kind : WebSocket_Data_Kind;
-         Data : String) := null;
+         Data : Flyology.Bytes.Unbounded_Bytes) := null;
       Closed         : access procedure
         (X : in out Applications.Exchange; Item : in out Session) := null;
       Protocol       : String := "";

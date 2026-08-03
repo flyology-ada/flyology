@@ -1,9 +1,9 @@
 with Ada.Command_Line;
 with Ada.Streams;
-with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with GNAT.Sockets;
 with Flyology;
+with Flyology.Bytes;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Connection_Handlers;
 with Flyology.HTTP.Server.Connections;
@@ -77,7 +77,7 @@ procedure HTTP_Server is
            (Item  : in out HTTP_Engine.Connection;
             Value : HTTP_Engine.Request)
          is
-            Message : Ada.Strings.Unbounded.Unbounded_String;
+            Message : Flyology.Bytes.Unbounded_Bytes;
             Kind    : HTTP_Engine.WebSocket_Data_Kind;
             Closed  : Boolean;
          begin
@@ -133,7 +133,7 @@ procedure HTTP_Server is
                   Timeout => 30.0, Token => Cancellation);
                if not Closed then
                   HTTP_Engine.Send_WebSocket
-                    (Item, Kind, Ada.Strings.Unbounded.To_String (Message),
+                    (Item, Kind, Flyology.Bytes.To_Array (Message),
                      Timeout => 5.0, Token => Cancellation);
                   HTTP_Engine.Close_WebSocket
                     (Item, Timeout => 5.0, Token => Cancellation);

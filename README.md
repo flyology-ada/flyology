@@ -1090,6 +1090,15 @@ the only connection writer. WebSocket lifecycle routes require the route's
 upgrade policy and an explicit browser-origin policy. Retained and reassembled
 messages still reserve the shared ingress budget.
 
+WebSocket application payloads use `Flyology.Bytes.Unbounded_Bytes`, an owned
+byte sequence backed by a definite vector. `Ada.Streams.Stream_Element_Array`
+remains the contiguous I/O boundary: binary sends accept it directly and
+`Flyology.Bytes.To_Array` returns it from a received message. The wrapper is
+needed because a reassembled receive result has a runtime-determined length;
+it hides container indices and capacity from protocol users. Explicit
+`From_Byte_String` and `To_Byte_String` helpers provide one-to-one octet
+mapping for already encoded WebSocket text, not character-set conversion.
+
 `Flyology.Task_Scopes` runs a bounded homogeneous group of child operations as
 ordinary structured Ada lightweight tasks; native work is available only
 through the separately application-bounded executor. A scope's parent token is

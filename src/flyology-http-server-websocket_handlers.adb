@@ -48,7 +48,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
    end Finalize;
 
    function Payload_Bytes (Value : Outgoing_Message) return Natural is
-     (Length (Value.Data));
+     (Flyology.Bytes.Length (Value.Data));
 
    procedure Reserve
      (Item    : in out Session;
@@ -108,7 +108,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
       Granted : Boolean;
       Guard   : Reservation_Guard;
    begin
-      if Length (Value.Data) > Max_Queued_Message_Bytes then
+      if Flyology.Bytes.Length (Value.Data) > Max_Queued_Message_Bytes then
          Accepted := False;
       else
          Guard.Transferred := Queued'Unchecked_Access;
@@ -136,7 +136,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
    begin
       Accepted := False;
       Timed_Out := False;
-      if Length (Value.Data) > Max_Queued_Message_Bytes then
+      if Flyology.Bytes.Length (Value.Data) > Max_Queued_Message_Bytes then
          return;
       end if;
       Guard.Transferred := Queued'Unchecked_Access;
@@ -176,7 +176,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
       Granted : Boolean;
       Guard   : Reservation_Guard;
    begin
-      if Length (Value.Data) > Max_Queued_Message_Bytes then
+      if Flyology.Bytes.Length (Value.Data) > Max_Queued_Message_Bytes then
          Accepted := False;
       else
          Guard.Transferred := Queued'Unchecked_Access;
@@ -216,7 +216,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
         (X    : in out Applications.Exchange;
          Item : in out Session;
          Kind : WebSocket_Data_Kind;
-         Data : String) := null;
+         Data : Flyology.Bytes.Unbounded_Bytes) := null;
       Closed         : access procedure
         (X : in out Applications.Exchange; Item : in out Session) := null;
       Protocol       : String := "";
@@ -230,7 +230,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
       Outgoing  : Outgoing_Message;
       Available : Boolean;
       Kind      : WebSocket_Data_Kind;
-      Data      : Unbounded_String;
+      Data      : Flyology.Bytes.Unbounded_Bytes;
       Peer_Closed : Boolean := False;
       Close_Called : Boolean := False;
       Outgoing_Burst : Natural := 0;
@@ -263,7 +263,8 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
          end if;
          if Available then
             begin
-               X.Send_WebSocket (Outgoing.Kind, To_String (Outgoing.Data));
+               X.Send_WebSocket
+                 (Outgoing.Kind, Flyology.Bytes.To_Array (Outgoing.Data));
             exception
                when others =>
                   Release_Retention (Item, Outgoing);
@@ -286,7 +287,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
                Count (Metric_Output, Metrics.WebSocket_Message);
                Outgoing_Burst := 0;
                if Message /= null then
-                  Message.all (X, Item, Kind, To_String (Data));
+                  Message.all (X, Item, Kind, Data);
                end if;
             exception
                when Flyology.IO.Timeout_Error =>

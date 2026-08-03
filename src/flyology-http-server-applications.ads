@@ -2,6 +2,7 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Task_Identification;
 with GNAT.Sockets;
+with Flyology.Bytes;
 with Flyology.Cancellation;
 
 --  Supplies a request-scoped application exchange above the raw HTTP engine.
@@ -387,7 +388,7 @@ package Flyology.HTTP.Server.Applications is
    procedure Receive_WebSocket
      (Item        : in out Exchange;
       Kind        : out WebSocket_Data_Kind;
-      Data        : out Ada.Strings.Unbounded.Unbounded_String;
+      Data        : out Flyology.Bytes.Unbounded_Bytes;
       Closed      : out Boolean;
       Max_Message : Natural := Max_WebSocket_Frame;
       Timeout     : Duration := 30.0;
@@ -400,6 +401,13 @@ package Flyology.HTTP.Server.Applications is
    procedure Send_WebSocket
      (Item : in out Exchange;
       Kind : WebSocket_Data_Kind;
+      Data : Ada.Streams.Stream_Element_Array);
+
+   --  Send a validated UTF-8 text message from the sole connection owner.
+   --  @param Item Upgraded request exchange
+   --  @param Data UTF-8 byte string
+   procedure Send_WebSocket
+     (Item : in out Exchange;
       Data : String);
 
    --  Complete an upgraded WebSocket with a normal close frame.
