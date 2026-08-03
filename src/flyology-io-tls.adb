@@ -231,6 +231,22 @@ package body Flyology.IO.TLS is
          Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
    end Remaining;
 
+   function Invalid_Progress_Bound
+     (First : Ada.Streams.Stream_Element_Offset;
+      Last  : Ada.Streams.Stream_Element_Offset)
+      return Ada.Streams.Stream_Element_Offset
+   is
+   begin
+      if First > Ada.Streams.Stream_Element_Offset'First then
+         return First - 1;
+      elsif Last < Ada.Streams.Stream_Element_Offset'Last then
+         return Last + 1;
+      else
+         raise TLS_Error with
+           "TLS buffer range leaves no invalid progress sentinel";
+      end if;
+   end Invalid_Progress_Bound;
+
    procedure Await_Ready
      (FD           : Descriptor;
       Status       : Step_Status;
@@ -428,7 +444,9 @@ package body Flyology.IO.TLS is
             when Want_Read | Want_Write =>
                Await_Ready
                  (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed | Failed =>
+            when Peer_Closed =>
+               raise TLS_Error with "TLS peer closed during handshake";
+            when Failed =>
                Raise_Provider_Error (Item.Session.all);
          end case;
       end loop;
@@ -497,6 +515,7 @@ package body Flyology.IO.TLS is
       Status       : Step_Status;
       First        : Ada.Streams.Stream_Element_Offset := Data'First;
       Last         : Ada.Streams.Stream_Element_Offset;
+      Before_Last  : Ada.Streams.Stream_Element_Offset;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
@@ -505,7 +524,8 @@ package body Flyology.IO.TLS is
       end if;
       while First <= Data'Last loop
          Check_Cancelled (Item, Token);
-         Last := First;
+         Before_Last := Invalid_Progress_Bound (First, Data'Last);
+         Last := Before_Last;
          Status := Receive_Step
            (Item.Session.all, Data (First .. Data'Last), Last);
          case Status is
@@ -517,13 +537,17 @@ package body Flyology.IO.TLS is
                exit when Last = Data'Last;
                First := Last + 1;
             when Want_Read | Want_Write =>
-               if Last /= First then
+               if Last /= Before_Last then
                   raise TLS_Error with
                     "TLS provider changed receive output while waiting";
                end if;
                Await_Ready
                  (FD, Status, Started, Timeout, Close_Source, Token);
             when Peer_Closed =>
+               if Last /= Before_Last then
+                  raise TLS_Error with
+                    "TLS provider changed receive output on peer close";
+               end if;
                raise TLS_Error with
                  "TLS peer closed before receive completed";
             when Failed =>
@@ -545,6 +569,7 @@ package body Flyology.IO.TLS is
       Status       : Step_Status;
       First        : Ada.Streams.Stream_Element_Offset := Data'First;
       Last         : Ada.Streams.Stream_Element_Offset;
+      Before_Last  : Ada.Streams.Stream_Element_Offset;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
@@ -553,7 +578,8 @@ package body Flyology.IO.TLS is
       end if;
       while First <= Data'Last loop
          Check_Cancelled (Item, Token);
-         Last := First;
+         Before_Last := Invalid_Progress_Bound (First, Data'Last);
+         Last := Before_Last;
          Status := Send_Step
            (Item.Session.all, Data (First .. Data'Last), Last);
          case Status is
@@ -564,13 +590,20 @@ package body Flyology.IO.TLS is
                exit when Last = Data'Last;
                First := Last + 1;
             when Want_Read | Want_Write =>
-               if Last /= First then
+               if Last /= Before_Last then
                   raise TLS_Error with
                     "TLS provider changed send output while waiting";
                end if;
                Await_Ready
                  (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed | Failed =>
+            when Peer_Closed =>
+               if Last /= Before_Last then
+                  raise TLS_Error with
+                    "TLS provider changed send output on peer close";
+               end if;
+               raise TLS_Error with
+                 "TLS peer closed before send completed";
+            when Failed =>
                Raise_Provider_Error (Item.Session.all);
          end case;
       end loop;
@@ -598,7 +631,10 @@ package body Flyology.IO.TLS is
             when Want_Read | Want_Write =>
                Await_Ready
                  (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed | Failed =>
+            when Peer_Closed =>
+               raise TLS_Error with
+                 "TLS peer closed before shutdown completed";
+            when Failed =>
                Raise_Provider_Error (Item.Session.all);
          end case;
       end loop;

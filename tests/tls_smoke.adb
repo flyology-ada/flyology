@@ -451,6 +451,56 @@ procedure TLS_Smoke is
          Socket  : Sockets.Socket_Type;
          Peer    : Sockets.Socket_Type;
          Item    : TLS.Connection;
+         Buffer  : Stream_Element_Array (11 .. 11);
+         Ready   : constant Stream_Element_Array := [1];
+         Sent    : Stream_Element_Offset;
+         Failed  : Boolean := False;
+      begin
+         TLS_Test_Provider.Set_Receive_Behavior
+           (Backend,
+            TLS_Test_Provider.Complete_Without_Receive_Progress);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         TLS.Take (Backend, Socket, TLS.Server, "", Item);
+         Sockets.Send_Socket (Peer, Ready, Sent);
+         begin
+            TLS.Receive_Exactly (Item, Buffer, Timeout => 1.0);
+         exception
+            when TLS.TLS_Error =>
+               Failed := True;
+         end;
+         pragma Assert (Failed);
+         TLS.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      declare
+         Backend : TLS_Test_Provider.Provider;
+         Socket  : Sockets.Socket_Type;
+         Peer    : Sockets.Socket_Type;
+         Item    : TLS.Connection;
+         Buffer  : constant Stream_Element_Array := [1];
+         Failed  : Boolean := False;
+      begin
+         TLS_Test_Provider.Set_Send_Behavior
+           (Backend, TLS_Test_Provider.Complete_Without_Send_Progress);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         TLS.Take (Backend, Socket, TLS.Server, "", Item);
+         begin
+            TLS.Send_All (Item, Buffer, Timeout => 1.0);
+         exception
+            when TLS.TLS_Error =>
+               Failed := True;
+         end;
+         pragma Assert (Failed);
+         TLS.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      declare
+         Backend : TLS_Test_Provider.Provider;
+         Socket  : Sockets.Socket_Type;
+         Peer    : Sockets.Socket_Type;
+         Item    : TLS.Connection;
          Buffer  : Stream_Element_Array (7 .. 7);
          Last    : Stream_Element_Offset;
          Ready   : constant Stream_Element_Array := [1];
@@ -467,6 +517,53 @@ procedure TLS_Smoke is
          Sockets.Close_Socket (Peer);
       end;
    end Run_Provider_Result_Validation;
+
+   procedure Run_Unexpected_Peer_Close_Statuses is
+      use type TLS_Test_Provider.Peer_Close_Point;
+   begin
+      for Point in
+        TLS_Test_Provider.Handshake_Peer_Close ..
+        TLS_Test_Provider.Shutdown_Peer_Close
+      loop
+         declare
+            Backend  : TLS_Test_Provider.Provider;
+            Socket   : Sockets.Socket_Type;
+            Peer     : Sockets.Socket_Type;
+            Item     : TLS.Connection;
+            Buffer   : constant Stream_Element_Array := [1];
+            Rejected : Boolean := False;
+            Expected : constant String :=
+              (case Point is
+                  when TLS_Test_Provider.Handshake_Peer_Close =>
+                     "during handshake",
+                  when TLS_Test_Provider.Send_Peer_Close =>
+                     "before send completed",
+                  when TLS_Test_Provider.Shutdown_Peer_Close =>
+                     "before shutdown completed");
+         begin
+            TLS_Test_Provider.Set_Peer_Close (Backend, Point);
+            Sockets.Create_Socket_Pair (Socket, Peer);
+            TLS.Take (Backend, Socket, TLS.Server, "", Item);
+            begin
+               case Point is
+                  when TLS_Test_Provider.Handshake_Peer_Close =>
+                     TLS.Handshake (Item, Timeout => 1.0);
+                  when TLS_Test_Provider.Send_Peer_Close =>
+                     TLS.Send_All (Item, Buffer, Timeout => 1.0);
+                  when TLS_Test_Provider.Shutdown_Peer_Close =>
+                     TLS.Shutdown (Item, Timeout => 1.0);
+               end case;
+            exception
+               when Error : TLS.TLS_Error =>
+                  Rejected := Ada.Strings.Fixed.Index
+                    (Ada.Exceptions.Exception_Message (Error), Expected) > 0;
+            end;
+            pragma Assert (Rejected);
+            TLS.Close (Item);
+            Sockets.Close_Socket (Peer);
+         end;
+      end loop;
+   end Run_Unexpected_Peer_Close_Statuses;
 
    procedure Run_Close_Finalization_Fault is
       Backend : TLS_Test_Provider.Provider;
@@ -1314,6 +1411,7 @@ begin
    Run_Hostname_Rejection;
    Run_Provider_Selection;
    Run_Provider_Result_Validation;
+   Run_Unexpected_Peer_Close_Statuses;
    Run_Empty_Closed_Validation;
    Run_Empty_Control (Flyology.Lightweight_Task);
    Run_Empty_Control (Flyology.Native_Task);

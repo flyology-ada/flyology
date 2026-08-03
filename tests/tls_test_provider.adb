@@ -8,6 +8,8 @@ package body TLS_Test_Provider is
       Fail_Finalize : Boolean := False;
       Block_Handshake : Boolean := False;
       Behavior      : Receive_Behavior := Return_Data;
+      Send_Mode     : Send_Behavior := Return_Progress;
+      Peer_Close    : Peer_Close_Point := No_Peer_Close;
       Handshakes    : Natural := 0;
       Receives      : Natural := 0;
       Sends         : Natural := 0;
@@ -124,6 +126,18 @@ package body TLS_Test_Provider is
       Item.Behavior := Behavior;
    end Set_Receive_Behavior;
 
+   procedure Set_Send_Behavior
+     (Item : in out Provider; Behavior : Send_Behavior) is
+   begin
+      Item.Send_Mode := Behavior;
+   end Set_Send_Behavior;
+
+   procedure Set_Peer_Close
+     (Item : in out Provider; Point : Peer_Close_Point) is
+   begin
+      Item.Peer_Close := Point;
+   end Set_Peer_Close;
+
    procedure Reset_Telemetry is
    begin
       Telemetry.Reset;
@@ -162,6 +176,8 @@ package body TLS_Test_Provider is
          Fail_Finalize => Item.Fail_Finalize,
          Block_Handshake => Item.Block_Handshake,
          Behavior      => Item.Behavior,
+         Send_Mode     => Item.Send_Mode,
+         Peer_Close    => Item.Peer_Close,
          Handshakes    => 0,
          Receives      => 0,
          Sends         => 0,
@@ -173,6 +189,9 @@ package body TLS_Test_Provider is
    is
    begin
       Item.Handshakes := Item.Handshakes + 1;
+      if Item.Peer_Close = Handshake_Peer_Close then
+         return TLS.Peer_Closed;
+      end if;
       if Item.Block_Handshake and then Item.Handshakes = 1 then
          Handshake_Block.Enter;
          Handshake_Block.Wait_Release;
@@ -211,6 +230,8 @@ package body TLS_Test_Provider is
          when Invalid_Upper =>
             Last := Data'Last + 1;
             return TLS.Complete;
+         when Complete_Without_Receive_Progress =>
+            return TLS.Complete;
       end case;
    end Receive_Step;
 
@@ -221,9 +242,15 @@ package body TLS_Test_Provider is
    is
    begin
       Item.Sends := Item.Sends + 1;
+      if Item.Peer_Close = Send_Peer_Close then
+         return TLS.Peer_Closed;
+      end if;
       if Item.Sends = 1 then
          Telemetry.Saw_Want;
          return TLS.Want_Write;
+      end if;
+      if Item.Send_Mode = Complete_Without_Send_Progress then
+         return TLS.Complete;
       end if;
       Last := Data'First;
       if Data'Length > 1 then
@@ -237,6 +264,9 @@ package body TLS_Test_Provider is
    is
    begin
       Item.Shutdowns := Item.Shutdowns + 1;
+      if Item.Peer_Close = Shutdown_Peer_Close then
+         return TLS.Peer_Closed;
+      end if;
       if Item.Shutdowns = 1 then
          Telemetry.Saw_Want;
          return TLS.Want_Write;

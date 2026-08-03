@@ -49,15 +49,18 @@ package Flyology.IO.TLS is
    --  active operation has drained and before closing the socket.
    type Session_Access is access all Session'Class;
 
-   --  Execute one handshake step.
+   --  Execute one handshake step. Complete finishes the handshake; Want_Read
+   --  and Want_Write request readiness; Failed supplies a provider diagnostic;
+   --  Peer_Closed reports that the peer closed before completion.
    --  @param Item Session to advance
    --  @return Provider progress state
    function Handshake_Step
      (Item : in out Session) return Step_Status is abstract;
 
-   --  Execute one decrypted receive step. Complete must return at least one
-   --  byte; Peer_Closed represents close_notify. Want_Read, Want_Write,
-   --  Peer_Closed, and Failed consume no buffer and leave Last unchanged.
+   --  Execute one decrypted receive step. All Step_Status values are valid.
+   --  Complete must return at least one byte; Peer_Closed represents
+   --  close_notify. Want_Read, Want_Write, Peer_Closed, and Failed consume no
+   --  buffer and leave Last unchanged.
    --  @param Item Session to read
    --  @param Data Destination buffer
    --  @param Last Last element produced, if any
@@ -68,9 +71,11 @@ package Flyology.IO.TLS is
       Last : in out Ada.Streams.Stream_Element_Offset) return Step_Status
    is abstract;
 
-   --  Execute one encrypted send step. Complete consumes at least one byte.
-   --  Want_Read, Want_Write, Peer_Closed, and Failed consume no bytes, leave
-   --  Last unchanged, and require the identical Data slice on retry.
+   --  Execute one encrypted send step. All Step_Status values are valid;
+   --  Peer_Closed means the peer closed before the send completed. Complete
+   --  consumes at least one byte. Want_Read, Want_Write, Peer_Closed, and
+   --  Failed consume no bytes, leave Last unchanged, and require the identical
+   --  Data slice on retry.
    --  @param Item Session to write
    --  @param Data Source buffer
    --  @param Last Last element consumed, if any
@@ -81,7 +86,10 @@ package Flyology.IO.TLS is
       Last : in out Ada.Streams.Stream_Element_Offset) return Step_Status
    is abstract;
 
-   --  Execute one bidirectional close_notify step.
+   --  Execute one bidirectional close_notify step. Complete finishes shutdown;
+   --  Want_Read and Want_Write request readiness; Failed supplies a provider
+   --  diagnostic; Peer_Closed reports transport closure before the TLS
+   --  shutdown completed.
    --  @param Item Session to shut down
    --  @return Provider progress state
    function Shutdown_Step
