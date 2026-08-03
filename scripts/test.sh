@@ -191,6 +191,7 @@ do
   else
     unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
   fi
+  printf '%s\n' "test: BEGIN $test_main"
   run_gprbuild \
     --RTS="$project_root/build/rts" \
     -f \
@@ -244,6 +245,7 @@ do
         "$project_root/tests/bin/$test_main"
       ;;
   esac
+  printf '%s\n' "test: PASS $test_main"
 done
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 
