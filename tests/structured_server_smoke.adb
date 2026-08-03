@@ -205,19 +205,31 @@ procedure Structured_Server_Smoke is
             Clients : array (1 .. 4) of Client;
             pragma Unreferenced (Clients);
          begin
-            Wait_Until (Two_Handlers'Access,
-                        "capacity did not admit two handlers");
-            declare
-               Sample : constant Structured.Snapshot := Structured.Current (Item);
             begin
-               pragma Assert (Sample.Active_Handlers = 2);
-               pragma Assert (Sample.Accepted_Connections = 2);
+               Wait_Until (Two_Handlers'Access,
+                           "capacity did not admit two handlers");
+               declare
+                  Sample : constant Structured.Snapshot :=
+                    Structured.Current (Item);
+               begin
+                  pragma Assert (Sample.Active_Handlers = 2);
+                  pragma Assert (Sample.Accepted_Connections = 2);
+               end;
+               delay 0.020;
+               pragma Assert
+                 (Structured.Current (Item).Accepted_Connections = 2);
+               State.State.Release_Gate;
+               Wait_Until
+                 (All_Clients'Access, "overload clients did not drain");
+               Structured.Request_Shutdown (Item);
+            exception
+               when others =>
+                  --  A failed observation must not leave handlers behind the
+                  --  test gate while the enclosing master completes.
+                  State.State.Release_Gate;
+                  Structured.Request_Shutdown (Item);
+                  raise;
             end;
-            delay 0.020;
-            pragma Assert (Structured.Current (Item).Accepted_Connections = 2);
-            State.State.Release_Gate;
-            Wait_Until (All_Clients'Access, "overload clients did not drain");
-            Structured.Request_Shutdown (Item);
          end;
          pragma Assert (Listener = Sockets.No_Socket);
          pragma Assert (Results.Passed);
@@ -267,12 +279,19 @@ procedure Structured_Server_Smoke is
                Sockets.Close_Socket (Socket);
             end Client;
          begin
-            Wait_Until (Handler_Active'Access,
-                        "draining handler was not admitted");
-            Structured.Request_Shutdown (Item);
-            delay 0.020;
-            pragma Assert (Structured.Current (Item).Active_Handlers = 1);
-            State.State.Release_Gate;
+            begin
+               Wait_Until (Handler_Active'Access,
+                           "draining handler was not admitted");
+               Structured.Request_Shutdown (Item);
+               delay 0.020;
+               pragma Assert (Structured.Current (Item).Active_Handlers = 1);
+               State.State.Release_Gate;
+            exception
+               when others =>
+                  State.State.Release_Gate;
+                  Structured.Request_Shutdown (Item);
+                  raise;
+            end;
          end;
          declare
             Sample : constant Structured.Snapshot := Structured.Current (Item);
