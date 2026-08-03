@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yrashk/flyology/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/yrashk/flyology/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/flyology-ada/flyology/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/flyology-ada/flyology/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
 <p align="center">

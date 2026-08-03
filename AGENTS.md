@@ -34,7 +34,7 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - When the user requests parallel agents, give each independent change its own
   branch and worktree. Merge only clean, green commits with `git merge
   --ff-only`; do not let agents edit one shared checkout concurrently.
-- Run `gh` outside the sandbox. Repository: `yrashk/flyology`.
+- Run `gh` outside the sandbox. Repository: `flyology-ada/flyology`.
 
 ## Execution-model invariants
 
