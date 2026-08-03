@@ -40,6 +40,8 @@ with Flyology.IO.Structured_Servers;
 with Flyology.IO.Timers;
 with Flyology.Native_Executors;
 with Flyology.Observability;
+with UUIDs;
+with UUIDs.V7;
 
 procedure HTTP_Application_Server is
    use type Ada.Streams.Stream_Element_Offset;
@@ -163,9 +165,47 @@ procedure HTTP_Application_Server is
          end Await_Goal;
       end Request_Counter;
 
-      type Application_Context is record
+      --  The UUID library protects its randomizer internally, but the
+      --  application owns this additional serialization point so generator
+      --  state and any future deployment prefix remain explicitly task-safe.
+      protected type UUIDv7_Request_ID_Source is
+         procedure Initialize;
+         procedure Generate
+           (Value : out Ada.Strings.Unbounded.Unbounded_String);
+      private
+         Ready : Boolean := False;
+      end UUIDv7_Request_ID_Source;
+
+      protected body UUIDv7_Request_ID_Source is
+         procedure Initialize is
+         begin
+            if not Ready then
+               declare
+                  Discard : constant UUIDs.UUID := UUIDs.V7.UUID7;
+                  pragma Unreferenced (Discard);
+               begin
+                  Ready := True;
+               end;
+            end if;
+         end Initialize;
+
+         procedure Generate
+           (Value : out Ada.Strings.Unbounded.Unbounded_String)
+         is
+            Item : constant UUIDs.UUID := UUIDs.V7.UUID7;
+         begin
+            --  Generate remains safe even if a caller forgets the eager
+            --  initialization below. The normal server path initializes on
+            --  the native environment task before lightweight work starts.
+            Ready := True;
+            Value := Ada.Strings.Unbounded.To_Unbounded_String (Item'Image);
+         end Generate;
+      end UUIDv7_Request_ID_Source;
+
+      type Application_Context is limited record
          Calls         : Natural := 0;
          Introspection : Ada.Strings.Unbounded.Unbounded_String;
+         Request_IDs   : UUIDv7_Request_ID_Source;
       end record;
 
       --  Routing is generic over application state, so handlers receive the
@@ -371,13 +411,26 @@ procedure HTTP_Application_Server is
             & Ada.Exceptions.Exception_Information (Error));
       end Error_Log;
 
+      procedure Generate_Request_ID
+        (State : in out Application_Context;
+         X     : App.Exchange;
+         Value : out Ada.Strings.Unbounded.Unbounded_String)
+      is
+         pragma Unreferenced (X);
+      begin
+         --  The borrowed exchange is available for trace-context policies,
+         --  but this showcase needs only application-owned UUIDv7 state.
+         State.Request_IDs.Generate (Value);
+      end Generate_Request_ID;
+
       package Error_Middleware is new
         Flyology.HTTP.Server.Middleware_Errors
           (Application_Context, Routing.Components, Log => Error_Log);
       package Request_ID_Middleware is new
         Flyology.HTTP.Server.Middleware_Request_IDs
           (Application_Context, Routing.Components,
-           Trust_Inbound => False);
+           Trust_Inbound => False,
+           Generate      => Generate_Request_ID'Access);
       package Logging_Middleware is new
         Flyology.HTTP.Server.Middleware_Logging
           (Application_Context, Routing.Components, Logger'Access);
@@ -1696,6 +1749,11 @@ procedure HTTP_Application_Server is
       State.Application.Introspection :=
         Ada.Strings.Unbounded.To_Unbounded_String
           (Build_Routing_JSON (State.Routes));
+
+      --  UUIDs seeds its default pseudorandom generator on first use. Do that
+      --  once on the native environment task so initialization cannot occupy
+      --  a cooperative event-loop pthread when the first request arrives.
+      State.Application.Request_IDs.Initialize;
 
       Sockets.Create_Socket (Listener);
       Sockets.Set_Socket_Option

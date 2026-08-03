@@ -1,11 +1,24 @@
 with "../flyology.gpr";
+with "uuids";
+with "config/flyology_showcases_config.gpr";
 
 project Showcases is
-   type Build_Profile_Type is ("development", "release");
+   type Build_Profile_Type is ("development", "validation", "release");
+   Default_Build_Profile : Build_Profile_Type := "development";
+   case Flyology_Showcases_Config.Build_Profile is
+      when "development" =>
+         Default_Build_Profile := "development";
+      when "validation" =>
+         Default_Build_Profile := "validation";
+      when "release" =>
+         Default_Build_Profile := "release";
+   end case;
    Build_Profile : Build_Profile_Type :=
-     external ("FLYOLOGY_SHOWCASE_PROFILE", "development");
+     external ("FLYOLOGY_SHOWCASE_PROFILE", Default_Build_Profile);
 
    for Languages use ("Ada", "C");
+   for Runtime ("Ada") use
+     external ("FLYOLOGY_RTS_DIR", "../build/rts");
    for Source_Dirs use (".");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
@@ -39,13 +52,21 @@ project Showcases is
       case Build_Profile is
          when "development" =>
             for Default_Switches ("Ada") use
-              ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
-               "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
+                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+            for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
+         when "validation" =>
+            for Default_Switches ("Ada") use
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
+                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
             for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
          when "release" =>
             for Default_Switches ("Ada") use
-              ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
-               "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
+                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
             for Default_Switches ("C") use ("-O3", "-Wall", "-Wextra");
       end case;
    end Compiler;

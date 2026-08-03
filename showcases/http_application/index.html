@@ -308,6 +308,25 @@ Worker.Move_To (Destination);</code></pre>
               <p>Request-head components run before body admission. Application-stage components run only after the selected route policy has admitted the body.</p>
             </div>
             <ol class="middleware-registry" data-middleware-list><li>Loading configured components…</li></ol>
+            <figure class="source-panel compact-source">
+              <figcaption><span>application-owned request IDs</span><code>UUIDv7_Request_ID_Source</code></figcaption>
+              <pre><code data-ada>procedure Generate_Request_ID
+  (State : in out Application_Context;
+   X     : App.Exchange;
+   Value : out Ada.Strings.Unbounded.Unbounded_String)
+is
+   pragma Unreferenced (X);
+begin
+   --  Request_IDs is a protected component of App_Context.
+   State.Request_IDs.Generate (Value);
+end Generate_Request_ID;
+
+package Request_ID_Middleware is new
+  Flyology.HTTP.Server.Middleware_Request_IDs
+    (Application_Context, Routing.Components,
+     Trust_Inbound =&gt; False,
+     Generate      =&gt; Generate_Request_ID'Access);</code></pre>
+            </figure>
           </div>
 
           <div class="registry-block routes-block">

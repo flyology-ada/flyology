@@ -1,0 +1,23 @@
+name = "flyology_showcases"
+description = "Optional dependencies for maintained Flyology showcases"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "http", "showcase"]
+project-files = ["showcases.gpr"]
+
+[[depends-on]]
+flyology = "*"
+
+[[pins]]
+flyology = { path='..' }
+
+[[depends-on]]
+uuids = "^1.0.0"
+
+[[actions]]
+type = "pre-build"
+command = ["./prepare-rts.sh"]

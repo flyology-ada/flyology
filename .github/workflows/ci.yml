@@ -53,11 +53,12 @@ jobs:
       - name: Run runtime tests
         run: ./scripts/test.sh
       - name: Build connection-density showcase
+        working-directory: showcases
         run: >-
           alr exec -- gprbuild
-          --RTS="$PWD/build/rts"
+          --RTS="$GITHUB_WORKSPACE/build/rts"
           -f
-          -P showcases/showcases.gpr
+          -P showcases.gpr
           connection_density.adb
       - name: Run connection-density smoke
         run: ./showcases/run_connection_density.sh 200 1000

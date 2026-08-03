@@ -8,5 +8,7 @@
 /tests/obj/
 /showcases/bin/
 /showcases/obj/
+/showcases/alire/
+/showcases/config/
 /docs/api/
 /coverage/

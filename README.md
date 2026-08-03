@@ -1223,6 +1223,10 @@ application registry:
 The fifth argument is the project root used to locate maintained assets; `.`
 is correct when launched from the repository root. Select `native` instead of
 `lightweight` to run the identical application on native handlers.
+The showcase build prepares one automatic execution group per online host CPU,
+up to Flyology's 128-group limit, and unspecified lightweight handler tasks are
+assigned to those groups round-robin. Set `FLYOLOGY_LOOP_POOL_SIZE` explicitly
+before building when a reproducible smaller pool is required.
 The runtime panel renders routes, policies, and named middleware from an owned
 setup snapshot, then reads created execution-group, stack-pool, and bounded
 HTTP metric snapshots over SSE. The feed does not create configured groups or

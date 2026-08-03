@@ -83,6 +83,7 @@ State.Routes.Serve
 ./showcases/bin/http_application_server lightweight 0 18082 256 .
 ./showcases/bin/http_application_server native 0 18082 256 .
 # open http://127.0.0.1:18082/</code></pre></figure>
+            <p>The showcase build prepares one automatic execution group per online host CPU, capped at 128. Lightweight handler tasks without an explicit <code>CPU</code> aspect are assigned round-robin, so the server can execute requests on separate event-loop pthreads in parallel. Set <code>FLYOLOGY_LOOP_POOL_SIZE</code> before building to make a smaller benchmark topology reproducible.</p>
           </section>
 
           <section id="low-level"><span class="step-label">HTTP 02</span><h2>Keep the low-level connection API available.</h2>
@@ -193,7 +194,23 @@ State.Routes.Add_Route_Middleware
           </section>
 
           <section id="observability"><span class="step-label">HTTP 10</span><h2>Observe stable route names, not attacker paths.</h2>
-            <p>Request-ID middleware generates a bounded safe identifier unless an explicit trust policy accepts a valid inbound value. Access logs include method, route name, optional safe target, status, request ID, peer, byte counts, and monotonic elapsed time. They do not receive authorization, cookies, or bodies. The default in-memory metrics sink caps route/method/status-class series and reports dropped series rather than growing without bound.</p>
+            <p>Request-ID middleware generates a bounded safe identifier unless an explicit trust policy accepts a valid inbound value. Its protected <code>fly-N</code> counter remains the zero-configuration default. An optional callback receives application state and a read-only borrowed exchange, so an application can provide a task-safe UUID, trace-context, or deployment-specific generator. Returned values must still pass the middleware's character and 128-byte checks before reaching response headers, logs, or metrics.</p>
+            <figure class="code-panel"><figcaption>UUIDv7 request IDs in the kitchen sink</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">procedure Generate_Request_ID
+  (State : in out Application_Context;
+   X     : App.Exchange;
+   Value : out Ada.Strings.Unbounded.Unbounded_String)
+is
+   pragma Unreferenced (X);
+begin
+   State.Request_IDs.Generate (Value);
+end Generate_Request_ID;
+
+package Request_ID_Middleware is new
+  Flyology.HTTP.Server.Middleware_Request_IDs
+    (Application_Context, Routing.Components,
+     Trust_Inbound =&gt; False,
+     Generate      =&gt; Generate_Request_ID'Access);</code></pre></figure>
+            <p>The showcase keeps <code>uuids</code> in its own Alire manifest rather than imposing that choice on core Flyology applications. Access logs include method, route name, optional safe target, status, request ID, peer, byte counts, and monotonic elapsed time. They do not receive authorization, cookies, or bodies. The default in-memory metrics sink caps route/method/status-class series and reports dropped series rather than growing without bound.</p>
             <p>The maintained <code>/metrics</code> endpoint demonstrates reading a snapshot without coupling the server to a monitoring format. Applications can instead implement the sink interface for their metrics system.</p>
             <figure class="code-panel"><figcaption>owned setup snapshot</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">State.Application.Introspection :=
   Ada.Strings.Unbounded.To_Unbounded_String

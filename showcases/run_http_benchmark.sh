@@ -2,6 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+showcase_root="$project_root/showcases"
 alr=$("$project_root/scripts/find-alr.sh")
 requests=${1:-100000}
 concurrency=${2:-256}
@@ -45,10 +46,11 @@ else
 fi
 FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE="$loops" \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
+cd "$showcase_root"
 FLYOLOGY_SHOWCASE_PROFILE="$profile" "$alr" exec -- gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
-  -P showcases/showcases.gpr \
+  -P showcases.gpr \
   http_benchmark_server.adb
 
 mkdir -p "$project_root/build"

@@ -41,7 +41,7 @@ restore_default () {
 }
 trap restore_default EXIT HUP INT TERM
 
-cd "$project_root"
+cd "$showcase_root"
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=$pool_size \
 FLYOLOGY_PLACEMENT=round_robin \
@@ -49,7 +49,7 @@ FLYOLOGY_PLACEMENT=round_robin \
 run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
-  -P showcases/showcases.gpr \
+  -P showcases.gpr \
   thread_per_core.adb >/dev/null
 
 printf '%s\n' \

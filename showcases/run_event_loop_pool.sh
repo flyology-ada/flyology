@@ -53,7 +53,7 @@ restore_default () {
 }
 trap restore_default EXIT HUP INT TERM
 
-cd "$project_root"
+cd "$showcase_root"
 printf '%s\n' \
   "This compares one event-loop pthread with a round-robin pool under repeated socket-readiness waves." \
   "Groups are execution lanes, not physical-CPU pins; the OS decides where each loop pthread runs."
@@ -66,7 +66,7 @@ for loops in 1 "$pool_size"; do
   run_gprbuild \
     --RTS="$project_root/build/rts" \
     -f \
-    -P showcases/showcases.gpr \
+    -P showcases.gpr \
     event_loop_pool.adb >/dev/null
   printf '\n== configured event loops: %s ==\n' "$loops"
   "$showcase_root/bin/event_loop_pool" "$workers" "$rounds"
