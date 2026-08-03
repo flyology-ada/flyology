@@ -6,4 +6,8 @@ package body System.Flyology.Faults is
       return False;
    end Fail;
 
+   function Pause_Final_Reaper return Boolean is (True);
+
+   procedure Release_Final_Reaper is null;
+
 end System.Flyology.Faults;

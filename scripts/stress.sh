@@ -61,7 +61,12 @@ if [ "$run_faults" = 1 ]; then
   FLYOLOGY_TEST_FAULTS=1 "$project_root/scripts/prepare-rts.sh" >/dev/null
   run_gprbuild \
     --RTS="$project_root/build/rts" \
-    -f -P tests/runtime_smoke.gpr fault_injection_smoke.adb
+    -f -P tests/runtime_smoke.gpr \
+    fault_injection_smoke.adb reap_finalize_race_smoke.adb
+
+  printf '%s\n' "fault case=final-reap-window"
+  run_timed "$case_timeout" \
+    "$project_root/tests/bin/reap_finalize_race_smoke"
 
   for fault_case in \
     fiber-allocation stack-map stack-protect stack-discard group-startup \

@@ -276,7 +276,7 @@ int flyology_in_fork_child(void) {
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 10
+#define FLYOLOGY_FAULT_POINT_COUNT 11
 
 struct flyology_fault_plan {
     atomic_uint calls;
@@ -286,6 +286,7 @@ struct flyology_fault_plan {
 
 static struct flyology_fault_plan
     flyology_faults[FLYOLOGY_FAULT_POINT_COUNT + 1];
+static atomic_uint flyology_final_reap_state;
 
 int flyology_test_faults_enabled(void) {
     return 1;
@@ -302,6 +303,8 @@ void flyology_test_fault_reset(void) {
         atomic_store_explicit(&flyology_faults[point].count, 0,
                               memory_order_release);
     }
+    atomic_store_explicit(&flyology_final_reap_state, 0,
+                          memory_order_release);
 }
 
 int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
@@ -343,6 +346,27 @@ int flyology_test_fault_hit(int point) {
     }
     first = atomic_load_explicit(&plan->first, memory_order_relaxed);
     return call >= first && call - first < count;
+}
+
+int flyology_test_pause_final_reaper(void) {
+    atomic_store_explicit(&flyology_final_reap_state, 1,
+                          memory_order_release);
+    for (unsigned attempt = 0; attempt < 1000; ++attempt) {
+        if (atomic_load_explicit(&flyology_final_reap_state,
+                                 memory_order_acquire) == 2) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+void flyology_test_release_final_reaper(void) {
+    if (atomic_load_explicit(&flyology_final_reap_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_final_reap_state, 2,
+                              memory_order_release);
+    }
 }
 #else
 int flyology_test_faults_enabled(void) {

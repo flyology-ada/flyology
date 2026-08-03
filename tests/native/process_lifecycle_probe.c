@@ -9,6 +9,7 @@
 
 extern int flyology_runtime_observe_lifecycle(void);
 extern int flyology_runtime_observe_created_groups(void);
+extern unsigned flyology_test_fault_calls(int point);
 struct runtime_group_snapshot {
     unsigned version;
     int thread_state;
@@ -47,18 +48,21 @@ extern int flyology_runtime_query_group_placement(
 
 static int expected_state;
 static int expected_groups;
+static int require_final_reap_window;
 static volatile sig_atomic_t signal_count;
 
 static void check_lifecycle_at_exit(void) {
     int state = flyology_runtime_observe_lifecycle();
     int groups = flyology_runtime_observe_created_groups();
 
-    if (state != expected_state || groups != expected_groups) {
+    if (state != expected_state || groups != expected_groups ||
+        (require_final_reap_window && flyology_test_fault_calls(11) < 2)) {
         char message[160];
         int length = snprintf(message, sizeof(message),
             "Flyology lifecycle exit check failed: state=%d groups=%d "
-            "expected_state=%d expected_groups=%d\n",
-            state, groups, expected_state, expected_groups);
+            "expected_state=%d expected_groups=%d reap_window_calls=%u\n",
+            state, groups, expected_state, expected_groups,
+            flyology_test_fault_calls(11));
         if (length > 0) {
             (void)write(STDERR_FILENO, message, (size_t)length);
         }
@@ -84,6 +88,13 @@ static void check_lifecycle_at_exit(void) {
 int flyology_test_arm_exit_check(int state, int groups) {
     expected_state = state;
     expected_groups = groups;
+    return atexit(check_lifecycle_at_exit);
+}
+
+int flyology_test_arm_final_reap_exit_check(void) {
+    expected_state = 3;
+    expected_groups = 0;
+    require_final_reap_window = 1;
     return atexit(check_lifecycle_at_exit);
 }
 

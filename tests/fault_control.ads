@@ -12,7 +12,8 @@ package Fault_Control is
       File_Submission_Full,
       Group_Startup,
       Stack_Protection,
-      Stack_Discard);
+      Stack_Discard,
+      Final_Reap_Window);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -24,7 +25,8 @@ package Fault_Control is
       File_Submission_Full => 7,
       Group_Startup        => 8,
       Stack_Protection     => 9,
-      Stack_Discard        => 10);
+      Stack_Discard        => 10,
+      Final_Reap_Window    => 11);
 
    function Enabled return Boolean;
    procedure Reset;

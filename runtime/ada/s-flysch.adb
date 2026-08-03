@@ -1312,6 +1312,12 @@ package body System.Flyology.Scheduler is
    begin
       Item.Reaping := True;
       Unlock_Group (Group);
+      if Faults.Enabled
+        and then Faults.Fail (Faults.Final_Reap_Window)
+        and then not Faults.Pause_Final_Reaper
+      then
+         Fatal;
+      end if;
       Lock_Registry_Shard (Shard);
       Lock_Topology;
       Lock_Group (Group);
@@ -1520,7 +1526,16 @@ package body System.Flyology.Scheduler is
                while Item /= null loop
                   Next := Item.Next_Group;
                   if Item.State = Finished then
-                     Reap_Locked (Item);
+                     if Item.Reaping then
+                        --  Reap_From_Scheduler owns this item even while it
+                        --  temporarily drops the group lock to establish the
+                        --  registry/topology lock order. Leaving it registered
+                        --  keeps this finalization attempt nonquiescent until
+                        --  the scheduler completes that exclusive reap.
+                        Faults.Release_Final_Reaper;
+                     else
+                        Reap_Locked (Item);
+                     end if;
                   end if;
                   Item := Next;
                end loop;
@@ -2773,6 +2788,29 @@ package body System.Flyology.Scheduler is
         (System.Address, Wrapper_Access);
    begin
       To_Wrapper (Item.Wrapper).all (Item.T);
+
+      if Faults.Enabled and then Faults.Fail (Faults.Final_Reap_Window) then
+         declare
+            Destroy_Observed : Boolean := False;
+         begin
+            --  Test-only ordering control: make the wrapper/master handoff
+            --  complete before this fiber publishes Finished. This guarantees
+            --  that the scheduler, rather than Destroy, owns the final reap.
+            for Attempt in 1 .. 1_000 loop
+               Group := Item.Group;
+               Lock_Group (Group);
+               Destroy_Observed := Item.Destroy_Requested;
+               Unlock_Group (Group);
+               exit when Destroy_Observed;
+               if Micro_Sleep (1_000) /= 0 then
+                  Fatal;
+               end if;
+            end loop;
+            if not Destroy_Observed then
+               Fatal;
+            end if;
+         end;
+      end if;
 
       Group := Item.Group;
       Lock_Group (Group);
