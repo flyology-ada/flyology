@@ -24,3 +24,9 @@ export FLYOLOGY_DOCUMENTATION=true
   --style=leading \
   -P flyology.gpr \
   -O docs/api
+
+mkdir -p docs/api/fonts
+cp website/assets/fonts/geologica-latin-variable.woff2 docs/api/fonts/
+cp assets/brand/flyology-mark-transparent.svg docs/api/flyology-mark.svg
+
+test -f docs/api/index.html

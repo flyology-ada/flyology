@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Build, configure, and evaluate Flyology with a prepared GNAT runtime.">
+    <meta name="theme-color" content="#17213d">
+    <title>Guide · Flyology</title>
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <script src="../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home">
+          <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../">Overview</a></li>
+          <li><a href="./" aria-current="page">Guide</a></li>
+          <li><a href="../architecture/">Architecture</a></li>
+          <li><a href="../api/">API</a></li>
+          <li><a href="https://github.com/yrashk/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Guide</li></ol>
+          <h1>From checkout to first lightweight task.</h1>
+        </div>
+        <p class="doc-hero-copy">Prepare a version-matched GNAT runtime, keep native behavior as the default, then opt one ordinary Ada task into cooperative event-loop execution.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#requirements">Requirements</a></li>
+            <li><a href="#build">Build the crate</a></li>
+            <li><a href="#prepare">Prepare the runtime</a></li>
+            <li><a href="#designate">Designate a task</a></li>
+            <li><a href="#groups">Choose a group</a></li>
+            <li><a href="#io">Use task-aware I/O</a></li>
+            <li><a href="#fairness">Preserve fairness</a></li>
+            <li><a href="#verify">Verify behavior</a></li>
+            <li><a href="#constraints">Constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="requirements">
+            <span class="step-label">STEP 01</span>
+            <h2>Start with an exact toolchain.</h2>
+            <p>Flyology is an Alire crate and requires Alire 2.1 or newer. The crate accepts GNAT 13 through 16 as a dependency range, but runtime preparation accepts only the exact host and release pairs whose GNARL source shapes have been verified.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>macOS / AArch64</dt><dd>13.2.2, 14.1.3, 14.2.1, and 16.1.0</dd></div>
+                <div class="decision-row"><dt>Linux / AArch64</dt><dd>16.1.0</dd></div>
+                <div class="decision-row"><dt>Linux / x86-64</dt><dd>13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>The dependency range is not the support matrix.</strong> Runtime preparation checks the exact active compiler and fails rather than guessing a nearby patch family.</p>
+            </aside>
+          </section>
+
+          <section id="build">
+            <span class="step-label">STEP 02</span>
+            <h2>Build the public library.</h2>
+            <p>Clone the repository, let Alire select a supported toolchain, and build the crate. The public library deliberately does not make a stock GNARL executable sufficient by itself; applications link against the prepared runtime in the next step.</p>
+            <figure class="code-panel">
+              <figcaption>shell</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>git clone https://github.com/yrashk/flyology.git
+cd flyology
+alr build</code></pre>
+            </figure>
+          </section>
+
+          <section id="prepare">
+            <span class="step-label">STEP 03</span>
+            <h2>Prepare a version-matched runtime.</h2>
+            <p>The preparation script copies the active compiler's installed runtime sources into ignored build output, applies the exact patch family, compiles Flyology policy into the runtime, and builds a static RTS.</p>
+            <figure class="code-panel">
+              <figcaption>native default</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./scripts/prepare-rts.sh</code></pre>
+            </figure>
+            <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock pthread-backed execution, and no event machinery starts until a lightweight task is activated.</p>
+            <figure class="code-panel">
+              <figcaption>lightweight project default with four shared groups</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>FLYOLOGY_DEFAULT=lightweight \
+FLYOLOGY_LOOP_POOL_SIZE=4 \
+  ./scripts/prepare-rts.sh</code></pre>
+            </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>Preparation settings are compiled into the RTS. They are not read dynamically by the application at startup.</p>
+            </aside>
+          </section>
+
+          <section id="designate">
+            <span class="step-label">STEP 04</span>
+            <h2>Designate one ordinary Ada task.</h2>
+            <p>Use GNAT <code>Task_Info</code> to select the execution model at task creation. The obsolete-feature warning is deliberate; Flyology projects retain other warnings while using <code>-gnatwJ</code> for this mechanism.</p>
+            <figure class="code-panel">
+              <figcaption>worker.ads</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>with Flyology;
+
+package Worker is
+   task Connection is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Connection;
+end Worker;</code></pre>
+            </figure>
+            <p>Explicit <code>Flyology.Native_Task</code> and <code>Flyology.Lightweight_Task</code> values override the prepared project default. <code>Flyology.Project_Default</code> requests that default explicitly, which is useful on discriminated task types.</p>
+            <figure class="code-panel">
+              <figcaption>build the application with the prepared RTS</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr exec -- gprbuild \
+  --RTS="$PWD/build/rts" \
+  -P path/to/application.gpr</code></pre>
+            </figure>
+          </section>
+
+          <section id="groups">
+            <span class="step-label">STEP 05</span>
+            <h2>Choose where lightweight work runs.</h2>
+            <p>A lightweight task without a specific Ada CPU is placed into the configured shared pool by deterministic round robin. A <code>CPU</code> aspect selects an exact Flyology execution group instead.</p>
+            <figure class="code-panel">
+              <figcaption>explicit shared groups</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>task Parser with CPU =&gt; 1 is
+   pragma Task_Info (Flyology.Lightweight_Task);
+end Parser;
+
+task Writer with CPU =&gt; 2 is
+   pragma Task_Info (Flyology.Lightweight_Task);
+end Writer;</code></pre>
+            </figure>
+            <p>Tasks in one group share a stable loop pthread and schedule cooperatively. Separate groups use separate pthreads and may execute in parallel. Shared group identifiers are <code>0 .. 127</code>; dedicated group identifiers are <code>128 .. 255</code>.</p>
+            <h3>Migration is an explicit safe point</h3>
+            <p>A lightweight task can move to another group without changing Ada task identity, stack, locals, or exception state. Use a scoped thread pin while holding thread-affine foreign state, and use a dedicated group when exclusive pthread ownership is also required.</p>
+            <figure class="code-panel">
+              <figcaption>explicit migration</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>declare
+   package Groups renames Flyology.Execution_Groups;
+   Home : constant Groups.Group_Id := Groups.Current;
+begin
+   Groups.Migrate (Groups.For_CPU (2));
+   Handle_Group_Owned_State;
+   Groups.Migrate (Home);
+end;</code></pre>
+            </figure>
+          </section>
+
+          <section id="io">
+            <span class="step-label">STEP 06</span>
+            <h2>Keep synchronous-looking calls.</h2>
+            <p>Flyology I/O packages expose normal procedure and function calls from either lane. In a lightweight task, a would-block result suspends only that task's fiber. In a native task, the wait may block only its pthread.</p>
+            <figure class="code-panel">
+              <figcaption>task-aware I/O</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>Flyology.IO.Timers.Sleep_For (0.050);
+
+Flyology.IO.Sockets.Receive
+  (Socket, Buffer, Last, Timeout =&gt; 1.0);
+
+Flyology.IO.Files.Read_At
+  (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
+            </figure>
+            <p>Use the ownership-aware connection packages when descriptor lifetime, cancellation, and close races matter. Raw descriptor waits deliberately leave lifetime serialization to the caller.</p>
+            <p><a href="../api/">Browse the generated API reference</a></p>
+          </section>
+
+          <section id="fairness">
+            <span class="step-label">STEP 07</span>
+            <h2>Make CPU work cooperate.</h2>
+            <p>A CPU-bound lightweight task owns its group until it reaches a runtime suspension, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities choose among ready fibers within a group, but they do not preempt arbitrary lightweight instructions.</p>
+            <figure class="code-panel">
+              <figcaption>time-budgeted fairness</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>Budget : Flyology.Fairness.Yield_Budget;
+
+Budget.Configure (Ada.Real_Time.Microseconds (250));
+while More_Work loop
+   Process_One_Item;
+   Budget.Checkpoint;
+end loop;</code></pre>
+            </figure>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>An arbitrary blocking foreign call can stop every lightweight task in its group. Put unpredictable blocking work on a native task or migrate to a dedicated group first.</p>
+            </aside>
+          </section>
+
+          <section id="verify">
+            <span class="step-label">STEP 08</span>
+            <h2>Verify at the boundary you changed.</h2>
+            <p>The repository scripts are authoritative for behavioral tests, proofs, documentation, stress campaigns, and showcases.</p>
+            <figure class="code-panel">
+              <figcaption>core verification</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./scripts/test.sh
+./scripts/prove.sh
+./scripts/docs.sh
+./scripts/showcases.sh</code></pre>
+            </figure>
+            <ul>
+              <li><code>test.sh</code> runs both project defaults, runtime-preparation validation, and an external consumer.</li>
+              <li><code>stress.sh</code> runs bounded deterministic concurrency and fault campaigns.</li>
+              <li><code>prove.sh</code> runs the SPARK policy proof suite.</li>
+              <li><code>docs.sh</code> generates the public GNATdoc reference with undocumented-entity warnings enabled.</li>
+            </ul>
+          </section>
+
+          <section id="constraints">
+            <span class="step-label">STEP 09</span>
+            <h2>Know when to stay native.</h2>
+            <p>Flyology is experimental. Keep a task native when its correctness depends on kernel real-time scheduling, forced preemption, stock GNARL CPU affinity, unpredictable foreign blocking, or a host and compiler combination outside the verified patch matrix.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Use lightweight</dt><dd>High I/O concurrency with cooperative work, explicit task-aware waits, and ordinary Ada task semantics.</dd></div>
+                <div class="decision-row"><dt>Use native</dt><dd>Blocking foreign libraries, kernel scheduling policies, independent pthread execution, or unmodified compatibility behavior.</dd></div>
+                <div class="decision-row"><dt>Use dedicated</dt><dd>A lightweight continuation must temporarily own a stable loop pthread exclusively.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>For the full implementation boundary, continue with the <a href="../architecture/">architecture guide</a>. For exact contracts and exceptions, use the <a href="../api/">API reference</a>.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. Validate the exact host, GNAT release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Overview</a><a href="../architecture/">Architecture</a><a href="../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -10,6 +10,12 @@
   <a href="https://github.com/yrashk/flyology/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/yrashk/flyology/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
+<p align="center">
+  <a href="https://yrashk.github.io/flyology/">Guide</a> ·
+  <a href="https://yrashk.github.io/flyology/architecture/">Architecture</a> ·
+  <a href="https://yrashk.github.io/flyology/api/">API reference</a>
+</p>
+
 Flyology lets ordinary Ada tasks run as lightweight tasks on event loops. They
 keep Ada rendezvous, protected objects, exceptions, task activation, masters,
 and normal blocking-looking control flow. Undesignated tasks remain native by
@@ -1265,7 +1271,13 @@ Generate the public API reference with:
 
 The [documentation script](scripts/docs.sh) runs GNATdoc with
 undocumented-entity warnings enabled and writes the ignored HTML output to
-`docs/api/index.html`.
+`docs/api/index.html`. Build the complete GitHub Pages artifact, including the
+guide, architecture notes, and generated API reference, with:
+
+```sh
+./scripts/build-site.sh
+node ./scripts/check-site.mjs build/site
+```
 
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,

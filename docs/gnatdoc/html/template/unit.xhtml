@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang='en' xmlns='http://www.w3.org/1999/xhtml' xmlns:tal='http://xml.adacore.com/namespaces/tal'>
+  <head>
+    <meta charset='utf-8'/>
+    <meta name='viewport' content='width=device-width, initial-scale=1'/>
+    <title>Flyology API reference</title>
+    <link rel='icon' href='flyology-mark.svg' type='image/svg+xml'/>
+    <link rel='stylesheet' href='gnatdoc.css'/>
+    <script src='gnatdoc.js'></script>
+  </head>
+  <body class='api-unit-page'>
+    <header class='api-header'>
+      <nav class='api-nav' aria-label='API navigation'>
+        <a class='api-brand' href='index.html'>
+          <img src='flyology-mark.svg' alt=''/>
+          <span>Flyology API</span>
+        </a>
+        <a href='../guide/'>Guide</a>
+        <a href='../architecture/'>Architecture</a>
+        <a href='https://github.com/yrashk/flyology'>GitHub</a>
+        <button class='theme-button' type='button' data-theme-toggle=''>
+          <span class='visually-hidden'>Change theme</span>
+          <svg aria-hidden='true' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8'>
+            <path d='M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56'/>
+            <circle cx='12' cy='12' r='4'/>
+          </svg>
+        </button>
+      </nav>
+    </header>
+
+    <main class='api-shell'>
+      <header class='api-unit-header'>
+        <a class='api-breadcrumb' href='index.html'>← All compilation units</a>
+        <h1 tal:content='gnatdoc/entity/qualified_name'>Entity Name</h1>
+      </header>
+
+      <div class='api-layout'>
+        <aside class='entity-index' aria-label='Entities in this unit'>
+          <h2>Entity index</h2>
+          <div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/formals'>
+              <h3>Generic formal parameters</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/formals'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Formal</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/exceptions'>
+              <h3>Exceptions</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/exceptions'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Exception</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/simple_types'>
+              <h3>Simple types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/simple_types'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Type</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/array_types'>
+              <h3>Array types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/array_types'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Array</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/record_types'>
+              <h3>Record types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/record_types'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Record</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/interface_types'>
+              <h3>Interface types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/interface_types'>
+                <a href='#' tal:condition='not:gnatdoc/oop_mode' tal:attributes='href item/local_href' tal:content='item/name'>Interface</a>
+                <a href='#' tal:condition='gnatdoc/oop_mode' tal:attributes='href item/full_href' tal:content='item/name'>Interface</a>
+              </li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/tagged_types'>
+              <h3>Tagged types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/tagged_types'>
+                <a href='#' tal:condition='not:gnatdoc/oop_mode' tal:attributes='href item/local_href' tal:content='item/name'>Tagged type</a>
+                <a href='#' tal:condition='gnatdoc/oop_mode' tal:attributes='href item/full_href' tal:content='item/name'>Tagged type</a>
+              </li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/task_types'>
+              <h3>Tasks</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/task_types'><a href='#' tal:attributes='href item/full_href' tal:content='item/name'>Task</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/protected_types'>
+              <h3>Protected types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/protected_types'><a href='#' tal:attributes='href item/full_href' tal:content='item/name'>Protected type</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/access_types'>
+              <h3>Access types</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/access_types'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Access type</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/subtypes'>
+              <h3>Subtypes</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/subtypes'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Subtype</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/constants'>
+              <h3>Constants</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/constants'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Constant</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/variables'>
+              <h3>Variables</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/variables'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Variable</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/entries'>
+              <h3>Entries</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/entries'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Entry</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/subprograms'>
+              <h3>Subprograms</h3>
+              <ul class='entity-list'><li tal:repeat='subprogram gnatdoc/entity/subprograms'><a href='#' tal:attributes='href subprogram/local_href' tal:content='subprogram/name'>Subprogram</a></li></ul>
+            </div>
+            <div tal:omit-tag='' tal:condition='gnatdoc/entity/generic_instantiations'>
+              <h3>Generic instantiations</h3>
+              <ul class='entity-list'><li tal:repeat='item gnatdoc/entity/generic_instantiations'><a href='#' tal:attributes='href item/local_href' tal:content='item/name'>Instantiation</a></li></ul>
+            </div>
+          </div>
+        </aside>
+
+        <article class='api-content'>
+          <h2>Description</h2>
+          <div tal:omit-tag='' tal:content='gnatdoc/entity/documentation/description'>Description of the entity</div>
+
+          <div tal:omit-tag='' tal:repeat='item gnatdoc/entity/all'>
+            <h4 tal:content='item/name' tal:attributes='id item/id'>Entity Name</h4>
+            <pre class='ada-code-snippet'><code xml:space='preserve' tal:content='item/code'>Source code of the entity declaration</code></pre>
+            <div tal:omit-tag='' tal:content='item/documentation/description'>Description of the entity</div>
+
+            <div tal:omit-tag='' tal:condition='item/documentation/enumeration_literals'>
+              <h5>Enumeration literals</h5>
+              <dl><div tal:omit-tag='' tal:repeat='literal item/documentation/enumeration_literals'><dt tal:content='literal/name'>Literal</dt><dd tal:content='literal/description'>Description</dd></div></dl>
+            </div>
+            <div tal:omit-tag='' tal:condition='item/documentation/fields'>
+              <h5>Record fields</h5>
+              <dl><div tal:omit-tag='' tal:repeat='formal item/documentation/fields'><dt tal:content='formal/name'>Field</dt><dd tal:content='formal/description'>Description</dd></div></dl>
+            </div>
+            <div tal:omit-tag='' tal:condition='item/documentation/formals'>
+              <h5>Generic formal parameters</h5>
+              <dl><div tal:omit-tag='' tal:repeat='formal item/documentation/formals'><dt tal:content='formal/name'>Formal</dt><dd tal:content='formal/description'>Description</dd></div></dl>
+            </div>
+            <div tal:omit-tag='' tal:condition='item/documentation/parameters'>
+              <h5>Parameters</h5>
+              <dl><div tal:omit-tag='' tal:repeat='parameter item/documentation/parameters'><dt tal:content='parameter/name'>Parameter</dt><dd tal:content='parameter/description'>Description</dd></div></dl>
+            </div>
+            <div tal:omit-tag='' tal:condition='item/documentation/returns'>
+              <h5>Return value</h5>
+              <dl><div tal:omit-tag='' tal:repeat='return item/documentation/returns'><dd tal:content='return/description'>Description</dd></div></dl>
+            </div>
+            <div tal:omit-tag='' tal:condition='item/documentation/exceptions'>
+              <h5>Raised exceptions</h5>
+              <dl><div tal:omit-tag='' tal:repeat='exception item/documentation/exceptions'><dt tal:content='exception/name'>Exception</dt><dd tal:content='exception/description'>Description</dd></div></dl>
+            </div>
+          </div>
+        </article>
+      </div>
+    </main>
+
+    <footer class='api-footer'><div class='api-footer-inner'><span>Generated with GNATdoc. Public API only.</span><a href='index.html'>All compilation units</a></div></footer>
+  </body>
+</html>

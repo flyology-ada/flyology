@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Flyology runs ordinary Ada tasks cooperatively on event loops while preserving GNARL task semantics.">
+    <meta name="theme-color" content="#17213d">
+    <title>Flyology · Lightweight Ada tasks on event loops</title>
+    <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/styles/site.css">
+    <script src="assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="./" aria-label="Flyology home">
+          <img src="assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="./" aria-current="page">Overview</a></li>
+          <li><a href="guide/">Guide</a></li>
+          <li><a href="architecture/">Architecture</a></li>
+          <li><a href="api/">API</a></li>
+          <li><a href="https://github.com/yrashk/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/>
+              <circle cx="12" cy="12" r="4"/>
+            </svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 7h16M4 12h16M4 17h16"/>
+            </svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero page-shell" aria-labelledby="hero-title">
+        <div>
+          <p class="eyebrow">Experimental GNAT runtime integration</p>
+          <h1 id="hero-title">Ordinary Ada tasks, on event loops.</h1>
+          <p class="hero-lede">
+            Flyology lets selected Ada tasks run cooperatively as fibers on shared event-loop threads. Rendezvous, protected objects, exceptions, and blocking-looking control flow stay ordinary Ada.
+          </p>
+          <div class="actions">
+            <a class="button button-primary" href="guide/">
+              Start with the guide
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
+            </a>
+            <a class="button button-secondary" href="architecture/">See how it works</a>
+          </div>
+        </div>
+
+        <div class="hero-visual" aria-label="A lightweight task moving through an event loop while ordinary Ada code remains unchanged">
+          <div class="orbit" aria-hidden="true">
+            <div class="orbit-ring"></div>
+            <img class="orbit-mark" src="assets/brand/flyology-mark-transparent.svg" alt="">
+          </div>
+          <div class="model-note model-note-light">
+            <strong>Lightweight task</strong>
+            Suspends its fiber, not the loop thread.
+          </div>
+          <div class="model-note model-note-native">
+            <strong>Native task</strong>
+            Keeps the stock pthread-backed path.
+          </div>
+          <div class="code-window">
+            <div class="code-titlebar">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span>connection.adb</span>
+            </div>
+            <pre><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
+   <span class="token-keyword">pragma</span> Task_Info
+     (<span class="token-type">Flyology.Lightweight_Task</span>);
+<span class="token-keyword">end</span> Connection;
+
+<span class="token-comment">-- Still ordinary blocking-looking Ada.</span>
+Flyology.IO.Sockets.Receive
+  (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <div class="status-strip" aria-label="Project status">
+        <div class="status-inner">
+          <div class="status-item"><strong>Experimental</strong>Evaluate against the documented constraints.</div>
+          <div class="status-item"><strong>Darwin + Linux</strong><code>kqueue</code> and <code>epoll</code> backends.</div>
+          <div class="status-item"><strong>AArch64 + x86-64</strong>Small ABI-specific context switches.</div>
+        </div>
+      </div>
+
+      <section class="section page-shell" aria-labelledby="lanes-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Programming model</p>
+            <h2 id="lanes-title">Two lanes. One tasking language.</h2>
+          </div>
+          <p>An undesignated task stays native. Lightweight execution is explicit, captured at task creation, and integrated below GNARL task semantics.</p>
+        </div>
+
+        <div class="lane-stage">
+          <div class="lane">
+            <div class="lane-copy">
+              <span class="lane-number">01 / LIGHTWEIGHT</span>
+              <h3>Shared loop thread</h3>
+            </div>
+            <div class="lane-flow" aria-label="Several lightweight tasks share a scheduler and event poller">
+              <div class="task-stack">
+                <span class="flow-node flow-node-violet">task A</span>
+                <span class="flow-node flow-node-violet">task B</span>
+                <span class="flow-node flow-node-violet">task C</span>
+              </div>
+              <span class="flow-arrow" aria-hidden="true"></span>
+              <span class="flow-node">scheduler</span>
+              <span class="flow-arrow" aria-hidden="true"></span>
+              <span class="flow-node flow-node-teal">poller</span>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="lane-copy">
+              <span class="lane-number">02 / NATIVE</span>
+              <h3>Dedicated pthread</h3>
+            </div>
+            <div class="lane-flow" aria-label="A native Ada task uses the stock GNARL pthread path">
+              <span class="flow-node">Ada task</span>
+              <span class="flow-arrow" aria-hidden="true"></span>
+              <span class="flow-node">GNARL</span>
+              <span class="flow-arrow" aria-hidden="true"></span>
+              <span class="flow-node flow-node-teal">pthread</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section page-shell mechanics" aria-labelledby="mechanics-title">
+        <div class="mechanics-copy">
+          <p class="eyebrow">Mechanics, not magic</p>
+          <h2 id="mechanics-title">Three mechanisms, kept separate.</h2>
+          <p>The poller discovers readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack so a suspended call resumes like an ordinary procedure return.</p>
+          <a href="architecture/">Read the architecture guide</a>
+        </div>
+        <ol class="mechanic-list">
+          <li class="mechanic-item">
+            <span class="mechanic-index">01</span>
+            <div><h3>Event polling</h3><p><code>kqueue</code> on Darwin or <code>epoll</code> plus <code>eventfd</code> on Linux waits for sockets, file completions, timers, and cross-thread wakes.</p></div>
+          </li>
+          <li class="mechanic-item">
+            <span class="mechanic-index">02</span>
+            <div><h3>Cooperative scheduling</h3><p>Per-group priority queues and deadline heaps select ready work. A CPU-bound lightweight task must suspend, yield, or call a fairness checkpoint.</p></div>
+          </li>
+          <li class="mechanic-item">
+            <span class="mechanic-index">03</span>
+            <div><h3>Stackful contexts</h3><p>Guarded <code>mmap</code> stacks and a small register swap preserve locals, exception state, Ada task identity, and blocking-looking control flow.</p></div>
+          </li>
+          <li class="mechanic-item">
+            <span class="mechanic-index">04</span>
+            <div><h3>GNARL semantics</h3><p>Rendezvous, protected objects, activation, masters, abort, and task identity remain within the existing runtime rather than a parallel async language.</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="io-band" aria-labelledby="io-title">
+        <div class="io-inner">
+          <div>
+            <p class="eyebrow">Task-aware I/O</p>
+            <h2 id="io-title">Calls look blocking. The lightweight task does not block its loop.</h2>
+            <p class="io-intro">The same public operation works from either lane. Values, exceptions, retry deadlines, and ownership rules stay consistent while the waiting mechanism changes underneath.</p>
+          </div>
+          <ul class="io-list">
+            <li><strong>Sockets</strong><span>Readiness-driven connect, accept, receive, and send.</span></li>
+            <li><strong>Files</strong><span>POSIX AIO on Darwin; <code>io_uring</code> or native AIO on Linux.</span></li>
+            <li><strong>Timers</strong><span>Monotonic deadlines in each group poller, with no timer thread.</span></li>
+            <li><strong>DNS</strong><span>Task-aware UDP and TCP resolution without a resolver worker thread.</span></li>
+            <li><strong>TLS</strong><span>Provider-neutral nonblocking steps, including an optional OpenSSL 3 adapter.</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">
+        <div class="constraint-lede">
+          <p class="eyebrow">Boundaries</p>
+          <h2 id="boundaries-title">Experimental, with explicit edges.</h2>
+          <p>Flyology does not claim hard real-time behavior, preemptive lightweight scheduling, or universal compiler portability. Runtime preparation fails closed when a host and GNAT release are not in the verified patch matrix.</p>
+          <a href="guide/#constraints">Review current constraints</a>
+        </div>
+        <table class="constraint-table">
+          <thead><tr><th>Concern</th><th>Contract</th></tr></thead>
+          <tbody>
+            <tr><td>Compatibility</td><td>Undesignated tasks remain native; event machinery starts lazily.</td></tr>
+            <tr><td>Fairness</td><td>Scheduling within a group is cooperative, with explicit yield points.</td></tr>
+            <tr><td>Foreign calls</td><td>Blocking foreign work belongs on a native task or a dedicated group.</td></tr>
+            <tr><td>Compiler support</td><td>Only exact, versioned GNAT patch families are accepted.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section page-shell" aria-labelledby="name-title">
+        <div class="history">
+          <div class="history-visual">
+            <img src="assets/brand/flyology-one-color.svg" alt="The Flyology flight mark">
+          </div>
+          <div class="history-copy">
+            <p class="eyebrow">The name</p>
+            <h2 id="name-title">A study of flight, revisited.</h2>
+            <p>In 1828, Ada Lovelace studied bird anatomy, experimented with materials for wings, and planned a book she called <em>Flyology</em>. This project borrows that name for another study in making familiar forms move differently.</p>
+            <a href="https://doi.org/10.1080/17498430.2017.1325297">Read the historical source</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta page-shell" aria-labelledby="cta-title">
+        <h2 id="cta-title">Follow one task from source to suspension.</h2>
+        <div class="actions">
+          <a class="button button-primary" href="guide/">Open the guide</a>
+          <a class="button button-secondary" href="api/">Browse the API</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental and dual-licensed under MIT or Apache-2.0, with a runtime patch carve-out.</span>
+        <div class="footer-links">
+          <a href="https://github.com/yrashk/flyology">Source</a>
+          <a href="https://github.com/yrashk/flyology/actions">CI</a>
+          <a href="api/">API reference</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="How Flyology routes Ada tasks through GNARL, event-loop schedulers, pollers, and stackful contexts.">
+    <meta name="theme-color" content="#17213d">
+    <title>Architecture · Flyology</title>
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <script src="../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home">
+          <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../">Overview</a></li>
+          <li><a href="../guide/">Guide</a></li>
+          <li><a href="./" aria-current="page">Architecture</a></li>
+          <li><a href="../api/">API</a></li>
+          <li><a href="https://github.com/yrashk/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Architecture</li></ol>
+          <h1>Below GNARL, beside the operating system.</h1>
+        </div>
+        <p class="doc-hero-copy">Flyology changes the execution resource behind a selected Ada task. It does not replace task identity, rendezvous, protected objects, activation, masters, abort, or exception semantics.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#routing">Task routing</a></li>
+            <li><a href="#mechanisms">Three mechanisms</a></li>
+            <li><a href="#lifecycle">Fiber lifecycle</a></li>
+            <li><a href="#groups">Execution groups</a></li>
+            <li><a href="#readiness">Readiness path</a></li>
+            <li><a href="#files">File completion</a></li>
+            <li><a href="#abi">ABI boundary</a></li>
+            <li><a href="#inertness">Native inertness</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="routing">
+            <span class="step-label">ROUTING</span>
+            <h2>One Ada tasking model, two execution lanes.</h2>
+            <p>The integration point is <code>System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the continuation to either a guarded fiber stack or the stock pthread-backed path.</p>
+            <figure class="architecture-figure">
+              <svg role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 760 410">
+                <title id="routing-title">Flyology task routing</title>
+                <desc id="routing-desc">An Ada task passes through GNARL and task primitives, then follows either the lightweight execution-group lane or the native pthread lane.</desc>
+                <defs>
+                  <marker id="routing-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                </defs>
+                <rect class="diagram-box" x="260" y="20" width="240" height="58" rx="12"/>
+                <text x="380" y="55" text-anchor="middle" font-size="16" font-weight="600">Application · ordinary Ada task</text>
+                <path class="diagram-line" d="M380 78v42" marker-end="url(#routing-arrow)"/>
+                <rect class="diagram-box" x="260" y="124" width="240" height="58" rx="12"/>
+                <text x="380" y="159" text-anchor="middle" font-size="16" font-weight="600">GNARL task semantics</text>
+                <path class="diagram-line" d="M380 182v42" marker-end="url(#routing-arrow)"/>
+                <rect class="diagram-box" x="260" y="228" width="240" height="58" rx="12"/>
+                <text x="380" y="253" text-anchor="middle" font-size="15" font-weight="600">Task-primitives routing</text>
+                <text class="diagram-muted" x="380" y="272" text-anchor="middle">designation captured at creation</text>
+                <path class="diagram-accent" d="M310 286c0 36-130 28-130 72" marker-end="url(#routing-arrow)"/>
+                <path class="diagram-line" d="M450 286c0 36 130 28 130 72" marker-end="url(#routing-arrow)"/>
+                <rect class="diagram-violet" x="50" y="334" width="260" height="58" rx="12"/>
+                <text x="180" y="359" text-anchor="middle" font-size="15" font-weight="600">Lightweight execution group</text>
+                <text class="diagram-muted" x="180" y="378" text-anchor="middle">fiber + scheduler + poller</text>
+                <rect class="diagram-teal" x="450" y="334" width="260" height="58" rx="12"/>
+                <text x="580" y="359" text-anchor="middle" font-size="15" font-weight="600">Native task lane</text>
+                <text class="diagram-muted" x="580" y="378" text-anchor="middle">stock GNARL pthread path</text>
+              </svg>
+            </figure>
+            <p>The environment task is always native. A task cannot change its lightweight or native designation while alive, though a lightweight task can migrate between event-loop groups at an explicit safe point.</p>
+          </section>
+
+          <section id="mechanisms">
+            <span class="step-label">SEPARATION</span>
+            <h2>Polling, scheduling, and switching are different jobs.</h2>
+            <p>Keeping the mechanisms separate makes the portability boundary explicit and keeps scheduler policy in Ada.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Event polling</dt><dd>Sleeps until socket readiness, file completion, a timer deadline, or a cross-thread wake. Implemented with <code>kqueue</code> on Darwin and <code>epoll</code> on Linux.</dd></div>
+                <div class="decision-row"><dt>Scheduling</dt><dd>Selects the next runnable fiber from per-priority FIFO buckets and promotes expired per-group deadlines. Implemented as Ada runtime policy.</dd></div>
+                <div class="decision-row"><dt>Context switching</dt><dd>Saves ABI-required register and stack state, then restores another guarded stack. Implemented by a small AArch64 or x86-64 register swap.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">i</span><p>The poller never executes an Ada continuation. It only makes a waiting fiber eligible for the scheduler to resume.</p></aside>
+          </section>
+
+          <section id="lifecycle">
+            <span class="step-label">LIFECYCLE</span>
+            <h2>A suspended call keeps its stack.</h2>
+            <p>Each lightweight task owns a guarded stackful context. A wait records the task's deadline and ownership state, switches fully back to the scheduler, and later resumes the original call frame.</p>
+            <ol class="state-rail" aria-label="Lightweight task lifecycle">
+              <li>Ready</li><li>Running</li><li>Waiting</li><li>Ready</li><li>Finished</li>
+            </ol>
+            <ul>
+              <li><strong>Ready to running:</strong> the group scheduler dispatches the highest-priority FIFO bucket.</li>
+              <li><strong>Running to waiting:</strong> a rendezvous, timer, or I/O operation suspends the fiber.</li>
+              <li><strong>Waiting to ready:</strong> GNARL synchronization, a deadline, or descriptor readiness wakes it.</li>
+              <li><strong>Running to migrating:</strong> an explicit safe point hands the fully switched-out fiber to another group.</li>
+            </ul>
+            <p>Two loops can never restore one fiber concurrently. The source scheduler performs the migration handoff only after the fiber has completely switched away.</p>
+          </section>
+
+          <section id="groups">
+            <span class="step-label">TOPOLOGY</span>
+            <h2>Each group is a scheduling and ownership domain.</h2>
+            <p>An execution group owns one stable loop pthread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work implicitly. Automatic placement, explicit Ada <code>CPU</code> selection, and migration determine where a task runs.</p>
+            <figure class="architecture-figure">
+              <svg role="img" aria-labelledby="groups-title groups-desc" viewBox="0 0 760 360">
+                <title id="groups-title">Two independent execution groups</title>
+                <desc id="groups-desc">Each group has its own tasks, priority queues, deadline heap, poller, and stable loop thread. Migration crosses between them explicitly.</desc>
+                <defs><marker id="groups-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--violet)"/></marker></defs>
+                <rect class="diagram-violet" x="30" y="32" width="315" height="290" rx="18"/>
+                <text x="58" y="69" font-size="17" font-weight="600">Group 0</text>
+                <text class="diagram-muted" x="58" y="90">stable loop pthread</text>
+                <rect class="diagram-box" x="58" y="113" width="116" height="50" rx="10"/><text x="116" y="143" text-anchor="middle" font-size="13">ready queues</text>
+                <rect class="diagram-box" x="200" y="113" width="116" height="50" rx="10"/><text x="258" y="143" text-anchor="middle" font-size="13">deadline heap</text>
+                <rect class="diagram-box" x="58" y="182" width="116" height="50" rx="10"/><text x="116" y="212" text-anchor="middle" font-size="13">descriptor index</text>
+                <rect class="diagram-box" x="200" y="182" width="116" height="50" rx="10"/><text x="258" y="212" text-anchor="middle" font-size="13">OS poller</text>
+                <circle cx="90" cy="278" r="13" fill="var(--violet)"/><circle cx="135" cy="278" r="13" fill="var(--violet)"/><circle cx="180" cy="278" r="13" fill="var(--violet)"/>
+                <text class="diagram-muted" x="218" y="283">fibers</text>
+                <rect class="diagram-teal" x="415" y="32" width="315" height="290" rx="18"/>
+                <text x="443" y="69" font-size="17" font-weight="600">Group 1</text>
+                <text class="diagram-muted" x="443" y="90">stable loop pthread</text>
+                <rect class="diagram-box" x="443" y="113" width="116" height="50" rx="10"/><text x="501" y="143" text-anchor="middle" font-size="13">ready queues</text>
+                <rect class="diagram-box" x="585" y="113" width="116" height="50" rx="10"/><text x="643" y="143" text-anchor="middle" font-size="13">deadline heap</text>
+                <rect class="diagram-box" x="443" y="182" width="116" height="50" rx="10"/><text x="501" y="212" text-anchor="middle" font-size="13">descriptor index</text>
+                <rect class="diagram-box" x="585" y="182" width="116" height="50" rx="10"/><text x="643" y="212" text-anchor="middle" font-size="13">OS poller</text>
+                <circle cx="475" cy="278" r="13" fill="var(--teal)"/><circle cx="520" cy="278" r="13" fill="var(--teal)"/>
+                <text class="diagram-muted" x="558" y="283">fibers</text>
+                <path class="diagram-accent" d="M320 278c40 35 80 35 120 0" marker-end="url(#groups-arrow)"/>
+              </svg>
+            </figure>
+            <p>Shared identifiers are <code>0 .. 127</code>. Dedicated identifiers are <code>128 .. 255</code>. Migrating out of a dedicated group consumes its reservation, so a task must call <code>Create_Dedicated</code> again before re-entering.</p>
+          </section>
+
+          <section id="readiness">
+            <span class="step-label">SOCKET PATH</span>
+            <h2>Readiness resumes the original operation.</h2>
+            <p>A socket call first attempts the nonblocking operating-system operation. If it would block, the lightweight path registers one-shot readiness and a deadline, then switches back to the scheduler. The resumed call owns the retry.</p>
+            <ol>
+              <li>The Ada task calls receive, send, accept, or connect.</li>
+              <li>The nonblocking syscall reports that it would block.</li>
+              <li>The scheduler records descriptor direction, generation, and deadline.</li>
+              <li><code>kqueue</code> or <code>epoll</code> reports readiness or the deadline expires.</li>
+              <li>The task resumes, retries the syscall, and returns a value or exception normally.</li>
+            </ol>
+            <p>Exact reads and complete writes can repeat this cycle while preserving one monotonic deadline. Ownership-aware connections also serialize operations and make cancellation and close descriptor-generation-safe.</p>
+          </section>
+
+          <section id="files">
+            <span class="step-label">FILE PATH</span>
+            <h2>Regular files use kernel completion, not worker threads.</h2>
+            <p>Regular files are usually always reported ready by readiness pollers, so lightweight file I/O uses a completion engine instead.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Darwin</dt><dd>POSIX AIO submissions complete through <code>EVFILT_AIO</code> in the group's <code>kqueue</code>.</dd></div>
+                <div class="decision-row"><dt>Linux primary</dt><dd>Each group owns an <code>io_uring</code> engine integrated with its event loop.</dd></div>
+                <div class="decision-row"><dt>Linux fallback</dt><dd>Linux native AIO completion wakes the group through <code>eventfd</code>.</dd></div>
+                <div class="decision-row"><dt>Native callers</dt><dd>Direct positional syscalls block only the native task's pthread.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p>A submitted file buffer remains kernel-owned until completion. Abort cannot release or reuse it early.</p></aside>
+          </section>
+
+          <section id="abi">
+            <span class="step-label">RUNTIME BOUNDARY</span>
+            <h2>Keep target-specific facts narrow.</h2>
+            <p>The C and assembly bridge contains Linux syscall numbers, native <code>epoll_event</code> layout, thread placement, virtual-memory operations, test hooks, and ABI register swaps. Scheduler, queue, timeout, backpressure, file-engine, and retry policy remain in Ada.</p>
+            <ul>
+              <li><strong>Contexts:</strong> AArch64 and x86-64 implementations preserve all ABI-required callee-saved integer, floating-point, stack, frame, and control state.</li>
+              <li><strong>Stacks:</strong> guarded <code>mmap</code> arenas detect overflow through the supported GNARL signal path and surface Ada <code>Storage_Error</code>.</li>
+              <li><strong>Patches:</strong> exact GNAT source-context patch families fail closed instead of weakening a hunk for an unverified compiler.</li>
+              <li><strong>Finalization:</strong> event machinery is one-shot and tears down only after GNARL task masters and controlled library objects are complete.</li>
+            </ul>
+          </section>
+
+          <section id="inertness">
+            <span class="step-label">COMPATIBILITY</span>
+            <h2>Native-only programs remain inert.</h2>
+            <p>The environment task is native, undesignated tasks are native by default, and Flyology creates no poller, event-loop thread, scheduler context, or fiber stack until the first lightweight task is activated.</p>
+            <p>This is a testable contract, not only a configuration preference. The external-consumer suite prepares both native-default and lightweight-default runtimes, then checks that an ordinary native-only program has no event machinery before or after creating a normal Ada task.</p>
+            <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">→</span><p>Ready to evaluate it? Continue with the <a href="../guide/">build and designation guide</a>, then use the <a href="../api/">generated API reference</a> for exact contracts.</p></aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Architecture descriptions track the implementation and repository verification scripts.</span>
+        <div class="footer-links"><a href="../">Overview</a><a href="../guide/">Guide</a><a href="../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

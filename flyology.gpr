@@ -116,6 +116,7 @@ project Flyology is
 
    package Documentation is
       for Excluded_Project_Files use ("config/flyology_config.gpr");
+      for Resources_Dir ("html") use "docs/gnatdoc/html";
    end Documentation;
 
 end Flyology;

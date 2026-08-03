@@ -6,7 +6,7 @@ authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
 maintainers-logins = ["yrashk"]
 licenses = "(MIT OR Apache-2.0) AND GPL-3.0-or-later WITH GCC-exception-3.1"
-website = "https://github.com/yrashk/flyology"
+website = "https://yrashk.github.io/flyology/"
 tags = ["ada", "runtime", "event-loop", "concurrency", "lightweight", "spark"]
 project-files = ["flyology.gpr"]
 
