@@ -239,6 +239,43 @@ X.End_Stream;</code></pre>
               <div><span>Scheduler view</span><h3>Execution groups</h3></div>
               <p>Current queue depth and cumulative activity from each created event loop. Members include parked handler tasks provisioned by server capacity; active HTTP counts requests in progress. Native tasks are outside these group rows, and configured but uncreated groups stay inert.</p>
             </div>
+            <div class="group-lab" aria-labelledby="group-lab-title">
+              <div class="group-lab-copy">
+                <span class="lab-kicker">Interactive migration lab</span>
+                <h4 id="group-lab-title">Move four isolated lightweight tasks.</h4>
+                <p>The configured pool is fixed at runtime. These controls lazily create showcase workers, move only those workers at cooperative safe points, and leave every created event-loop thread alive.</p>
+                <div class="group-actions" aria-label="Migration actions">
+                  <button type="button" data-group-action="populate">Populate groups</button>
+                  <button type="button" data-group-action="rotate">Rotate workers</button>
+                  <button type="button" data-group-action="consolidate">Consolidate on 0</button>
+                </div>
+                <p class="group-lab-status" data-group-lab-status role="status" aria-live="polite">No showcase workers created. The scheduler remains lazy.</p>
+                <ol class="group-workers" data-group-workers aria-label="Showcase worker positions">
+                  <li><span>worker 1</span><strong>offline</strong><small>0 moves</small></li>
+                  <li><span>worker 2</span><strong>offline</strong><small>0 moves</small></li>
+                  <li><span>worker 3</span><strong>offline</strong><small>0 moves</small></li>
+                  <li><span>worker 4</span><strong>offline</strong><small>0 moves</small></li>
+                </ol>
+              </div>
+              <figure class="source-panel group-source">
+                <figcaption><span>task-owned safe point</span><code>Migration_Worker.Move_To</code></figcaption>
+                <pre><code data-ada>accept Move_To
+  (Destination : Groups.Shared_Group_Id)
+do
+   declare
+      Before : constant Groups.Group_Id :=
+        Groups.Current;
+   begin
+      if Before /= Destination then
+         Groups.Migrate (Destination);
+      end if;
+   end;
+end Move_To;
+
+--  The caller resumes after arrival.
+Worker.Move_To (Destination);</code></pre>
+              </figure>
+            </div>
             <div class="technical-table-wrap">
               <table class="technical-table group-table">
                 <thead><tr><th>Group</th><th>State</th><th>Members</th><th>Ready</th><th>Waiting</th><th>Running</th><th>Timers</th><th>Descriptors</th><th>Files</th><th>Dispatches</th><th>Poll events</th><th>Wakeups</th></tr></thead>

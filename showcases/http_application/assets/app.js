@@ -280,6 +280,9 @@
   const runtimeState = document.querySelector("[data-runtime-state]");
   const runtimeLabel = document.querySelector("[data-runtime-label]");
   const groupTable = document.querySelector("[data-group-table]");
+  const groupWorkers = document.querySelector("[data-group-workers]");
+  const groupLabStatus = document.querySelector("[data-group-lab-status]");
+  const groupActionButtons = [...document.querySelectorAll("[data-group-action]")];
   const routeTable = document.querySelector("[data-route-table]");
   const middlewareList = document.querySelector("[data-middleware-list]");
 
@@ -302,7 +305,7 @@
     return item;
   }
 
-  function renderGroups(groups) {
+  function renderGroups(groups, lab) {
     groupTable.replaceChildren();
     if (!groups.length) {
       const row = document.createElement("tr");
@@ -313,6 +316,11 @@
     }
     groups.forEach((group) => {
       const row = document.createElement("tr");
+      const labMembers = lab?.workers?.filter((worker) => worker.online && worker.group === group.id) || [];
+      if (labMembers.length) {
+        row.className = "group-has-lab-worker";
+        row.title = `${labMembers.length} migration-lab worker${labMembers.length === 1 ? "" : "s"} currently here`;
+      }
       cell(row, String(group.id), "method-cell");
       cell(row, group.state, `state-${group.state}`);
       const members = cell(row, formatInteger(group.members));
@@ -329,6 +337,49 @@
       groupTable.append(row);
     });
   }
+
+  function renderMigrationLab(lab) {
+    if (!lab) return;
+    groupWorkers.replaceChildren();
+    lab.workers.forEach((worker) => {
+      const item = document.createElement("li");
+      if (worker.online) item.className = "online";
+      const name = document.createElement("span");
+      name.textContent = `worker ${worker.id}`;
+      const group = document.createElement("strong");
+      group.textContent = worker.online ? `group ${worker.group}` : "offline";
+      const moves = document.createElement("small");
+      moves.textContent = `${formatInteger(worker.moves)} move${worker.moves === 1 ? "" : "s"}`;
+      item.append(name, group, moves);
+      groupWorkers.append(item);
+    });
+
+    if (!lab.started) {
+      groupLabStatus.textContent = "No showcase workers created. The scheduler remains lazy.";
+      return;
+    }
+    const failureText = lab.failures ? ` · ${formatInteger(lab.failures)} failed` : "";
+    groupLabStatus.textContent = `${formatInteger(lab.active_workers)} workers online · ${formatInteger(lab.total_moves)} migrations completed${failureText} · last action ${lab.last_action}`;
+  }
+
+  groupActionButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.groupAction;
+      groupActionButtons.forEach((item) => { item.disabled = true; });
+      groupLabStatus.textContent = `${action} in progress…`;
+      try {
+        const response = await fetch(`/runtime/groups/${action}`, { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+        const poolNote = result.configured_groups === 1 ? " · one configured group, so movement is a no-op" : "";
+        groupLabStatus.textContent = `${result.action} complete · ${formatInteger(result.workers)} workers · ${formatInteger(result.total_moves)} migrations${poolNote}`;
+      } catch (error) {
+        groupLabStatus.textContent = `migration action failed · ${error.message}`;
+      } finally {
+        groupActionButtons.forEach((item) => { item.disabled = false; });
+      }
+    });
+  });
 
   const runtimeSource = new EventSource("/runtime/events");
   runtimeSource.onopen = () => {
@@ -352,7 +403,8 @@
     stackValue.title = `${formatBytes(sample.stacks.usable_bytes)} usable, ${formatBytes(sample.stacks.reserved_bytes)} reserved across ${formatInteger(sample.stacks.arenas)} arenas`;
     document.querySelector("[data-runtime-active]").textContent = formatInteger(sample.http.active);
     document.querySelector("[data-runtime-sequence]").textContent = formatInteger(sample.sequence);
-    renderGroups(sample.groups);
+    renderGroups(sample.groups, sample.migration_lab);
+    renderMigrationLab(sample.migration_lab);
   });
   runtimeSource.onerror = () => {
     serverState.dataset.serverState = "error";

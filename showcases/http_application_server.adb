@@ -44,6 +44,7 @@ with Flyology.Observability;
 procedure HTTP_Application_Server is
    use type Ada.Streams.Stream_Element_Offset;
    use type Flyology.Observability.Counter;
+   use type Flyology.Execution_Groups.Group_Id;
    use type Flyology.HTTP.Server.WebSocket_Data_Kind;
    use type Flyology.IO.Files.File_Descriptor;
    use type Flyology.IO.Files.File_Offset;
@@ -411,6 +412,150 @@ procedure HTTP_Application_Server is
         Flyology.HTTP.Server.Middleware_Deadlines
           (Application_Context, Routing.Components, Maximum => 20.0);
 
+      Migration_Worker_Count : constant Positive := 4;
+      subtype Migration_Worker_Id is
+        Positive range 1 .. Migration_Worker_Count;
+
+      type Migration_Action is
+        (No_Migration_Action, Populate_Groups, Rotate_Groups,
+         Consolidate_Group_Zero);
+      type Migration_Group_Array is
+        array (Migration_Worker_Id) of Groups.Group_Id;
+      type Migration_Count_Array is
+        array (Migration_Worker_Id) of Natural;
+      type Migration_Online_Array is
+        array (Migration_Worker_Id) of Boolean;
+
+      type Migration_Lab_Snapshot is record
+         Worker_Groups : Migration_Group_Array :=
+           (others => Groups.Default_Group);
+         Moves       : Migration_Count_Array := (others => 0);
+         Online      : Migration_Online_Array := (others => False);
+         Active      : Natural range 0 .. Migration_Worker_Count := 0;
+         Total_Moves : Natural := 0;
+         Failures    : Natural := 0;
+         Last_Action : Migration_Action := No_Migration_Action;
+      end record;
+
+      --  Runtime samples can race with migration commands. Keep the lab's
+      --  small public snapshot behind one protected object; scheduler state
+      --  itself remains owned and observed through Flyology's runtime APIs.
+      protected Migration_Lab is
+         procedure Started
+           (Worker : Migration_Worker_Id;
+            Group  : Groups.Group_Id);
+         procedure Record_Move
+           (Worker    : Migration_Worker_Id;
+            Group     : Groups.Group_Id;
+            Moved     : Boolean;
+            Succeeded : Boolean);
+         procedure Finish (Action : Migration_Action);
+         function Read return Migration_Lab_Snapshot;
+      private
+         Value : Migration_Lab_Snapshot;
+      end Migration_Lab;
+
+      protected body Migration_Lab is
+         procedure Started
+           (Worker : Migration_Worker_Id;
+            Group  : Groups.Group_Id) is
+         begin
+            if not Value.Online (Worker) then
+               Value.Active := Value.Active + 1;
+            end if;
+            Value.Online (Worker) := True;
+            Value.Worker_Groups (Worker) := Group;
+         end Started;
+
+         procedure Record_Move
+           (Worker    : Migration_Worker_Id;
+            Group     : Groups.Group_Id;
+            Moved     : Boolean;
+            Succeeded : Boolean) is
+         begin
+            Value.Worker_Groups (Worker) := Group;
+            if Succeeded and then Moved then
+               Value.Moves (Worker) := Value.Moves (Worker) + 1;
+               Value.Total_Moves := Value.Total_Moves + 1;
+            elsif not Succeeded then
+               Value.Failures := Value.Failures + 1;
+            end if;
+         end Record_Move;
+
+         procedure Finish (Action : Migration_Action) is
+         begin
+            Value.Last_Action := Action;
+         end Finish;
+
+         function Read return Migration_Lab_Snapshot is (Value);
+      end Migration_Lab;
+
+      task type Migration_Worker (Worker : Migration_Worker_Id) is
+         pragma Task_Info (Flyology.Lightweight_Task);
+         entry Move_To (Destination : Groups.Shared_Group_Id);
+         entry Stop;
+      end Migration_Worker;
+
+      task body Migration_Worker is
+      begin
+         Migration_Lab.Started (Worker, Groups.Current);
+         loop
+            select
+               accept Move_To (Destination : Groups.Shared_Group_Id) do
+                  declare
+                     Before    : constant Groups.Group_Id := Groups.Current;
+                     Arrived   : Groups.Group_Id := Before;
+                     Did_Move  : constant Boolean := Before /= Destination;
+                     Succeeded : Boolean := True;
+                  begin
+                     begin
+                        --  Migration is a cooperative safe point performed by
+                        --  the lightweight task that owns this stack. The
+                        --  controller never moves an arbitrary runtime task.
+                        if Did_Move then
+                           Groups.Migrate (Destination);
+                           Arrived := Groups.Current;
+                        end if;
+                     exception
+                        when others =>
+                           Succeeded := False;
+                     end;
+                     Migration_Lab.Record_Move
+                       (Worker, Arrived, Did_Move, Succeeded);
+                  end;
+               end Move_To;
+            or
+               accept Stop;
+               exit;
+            end select;
+         end loop;
+      end Migration_Worker;
+
+      type Migration_Worker_Access is access Migration_Worker;
+      type Migration_Worker_Array is
+        array (Migration_Worker_Id) of Migration_Worker_Access;
+      Migration_Workers : Migration_Worker_Array := (others => null);
+
+      function Migration_Action_Name
+        (Value : Migration_Action) return String is
+        (case Value is
+            when No_Migration_Action      => "none",
+            when Populate_Groups          => "populate",
+            when Rotate_Groups            => "rotate",
+            when Consolidate_Group_Zero   => "consolidate");
+
+      procedure Ensure_Migration_Workers is
+      begin
+         --  Laziness matters to the native showcase: merely serving the page
+         --  must not start event-loop machinery. The first explicit lab action
+         --  creates these four isolated lightweight tasks.
+         for Worker in Migration_Worker_Id loop
+            if Migration_Workers (Worker) = null then
+               Migration_Workers (Worker) := new Migration_Worker (Worker);
+            end if;
+         end loop;
+      end Ensure_Migration_Workers;
+
       function Body_Name
         (Value : App.Request_Body_Policy) return String is
         (case Value is
@@ -541,6 +686,7 @@ procedure HTTP_Application_Server is
            Metrics.Read;
          First_Group : Boolean := True;
          Created     : Natural := 0;
+         Lab         : constant Migration_Lab_Snapshot := Migration_Lab.Read;
       begin
          Ada.Strings.Unbounded.Append
            (Result,
@@ -596,7 +742,30 @@ procedure HTTP_Application_Server is
             end;
          end loop;
          Ada.Strings.Unbounded.Append
-           (Result, "],""created_groups"":" & Compact (Created) & "}");
+           (Result,
+            "],""created_groups"":" & Compact (Created)
+            & ",""migration_lab"":{"
+            & """started"":" & (if Lab.Active > 0 then "true" else "false")
+            & ",""active_workers"":" & Compact (Lab.Active)
+            & ",""total_moves"":" & Compact (Lab.Total_Moves)
+            & ",""failures"":" & Compact (Lab.Failures)
+            & ",""last_action"":"
+            & JSON_Quote (Migration_Action_Name (Lab.Last_Action))
+            & ",""workers"":[");
+         for Worker in Migration_Worker_Id loop
+            if Worker > Migration_Worker_Id'First then
+               Ada.Strings.Unbounded.Append (Result, ',');
+            end if;
+            Ada.Strings.Unbounded.Append
+              (Result,
+               "{""id"":" & Compact (Worker)
+               & ",""online"":"
+               & (if Lab.Online (Worker) then "true" else "false")
+               & ",""group"":"
+               & Compact (Natural (Lab.Worker_Groups (Worker)))
+               & ",""moves"":" & Compact (Lab.Moves (Worker)) & "}");
+         end loop;
+         Ada.Strings.Unbounded.Append (Result, "]}}");
          return Ada.Strings.Unbounded.To_String (Result);
       end Runtime_JSON;
 
@@ -609,6 +778,90 @@ procedure HTTP_Application_Server is
          State.Calls := State.Calls + 1;
          Requests.Completed;
       end Complete;
+
+      procedure Migration_Action_Endpoint
+        (State : in out Application_Context;
+         X     : in out App.Exchange)
+      is
+         Requested  : constant String := X.Parameter ("action");
+         Action     : Migration_Action;
+         Pool_Size  : constant Natural :=
+           Natural (Groups.Configured_Pool_Size);
+         Expected_Origin : constant String :=
+           "http://"
+           & Ada.Characters.Handling.To_Lower
+               (Request_Helpers.Authority (X));
+      begin
+         --  These controls mutate local scheduler state. Require a browser
+         --  same-origin request so an unrelated page cannot drive a listener
+         --  on localhost with a simple cross-origin POST.
+         if X.Request_Header_Count ("Origin") /= 1
+           or else X.Request_Header ("Origin") /= Expected_Origin
+         then
+            Complete (State);
+            X.Problem
+              (403, "migration-origin",
+               "Migration controls require the showcase origin");
+            return;
+         end if;
+
+         if Requested = "populate" then
+            Action := Populate_Groups;
+         elsif Requested = "rotate" then
+            Action := Rotate_Groups;
+         elsif Requested = "consolidate" then
+            Action := Consolidate_Group_Zero;
+         else
+            Complete (State);
+            X.Problem
+              (400, "unknown-migration-action",
+               "Use populate, rotate, or consolidate");
+            return;
+         end if;
+
+         Ensure_Migration_Workers;
+         declare
+            Before : constant Migration_Lab_Snapshot := Migration_Lab.Read;
+         begin
+            for Worker in Migration_Worker_Id loop
+               declare
+                  Destination : Groups.Shared_Group_Id;
+               begin
+                  case Action is
+                     when Populate_Groups =>
+                        --  Spread wraps when the configured pool has fewer
+                        --  groups than the fixed four-worker demonstration.
+                        Destination := Groups.Shared_Group_Id
+                          ((Worker - Migration_Worker_Id'First) mod Pool_Size);
+                     when Rotate_Groups =>
+                        Destination := Groups.Shared_Group_Id
+                          ((Natural (Before.Worker_Groups (Worker)) + 1)
+                           mod Pool_Size);
+                     when Consolidate_Group_Zero =>
+                        Destination := Groups.Default_Group;
+                     when No_Migration_Action =>
+                        raise Program_Error;
+                  end case;
+                  --  The rendezvous returns only after the worker has reached
+                  --  its destination or recorded a bounded failure.
+                  Migration_Workers (Worker).Move_To (Destination);
+               end;
+            end loop;
+         end;
+         Migration_Lab.Finish (Action);
+         Complete (State);
+         declare
+            After : constant Migration_Lab_Snapshot := Migration_Lab.Read;
+         begin
+            X.JSON
+              (200,
+               "{""action"":" & JSON_Quote (Requested)
+               & ",""workers"":" & Compact (After.Active)
+               & ",""configured_groups"":" & Compact (Pool_Size)
+               & ",""total_moves"":" & Compact (After.Total_Moves)
+               & ",""failures"":" & Compact (After.Failures) & "}");
+         end;
+      end Migration_Action_Endpoint;
 
       procedure Serve_File
         (State        : in out Application_Context;
@@ -1271,7 +1524,7 @@ procedure HTTP_Application_Server is
       type Context is limited record
          Application : Application_Context;
          Routes      : Routing.Router
-           (Capacity => 28, Slashes => Routing.Strict_Slashes);
+           (Capacity => 30, Slashes => Routing.Strict_Slashes);
          Budget      : aliased HTTP.Ingress_Budget
            (Limit => 64 * 1_024 * 1_024);
       end record;
@@ -1374,6 +1627,15 @@ procedure HTTP_Application_Server is
            (Routing.Default_Route_Policy with delta
               Upgrade => Routing.Allow_SSE,
               Timeout => 110.0));
+      State.Routes.Post
+        ("/runtime/groups/{action}", Migration_Action_Endpoint'Access,
+         Name => "runtime.groups.action",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              --  Serialize access to the fixed worker handles. The workers
+              --  themselves migrate cooperatively on their own stacks.
+              Concurrency => 1,
+              Timeout     => 5.0));
       State.Routes.Get
         ("/request-log/events", Request_Log_Events'Access,
          Name => "request-log.events",
@@ -1469,6 +1731,19 @@ procedure HTTP_Application_Server is
          Server_Instance.Serve
            (Server, Listener, State, Drain_Timeout => 0.050);
       end;
+
+      --  Access-task allocation gives these workers Run's task master. Stop
+      --  every created worker before leaving so none can outlive showcase
+      --  state or keep application shutdown waiting indefinitely.
+      for Worker in Migration_Worker_Id loop
+         if Migration_Workers (Worker) /= null then
+            begin
+               Migration_Workers (Worker).Stop;
+            exception
+               when Tasking_Error => null;
+            end;
+         end if;
+      end loop;
    end Run;
 
    procedure Run_Lightweight is new Run (Flyology.Lightweight_Task);
