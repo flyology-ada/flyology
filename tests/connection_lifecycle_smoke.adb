@@ -5,6 +5,8 @@ with Flyology;
 with Flyology.IO.Connections;
 with Flyology.Observability;
 with Interfaces;
+with System.Task_Primitives.Operations;
+with System.Tasking;
 
 procedure Connection_Lifecycle_Smoke is
    package Connections renames Flyology.IO.Connections;
@@ -128,12 +130,30 @@ begin
 
       task body Completion_Probe is
          Sample : Flyology.Observability.Group_Snapshot;
+         Parent : constant System.Tasking.Task_Id :=
+           System.Task_Primitives.Operations.Environment_Task;
+         Parent_State : System.Tasking.Task_States;
+         Parent_Wait  : Natural;
+         Parent_Awake : Natural;
+         Parent_Alive : Natural;
       begin
          delay 0.500;
+         System.Task_Primitives.Operations.Write_Lock (Parent);
+         Parent_State := Parent.Common.State;
+         Parent_Wait := Parent.Common.Wait_Count;
+         Parent_Awake := Parent.Awake_Count;
+         Parent_Alive := Parent.Alive_Count;
+         System.Task_Primitives.Operations.Unlock (Parent);
          Ada.Text_IO.Put_Line
            ("issue18: first_terminated=" & Boolean'Image (First'Terminated)
             & " second_terminated=" & Boolean'Image (Second'Terminated)
             & " manager_active=" & Natural'Image (Manager.Active));
+         Ada.Text_IO.Put_Line
+           ("issue18: parent_state="
+            & System.Tasking.Task_States'Image (Parent_State)
+            & " wait=" & Natural'Image (Parent_Wait)
+            & " awake=" & Natural'Image (Parent_Awake)
+            & " alive=" & Natural'Image (Parent_Alive));
          if Flyology.Observability.Snapshot (0, Sample) then
             Ada.Text_IO.Put_Line
               ("issue18: members=" & Interfaces.Unsigned_64'Image (Sample.Members)
