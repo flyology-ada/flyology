@@ -43,9 +43,9 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Architecture</li></ol>
-          <h1>Below GNARL, beside the operating system.</h1>
+          <h1>How lightweight tasks fit into GNARL.</h1>
         </div>
-        <p class="doc-hero-copy">Flyology changes the execution resource behind a selected Ada task. It does not replace task identity, rendezvous, protected objects, activation, masters, abort, or exception semantics.</p>
+        <p class="doc-hero-copy">Flyology changes how a selected task executes without changing its Ada task semantics. Task identity, rendezvous, protected objects, activation, masters, abort, and exception behavior remain within GNARL.</p>
       </header>
 
       <div class="docs-layout">
@@ -66,8 +66,8 @@
         <article class="prose">
           <section id="routing">
             <span class="step-label">ROUTING</span>
-            <h2>One Ada tasking model, two execution lanes.</h2>
-            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the continuation to either a guarded fiber stack or the stock pthread-backed path.</p>
+            <h2>Tasks use either native or lightweight execution.</h2>
+            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the task either to a guarded fiber stack managed by an execution group or to the stock pthread-backed path.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 760 410">
                 <title id="routing-title">Flyology task routing</title>
@@ -163,7 +163,7 @@
           <section id="readiness">
             <span class="step-label">SOCKET PATH</span>
             <h2>Readiness resumes the original operation.</h2>
-            <p>A socket call first attempts the nonblocking operating-system operation. If it would block, the lightweight path registers one-shot readiness and a deadline, then switches back to the scheduler. The resumed call owns the retry.</p>
+            <p>A socket call first attempts the nonblocking operating-system operation. If it would block, the lightweight path registers one-shot readiness and a deadline, then switches back to the scheduler. When resumed, the same call retries the operation.</p>
             <ol>
               <li>The Ada task calls receive, send, accept, or connect.</li>
               <li>The nonblocking syscall reports that it would block.</li>
@@ -191,7 +191,7 @@
 
           <section id="abi">
             <span class="step-label">RUNTIME BOUNDARY</span>
-            <h2>Keep target-specific facts narrow.</h2>
+            <h2>Target-specific code stays in the C and assembly bridge.</h2>
             <p>The C and assembly bridge contains Linux syscall numbers, native <code>epoll_event</code> layout, thread placement, virtual-memory operations, test hooks, and ABI register swaps. Scheduler, queue, timeout, backpressure, file-engine, and retry policy remain in Ada.</p>
             <ul>
               <li><strong>Contexts:</strong> AArch64 and x86-64 implementations preserve all ABI-required callee-saved integer, floating-point, stack, frame, and control state.</li>
@@ -203,7 +203,7 @@
 
           <section id="inertness">
             <span class="step-label">COMPATIBILITY</span>
-            <h2>Native-only programs remain inert.</h2>
+            <h2>Native-only programs start no event machinery.</h2>
             <p>The environment task is native, undesignated tasks are native by default, and Flyology creates no poller, event-loop thread, scheduler context, or fiber stack until the first lightweight task is activated.</p>
             <p>This is a testable contract, not only a configuration preference. The external-consumer suite prepares both native-default and lightweight-default runtimes, then checks that an ordinary native-only program has no event machinery before or after creating a normal Ada task.</p>
             <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">→</span><p>Ready to evaluate it? Continue with the <a href="../guide/">build and designation guide</a>, then use the <a href="../api/">generated API reference</a> for exact contracts.</p></aside>
@@ -214,7 +214,7 @@
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Architecture descriptions track the implementation and repository verification scripts.</span>
+        <span>This guide reflects the current implementation and verification scripts.</span>
         <div class="footer-links"><a href="../">Overview</a><a href="../guide/">Guide</a><a href="../api/">API reference</a></div>
       </div>
     </footer>

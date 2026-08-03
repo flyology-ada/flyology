@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Flyology adds an explicit lightweight execution lane to ordinary Ada tasking without introducing a new async model.">
     <meta name="theme-color" content="#17213d">
-    <title>Flyology · Lightweight tasks, ordinary Ada</title>
+    <title>Flyology · Lightweight tasks for Ada</title>
     <link rel="canonical" href="https://flyology.org/">
     <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles/site.css">
@@ -48,9 +48,9 @@
       <section class="hero page-shell" aria-labelledby="hero-title">
         <div>
           <p class="eyebrow">Experimental GNAT runtime integration</p>
-          <h1 id="hero-title">Lightweight tasks. Ordinary Ada.</h1>
+          <h1 id="hero-title">Lightweight tasks for Ada.</h1>
           <p class="hero-lede">
-            Flyology adds an explicit lightweight execution lane to ordinary Ada tasking, without introducing a new async model. Selected tasks run cooperatively as fibers on shared event-loop threads, while rendezvous, protected objects, exceptions, and synchronous control flow stay ordinary Ada.
+            Flyology adds an explicit lightweight execution lane to ordinary Ada tasking, without introducing a new async model. Selected tasks run cooperatively as fibers on shared event-loop threads. Rendezvous, protected objects, exceptions, and synchronous control flow continue to use Ada task semantics.
           </p>
           <div class="actions">
             <a class="button button-primary" href="guide/">
@@ -68,11 +68,11 @@
           </div>
           <div class="model-note model-note-light">
             <strong>Lightweight task</strong>
-            Suspends its fiber, not the loop thread.
+            Waits without blocking its shared loop thread.
           </div>
           <div class="model-note model-note-native">
             <strong>Native task</strong>
-            Keeps the stock pthread-backed path.
+            Runs on its own pthread through stock GNARL.
           </div>
           <div class="code-window">
             <div class="code-titlebar">
@@ -103,7 +103,7 @@ Flyology.IO.Sockets.Receive
         <div class="section-heading">
           <div>
             <p class="eyebrow">Programming model</p>
-            <h2 id="lanes-title">Two lanes. One tasking language.</h2>
+            <h2 id="lanes-title">Native and lightweight tasks share Ada semantics.</h2>
           </div>
           <p>An undesignated task stays native. Lightweight execution is explicit, captured at task creation, and integrated below GNARL task semantics.</p>
         </div>
@@ -144,9 +144,9 @@ Flyology.IO.Sockets.Receive
 
       <section class="section page-shell mechanics" aria-labelledby="mechanics-title">
         <div class="mechanics-copy">
-          <p class="eyebrow">Mechanics, not magic</p>
-          <h2 id="mechanics-title">Three mechanisms, kept separate.</h2>
-          <p>The poller discovers readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack so a suspended call resumes like an ordinary procedure return.</p>
+          <p class="eyebrow">Runtime architecture</p>
+          <h2 id="mechanics-title">Each part has a separate responsibility.</h2>
+          <p>The poller reports readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack. GNARL continues to provide Ada task semantics.</p>
           <a href="architecture/">Read the architecture guide</a>
         </div>
         <ol class="mechanic-list">
@@ -189,7 +189,7 @@ Flyology.IO.Sockets.Receive
       <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">
         <div class="constraint-lede">
           <p class="eyebrow">Boundaries</p>
-          <h2 id="boundaries-title">Experimental, with explicit edges.</h2>
+          <h2 id="boundaries-title">Experimental, with documented constraints.</h2>
           <p>Flyology does not claim hard real-time behavior, preemptive lightweight scheduling, or universal compiler portability. Runtime preparation fails closed when a host and GNAT release are not in the verified patch matrix.</p>
           <a href="guide/#constraints">Review current constraints</a>
         </div>
@@ -219,7 +219,7 @@ Flyology.IO.Sockets.Receive
       </section>
 
       <section class="final-cta page-shell" aria-labelledby="cta-title">
-        <h2 id="cta-title">Follow one task from source to suspension.</h2>
+        <h2 id="cta-title">Build your first lightweight task.</h2>
         <div class="actions">
           <a class="button button-primary" href="guide/">Open the guide</a>
           <a class="button button-secondary" href="api/">Browse the API</a>

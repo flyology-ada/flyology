@@ -68,7 +68,7 @@
           <section id="requirements">
             <span class="step-label">STEP 01</span>
             <h2>Start with an exact toolchain.</h2>
-            <p>Flyology is an Alire crate and requires Alire 2.1 or newer. The crate accepts GNAT 13 through 16 as a dependency range, but runtime preparation accepts only the exact host and release pairs whose GNARL source shapes have been verified.</p>
+            <p>Flyology is an Alire crate and requires Alire 2.1 or newer. The crate accepts GNAT 13 through 16 as a dependency range, but runtime preparation supports only the host and release pairs listed below.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>macOS / AArch64</dt><dd>13.2.2, 14.1.3, 14.2.1, and 16.1.0</dd></div>
@@ -85,7 +85,7 @@
           <section id="build">
             <span class="step-label">STEP 02</span>
             <h2>Build the public library.</h2>
-            <p>Clone the repository, let Alire select a supported toolchain, and build the crate. The public library deliberately does not make a stock GNARL executable sufficient by itself; applications link against the prepared runtime in the next step.</p>
+            <p>Clone the repository, let Alire select a supported toolchain, and build the crate. Applications must link against a prepared runtime; stock GNARL alone is not sufficient.</p>
             <figure class="code-panel">
               <figcaption>shell</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -145,7 +145,7 @@ end Worker;</code></pre>
 
           <section id="groups">
             <span class="step-label">STEP 05</span>
-            <h2>Choose where lightweight work runs.</h2>
+            <h2>Choose an execution group.</h2>
             <p>A lightweight task without a specific Ada CPU is placed into the configured shared pool by deterministic round robin. A <code>CPU</code> aspect selects an exact Flyology execution group instead.</p>
             <figure class="code-panel">
               <figcaption>explicit shared groups</figcaption>
@@ -177,8 +177,8 @@ end;</code></pre>
 
           <section id="io">
             <span class="step-label">STEP 06</span>
-            <h2>Keep synchronous calls.</h2>
-            <p>Flyology I/O packages expose normal procedure and function calls from either lane. In a lightweight task, a would-block result suspends only that task's fiber. In a native task, the wait may block only its pthread.</p>
+            <h2>Use synchronous I/O calls.</h2>
+            <p>Flyology I/O packages expose normal procedure and function calls from either lane. If a lightweight call would block, only that task waits; the loop thread remains available. A native call may block only its pthread.</p>
             <figure class="code-panel">
               <figcaption>task-aware I/O</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -196,8 +196,8 @@ Flyology.IO.Files.Read_At
 
           <section id="fairness">
             <span class="step-label">STEP 07</span>
-            <h2>Make CPU work cooperate.</h2>
-            <p>A CPU-bound lightweight task owns its group until it reaches a runtime suspension, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities choose among ready fibers within a group, but they do not preempt arbitrary lightweight instructions.</p>
+            <h2>Add fairness checkpoints to CPU-bound work.</h2>
+            <p>A CPU-bound lightweight task can monopolize its group until it reaches a runtime suspension, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities choose among ready fibers within a group, but they do not preempt arbitrary lightweight instructions.</p>
             <figure class="code-panel">
               <figcaption>time-budgeted fairness</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -217,7 +217,7 @@ end loop;</code></pre>
 
           <section id="verify">
             <span class="step-label">STEP 08</span>
-            <h2>Verify at the boundary you changed.</h2>
+            <h2>Run the checks for your changes.</h2>
             <p>The repository scripts are authoritative for behavioral tests, proofs, documentation, stress campaigns, and showcases.</p>
             <figure class="code-panel">
               <figcaption>core verification</figcaption>
@@ -248,7 +248,7 @@ end loop;</code></pre>
             </div>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">→</span>
-              <p>For the full implementation boundary, continue with the <a href="../architecture/">architecture guide</a>. For exact contracts and exceptions, use the <a href="../api/">API reference</a>.</p>
+              <p>For implementation details, continue with the <a href="../architecture/">architecture guide</a>. For exact contracts and exceptions, use the <a href="../api/">API reference</a>.</p>
             </aside>
           </section>
         </article>
