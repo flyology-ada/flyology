@@ -329,6 +329,14 @@ package Flyology.HTTP.Server.Applications is
    --  @param Data Response bytes
    procedure Write_Chunk (Item : in out Exchange; Data : String);
 
+   --  Write one binary response chunk with synchronous transport
+   --  backpressure.
+   --  @param Item Exchange with an active streaming response
+   --  @param Data Response bytes
+   procedure Write_Chunk
+     (Item : in out Exchange;
+      Data : Ada.Streams.Stream_Element_Array);
+
    --  Complete an active streaming response.
    --  @param Item Exchange with an active streaming response
    procedure End_Stream (Item : in out Exchange);

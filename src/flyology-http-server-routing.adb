@@ -959,7 +959,8 @@ package body Flyology.HTTP.Server.Routing is
       Timeout      : Duration := 30.0;
       Max_Connection_Age : Duration := 300.0;
       Max_Requests : Natural := 1_000;
-      Token        : access Flyology.Cancellation.Token := null)
+      Token        : access Flyology.Cancellation.Token := null;
+      Header_Timeout : Duration := -1.0)
    is
       Value  : aliased Request;
       Closed : Boolean;
@@ -1001,11 +1002,19 @@ package body Flyology.HTTP.Server.Routing is
       loop
          exit when Read_Timeout = 0.0;
          Head_Started := Ada.Real_Time.Clock;
-         Head_Budget := Read_Timeout;
+         Head_Budget :=
+           (if Header_Timeout < 0.0
+            then Read_Timeout
+            elsif Read_Timeout < 0.0
+            then Header_Timeout
+            else Duration'Min (Header_Timeout, Read_Timeout));
          begin
             Read_Request_Head
-              (Connection, Value, Closed, Read_Timeout,
-               Max_Request_Body, Token);
+              (Connection, Value, Closed,
+               Header_Timeout  => Head_Budget,
+               Request_Timeout => Read_Timeout,
+               Max_Body        => Max_Request_Body,
+               Token           => Token);
          exception
             when Payload_Too_Large =>
                if not Response_Started (Connection)

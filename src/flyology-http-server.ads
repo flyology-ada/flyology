@@ -197,6 +197,27 @@ package Flyology.HTTP.Server is
       Max_Body    : Natural := Max_Request_Body;
       Token       : access Flyology.Cancellation.Token := null);
 
+   --  Read and validate a request head with distinct absolute budgets for the
+   --  header and complete request. Both clocks start before the first header
+   --  byte, so neither incremental headers nor a streamed body can restart a
+   --  deadline. Request_Timeout may exceed Header_Timeout for explicitly
+   --  admitted long-lived responses such as SSE and WebSocket lifecycles.
+   --  @param Item HTTP connection
+   --  @param Value Parsed request head on success; Content is empty
+   --  @param Peer_Closed True only when the peer closes between requests
+   --  @param Header_Timeout Absolute request-head deadline interval
+   --  @param Request_Timeout Absolute complete-request deadline interval
+   --  @param Max_Body Application body limit, capped by Max_Request_Body
+   --  @param Token Optional cancellation source
+   procedure Read_Request_Head
+     (Item            : in out Connection;
+      Value           : out Request;
+      Peer_Closed     : out Boolean;
+      Header_Timeout  : Duration;
+      Request_Timeout : Duration;
+      Max_Body        : Natural := Max_Request_Body;
+      Token           : access Flyology.Cancellation.Token := null);
+
    --  Accept the current request body, sending 100 Continue when requested.
    --  The original Read_Request_Head deadline remains authoritative.
    --  @param Item HTTP connection with an unread request body
@@ -346,6 +367,18 @@ package Flyology.HTTP.Server is
    procedure Write_Response_Chunk
      (Item    : in out Connection;
       Data    : String;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null);
+
+   --  Send one binary streaming response chunk with transport backpressure.
+   --  Empty data is a no-op and HEAD suppresses data bytes.
+   --  @param Item Active streaming response
+   --  @param Data Response bytes
+   --  @param Timeout Transport send deadline
+   --  @param Token Optional cancellation source
+   procedure Write_Response_Chunk
+     (Item    : in out Connection;
+      Data    : Ada.Streams.Stream_Element_Array;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
 

@@ -880,6 +880,24 @@ package body Flyology.HTTP.Server is
       Max_Body    : Natural := Max_Request_Body;
       Token       : access Flyology.Cancellation.Token := null)
    is
+   begin
+      Read_Request_Head
+        (Item, Value, Peer_Closed,
+         Header_Timeout  => Timeout,
+         Request_Timeout => Timeout,
+         Max_Body        => Max_Body,
+         Token           => Token);
+   end Read_Request_Head;
+
+   procedure Read_Request_Head
+     (Item            : in out Connection;
+      Value           : out Request;
+      Peer_Closed     : out Boolean;
+      Header_Timeout  : Duration;
+      Request_Timeout : Duration;
+      Max_Body        : Natural := Max_Request_Body;
+      Token           : access Flyology.Cancellation.Token := null)
+   is
       Header_End : Natural := 0;
       Closed     : Boolean;
       Body_Size  : Natural := 0;
@@ -887,6 +905,12 @@ package body Flyology.HTTP.Server is
       Body_Limit : constant Natural := Natural'Min
         (Max_Body, Max_Request_Body);
       Started    : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Effective_Header_Timeout : constant Duration :=
+        (if Header_Timeout < 0.0
+         then Request_Timeout
+         elsif Request_Timeout < 0.0
+         then Header_Timeout
+         else Duration'Min (Header_Timeout, Request_Timeout));
    begin
       if Item.State /= Reading_HTTP then
          raise Program_Error with "HTTP connection is not reading requests";
@@ -907,7 +931,7 @@ package body Flyology.HTTP.Server is
       Item.Continue_Pending := False;
       Item.Chunk_CRLF_Pending := False;
       Item.Body_Started := Started;
-      Item.Body_Timeout := Timeout;
+      Item.Body_Timeout := Request_Timeout;
 
       loop
          declare
@@ -920,7 +944,7 @@ package body Flyology.HTTP.Server is
             end if;
          end;
          Receive_More
-           (Item, Closed, Started, Timeout, Token,
+           (Item, Closed, Started, Effective_Header_Timeout, Token,
             Maximum => Max_Header_Bytes + 4);
          if Closed then
             if Length (Item.Pending) = 0 then
@@ -1726,6 +1750,58 @@ package body Flyology.HTTP.Server is
          begin
             Write
               (Item, Hex (Data'Length) & CRLF & Data & CRLF, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
+      else
+         begin
+            Write (Item, Data, Timeout, Token);
+         exception
+            when others =>
+               Item.Request_Close := True;
+               Item.State := Terminal;
+               raise;
+         end;
+      end if;
+   end Write_Response_Chunk;
+
+   procedure Write_Response_Chunk
+     (Item    : in out Connection;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null)
+   is
+   begin
+      if Item.State /= Streaming_HTTP then
+         raise Program_Error with "HTTP streaming response is not active";
+      elsif Data'Length = 0 or else Item.Current_Is_Head then
+         return;
+      elsif Item.Current_Version = HTTP_1_1 then
+         declare
+            Prefix : constant Ada.Streams.Stream_Element_Array :=
+              Bytes (Hex (Natural (Data'Length)) & CRLF);
+            Suffix : constant Ada.Streams.Stream_Element_Array := Bytes (CRLF);
+            Frame  : Ada.Streams.Stream_Element_Array
+              (1 .. Ada.Streams.Stream_Element_Offset
+                (Prefix'Length + Data'Length + Suffix'Length));
+            Last : Ada.Streams.Stream_Element_Offset := 0;
+         begin
+            for Value of Prefix loop
+               Last := Last + 1;
+               Frame (Last) := Value;
+            end loop;
+            for Value of Data loop
+               Last := Last + 1;
+               Frame (Last) := Value;
+            end loop;
+            for Value of Suffix loop
+               Last := Last + 1;
+               Frame (Last) := Value;
+            end loop;
+            Write (Item, Frame, Timeout, Token);
          exception
             when others =>
                Item.Request_Close := True;

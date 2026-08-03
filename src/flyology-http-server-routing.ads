@@ -269,6 +269,8 @@ package Flyology.HTTP.Server.Routing is
    --  negative disables this additional bound
    --  @param Max_Requests Requests before connection close; zero is unlimited
    --  @param Token Optional cancellation token
+   --  @param Header_Timeout Absolute slow-header budget for each request;
+   --  negative uses the remaining request/connection lifetime
    procedure Serve
      (Item         : in out Router;
       Context      : in out App_Context;
@@ -277,7 +279,8 @@ package Flyology.HTTP.Server.Routing is
       Timeout      : Duration := 30.0;
       Max_Connection_Age : Duration := 300.0;
       Max_Requests : Natural := 1_000;
-      Token        : access Flyology.Cancellation.Token := null);
+      Token        : access Flyology.Cancellation.Token := null;
+      Header_Timeout : Duration := -1.0);
 
 private
    use Ada.Strings.Unbounded;

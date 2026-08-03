@@ -461,6 +461,26 @@ package body Flyology.HTTP.Server.Applications is
          raise;
    end Write_Chunk;
 
+   procedure Write_Chunk
+     (Item : in out Exchange;
+      Data : Ada.Streams.Stream_Element_Array) is
+   begin
+      Require_Owner (Item);
+      if Item.Response_Value /= Streaming_Response then
+         raise Program_Error with "HTTP exchange stream is not active";
+      end if;
+      Write_Response_Chunk
+        (Item.Connection_Handle.all, Data, Remaining (Item),
+         Item.Token_Handle);
+      if Method (Item.Request_Handle.all) /= "HEAD" then
+         Item.Response_Length := Item.Response_Length + Natural (Data'Length);
+      end if;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Write_Chunk;
+
    procedure End_Stream (Item : in out Exchange) is
    begin
       Require_Owner (Item);

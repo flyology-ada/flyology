@@ -474,6 +474,29 @@ procedure HTTP_Smoke is
          end;
       end;
       pragma Assert (Duplicate_Date_Rejected);
+
+      Wire.Input := To_Unbounded_String
+        ("GET /binary HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF);
+      Wire.Output := Null_Unbounded_String;
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+         Data    : constant Ada.Streams.Stream_Element_Array :=
+           (1 => 0, 2 => 128, 3 => 255);
+      begin
+         HTTP_Server.Read_Request_Head (Client, Request, Closed);
+         HTTP_Server.Begin_Response_Stream
+           (Client, 200, "application/octet-stream");
+         HTTP_Server.Write_Response_Chunk (Client, Data);
+         HTTP_Server.End_Response_Stream (Client);
+      end;
+      pragma Assert
+        (Ada.Strings.Fixed.Index
+           (To_String (Wire.Output),
+            "3" & CRLF & Character'Val (0) & Character'Val (128)
+            & Character'Val (255) & CRLF) /= 0);
    end Check_Response_Framing;
 
    procedure Check_SSE is
@@ -989,8 +1012,10 @@ procedure HTTP_Smoke is
          Closed : Boolean;
       begin
          begin
-            HTTP_Server.Read_Request
-              (Client, Request, Closed, Timeout => 0.016);
+            HTTP_Server.Read_Request_Head
+              (Client, Request, Closed,
+               Header_Timeout  => 0.016,
+               Request_Timeout => 1.0);
          exception
             when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
@@ -1028,6 +1053,28 @@ procedure HTTP_Smoke is
       pragma Assert (Timed_Out);
       pragma Assert (Length (Wire.Input) > 0);
    end Check_Slow_Body_Deadline;
+
+   procedure Check_Separate_Header_Deadline is
+      use type Ada.Real_Time.Time;
+      Wire : aliased Memory_Transport;
+      Left : Duration;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("GET / HTTP/1.1" & CRLF & "Host: localhost" & CRLF & CRLF);
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request_Head
+           (Client, Request, Closed,
+            Header_Timeout  => 0.05,
+            Request_Timeout => 1.0);
+         Left := Ada.Real_Time.To_Duration
+           (HTTP_Server.Request_Deadline (Client) - Ada.Real_Time.Clock);
+      end;
+      pragma Assert (Left > 0.8);
+   end Check_Separate_Header_Deadline;
 
    procedure Check_Handler_Isolation is
       procedure Route
@@ -2894,6 +2941,7 @@ begin
    Check_WebSocket_Origin;
    Check_Slow_Request_Deadline;
    Check_Slow_Body_Deadline;
+   Check_Separate_Header_Deadline;
    Check_Handler_Isolation;
    Check_Handler_Streamed_Limit;
    Check_Application_Failure_Propagates;
