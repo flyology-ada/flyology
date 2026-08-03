@@ -816,6 +816,146 @@ procedure TLS_Smoke is
       Sockets.Close_Socket (Peer);
    end Run_Concurrent_Close;
 
+   procedure Run_Queued_Close (Model : Flyology.Execution_Model) is
+      Socket         : Sockets.Socket_Type;
+      Peer           : Sockets.Socket_Type;
+      Item           : TLS.Connection;
+      Already_Closed : Boolean := False;
+
+      protected Progress is
+         procedure Active_Started;
+         entry Wait_Active_Started;
+         procedure Release_Queued;
+         entry Start_Queued;
+         procedure Queued_Started;
+         entry Wait_Queued_Started;
+         procedure Finished (Passed : Boolean);
+         entry Wait_Finished;
+         function Passed return Boolean;
+      private
+         Active_In : Boolean := False;
+         Queued_Go : Boolean := False;
+         Queued_In : Boolean := False;
+         Done      : Natural := 0;
+         Is_OK     : Boolean := True;
+      end Progress;
+
+      protected body Progress is
+         procedure Active_Started is
+         begin
+            Active_In := True;
+         end Active_Started;
+         entry Wait_Active_Started when Active_In is
+         begin
+            null;
+         end Wait_Active_Started;
+         procedure Release_Queued is
+         begin
+            Queued_Go := True;
+         end Release_Queued;
+         entry Start_Queued when Queued_Go is
+         begin
+            null;
+         end Start_Queued;
+         procedure Queued_Started is
+         begin
+            Queued_In := True;
+         end Queued_Started;
+         entry Wait_Queued_Started when Queued_In is
+         begin
+            null;
+         end Wait_Queued_Started;
+         procedure Finished (Passed : Boolean) is
+         begin
+            Is_OK := Is_OK and Passed;
+            Done := Done + 1;
+         end Finished;
+         entry Wait_Finished when Done = 3 is
+         begin
+            null;
+         end Wait_Finished;
+         function Passed return Boolean is (Is_OK);
+      end Progress;
+   begin
+      Sockets.Create_Socket_Pair (Socket, Peer);
+      TLS.Take (Client_Backend, Socket, TLS.Client, "localhost", Item);
+      declare
+         task Active_Operation is
+            pragma Task_Info (Model);
+         end Active_Operation;
+         task Queued_Operation is
+            pragma Task_Info (Model);
+         end Queued_Operation;
+         task Closer is
+            pragma Task_Info (Model);
+         end Closer;
+
+         task body Active_Operation is
+            Cancelled : Boolean := False;
+         begin
+            Progress.Active_Started;
+            begin
+               TLS.Handshake (Item);
+            exception
+               when TLS.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Progress.Finished (Cancelled);
+         exception
+            when others =>
+               Progress.Finished (False);
+         end Active_Operation;
+
+         task body Queued_Operation is
+            Cancelled : Boolean := False;
+         begin
+            Progress.Start_Queued;
+            Progress.Queued_Started;
+            begin
+               TLS.Handshake (Item);
+            exception
+               when TLS.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Progress.Finished (Cancelled);
+         exception
+            when others =>
+               Progress.Finished (False);
+         end Queued_Operation;
+
+         task body Closer is
+            Closed : Boolean := False;
+         begin
+            Progress.Wait_Active_Started;
+            delay 0.050;
+            Progress.Release_Queued;
+            Progress.Wait_Queued_Started;
+            --  The active handshake remains parked on peer input, so this
+            --  interval lets the second operation reach the acquisition
+            --  queue before Close interrupts and drains both callers.
+            delay 0.050;
+            TLS.Close (Item);
+            Closed := not TLS.Is_Open (Item);
+            Progress.Finished (Closed);
+         exception
+            when others =>
+               Progress.Finished (False);
+         end Closer;
+      begin
+         Progress.Wait_Finished;
+      end;
+      pragma Assert (Progress.Passed);
+      pragma Assert (not TLS.Is_Open (Item));
+      begin
+         TLS.Handshake (Item, Timeout => 0.0);
+      exception
+         when Program_Error =>
+            Already_Closed := True;
+      end;
+      pragma Assert (Already_Closed);
+      Sockets.Close_Socket (Peer);
+   end Run_Queued_Close;
+
    procedure Run_Provider_Lifetime is
       Client_Socket : Sockets.Socket_Type;
       Server_Socket : Sockets.Socket_Type;
@@ -905,4 +1045,6 @@ begin
    Run_Queued_Control (Flyology.Native_Task, Cancel_Queued => True);
    Run_Concurrent_Close (Flyology.Lightweight_Task);
    Run_Concurrent_Close (Flyology.Native_Task);
+   Run_Queued_Close (Flyology.Lightweight_Task);
+   Run_Queued_Close (Flyology.Native_Task);
 end TLS_Smoke;

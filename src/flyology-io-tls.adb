@@ -26,7 +26,7 @@ package body Flyology.IO.TLS is
          if FD < 0
            or else Current_FD >= 0
            or else Active
-           or else Closing
+           or else Close_In_Progress
          then
             raise Program_Error with
               "TLS descriptor controller already owns a resource";
@@ -39,17 +39,24 @@ package body Flyology.IO.TLS is
       entry Acquire
         (FD           : out Descriptor;
          Generation   : out Descriptor_Generation;
-         Close_Source : out Descriptor)
+         Close_Source : out Descriptor;
+         Result       : out Acquire_Result)
         when not Active
       is
       begin
-         if Current_FD < 0 or else Closing then
-            raise Program_Error with "TLS connection is not open";
-         end if;
-         Active := True;
-         FD := Current_FD;
+         FD := Invalid_Descriptor;
          Generation := Current_Generation;
-         Close_Source := Wake_Sources.Descriptor (Close_Wake);
+         Close_Source := Invalid_Descriptor;
+         if Close_In_Progress then
+            Result := Closing;
+         elsif Current_FD < 0 then
+            Result := Closed;
+         else
+            Result := Acquired;
+            Active := True;
+            FD := Current_FD;
+            Close_Source := Wake_Sources.Descriptor (Close_Wake);
+         end if;
       end Acquire;
 
       procedure Release (Generation : Descriptor_Generation) is
@@ -68,15 +75,15 @@ package body Flyology.IO.TLS is
       begin
          FD := Current_FD;
          Generation := Current_Generation;
-         Leader := Current_FD >= 0 and then not Closing;
+         Leader := Current_FD >= 0 and then not Close_In_Progress;
          if Leader then
             if Active then
                Wake_Sources.Signal (Close_Wake);
             end if;
-            --  Publish Closing only after the wake is known to be usable. If
+            --  Publish the close only after the wake is known to be usable. If
             --  Signal raises, a later Close can retry instead of waiting on a
             --  state that no caller can finish.
-            Closing := True;
+            Close_In_Progress := True;
          end if;
       end Begin_Close;
 
@@ -85,14 +92,14 @@ package body Flyology.IO.TLS is
          null;
       end Await_Drained;
 
-      entry Await_Closed when not Closing is
+      entry Await_Closed when not Close_In_Progress is
       begin
          null;
       end Await_Closed;
 
       procedure Finish_Close (Generation : Descriptor_Generation) is
       begin
-         if not Closing
+         if not Close_In_Progress
            or else Active
            or else Generation /= Current_Generation
          then
@@ -100,13 +107,18 @@ package body Flyology.IO.TLS is
          end if;
          Current_FD := Invalid_Descriptor;
          Wake_Sources.Release (Close_Wake);
-         Closing := False;
+         Close_In_Progress := False;
       end Finish_Close;
 
-      function Is_Open_State return Boolean is
-        (Current_FD >= 0 and then not Closing);
+      function Acquisition_State return Acquire_Result is
+        (if Close_In_Progress then Closing
+         elsif Current_FD < 0 then Closed
+         else Acquired);
 
-      function Close_Requested return Boolean is (Closing);
+      function Is_Open_State return Boolean is
+        (Current_FD >= 0 and then not Close_In_Progress);
+
+      function Close_Requested return Boolean is (Close_In_Progress);
    end Descriptor_Controller;
 
    function Remaining
@@ -178,16 +190,32 @@ package body Flyology.IO.TLS is
       Generation   : out Descriptor_Generation;
       Close_Source : out Descriptor)
    is
-      Wait_Slice : Duration;
-      Left       : Duration;
+      Wait_Slice    : Duration;
+      Left          : Duration;
+      Acquire_State : Acquire_Result;
    begin
+      case Item.Controller.Acquisition_State is
+         when Acquired =>
+            null;
+         when Closing =>
+            raise Operation_Cancelled;
+         when Closed =>
+            raise Program_Error with "TLS connection is not open";
+      end case;
+
       loop
          Check_Cancelled (Item, Token);
          Left := Remaining (Started, Timeout);
          if Left = 0.0 then
             select
-               Item.Controller.Acquire (FD, Generation, Close_Source);
-               return;
+               Item.Controller.Acquire
+                 (FD, Generation, Close_Source, Acquire_State);
+               case Acquire_State is
+                  when Acquired =>
+                     return;
+                  when Closing | Closed =>
+                     raise Operation_Cancelled;
+               end case;
             else
                raise Timeout_Error with
                  "TLS operation timed out waiting for the connection";
@@ -197,8 +225,14 @@ package body Flyology.IO.TLS is
          Wait_Slice :=
            (if Left < 0.0 then 0.010 else Duration'Min (Left, 0.010));
          select
-            Item.Controller.Acquire (FD, Generation, Close_Source);
-            return;
+            Item.Controller.Acquire
+              (FD, Generation, Close_Source, Acquire_State);
+            case Acquire_State is
+               when Acquired =>
+                  return;
+               when Closing | Closed =>
+                  raise Operation_Cancelled;
+            end case;
          or
             delay Wait_Slice;
          end select;

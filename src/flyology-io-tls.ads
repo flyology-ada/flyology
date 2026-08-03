@@ -265,13 +265,16 @@ package Flyology.IO.TLS is
 
 private
    type Descriptor_Generation is mod 2 ** 64;
+   --  Distinguish successful serialization from a close observed at the gate.
+   type Acquire_Result is (Acquired, Closing, Closed);
 
    protected type Descriptor_Controller is
       procedure Adopt (FD : Descriptor);
       entry Acquire
         (FD           : out Descriptor;
          Generation   : out Descriptor_Generation;
-         Close_Source : out Descriptor);
+         Close_Source : out Descriptor;
+         Result       : out Acquire_Result);
       procedure Release (Generation : Descriptor_Generation);
       procedure Begin_Close
         (FD         : out Descriptor;
@@ -280,13 +283,15 @@ private
       entry Await_Drained;
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
+      --  Snapshot connection state at an operation's public call boundary.
+      function Acquisition_State return Acquire_Result;
       function Is_Open_State return Boolean;
       function Close_Requested return Boolean;
    private
       Current_FD         : Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;
       Active             : Boolean := False;
-      Closing            : Boolean := False;
+      Close_In_Progress  : Boolean := False;
       Close_Wake         : Flyology.Wake_Sources.Source;
    end Descriptor_Controller;
 
