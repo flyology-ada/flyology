@@ -27,6 +27,15 @@ package body Flyology.HTTP.Server.Applications is
    function Request_Value (Item : Exchange) return Request is
      (Item.Request_Handle.all);
 
+   function Request_Method (Item : Exchange) return String is
+     (Method (Item.Request_Handle.all));
+
+   function Request_Target (Item : Exchange) return String is
+     (Target (Item.Request_Handle.all));
+
+   function Request_Header (Item : Exchange; Name : String) return String is
+     (Header (Item.Request_Handle.all, Name));
+
    function Connection_Access
      (Item : in out Exchange) return not null access Connection
    is (Item.Connection_Handle);
@@ -102,12 +111,14 @@ package body Flyology.HTTP.Server.Applications is
 
    procedure Set_Request_ID (Item : in out Exchange; Value : String) is
    begin
-      if Value'Length > 128 then
-         raise Program_Error with "HTTP request id is too long";
+      if Value'Length = 0 or else Value'Length > 128 then
+         raise Program_Error with "invalid HTTP request id length";
       end if;
       for Character_Value of Value loop
-         if Character'Pos (Character_Value) < 32
-           or else Character'Pos (Character_Value) = 127
+         if Character_Value not in 'a' .. 'z'
+           and then Character_Value not in 'A' .. 'Z'
+           and then Character_Value not in '0' .. '9'
+           and then Character_Value not in '-' | '.' | '_'
          then
             raise Program_Error with "invalid HTTP request id";
          end if;
@@ -115,11 +126,42 @@ package body Flyology.HTTP.Server.Applications is
       Item.Request_ID_Value := To_Unbounded_String (Value);
    end Set_Request_ID;
 
+   function Has_Principal (Item : Exchange) return Boolean is
+     (Item.Principal_Present);
+
+   function Principal (Item : Exchange) return String is
+     (To_String (Item.Principal_Value));
+
+   procedure Set_Principal (Item : in out Exchange; Value : String) is
+   begin
+      if Value'Length = 0 or else Value'Length > 256 then
+         raise Program_Error with "invalid HTTP principal length";
+      end if;
+      for Character_Value of Value loop
+         if Character'Pos (Character_Value) < 32
+           or else Character'Pos (Character_Value) = 127
+         then
+            raise Program_Error with "invalid HTTP principal";
+         end if;
+      end loop;
+      Item.Principal_Value := To_Unbounded_String (Value);
+      Item.Principal_Present := True;
+   end Set_Principal;
+
+   function Authentication (Item : Exchange) return Authentication_Mode is
+     (Item.Authentication_Value);
+
+   function CORS_Policy (Item : Exchange) return Natural is
+     (Item.CORS_Policy_Value);
+
    function Body_Policy (Item : Exchange) return Request_Body_Policy is
      (Item.Body_Mode);
 
    function Body_Complete (Item : Exchange) return Boolean is
      (Flyology.HTTP.Server.Body_Complete (Item.Connection_Handle.all));
+
+   function Request_Body_Bytes (Item : Exchange) return Natural is
+     (Item.Connection_Handle.Body_Total);
 
    procedure Read_Body
      (Item     : in out Exchange;
@@ -409,12 +451,16 @@ package body Flyology.HTTP.Server.Applications is
      (Item            : in out Exchange;
       Name            : String;
       Normalized_Path : String;
-      Policy          : Request_Body_Policy)
+      Policy          : Request_Body_Policy;
+      Authentication  : Authentication_Mode;
+      CORS_Policy     : Natural)
    is
    begin
       Item.Route_Value := To_Unbounded_String (Name);
       Item.Path_Value := To_Unbounded_String (Normalized_Path);
       Item.Body_Mode := Policy;
+      Item.Authentication_Value := Authentication;
+      Item.CORS_Policy_Value := CORS_Policy;
       Item.Parameter_Count := 0;
       Item.Parameters := (others => (Null_Unbounded_String,
                                      Null_Unbounded_String));

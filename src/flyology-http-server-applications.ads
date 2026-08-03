@@ -20,6 +20,13 @@ package Flyology.HTTP.Server.Applications is
    type Request_Body_Policy is
      (Reject_Body, Stream_Body, Buffer_Body, Discard_Request_Body);
 
+   --  Route authentication requirement interpreted by optional middleware.
+   --  @enum No_Authentication Route does not request authentication
+   --  @enum Optional_Authentication Install a principal when credentials exist
+   --  @enum Required_Authentication Reject unauthenticated requests
+   type Authentication_Mode is
+     (No_Authentication, Optional_Authentication, Required_Authentication);
+
    --  High-level response lifecycle observed through this exchange.
    --  @enum Not_Started No response bytes have been written
    --  @enum Completed One complete fixed response was written
@@ -56,6 +63,23 @@ package Flyology.HTTP.Server.Applications is
    --  @param Item Request exchange
    --  @return Parsed request value
    function Request_Value (Item : Exchange) return Request;
+
+   --  Return the request method without copying the complete request.
+   --  @param Item Request exchange
+   --  @return Request method
+   function Request_Method (Item : Exchange) return String;
+
+   --  Return the original request target.
+   --  @param Item Request exchange
+   --  @return Request target
+   function Request_Target (Item : Exchange) return String;
+
+   --  Return a case-insensitive request header value. Repeated fields retain
+   --  the core parser's comma-joined wire order.
+   --  @param Item Request exchange
+   --  @param Name Header field name
+   --  @return Header value or an empty string
+   function Request_Header (Item : Exchange; Name : String) return String;
 
    --  Borrow the raw HTTP connection. Only the active handler may use it and
    --  no child task may write through it.
@@ -131,6 +155,32 @@ package Flyology.HTTP.Server.Applications is
    --  @param Value Request identifier
    procedure Set_Request_ID (Item : in out Exchange; Value : String);
 
+   --  Report whether authentication middleware installed a principal.
+   --  @param Item Request exchange
+   --  @return True when a principal is present
+   function Has_Principal (Item : Exchange) return Boolean;
+
+   --  Return the authenticated principal, or an empty string.
+   --  @param Item Request exchange
+   --  @return Application-defined bounded principal
+   function Principal (Item : Exchange) return String;
+
+   --  Install an authenticated principal. Header control bytes and values
+   --  longer than 256 bytes are rejected.
+   --  @param Item Request exchange
+   --  @param Value Application-defined principal
+   procedure Set_Principal (Item : in out Exchange; Value : String);
+
+   --  Return the selected route authentication requirement.
+   --  @param Item Request exchange
+   --  @return Route authentication mode
+   function Authentication (Item : Exchange) return Authentication_Mode;
+
+   --  Return the selected bounded CORS policy registry slot.
+   --  @param Item Request exchange
+   --  @return CORS policy slot or zero
+   function CORS_Policy (Item : Exchange) return Natural;
+
    --  Return the route-selected body policy.
    --  @param Item Request exchange
    --  @return Current body policy
@@ -140,6 +190,11 @@ package Flyology.HTTP.Server.Applications is
    --  @param Item Request exchange
    --  @return True when body processing is complete
    function Body_Complete (Item : Exchange) return Boolean;
+
+   --  Return decoded request-body bytes observed so far.
+   --  @param Item Request exchange
+   --  @return Decoded request bytes
+   function Request_Body_Bytes (Item : Exchange) return Natural;
 
    --  Stream decoded request bytes under the current absolute deadline.
    --  @param Item Request exchange configured for Stream_Body
@@ -280,11 +335,15 @@ package Flyology.HTTP.Server.Applications is
    --  @param Name Stable route name
    --  @param Normalized_Path Decoded path used for matching
    --  @param Policy Route body policy
+   --  @param Authentication Route authentication requirement
+   --  @param CORS_Policy Bounded CORS registry slot
    procedure Configure_Route
      (Item            : in out Exchange;
       Name            : String;
       Normalized_Path : String;
-      Policy          : Request_Body_Policy);
+      Policy          : Request_Body_Policy;
+      Authentication  : Authentication_Mode;
+      CORS_Policy     : Natural);
 
    --  Append one decoded route parameter. Duplicate names or capacity excess
    --  raise Program_Error. Intended for Flyology router packages.
@@ -321,7 +380,11 @@ private
       Parameters        : Parameter_Array;
       Parameter_Count   : Natural := 0;
       Request_ID_Value  : Unbounded_String;
+      Principal_Value   : Unbounded_String;
+      Principal_Present : Boolean := False;
       Body_Mode         : Request_Body_Policy := Reject_Body;
+      Authentication_Value : Authentication_Mode := No_Authentication;
+      CORS_Policy_Value : Natural := 0;
       Extra_Headers     : Unbounded_String;
       Response_Value    : Response_State := Not_Started;
       Status_Value      : Natural := 0;

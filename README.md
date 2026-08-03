@@ -1053,6 +1053,17 @@ application mapper may handle expected exceptions; other application failures
 produce a generic closing 500 before response start, while failures after any
 response bytes force connection close without attempting replacement framing.
 
+Optional typed middleware packages provide request IDs, access logging,
+bounded-cardinality metrics, authentication hooks, CORS, and browser security
+headers. Inbound request IDs are trusted only when the application selects that
+policy and valid identifiers cannot contain header separators. Logging omits
+the original target by default and never receives authorization, cookies, or
+body content. Authentication delegates credential verification to application
+code and installs only its bounded principal. CORS policies reject wildcard
+origin with credentials, validate preflights, and emit `Vary` fields for the
+request values that affect a response. HSTS remains disabled unless an
+application explicitly configures it for a TLS deployment.
+
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
 13 upgrade and client key. Its default origin policy rejects browser `Origin`

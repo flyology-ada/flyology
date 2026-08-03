@@ -742,7 +742,8 @@ package body Flyology.HTTP.Server.Routing is
               Max_Global_Middleware + Max_Route_Middleware + 1);
       begin
          X.Configure_Route
-           (To_String (Route.Name), Path_Value, Route.Policy.Body_Handling);
+           (To_String (Route.Name), Path_Value, Route.Policy.Body_Handling,
+            Route.Policy.Authentication, Route.Policy.CORS_Policy);
          if not Match_Path
            (To_String (Route.Pattern), Path_Value,
             Item.Slashes = Ignore_Slashes, Capture => True, X => X'Access)

@@ -8,7 +8,16 @@ with Flyology.HTTP;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Connection_Handlers;
+with Flyology.HTTP.Server.CORS;
+with Flyology.HTTP.Server.Logging;
+with Flyology.HTTP.Server.Metrics;
+with Flyology.HTTP.Server.Middleware_Authentication;
+with Flyology.HTTP.Server.Middleware_CORS;
 with Flyology.HTTP.Server.Middleware_Errors;
+with Flyology.HTTP.Server.Middleware_Logging;
+with Flyology.HTTP.Server.Middleware_Metrics;
+with Flyology.HTTP.Server.Middleware_Request_IDs;
+with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Routing;
 with Flyology.IO;
 
@@ -1310,6 +1319,274 @@ procedure HTTP_Smoke is
       end;
    end Check_Middleware;
 
+   procedure Check_Standard_Middleware is
+      package Applications renames Flyology.HTTP.Server.Applications;
+
+      type Context is record
+         Principal : Unbounded_String;
+      end record;
+
+      package Routing is new Flyology.HTTP.Server.Routing (Context);
+
+      type Test_Log is limited new Flyology.HTTP.Server.Logging.Sink with
+        record
+           Calls      : Natural := 0;
+           Route      : Unbounded_String;
+           Target     : Unbounded_String;
+           Request_ID : Unbounded_String;
+           Status     : Natural := 0;
+        end record;
+
+      overriding procedure Write
+        (Item           : in out Test_Log;
+         Method         : String;
+         Route          : String;
+         Target         : String;
+         Status         : Natural;
+         Request_ID     : String;
+         Peer           : GNAT.Sockets.Sock_Addr_Type;
+         Request_Bytes  : Natural;
+         Response_Bytes : Natural;
+         Elapsed        : Duration);
+
+      overriding procedure Write
+        (Item           : in out Test_Log;
+         Method         : String;
+         Route          : String;
+         Target         : String;
+         Status         : Natural;
+         Request_ID     : String;
+         Peer           : GNAT.Sockets.Sock_Addr_Type;
+         Request_Bytes  : Natural;
+         Response_Bytes : Natural;
+         Elapsed        : Duration)
+      is
+         pragma Unreferenced
+           (Method, Peer, Request_Bytes, Response_Bytes, Elapsed);
+      begin
+         Item.Calls := Item.Calls + 1;
+         Item.Route := To_Unbounded_String (Route);
+         Item.Target := To_Unbounded_String (Target);
+         Item.Request_ID := To_Unbounded_String (Request_ID);
+         Item.Status := Status;
+      end Write;
+
+      procedure Authenticate
+        (Scheme        : String;
+         Credential    : String;
+         Authenticated : out Boolean;
+         Principal     : out Unbounded_String)
+      is
+      begin
+         Authenticated := Scheme = "Bearer" and then Credential = "secret";
+         Principal :=
+           (if Authenticated then To_Unbounded_String ("user-1")
+            else Null_Unbounded_String);
+      end Authenticate;
+
+      Allowed : aliased constant Flyology.HTTP.Server.CORS.Policy :=
+        Flyology.HTTP.Server.CORS.Create
+          (Allowed_Origins   => "https://app.example",
+           Allowed_Methods   => "GET, OPTIONS",
+           Allowed_Headers   => "Content-Type",
+           Exposed_Headers   => "X-Request-ID",
+           Allow_Credentials => True,
+           Max_Age           => 600.0);
+
+      function Resolve (Slot : Positive)
+        return access constant Flyology.HTTP.Server.CORS.Policy
+      is
+      begin
+         return (if Slot = 1 then Allowed'Access else null);
+      end Resolve;
+
+      Log_Output    : aliased Test_Log;
+      Metric_Output : aliased Flyology.HTTP.Server.Metrics.In_Memory
+        (Capacity => 1);
+
+      package IDs is new Flyology.HTTP.Server.Middleware_Request_IDs
+        (Context, Routing.Components, Trust_Inbound => True);
+      package Auth is new Flyology.HTTP.Server.Middleware_Authentication
+        (Context, Routing.Components, Authenticate);
+      package CORS_Layer is new Flyology.HTTP.Server.Middleware_CORS
+        (Context, Routing.Components, Resolve);
+      package Headers is new
+        Flyology.HTTP.Server.Middleware_Security_Headers
+          (Context, Routing.Components,
+           Content_Security_Policy => "default-src 'self'",
+           Permissions_Policy      => "camera=()",
+           Enable_HSTS             => False);
+      package Access_Logs is new Flyology.HTTP.Server.Middleware_Logging
+        (Context, Routing.Components, Log_Output'Access);
+      package Metric_Layer is new Flyology.HTTP.Server.Middleware_Metrics
+        (Context, Routing.Components, Metric_Output'Access);
+
+      procedure Private_Handler
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+      begin
+         pragma Assert (X.Has_Principal);
+         State.Principal := To_Unbounded_String (X.Principal);
+         X.Text (200, "private");
+      end Private_Handler;
+
+      procedure Public_Handler
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+      begin
+         X.Text (200, "public");
+      end Public_Handler;
+
+      Routes : Routing.Router
+        (Capacity => 3, Slashes => Routing.Strict_Slashes);
+      State : Context;
+      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
+        (Family => GNAT.Sockets.Family_Inet,
+         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
+         Port   => 12_345);
+
+      function Run
+        (Method, Path : String;
+         Headers      : String := "") return String
+      is
+         Wire : aliased Memory_Transport;
+      begin
+         Wire.Input := To_Unbounded_String
+           (Method & " " & Path & " HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF & Headers
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Routes.Serve (State, Client, Peer);
+         end;
+         return To_String (Wire.Output);
+      end Run;
+   begin
+      Routes.Get
+        ("/private", Private_Handler'Access, Name => "private",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Authentication => Routing.Required_Authentication,
+              CORS_Policy    => 1));
+      Routes.Options
+        ("/private", Public_Handler'Access, Name => "private.preflight",
+         Policy =>
+           (Routing.Default_Route_Policy with delta CORS_Policy => 1));
+      Routes.Get ("/public", Public_Handler'Access, Name => "public");
+      Routes.Add_Middleware (IDs.Call'Access);
+      Routes.Add_Middleware (Access_Logs.Call'Access);
+      Routes.Add_Middleware (Metric_Layer.Call'Access);
+      Routes.Add_Middleware (Headers.Call'Access);
+      Routes.Add_Middleware (CORS_Layer.Call'Access);
+      Routes.Add_Middleware (Auth.Call'Access);
+
+      declare
+         Output : constant String := Run
+           ("GET", "/private?token=must-not-be-logged",
+            "Authorization: Bearer secret" & CRLF &
+            "X-Request-ID: trusted-1" & CRLF &
+            "Origin: https://app.example" & CRLF);
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "200 OK") /= 0);
+         pragma Assert (To_String (State.Principal) = "user-1");
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "X-Request-ID: trusted-1") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output,
+               "Access-Control-Allow-Origin: https://app.example") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "Vary: Origin") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "X-Content-Type-Options: nosniff") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "Strict-Transport-Security") = 0);
+         pragma Assert (To_String (Log_Output.Route) = "private");
+         pragma Assert (To_String (Log_Output.Target) = "");
+         pragma Assert (To_String (Log_Output.Request_ID) = "trusted-1");
+      end;
+
+      declare
+         Output : constant String := Run
+           ("GET", "/private",
+            "X-Request-ID: invalid value" & CRLF);
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "401 Unauthorized") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "invalid value") = 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "X-Request-ID: fly-") /= 0);
+      end;
+
+      declare
+         Output : constant String := Run
+           ("OPTIONS", "/private",
+            "Origin: https://app.example" & CRLF &
+            "Access-Control-Request-Method: GET" & CRLF &
+            "Access-Control-Request-Headers: Content-Type" & CRLF);
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "204 No Content") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "Access-Control-Allow-Credentials: true") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "Access-Control-Max-Age: 600") /= 0);
+      end;
+
+      declare
+         Output : constant String := Run
+           ("OPTIONS", "/private",
+            "Origin: https://evil.example" & CRLF &
+            "Access-Control-Request-Method: GET" & CRLF);
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "403 Forbidden") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Output, "Access-Control-Allow-Origin") = 0);
+      end;
+
+      declare
+         Output : constant String := Run ("GET", "/public");
+         Metrics : constant Flyology.HTTP.Server.Metrics.Snapshot :=
+           Flyology.HTTP.Server.Metrics.Read (Metric_Output);
+         Rejected : Boolean := False;
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Output, "200 OK") /= 0);
+         pragma Assert (Metrics.Active = 0);
+         pragma Assert (Metrics.Requests >= 5);
+         pragma Assert (Metrics.Series = 1);
+         pragma Assert (Metrics.Dropped_Series > 0);
+         begin
+            declare
+               Invalid : constant Flyology.HTTP.Server.CORS.Policy :=
+                 Flyology.HTTP.Server.CORS.Create
+                   (Allowed_Origins => "*", Allowed_Methods => "GET",
+                    Allow_Credentials => True);
+               pragma Unreferenced (Invalid);
+            begin
+               null;
+            end;
+         exception
+            when Program_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
+   end Check_Standard_Middleware;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -1328,4 +1605,5 @@ begin
    Check_Rejections;
    Check_Applications_And_Routing;
    Check_Middleware;
+   Check_Standard_Middleware;
 end HTTP_Smoke;

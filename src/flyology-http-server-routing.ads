@@ -29,11 +29,17 @@ package Flyology.HTTP.Server.Routing is
    type Middleware_Stage is (Request_Head, Application);
 
    --  Authentication policy interpreted by authentication middleware.
-   --  @enum No_Authentication Route does not request authentication
-   --  @enum Optional_Authentication Install a principal when credentials exist
-   --  @enum Required_Authentication Reject unauthenticated requests
-   type Authentication_Policy is
-     (No_Authentication, Optional_Authentication, Required_Authentication);
+   subtype Authentication_Policy is
+     Flyology.HTTP.Server.Applications.Authentication_Mode;
+   --  Route does not request authentication.
+   No_Authentication : constant Authentication_Policy :=
+     Flyology.HTTP.Server.Applications.No_Authentication;
+   --  Install a principal when valid credentials exist.
+   Optional_Authentication : constant Authentication_Policy :=
+     Flyology.HTTP.Server.Applications.Optional_Authentication;
+   --  Reject requests without valid credentials.
+   Required_Authentication : constant Authentication_Policy :=
+     Flyology.HTTP.Server.Applications.Required_Authentication;
 
    --  Upgrade permission for higher-level endpoint adapters.
    --  @enum No_Upgrade Ordinary HTTP response only
