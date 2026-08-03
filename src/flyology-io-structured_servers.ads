@@ -77,8 +77,11 @@ package Flyology.IO.Structured_Servers is
    --  One-shot server object. Capacity is both the admission limit and the
    --  number of handler tasks created eagerly by Serve. Handler designation is
    --  fixed at activation and cannot change. Serve, Request_Shutdown, and
-   --  Current coordinate through protected state, but only one Serve is valid.
-   --  Keep the object alive until Serve returns.
+   --  Current coordinate through protected state. Request_Shutdown may precede
+   --  the one permitted Serve call; once that call begins, every normal or
+   --  exceptional return leaves the server terminal. Keep the object alive
+   --  until Serve returns. If listener cleanup fails, the object retains
+   --  closing ownership for a retry when it is finalized.
    --  @field Capacity Handler task count and connection admission limit
    type Server (Capacity : Positive) is limited private;
 
@@ -93,6 +96,11 @@ package Flyology.IO.Structured_Servers is
    --  CPU-only Handle code must poll Cancellation.Requested cooperatively.
    --  Lightweight handlers suspend on event-loop I/O; native handlers block
    --  their threads.
+   --  On an exceptional return after ownership transfers, Ada does not
+   --  guarantee scalar in-out copy-back. A retained numeric Listener value is
+   --  stale and must not be closed or reused; the server object retains
+   --  authoritative closing ownership until cleanup succeeds or it is
+   --  finalized.
    --  @param Item One-shot server kept alive for the call
    --  @param Listener Bound listening socket; transferred and always closed
    --  @param Context Shared handler context kept alive for the call
@@ -147,12 +155,14 @@ private
          Information : String);
       procedure Mark_Forced;
       procedure Finish_Serve;
+      procedure Abandon_Serve;
 
       entry Await_All_Workers;
       function Read_Snapshot return Snapshot;
       function Failure_Information return String;
    private
       Phase                 : Run_Phase := Idle;
+      Serve_Started         : Boolean := False;
       Active                : Natural := 0;
       Accepted              : Natural := 0;
       Completed             : Natural := 0;
@@ -168,12 +178,14 @@ private
 
    type Server (Capacity : Positive) is
      new Ada.Finalization.Limited_Controlled with record
-      State       : Lifecycle;
-      Accept_Stop : aliased Cancellation_Token;
-      Handler_Stop : aliased Cancellation_Token;
+      State          : Lifecycle;
+      Accept_Stop    : aliased Cancellation_Token;
+      Handler_Stop   : aliased Cancellation_Token;
+      Owned_Listener : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
    end record;
 
-   --  Request shutdown and cancellation if Item is still serving.
+   --  Request shutdown and cancellation if Item is still serving. Retry the
+   --  close of a listener retained after terminal Serve cleanup.
    --  @param Item Server being finalized
    overriding procedure Finalize (Item : in out Server);
 

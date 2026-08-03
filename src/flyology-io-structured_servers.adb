@@ -1,23 +1,39 @@
 with Ada.Exceptions;
 with Flyology.Counter_Policy;
+with Flyology.IO.Sockets;
+with GNAT.OS_Lib;
+with Interfaces.C;
 package body Flyology.IO.Structured_Servers is
    package Connections renames Flyology.IO.Connections;
    package Counters renames Flyology.Counter_Policy;
    package Sockets renames GNAT.Sockets;
 
    use type Sockets.Socket_Type;
+   use type Interfaces.C.int;
+
+   function C_Close_Listener
+     (Descriptor : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import
+     (C, C_Close_Listener, "flyology_structured_listener_close");
 
    protected body Lifecycle is
       procedure Begin_Serve (Expected : Positive) is
       begin
          case Phase is
             when Idle =>
-               Phase := Serving;
-            when Stop_Requested =>
                null;
+            when Stop_Requested =>
+               if Serve_Started then
+                  raise Program_Error with "structured server is one-shot";
+               end if;
             when Serving | Finished =>
                raise Program_Error with "structured server is one-shot";
          end case;
+         Serve_Started := True;
+         if Phase = Idle then
+            Phase := Serving;
+         end if;
+         Workers_Done := 0;
          Expected_Workers := Expected;
       end Begin_Serve;
 
@@ -65,6 +81,10 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Worker_Finished is
       begin
+         if Workers_Done >= Expected_Workers then
+            raise Program_Error with
+              "structured server worker completion exceeds capacity";
+         end if;
          Workers_Done := Workers_Done + 1;
       end Worker_Finished;
 
@@ -102,17 +122,30 @@ package body Flyology.IO.Structured_Servers is
               "structured server finished with live handlers";
          end if;
          Phase := Finished;
+         Workers_Done := 0;
+         Expected_Workers := 0;
       end Finish_Serve;
 
+      procedure Abandon_Serve is
+      begin
+         --  The task scope has joined before Serve's outer handler runs, so
+         --  no worker can publish another completion after this reset.
+         Phase := Finished;
+         Active := 0;
+         Workers_Done := 0;
+         Expected_Workers := 0;
+      end Abandon_Serve;
+
       entry Await_All_Workers
-        when Expected_Workers > 0 and then Workers_Done = Expected_Workers
+        when Expected_Workers > 0 and then Workers_Done >= Expected_Workers
       is
       begin
          null;
       end Await_All_Workers;
 
       function Read_Snapshot return Snapshot is
-        (Running               => Phase in Serving | Stop_Requested,
+        (Running               =>
+           Serve_Started and then Phase in Serving | Stop_Requested,
          Shutdown_Requested    => Phase in Stop_Requested | Finished,
          Forced_Cancellation   => Forced,
          Active_Handlers       => Active,
@@ -147,14 +180,28 @@ package body Flyology.IO.Structured_Servers is
    function First_Failure_Information (Item : Server) return String is
      (Item.State.Failure_Information);
 
+   procedure Close_Owned_Listener (Item : in out Server) is
+      Result : Interfaces.C.int;
+   begin
+      if Item.Owned_Listener /= Sockets.No_Socket then
+         Result := C_Close_Listener
+           (Flyology.IO.Sockets.Native_Descriptor (Item.Owned_Listener));
+         if Result /= 0 then
+            raise Sockets.Socket_Error with
+              "listener close failed, errno=" & GNAT.OS_Lib.Errno'Image;
+         end if;
+         Item.Owned_Listener := Sockets.No_Socket;
+      end if;
+   end Close_Owned_Listener;
+
    procedure Serve
      (Item          : aliased in out Server;
       Listener      : in out Sockets.Socket_Type;
       Context       : aliased in out Handler_Context;
       Drain_Timeout : Duration := Infinite)
    is
-      Owned_Listener : Sockets.Socket_Type := Sockets.No_Socket;
       Manager : aliased Connections.Server (Capacity => Item.Capacity);
+      Began : Boolean := False;
 
       procedure Stop_Accepting is
       begin
@@ -168,13 +215,6 @@ package body Flyology.IO.Structured_Servers is
          Manager.Request_Shutdown;
       end Force_Handlers;
 
-      procedure Close_Listener is
-      begin
-         if Owned_Listener /= Sockets.No_Socket then
-            Sockets.Close_Socket (Owned_Listener);
-            Owned_Listener := Sockets.No_Socket;
-         end if;
-      end Close_Listener;
    begin
       if Listener = Sockets.No_Socket then
          raise Program_Error with
@@ -182,7 +222,8 @@ package body Flyology.IO.Structured_Servers is
       end if;
 
       Item.State.Begin_Serve (Item.Capacity);
-      Owned_Listener := Listener;
+      Began := True;
+      Item.Owned_Listener := Listener;
       Listener := Sockets.No_Socket;
 
       declare
@@ -192,6 +233,15 @@ package body Flyology.IO.Structured_Servers is
 
          task body Worker is
             Stop_Worker : Boolean := False;
+            Completion_Reported : Boolean := False;
+
+            procedure Report_Completion is
+            begin
+               if not Completion_Reported then
+                  Completion_Reported := True;
+                  Item.State.Worker_Finished;
+               end if;
+            end Report_Completion;
 
             procedure Report
               (Origin : Failure_Origin;
@@ -215,7 +265,7 @@ package body Flyology.IO.Structured_Servers is
                      begin
                         Connections.Accept_Connection
                           (Manager  => Manager,
-                           Listener => Owned_Listener,
+                           Listener => Item.Owned_Listener,
                            Item     => Connection,
                            Address  => Peer,
                            Token    => Item.Accept_Stop'Access);
@@ -262,7 +312,7 @@ package body Flyology.IO.Structured_Servers is
                when Event : others =>
                   Report (Admission_Loop, Event);
             end;
-            Item.State.Worker_Finished;
+            Report_Completion;
          exception
             when Event : others =>
                --  Preserve the task-scope join even if bookkeeping itself
@@ -270,7 +320,7 @@ package body Flyology.IO.Structured_Servers is
                Item.State.Record_Failure
                  (Admission_Loop,
                   Ada.Exceptions.Exception_Information (Event));
-               Item.State.Worker_Finished;
+               Report_Completion;
          end Worker;
 
          Workers : array (1 .. Item.Capacity) of Worker;
@@ -301,35 +351,57 @@ package body Flyology.IO.Structured_Servers is
             raise;
       end;
 
-      Close_Listener;
+      Close_Owned_Listener (Item);
       Item.State.Finish_Serve;
       if Item.State.Read_Snapshot.Failures > 0 then
          raise Server_Failed with Item.State.Failure_Information;
       end if;
    exception
-      when others =>
-         if Owned_Listener /= Sockets.No_Socket then
-            Stop_Accepting;
-            Force_Handlers;
+      when Event : others =>
+         if Began and then Item.State.Read_Snapshot.Running then
+            --  Cleanup failures must not leave the one-shot lifecycle
+            --  appearing reusable. Each action is isolated so terminalization
+            --  always runs after a successfully begun Serve call.
             begin
-               Close_Listener;
+               Stop_Accepting;
             exception
                when others =>
                   null;
             end;
+            if Item.Owned_Listener /= Sockets.No_Socket then
+               begin
+                  Close_Owned_Listener (Item);
+               exception
+                  when others =>
+                     null;
+               end;
+            end if;
+            Item.State.Abandon_Serve;
          end if;
-         raise;
+         Ada.Exceptions.Reraise_Occurrence (Event);
    end Serve;
 
    overriding procedure Finalize (Item : in out Server) is
+      Was_Running : constant Boolean := Item.State.Read_Snapshot.Running;
    begin
-      if Item.State.Read_Snapshot.Running then
-         Request_Shutdown (Item);
-         Item.Handler_Stop.Request;
+      begin
+         if Was_Running then
+            Request_Shutdown (Item);
+            Item.Handler_Stop.Request;
+         end if;
+      exception
+         when others =>
+            null;
+      end;
+
+      if not Was_Running then
+         begin
+            Close_Owned_Listener (Item);
+         exception
+            when others =>
+               null;
+         end;
       end if;
-   exception
-      when others =>
-         null;
    end Finalize;
 
 end Flyology.IO.Structured_Servers;

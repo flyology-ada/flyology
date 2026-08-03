@@ -293,11 +293,12 @@ int flyology_in_fork_child(void) {
 #define FLYOLOGY_FAULT_ACCEPT_PROCESS_LIMIT 22
 #define FLYOLOGY_FAULT_ACCEPT_SYSTEM_LIMIT 23
 #define FLYOLOGY_FAULT_ACCEPT_BAD_DESCRIPTOR 24
+#define FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE 25
 
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 24
+#define FLYOLOGY_FAULT_POINT_COUNT 25
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
@@ -564,6 +565,20 @@ int flyology_errno_system_file_limit(void) {
 #else
     return -1;
 #endif
+}
+
+/* Keep listener close injection at the syscall boundary. Production builds
+   contain one direct close(2), while fault-enabled tests can make a close fail
+   before the descriptor is consumed and verify the structured cleanup retry. */
+int flyology_structured_listener_close(int descriptor) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    if (flyology_test_fault_hit(
+            FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE)) {
+        errno = EIO;
+        return -1;
+    }
+#endif
+    return close(descriptor);
 }
 
 /* The production path remains one direct accept call.  Deterministic errno

@@ -296,6 +296,13 @@ run_gprbuild \
   accept_transient_smoke.adb
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$project_root/tests/bin/accept_transient_smoke"
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f \
+  -P tests/runtime_smoke.gpr \
+  structured_server_reuse_smoke.adb
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$project_root/tests/bin/structured_server_reuse_smoke"
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \

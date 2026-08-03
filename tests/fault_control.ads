@@ -26,7 +26,8 @@ package Fault_Control is
       Accept_Protocol_Error,
       Accept_Process_File_Limit,
       Accept_System_File_Limit,
-      Accept_Bad_Descriptor);
+      Accept_Bad_Descriptor,
+      Structured_Listener_Close);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -52,7 +53,8 @@ package Fault_Control is
       Accept_Protocol_Error        => 21,
       Accept_Process_File_Limit    => 22,
       Accept_System_File_Limit     => 23,
-      Accept_Bad_Descriptor        => 24);
+      Accept_Bad_Descriptor        => 24,
+      Structured_Listener_Close   => 25);
 
    function Enabled return Boolean;
    procedure Reset;
