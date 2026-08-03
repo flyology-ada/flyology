@@ -57,8 +57,8 @@ based on the surviving correspondence.
 - [SPARK proof boundary](#spark-proof-boundary)
 - [Portability boundaries](#portability-boundaries)
 - [Repository layout](#repository-layout)
+- [Use as an Alire dependency](#use-as-an-alire-dependency)
 - [Build and test](#build-and-test)
-  - [Use as an Alire dependency](#use-as-an-alire-dependency)
   - [AddressSanitizer builds](#addresssanitizer-builds)
   - [CI and releases](#ci-and-releases)
 - [Showcases](#showcases)
@@ -103,13 +103,14 @@ task Connection is
 end Connection;
 ```
 
-The prepared runtime has a project-wide default. Compatibility-oriented builds
-omit the setting or select `native`; lightweight applications can opt in once for
-the whole project:
+The prepared runtime has a project-wide default. The Alire dependency workflow
+uses `native` unless configured otherwise. A lightweight application can opt in
+once for the whole project, then rebuild normally:
 
 ```sh
-FLYOLOGY_DEFAULT=native  ./scripts/prepare-rts.sh  # default when omitted
-FLYOLOGY_DEFAULT=lightweight ./scripts/prepare-rts.sh
+alr exec -- sh -c \
+  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh"'
+alr build
 ```
 
 The environment task always remains native. No poller, scheduler context,
@@ -149,9 +150,9 @@ distribute such tasks across a fixed pool with deterministic round-robin
 tickets:
 
 ```sh
-FLYOLOGY_LOOP_POOL_SIZE=4 \
-FLYOLOGY_PLACEMENT=round_robin \
-  ./scripts/prepare-rts.sh
+alr exec -- sh -c \
+  'FLYOLOGY_LOOP_POOL_SIZE=4 FLYOLOGY_PLACEMENT=round_robin "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh"'
+alr build
 ```
 
 Pool groups are created independently and lazily: configuration inspection
@@ -1653,7 +1654,50 @@ rather than hidden behind a claim of universal portability.
 - [`scripts`](scripts): custom RTS construction, verification, and test runners.
 - [`docker`](docker): native-architecture Linux validation Dockerfile.
 
+## Use as an Alire dependency
+
+Until Flyology has a community-index release, register the temporary test index
+in an Alire application and add the crate normally:
+
+```sh
+alr init --bin flyology_app
+cd flyology_app
+alr index --add=git+https://github.com/yrashk/alire-index.git#codex/flyology-test-release \
+  --name=flyology_fork
+alr with flyology
+alr build
+```
+
+The extra index is a testing channel. Remove it with
+`alr index --del flyology_fork` when Flyology is available from the standard
+Alire community index.
+
+Alire makes `flyology.gpr` available to the application and exports
+`FLYOLOGY_ROOT` as the dependency root. The first `alr build` runs Flyology's
+post-fetch action, prepares a native-default RTS matching the selected compiler,
+and exports a GPR configuration that selects it. No checkout-relative source
+paths, manual preparation command, or explicit `--RTS` argument is needed.
+
+The application's GPR file may explicitly `with "flyology.gpr"`; Alire also
+supports its normal automatic GPR dependency wiring. To test an unindexed local
+checkout while developing Flyology, replace the indexed dependency with a path
+pin:
+
+```sh
+alr with flyology --use /path/to/flyology
+alr build
+```
+
 ## Build and test
+
+This section is for contributors developing Flyology itself from a source
+checkout. Application projects should use the Alire dependency workflow above.
+
+```sh
+git clone https://github.com/yrashk/flyology.git
+cd flyology
+alr build
+```
 
 Flyology supports Alire 2.1 or newer with the exact `gnat_native` releases shown
 below:
@@ -1728,36 +1772,6 @@ deployment configuration is stable during elaboration and concurrent task
 activation. The script checks source compatibility by applying the source
 patch under `set -e`, so an incompatible runtime source tree fails rather than
 being silently accepted.
-
-### Use as an Alire dependency
-
-Once an indexed release exists, an application adds it normally:
-
-```sh
-alr with flyology
-```
-
-During development, use a path or Git pin instead:
-
-```sh
-alr with flyology --use /path/to/flyology
-```
-
-Alire makes `flyology.gpr` available to the consumer and exports
-`FLYOLOGY_ROOT` as the dependency root. On the first build after fetching an
-indexed release, Flyology prepares a native-default RTS and a GPR configuration
-that selects it. The application then builds with the ordinary Alire command:
-
-```sh
-alr build
-```
-
-The application's GPR file may explicitly `with "flyology.gpr"`; Alire also
-supports its normal automatic GPR dependency wiring. No `../../src` paths or
-imports of runtime implementation units are required, and no explicit `--RTS`
-argument is needed. `alr with flyology` only records and fetches the dependency;
-as with other Alire crates, `alr build` performs the actual build and runs the
-one-time runtime preparation action.
 
 `scripts/test-external-consumer.sh` copies a small consumer into a fresh
 temporary workspace, adds Flyology through an Alire path pin, verifies the
