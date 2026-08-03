@@ -1036,6 +1036,29 @@ malformed UTF-8 are rejected, and `+` remains a literal plus in a path. Routers
 provide automatic 404, 405 with `Allow`, and HEAD fallback to GET. Trailing
 slash behavior is selected explicitly when the bounded router is declared.
 
+Router setup can attach optional stable names to middleware, and the completed
+registry can be described without exposing handler access values:
+
+```ada
+Router.Add_Middleware
+  (Request_ID_Middleware.Call'Access, Name => "request-id");
+
+for Index in 1 .. Router.Route_Count loop
+   declare
+      Route : constant Routes.Route_Description :=
+        Router.Describe_Route (Index);
+   begin
+      Inspect (Route.Name, Route.Method, Route.Pattern, Route.Policy);
+   end;
+end loop;
+```
+
+`Describe_Route`, `Describe_Global_Middleware`, and
+`Describe_Route_Middleware` return owned copies in deterministic registration
+order. Introspection is a setup/diagnostic operation and must not race router
+registration. Dispatch does not construct descriptions or add dynamic lookup
+work to the request hot path.
+
 `Exchange` does not require buffering. A `Stream_Body` route pulls decoded
 request bytes with `X.Read_Body`; `Begin_Stream`, `Write_Chunk`, and
 `End_Stream` provide a general response stream with synchronous transport
@@ -1183,7 +1206,8 @@ read positionally with `Flyology.IO.Files.Read_At` and emitted as binary
 streaming response chunks. The UI exercises a multi-item SSE flight feed with
 heartbeats, a WebSocket chat with two concurrent mailbox producers and one
 connection writer, streamed file upload, metrics, authentication, mounted
-routing, structured lightweight work, and a bounded native boundary:
+routing, structured lightweight work, a bounded native boundary, and a live
+application registry:
 
 ```sh
 ./scripts/showcases.sh
@@ -1194,6 +1218,12 @@ routing, structured lightweight work, and a bounded native boundary:
 The fifth argument is the project root used to locate maintained assets; `.`
 is correct when launched from the repository root. Select `native` instead of
 `lightweight` to run the identical application on native handlers.
+The runtime panel renders routes, policies, and named middleware from an owned
+setup snapshot, then reads created execution-group, stack-pool, and bounded
+HTTP metric snapshots over SSE. The feed does not create configured groups or
+add per-dispatch instrumentation. Group members include parked lightweight
+handler tasks provisioned by server capacity; active HTTP requests are shown
+separately.
 
 `https_server` accepts one HTTPS request on a lightweight task and demonstrates
 the OpenSSL transport adapter. Its optional arguments are port, certificate,

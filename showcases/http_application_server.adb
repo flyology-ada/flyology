@@ -6,9 +6,11 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with GNAT.Sockets;
+with System.Multiprocessors;
 with Flyology;
 with Flyology.Bytes;
 with Flyology.Cancellation;
+with Flyology.Execution_Groups;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Connections;
@@ -35,6 +37,7 @@ with Flyology.IO.Files;
 with Flyology.IO.Structured_Servers;
 with Flyology.IO.Timers;
 with Flyology.Native_Executors;
+with Flyology.Observability;
 
 procedure HTTP_Application_Server is
    use type Ada.Streams.Stream_Element_Offset;
@@ -46,6 +49,8 @@ procedure HTTP_Application_Server is
    package App renames Flyology.HTTP.Server.Applications;
    package Bytes renames Flyology.Bytes;
    package Files renames Flyology.IO.Files;
+   package Groups renames Flyology.Execution_Groups;
+   package Observation renames Flyology.Observability;
    package Sockets renames GNAT.Sockets;
    package Owned renames Flyology.IO.Connections;
 
@@ -71,6 +76,54 @@ procedure HTTP_Application_Server is
 
    function Compact (Value : Natural) return String is
      (Ada.Strings.Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
+
+   function Compact (Value : Observation.Counter) return String is
+     (Ada.Strings.Fixed.Trim
+        (Observation.Counter'Image (Value), Ada.Strings.Both));
+
+   function Compact (Value : Duration) return String is
+     (Ada.Strings.Fixed.Trim (Duration'Image (Value), Ada.Strings.Both));
+
+   function Hex_Digit (Value : Natural) return Character is
+     (if Value < 10
+      then Character'Val (Character'Pos ('0') + Value)
+      else Character'Val (Character'Pos ('A') + Value - 10));
+
+   function JSON_Quote (Value : String) return String is
+      Result : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Ada.Strings.Unbounded.Append (Result, '"');
+      for Item of Value loop
+         case Item is
+            when '"' | Character'Val (92) =>
+               Ada.Strings.Unbounded.Append
+                 (Result, Character'Val (92));
+               Ada.Strings.Unbounded.Append (Result, Item);
+            when ASCII.BS =>
+               Ada.Strings.Unbounded.Append (Result, "\b");
+            when ASCII.HT =>
+               Ada.Strings.Unbounded.Append (Result, "\t");
+            when ASCII.LF =>
+               Ada.Strings.Unbounded.Append (Result, "\n");
+            when ASCII.FF =>
+               Ada.Strings.Unbounded.Append (Result, "\f");
+            when ASCII.CR =>
+               Ada.Strings.Unbounded.Append (Result, "\r");
+            when others =>
+               if Character'Pos (Item) < 32 then
+                  Ada.Strings.Unbounded.Append
+                    (Result,
+                     "\u00"
+                     & Hex_Digit (Character'Pos (Item) / 16)
+                     & Hex_Digit (Character'Pos (Item) mod 16));
+               else
+                  Ada.Strings.Unbounded.Append (Result, Item);
+               end if;
+         end case;
+      end loop;
+      Ada.Strings.Unbounded.Append (Result, '"');
+      return Ada.Strings.Unbounded.To_String (Result);
+   end JSON_Quote;
 
    Origin : constant String :=
      "http://127.0.0.1:" & Compact (Natural (Port));
@@ -106,7 +159,8 @@ procedure HTTP_Application_Server is
       end Request_Counter;
 
       type Application_Context is record
-         Calls : Natural := 0;
+         Calls         : Natural := 0;
+         Introspection : Ada.Strings.Unbounded.Unbounded_String;
       end record;
 
       --  Routing is generic over application state, so handlers receive the
@@ -252,6 +306,195 @@ procedure HTTP_Application_Server is
       package Deadline_Middleware is new
         Flyology.HTTP.Server.Middleware_Deadlines
           (Application_Context, Routing.Components, Maximum => 20.0);
+
+      function Body_Name
+        (Value : App.Request_Body_Policy) return String is
+        (case Value is
+            when App.Reject_Body         => "reject",
+            when App.Stream_Body         => "stream",
+            when App.Buffer_Body         => "buffer",
+            when App.Discard_Request_Body => "discard");
+
+      function Authentication_Name
+        (Value : App.Authentication_Mode) return String is
+        (case Value is
+            when App.No_Authentication       => "none",
+            when App.Optional_Authentication => "optional",
+            when App.Required_Authentication => "required");
+
+      function Upgrade_Name (Value : App.Upgrade_Mode) return String is
+        (case Value is
+            when App.No_Upgrade       => "none",
+            when App.Allow_SSE        => "sse",
+            when App.Allow_WebSocket  => "websocket");
+
+      function Stage_Name (Value : Routing.Middleware_Stage) return String is
+        (case Value is
+            when Routing.Request_Head => "request-head",
+            when Routing.Application  => "application");
+
+      function Thread_State_Name
+        (Value : Observation.Event_Thread_State) return String is
+        (case Value is
+            when Observation.Starting => "starting",
+            when Observation.Running  => "running",
+            when Observation.Failed   => "failed");
+
+      function Build_Routing_JSON (Item : Routing.Router) return String is
+         Result : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         Ada.Strings.Unbounded.Append
+           (Result,
+            "{""lane"":" & JSON_Quote (Lane)
+            & ",""capacity"":" & Compact (Capacity)
+            & ",""cpu_count"":"
+            & Compact
+                (Natural (System.Multiprocessors.Number_Of_CPUs))
+            & ",""configured_groups"":"
+            & Compact (Natural (Groups.Configured_Pool_Size))
+            & "," & JSON_Quote ("middleware") & ":[");
+         for Index in 1 .. Routing.Global_Middleware_Count (Item) loop
+            declare
+               Value : constant Routing.Middleware_Description :=
+                 Routing.Describe_Global_Middleware (Item, Index);
+            begin
+               if Index > 1 then
+                  Ada.Strings.Unbounded.Append (Result, ',');
+               end if;
+               Ada.Strings.Unbounded.Append
+                 (Result,
+                  "{""name"":"
+                  & JSON_Quote (Ada.Strings.Unbounded.To_String (Value.Name))
+                  & ",""stage"":" & JSON_Quote (Stage_Name (Value.Stage))
+                  & "}");
+            end;
+         end loop;
+         Ada.Strings.Unbounded.Append
+           (Result, "]," & JSON_Quote ("routes") & ":[");
+         for Index in 1 .. Routing.Route_Count (Item) loop
+            declare
+               Value : constant Routing.Route_Description :=
+                 Routing.Describe_Route (Item, Index);
+               Policy : Routing.Route_Policy renames Value.Policy;
+            begin
+               if Index > 1 then
+                  Ada.Strings.Unbounded.Append (Result, ',');
+               end if;
+               Ada.Strings.Unbounded.Append
+                 (Result,
+                  "{""method"":"
+                  & JSON_Quote (Ada.Strings.Unbounded.To_String (Value.Method))
+                  & ",""pattern"":"
+                  & JSON_Quote (Ada.Strings.Unbounded.To_String (Value.Pattern))
+                  & ",""name"":"
+                  & JSON_Quote (Ada.Strings.Unbounded.To_String (Value.Name))
+                  & "," & JSON_Quote ("policy") & ":{"
+                  & JSON_Quote ("body") & ":"
+                  & JSON_Quote (Body_Name (Policy.Body_Handling))
+                  & ",""max_body"":" & Compact (Policy.Max_Body)
+                  & ",""timeout"":" & Compact (Policy.Timeout)
+                  & ",""concurrency"":" & Compact (Policy.Concurrency)
+                  & ",""rate"":" & Compact (Policy.Rate_Per_Second)
+                  & ",""authentication"":"
+                  & JSON_Quote (Authentication_Name (Policy.Authentication))
+                  & ",""cors_slot"":" & Compact (Policy.CORS_Policy)
+                  & ",""upgrade"":"
+                  & JSON_Quote (Upgrade_Name (Policy.Upgrade))
+                  & "}," & JSON_Quote ("middleware") & ":[");
+               for Middleware_Index in 1 ..
+                 Routing.Route_Middleware_Count (Item, Index)
+               loop
+                  declare
+                     Middleware : constant Routing.Middleware_Description :=
+                       Routing.Describe_Route_Middleware
+                         (Item, Index, Middleware_Index);
+                  begin
+                     if Middleware_Index > 1 then
+                        Ada.Strings.Unbounded.Append (Result, ',');
+                     end if;
+                     Ada.Strings.Unbounded.Append
+                       (Result,
+                        "{""name"":"
+                        & JSON_Quote
+                            (Ada.Strings.Unbounded.To_String
+                               (Middleware.Name))
+                        & ",""stage"":"
+                        & JSON_Quote (Stage_Name (Middleware.Stage)) & "}");
+                  end;
+               end loop;
+               Ada.Strings.Unbounded.Append (Result, "]}");
+            end;
+         end loop;
+         Ada.Strings.Unbounded.Append (Result, "]}");
+         return Ada.Strings.Unbounded.To_String (Result);
+      end Build_Routing_JSON;
+
+      function Runtime_JSON (Sequence : Positive) return String is
+         Result  : Ada.Strings.Unbounded.Unbounded_String;
+         Stack   : constant Observation.Stack_Pool_Snapshot :=
+           Observation.Stack_Pool;
+         HTTP_Metrics : constant Flyology.HTTP.Server.Metrics.Snapshot :=
+           Metrics.Read;
+         First_Group : Boolean := True;
+         Created     : Natural := 0;
+      begin
+         Ada.Strings.Unbounded.Append
+           (Result,
+            "{""sequence"":" & Compact (Sequence)
+            & ",""lane"":" & JSON_Quote (Lane)
+            & ",""cpu_count"":"
+            & Compact (Natural (System.Multiprocessors.Number_Of_CPUs))
+            & ",""configured_groups"":"
+            & Compact (Natural (Groups.Configured_Pool_Size))
+            & "," & JSON_Quote ("http") & ":{"
+            & JSON_Quote ("active") & ":" & Compact (HTTP_Metrics.Active)
+            & ",""requests"":" & Compact (HTTP_Metrics.Requests)
+            & ",""request_bytes"":"
+            & Compact (HTTP_Metrics.Request_Bytes)
+            & ",""response_bytes"":"
+            & Compact (HTTP_Metrics.Response_Bytes) & "}"
+            & "," & JSON_Quote ("stacks") & ":{"
+            & JSON_Quote ("live") & ":" & Compact (Stack.Live_Stacks)
+            & ",""arenas"":" & Compact (Stack.Active_Arenas)
+            & ",""usable_bytes"":" & Compact (Stack.Live_Usable_Bytes)
+            & ",""reserved_bytes"":" & Compact (Stack.Reserved_Bytes)
+            & "}," & JSON_Quote ("groups") & ":[");
+         for Index in 0 .. Natural (Groups.Configured_Pool_Size) - 1 loop
+            declare
+               Sample : Observation.Group_Snapshot;
+               Available : constant Boolean := Observation.Snapshot
+                 (Observation.Group_Id (Index), Sample);
+            begin
+               if Available then
+                  Created := Created + 1;
+                  if not First_Group then
+                     Ada.Strings.Unbounded.Append (Result, ',');
+                  end if;
+                  First_Group := False;
+                  Ada.Strings.Unbounded.Append
+                    (Result,
+                     "{""id"":" & Compact (Index)
+                     & ",""state"":"
+                     & JSON_Quote (Thread_State_Name (Sample.Thread_State))
+                     & ",""members"":" & Compact (Sample.Members)
+                     & ",""pinned"":" & Compact (Sample.Pinned_Members)
+                     & ",""ready"":" & Compact (Sample.Ready)
+                     & ",""waiting"":" & Compact (Sample.Waiting)
+                     & ",""running"":" & Compact (Sample.Running)
+                     & ",""timers"":" & Compact (Sample.Timer_Waits)
+                     & ",""descriptors"":"
+                     & Compact (Sample.Descriptor_Waits)
+                     & ",""files"":" & Compact (Sample.File_Waits)
+                     & ",""dispatches"":" & Compact (Sample.Dispatches)
+                     & ",""poll_events"":" & Compact (Sample.Poll_Events)
+                     & ",""wakeups"":" & Compact (Sample.Wakeups) & "}");
+               end if;
+            end;
+         end loop;
+         Ada.Strings.Unbounded.Append
+           (Result, "],""created_groups"":" & Compact (Created) & "}");
+         return Ada.Strings.Unbounded.To_String (Result);
+      end Runtime_JSON;
 
       Requests : Request_Counter (Request_Goal);
 
@@ -436,6 +679,69 @@ procedure HTTP_Application_Server is
             & Ada.Strings.Fixed.Trim
                 (Natural'Image (Snapshot.Active), Ada.Strings.Both) & "}");
       end Metrics_Endpoint;
+
+      procedure Introspection_Endpoint
+        (State : in out Application_Context;
+         X     : in out App.Exchange) is
+      begin
+         Complete (State);
+         X.JSON
+           (200, Ada.Strings.Unbounded.To_String (State.Introspection));
+      end Introspection_Endpoint;
+
+      procedure Runtime_Events
+        (State : in out Application_Context;
+         X     : in out App.Exchange)
+      is
+         package SSE renames Flyology.HTTP.Server.SSE_Handlers;
+         Session : aliased SSE.Session
+           (Capacity   => 2,
+            Byte_Limit => SSE.Default_Session_Bytes,
+            Budget     => null);
+         type Session_Access is access all SSE.Session;
+
+         task type Producer (Item : not null Session_Access) is
+            pragma Task_Info (Model);
+         end Producer;
+
+         task body Producer is
+            Accepted  : Boolean;
+            Timed_Out : Boolean;
+         begin
+            for Sequence in 1 .. 140 loop
+               exit when SSE.Cancelled (Item.all);
+               SSE.Publish_For
+                 (Item.all,
+                  (Data => Ada.Strings.Unbounded.To_Unbounded_String
+                     (Runtime_JSON (Sequence)),
+                   Event => Ada.Strings.Unbounded.To_Unbounded_String
+                     ("runtime"),
+                   Id => Ada.Strings.Unbounded.To_Unbounded_String
+                     (Compact (Sequence)),
+                   Retry         => 1_000,
+                   Include_Id    => True,
+                   Include_Retry => Sequence = 1),
+                  Accepted, Timeout => 0.5, Timed_Out => Timed_Out);
+               exit when not Accepted or else Timed_Out;
+               Flyology.IO.Timers.Sleep_For (0.75);
+            end loop;
+            SSE.Close (Item.all);
+         exception
+            when others =>
+               SSE.Close (Item.all);
+         end Producer;
+      begin
+         Complete (State);
+         declare
+            Source : Producer (Session'Unchecked_Access);
+         begin
+            --  Sampling reads existing counters only. It does not create
+            --  execution groups or add instrumentation to scheduler paths.
+            SSE.Run
+              (X, Session, Metrics'Access,
+               Idle_Quantum => 0.10, Heartbeat => 5.0);
+         end;
+      end Runtime_Events;
 
       procedure Private_Profile
         (State : in out Application_Context;
@@ -750,7 +1056,7 @@ procedure HTTP_Application_Server is
       type Context is limited record
          Application : Application_Context;
          Routes      : Routing.Router
-           (Capacity => 24, Slashes => Routing.Strict_Slashes);
+           (Capacity => 28, Slashes => Routing.Strict_Slashes);
          Budget      : aliased HTTP.Ingress_Budget
            (Limit => 64 * 1_024 * 1_024);
       end record;
@@ -791,15 +1097,23 @@ procedure HTTP_Application_Server is
    begin
       --  Registration order is execution order around the route. Error
       --  mapping is outermost so failures in later components are contained.
-      State.Routes.Add_Middleware (Error_Middleware.Call'Access);
-      State.Routes.Add_Middleware (Request_ID_Middleware.Call'Access);
-      State.Routes.Add_Middleware (Logging_Middleware.Call'Access);
-      State.Routes.Add_Middleware (Metrics_Middleware.Call'Access);
-      State.Routes.Add_Middleware (CORS_Middleware.Call'Access);
-      State.Routes.Add_Middleware (Rate_Middleware.Call'Access);
-      State.Routes.Add_Middleware (Bulkhead_Middleware.Call'Access);
       State.Routes.Add_Middleware
-        (Security_Middleware.Call'Access, Stage => Routing.Application);
+        (Error_Middleware.Call'Access, Name => "errors");
+      State.Routes.Add_Middleware
+        (Request_ID_Middleware.Call'Access, Name => "request-id");
+      State.Routes.Add_Middleware
+        (Logging_Middleware.Call'Access, Name => "access-log");
+      State.Routes.Add_Middleware
+        (Metrics_Middleware.Call'Access, Name => "metrics");
+      State.Routes.Add_Middleware
+        (CORS_Middleware.Call'Access, Name => "cors");
+      State.Routes.Add_Middleware
+        (Rate_Middleware.Call'Access, Name => "rate-limit");
+      State.Routes.Add_Middleware
+        (Bulkhead_Middleware.Call'Access, Name => "bulkhead");
+      State.Routes.Add_Middleware
+        (Security_Middleware.Call'Access, Stage => Routing.Application,
+         Name => "security-headers");
 
       --  Static assets use ordinary routes and the same middleware as dynamic
       --  handlers. The low-level server remains usable without this router.
@@ -830,11 +1144,21 @@ procedure HTTP_Application_Server is
               Body_Handling => App.Stream_Body,
               Timeout       => 30.0));
       State.Routes.Add_Route_Middleware
-        ("upload", Deadline_Middleware.Call'Access);
+        ("upload", Deadline_Middleware.Call'Access,
+         Middleware_Name => "deadline-narrowing");
       State.Routes.Get
         ("/stream", Stream_Response'Access, Name => "stream");
       State.Routes.Get
         ("/metrics", Metrics_Endpoint'Access, Name => "metrics");
+      State.Routes.Get
+        ("/introspection", Introspection_Endpoint'Access,
+         Name => "introspection");
+      State.Routes.Get
+        ("/runtime/events", Runtime_Events'Access, Name => "runtime.events",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade => Routing.Allow_SSE,
+              Timeout => 110.0));
       State.Routes.Get
         ("/private", Private_Profile'Access, Name => "private",
          Policy =>
@@ -844,7 +1168,8 @@ procedure HTTP_Application_Server is
               Rate_Per_Second => 10,
               Concurrency     => 8));
       State.Routes.Add_Route_Middleware
-        ("private", Authentication_Middleware.Call'Access);
+        ("private", Authentication_Middleware.Call'Access,
+         Middleware_Name => "authentication");
       State.Routes.Get
         ("/error", Demonstrate_Error'Access, Name => "error");
       State.Routes.Get
@@ -873,11 +1198,18 @@ procedure HTTP_Application_Server is
 
       Admin_Routes.Get
         ("/status", Admin_Status'Access, Name => "status");
-      Admin_Routes.Add_Middleware (Security_Middleware.Call'Access);
+      Admin_Routes.Add_Middleware
+        (Security_Middleware.Call'Access, Name => "admin-security-headers");
       --  Mount keeps child policy and prefixes names so logs and metrics use
       --  bounded "admin.*" labels instead of arbitrary raw paths.
       State.Routes.Mount
         ("/admin", Admin_Routes, Name_Prefix => "admin.");
+
+      --  Routes and middleware are immutable after setup. Cache one owned JSON
+      --  description so introspection requests do not rebuild it per request.
+      State.Application.Introspection :=
+        Ada.Strings.Unbounded.To_Unbounded_String
+          (Build_Routing_JSON (State.Routes));
 
       Sockets.Create_Socket (Listener);
       Sockets.Set_Socket_Option

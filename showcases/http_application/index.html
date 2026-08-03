@@ -22,6 +22,7 @@
           <a href="#events">SSE</a>
           <a href="#chat">WebSocket</a>
           <a href="#files">File I/O</a>
+          <a href="#introspection">Runtime</a>
           <a href="#toolkit">Toolkit</a>
         </div>
         <div class="nav-tools">
@@ -136,9 +137,68 @@
         </div>
       </section>
 
+      <section class="introspection-section" id="introspection" aria-labelledby="introspection-title">
+        <div class="introspection-shell">
+          <header class="introspection-header">
+            <div>
+              <p class="section-index">04 · live introspection</p>
+              <h2 id="introspection-title">The application describes itself.</h2>
+            </div>
+            <div class="introspection-copy">
+              <p>Router metadata is copied from the configured registry after setup. Runtime counters arrive over a separate SSE connection every 750 milliseconds. Sampling reads existing group snapshots; it does not create groups or instrument dispatch.</p>
+              <div class="stream-identity"><span class="status-dot" data-runtime-state="connecting"></span><strong data-runtime-label>connecting to runtime feed</strong><code>GET /runtime/events</code></div>
+            </div>
+          </header>
+
+          <div class="runtime-ledger" aria-label="Live runtime summary">
+            <div><span>handler lane</span><strong data-runtime-lane>waiting</strong></div>
+            <div><span>host CPUs</span><strong data-runtime-cpus>0</strong></div>
+            <div><span>groups</span><strong><b data-runtime-created>0</b> / <b data-runtime-configured>0</b></strong></div>
+            <div><span>live stacks</span><strong data-runtime-stacks>0</strong></div>
+            <div><span>active HTTP</span><strong data-runtime-active>0</strong></div>
+            <div><span>samples</span><strong data-runtime-sequence>0</strong></div>
+          </div>
+
+          <div class="registry-block groups-block">
+            <div class="registry-heading">
+              <div><span>Scheduler view</span><h3>Execution groups</h3></div>
+              <p>Current queue depth and cumulative activity from each created event loop. Members include parked handler tasks provisioned by server capacity; active HTTP counts requests in progress. Native tasks are outside these group rows, and configured but uncreated groups stay inert.</p>
+            </div>
+            <div class="technical-table-wrap">
+              <table class="technical-table group-table">
+                <thead><tr><th>Group</th><th>State</th><th>Members</th><th>Ready</th><th>Waiting</th><th>Running</th><th>Timers</th><th>Descriptors</th><th>Files</th><th>Dispatches</th><th>Poll events</th><th>Wakeups</th></tr></thead>
+                <tbody data-group-table><tr><td colspan="12" class="table-empty">Waiting for the first runtime sample.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="registry-block middleware-block">
+            <div class="registry-heading">
+              <div><span>Deterministic order</span><h3>Global middleware</h3></div>
+              <p>Request-head components run before body admission. Application-stage components run only after the selected route policy has admitted the body.</p>
+            </div>
+            <ol class="middleware-registry" data-middleware-list><li>Loading configured components…</li></ol>
+          </div>
+
+          <div class="registry-block routes-block">
+            <div class="registry-heading">
+              <div><span>Bounded registry</span><h3>Routing table</h3></div>
+              <p><span data-route-count>0</span> routes in registration order. Names are the bounded labels used by logs and metrics; policies are applied before handlers run.</p>
+              <a href="/introspection" target="_blank" rel="noreferrer">Open raw JSON</a>
+            </div>
+            <div class="technical-table-wrap">
+              <table class="technical-table route-table">
+                <thead><tr><th>Method</th><th>Pattern</th><th>Route name</th><th>Body</th><th>Deadline</th><th>Admission and upgrade</th><th>Route middleware</th></tr></thead>
+                <tbody data-route-table><tr><td colspan="7" class="table-empty">Loading router registry.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="toolkit-section" id="toolkit" aria-labelledby="toolkit-title">
         <header>
-          <p class="section-index">04 · optional application toolkit</p>
+          <p class="section-index">05 · optional application toolkit</p>
           <h2 id="toolkit-title">Probe each layer.</h2>
           <div class="toolkit-intro">
             <p>Each control sends a real request through the complete application stack. Pick a probe to compare the intended invariant with the status, headers, request ID, and body that came back.</p>

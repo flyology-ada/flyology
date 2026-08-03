@@ -66,7 +66,7 @@
           <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">i</span><p>Flyology is experimental. This guide describes implemented behavior and maintained examples; it is not a production-qualification claim. Code excerpts come from <a href="https://github.com/yrashk/flyology/blob/main/showcases/http_application_server.adb"><code>showcases/http_application_server.adb</code></a>, which the showcase build compile-checks.</p></aside>
 
           <section id="start"><span class="step-label">HTTP 01</span><h2>Start the HTTP server.</h2>
-            <p>The maintained server owns a listening socket through <code>Flyology.IO.Structured_Servers</code>. Each admitted handler wraps its owned connection in the HTTP transport, installs a shared ingress budget, and serves persistent requests under one cancellation token. The kitchen-sink page is a real same-origin application: its HTML, CSS, JavaScript, brand mark, and variable font are read through <code>Flyology.IO.Files.Read_At</code>, while its UI drives SSE, WebSocket chat, streamed upload, middleware, and structured request work.</p>
+            <p>The maintained server owns a listening socket through <code>Flyology.IO.Structured_Servers</code>. Each admitted handler wraps its owned connection in the HTTP transport, installs a shared ingress budget, and serves persistent requests under one cancellation token. The kitchen-sink page is a real same-origin application: its HTML, CSS, JavaScript, brand mark, and variable font are read through <code>Flyology.IO.Files.Read_At</code>, while its UI drives SSE, WebSocket chat, streamed upload, middleware, structured request work, and live application introspection.</p>
             <figure class="code-panel"><figcaption>connection handler excerpt</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Channel : aliased HTTP.Connections.Connection_Transport
   (Connection'Unchecked_Access);
 Client : aliased HTTP.Connection (Channel'Access);
@@ -123,6 +123,7 @@ Admin_Routes.Get
 State.Routes.Mount
   ("/admin", Admin_Routes, Name_Prefix =&gt; "admin.");</code></pre></figure>
             <p>Query parsing is lazy. Repeated values retain occurrence order, invalid percent escapes are rejected, and <code>+</code> becomes a space only in the query component.</p>
+            <p>After setup, <code>Route_Count</code>, <code>Describe_Route</code>, and the matching middleware-description operations return owned metadata in deterministic registration order. Applications can build diagnostics without exposing handler access values. Registration and introspection must not run concurrently; dispatch itself does not allocate descriptions or perform extra dynamic lookup.</p>
           </section>
 
           <section id="body-policy"><span class="step-label">HTTP 05</span><h2>Select body behavior per route.</h2>
@@ -144,16 +145,23 @@ State.Routes.Post
 
           <section id="middleware"><span class="step-label">HTTP 06</span><h2>Compose deterministic around middleware.</h2>
             <p>A middleware component receives the typed context, exchange, and a single-use <code>Next</code> continuation. Code before <code>Next.Call</code> runs inward; code after it runs outward. A component may short circuit with a response. Global components wrap route-local components in registration order. Request-head components run before body acceptance and delayed <code>100 Continue</code>; application-stage components run afterward.</p>
-            <figure class="code-panel"><figcaption>maintained middleware order</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">State.Routes.Add_Middleware (Error_Middleware.Call'Access);
-State.Routes.Add_Middleware (Request_ID_Middleware.Call'Access);
-State.Routes.Add_Middleware (Logging_Middleware.Call'Access);
-State.Routes.Add_Middleware (Metrics_Middleware.Call'Access);
-State.Routes.Add_Middleware (CORS_Middleware.Call'Access);
-State.Routes.Add_Middleware (Rate_Middleware.Call'Access);
-State.Routes.Add_Middleware (Bulkhead_Middleware.Call'Access);
-State.Routes.Add_Middleware (Deadline_Middleware.Call'Access);
+            <figure class="code-panel"><figcaption>maintained middleware order</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">State.Routes.Add_Middleware
+  (Error_Middleware.Call'Access, Name =&gt; "errors");
 State.Routes.Add_Middleware
-  (Security_Middleware.Call'Access, Stage =&gt; Routing.Application);</code></pre></figure>
+  (Request_ID_Middleware.Call'Access, Name =&gt; "request-id");
+State.Routes.Add_Middleware
+  (Logging_Middleware.Call'Access, Name =&gt; "access-log");
+State.Routes.Add_Middleware
+  (Metrics_Middleware.Call'Access, Name =&gt; "metrics");
+State.Routes.Add_Middleware
+  (CORS_Middleware.Call'Access, Name =&gt; "cors");
+State.Routes.Add_Middleware
+  (Rate_Middleware.Call'Access, Name =&gt; "rate-limit");
+State.Routes.Add_Middleware
+  (Bulkhead_Middleware.Call'Access, Name =&gt; "bulkhead");
+State.Routes.Add_Middleware
+  (Security_Middleware.Call'Access, Stage =&gt; Routing.Application,
+   Name =&gt; "security-headers");</code></pre></figure>
           </section>
 
           <section id="errors"><span class="step-label">HTTP 07</span><h2>Map errors only while framing is safe.</h2>
@@ -187,6 +195,11 @@ State.Routes.Add_Route_Middleware
           <section id="observability"><span class="step-label">HTTP 10</span><h2>Observe stable route names, not attacker paths.</h2>
             <p>Request-ID middleware generates a bounded safe identifier unless an explicit trust policy accepts a valid inbound value. Access logs include method, route name, optional safe target, status, request ID, peer, byte counts, and monotonic elapsed time. They do not receive authorization, cookies, or bodies. The default in-memory metrics sink caps route/method/status-class series and reports dropped series rather than growing without bound.</p>
             <p>The maintained <code>/metrics</code> endpoint demonstrates reading a snapshot without coupling the server to a monitoring format. Applications can instead implement the sink interface for their metrics system.</p>
+            <figure class="code-panel"><figcaption>owned setup snapshot</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">State.Application.Introspection :=
+  Ada.Strings.Unbounded.To_Unbounded_String
+    (Build_Routing_JSON (State.Routes));</code></pre></figure>
+            <p>The kitchen sink exposes that immutable registry at <code>/introspection</code>: route methods, patterns, stable names, body and admission policies, upgrades, and named middleware. Its <code>/runtime/events</code> SSE endpoint samples the stack pool, bounded HTTP metrics, and <code>Flyology.Observability.Snapshot</code> for already-created execution groups every 750 milliseconds. Reading the feed neither creates configured groups nor instruments each dispatch.</p>
+            <p>Execution-group members include parked lightweight handler tasks provisioned by server capacity, while active HTTP requests are reported separately. Native handlers do not appear as execution-group members. Route and policy metadata can reveal application structure, so exposing these endpoints outside a development or protected operational surface is an application deployment decision.</p>
           </section>
 
           <section id="upload"><span class="step-label">HTTP 11</span><h2>Stream uploads under one deadline.</h2>
