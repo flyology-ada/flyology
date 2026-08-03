@@ -320,6 +320,24 @@ run_gprbuild \
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$project_root/tests/bin/structured_server_reuse_smoke"
 
+#  A capable Linux host must prove both initialization-fallback boundaries in
+#  fresh processes.  Forced-native runs cannot reach these post-setup seams.
+if [ "$(uname -s)" = Linux ] && \
+   [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]
+then
+  run_gprbuild \
+    --RTS="$project_root/build/rts" \
+    -f \
+    -P tests/runtime_smoke.gpr \
+    fault_injection_smoke.adb
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$project_root/tests/bin/fault_injection_smoke" \
+    file-uring-probe-fallback
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$project_root/tests/bin/fault_injection_smoke" \
+    file-uring-post-setup-fallback
+fi
+
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=1 \

@@ -786,8 +786,10 @@ actual kernel completion facility and suspends only the calling Ada task.
   the Ada scheduler.
 - On Linux, each execution group owns an `io_uring`; its completion queue
   signals the group's existing eventfd, which is already watched by epoll. If
-  `io_uring_setup` is unavailable or forbidden, the backend uses Linux native
-  AIO with `IOCB_FLAG_RESFD` and the same eventfd completion path.
+  setup is unavailable or forbidden, the kernel probe does not report `READ`
+  and `WRITE`, or later ring initialization fails, Flyology releases the
+  partial ring and uses Linux native AIO with `IOCB_FLAG_RESFD` and the same
+  eventfd completion path.
 
 Linux interfaces without ordinary libc functions cross a small typed C bridge.
 Its syscall wrappers select `SYS_*` numbers from the target headers, and its
@@ -1682,9 +1684,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   path.
 - Arbitrary blocking foreign calls are not automatically made event-aware; use
   a designated native task or an explicit worker boundary.
-- Linux prefers `io_uring` and falls back to native AIO when the syscall is
-  unavailable or forbidden. Native AIO supports fewer filesystem and file-type
-  combinations and does not guarantee asynchronous execution for every target.
+- Linux prefers `io_uring` and falls back to native AIO when setup is
+  unavailable or forbidden, the required operation probe fails, or ring
+  initialization cannot finish. Native AIO supports fewer filesystem and
+  file-type combinations and does not guarantee asynchronous execution for
+  every target.
 - File `Open` and `Close` remain direct metadata syscalls and may briefly occupy
   an event loop, particularly on remote or unhealthy filesystems.
 - A submitted file buffer remains owned by the kernel until terminal

@@ -32,7 +32,9 @@ package Fault_Control is
       File_Uring_Submit_EBUSY,
       File_Uring_Overflow_Flush,
       File_Uring_Backpressure,
-      File_Uring_Flush_EBUSY);
+      File_Uring_Flush_EBUSY,
+      File_Uring_Probe_Unsupported,
+      File_Uring_Post_Setup_Failure);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -64,7 +66,9 @@ package Fault_Control is
       File_Uring_Submit_EBUSY     => 27,
       File_Uring_Overflow_Flush   => 28,
       File_Uring_Backpressure     => 29,
-      File_Uring_Flush_EBUSY      => 30);
+      File_Uring_Flush_EBUSY      => 30,
+      File_Uring_Probe_Unsupported => 31,
+      File_Uring_Post_Setup_Failure => 32);
 
    function Enabled return Boolean;
    procedure Reset;

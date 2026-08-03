@@ -29,6 +29,9 @@ procedure Fault_Injection_Smoke is
    pragma Import
      (C, Selected_Linux_Backend, "flyology_linux_file_backend");
 
+   function Open_FD_Count return Interfaces.C.int;
+   pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
+
    Case_Name : constant String :=
      (if Ada.Command_Line.Argument_Count = 0
       then ""
@@ -503,6 +506,86 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_Uring_CQ_Backpressure;
+
+   procedure Test_Uring_Initialization_Fallback
+     (At_Point : Fault_Control.Point)
+   is
+      Path : constant String :=
+        "/tmp/flyology-uring-initialization-fallback.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Before_FDs : Interfaces.C.int;
+      After_FDs  : Interfaces.C.int;
+      Wrote      : Boolean := False with Atomic;
+   begin
+      if At_Point not in
+        Fault_Control.File_Uring_Probe_Unsupported |
+        Fault_Control.File_Uring_Post_Setup_Failure
+      then
+         raise Program_Error with "invalid io_uring initialization fault";
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm (At_Point);
+      Before_FDs := Open_FD_Count;
+
+      declare
+         task Writer is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Writer;
+
+         task body Writer is
+            Data : constant Ada.Streams.Stream_Element_Array := [1 => 73];
+            Last : Ada.Streams.Stream_Element_Offset;
+         begin
+            Files.Write_At (File, 0, Data, Last);
+            Wrote := Last = Data'Last;
+         end Writer;
+      begin
+         null;
+      end;
+
+      --  Darwin has no Linux backend marker and does not reach either Linux
+      --  fault point.  Linux must reach the requested post-setup boundary,
+      --  transfer to native AIO, and retain only epoll plus its wake eventfd.
+      if Selected_Linux_Backend = 0 then
+         Fault_Control.Reset;
+         Files.Close (File);
+         Ada.Directories.Delete_File (Path);
+         Ada.Text_IO.Put_Line
+           ("io_uring initialization fallback skipped on non-Linux host");
+         return;
+      elsif Fault_Control.Calls (At_Point) = 0 then
+         raise Program_Error with
+           "io_uring initialization fault was not reached";
+      elsif Selected_Linux_Backend /= 2 then
+         raise Program_Error with
+           "io_uring initialization did not fall back to native AIO";
+      elsif not Wrote then
+         raise Program_Error with
+           "native-AIO fallback did not complete file I/O";
+      end if;
+
+      After_FDs := Open_FD_Count;
+      if After_FDs /= Before_FDs + 2 then
+         raise Program_Error with
+           "io_uring fallback retained a ring descriptor";
+      end if;
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Uring_Initialization_Fallback;
 
    procedure Test_Cross_Domain_Cancellation is
       Path : constant String := "/tmp/flyology-cancel-file.data";
@@ -1422,6 +1505,12 @@ begin
       Test_File_Saturation;
    elsif Case_Name = "file-uring-cq-backpressure" then
       Test_Uring_CQ_Backpressure;
+   elsif Case_Name = "file-uring-probe-fallback" then
+      Test_Uring_Initialization_Fallback
+        (Fault_Control.File_Uring_Probe_Unsupported);
+   elsif Case_Name = "file-uring-post-setup-fallback" then
+      Test_Uring_Initialization_Fallback
+        (Fault_Control.File_Uring_Post_Setup_Failure);
    elsif Case_Name = "file-cancellation" then
       Test_Cross_Domain_Cancellation;
    elsif Case_Name = "file-abort" then

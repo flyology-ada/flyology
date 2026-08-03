@@ -21,6 +21,8 @@ package body System.Flyology.File_Engine is
    use type C.unsigned_long;
    use type Interfaces.Integer_32;
    use type Interfaces.Integer_64;
+   use type AP.uint8;
+   use type AP.uint16;
    use type AP.uint32;
    use System.Storage_Elements;
 
@@ -53,6 +55,8 @@ package body System.Flyology.File_Engine is
    IORING_ENTER_GETEVENTS        : constant C.unsigned := 1;
    IORING_REGISTER_EVENTFD       : constant U32 := 4;
    IORING_REGISTER_EVENTFD_ASYNC : constant U32 := 7;
+   IORING_REGISTER_PROBE         : constant U32 := 8;
+   IO_URING_OP_SUPPORTED         : constant U16 := 1;
    IORING_OP_READ                : constant U8 := 22;
    IORING_OP_WRITE               : constant U8 := 23;
    IORING_OP_ASYNC_CANCEL        : constant U8 := 14;
@@ -136,6 +140,44 @@ package body System.Flyology.File_Engine is
       Reserved       at 28 range 0 .. 95;
       SQ_Offsets     at 40 range 0 .. 319;
       CQ_Offsets     at 80 range 0 .. 319;
+   end record;
+
+   --  The probe header is followed by the number of operation records passed
+   --  to io_uring_register.  READ and WRITE are opcodes 22 and 23, so asking
+   --  for the first 24 records is sufficient for Flyology's file engine.
+   type Probe_Operation is record
+      Opcode     : U8;
+      Reserved   : U8;
+      Flags      : U16;
+      Reserved_2 : U32;
+   end record
+     with Convention => C, Size => 64, Alignment => 4;
+   for Probe_Operation use record
+      Opcode     at 0 range 0 .. 7;
+      Reserved   at 1 range 0 .. 7;
+      Flags      at 2 range 0 .. 15;
+      Reserved_2 at 4 range 0 .. 31;
+   end record;
+
+   Probe_Operation_Count : constant := 24;
+   type Probe_Operation_Array is
+     array (Natural range 0 .. Probe_Operation_Count - 1) of Probe_Operation
+       with Convention => C;
+
+   type Operation_Probe is record
+      Last_Opcode : U8;
+      Operations  : U8;
+      Reserved    : U16;
+      Reserved_2  : Reserved_Array;
+      Operation   : Probe_Operation_Array;
+   end record
+     with Convention => C, Size => 1_664, Alignment => 4;
+   for Operation_Probe use record
+      Last_Opcode at 0  range 0 .. 7;
+      Operations  at 1  range 0 .. 7;
+      Reserved    at 2  range 0 .. 15;
+      Reserved_2  at 4  range 0 .. 95;
+      Operation   at 16 range 0 .. 1_535;
    end record;
 
    type Submission_Entry is record
@@ -498,6 +540,14 @@ package body System.Flyology.File_Engine is
 
    procedure Release_State (State : in out Engine_State_Access);
 
+   function Supports_File_Operations
+     (Descriptor : C.int) return Boolean;
+
+   function Initialize_Native_AIO
+     (Item    : in out Engine;
+      State   : in out Engine_State_Access;
+      Wake_FD : C.int) return Boolean;
+
    function Failed_Mapping return System.Address is
      (SSE.To_Address (SSE.Integer_Address'Last));
 
@@ -789,6 +839,86 @@ package body System.Flyology.File_Engine is
       Free_State (State);
    end Release_State;
 
+   function Supports_File_Operations
+     (Descriptor : C.int) return Boolean
+   is
+      Probe : aliased Operation_Probe :=
+        (Last_Opcode => 0,
+         Operations  => 0,
+         Reserved    => 0,
+         Reserved_2  => (others => 0),
+         Operation   =>
+           (others =>
+              (Opcode     => 0,
+               Reserved   => 0,
+               Flags      => 0,
+               Reserved_2 => 0)));
+      Result          : C.long;
+      Read_Supported  : Boolean := False;
+      Write_Supported : Boolean := False;
+      Returned        : Natural;
+   begin
+      Result :=
+        Linux_IO_Uring_Register
+          (Descriptor,
+           C.unsigned (IORING_REGISTER_PROBE),
+           Probe'Address,
+           Probe_Operation_Count);
+      if Result < 0 then
+         return False;
+      end if;
+
+      Returned := Natural'Min
+        (Natural (Probe.Operations), Probe_Operation_Count);
+      if Returned > 0 then
+         for Index in 0 .. Returned - 1 loop
+            if Probe.Operation (Index).Opcode = IORING_OP_READ
+              and then
+                (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
+            then
+               Read_Supported := True;
+            elsif Probe.Operation (Index).Opcode = IORING_OP_WRITE
+              and then
+                (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
+            then
+               Write_Supported := True;
+            end if;
+         end loop;
+      end if;
+      return Read_Supported and Write_Supported;
+   end Supports_File_Operations;
+
+   function Initialize_Native_AIO
+     (Item    : in out Engine;
+      State   : in out Engine_State_Access;
+      Wake_FD : C.int) return Boolean
+   is
+      Result : C.long;
+   begin
+      --  Never retain a ring descriptor or mapping when falling back.  A
+      --  fresh state also prevents partially initialized ring addresses from
+      --  being interpreted as native-AIO state during finalization.
+      Release_State (State);
+      State := new Engine_State;
+      State.Backend := Native_AIO;
+      State.Wake_FD := Wake_FD;
+      State.AIO_Context := 0;
+      Result :=
+        Linux_IO_Setup
+          (C.unsigned (Ring_Entries), State.AIO_Context'Address);
+      if Result < 0 then
+         Release_State (State);
+         return False;
+      end if;
+      Item.State := State_Address (State);
+      Note_Backend (2);
+      return True;
+   exception
+      when Storage_Error =>
+         Release_State (State);
+         return False;
+   end Initialize_Native_AIO;
+
    function Initialize
      (Item      : in out Engine;
       Poller_FD : C.int;
@@ -834,22 +964,18 @@ package body System.Flyology.File_Engine is
             Release_State (State);
             return False;
          end if;
-         State.Backend := Native_AIO;
-         State.AIO_Context := 0;
-         Result :=
-           Linux_IO_Setup
-             (C.unsigned (Ring_Entries),
-              State.AIO_Context'Address);
-         if Result < 0 then
-            Release_State (State);
-            return False;
-         end if;
-         Item.State := State_Address (State);
-         Note_Backend (2);
-         return True;
+         return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
       State.Ring_FD := C.int (Result);
+      if not Supports_File_Operations (State.Ring_FD)
+        or else
+          (Faults.Enabled
+           and then Faults.Fail (Faults.File_Uring_Probe_Unsupported))
+      then
+         return Initialize_Native_AIO (Item, State, Wake_FD);
+      end if;
+
       State.SQ_Mapping_Size :=
         C.size_t (Parameters.SQ_Offsets.Array_Offset)
           + C.size_t (Parameters.SQ_Entries) * C.size_t (U32'Size / 8);
@@ -873,8 +999,11 @@ package body System.Flyology.File_Engine is
            State.Ring_FD,
            IORING_OFF_SQ_RING);
       if State.SQ_Mapping = Failed_Mapping then
-         Release_State (State);
-         return False;
+         return Initialize_Native_AIO (Item, State, Wake_FD);
+      elsif Faults.Enabled
+        and then Faults.Fail (Faults.File_Uring_Post_Setup_Failure)
+      then
+         return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
       if (Parameters.Features and IORING_FEAT_SINGLE_MMAP) /= 0 then
@@ -889,8 +1018,7 @@ package body System.Flyology.File_Engine is
               State.Ring_FD,
               IORING_OFF_CQ_RING);
          if State.CQ_Mapping = Failed_Mapping then
-            Release_State (State);
-            return False;
+            return Initialize_Native_AIO (Item, State, Wake_FD);
          end if;
       end if;
 
@@ -906,8 +1034,7 @@ package body System.Flyology.File_Engine is
            State.Ring_FD,
            IORING_OFF_SQES);
       if State.SQEs_Mapping = Failed_Mapping then
-         Release_State (State);
-         return False;
+         return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
       State.SQ_Head := Address_At
@@ -935,8 +1062,7 @@ package body System.Flyology.File_Engine is
         (State.CQ_Mapping, Parameters.CQ_Offsets.CQEs);
       State.CQ_Capacity := Parameters.CQ_Entries;
       if State.CQ_Capacity = 0 then
-         Release_State (State);
-         return False;
+         return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
       State.CQ_Overflow_Seen := Load (State.CQ_Overflow, AP.Acquire);
       if Faults.Enabled then
@@ -958,8 +1084,7 @@ package body System.Flyology.File_Engine is
               1);
       end if;
       if Result < 0 then
-         Release_State (State);
-         return False;
+         return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
       Item.State := State_Address (State);
@@ -967,6 +1092,9 @@ package body System.Flyology.File_Engine is
       return True;
    exception
       when Storage_Error =>
+         if State /= null and then State.Ring_FD >= 0 then
+            return Initialize_Native_AIO (Item, State, Wake_FD);
+         end if;
          Release_State (State);
          return False;
    end Initialize;
