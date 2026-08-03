@@ -59,8 +59,8 @@ project Flyology is
          null;
       when "true" =>
          for Languages use ("Ada");
-         --  Public API only. Private proof helpers remain build sources in the
-         --  normal scenario but are intentionally outside GNATdoc's scope.
+         --  Public API plus private specs needed to resolve its dependencies.
+         --  Private proof helpers exclude themselves from generated docs.
          for Source_Files use
            ("flyology.ads",
             "flyology-cancellation.ads",
@@ -73,6 +73,7 @@ project Flyology is
             "flyology-io-dns-testing.ads",
             "flyology-io-files.ads",
             "flyology-io-sockets.ads",
+            "flyology-structured_server_policy.ads",
             "flyology-io-structured_servers.ads",
             "flyology-io-tls.ads",
             "flyology-io-tls-openssl.ads",
