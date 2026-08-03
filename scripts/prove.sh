@@ -16,6 +16,7 @@ cd "$project_root/proof"
   --output-header \
   --report=all \
   -u \
+  flyology-counter_policy.adb \
   flyology-time_math.adb \
   flyology-file_open_policy.adb \
   flyology-wait_policy.adb

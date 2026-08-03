@@ -54,9 +54,12 @@ package Flyology.IO.Structured_Servers is
    --  @field Shutdown_Requested Admission has been stopped
    --  @field Forced_Cancellation Drain timeout required handler cancellation
    --  @field Active_Handlers Handlers currently processing a connection
-   --  @field Accepted_Connections Cumulative accepted connections
-   --  @field Completed_Connections Cumulative normal callback completions
-   --  @field Cancelled_Connections Cumulative cancelled callbacks
+   --  @field Accepted_Connections Cumulative accepted connections, saturating
+   --  at Natural'Last
+   --  @field Completed_Connections Cumulative normal callback completions,
+   --  saturating at Natural'Last
+   --  @field Cancelled_Connections Cumulative cancelled callbacks, saturating
+   --  at Natural'Last
    --  @field Failures Cumulative admission, callback, or cleanup failures
    --  @field First_Failure Origin of the first failure
    type Snapshot is record

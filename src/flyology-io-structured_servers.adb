@@ -1,6 +1,8 @@
 with Ada.Exceptions;
+with Flyology.Counter_Policy;
 package body Flyology.IO.Structured_Servers is
    package Connections renames Flyology.IO.Connections;
+   package Counters renames Flyology.Counter_Policy;
    package Sockets renames GNAT.Sockets;
 
    use type Sockets.Socket_Type;
@@ -37,8 +39,11 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Handler_Started is
       begin
+         if Active >= Expected_Workers then
+            raise Program_Error with "handler admission exceeds capacity";
+         end if;
          Active := Active + 1;
-         Accepted := Accepted + 1;
+         Accepted := Counters.Saturating_Increment (Accepted);
       end Handler_Started;
 
       procedure Handler_Completed
@@ -51,9 +56,10 @@ package body Flyology.IO.Structured_Servers is
          end if;
          Active := Active - 1;
          if Cancelled then
-            Lifecycle.Cancelled := Lifecycle.Cancelled + 1;
+            Lifecycle.Cancelled :=
+              Counters.Saturating_Increment (Lifecycle.Cancelled);
          elsif not Failed then
-            Completed := Completed + 1;
+            Completed := Counters.Saturating_Increment (Completed);
          end if;
       end Handler_Completed;
 
