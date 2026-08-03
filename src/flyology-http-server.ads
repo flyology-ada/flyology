@@ -3,15 +3,15 @@ with Ada.Strings.Unbounded;
 with Flyology.Cancellation;
 
 --  Provides a bounded HTTP/1.1 connection engine over a task-aware transport.
---  The engine supports persistent requests, fixed-length request and response
---  bodies, chunked server-sent events, and RFC 6455 WebSocket upgrades.
+--  The engine supports persistent requests, fixed-length and chunked request
+--  bodies, fixed responses, server-sent events, and RFC 6455 WebSockets.
 package Flyology.HTTP.Server is
 
    --  Maximum bytes before the terminating empty request-header line.
    Max_Header_Bytes : constant := 16 * 1_024;
-   --  Maximum fixed-length request representation.
+   --  Maximum decoded request representation.
    Max_Request_Body : constant := 1_024 * 1_024;
-   --  Maximum accepted or generated WebSocket frame payload.
+   --  Maximum accepted frame, reassembled message, or generated frame payload.
    Max_WebSocket_Frame : constant := 1_024 * 1_024;
 
    --  Transport boundary shared by plain and TLS connections. Implementations
@@ -71,7 +71,7 @@ package Flyology.HTTP.Server is
    --  @return True when the token occurs as a complete list member
    function Header_Has_Token
      (Item : Request; Name : String; Value : String) return Boolean;
-   --  Return the fixed-length request body.
+   --  Return the decoded fixed-length or chunked request body.
    --  @param Item Request to inspect
    --  @return Body bytes represented as an Ada String
    function Content (Item : Request) return String;
@@ -85,13 +85,13 @@ package Flyology.HTTP.Server is
 
    --  Read and parse the next request. Header and body limits are enforced
    --  before allocation grows beyond their public bounds. One monotonic
-   --  Timeout covers the complete header and fixed-length body, so incremental
+   --  Timeout covers the complete header and decoded body, so incremental
    --  progress cannot extend a slow client's deadline. HTTP/1.1 requires Host.
-   --  Transfer-Encoding request bodies are currently rejected.
    --  @param Item HTTP connection
    --  @param Value Parsed request on success
    --  @param Peer_Closed True only when the peer closes between requests
    --  @param Timeout Deadline used by each transport receive
+   --  @param Max_Body Application body limit, capped by Max_Request_Body
    --  @param Token Optional cancellation source
    --  @exception Protocol_Error Input is malformed, oversized, or unsupported
    procedure Read_Request
@@ -99,13 +99,15 @@ package Flyology.HTTP.Server is
       Value       : out Request;
       Peer_Closed : out Boolean;
       Timeout     : Duration := 30.0;
+      Max_Body    : Natural := Max_Request_Body;
       Token       : access Flyology.Cancellation.Token := null);
 
    --  Send one complete fixed-length response. Reason is derived from Status.
    --  Extra_Headers is a sequence of complete CRLF-terminated fields and must
    --  not contain an empty line. HEAD sends the declared body length without
-   --  body bytes. Connection persistence follows the request unless Close is
-   --  true.
+   --  body bytes. Statuses 204, 205, and 304 reject nonempty Payload; 204 and
+   --  304 omit Content-Length. Connection persistence follows the request
+   --  unless Close is true.
    --  @param Item HTTP connection
    --  @param Status Three-digit HTTP status
    --  @param Content_Type Media type, or empty to omit
@@ -174,15 +176,24 @@ package Flyology.HTTP.Server is
       Token   : access Flyology.Cancellation.Token := null);
 
    --  WebSocket application-data kind.
-   --  @enum Text_Frame UTF-8 text payload; validation is application policy
+   --  @enum Text_Frame Validated UTF-8 text payload
    --  @enum Binary_Frame Binary payload
    type WebSocket_Data_Kind is (Text_Frame, Binary_Frame);
+
+   --  Browser-origin policy applied before a WebSocket upgrade.
+   --  @enum Reject_Browser_Origins Reject requests containing Origin
+   --  @enum Allow_Any_Origin Accept zero or one syntactically bounded Origin
+   --  @enum Require_Exact_Origin Require exact case-sensitive Allowed_Origin
+   type WebSocket_Origin_Policy is
+     (Reject_Browser_Origins, Allow_Any_Origin, Require_Exact_Origin);
 
    --  Perform an RFC 6455 server upgrade for Request. The client key and
    --  required Upgrade, Connection, and version fields are validated.
    --  @param Item HTTP connection
    --  @param Value Request being upgraded
    --  @param Protocol Optional selected subprotocol token
+   --  @param Origin_Policy Browser-origin policy; secure non-browser default
+   --  @param Allowed_Origin Exact origin required by Require_Exact_Origin
    --  @param Timeout Transport send deadline
    --  @param Token Optional cancellation source
    --  @exception Protocol_Error Request is not a valid version 13 upgrade
@@ -190,17 +201,20 @@ package Flyology.HTTP.Server is
      (Item     : in out Connection;
       Value    : Request;
       Protocol : String := "";
+      Origin_Policy : WebSocket_Origin_Policy := Reject_Browser_Origins;
+      Allowed_Origin : String := "";
       Timeout  : Duration := 30.0;
       Token    : access Flyology.Cancellation.Token := null);
 
-   --  Receive one complete unfragmented client message. One monotonic Timeout
-   --  covers the whole frame. Control ping frames are answered automatically
-   --  and close frames set Closed. Client frames must be masked. Fragmented
-   --  messages are rejected.
+   --  Receive one complete client message, reassembling fragments within
+   --  Max_Message. One monotonic Timeout covers all fragments and interleaved
+   --  control frames. Ping is answered automatically and close sets Closed.
+   --  Client frames must be masked. Protocol failure makes Item terminal.
    --  @param Item Upgraded WebSocket connection
    --  @param Kind Text or binary message kind
    --  @param Data Message payload
    --  @param Closed True after a valid close frame
+   --  @param Max_Message Application message limit, capped by frame maximum
    --  @param Timeout Transport receive/send deadline
    --  @param Token Optional cancellation source
    procedure Receive_WebSocket
@@ -208,6 +222,7 @@ package Flyology.HTTP.Server is
       Kind    : out WebSocket_Data_Kind;
       Data    : out Ada.Strings.Unbounded.Unbounded_String;
       Closed  : out Boolean;
+      Max_Message : Natural := Max_WebSocket_Frame;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
 
@@ -258,6 +273,7 @@ private
       Request_Close    : Boolean := False;
       Response_Begun   : Boolean := False;
       Current_Is_Head  : Boolean := False;
+      Current_Version  : HTTP_Version := HTTP_1_1;
    end record;
 
 end Flyology.HTTP.Server;

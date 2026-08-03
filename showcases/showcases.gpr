@@ -1,6 +1,10 @@
 with "../flyology.gpr";
 
 project Showcases is
+   type Build_Profile_Type is ("development", "release");
+   Build_Profile : Build_Profile_Type :=
+     external ("FLYOLOGY_SHOWCASE_PROFILE", "development");
+
    for Languages use ("Ada", "C");
    for Source_Dirs use (".");
    for Object_Dir use "obj";
@@ -30,9 +34,17 @@ project Showcases is
    for Create_Missing_Dirs use "True";
 
    package Compiler is
-      for Default_Switches ("Ada") use
-        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
-         "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
-      for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
+      case Build_Profile is
+         when "development" =>
+            for Default_Switches ("Ada") use
+              ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
+               "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+            for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
+         when "release" =>
+            for Default_Switches ("Ada") use
+              ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
+               "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+            for Default_Switches ("C") use ("-O3", "-Wall", "-Wextra");
+      end case;
    end Compiler;
 end Showcases;

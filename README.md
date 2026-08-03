@@ -953,7 +953,8 @@ macOS and Linux runs exercise those exception paths in both handler lanes.
 `Flyology.HTTP` holds protocol concepts that can be shared by a future client
 and the current server. `Flyology.HTTP.Server` is the server-side connection
 engine. It reads persistent HTTP/1.0 and HTTP/1.1 requests, requires `Host` for
-HTTP/1.1, handles fixed-length request bodies, emits fixed-length responses,
+HTTP/1.1, handles fixed-length and chunked request bodies, emits fixed-length
+responses,
 and preserves pipelined bytes for the next request. `HEAD` responses declare
 the representation length without sending the representation.
 
@@ -984,11 +985,13 @@ end;
 
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
-13 upgrade and client key. WebSocket client frames must be masked; ping is
-answered with pong, close is acknowledged, and text or binary messages can be
-sent and received with synchronous calls. Frames are currently limited to 1
-MiB and fragmented messages are rejected. UTF-8 validation remains application
-policy.
+13 upgrade and client key. Its default origin policy rejects browser `Origin`
+headers until the application explicitly allows any origin or requires one
+exact origin. WebSocket client frames must be masked; fragmented messages are
+reassembled with interleaved control-frame handling, ping is answered with
+pong, and close is acknowledged. Text and close reasons are validated as
+UTF-8, close codes are checked, and protocol failure makes the connection
+terminal. Frames and reassembled messages are capped at 1 MiB by default.
 
 TLS uses the same HTTP engine after `Flyology.IO.TLS.Take` and `Handshake`.
 `Flyology.HTTP.Server.TLS.Connection_Transport` forwards decrypted reads and
@@ -996,14 +999,22 @@ encrypted writes while the TLS connection retains sole closing ownership. The
 shipped OpenSSL provider therefore supplies TLS records, certificate handling,
 and cryptography; the HTTP package does not duplicate those functions.
 
-Request headers are capped at 16 KiB and request bodies at 1 MiB. One monotonic
-request timeout covers every incremental header and body read, rather than
-restarting after each byte, so a slow header or slow fixed-length body cannot
-retain a handler indefinitely. The same rule covers a complete WebSocket
-frame. Applications choose the timeout passed to `Read_Request` or
-`Connection_Handlers.Serve`; the example uses five seconds. Request
-`Transfer-Encoding` is currently rejected, so chunked request bodies are not
-part of this first server boundary.
+Request headers are capped at 16 KiB and decoded request bodies at 1 MiB, with
+a smaller application limit available per handler. Strict chunked decoding
+includes bounded extensions and trailers, rejects conflicting framing, and
+preserves pipelined bytes. `Expect: 100-continue` is answered before body reads.
+One monotonic request timeout covers every incremental header and body read,
+rather than restarting after each byte, so a slow header or body cannot retain
+a handler indefinitely. The same rule covers a complete WebSocket message.
+Handlers also default to 1,000 requests and five minutes per connection; peer
+protocol, timeout, socket, and TLS failures close only that connection, while
+application callback failures still propagate to the structured server.
+
+The parser accepts origin-form, absolute HTTP(S)-form, and `OPTIONS *`, with
+strict Host/authority validation; `CONNECT` and transfer codings other than
+`chunked` are not implemented. Request bodies are currently buffered rather
+than streamed, and there is no server-wide in-flight byte budget, so capacity
+and per-handler body/message limits remain part of deployment sizing.
 
 The runnable `http_server` showcase exposes `/`, `/events`, and `/websocket`.
 It takes the handler lane, request count before shutdown, port, and handler
@@ -1028,14 +1039,17 @@ The benchmark runner uses `oha` and runs the same loopback keep-alive workload
 against explicit lightweight and native handler pools:
 
 ```sh
-./showcases/run_http_benchmark.sh 100000 256 256 18080 16
+./showcases/run_http_benchmark.sh 100000 256 256 18080 16 3 10000 release
 ```
 
-The arguments are requests, client concurrency, handler capacity, port, and
-lightweight event-loop count. The loop count defaults to the host's logical CPU
-count. The runner prints the `oha` version, complete command, and execution
-parallelism with both result sets; results are host measurements, not portable
-performance guarantees.
+The arguments are measured requests, client concurrency, handler capacity,
+port, lightweight event-loop count, paired trial count, and warm-up requests.
+The optional final argument selects the `release` (default) or `development`
+profile. The loop count defaults to the host's logical CPU count. The runner
+removes the benchmark-only per-request counter, warms each server, alternates
+lane order, and prints the `oha` version, complete command, profile, and
+execution parallelism with every result. Results are host measurements, not
+portable performance guarantees.
 
 ### Timers
 

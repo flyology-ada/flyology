@@ -17,9 +17,9 @@ procedure HTTP_Server is
    Lane : constant String :=
      (if Ada.Command_Line.Argument_Count >= 1
       then Ada.Command_Line.Argument (1) else "lightweight");
-   Request_Goal : constant Positive :=
+   Request_Goal : constant Natural :=
      (if Ada.Command_Line.Argument_Count >= 2
-      then Positive'Value (Ada.Command_Line.Argument (2)) else 100_000);
+      then Natural'Value (Ada.Command_Line.Argument (2)) else 100_000);
    Port : constant Sockets.Port_Type :=
      (if Ada.Command_Line.Argument_Count >= 3
       then Sockets.Port_Type'Value (Ada.Command_Line.Argument (3)) else 18_080);
@@ -32,7 +32,7 @@ procedure HTTP_Server is
    procedure Run;
 
    procedure Run is
-      protected type Request_Counter (Goal : Positive) is
+      protected type Request_Counter (Goal : Natural) is
          procedure Completed;
          entry Await_Goal;
       private
@@ -42,12 +42,12 @@ procedure HTTP_Server is
       protected body Request_Counter is
          procedure Completed is
          begin
-            if Count < Goal then
+            if Goal > 0 and then Count < Goal then
                Count := Count + 1;
             end if;
          end Completed;
 
-         entry Await_Goal when Count = Goal is
+         entry Await_Goal when Goal > 0 and then Count = Goal is
          begin
             null;
          end Await_Goal;
@@ -114,7 +114,9 @@ procedure HTTP_Server is
                   "not found" & ASCII.LF,
                   Timeout => 5.0, Token => Cancellation);
             end if;
-            State.Requests.Completed;
+            if Request_Goal > 0 then
+               State.Requests.Completed;
+            end if;
          end Route;
 
          package Handler is new
