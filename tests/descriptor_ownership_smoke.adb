@@ -728,6 +728,8 @@ procedure Descriptor_Ownership_Smoke is
       Server, Peer, Observer : Sockets.Socket_Type;
       Duplicate : Interfaces.C.int;
       Token : aliased Connections.Cancellation_Token;
+      Point : constant Connection_Testing.Barrier_Point :=
+        Connection_Testing.Receive_Chunk_Boundary;
 
       type Receive_Result is
         (Not_Finished, Was_Cancelled, Raised_Other_Exception);
@@ -813,9 +815,10 @@ procedure Descriptor_Ownership_Smoke is
 
       Reader_Outcome : Receive_Result;
       Writer_OK : Boolean;
-      Initial_Size : Natural;
       Request : Sockets.Request_Type (Sockets.N_Bytes_To_Read);
    begin
+      Connection_Testing.Reset_Barriers;
+      Connection_Testing.Arm (Point);
       Sockets.Create_Socket_Pair
         (Server, Peer, Mode => Sockets.Socket_Datagram);
       Duplicate := C_Dup (Interfaces.C.int (Sockets.To_C (Server)));
@@ -908,31 +911,16 @@ procedure Descriptor_Ownership_Smoke is
             raise Program_Error with
               "continuous-readability socket did not prefill";
          end select;
-         Sockets.Control_Socket (Observer, Request);
-         Initial_Size := Request.Size;
-         pragma Assert (Initial_Size > 0);
-
          Progress.Start_Reader;
-         declare
-            Deadline : constant Ada.Real_Time.Time :=
-              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
-         begin
-            loop
-               Sockets.Control_Socket (Observer, Request);
-               exit when Request.Size > 0
-                 and then Request.Size /= Initial_Size;
-               if Ada.Real_Time.Clock >= Deadline then
-                  raise Program_Error with
-                    "reader made no observable partial datagram progress";
-               end if;
-            end loop;
-         end;
+         Connection_Testing.Wait_Reached (Point);
 
-         --  A later datagram is already readable after at least one completed
-         --  receive. Cancellation must be noticed at the next connection-level
-         --  chunk boundary rather than only after the socket becomes empty.
+         --  The barrier holds the reader after one completed datagram while at
+         --  least three later datagrams remain readable. Cancellation must be
+         --  noticed at the next connection-level chunk boundary rather than
+         --  only after the socket becomes empty.
          Token.Request;
          Progress.Stop_Writer;
+         Connection_Testing.Release (Point);
          select
             Progress.Wait_Reader (Reader_Outcome);
          or
@@ -954,6 +942,7 @@ procedure Descriptor_Ownership_Smoke is
             Progress.Start_Reader;
             Token.Request;
             Progress.Stop_Writer;
+            Connection_Testing.Release (Point);
             raise;
       end;
 
@@ -967,6 +956,7 @@ procedure Descriptor_Ownership_Smoke is
       Owned.Close;
       Sockets.Close_Socket (Observer);
       Sockets.Close_Socket (Peer);
+      Connection_Testing.Reset_Barriers;
       if Model = Flyology.Lightweight_Task then
          Assert_No_Event_Waits;
       end if;

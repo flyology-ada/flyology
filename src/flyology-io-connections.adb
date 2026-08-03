@@ -664,6 +664,11 @@ package body Flyology.IO.Connections is
                raise Device_Error with "connection closed while receiving";
             end if;
             First := Last + 1;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+            if First <= Data'Last then
+               Test_Barrier (5);
+            end if;
+#end if;
          end loop;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
