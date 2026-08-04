@@ -73,6 +73,65 @@
       });
     });
 
+    const sampleButtons = Array.from(
+      document.querySelectorAll("[data-model-sample]")
+    );
+    const samplePanels = Array.from(
+      document.querySelectorAll("[data-model-code]")
+    );
+    const sampleFilename = document.querySelector("[data-model-filename]");
+
+    if (sampleButtons.length && samplePanels.length && sampleFilename) {
+      let selectedSample =
+        sampleButtons.find(function (button) {
+          return button.getAttribute("aria-pressed") === "true";
+        })?.dataset.modelSample || sampleButtons[0].dataset.modelSample;
+
+      function previewSample(name) {
+        samplePanels.forEach(function (panel) {
+          panel.hidden = panel.dataset.modelCode !== name;
+        });
+
+        const button = sampleButtons.find(function (item) {
+          return item.dataset.modelSample === name;
+        });
+        if (button) sampleFilename.textContent = button.dataset.modelFile;
+      }
+
+      function selectSample(name) {
+        selectedSample = name;
+        sampleButtons.forEach(function (button) {
+          button.setAttribute(
+            "aria-pressed",
+            String(button.dataset.modelSample === name)
+          );
+        });
+        previewSample(name);
+      }
+
+      sampleButtons.forEach(function (button) {
+        const name = button.dataset.modelSample;
+
+        button.addEventListener("mouseenter", function () {
+          previewSample(name);
+        });
+        button.addEventListener("mouseleave", function () {
+          previewSample(selectedSample);
+        });
+        button.addEventListener("focus", function () {
+          previewSample(name);
+        });
+        button.addEventListener("blur", function () {
+          previewSample(selectedSample);
+        });
+        button.addEventListener("click", function () {
+          selectSample(name);
+        });
+      });
+
+      selectSample(selectedSample);
+    }
+
     window.FlyologyAda.highlightAll("code.language-ada");
     window.FlyologyAda.highlightAllSQL("code.language-sql");
 

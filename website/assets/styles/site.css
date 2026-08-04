@@ -539,35 +539,71 @@ code:not(pre code) {
   filter: brightness(0) invert(1) drop-shadow(0 1.4rem 2rem oklch(8% 0.03 270 / 0.28));
 }
 
-.model-note {
+.model-switcher {
   position: absolute;
-  z-index: 2;
-  max-width: 14rem;
+  top: 5%;
+  left: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 30rem);
+  gap: 0.65rem;
+}
+
+.model-note {
+  min-width: 0;
   padding: 0.85rem 1rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--paper);
   box-shadow: var(--shadow-low);
   color: var(--ink-soft);
+  cursor: pointer;
+  font-family: inherit;
   font-size: 0.78rem;
   line-height: 1.45;
+  text-align: left;
+  transition:
+    transform 180ms var(--ease-out),
+    border-color 180ms var(--ease-out),
+    background-color 180ms var(--ease-out);
+}
+
+.model-note:hover,
+.model-note:focus-visible {
+  transform: translateY(-2px);
 }
 
 .model-note strong {
   display: block;
-  margin-bottom: 0.18rem;
   color: var(--ink);
   font-size: 0.84rem;
 }
 
-.model-note-light {
-  top: 5%;
-  left: 0;
+.model-direction {
+  display: block;
+  margin: 0.05rem 0 0.28rem;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.035em;
 }
 
-.model-note-native {
-  right: -2%;
-  bottom: 10%;
+.model-note-light .model-direction {
+  color: var(--violet-deep);
+}
+
+.model-note-native .model-direction {
+  color: var(--ink);
+}
+
+.model-note-light[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--violet) 68%, var(--line));
+  background: color-mix(in oklch, var(--paper) 92%, var(--violet));
+}
+
+.model-note-native[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--ink-soft) 58%, var(--line));
+  background: color-mix(in oklch, var(--paper) 92%, var(--ink));
 }
 
 .code-window {
@@ -624,6 +660,10 @@ code:not(pre code) {
   font-size: clamp(0.72rem, 1.4vw, 0.88rem);
   line-height: 1.8;
   tab-size: 3;
+}
+
+.hero-code-sample[hidden] {
+  display: none;
 }
 
 .token-keyword {
@@ -1847,15 +1887,15 @@ code:not(pre code) {
   }
 
   .hero-visual {
-    min-height: 29rem;
+    min-height: 32rem;
+  }
+
+  .model-switcher {
+    gap: 0.45rem;
   }
 
   .model-note {
-    max-width: 11rem;
-  }
-
-  .model-note-native {
-    right: 0;
+    padding: 0.72rem 0.78rem;
   }
 
   .code-window {
