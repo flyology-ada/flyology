@@ -169,6 +169,12 @@ package body Flyology.IO is
                raise Device_Error with "event-loop readiness wait failed";
             elsif Result = 0 then
                return 0;
+            elsif Result = 1 then
+               --  The first request is already the lowest possible caller
+               --  index, so the parity probe below cannot change the result.
+               --  Later results still probe the whole set to preserve
+               --  simultaneous-readiness and interrupt priority semantics.
+               return Requests'First;
             else
                --  kqueue/epoll may deliver distinct ready descriptors in an
                --  order unrelated to the caller's array. Probe the whole set
