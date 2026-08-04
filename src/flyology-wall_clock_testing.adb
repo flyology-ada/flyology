@@ -7,12 +7,14 @@ package body Flyology.Wall_Clock_Testing is
    end Control;
 
    protected body Control is
+      --  GNAT 13 through 16 on Linux/x86-64 mishandle validity checks while
+      --  copying Duration values into and out of protected storage: optimized
+      --  writes ICE in fold_convert_loc and reads can reject a valid negative
+      --  offset as invalid data. Keep the suppression within the protected
+      --  body; validity checks remain enabled on the public wrappers.
+      pragma Suppress (Validity_Check);
+
       procedure Set_Offset (Value : Duration) is
-         --  GNAT 13 through 16 on Linux/x86-64 ICE in fold_convert_loc when
-         --  optimization and -gnatVa generate a validity check for this
-         --  protected Duration assignment. The public wrapper validates Value,
-         --  so suppress only the redundant check in this protected operation.
-         pragma Suppress (Validity_Check);
       begin
          Current_Offset := Value;
       end Set_Offset;
