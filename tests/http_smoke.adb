@@ -2664,9 +2664,11 @@ procedure HTTP_Smoke is
       pragma Assert (HTTP_Server.Current (Budget).Current = 0);
       declare
          Item : WS.Session
-           (Capacity => 4, Byte_Limit => 6, Budget => Budget'Access);
+           (Capacity => 4, Byte_Limit => 6, Budget => Budget'Access,
+            Buffer_Pool => null);
          Other : WS.Session
-           (Capacity => 1, Byte_Limit => 6, Budget => Budget'Access);
+           (Capacity => 1, Byte_Limit => 6, Budget => Budget'Access,
+            Buffer_Pool => null);
          Message : WS.Outgoing_Message;
       begin
          Message.Data := Bytes.From_Byte_String ("123456");
@@ -2916,7 +2918,8 @@ procedure HTTP_Smoke is
       is
          pragma Unreferenced (State);
          Item : WebSockets.Session
-           (Capacity => 2, Byte_Limit => 1_024, Budget => null);
+           (Capacity => 2, Byte_Limit => 1_024, Budget => null,
+            Buffer_Pool => null);
          package Chat_Lifecycle is new
            WebSockets.Lifecycle (On_Open, On_Message, On_Close);
       begin

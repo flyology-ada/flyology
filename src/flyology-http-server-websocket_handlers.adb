@@ -67,28 +67,11 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
 
    procedure Require_Value_Outbox (Item : Session) is
    begin
-      if Item.Mode /= Value_Outbox then
+      if Item.Buffer_Pool /= null then
          raise Program_Error with
            "WebSocket session is configured for moved buffers";
       end if;
    end Require_Value_Outbox;
-
-   procedure Configure_Buffer_Pool
-     (Item : in out Session;
-      Pool : not null access Flyology.Buffers.Pool) is
-   begin
-      if Item.Buffer_Outbox /= null
-        or else Item.Outbox.Is_Closed
-        or else Item.Outbox.Length /= 0
-      then
-         raise Program_Error with
-           "WebSocket session buffer pool cannot be configured now";
-      end if;
-      Item.Buffer_Pool := Pool.all'Unchecked_Access;
-      Item.Buffer_Outbox :=
-        new Buffer_Channels.Channel (Item.Buffer_Pool, Item.Capacity);
-      Item.Mode := Buffer_Outbox;
-   end Configure_Buffer_Pool;
 
    procedure Reserve
      (Item    : in out Session;
@@ -151,7 +134,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
          exit when not Available;
          Release_Retention (Item, Value);
       end loop;
-      if Item.Buffer_Outbox /= null then
+      if Item.Buffer_Pool /= null then
          declare
             Buffered : Flyology.Buffers.Unique_Buffer (Item.Buffer_Pool);
             Result   : Buffer_Channels.Try_Receive_Result;
@@ -259,7 +242,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
 
    procedure Require_Buffer_Outbox (Item : Session) is
    begin
-      if Item.Buffer_Outbox = null then
+      if Item.Buffer_Pool = null then
          raise Program_Error with
            "WebSocket session has no configured buffer pool";
       end if;
@@ -391,7 +374,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
    procedure Close (Item : in out Session) is
    begin
       Item.Outbox.Close;
-      if Item.Buffer_Outbox /= null then
+      if Item.Buffer_Pool /= null then
          Item.Buffer_Outbox.Close;
       end if;
    end Close;
@@ -440,7 +423,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
 
       function Selected_Outbox_Drained return Boolean is
       begin
-         if Item.Mode = Value_Outbox then
+         if Item.Buffer_Pool = null then
             return Item.Outbox.Is_Closed and then Item.Outbox.Length = 0;
          end if;
          declare
@@ -526,10 +509,11 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
 
       loop
          if Outgoing_Burst < Max_Outgoing_Burst then
-            case Item.Mode is
-               when Value_Outbox => Send_One_Value (Available);
-               when Buffer_Outbox => Send_One_Buffer (Available);
-            end case;
+            if Item.Buffer_Pool = null then
+               Send_One_Value (Available);
+            else
+               Send_One_Buffer (Available);
+            end if;
          else
             Available := False;
          end if;
@@ -588,7 +572,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
    overriding procedure Finalize (Item : in out Session) is
    begin
       Item.Outbox.Close;
-      if Item.Buffer_Outbox /= null then
+      if Item.Buffer_Pool /= null then
          Item.Buffer_Outbox.Close;
       end if;
       Drain (Item);

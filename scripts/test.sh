@@ -93,6 +93,18 @@ fi
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 
+if run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  --subdirs=compile-fail \
+  -c -p \
+  -P tests/runtime_smoke.gpr \
+  websocket_pool_lifetime_fail.adb >/dev/null 2>&1
+then
+  printf '%s\n' \
+    "WebSocket session accepted a shorter-lived buffer pool" >&2
+  exit 1
+fi
+
 if FLYOLOGY_LOOP_POOL_SIZE=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then

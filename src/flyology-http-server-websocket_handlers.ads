@@ -29,19 +29,13 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
    --  @field Capacity Maximum queued outgoing messages
    --  @field Byte_Limit Maximum retained payload bytes in this session
    --  @field Budget Optional shared server/application outbound budget
+   --  @field Buffer_Pool Optional pool enabling ownership-transfer publishing;
+   --     the access discriminant requires the pool to outlive the session
    type Session
      (Capacity   : Positive := 32;
       Byte_Limit : Positive := Default_Session_Bytes;
-      Budget     : access Outbound_Budget := null) is limited private;
-
-   --  Select ownership-transfer publishing from Pool. Configure this once,
-   --  before Run or any producer operation. A configured session accepts only
-   --  Publish_Move operations. Pool must outlive Item.
-   --  @param Item WebSocket session to configure
-   --  @param Pool Storage pool supplying moved payloads
-   procedure Configure_Buffer_Pool
-     (Item : in out Session;
-      Pool : not null access Flyology.Buffers.Pool);
+      Budget     : access Outbound_Budget := null;
+      Buffer_Pool : access Flyology.Buffers.Pool := null) is limited private;
 
    --  Enqueue with backpressure, or return Accepted false after close.
    --  Owner-thread lifecycle callbacks should use Try_Publish to avoid
@@ -199,8 +193,6 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
       Metric_Output  : access Metrics.Sink'Class := null);
 
 private
-   type Outbox_Mode is (Value_Outbox, Buffer_Outbox);
-
    type Outbound_Budget_Access is access all Outbound_Budget;
 
    protected type Retained_Bytes (Limit : Positive) is
@@ -212,7 +204,6 @@ private
    type Retained_Bytes_Access is access all Retained_Bytes;
    type Session_Access is access all Session;
    type Boolean_Access is access all Boolean;
-   type Buffer_Pool_Access is access all Flyology.Buffers.Pool;
    package Buffer_Channels renames Flyology.Buffers.Channels;
    type Buffer_Channel_Access is access Buffer_Channels.Channel;
 
@@ -223,12 +214,14 @@ private
    type Session
      (Capacity   : Positive := 32;
       Byte_Limit : Positive := Default_Session_Bytes;
-      Budget     : access Outbound_Budget := null) is
+      Budget     : access Outbound_Budget := null;
+      Buffer_Pool : access Flyology.Buffers.Pool := null) is
      limited new Ada.Finalization.Limited_Controlled with record
       Outbox        : Message_Channels.Channel (Capacity);
-      Mode          : Outbox_Mode := Value_Outbox;
-      Buffer_Pool   : Buffer_Pool_Access;
-      Buffer_Outbox : Buffer_Channel_Access;
+      Buffer_Outbox : Buffer_Channel_Access :=
+        (if Buffer_Pool = null
+         then null
+         else new Buffer_Channels.Channel (Buffer_Pool, Capacity));
       Stop          : Flyology.Cancellation.Token;
       Bytes         : aliased Retained_Bytes (Byte_Limit);
    end record;

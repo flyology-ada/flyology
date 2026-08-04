@@ -356,7 +356,8 @@ procedure Buffers_Smoke is
          Session : WebSockets.Session
            (Capacity    => 1,
             Byte_Limit  => 16,
-            Budget      => null);
+            Budget      => null,
+            Buffer_Pool => Storage'Access);
 
          task Closer is
             entry Start;
@@ -369,7 +370,6 @@ procedure Buffers_Smoke is
             WebSockets.Close (Session);
          end Closer;
       begin
-         WebSockets.Configure_Buffer_Pool (Session, Storage'Access);
          begin
             WebSockets.Try_Publish
               (Session,

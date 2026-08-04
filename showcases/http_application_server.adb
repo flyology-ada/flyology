@@ -1416,7 +1416,8 @@ procedure HTTP_Application_Server is
          Session : aliased WS.Session
            (Capacity => 16,
             Byte_Limit => WS.Default_Session_Bytes,
-            Budget => null);
+            Budget => null,
+            Buffer_Pool => null);
          --  Producers may retain the bounded mailbox during this request, but
          --  none receives the borrowed exchange or connection.
          type Session_Access is access all WS.Session;

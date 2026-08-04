@@ -1218,12 +1218,13 @@ it hides container indices and capacity from protocol users. Explicit
 `From_Byte_String` and `To_Byte_String` helpers provide one-to-one octet
 mapping for already encoded WebSocket text, not character-set conversion.
 For an application that already uses a buffer pool, a WebSocket lifecycle
-`Session` can select it once through `Configure_Buffer_Pool`; `Publish_Move`,
-`Publish_Move_For`, and `Try_Publish_Move` then transfer a `Unique_Buffer` into
-the sole-writer outbox. A configured session is buffer-only, so its declared
-capacity remains one FIFO and value-based `Publish` operations are rejected.
-Sessions that are not configured retain the existing `Outgoing_Message` value
-semantics. The pool must outlive the session.
+`Session` can select it through its `Buffer_Pool` access discriminant;
+`Publish_Move`, `Publish_Move_For`, and `Try_Publish_Move` then transfer a
+`Unique_Buffer` into the sole-writer outbox. A buffer-backed session is
+buffer-only, so its declared capacity remains one FIFO and value-based
+`Publish` operations are rejected. Sessions with a null pool retain the
+existing `Outgoing_Message` value semantics. Ada's accessibility rules require
+the pool to outlive the session.
 
 The WebSocket sender currently coalesces headers with payloads up to 4 KiB so
 small messages use one transport operation. Above that boundary it sends the
