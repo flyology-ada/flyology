@@ -4,7 +4,11 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
 test_subdir=behavioral
+connection_test_subdir=behavioral-connection-hooks
+worker_pool_test_subdir=behavioral-worker-pool-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
+connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
+worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
 
 cd "$project_root"
 
@@ -29,7 +33,8 @@ run_gprbuild () {
 }
 
 compile_test_mains () {
-  test_mains=$1
+  test_build_subdir=$1
+  test_mains=$2
   set --
   test_count=0
   for test_main in $test_mains; do
@@ -39,15 +44,16 @@ compile_test_mains () {
   printf '%s\n' "test: COMPILE $test_count programs"
   run_gprbuild \
     --RTS="$project_root/build/rts" \
-    --subdirs="$test_subdir" \
+    --subdirs="$test_build_subdir" \
     -f -c -r -p -j0 \
     -P tests/runtime_smoke.gpr \
     "$@"
 }
 
 link_test_mains () {
-  test_rts=$1
-  test_mains=$2
+  test_build_subdir=$1
+  test_rts=$2
+  test_mains=$3
   set --
   test_count=0
   for test_main in $test_mains; do
@@ -57,7 +63,7 @@ link_test_mains () {
   printf '%s\n' "test: LINK $test_count programs"
   run_gprbuild \
     --RTS="$test_rts" \
-    --subdirs="$test_subdir" \
+    --subdirs="$test_build_subdir" \
     -f -b -l -p -j0 \
     -P tests/runtime_smoke.gpr \
     "$@"
@@ -241,8 +247,25 @@ semantic_termination_matrix'
 fault_mains='accept_transient_smoke
 structured_server_reuse_smoke'
 
+connection_hook_mains='connection_state_model
+descriptor_ownership_smoke'
+
+worker_pool_hook_mains=concurrency_primitives_smoke
+
+ordinary_unhooked_mains=
+for test_main in $ordinary_mains; do
+  case "$test_main" in
+    connection_state_model|descriptor_ownership_smoke|concurrency_primitives_smoke)
+      ;;
+    *)
+      ordinary_unhooked_mains="$ordinary_unhooked_mains
+$test_main"
+      ;;
+  esac
+done
+
 all_test_mains="default_policy_smoke
-$ordinary_mains
+$ordinary_unhooked_mains
 $pool_mains
 loop_thread_project_placement_smoke
 $fault_mains"
@@ -252,45 +275,80 @@ fault_injection_smoke
 linux_poller_fairness_smoke"
 fi
 
-#  The test hooks are inert until their C controllers arm a fault or barrier.
-#  Compile every selected main against the native compatibility RTS once. The
+#  Compile each hook configuration into its own object directory. The hook
+#  projects add different native controller objects, so combining them changes
+#  the link closure and runtime behavior of otherwise unrelated tests. The
 #  alternate RTS configurations change only private runtime policy units and
 #  replace the contents of the same build/rts path. A fresh binder pass checks
-#  the compiled ALI closure against each configuration before linking, and
-#  fails rather than reusing an incompatible object.
+#  each compiled ALI closure against the selected RTS before linking.
+unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+compile_test_mains "$test_subdir" "$all_test_mains"
+
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS
+compile_test_mains "$connection_test_subdir" "$connection_hook_mains"
+unset FLYOLOGY_CONNECTION_TEST_HOOKS
+
 FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
-export FLYOLOGY_CONNECTION_TEST_HOOKS FLYOLOGY_WORKER_POOL_TEST_HOOKS
-compile_test_mains "$all_test_mains"
+export FLYOLOGY_WORKER_POOL_TEST_HOOKS
+compile_test_mains "$worker_pool_test_subdir" "$worker_pool_hook_mains"
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
-link_test_mains "$project_root/build/rts" default_policy_smoke
+link_test_mains \
+  "$test_subdir" "$project_root/build/rts" default_policy_smoke
 "$test_bin/default_policy_smoke" lightweight
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 native_mains="default_policy_smoke
-$ordinary_mains"
-link_test_mains "$project_root/build/rts" "$native_mains"
+$ordinary_unhooked_mains"
+link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+
+FLYOLOGY_CONNECTION_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS
+link_test_mains \
+  "$connection_test_subdir" "$project_root/build/rts" "$connection_hook_mains"
+unset FLYOLOGY_CONNECTION_TEST_HOOKS
+
+FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+export FLYOLOGY_WORKER_POOL_TEST_HOOKS
+link_test_mains \
+  "$worker_pool_test_subdir" "$project_root/build/rts" \
+  "$worker_pool_hook_mains"
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
+
 "$test_bin/default_policy_smoke" native
 
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
   case "$test_main" in
+    connection_state_model|descriptor_ownership_smoke)
+      current_test_bin=$connection_test_bin
+      ;;
+    concurrency_primitives_smoke)
+      current_test_bin=$worker_pool_test_bin
+      ;;
+    *)
+      current_test_bin=$test_bin
+      ;;
+  esac
+  case "$test_main" in
     dns_smoke)
       "$project_root/scripts/run-with-timeout.sh" 20 \
-        "$test_bin/$test_main"
+        "$current_test_bin/$test_main"
       ;;
     dns_parser_matrix)
       "$project_root/scripts/run-with-timeout.sh" 20 \
-        "$test_bin/$test_main"
+        "$current_test_bin/$test_main"
       ;;
     process_lifecycle_smoke|process_exit_live_task_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
-        "$test_bin/$test_main"
+        "$current_test_bin/$test_main"
       ;;
     connection_state_model)
       "$project_root/scripts/run-with-timeout.sh" 30 \
-        "$test_bin/$test_main"
+        "$current_test_bin/$test_main"
       ;;
     tls_smoke)
       tls_library_dir=${FLYOLOGY_TEST_OPENSSL_DIR:-}
@@ -320,19 +378,19 @@ for test_main in $ordinary_mains; do
         FLYOLOGY_TEST_OPENSSL_DIR="$tls_library_dir" \
         FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR="$tls_mismatch_dir" \
           "$project_root/scripts/run-with-timeout.sh" 90 \
-          "$test_bin/$test_main"
+          "$current_test_bin/$test_main"
       else
         "$project_root/scripts/run-with-timeout.sh" 90 \
-          "$test_bin/$test_main"
+          "$current_test_bin/$test_main"
       fi
       ;;
     tls_state_model)
       "$project_root/scripts/run-with-timeout.sh" 30 \
-        "$test_bin/$test_main"
+        "$current_test_bin/$test_main"
       ;;
     *)
       "$project_root/scripts/run-with-timeout.sh" 60 \
-        "$test_bin/$test_main"
+        "$current_test_bin/$test_main"
       ;;
   esac
   printf '%s\n' "test: PASS $test_main"
@@ -345,7 +403,7 @@ FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=3 \
 FLYOLOGY_PLACEMENT=round_robin \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
-link_test_mains "$project_root/build/rts" "$pool_mains"
+link_test_mains "$test_subdir" "$project_root/build/rts" "$pool_mains"
 "$test_bin/loop_pool_smoke"
 "$test_bin/topology_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
@@ -378,7 +436,8 @@ if [ "$loop_placement" != none ]; then
   FLYOLOGY_LOOP_PLACEMENT_MAP="6:$loop_placement_value" \
     "$project_root/scripts/prepare-rts.sh" >/dev/null
   link_test_mains \
-    "$project_root/build/rts" loop_thread_project_placement_smoke
+    "$test_subdir" "$project_root/build/rts" \
+    loop_thread_project_placement_smoke
   "$test_bin/loop_thread_project_placement_smoke"
 fi
 
@@ -398,7 +457,7 @@ linux_poller_fairness_smoke"
 fault_injection_smoke"
   fi
 fi
-link_test_mains "$project_root/build/rts" "$fault_mains"
+link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/accept_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
