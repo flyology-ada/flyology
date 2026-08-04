@@ -170,6 +170,53 @@ procedure Memory_Regions_Smoke is
       end if;
    end Check_Pool_Finalization;
 
+   procedure Check_Task_Finalization is
+      Before : constant Natural := Results.Finalization_Count;
+   begin
+      declare
+         task Native_Owner is
+            pragma Task_Info (Flyology.Native_Task);
+         end Native_Owner;
+
+         task body Native_Owner is
+            Pool : aliased Regions.Task_Pool;
+            type Tracked_Access is access Tracked;
+            for Tracked_Access'Storage_Pool use Pool;
+            Region : constant Regions.Region_Handle :=
+              Regions.Create_Region (Pool);
+            Object : constant Tracked_Access :=
+              new (Region) Tracked'(Ada.Finalization.Controlled with 12);
+            pragma Unreferenced (Object);
+         begin
+            null;
+         end Native_Owner;
+
+         task Lightweight_Owner is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Lightweight_Owner;
+
+         task body Lightweight_Owner is
+            Pool : aliased Regions.Task_Pool;
+            type Tracked_Access is access Tracked;
+            for Tracked_Access'Storage_Pool use Pool;
+            Region : constant Regions.Region_Handle :=
+              Regions.Create_Region (Pool);
+            Object : constant Tracked_Access :=
+              new (Region) Tracked'(Ada.Finalization.Controlled with 13);
+            pragma Unreferenced (Object);
+         begin
+            null;
+         end Lightweight_Owner;
+      begin
+         null;
+      end;
+
+      if Results.Finalization_Count /= Before + 2 then
+         raise Program_Error with
+           "task termination did not release native and lightweight regions";
+      end if;
+   end Check_Task_Finalization;
+
    procedure Check_Cross_Task_Rejection is
       Pool : aliased Regions.Task_Pool;
       type Integer_Access is access Integer;
@@ -229,6 +276,7 @@ begin
    Check_Explicit_Release;
    Check_Failing_Finalization;
    Check_Pool_Finalization;
+   Check_Task_Finalization;
    Check_Cross_Task_Rejection;
    Lightweight_Owner.Done;
    if not Results.Lightweight_Was_Passed then
