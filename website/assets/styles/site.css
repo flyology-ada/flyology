@@ -256,6 +256,36 @@ code:not(pre code) {
   text-decoration: none;
 }
 
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-dropdown > summary {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 520;
+  cursor: pointer;
+  list-style: none;
+}
+
+.nav-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-dropdown > summary svg {
+  width: 0.78rem;
+  height: 0.78rem;
+  transition: transform 180ms var(--ease-out);
+}
+
+.nav-dropdown[open] > summary svg {
+  transform: rotate(180deg);
+}
+
 .nav-links a::after {
   position: absolute;
   right: 0;
@@ -269,9 +299,55 @@ code:not(pre code) {
   transition: transform 220ms var(--ease-out);
 }
 
+.nav-dropdown > summary::after {
+  position: absolute;
+  right: 0;
+  bottom: -0.6rem;
+  left: 0;
+  height: 2px;
+  background: var(--violet);
+  content: "";
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 220ms var(--ease-out);
+}
+
 .nav-links a:hover::after,
-.nav-links a[aria-current="page"]::after {
+.nav-links a[aria-current="page"]::after,
+.nav-dropdown > summary:hover::after,
+.nav-dropdown[open] > summary::after {
   transform: scaleX(1);
+}
+
+.nav-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 1rem);
+  left: 50%;
+  z-index: 1;
+  min-width: 10rem;
+  margin: 0;
+  padding: 0.42rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  box-shadow: var(--shadow-low);
+  list-style: none;
+  transform: translateX(-50%);
+}
+
+.nav-dropdown-menu a {
+  display: block;
+  padding: 0.58rem 0.7rem;
+  border-radius: calc(var(--radius-sm) - 0.15rem);
+  white-space: nowrap;
+}
+
+.nav-dropdown-menu a:hover {
+  background: var(--surface);
+}
+
+.nav-dropdown-menu a::after {
+  display: none;
 }
 
 .nav-tools {
@@ -1667,8 +1743,33 @@ code:not(pre code) {
     border-bottom: 1px solid var(--line);
   }
 
-  .nav-links a::after {
+  .nav-links a::after,
+  .nav-dropdown > summary::after {
     display: none;
+  }
+
+  .nav-dropdown > summary {
+    display: flex;
+    justify-content: space-between;
+    padding-block: 0.85rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav-dropdown-menu {
+    position: static;
+    min-width: 0;
+    padding: 0.45rem 0 0.65rem 1rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+  }
+
+  .nav-dropdown-menu a {
+    padding: 0.65rem 0.8rem;
+    border-bottom: 0;
+    background: var(--surface);
   }
 
   .hero,

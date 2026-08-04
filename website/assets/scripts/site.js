@@ -14,6 +14,7 @@
     const themeLabel = document.querySelector("[data-theme-label]");
     const menuButton = document.querySelector("[data-menu-toggle]");
     const navLinks = document.querySelector("[data-nav-links]");
+    const navDropdowns = Array.from(document.querySelectorAll("[data-nav-dropdown]"));
 
     function updateThemeLabel() {
       if (!themeLabel) return;
@@ -41,9 +42,36 @@
         if (event.target.closest("a")) {
           navLinks.dataset.open = "false";
           menuButton.setAttribute("aria-expanded", "false");
+          navDropdowns.forEach(function (dropdown) {
+            dropdown.open = false;
+          });
         }
       });
     }
+
+    navDropdowns.forEach(function (dropdown) {
+      dropdown.addEventListener("toggle", function () {
+        if (!dropdown.open) return;
+        navDropdowns.forEach(function (otherDropdown) {
+          if (otherDropdown !== dropdown) otherDropdown.open = false;
+        });
+      });
+    });
+
+    document.addEventListener("click", function (event) {
+      navDropdowns.forEach(function (dropdown) {
+        if (dropdown.open && !dropdown.contains(event.target)) dropdown.open = false;
+      });
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") return;
+      navDropdowns.forEach(function (dropdown) {
+        if (!dropdown.open) return;
+        dropdown.open = false;
+        dropdown.querySelector("summary").focus();
+      });
+    });
 
     window.FlyologyAda.highlightAll("code.language-ada");
     window.FlyologyAda.highlightAllSQL("code.language-sql");
