@@ -22,6 +22,7 @@ procedure Buffers_Smoke is
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type Buffers.Pool_Snapshot;
+   use type Channels.Transfer_Metadata;
    use type Channels.Try_Receive_Result;
    use type Channels.Try_Send_Result;
    use type Files.File_Descriptor;
@@ -165,6 +166,14 @@ procedure Buffers_Smoke is
       Assert (Metadata = 13, "channel lost transfer metadata");
       Check_Payload (Target, [1, 2, 3]);
       Buffers.Release (Target);
+
+      Queue.Send_Move (Second);
+      Queue.Receive_Move (Target, Metadata);
+      Assert
+        (Metadata = Channels.No_Metadata,
+         "default channel metadata did not round trip");
+      Buffers.Release (Target);
+      Buffers.Acquire (Second);
 
       Queue.Close;
       Queue.Try_Send_Move (Second, Send_Result);

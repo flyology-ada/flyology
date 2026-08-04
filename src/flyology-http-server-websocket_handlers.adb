@@ -4,11 +4,10 @@ with Ada.Strings;
 with Ada.Strings.Fixed;
 with Ada.Unchecked_Deallocation;
 with Flyology.IO;
-with Interfaces;
 
 package body Flyology.HTTP.Server.WebSocket_Handlers is
    use type Ada.Real_Time.Time;
-   use type Interfaces.Unsigned_64;
+   use type Buffer_Channels.Transfer_Metadata;
    use type Buffer_Channels.Try_Receive_Result;
    use type Buffer_Channels.Try_Send_Result;
 
@@ -64,6 +63,24 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
 
    function Payload_Bytes (Value : Outgoing_Message) return Natural is
      (Flyology.Bytes.Length (Value.Data));
+
+   function Encode_Kind
+     (Kind : WebSocket_Data_Kind)
+      return Buffer_Channels.Transfer_Metadata is
+     (Buffer_Channels.Transfer_Metadata (WebSocket_Data_Kind'Pos (Kind)));
+
+   function Decode_Kind
+     (Metadata : Buffer_Channels.Transfer_Metadata)
+      return WebSocket_Data_Kind
+   is
+   begin
+      if Metadata > Buffer_Channels.Transfer_Metadata
+        (WebSocket_Data_Kind'Pos (WebSocket_Data_Kind'Last))
+      then
+         raise Program_Error with "invalid queued WebSocket buffer kind";
+      end if;
+      return WebSocket_Data_Kind'Val (Metadata);
+   end Decode_Kind;
 
    procedure Require_Value_Outbox (Item : Session) is
    begin
@@ -269,9 +286,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
       if Granted then
          begin
             Item.Buffer_Outbox.Send_Move
-              (Value,
-               Buffer_Channels.Transfer_Metadata
-                 (WebSocket_Data_Kind'Pos (Kind)));
+              (Value, Encode_Kind (Kind));
             Queued := True;
          exception
             when Buffer_Channels.Channel_Closed => null;
@@ -318,8 +333,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
             Item.Buffer_Outbox.Timed_Send_Move
               (Value,
                (if Left < 0.0 then 0.05 else Duration'Min (Left, 0.05)),
-               Buffer_Channels.Transfer_Metadata
-                 (WebSocket_Data_Kind'Pos (Kind)));
+               Encode_Kind (Kind));
             Queued := True;
             Accepted := True;
             Timed_Out := False;
@@ -362,10 +376,7 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
       Reserve (Item, Flyology.Buffers.Length (Value), Guard, Granted);
       if Granted then
          Item.Buffer_Outbox.Try_Send_Move
-           (Value,
-            Result,
-            Buffer_Channels.Transfer_Metadata
-              (WebSocket_Data_Kind'Pos (Kind)));
+           (Value, Result, Encode_Kind (Kind));
          Queued := Result = Buffer_Channels.Item_Sent;
       end if;
       Accepted := Granted and then Queued;
@@ -460,21 +471,14 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
          Sent := Result = Buffer_Channels.Item_Received;
          if Sent then
             declare
-               Position : constant Interfaces.Unsigned_64 := Metadata;
-               Buffered_Kind : WebSocket_Data_Kind;
+               Buffered_Kind : constant WebSocket_Data_Kind :=
+                 Decode_Kind (Metadata);
                procedure Send_Buffer
                  (Payload : Ada.Streams.Stream_Element_Array) is
                begin
                   X.Send_WebSocket (Buffered_Kind, Payload);
                end Send_Buffer;
             begin
-               if Position > Interfaces.Unsigned_64
-                 (WebSocket_Data_Kind'Pos (WebSocket_Data_Kind'Last))
-               then
-                  raise Program_Error with
-                    "invalid queued WebSocket buffer kind";
-               end if;
-               Buffered_Kind := WebSocket_Data_Kind'Val (Position);
                Flyology.Buffers.With_Readable_Data
                  (Buffered, Send_Buffer'Access);
             exception

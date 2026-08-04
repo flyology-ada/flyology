@@ -1,15 +1,16 @@
 with Ada.Finalization;
-with Interfaces;
 
 --  Supplies bounded closeable channels that transfer unique buffer ownership
 --  without copying payload bytes. The protected queue carries only pool slot
 --  tokens; payload storage remains in the associated pool.
 package Flyology.Buffers.Channels is
 
-   --  Scalar metadata transferred atomically with a buffer token. This value
-   --  is channel-local and does not alter the buffer's application Tag.
-   subtype Transfer_Metadata is Interfaces.Unsigned_64;
-   --  Metadata used by send overloads when none is supplied.
+   --  Distinct 64-bit scalar metadata transferred atomically with a buffer
+   --  token. This value is channel-local and does not alter the buffer's
+   --  application Tag. Callers define and validate their own encoding.
+   type Transfer_Metadata is mod 2 ** 64;
+   --  Default metadata used by send overloads. Zero is an ordinary encoded
+   --  value, not an indication that metadata is absent.
    No_Metadata : constant Transfer_Metadata := 0;
 
    --  Raised when a send observes a closed channel, or a receive observes a
@@ -119,7 +120,8 @@ package Flyology.Buffers.Channels is
    --  @param Item Channel yielding ownership
    --  @param Target Vacant buffer that receives ownership on success
    --  @param Result Receive outcome
-   --  @param Metadata Sender metadata, or No_Metadata without a value
+   --  @param Metadata Sender metadata, or No_Metadata when no buffer is
+   --    received; No_Metadata is not a presence indicator
    procedure Try_Receive_Move
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;

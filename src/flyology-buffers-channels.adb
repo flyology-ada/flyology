@@ -1,7 +1,16 @@
 with Flyology.Channel_Policy;
+with Interfaces;
 
 package body Flyology.Buffers.Channels is
    package Policy renames Flyology.Channel_Policy;
+
+   function To_Stored_Metadata
+     (Value : Transfer_Metadata) return Interfaces.Unsigned_64 is
+     (Interfaces.Unsigned_64 (Value));
+
+   function From_Stored_Metadata
+     (Value : Interfaces.Unsigned_64) return Transfer_Metadata is
+     (Transfer_Metadata (Value));
 
    protected body Channel_State is
       entry Send (Token : Buffer_Token; Accepted : out Boolean)
@@ -154,7 +163,7 @@ package body Flyology.Buffers.Channels is
          raise Program_Error with "send of a vacant buffer";
       end if;
       Detach (Value, Token);
-      Token.Channel_Metadata := Metadata;
+      Token.Channel_Metadata := To_Stored_Metadata (Metadata);
       Item.State.Send (Token, Transferred);
       if not Transferred then
          raise Channel_Closed with "send on closed buffer channel";
@@ -191,8 +200,8 @@ package body Flyology.Buffers.Channels is
       if not Available then
          raise Channel_Closed with "receive from drained buffer channel";
       end if;
-      Metadata := Token.Channel_Metadata;
-      Token.Channel_Metadata := No_Metadata;
+      Metadata := From_Stored_Metadata (Token.Channel_Metadata);
+      Token.Channel_Metadata := 0;
       Attach (Target, Token);
    end Receive_Move;
 
@@ -213,7 +222,7 @@ package body Flyology.Buffers.Channels is
          raise Program_Error with "send of a vacant buffer";
       end if;
       Detach (Value, Token);
-      Token.Channel_Metadata := Metadata;
+      Token.Channel_Metadata := To_Stored_Metadata (Metadata);
       Item.State.Try_Send (Token, Result, Transferred);
       if Transferred then
          Token := No_Token;
@@ -247,8 +256,8 @@ package body Flyology.Buffers.Channels is
       end if;
       Item.State.Try_Receive (Token, Result);
       if Result = Item_Received then
-         Metadata := Token.Channel_Metadata;
-         Token.Channel_Metadata := No_Metadata;
+         Metadata := From_Stored_Metadata (Token.Channel_Metadata);
+         Token.Channel_Metadata := 0;
          Attach (Target, Token);
       end if;
    end Try_Receive_Move;
@@ -285,7 +294,7 @@ package body Flyology.Buffers.Channels is
          raise Program_Error with "send of a vacant buffer";
       end if;
       Detach (Value, Token);
-      Token.Channel_Metadata := Metadata;
+      Token.Channel_Metadata := To_Stored_Metadata (Metadata);
       select
          Item.State.Send (Token, Transferred);
          if not Transferred then
@@ -347,8 +356,8 @@ package body Flyology.Buffers.Channels is
             raise Channel_Closed with
               "receive from drained buffer channel";
          end if;
-         Metadata := Token.Channel_Metadata;
-         Token.Channel_Metadata := No_Metadata;
+         Metadata := From_Stored_Metadata (Token.Channel_Metadata);
+         Token.Channel_Metadata := 0;
          Attach (Target, Token);
       or
          delay Timeout;

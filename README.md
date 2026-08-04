@@ -639,7 +639,9 @@ out, closed, or aborted send restores ownership to the sender; a channel being
 finalized returns undelivered buffers to its pool. Close-and-drain behavior
 matches `Flyology.Channels.Bounded`. Optional scalar transfer metadata travels
 atomically with the token and remains separate from the buffer's application
-tag.
+tag. `Transfer_Metadata` is a distinct 64-bit modular type so it cannot mix
+implicitly with unrelated integers. Each consumer owns its encoding and
+validation; `No_Metadata` is the default zero value, not a presence marker.
 
 ```ada
 Pool  : aliased Flyology.Buffers.Pool
