@@ -1,15 +1,29 @@
 with Ada.Real_Time;
+with Ada.Unchecked_Deallocation;
 with Flyology.Connection_Policy;
+with Flyology.IO.TLS_Driver;
 with Flyology.Time_Math;
 with Interfaces.C;
 
 package body Flyology.IO.Connections is
    package Policy renames Flyology.Connection_Policy;
    package Sockets renames Flyology.IO.Sockets;
+   package TLS renames Flyology.IO.TLS;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
+   use type TLS.Session_Access;
+   use type TLS.Role;
+   use type TLS.Step_Status;
+
+   procedure Free is new Ada.Unchecked_Deallocation
+     (TLS.Session'Class, TLS.Session_Access);
+
+   --  GNAT implements this as SO_NOSIGPIPE on Darwin and a no-op where send
+   --  flags provide the equivalent process-safety behavior.
+   procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
+   pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
 
    type Operation_Guard (Item : not null access Connection) is
      new Ada.Finalization.Limited_Controlled with record
@@ -19,6 +33,24 @@ package body Flyology.IO.Connections is
    end record;
 
    overriding procedure Finalize (Guard : in out Operation_Guard);
+
+   type Upgrade_Cleanup_Guard (Item : not null access Connection) is
+     new Ada.Finalization.Limited_Controlled with record
+      Armed : aliased Boolean := False;
+   end record;
+
+   type Session_Setup_Guard is
+     new Ada.Finalization.Limited_Controlled with record
+      Value : TLS.Session_Access := null;
+   end record;
+
+   overriding procedure Finalize (Guard : in out Upgrade_Cleanup_Guard);
+   overriding procedure Finalize (Guard : in out Session_Setup_Guard);
+
+   procedure Disarm (Guard : in out Upgrade_Cleanup_Guard) is
+   begin
+      Guard.Armed := False;
+   end Disarm;
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
    function Test_Barrier_Arrive
@@ -31,6 +63,11 @@ package body Flyology.IO.Connections is
      with Import,
           Convention => C,
           External_Name => "flyology_test_connection_barrier_released";
+   function Test_Barrier_Arrive_Once
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_arrive_once";
 
    procedure Test_Barrier (Point : Interfaces.C.int) is
    begin
@@ -40,6 +77,15 @@ package body Flyology.IO.Connections is
          end loop;
       end if;
    end Test_Barrier;
+
+   procedure Test_One_Shot_Barrier (Point : Interfaces.C.int) is
+   begin
+      if Test_Barrier_Arrive_Once (Point) /= 0 then
+         while Test_Barrier_Released (Point) = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_One_Shot_Barrier;
 #end if;
 
    protected body Descriptor_Controller is
@@ -66,6 +112,7 @@ package body Flyology.IO.Connections is
          Current_Owner := Owner;
          Current_FD := FD;
          Current_Generation := Current_Generation + 1;
+         Current_Transport := Plain_Transport;
       end Adopt;
 
       procedure Start_Operation
@@ -79,7 +126,10 @@ package body Flyology.IO.Connections is
          if State.all /= Unregistered then
             raise Program_Error with "connection operation already registered";
          end if;
-         if Current_FD < 0
+         if Current_Transport = TLS_Upgrading then
+            raise Operation_Cancelled with
+              "connection transport is being upgraded";
+         elsif Current_FD < 0
            or else Closing
            or else Current_Owner = null
          then
@@ -106,7 +156,8 @@ package body Flyology.IO.Connections is
          FD           : out Descriptor;
          Close_Source : out Descriptor;
          Socket       : in out Sockets.Socket_Type;
-         Owner        : out Server_Access)
+         Owner        : out Server_Access;
+         Transport    : out Transport_Kind)
       is
       begin
          if State.all /= Registered then
@@ -128,9 +179,11 @@ package body Flyology.IO.Connections is
                  Policy.Started_After_Release (Started_Operations);
                State.all := Unregistered;
                Result := Lease_Cancelled;
+               Transport := No_Transport;
                return;
             when Policy.Wait_For_Lease =>
                Result := Lease_Busy;
+               Transport := No_Transport;
                return;
             when Policy.Acquire_Lease =>
                null;
@@ -144,6 +197,7 @@ package body Flyology.IO.Connections is
          Close_Source := Wake_Sources.Descriptor (Close_Wake);
          Sockets.Move (Current_Socket, Socket);
          Owner := Current_Owner;
+         Transport := Current_Transport;
          --  Active and the guard state become visible in one protected action.
          --  Finalization after any abort at the call boundary will Release.
          State.all := Acquired;
@@ -152,8 +206,8 @@ package body Flyology.IO.Connections is
 
       procedure Abandon_Operation (Generation : Descriptor_Generation) is
       begin
-         if Generation /= Current_Generation or else Started_Operations = 0
-         then
+         pragma Unreferenced (Generation);
+         if Started_Operations = 0 then
             raise Program_Error with "stale connection operation withdrawal";
          end if;
          Started_Operations :=
@@ -175,6 +229,45 @@ package body Flyology.IO.Connections is
               "connection closed during its operation";
          end if;
       end Check_Operation;
+
+      procedure Begin_TLS_Upgrade
+        (Generation    : in out Descriptor_Generation;
+         Cleanup_Armed : not null access Boolean)
+      is
+      begin
+         if not Active
+           or else Generation /= Current_Generation
+           or else Current_Transport /= Plain_Transport
+         then
+            raise Program_Error with
+              "connection TLS upgrade requires an active plaintext transport";
+         elsif Closing then
+            raise Operation_Cancelled with
+              "connection closed before its TLS upgrade transition";
+         end if;
+         Current_Transport := TLS_Upgrading;
+         Current_Generation := Current_Generation + 1;
+         Generation := Current_Generation;
+         --  Publish the cleanup obligation before the protected-call abort
+         --  completion point, matching operation registration and acquisition.
+         Cleanup_Armed.all := True;
+      end Begin_TLS_Upgrade;
+
+      procedure Finish_TLS_Upgrade
+        (Generation : Descriptor_Generation)
+      is
+      begin
+         if not Active
+           or else Generation /= Current_Generation
+           or else Current_Transport /= TLS_Upgrading
+         then
+            raise Program_Error with "invalid TLS upgrade completion";
+         elsif Closing then
+            raise Operation_Cancelled with
+              "connection closed during its TLS upgrade";
+         end if;
+         Current_Transport := TLS_Transport;
+      end Finish_TLS_Upgrade;
 
       procedure Release
         (Generation : Descriptor_Generation;
@@ -255,6 +348,7 @@ package body Flyology.IO.Connections is
             raise Program_Error with "stale descriptor close completion";
          end if;
          Current_FD := Invalid_Descriptor;
+         Current_Transport := No_Transport;
          Wake_Sources.Release (Lease_Wake);
          Wake_Sources.Release (Close_Wake);
          Lease_Signalled := False;
@@ -264,14 +358,12 @@ package body Flyology.IO.Connections is
       function Is_Open_State return Boolean is
         (Policy.Is_Open (Current_FD >= 0, Closing));
 
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      function Test_Waiting_Operations return Natural is
+      function Waiting_Count return Natural is
         (Policy.Waiting_Operations (Started_Operations, Active));
 
-      function Test_Operation_Active return Boolean is (Active);
+      function Lease_Active return Boolean is (Active);
 
-      function Test_Close_Requested return Boolean is (Closing);
-#end if;
+      function Close_Pending return Boolean is (Closing);
 
    end Descriptor_Controller;
 
@@ -287,6 +379,32 @@ package body Flyology.IO.Connections is
             Guard.Item.Controller.Release (Guard.Generation, Guard.Socket);
             Guard.State := Unregistered;
       end case;
+   end Finalize;
+
+   overriding procedure Finalize (Guard : in out Upgrade_Cleanup_Guard) is
+   begin
+      if Guard.Armed then
+         begin
+            Close (Guard.Item.all);
+         exception
+            --  The upgrade exception remains primary. Close still makes the
+            --  connection terminal and releases admission before raising.
+            when others =>
+               null;
+         end;
+      end if;
+   end Finalize;
+
+   overriding procedure Finalize (Guard : in out Session_Setup_Guard) is
+   begin
+      if Guard.Value /= null then
+         begin
+            Free (Guard.Value);
+         exception
+            when others =>
+               Guard.Value := null;
+         end;
+      end if;
    end Finalize;
    function Remaining
      (Started : Ada.Real_Time.Time;
@@ -330,7 +448,8 @@ package body Flyology.IO.Connections is
       FD            : out Descriptor;
       Guard         : in out Operation_Guard;
       Close_Source  : out Descriptor;
-      Owner         : out Server_Access)
+      Owner         : out Server_Access;
+      Transport     : out Transport_Kind)
    is
       Lease_Source : Descriptor;
       Initial_Close_Source : Descriptor;
@@ -348,6 +467,9 @@ package body Flyology.IO.Connections is
          Initial_Owner);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (0);
+      --  Unlike the general barrier above, only the first registration parks.
+      --  A competing upgrade can therefore advance the transport generation.
+      Test_One_Shot_Barrier (6);
 #end if;
       loop
          Interrupts (1) := Initial_Close_Source;
@@ -360,7 +482,8 @@ package body Flyology.IO.Connections is
             FD,
             Close_Source,
             Guard.Socket,
-            Owner);
+            Owner,
+            Transport);
          case Result is
             when Lease_Acquired =>
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
@@ -400,6 +523,52 @@ package body Flyology.IO.Connections is
          end if;
       end loop;
    end Acquire_Operation;
+
+   procedure Check_TLS_Operation
+     (Item       : in out Connection;
+      Generation : Descriptor_Generation;
+      Owner      : not null Server_Access;
+      Token      : access Cancellation_Token)
+   is
+   begin
+      Item.Controller.Check_Operation (Generation);
+      if Owner.Shutdown_Requested
+        or else (Token /= null and then Token.Requested)
+      then
+         raise Operation_Cancelled;
+      end if;
+   end Check_TLS_Operation;
+
+   procedure Await_TLS_Ready
+     (FD           : Descriptor;
+      Status       : TLS.Step_Status;
+      Started      : Ada.Real_Time.Time;
+      Timeout      : Duration;
+      Close_Source : Descriptor;
+      Owner        : not null Server_Access;
+      Token        : access Cancellation_Token)
+   is
+      Interrupts      : Interrupt_Set (1 .. 3);
+      Interrupt_Count : Natural;
+      Outcome         : Wait_Outcome;
+   begin
+      Interrupts (1) := Close_Source;
+      Interrupt_Sources
+        (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
+      Outcome := Wait_Interruptibly
+        (FD,
+         (if Status = TLS.Want_Read then For_Read else For_Write),
+         Remaining (Started, Timeout),
+         Interrupts (1 .. Interrupt_Count + 1));
+      case Outcome is
+         when Ready =>
+            null;
+         when Timed_Out =>
+            raise Timeout_Error with "TLS connection operation timed out";
+         when Interrupted =>
+            raise Operation_Cancelled;
+      end case;
+   end Await_TLS_Ready;
 
    procedure Reserve
      (Manager : aliased in out Server;
@@ -444,6 +613,131 @@ package body Flyology.IO.Connections is
             raise;
       end;
    end Take;
+
+   procedure Upgrade_TLS
+     (Item        : in out Connection;
+      Backend     : in out TLS.Provider'Class;
+      Side        : TLS.Role;
+      Server_Name : String;
+      Timeout     : Duration;
+      Token       : access Cancellation_Token)
+   is
+      Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Cleanup      : Upgrade_Cleanup_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Session_Hold : Session_Setup_Guard;
+      FD           : Descriptor;
+      Close_Source : Descriptor;
+      Owner        : Server_Access;
+      Transport    : Transport_Kind;
+      Available    : Boolean;
+
+      procedure Check_Setup_Deadline is
+      begin
+         --  Provider and socket setup calls are synchronous. A positive
+         --  deadline is checked at every return boundary; zero retains the
+         --  established immediate-attempt behavior.
+         if Timeout > 0.0 and then Remaining (Started, Timeout) = 0.0 then
+            raise Timeout_Error with "TLS provider setup timed out";
+         end if;
+      end Check_Setup_Deadline;
+
+      procedure Check is
+      begin
+         Check_TLS_Operation
+           (Item, Guard.Generation, Owner, Token);
+      end Check;
+
+      procedure Await (Status : TLS.Step_Status) is
+      begin
+         Await_TLS_Ready
+           (FD, Status, Started, Timeout, Close_Source, Owner, Token);
+      end Await;
+   begin
+      if Side = TLS.Client and then Server_Name'Length = 0 then
+         raise Program_Error with "TLS client requires a server name";
+      elsif Side = TLS.Server and then Server_Name'Length /= 0 then
+         raise Program_Error with "TLS server does not accept a server name";
+      end if;
+
+      Acquire_Operation
+        (Item, Started, Timeout, Token,
+         FD, Guard, Close_Source, Owner, Transport);
+      if Transport /= Plain_Transport then
+         raise Program_Error with
+           "connection TLS upgrade requires a plaintext transport";
+      end if;
+
+      Item.Controller.Begin_TLS_Upgrade
+        (Guard.Generation, Cleanup.Armed'Access);
+
+      Available := TLS.Is_Available (Backend);
+      Check_Setup_Deadline;
+      if not Available then
+         raise TLS.TLS_Error with
+           TLS.Name (Backend) & " provider is unavailable";
+      end if;
+      Sockets.Prepare (Guard.Socket);
+      Check_Setup_Deadline;
+      FD := Sockets.Native_Descriptor (Guard.Socket);
+      Disable_SIGPIPE (Interfaces.C.int (FD));
+      Check_Setup_Deadline;
+      Session_Hold.Value :=
+        TLS.Create_Session (Backend, FD, Side, Server_Name);
+      Check_Setup_Deadline;
+      if Session_Hold.Value = null then
+         raise TLS.TLS_Error with
+           TLS.Name (Backend) & " returned no TLS session";
+      end if;
+      Item.TLS_Session := Session_Hold.Value;
+      Session_Hold.Value := null;
+      Item.TLS_Shutdown_Complete := False;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (7);
+#end if;
+
+      TLS_Driver.Handshake
+        (Item.TLS_Session.all, Check'Access, Await'Access);
+      Item.Controller.Finish_TLS_Upgrade (Guard.Generation);
+      Disarm (Cleanup);
+   end Upgrade_TLS;
+
+   procedure Shutdown_TLS
+     (Item    : in out Connection;
+      Timeout : Duration;
+      Token   : access Cancellation_Token)
+   is
+      Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
+      FD           : Descriptor;
+      Close_Source : Descriptor;
+      Owner        : Server_Access;
+      Transport    : Transport_Kind;
+
+      procedure Check is
+      begin
+         Check_TLS_Operation
+           (Item, Guard.Generation, Owner, Token);
+      end Check;
+
+      procedure Await (Status : TLS.Step_Status) is
+      begin
+         Await_TLS_Ready
+           (FD, Status, Started, Timeout, Close_Source, Owner, Token);
+      end Await;
+   begin
+      Acquire_Operation
+        (Item, Started, Timeout, Token,
+         FD, Guard, Close_Source, Owner, Transport);
+      if Transport /= TLS_Transport or else Item.TLS_Session = null then
+         raise Program_Error with "connection transport does not use TLS";
+      elsif Item.TLS_Shutdown_Complete then
+         return;
+      end if;
+      TLS_Driver.Shutdown
+        (Item.TLS_Session.all, Check'Access, Await'Access);
+      Item.TLS_Shutdown_Complete := True;
+   end Shutdown_TLS;
 
    procedure Accept_Connection
      (Manager              : aliased in out Server;
@@ -505,6 +799,7 @@ package body Flyology.IO.Connections is
       Leader     : Boolean;
       Socket     : Sockets.Socket_Type;
       Owner      : Server_Access;
+      Provider_Error : Boolean := False;
    begin
       Item.Controller.Begin_Close (FD, Generation, Leader);
       if not Leader then
@@ -518,6 +813,14 @@ package body Flyology.IO.Connections is
       --  observed Close_Wake and acknowledged release. Only then may the OS
       --  recycle the integer descriptor.
       Item.Controller.Await_Drained (Socket, Owner);
+      begin
+         Free (Item.TLS_Session);
+      exception
+         when others =>
+            Item.TLS_Session := null;
+            Provider_Error := True;
+      end;
+      Item.TLS_Shutdown_Complete := False;
       if Sockets.Is_Open (Socket) then
          begin
             Sockets.Close_Socket (Socket);
@@ -533,6 +836,9 @@ package body Flyology.IO.Connections is
       Item.Controller.Finish_Close (Generation);
       if Owner /= null then
          Owner.Release;
+      end if;
+      if Provider_Error then
+         raise TLS.TLS_Error with "TLS provider session finalization failed";
       end if;
    end Close;
 
@@ -552,14 +858,35 @@ package body Flyology.IO.Connections is
       FD : Descriptor;
       Guard : Operation_Guard (Item'Unchecked_Access);
       Owner : Server_Access;
+      Transport : Transport_Kind;
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       pragma Unreferenced (Cancellation_Quantum);
+      procedure Check is
+      begin
+         Check_TLS_Operation
+           (Item, Guard.Generation, Owner, Token);
+      end Check;
+      procedure Await (Status : TLS.Step_Status) is
+      begin
+         Await_TLS_Ready
+           (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Owner);
+         FD, Guard, Interrupts (1), Owner, Transport);
       pragma Assert
         (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
+      if Transport = TLS_Transport then
+         if Item.TLS_Session = null then
+            raise Program_Error with "TLS transport has no provider session";
+         end if;
+         TLS_Driver.Receive
+           (Item.TLS_Session.all, Data, Last, Check'Access, Await'Access);
+         return;
+      elsif Transport /= Plain_Transport then
+         raise Operation_Cancelled;
+      end if;
       Interrupt_Sources
         (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
@@ -590,13 +917,34 @@ package body Flyology.IO.Connections is
       FD             : Descriptor;
       Guard          : Operation_Guard (Item'Unchecked_Access);
       Owner          : Server_Access;
+      Transport      : Transport_Kind;
       pragma Unreferenced (Cancellation_Quantum);
+      procedure Check is
+      begin
+         Check_TLS_Operation
+           (Item, Guard.Generation, Owner, Token);
+      end Check;
+      procedure Await (Status : TLS.Step_Status) is
+      begin
+         Await_TLS_Ready
+           (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Owner);
+         FD, Guard, Interrupts (1), Owner, Transport);
       pragma Assert
         (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
+      if Transport = TLS_Transport then
+         if Item.TLS_Session = null then
+            raise Program_Error with "TLS transport has no provider session";
+         end if;
+         TLS_Driver.Receive_Exactly
+           (Item.TLS_Session.all, Data, Check'Access, Await'Access);
+         return;
+      elsif Transport /= Plain_Transport then
+         raise Operation_Cancelled;
+      end if;
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
@@ -642,13 +990,34 @@ package body Flyology.IO.Connections is
       FD : Descriptor;
       Guard : Operation_Guard (Item'Unchecked_Access);
       Owner : Server_Access;
+      Transport : Transport_Kind;
       pragma Unreferenced (Cancellation_Quantum);
+      procedure Check is
+      begin
+         Check_TLS_Operation
+           (Item, Guard.Generation, Owner, Token);
+      end Check;
+      procedure Await (Status : TLS.Step_Status) is
+      begin
+         Await_TLS_Ready
+           (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Owner);
+         FD, Guard, Interrupts (1), Owner, Transport);
       pragma Assert
         (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
+      if Transport = TLS_Transport then
+         if Item.TLS_Session = null then
+            raise Program_Error with "TLS transport has no provider session";
+         end if;
+         TLS_Driver.Send_All
+           (Item.TLS_Session.all, Data, Check'Access, Await'Access);
+         return;
+      elsif Transport /= Plain_Transport then
+         raise Operation_Cancelled;
+      end if;
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);

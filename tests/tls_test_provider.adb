@@ -187,6 +187,23 @@ package body TLS_Test_Provider is
       Item.Fail_Finalize := True;
    end Set_Finalize_Failure;
 
+   procedure Set_Available (Item : in out Provider; Value : Boolean) is
+   begin
+      Item.Available := Value;
+   end Set_Available;
+
+   procedure Set_Create_Behavior
+     (Item : in out Provider; Behavior : Create_Behavior) is
+   begin
+      Item.Create_Mode := Behavior;
+   end Set_Create_Behavior;
+
+   procedure Set_Create_Delay
+     (Item : in out Provider; Delay_For : Duration) is
+   begin
+      Item.Create_Delay := Delay_For;
+   end Set_Create_Delay;
+
    procedure Set_Block_Handshake (Item : in out Provider) is
    begin
       Item.Block_Handshake := True;
@@ -285,9 +302,8 @@ package body TLS_Test_Provider is
    end Name;
 
    overriding function Is_Available (Item : Provider) return Boolean is
-      pragma Unreferenced (Item);
    begin
-      return True;
+      return Item.Available;
    end Is_Available;
 
    overriding function Create_Session
@@ -299,6 +315,17 @@ package body TLS_Test_Provider is
       pragma Unreferenced (Side, Server_Name);
       Result : TLS.Session_Access;
    begin
+      if Item.Create_Delay > 0.0 then
+         delay Item.Create_Delay;
+      end if;
+      case Item.Create_Mode is
+         when Create_Normally =>
+            null;
+         when Raise_On_Create =>
+            raise TLS.TLS_Error with "injected session creation failure";
+         when Return_Null =>
+            return null;
+      end case;
       Result := new Test_Session'
         (TLS.Session with
          FD            => FD,

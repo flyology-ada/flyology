@@ -9,6 +9,8 @@ with Flyology.Fairness;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.TLS;
 with Flyology.IO;
+with Flyology.IO.Connections;
+with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
 with Flyology.IO.TLS.OpenSSL;
@@ -18,6 +20,8 @@ with TLS_Test_Provider;
 
 procedure TLS_Smoke is
    package HTTP_Server renames Flyology.HTTP.Server;
+   package Connections renames Flyology.IO.Connections;
+   package Connection_TLS renames Flyology.IO.Connections.TLS;
    package TLS renames Flyology.IO.TLS;
    package TLS_Testing renames Flyology.IO.TLS.Testing;
    package OpenSSL renames Flyology.IO.TLS.OpenSSL;
@@ -154,6 +158,200 @@ procedure TLS_Smoke is
       TLS.Close (Client);
       TLS.Close (Server);
    end Run_Exchange;
+
+   procedure Run_Connection_Upgrade_Exchange
+     (Model : Flyology.Execution_Model)
+   is
+      Manager       : aliased Connections.Server (Capacity => 1);
+      Client_Socket : Sockets.Socket_Type;
+      Server_Socket : Sockets.Socket_Type;
+      Client        : TLS.Connection;
+      Server        : Connections.Connection;
+      Result        : Outcome;
+      SSL_Request   : constant Stream_Element_Array :=
+        [0, 0, 0, 8, 4, 210, 22, 47];
+      Accepted      : constant Stream_Element_Array :=
+        [1 => Stream_Element (Character'Pos ('S'))];
+      Payload       : constant Stream_Element_Array := [1, 3, 5, 7, 9];
+      Reply         : constant Stream_Element_Array := [2, 4, 6, 8];
+   begin
+      Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
+      Connections.Take (Manager, Server_Socket, Server);
+      pragma Assert (not Sockets.Is_Open (Server_Socket));
+      pragma Assert (Manager.Active = 1);
+
+      declare
+         task Client_Task is
+            pragma Task_Info (Model);
+         end Client_Task;
+
+         task Server_Task is
+            pragma Task_Info (Model);
+         end Server_Task;
+
+         task body Client_Task is
+            Response : Stream_Element_Array (Accepted'Range);
+            Received : Stream_Element_Array (Reply'Range);
+            Passed   : Boolean := False;
+         begin
+            Sockets.Send_All
+              (Client_Socket, SSL_Request, Timeout => 5.0);
+            Sockets.Receive_Exactly
+              (Client_Socket, Response, Timeout => 5.0);
+            if Response /= Accepted then
+               raise Program_Error with
+                 "TLS upgrade acceptance response mismatch";
+            end if;
+            TLS.Take
+              (Client_Backend,
+               Client_Socket,
+               TLS.Client,
+               "localhost",
+               Client);
+            TLS.Handshake (Client, Timeout => 5.0);
+            TLS.Send_All (Client, Payload, Timeout => 5.0);
+            TLS.Receive_Exactly (Client, Received, Timeout => 5.0);
+            Passed := Received = Reply;
+            TLS.Shutdown (Client, Timeout => 5.0);
+            Result.Report (Passed);
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Client_Task;
+
+         task body Server_Task is
+            Request  : Stream_Element_Array (SSL_Request'Range);
+            Received : Stream_Element_Array (Payload'Range);
+            Passed   : Boolean := False;
+         begin
+            Server.Receive_Exactly (Request, Timeout => 5.0);
+            if Request /= SSL_Request then
+               raise Program_Error with "TLS upgrade request mismatch";
+            end if;
+            Server.Send_All (Accepted, Timeout => 5.0);
+            Connection_TLS.Upgrade
+              (Server,
+               Server_Backend,
+               TLS.Server,
+               "",
+               Timeout => 5.0);
+            Server.Receive_Exactly (Received, Timeout => 5.0);
+            Passed := Received = Payload;
+            Server.Send_All (Reply, Timeout => 5.0);
+            Connection_TLS.Shutdown (Server, Timeout => 5.0);
+            Result.Report (Passed);
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Server_Task;
+      begin
+         Result.Wait;
+      end;
+
+      pragma Assert (Result.Passed);
+      TLS.Close (Client);
+      Connections.Close (Server);
+      pragma Assert (Manager.Active = 0);
+   end Run_Connection_Upgrade_Exchange;
+
+   procedure Run_Client_Connection_Upgrade_Exchange
+     (Model : Flyology.Execution_Model)
+   is
+      Manager       : aliased Connections.Server (Capacity => 1);
+      Client_Socket : Sockets.Socket_Type;
+      Server_Socket : Sockets.Socket_Type;
+      Client        : Connections.Connection;
+      Server        : TLS.Connection;
+      Result        : Outcome;
+      SSL_Request   : constant Stream_Element_Array :=
+        [0, 0, 0, 8, 4, 210, 22, 47];
+      Accepted      : constant Stream_Element_Array :=
+        [1 => Stream_Element (Character'Pos ('S'))];
+      Payload       : constant Stream_Element_Array := [11, 13, 17, 19];
+      Reply         : constant Stream_Element_Array := [23, 29, 31];
+   begin
+      Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
+      Connections.Take (Manager, Client_Socket, Client);
+      pragma Assert (not Sockets.Is_Open (Client_Socket));
+      pragma Assert (Manager.Active = 1);
+
+      declare
+         task Client_Task is
+            pragma Task_Info (Model);
+         end Client_Task;
+
+         task Server_Task is
+            pragma Task_Info (Model);
+         end Server_Task;
+
+         task body Client_Task is
+            Response : Stream_Element_Array (Accepted'Range);
+            Received : Stream_Element_Array (Reply'Range);
+            Passed   : Boolean := False;
+         begin
+            Client.Send_All (SSL_Request, Timeout => 5.0);
+            Client.Receive_Exactly (Response, Timeout => 5.0);
+            if Response /= Accepted then
+               raise Program_Error with
+                 "client TLS upgrade acceptance response mismatch";
+            end if;
+            Connection_TLS.Upgrade
+              (Client,
+               Client_Backend,
+               TLS.Client,
+               "localhost",
+               Timeout => 5.0);
+            Client.Send_All (Payload, Timeout => 5.0);
+            Client.Receive_Exactly (Received, Timeout => 5.0);
+            Passed := Received = Reply and then Manager.Active = 1;
+            Connection_TLS.Shutdown (Client, Timeout => 5.0);
+            Result.Report (Passed);
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Client_Task;
+
+         task body Server_Task is
+            Request  : Stream_Element_Array (SSL_Request'Range);
+            Received : Stream_Element_Array (Payload'Range);
+            Passed   : Boolean := False;
+         begin
+            Sockets.Receive_Exactly
+              (Server_Socket, Request, Timeout => 5.0);
+            if Request /= SSL_Request then
+               raise Program_Error with "client TLS upgrade request mismatch";
+            end if;
+            Sockets.Send_All (Server_Socket, Accepted, Timeout => 5.0);
+            TLS.Take
+              (Server_Backend, Server_Socket, TLS.Server, "", Server);
+            TLS.Handshake (Server, Timeout => 5.0);
+            TLS.Receive_Exactly (Server, Received, Timeout => 5.0);
+            Passed := Received = Payload;
+            TLS.Send_All (Server, Reply, Timeout => 5.0);
+            TLS.Shutdown (Server, Timeout => 5.0);
+            Result.Report (Passed);
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Server_Task;
+      begin
+         Result.Wait;
+      end;
+
+      pragma Assert (Result.Passed);
+      pragma Assert (Manager.Active = 1);
+      TLS.Close (Server);
+      Connections.Close (Client);
+      pragma Assert (Manager.Active = 0);
+   end Run_Client_Connection_Upgrade_Exchange;
 
    procedure Run_HTTP_Exchange (Model : Flyology.Execution_Model) is
       CRLF : constant String := Character'Val (13) & Character'Val (10);
@@ -1523,6 +1721,10 @@ begin
 
    Run_Exchange (Flyology.Lightweight_Task);
    Run_Exchange (Flyology.Native_Task);
+   Run_Connection_Upgrade_Exchange (Flyology.Lightweight_Task);
+   Run_Connection_Upgrade_Exchange (Flyology.Native_Task);
+   Run_Client_Connection_Upgrade_Exchange (Flyology.Lightweight_Task);
+   Run_Client_Connection_Upgrade_Exchange (Flyology.Native_Task);
    Run_HTTP_Exchange (Flyology.Lightweight_Task);
    Run_HTTP_Exchange (Flyology.Native_Task);
    Run_Timeout (Flyology.Lightweight_Task);

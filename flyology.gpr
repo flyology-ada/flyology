@@ -114,6 +114,7 @@ project Flyology is
             "flyology-http-server-tls.ads",
             "flyology-io.ads",
             "flyology-io-connections.ads",
+            "flyology-io-connections-tls.ads",
             "flyology-io-dns.ads",
             "flyology-io-dns-testing.ads",
             "flyology-io-files.ads",

@@ -616,6 +616,8 @@ Flyology exposes synchronous operations in:
   send operations.
 - `Flyology.IO.Connections`: bounded admission, single-owner sockets,
   cancellation tokens, and descriptor-generation-safe close.
+- `Flyology.IO.Connections.TLS`: ownership-preserving TLS replacement for an
+  admitted plaintext connection.
 - `Flyology.IO.TLS`: provider-neutral nonblocking TLS sessions with owned
   sockets, shared deadlines, cancellation, and orderly shutdown.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
@@ -814,6 +816,42 @@ Manager.Accept_Connection (Listener, Owned, Peer);
 Owned.Receive_Exactly (Request);
 Owned.Send_All (Response);
 ```
+
+Protocols that negotiate encryption after admission keep this same owner. For
+example, a PostgreSQL-style handler can inspect its bounded startup packet,
+decline TLS and continue with `Owned`, or send the one-byte acceptance and
+replace the transport in place:
+
+```ada
+Owned.Send_All ([1 => Character'Pos ('S')]);
+Flyology.IO.Connections.TLS.Upgrade
+  (Owned, OpenSSL, Flyology.IO.TLS.Server, "", Timeout => 5.0);
+Owned.Receive_Exactly (Encrypted_Request);
+```
+
+`Upgrade` does not release or expose the raw socket. The `Connection` remains
+the sole closing owner and retains the same admission permit, manager shutdown
+source, and structured-handler lifetime. The operation takes the connection's
+exclusive lease, advances its descriptor generation so already-queued
+plaintext operations are cancelled, creates a provider session over the same
+descriptor, and performs the handshake under one deadline. Later `Receive`,
+`Receive_Exactly`, and `Send_All` calls use TLS transparently.
+
+Plaintext fallback is a protocol decision made before calling `Upgrade`. Once
+the transport enters its upgrade state, provider setup failure, handshake
+failure, timeout, cancellation, manager shutdown, concurrent close, or task
+abort closes the connection and releases its permit; it never falls back to
+plaintext after sending an acceptance response. Repeating `Upgrade` is an
+error. `Flyology.IO.Connections.TLS.Shutdown` exchanges `close_notify` without
+releasing ownership, and ordinary `Connections.Close` remains the terminal,
+idempotent cleanup. Structured-server handlers need no new transport type: the
+connection they already receive supports the child-package operation in both
+lightweight and native handler lanes.
+
+The standalone `Flyology.IO.TLS.Connection` API remains available for sockets
+that start as TLS before connection admission. It retains its existing source
+and ownership behavior; it is not a route for extracting a socket from an
+admitted `Connections.Connection`.
 
 The limited owner cannot be copied and closes its socket while releasing the
 admission permit during explicit `Close`, normal scope exit, or exception

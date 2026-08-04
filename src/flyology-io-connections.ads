@@ -4,6 +4,7 @@ with Flyology.Capacity;
 with Flyology.Cancellation;
 with Flyology.IO.Sockets;
 with Flyology.Wake_Sources;
+private with Flyology.IO.TLS;
 
 --  Adds ownership, admission control, and cancellation to socket connections.
 --
@@ -33,7 +34,9 @@ package Flyology.IO.Connections is
    --  while multiple callers may be registered or queued for it. Close is
    --  idempotent and may run concurrently with all of them: it cancels and
    --  drains the active operation and every registered or queued operation
-   --  before closing the socket. Server must outlive the Connection.
+   --  before closing the socket. The TLS child may replace the plaintext
+   --  transport in place without changing this ownership. Server must outlive
+   --  the Connection.
    type Connection is new Ada.Finalization.Limited_Controlled with private;
 
    --  Transfer Socket and one Manager permit to Item. On success Socket is
@@ -86,6 +89,9 @@ package Flyology.IO.Connections is
    --  @param Item Connection whose ownership is released
    --  @exception Flyology.IO.Sockets.Socket_Error The underlying close reports
    --     failure
+   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider session
+   --     violates its non-raising finalization contract; cleanup still
+   --     completes
    procedure Close (Item : in out Connection);
    --  Query the protected ownership state.
    --  @param Item Connection to inspect
@@ -105,6 +111,8 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The deadline expires
    --  @exception Device_Error Readiness polling fails
+   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider fails or
+   --     returns invalid progress
    --  @exception Flyology.IO.Sockets.Socket_Error Receive or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
@@ -128,6 +136,8 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or the peer closes early
+   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider fails, closes
+   --     early, or returns invalid progress
    --  @exception Flyology.IO.Sockets.Socket_Error Receive or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
@@ -150,6 +160,8 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or no forward progress is made
+   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider or peer fails,
+   --     or the provider returns invalid progress
    --  @exception Flyology.IO.Sockets.Socket_Error Socket send or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
@@ -174,6 +186,11 @@ private
    --  Registered, and both that count and the exclusive lease while Acquired.
    type Operation_State is (Unregistered, Registered, Acquired);
 
+   --  Transport replacement occurs under the descriptor operation lease. A
+   --  connection never exposes the intermediate state to application I/O.
+   type Transport_Kind is
+     (No_Transport, Plain_Transport, TLS_Upgrading, TLS_Transport);
+
    protected type Descriptor_Controller is
       --  Publish descriptor, socket, and admission ownership atomically.
       procedure Adopt
@@ -196,11 +213,20 @@ private
          FD           : out Flyology.IO.Descriptor;
          Close_Source : out Flyology.IO.Descriptor;
          Socket       : in out Flyology.IO.Sockets.Socket_Type;
-         Owner        : out Server_Access);
+         Owner        : out Server_Access;
+         Transport    : out Transport_Kind);
       --  Withdraw one operation whose lease acquisition did not complete.
       procedure Abandon_Operation (Generation : Descriptor_Generation);
       --  Reject further chunks after Close has marked this leased generation.
       procedure Check_Operation (Generation : Descriptor_Generation);
+      --  Replace the plaintext operation generation while retaining the same
+      --  descriptor and admission owner. Older queued operations are rejected.
+      --  Arm cleanup in the same protected action so abort cannot expose an
+      --  upgrading transport without a terminal cleanup obligation.
+      procedure Begin_TLS_Upgrade
+        (Generation : in out Descriptor_Generation;
+         Cleanup_Armed : not null access Boolean);
+      procedure Finish_TLS_Upgrade (Generation : Descriptor_Generation);
       procedure Release
         (Generation : Descriptor_Generation;
          Socket     : in out Flyology.IO.Sockets.Socket_Type);
@@ -214,13 +240,11 @@ private
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
       function Is_Open_State return Boolean;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      --  Test-only observations are protected operations so tests never
-      --  depend on the controller's private memory layout.
-      function Test_Waiting_Operations return Natural;
-      function Test_Operation_Active return Boolean;
-      function Test_Close_Requested return Boolean;
-#end if;
+      --  Private protected snapshots avoid exposing the controller's memory
+      --  layout to diagnostic descendants.
+      function Waiting_Count return Natural;
+      function Lease_Active return Boolean;
+      function Close_Pending return Boolean;
    private
       Current_FD         : Flyology.IO.Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;
@@ -234,11 +258,40 @@ private
       Close_Wake         : Flyology.Wake_Sources.Source;
       Current_Socket     : Flyology.IO.Sockets.Socket_Type;
       Current_Owner      : Server_Access := null;
+      Current_Transport  : Transport_Kind := No_Transport;
    end Descriptor_Controller;
 
    type Connection is new Ada.Finalization.Limited_Controlled with record
-      Controller : Descriptor_Controller;
+      Controller            : Descriptor_Controller;
+      TLS_Session           : Flyology.IO.TLS.Session_Access := null;
+      TLS_Shutdown_Complete : Boolean := False;
    end record;
+
+   --  @exclude
+   --  Private implementation entry point exported only through the TLS child;
+   --  the connection remains the socket and admission owner.
+   --  @param Item Admitted connection being upgraded
+   --  @param Backend Provider used to create the session
+   --  @param Side Client or server handshake role
+   --  @param Server_Name Client verification name or empty server name
+   --  @param Timeout Shared operation deadline in seconds
+   --  @param Token Optional cancellation source
+   procedure Upgrade_TLS
+     (Item        : in out Connection;
+      Backend     : in out Flyology.IO.TLS.Provider'Class;
+      Side        : Flyology.IO.TLS.Role;
+      Server_Name : String;
+      Timeout     : Duration;
+      Token       : access Cancellation_Token);
+
+   --  @exclude
+   --  @param Item Upgraded admitted connection being shut down
+   --  @param Timeout Shared operation deadline in seconds
+   --  @param Token Optional cancellation source
+   procedure Shutdown_TLS
+     (Item    : in out Connection;
+      Timeout : Duration;
+      Token   : access Cancellation_Token);
 
    --  Close Item without propagating cleanup errors.
    --  @param Item Connection being finalized

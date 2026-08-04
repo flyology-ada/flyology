@@ -196,6 +196,7 @@ fi
 ordinary_mains='cancellation_wake_smoke
 connection_lifecycle_smoke
 connection_state_model
+connection_tls_upgrade_smoke
 concurrency_primitives_smoke
 context_abi_matrix
 descriptor_ownership_smoke
@@ -231,6 +232,7 @@ task_scopes_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
 structured_server_smoke
+structured_server_tls_smoke
 thread_affinity_smoke
 timer_heap_smoke
 tls_smoke
@@ -248,6 +250,7 @@ fault_mains='accept_transient_smoke
 structured_server_reuse_smoke'
 
 connection_hook_mains='connection_state_model
+connection_tls_upgrade_smoke
 descriptor_ownership_smoke'
 
 worker_pool_hook_mains=concurrency_primitives_smoke
@@ -255,7 +258,7 @@ worker_pool_hook_mains=concurrency_primitives_smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_state_model|descriptor_ownership_smoke|concurrency_primitives_smoke)
+    connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -323,7 +326,7 @@ unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
   case "$test_main" in
-    connection_state_model|descriptor_ownership_smoke)
+    connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke)
       current_test_bin=$connection_test_bin
       ;;
     concurrency_primitives_smoke)
@@ -346,7 +349,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
       ;;
-    connection_state_model)
+    connection_state_model|connection_tls_upgrade_smoke)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
       ;;

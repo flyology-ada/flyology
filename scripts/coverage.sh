@@ -83,6 +83,7 @@ printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
 ordinary_mains='cancellation_wake_smoke
 connection_lifecycle_smoke
 connection_state_model
+connection_tls_upgrade_smoke
 concurrency_primitives_smoke
 descriptor_ownership_smoke
 dns_smoke
@@ -115,6 +116,7 @@ suspension_object_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
 structured_server_smoke
+structured_server_tls_smoke
 thread_affinity_smoke
 timer_heap_smoke
 tls_smoke

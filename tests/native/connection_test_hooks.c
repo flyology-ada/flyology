@@ -1,6 +1,6 @@
 #include <stdatomic.h>
 
-enum { barrier_count = 6 };
+enum { barrier_count = 8 };
 
 static _Atomic int armed[barrier_count];
 static _Atomic int reached[barrier_count];
@@ -32,6 +32,19 @@ int flyology_test_connection_barrier_arrive(int point)
 {
    if (!valid_point(point) ||
        atomic_load_explicit(&armed[point], memory_order_seq_cst) == 0)
+      return 0;
+   atomic_store_explicit(&reached[point], 1, memory_order_seq_cst);
+   return 1;
+}
+
+int flyology_test_connection_barrier_arrive_once(int point)
+{
+   int expected = 1;
+
+   if (!valid_point(point) ||
+       !atomic_compare_exchange_strong_explicit(
+          &armed[point], &expected, 0,
+          memory_order_seq_cst, memory_order_seq_cst))
       return 0;
    atomic_store_explicit(&reached[point], 1, memory_order_seq_cst);
    return 1;

@@ -36,6 +36,7 @@ package TLS_Test_Provider is
      (Return_Data, Orderly_EOF, Invalid_Lower, Invalid_Upper,
       Complete_Without_Receive_Progress);
    type Send_Behavior is (Return_Progress, Complete_Without_Send_Progress);
+   type Create_Behavior is (Create_Normally, Raise_On_Create, Return_Null);
    type Peer_Close_Point is
      (No_Peer_Close, Handshake_Peer_Close, Send_Peer_Close,
       Shutdown_Peer_Close);
@@ -43,6 +44,12 @@ package TLS_Test_Provider is
    type Provider is new Flyology.IO.TLS.Provider with private;
 
    procedure Set_Finalize_Failure (Item : in out Provider);
+   procedure Set_Available (Item : in out Provider; Value : Boolean);
+   procedure Set_Create_Behavior
+     (Item : in out Provider; Behavior : Create_Behavior);
+   procedure Set_Create_Delay
+     (Item : in out Provider; Delay_For : Duration)
+   with Pre => Delay_For >= 0.0;
    procedure Set_Block_Handshake (Item : in out Provider);
    procedure Wait_Handshake_Blocked;
    procedure Release_Handshake;
@@ -85,6 +92,9 @@ private
 
    type Provider is new Flyology.IO.TLS.Provider with record
       Fail_Finalize : Boolean := False;
+      Available     : Boolean := True;
+      Create_Mode   : Create_Behavior := Create_Normally;
+      Create_Delay  : Duration := 0.0;
       Block_Handshake : Boolean := False;
       Behavior      : Receive_Behavior := Return_Data;
       Send_Mode     : Send_Behavior := Return_Progress;

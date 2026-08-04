@@ -24,13 +24,13 @@ package body Flyology.IO.Connections.Testing is
           External_Name => "flyology_test_connection_barrier_release";
 
    function Waiting_Operations (Item : Connection) return Natural is
-     (Item.Controller.Test_Waiting_Operations);
+     (Item.Controller.Waiting_Count);
 
    function Operation_Active (Item : Connection) return Boolean is
-     (Item.Controller.Test_Operation_Active);
+     (Item.Controller.Lease_Active);
 
    function Close_Requested (Item : Connection) return Boolean is
-     (Item.Controller.Test_Close_Requested);
+     (Item.Controller.Close_Pending);
 
    procedure Reset_Barriers is
    begin
