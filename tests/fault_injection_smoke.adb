@@ -7,9 +7,12 @@ with Ada.Unchecked_Deallocation;
 with Fault_Control;
 with Flyology.IO.Sockets;
 with Flyology;
+with Flyology.Dormancy;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Files;
+with Flyology.Observability;
+with Interfaces;
 with Interfaces.C;
 
 procedure Fault_Injection_Smoke is
@@ -18,11 +21,14 @@ procedure Fault_Injection_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Fault_Control.File_Cancel_Backend;
    use type Fault_Control.Point;
+   use type Interfaces.Unsigned_64;
    use type Interfaces.C.int;
 
+   package Dormancy renames Flyology.Dormancy;
    package IO renames Flyology.IO;
    package Connections renames Flyology.IO.Connections;
    package Files renames Flyology.IO.Files;
+   package Observation renames Flyology.Observability;
 
    function Selected_Linux_Backend return Interfaces.C.int;
    pragma Import
@@ -369,6 +375,100 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_File_Saturation;
+
+   procedure Test_File_Dormancy_Exclusion is
+      Path : constant String := "/tmp/flyology-file-dormancy.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Finished : Boolean := False with Atomic;
+      Passed   : Boolean := False with Atomic;
+      Observed : Boolean := False;
+      Sample   : Observation.Group_Snapshot;
+
+      task type Writer with CPU => 1 is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 17];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Dormancy.Set_Policy
+           (Dormancy.Reclaimable, Minimum_Wait => 0.0);
+         Files.Write_At (File, 0, Data, Last);
+         Passed := Last = Data'Last;
+         Finished := True;
+      exception
+         when others =>
+            Finished := True;
+      end Writer;
+
+      type Writer_Access is access Writer;
+      procedure Free_Writer is new Ada.Unchecked_Deallocation
+        (Writer, Writer_Access);
+      Item : Writer_Access := null;
+
+      procedure Await_Item is
+         Limit : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Item /= null and then not Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "file wait did not resume";
+            end if;
+            delay 0.001;
+         end loop;
+      end Await_Item;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 1_000_000_000);
+      Item := new Writer;
+
+      for Attempt in 1 .. 2_000 loop
+         Observed :=
+           Fault_Control.Calls (Fault_Control.File_Submission_Full) > 0
+           and then Observation.Snapshot (1, Sample)
+           and then Sample.File_Waits = 1
+           and then Sample.Pending_File_Submissions = 1;
+         exit when Observed;
+         delay 0.001;
+      end loop;
+      if not Observed then
+         raise Program_Error with "pending file wait was not observed";
+      elsif Sample.Dormancy_Candidates /= 0
+        or else Sample.Cold_Stacks /= 0
+        or else Sample.Cold_Advice_Attempts /= 0
+      then
+         raise Program_Error with
+           "file wait was treated as a dormancy candidate";
+      end if;
+
+      Fault_Control.Reset;
+      Await_Item;
+      if not Finished or else not Passed then
+         raise Program_Error with "resumed file operation failed";
+      end if;
+      Free_Writer (Item);
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Await_Item;
+         if Item /= null then
+            Free_Writer (Item);
+         end if;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Dormancy_Exclusion;
 
    procedure Test_Uring_CQ_Backpressure is
       Path : constant String := "/tmp/flyology-uring-capacity.data";
@@ -1503,6 +1603,8 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "file-dormancy-exclusion" then
+      Test_File_Dormancy_Exclusion;
    elsif Case_Name = "file-uring-cq-backpressure" then
       Test_Uring_CQ_Backpressure;
    elsif Case_Name = "file-uring-probe-fallback" then

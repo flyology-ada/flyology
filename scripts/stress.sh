@@ -70,7 +70,7 @@ if [ "$run_faults" = 1 ]; then
 
   for fault_case in \
     fiber-allocation stack-map stack-protect stack-discard group-startup \
-    watch-error eintr file-saturation \
+    watch-error eintr file-saturation file-dormancy-exclusion \
     file-uring-cq-backpressure file-uring-probe-fallback \
     file-uring-post-setup-fallback \
     file-cancellation file-abort file-pre-park-abort file-backend-cancel \

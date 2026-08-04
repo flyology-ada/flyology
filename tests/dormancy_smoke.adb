@@ -1,5 +1,7 @@
 with Flyology;
 with Flyology.Dormancy;
+with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.Observability;
 with Interfaces;
 
@@ -9,6 +11,100 @@ procedure Dormancy_Smoke is
 
    use type Dormancy.Policy;
    use type Interfaces.Unsigned_64;
+
+   procedure Check_Minimum_Wait is
+      Started  : Boolean := False with Atomic;
+      Observed : Boolean := False;
+      Current  : Observation.Group_Snapshot;
+
+      task Worker with CPU => 1 is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Worker;
+
+      task body Worker is
+      begin
+         Dormancy.Set_Policy
+           (Dormancy.Reclaimable, Minimum_Wait => 1.0);
+         Started := True;
+         delay 0.2;
+      end Worker;
+   begin
+      for Attempt in 1 .. 2_000 loop
+         Observed := Started
+           and then Observation.Snapshot (1, Current)
+           and then Current.Timer_Waits = 1
+           and then Current.Dormancy_Candidates = 1;
+         exit when Observed;
+         delay 0.001;
+      end loop;
+      if not Observed then
+         raise Program_Error with "minimum-wait timer was not observed";
+      elsif Current.Cold_Stacks /= 0
+        or else Current.Cold_Advice_Attempts /= 0
+      then
+         raise Program_Error with
+           "stack was reclaimed below the configured minimum wait";
+      end if;
+   end Check_Minimum_Wait;
+
+   procedure Check_Descriptor_Exclusion is
+      Reader   : Flyology.IO.Sockets.Socket_Type;
+      Writer   : Flyology.IO.Sockets.Socket_Type;
+      Started  : Boolean := False with Atomic;
+      Passed   : Boolean := False with Atomic;
+      Observed : Boolean := False;
+      Current  : Observation.Group_Snapshot;
+   begin
+      Flyology.IO.Sockets.Create_Socket_Pair (Reader, Writer);
+      declare
+         task Worker with CPU => 1 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Worker;
+
+         task body Worker is
+         begin
+            Dormancy.Set_Policy
+              (Dormancy.Reclaimable, Minimum_Wait => 0.0);
+            Started := True;
+            Passed := Flyology.IO.Wait
+              (Flyology.IO.Sockets.Native_Descriptor (Reader),
+               Flyology.IO.For_Read,
+               Timeout => 1.0);
+         end Worker;
+      begin
+         for Attempt in 1 .. 2_000 loop
+            Observed := Started
+              and then Observation.Snapshot (1, Current)
+              and then Current.Descriptor_Waits = 1;
+            exit when Observed;
+            delay 0.001;
+         end loop;
+         if not Observed then
+            raise Program_Error with "descriptor wait was not observed";
+         elsif Current.Dormancy_Candidates /= 0
+           or else Current.Cold_Stacks /= 0
+           or else Current.Cold_Advice_Attempts /= 0
+         then
+            raise Program_Error with
+              "descriptor wait was treated as a dormancy candidate";
+         end if;
+         Flyology.IO.Sockets.Send_All (Writer, [1 => 42], Timeout => 1.0);
+      end;
+      if not Passed then
+         raise Program_Error with "descriptor wait did not resume";
+      end if;
+      Flyology.IO.Sockets.Close_Socket (Reader);
+      Flyology.IO.Sockets.Close_Socket (Writer);
+   exception
+      when others =>
+         if Flyology.IO.Sockets.Is_Open (Reader) then
+            Flyology.IO.Sockets.Close_Socket (Reader);
+         end if;
+         if Flyology.IO.Sockets.Is_Open (Writer) then
+            Flyology.IO.Sockets.Close_Socket (Writer);
+         end if;
+         raise;
+   end Check_Descriptor_Exclusion;
 
    protected Control is
       procedure Started;
@@ -70,6 +166,9 @@ begin
    if not Native_Rejected then
       raise Program_Error with "native page-out policy was accepted";
    end if;
+
+   Check_Minimum_Wait;
+   Check_Descriptor_Exclusion;
 
    declare
       task Worker with CPU => 1 is
