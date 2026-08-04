@@ -1316,7 +1316,8 @@ resource samples, and includes a pinned Linux Docker build:
 ```
 
 A dated [preliminary development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
-records three three-second Linux/AArch64 Docker trials from commit `48fdb23`.
+records three three-second Linux/AArch64 Docker trials on an Apple M3 Max
+MacBook Pro with 48 GB of memory, from commit `48fdb23`.
 At concurrency 32, the median results were:
 
 | Tier | Flyology lightweight | AWS-based peer | EWS-based peer |

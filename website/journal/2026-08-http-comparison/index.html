@@ -51,7 +51,9 @@
           <dl class="article-meta">
             <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
             <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/48fdb2365977e6f30a8db3cfb59df886367c8e66/showcases/http-comparison">48fdb23</a></dd></div>
-            <div><dt>Platform</dt><dd>Linux / AArch64 / Docker</dd></div>
+            <div><dt>Container</dt><dd>Linux / AArch64 / Docker</dd></div>
+            <div><dt>Host</dt><dd>MacBook Pro (Mac15,9)</dd></div>
+            <div><dt>Hardware</dt><dd>Apple M3 Max / 16 cores / 48 GB</dd></div>
             <div><dt>Profile</dt><dd>3 trials × 3 seconds</dd></div>
           </dl>
         </div>
@@ -75,13 +77,15 @@
           <section id="boundary">
             <div class="snapshot-boundary">
               <strong>Development snapshot</strong>
-              <p>This is a short loopback campaign inside Docker under OrbStack. It is useful evidence about these exact fixtures on this host, not a general ranking of Ada web servers.</p>
+              <p>This is a short loopback campaign inside Docker under OrbStack on an Apple M3 Max MacBook Pro. It is useful evidence about these exact fixtures on this host, not a general ranking of Ada web servers.</p>
             </div>
-            <p>All measured requests completed with HTTP 200 and no transport errors. The runner checked the status, content type, and exact response bytes before each measurement. Server and client processes used separate CPU sets inside a 16-CPU container.</p>
+            <p>The physical host was a MacBook Pro (Mac15,9) with an Apple M3 Max, 16 CPU cores (12 performance and 4 efficiency), and 48 GB of memory. The container exposed all 16 cores; server and client processes used separate CPU sets.</p>
+            <p>All measured requests completed with HTTP 200 and no transport errors. The runner checked the status, content type, and exact response bytes before each measurement.</p>
             <div class="data-links" aria-label="Benchmark data downloads">
               <a href="data/summary.csv" download>Throughput and latency CSV</a>
               <a href="data/resources.csv" download>Resource CSV</a>
               <a href="data/metadata.json" download>Run metadata</a>
+              <a href="data/host.json" download>Physical host metadata</a>
               <a href="data/raw-results.tar.gz" download>Complete raw result bundle</a>
             </div>
           </section>
@@ -93,6 +97,7 @@
             <p>The application tier includes framework dispatch. Flyology uses its router and exchange API. The two competitors use one identical ServletAda servlet over AWS and EWS. Plain engines and application containers never share a result table.</p>
             <dl class="decision-list">
               <div class="decision-row"><dt>Transport</dt><dd>HTTP/1.1 cleartext over loopback with persistent connections.</dd></div>
+              <div class="decision-row"><dt>Physical host</dt><dd>MacBook Pro (Mac15,9), Apple M3 Max, 16 cores (12 performance and 4 efficiency), and 48 GB of memory.</dd></div>
               <div class="decision-row"><dt>Build</dt><dd>Release profiles with Flyology at <code>-O3</code>; GNAT 15.3.1 and gprbuild 25.0.1.</dd></div>
               <div class="decision-row"><dt>Versions</dt><dd>AWS 25.2.0, EWS 1.11.0, ServletAda 1.8.2, and the backend versions recorded in metadata.</dd></div>
               <div class="decision-row"><dt>Campaign</dt><dd>Three trials, one-second warmups, three-second measurements, rotating server order, and concurrency 1, 8, and 32.</dd></div>

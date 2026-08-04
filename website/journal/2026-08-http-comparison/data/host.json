@@ -1,0 +1,12 @@
+{
+  "benchmark_container": "OrbStack Linux/AArch64 Docker",
+  "captured_at": "2026-08-04",
+  "chip": "Apple M3 Max",
+  "efficiency_cores": 4,
+  "memory_gb": 48,
+  "model_identifier": "Mac15,9",
+  "model_name": "MacBook Pro",
+  "performance_cores": 12,
+  "source": "system_profiler SPHardwareDataType",
+  "total_cores": 16
+}
