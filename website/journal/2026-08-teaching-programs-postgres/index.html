@@ -50,7 +50,7 @@
           <p class="article-summary">A routine need for a database client grew into a bidirectional protocol library, and a way for application-defined programs to answer through familiar Postgres tools.</p>
           <dl class="article-meta">
             <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
-            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93">eb6b685</a></dd></div>
+            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology-postgres/tree/065482ad529f1cfc9ad844e889f9a743111b2001">065482a</a></dd></div>
             <div><dt>Interop</dt><dd>Postgres 18.4 + psql</dd></div>
             <div><dt>Status</dt><dd>Development baseline</dd></div>
           </dl>
@@ -215,7 +215,7 @@ end Serve_Application;</code></pre>
           <section id="pgish">
             <span class="step-label">EXAMPLE</span>
             <h2 class="wide-heading"><code>pgish</code> answers in Postgres.</h2>
-            <p><a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93/examples/pgish"><code>pgish</code></a> is a small read-only server built on the production server API. It is deliberately not a database. Its bounded SQL subset exposes virtual tables describing the Flyology server, execution groups, stack pool, live sessions, repository commits, effective settings, selected environment values, and its own catalog.</p>
+            <p><a href="https://github.com/flyology-ada/flyology-postgres/tree/065482ad529f1cfc9ad844e889f9a743111b2001/examples/pgish"><code>pgish</code></a> is a small read-only server built on the production server API. It is deliberately not a database. Its bounded SQL subset exposes virtual tables describing the Flyology server, execution groups, stack pool, live sessions, repository commits, effective settings, selected environment values, and its own catalog.</p>
             <p>After starting it on its loopback default, an ordinary <code>psql</code> session can ask questions such as:</p>
             <figure class="code-panel">
               <figcaption>Querying a Flyology program through psql</figcaption>
@@ -235,7 +235,7 @@ ORDER BY committed_at DESC
 LIMIT 10;</code></pre>
             </figure>
             <p>The example also answers the catalog query shapes used by <code>psql</code>'s <code>\dt</code> and <code>\d</code> commands. That compatibility work is intentionally narrow, but it reveals an important property of a lingua franca: a protocol alone is not the whole conversation. Existing tools bring expectations about metadata, errors, session reuse, and query shapes.</p>
-            <p>The companion <a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93/examples/psqlish"><code>psqlish</code></a> example approaches from the other direction. It builds <code>flyology_psql</code>, a compact interactive client with multiline input, history, catalog commands, bounded table rendering, diagnostics, and recovery after SQL errors. It connects to ordinary Postgres and to <code>pgish</code>. Building both examples exposed compatibility gaps that a packet fixture would not: catalog naming, qualified descriptions, NULL and empty display, end-of-input behavior, and realistic session lifecycle.</p>
+            <p>The companion <a href="https://github.com/flyology-ada/flyology-postgres/tree/065482ad529f1cfc9ad844e889f9a743111b2001/examples/psqlish"><code>psqlish</code></a> example approaches from the other direction. It is a compact interactive client with multiline input, history, catalog commands, bounded table rendering, diagnostics, and recovery after SQL errors. It connects to ordinary Postgres and to <code>pgish</code>. Building both examples exposed compatibility gaps that a packet fixture would not: catalog naming, qualified descriptions, NULL and empty display, end-of-input behavior, and realistic session lifecycle.</p>
           </section>
 
           <section id="boundary">
@@ -256,8 +256,8 @@ LIMIT 10;</code></pre>
             <p>The project started because a client was needed. The more useful result is not merely that Flyology programs can now ask Postgres questions. They can also answer in Postgres, within an explicit, testable slice of the language that existing tools already understand.</p>
             <div class="data-links" aria-label="Project links">
               <a href="https://github.com/flyology-ada/flyology-postgres">Browse Flyology Postgres</a>
-              <a href="https://github.com/flyology-ada/flyology-postgres/blob/eb6b685d7da760bbd211e9922d29a2efda66de93/README.md#current-boundaries">Read the current boundaries</a>
-              <a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93/examples">Explore the examples</a>
+              <a href="https://github.com/flyology-ada/flyology-postgres/blob/065482ad529f1cfc9ad844e889f9a743111b2001/README.md#current-boundaries">Read the current boundaries</a>
+              <a href="https://github.com/flyology-ada/flyology-postgres/tree/065482ad529f1cfc9ad844e889f9a743111b2001/examples">Explore the examples</a>
             </div>
           </section>
         </article>
