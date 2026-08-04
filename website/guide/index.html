@@ -237,6 +237,7 @@ Flyology.Dormancy.Set_Policy (Flyology.Dormancy.Prompt);</code></pre>
 
             <h3>Release task-private allocations as one region</h3>
             <p><code>Flyology.Memory_Regions.Task_Pool</code> is owned by the native or lightweight task that declares it. Each region grows in backing chunks as named-subpool allocators request storage. Explicit release first finalizes controlled objects and then returns every backing chunk; finalizing the pool releases any regions that remain live.</p>
+            <p>A pool object declared in a task body is finalized when the task ends, so its remaining live regions are released automatically. Call <code>Release</code> when an earlier lifetime boundary matters. A dynamically allocated pool is not reclaimed merely because its owning task ends; the application must arrange for the pool to be finalized and deallocated.</p>
             <figure class="code-panel">
               <figcaption>one region for one task phase</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
