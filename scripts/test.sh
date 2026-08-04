@@ -218,6 +218,7 @@ descriptor_ownership_smoke
 dns_smoke
 dns_parser_smoke
 dns_parser_matrix
+dormancy_smoke
 execution_groups_smoke
 exception_traceback_smoke
 fairness_smoke

@@ -19,6 +19,11 @@ package System.Flyology.Contexts is
 
    function Stack_Base (Item : Context_Access) return System.Address;
    function Stack_Size (Item : Context_Access) return Interfaces.C.size_t;
+   function Cold_Advice_Supported return Boolean;
+   function Advise_Stack_Cold
+     (Item : not null Context_Access) return Interfaces.C.int;
+   --  Return 1 when the host accepted nondestructive cold advice, 0 when the
+   --  mechanism is unavailable, and -1 when an available host call failed.
 
    type Stack_Pool_Snapshot is record
       ABI_Version       : Interfaces.C.unsigned := 1;

@@ -1492,6 +1492,34 @@ The earliest deadline becomes the timeout of the group's next `kevent64` or
 for sockets and file completions. There is no timer thread and no per-task OS
 timer object.
 
+### Dormant stack advice
+
+`Flyology.Dormancy` lets a lightweight task opt into best-effort stack
+reclamation without changing its Ada scheduling priority:
+
+```ada
+Flyology.Dormancy.Set_Policy
+  (Flyology.Dormancy.Reclaimable, Minimum_Wait => 5.0);
+delay 60.0;
+```
+
+`Prompt` is the default. A reclaimable task is considered only while waiting
+solely on a timer whose remaining delay is at least `Minimum_Wait`.
+Descriptor waits are excluded because their scheduler links may live on the
+suspended stack, and file waits are excluded because the kernel may own a
+stack-backed buffer. On Linux hosts that expose `MADV_COLD`, Flyology marks the
+complete usable stack mapping cold after switching to the scheduler stack.
+The mapping, contents, guard, and virtual address remain unchanged; the kernel
+may reclaim its resident pages later under pressure. Other hosts retain the
+policy but perform no advice, as reported by `Cold_Advice_Supported`.
+
+Cold advice is not a residency guarantee in either direction. `Prompt` stops
+Flyology from proactively cooling the stack but does not lock it into RAM, and
+an accepted reclaimable hint does not prove that any page was evicted. A wake
+removes the stack's cold classification before it becomes ready. Group
+observability reports current cold stacks and bytes plus cumulative advice
+attempts, acceptances, and failures.
+
 ### Regular files
 
 Regular files are not readiness-oriented: marking a regular descriptor readable
@@ -1587,10 +1615,11 @@ reserved; total and thread-pinned members; members in ready, waiting, running,
 migrating, and finished states;
 active timer, descriptor, interrupt-enabled, and file waits; file submissions queued behind kernel
 backpressure; timer-only dormancy candidates and their usable stack bytes; and
-lifetime dispatch, poll-batch, delivered-event, GNARL-wakeup, and
-migration-in/out counters. A dormancy candidate is waiting only on a timer, so
-its scheduler metadata and any kernel-owned buffer are outside its stack. Wait
-categories overlap: for example, a
+lifetime cold-stack state and advice outcomes; dispatch, poll-batch,
+delivered-event, GNARL-wakeup, and migration-in/out counters. A dormancy
+candidate is waiting only on a timer, so its scheduler metadata and any
+kernel-owned buffer are outside its stack. Wait categories overlap: for
+example, a
 descriptor wait with a deadline contributes to both `Descriptor_Waits` and
 `Timer_Waits`; a connection wait also contributes to `Interrupt_Waits` when it
 has a cancellation or shutdown wake source. `Pending_File_Submissions` is the subset of `File_Waits` not yet

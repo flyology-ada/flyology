@@ -162,6 +162,11 @@ package body System.Flyology.Scheduler is
       Pending_File_Submissions : C.unsigned_long_long;
       Dormancy_Candidates      : C.unsigned_long_long;
       Dormancy_Candidate_Bytes : C.unsigned_long_long;
+      Cold_Stacks              : C.unsigned_long_long;
+      Cold_Stack_Bytes         : C.unsigned_long_long;
+      Cold_Advice_Attempts     : C.unsigned_long_long;
+      Cold_Advice_Accepted     : C.unsigned_long_long;
+      Cold_Advice_Failures     : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
       Poll_Batches             : C.unsigned_long_long;
       Poll_Events              : C.unsigned_long_long;
@@ -210,6 +215,9 @@ package body System.Flyology.Scheduler is
       Reaping     : Boolean := False;
       Can_Migrate : Boolean := True;
       Thread_Pin_Count : Natural := 0;
+      Dormancy_Reclaimable : Boolean := False;
+      Dormancy_Minimum_Wait : Duration := 1.0;
+      Stack_Cold : Boolean := False;
       --  RM D.2.2(9) puts a runnable task at the head of its new priority
       --  queue when it loses inherited priority.  GNARL can report that
       --  transition while this fiber is still running, so remember it until
@@ -272,6 +280,11 @@ package body System.Flyology.Scheduler is
       Wakeups           : C.unsigned_long_long := 0;
       Migrations_In     : C.unsigned_long_long := 0;
       Migrations_Out    : C.unsigned_long_long := 0;
+      Cold_Stacks          : C.unsigned_long_long := 0;
+      Cold_Stack_Bytes     : C.unsigned_long_long := 0;
+      Cold_Advice_Attempts : C.unsigned_long_long := 0;
+      Cold_Advice_Accepted : C.unsigned_long_long := 0;
+      Cold_Advice_Failures : C.unsigned_long_long := 0;
       --  Signal stacks belong to OS threads, not fibers. Keeping one with
       --  each permanent loop prevents Task_Wrapper from reserving and
       --  installing 32 KiB inside every lightweight task stack.
@@ -471,6 +484,9 @@ package body System.Flyology.Scheduler is
      (Item   : not null Fiber_Access;
       Source : not null Loop_Group_Access);
    function Clock return Duration;
+   procedure Consider_Cold_Stack
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access);
    function Promote_Expired_Timers
      (Group : not null Loop_Group_Access) return Duration;
    function Is_Event_Thread return Boolean;
@@ -1388,6 +1404,19 @@ package body System.Flyology.Scheduler is
       Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
       At_Head  : constant Boolean := Item.Enqueue_At_Head;
    begin
+      if Item.Stack_Cold then
+         if Group.Cold_Stacks = 0
+           or else Group.Cold_Stack_Bytes
+             < C.unsigned_long_long (Contexts.Stack_Size (Item.Context))
+         then
+            Fatal;
+         end if;
+         Group.Cold_Stacks := Group.Cold_Stacks - 1;
+         Group.Cold_Stack_Bytes :=
+           Group.Cold_Stack_Bytes
+           - C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
+         Item.Stack_Cold := False;
+      end if;
       Item.State := Ready;
       Item.Enqueue_At_Head := False;
 
@@ -1639,6 +1668,38 @@ package body System.Flyology.Scheduler is
       end if;
       return Time_ABI.To_Duration (Now);
    end Clock;
+
+   procedure Consider_Cold_Stack
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access)
+   is
+      Result : C.int;
+   begin
+      if not Item.Dormancy_Reclaimable
+        or else Item.Stack_Cold
+        or else Item.State /= Waiting
+        or else Item.Timer_Index = 0
+        or else Item.IO_Wait
+        or else Item.File_Wait
+        or else not Contexts.Cold_Advice_Supported
+        or else Item.Deadline - Clock < Item.Dormancy_Minimum_Wait
+      then
+         return;
+      end if;
+
+      Group.Cold_Advice_Attempts := Group.Cold_Advice_Attempts + 1;
+      Result := Contexts.Advise_Stack_Cold (Item.Context);
+      if Result = 1 then
+         Item.Stack_Cold := True;
+         Group.Cold_Stacks := Group.Cold_Stacks + 1;
+         Group.Cold_Stack_Bytes :=
+           Group.Cold_Stack_Bytes
+           + C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
+         Group.Cold_Advice_Accepted := Group.Cold_Advice_Accepted + 1;
+      elsif Result < 0 then
+         Group.Cold_Advice_Failures := Group.Cold_Advice_Failures + 1;
+      end if;
+   end Consider_Cold_Stack;
 
    function Promote_Expired_Timers
      (Group : not null Loop_Group_Access) return Duration
@@ -2008,6 +2069,58 @@ package body System.Flyology.Scheduler is
    function Current_Group return C.int is
      (if Current_Task = System.Null_Address then -1 else Thread_Group.Id);
 
+   function Set_Current_Dormancy
+     (Policy                   : C.int;
+      Minimum_Wait_Nanoseconds : C.long_long) return C.int
+   is
+      Group     : constant Loop_Group_Access := Thread_Group;
+      Item      : Fiber_Access;
+      Whole     : C.long_long;
+      Remainder : C.long_long;
+   begin
+      if not Is_Event_Thread
+        or else Group.Current_Fiber = null
+        or else Policy not in 0 | 1
+        or else Minimum_Wait_Nanoseconds < 0
+      then
+         return -1;
+      end if;
+
+      Whole := Minimum_Wait_Nanoseconds / 1_000_000_000;
+      Remainder := Minimum_Wait_Nanoseconds mod 1_000_000_000;
+      Lock_Group (Group);
+      Item := Group.Current_Fiber;
+      Item.Dormancy_Reclaimable := Policy = 1;
+      Item.Dormancy_Minimum_Wait :=
+        Duration (Whole) + Duration (Remainder) / 1_000_000_000;
+      Unlock_Group (Group);
+      return 0;
+   exception
+      when others =>
+         Fatal;
+   end Set_Current_Dormancy;
+
+   function Current_Dormancy return C.int is
+      Group  : constant Loop_Group_Access := Thread_Group;
+      Item   : Fiber_Access;
+      Result : C.int;
+   begin
+      if not Is_Event_Thread or else Group.Current_Fiber = null then
+         return -1;
+      end if;
+      Lock_Group (Group);
+      Item := Group.Current_Fiber;
+      Result := (if Item.Dormancy_Reclaimable then 1 else 0);
+      Unlock_Group (Group);
+      return Result;
+   exception
+      when others =>
+         Fatal;
+   end Current_Dormancy;
+
+   function Cold_Advice_Supported return C.int is
+     (if Contexts.Cold_Advice_Supported then 1 else 0);
+
    function Configured_Pool_Size return C.int is
      (C.int (Pool_Config.Automatic_Pool_Size));
 
@@ -2262,7 +2375,7 @@ package body System.Flyology.Scheduler is
       Lock_Group (Target);
       Output := To_Runtime_Group_Snapshot (Snapshot);
       Output.all :=
-        (ABI_Version              => 3,
+        (ABI_Version              => 4,
          Thread_State             =>
            (if Target.Start_Failed then 3
             elsif Target.Started then 2
@@ -2286,6 +2399,11 @@ package body System.Flyology.Scheduler is
          Pending_File_Submissions => 0,
          Dormancy_Candidates      => 0,
          Dormancy_Candidate_Bytes => 0,
+         Cold_Stacks              => Target.Cold_Stacks,
+         Cold_Stack_Bytes         => Target.Cold_Stack_Bytes,
+         Cold_Advice_Attempts     => Target.Cold_Advice_Attempts,
+         Cold_Advice_Accepted     => Target.Cold_Advice_Accepted,
+         Cold_Advice_Failures     => Target.Cold_Advice_Failures,
          Dispatches               => Target.Dispatches,
          Poll_Batches             => Target.Poll_Batches,
          Poll_Events              => Target.Poll_Events,
@@ -3193,6 +3311,7 @@ package body System.Flyology.Scheduler is
                 (Positive (Dispatches_Until_Timer_Check));
             Unlock_Group (Group);
             Contexts.Switch (Group.Scheduler_Context, Next.Context);
+            Consider_Cold_Stack (Group, Next);
 
             if Next.Migration_Target /= null then
                Transfer (Next, Group);

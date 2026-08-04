@@ -97,6 +97,7 @@ project Flyology is
             "flyology-cancellation.ads",
             "flyology-channels.ads",
             "flyology-channels-bounded.ads",
+            "flyology-dormancy.ads",
             "flyology-execution_groups.ads",
             "flyology-execution_groups-topology.ads",
             "flyology-fairness.ads",

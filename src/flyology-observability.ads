@@ -55,6 +55,11 @@ package Flyology.Observability with Preelaborate is
    --  @field Pending_File_Submissions Current file requests queued for submit
    --  @field Dormancy_Candidates Timer-only waits safe for stack reclamation
    --  @field Dormancy_Candidate_Bytes Usable stack bytes of those candidates
+   --  @field Cold_Stacks Current stacks accepted as cold by the host
+   --  @field Cold_Stack_Bytes Usable bytes in currently cold stacks
+   --  @field Cold_Advice_Attempts Cumulative host cold-advice calls
+   --  @field Cold_Advice_Accepted Cumulative accepted cold-advice calls
+   --  @field Cold_Advice_Failures Cumulative failed cold-advice calls
    --  @field Dispatches Cumulative fiber dispatches
    --  @field Poll_Batches Cumulative event-poller batches
    --  @field Poll_Events Cumulative host events delivered
@@ -80,6 +85,11 @@ package Flyology.Observability with Preelaborate is
       Pending_File_Submissions : Counter;
       Dormancy_Candidates      : Counter;
       Dormancy_Candidate_Bytes : Counter;
+      Cold_Stacks              : Counter;
+      Cold_Stack_Bytes         : Counter;
+      Cold_Advice_Attempts     : Counter;
+      Cold_Advice_Accepted     : Counter;
+      Cold_Advice_Failures     : Counter;
       Dispatches               : Counter;
       Poll_Batches             : Counter;
       Poll_Events              : Counter;

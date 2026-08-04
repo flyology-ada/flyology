@@ -103,6 +103,21 @@ package System.Flyology.Scheduler is
       Current_Thread_Is_Pinned,
       "flyology_runtime_current_thread_is_pinned");
 
+   function Set_Current_Dormancy
+     (Policy                   : Interfaces.C.int;
+      Minimum_Wait_Nanoseconds : Interfaces.C.long_long)
+      return Interfaces.C.int;
+   pragma Export
+     (C, Set_Current_Dormancy, "flyology_runtime_set_current_dormancy");
+
+   function Current_Dormancy return Interfaces.C.int;
+   pragma Export
+     (C, Current_Dormancy, "flyology_runtime_current_dormancy");
+
+   function Cold_Advice_Supported return Interfaces.C.int;
+   pragma Export
+     (C, Cold_Advice_Supported, "flyology_runtime_cold_advice_supported");
+
    function Create_Dedicated_Group return Interfaces.C.int;
    pragma Export
      (C, Create_Dedicated_Group, "flyology_runtime_create_dedicated_group");

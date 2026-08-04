@@ -29,6 +29,11 @@ struct runtime_group_snapshot {
     unsigned long long pending_file_submissions;
     unsigned long long dormancy_candidates;
     unsigned long long dormancy_candidate_bytes;
+    unsigned long long cold_stacks;
+    unsigned long long cold_stack_bytes;
+    unsigned long long cold_advice_attempts;
+    unsigned long long cold_advice_accepted;
+    unsigned long long cold_advice_failures;
     unsigned long long dispatches;
     unsigned long long poll_batches;
     unsigned long long poll_events;
@@ -159,7 +164,7 @@ int flyology_test_fork_exec(const char *program) {
             if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
                 flyology_runtime_observe_group(
                     0, &snapshot, sizeof(snapshot)) != 1 ||
-                snapshot.version != 3) {
+                snapshot.version != 4) {
                 return -1;
             }
             return 0;

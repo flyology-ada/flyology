@@ -7,7 +7,7 @@ package body Flyology.Observability is
    use type C.size_t;
    use type C.unsigned;
 
-   ABI_Version : constant C.unsigned := 3;
+   ABI_Version : constant C.unsigned := 4;
 
    type Runtime_Group_Snapshot is record
       Version                  : C.unsigned;
@@ -28,6 +28,11 @@ package body Flyology.Observability is
       Pending_File_Submissions : C.unsigned_long_long;
       Dormancy_Candidates      : C.unsigned_long_long;
       Dormancy_Candidate_Bytes : C.unsigned_long_long;
+      Cold_Stacks              : C.unsigned_long_long;
+      Cold_Stack_Bytes         : C.unsigned_long_long;
+      Cold_Advice_Attempts     : C.unsigned_long_long;
+      Cold_Advice_Accepted     : C.unsigned_long_long;
+      Cold_Advice_Failures     : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
       Poll_Batches             : C.unsigned_long_long;
       Poll_Events              : C.unsigned_long_long;
@@ -107,6 +112,11 @@ package body Flyology.Observability is
          Dormancy_Candidates      => Counter (Raw.Dormancy_Candidates),
          Dormancy_Candidate_Bytes =>
            Counter (Raw.Dormancy_Candidate_Bytes),
+         Cold_Stacks              => Counter (Raw.Cold_Stacks),
+         Cold_Stack_Bytes         => Counter (Raw.Cold_Stack_Bytes),
+         Cold_Advice_Attempts     => Counter (Raw.Cold_Advice_Attempts),
+         Cold_Advice_Accepted     => Counter (Raw.Cold_Advice_Accepted),
+         Cold_Advice_Failures     => Counter (Raw.Cold_Advice_Failures),
          Dispatches               => Counter (Raw.Dispatches),
          Poll_Batches             => Counter (Raw.Poll_Batches),
          Poll_Events              => Counter (Raw.Poll_Events),

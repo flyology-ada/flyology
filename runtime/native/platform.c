@@ -646,6 +646,24 @@ int flyology_discard_pages(void *address, size_t length) {
     return madvise(address, length, MADV_DONTNEED);
 }
 
+int flyology_cold_pages_supported(void) {
+#if defined(__linux__) && defined(MADV_COLD)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int flyology_cold_pages(void *address, size_t length) {
+#if defined(__linux__) && defined(MADV_COLD)
+    return madvise(address, length, MADV_COLD) == 0 ? 1 : -1;
+#else
+    (void)address;
+    (void)length;
+    return 0;
+#endif
+}
+
 void flyology_atomic_store_u32(void *address, uint32_t value, int model) {
     __atomic_store_n((uint32_t *)address, value, model);
 }
