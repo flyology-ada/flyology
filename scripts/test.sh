@@ -233,6 +233,7 @@ io_starvation_smoke
 lazy_event_start_smoke
 lifecycle_smoke
 loop_thread_placement_smoke
+memory_regions_smoke
 observability_native_smoke
 observability_smoke
 priority_semantics_smoke

@@ -141,6 +141,7 @@ project Flyology is
             "flyology-io-tls.ads",
             "flyology-io-tls-openssl.ads",
             "flyology-io-timers.ads",
+            "flyology-memory_regions.ads",
             "flyology-observability.ads",
             "flyology-observability-stall_watchdogs.ads",
              "flyology-native_executors.ads",

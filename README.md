@@ -1536,6 +1536,39 @@ inapplicable pages, and waking the task may incur page faults.
 `Pageout_Advice_Supported` reports the running kernel capability, while group
 observability distinguishes cumulative page-out calls from cold advice.
 
+### Task-owned memory regions
+
+`Flyology.Memory_Regions` provides an explicit storage pool for allocations
+whose lifetime belongs to one task phase. The declaring task owns the pool and
+all of its regions; use from another task raises `Ownership_Error`. Allocation
+uses Ada named-subpool syntax, which keeps controlled-object finalization tied
+to the region:
+
+```ada
+Pool : aliased Flyology.Memory_Regions.Task_Pool;
+type Node_Access is access Node;
+for Node_Access'Storage_Pool use Pool;
+
+Region : Flyology.Memory_Regions.Region_Handle :=
+  Flyology.Memory_Regions.Create_Region (Pool);
+Head : Node_Access := new (Region) Node'(...);
+
+--  Finalizes every controlled object, then releases all backing chunks.
+Flyology.Memory_Regions.Release (Region);
+```
+
+Every allocator for an access type associated with `Task_Pool` must name a
+region; an unnamed `new Node` raises `Program_Error`. References into a region
+must not escape its lifetime. Pool finalization releases any live regions, but
+explicit `Release` makes the peak-memory boundary visible and promptly returns
+all region chunks to the underlying allocator. `Statistics` reports live
+regions plus consumed and reserved storage for application policy and tests.
+
+This facility does not redirect ordinary Ada allocations and is not
+automatically coupled to dormant-stack advice. A future integration can add
+reclaim advice for page-backed region chunks without changing access-type
+ownership or allowing escaped references to be restored unsafely.
+
 ### Regular files
 
 Regular files are not readiness-oriented: marking a regular descriptor readable
