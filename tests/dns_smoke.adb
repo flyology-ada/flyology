@@ -1,6 +1,8 @@
 with Ada.Directories;
+with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Flyology;
 with Flyology.IO.DNS;
 with Flyology.IO.DNS.Testing;
@@ -30,8 +32,10 @@ procedure DNS_Smoke is
       protected Control is
          procedure Ready (Address : Sockets.Endpoint);
          entry Get_Address (Address : out Sockets.Endpoint);
+         procedure Primary_Failed;
          procedure Secondary_Ready (Address : Sockets.Endpoint);
          entry Get_Secondary (Address : out Sockets.Endpoint);
+         procedure Secondary_Failed;
          procedure Begin_Client;
          entry Await_Start;
          procedure Saw_Cancel_Query;
@@ -52,9 +56,11 @@ procedure DNS_Smoke is
          entry Wait_Finished (Passed : out Boolean);
       private
          Is_Ready : Boolean := False;
+         Primary_Setup_Failed : Boolean := False;
          Can_Start : Boolean := False;
          Server   : Sockets.Endpoint;
          Secondary_Is_Ready : Boolean := False;
+         Secondary_Setup_Failed : Boolean := False;
          Secondary : Sockets.Endpoint;
          Cancel_Seen : Boolean := False;
          Missing_Count : Natural := 0;
@@ -76,6 +82,15 @@ procedure DNS_Smoke is
              (Sockets.Port'Image (Server.Port), Ada.Strings.Both)
            & Suffix & ".conf";
       end Config_Path;
+
+      procedure Close_Quietly (Socket : in out Sockets.Socket_Type) is
+      begin
+         if Sockets.Is_Open (Socket) then
+            Sockets.Close_Socket (Socket);
+         end if;
+      exception
+         when others => null;
+      end Close_Quietly;
 
       procedure Write_Config
         (Server : Sockets.Endpoint;
@@ -123,22 +138,36 @@ procedure DNS_Smoke is
             Is_Ready := True;
          end Ready;
          entry Get_Address (Address : out Sockets.Endpoint)
-           when Is_Ready
+           when Is_Ready or else Primary_Setup_Failed
          is
          begin
+            if Primary_Setup_Failed then
+               raise Program_Error with "primary DNS server setup failed";
+            end if;
             Address := Server;
          end Get_Address;
+         procedure Primary_Failed is
+         begin
+            Primary_Setup_Failed := True;
+         end Primary_Failed;
          procedure Secondary_Ready (Address : Sockets.Endpoint) is
          begin
             Secondary := Address;
             Secondary_Is_Ready := True;
          end Secondary_Ready;
          entry Get_Secondary (Address : out Sockets.Endpoint)
-           when Secondary_Is_Ready
+           when Secondary_Is_Ready or else Secondary_Setup_Failed
          is
          begin
+            if Secondary_Setup_Failed then
+               raise Program_Error with "secondary DNS server setup failed";
+            end if;
             Address := Secondary;
          end Get_Secondary;
+         procedure Secondary_Failed is
+         begin
+            Secondary_Setup_Failed := True;
+         end Secondary_Failed;
          procedure Begin_Client is
          begin
             Can_Start := True;
@@ -202,11 +231,53 @@ procedure DNS_Smoke is
 
       task body Fake_Server is
          UDP, TCP : Sockets.Socket_Type;
+         Collision : Sockets.Socket_Type;
          Peer     : Sockets.Endpoint;
          Bound    : Sockets.Endpoint;
          Query    : Streams.Stream_Element_Array (1 .. 512);
          Last     : Streams.Stream_Element_Offset;
          Retry_Count : Natural := 0;
+
+         procedure Open_Server_Sockets is
+         begin
+            --  UDP and TCP have independent ephemeral-port allocation. Bind
+            --  TCP first so its selected port is known to be free in the
+            --  stream namespace, then retry if UDP already owns that number.
+            --  The first synthetic conflict exercises this recovery instead
+            --  of allowing a setup exception to become a test hang.
+            for Attempt in 1 .. 16 loop
+               begin
+                  Sockets.Create_Socket
+                    (TCP, Sockets.IPv4, Sockets.Socket_Stream);
+                  Sockets.Set_Socket_Option
+                    (TCP, Sockets.Socket_Level,
+                     (Name => Sockets.Reuse_Address, Enabled => True));
+                  Sockets.Bind_Socket
+                    (TCP, Sockets.Network_Endpoint
+                       (Sockets.Loopback_IPv4, Sockets.Any_Port));
+                  Bound := Sockets.Get_Socket_Name (TCP);
+                  Sockets.Listen_Socket (TCP);
+
+                  if Attempt = 1 then
+                     Sockets.Create_Socket
+                       (Collision, Sockets.IPv4, Sockets.Socket_Datagram);
+                     Sockets.Bind_Socket (Collision, Bound);
+                  end if;
+                  Sockets.Create_Socket
+                    (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
+                  Sockets.Bind_Socket (UDP, Bound);
+                  return;
+               exception
+                  when Sockets.Socket_Error =>
+                     Close_Quietly (Collision);
+                     Close_Quietly (UDP);
+                     Close_Quietly (TCP);
+                     if Attempt = 16 then
+                        raise;
+                     end if;
+               end;
+            end loop;
+         end Open_Server_Sockets;
 
          function Query_Name return String is
             Result : String (1 .. 253);
@@ -399,19 +470,7 @@ procedure DNS_Smoke is
             pragma Unreferenced (Name);
          end Send_Response;
       begin
-         Sockets.Create_Socket
-           (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
-         Sockets.Bind_Socket
-           (UDP, Sockets.Network_Endpoint
-              (Sockets.Loopback_IPv4, Sockets.Any_Port));
-         Bound := Sockets.Get_Socket_Name (UDP);
-         Sockets.Create_Socket
-           (TCP, Sockets.IPv4, Sockets.Socket_Stream);
-         Sockets.Set_Socket_Option
-           (TCP, Sockets.Socket_Level,
-            (Name => Sockets.Reuse_Address, Enabled => True));
-         Sockets.Bind_Socket (TCP, Bound);
-         Sockets.Listen_Socket (TCP);
+         Open_Server_Sockets;
          Control.Ready (Bound);
          loop
             Sockets.Receive_Socket (UDP, Query, Last, Peer);
@@ -577,6 +636,16 @@ procedure DNS_Smoke is
          end loop;
          Sockets.Close_Socket (UDP);
          Sockets.Close_Socket (TCP);
+      exception
+         when Error : others =>
+            Close_Quietly (Collision);
+            Close_Quietly (UDP);
+            Close_Quietly (TCP);
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "primary DNS test server failed: "
+               & Ada.Exceptions.Exception_Information (Error));
+            Control.Primary_Failed;
       end Fake_Server;
 
       --  A second endpoint gives cache-order and failover tests independent
@@ -703,6 +772,14 @@ procedure DNS_Smoke is
             end if;
          end loop;
          Sockets.Close_Socket (UDP);
+      exception
+         when Error : others =>
+            Close_Quietly (UDP);
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "secondary DNS test server failed: "
+               & Ada.Exceptions.Exception_Information (Error));
+            Control.Secondary_Failed;
       end Secondary_Server;
 
       task Client is
