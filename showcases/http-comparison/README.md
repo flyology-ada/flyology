@@ -14,6 +14,10 @@ measurement. TLS is deliberately absent: it would primarily compare provider
 configuration and crypto rather than HTTP dispatch. The default workload uses
 persistent connections; optional connection churn is recorded separately.
 
+The website publishes an [August 2026 development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
+from this harness. It includes the aggregate tables, metadata, and raw result
+bundle. The short Docker campaign is labeled as preliminary throughout.
+
 ## Reproduce it in Docker
 
 Docker is the supported entry point on macOS and the most convenient entry

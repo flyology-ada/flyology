@@ -1,0 +1,9 @@
+server,trials,median_cpu_seconds,median_max_rss_kib,maximum_threads,median_voluntary_context_switches,median_involuntary_context_switches
+aws,3,25.64,25416,258,706,94
+ews,3,17.89,2108,2,4,1
+flyology-app-lightweight,3,8.68,10604,2,4,0
+flyology-app-native,3,47.19,14212,257,4,1
+flyology-lightweight,3,17.25,10328,2,3,2
+flyology-native,3,91.5,13080,257,3,1
+servletada-aws,3,19.33,30720,258,745,39
+servletada-ews,3,8.98,4768,2,4,1

@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://flyology.org/">Guide</a> ·
   <a href="https://flyology.org/architecture/">Architecture</a> ·
+  <a href="https://flyology.org/journal/">Journal</a> ·
   <a href="https://flyology.org/api/">API reference</a>
 </p>
 
@@ -1313,6 +1314,21 @@ resource samples, and includes a pinned Linux Docker build:
 ```sh
 ./showcases/http-comparison/scripts/run-linux-docker.sh
 ```
+
+A dated [preliminary development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
+records three three-second Linux/AArch64 Docker trials from commit `48fdb23`.
+At concurrency 32, the median results were:
+
+| Tier | Flyology lightweight | AWS-based peer | EWS-based peer |
+| --- | ---: | ---: | ---: |
+| Plain HTTP, 13-byte body | 68.5k req/s | 30.6k req/s | 28.8k req/s |
+| Routed application GET | 52.6k req/s | 17.5k req/s | 24.7k req/s |
+
+Flyology lightweight used two server threads in both tiers. These short
+loopback measurements are development evidence for the exact fixtures and
+recorded host, not a general ranking or a substitute for a longer native-Linux
+campaign. The journal entry publishes the latency tails, CPU/RSS/thread costs,
+metadata, raw observations, and reproduction command alongside the table.
 
 The website's [HTTP application guide](https://flyology.org/guide/http/)
 progresses from the raw connection through routing, body policy, middleware,

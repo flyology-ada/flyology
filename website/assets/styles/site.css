@@ -942,6 +942,306 @@ code:not(pre code) {
   text-decoration: none;
 }
 
+/* Journal */
+.journal-teaser {
+  padding-block: clamp(5rem, 10vw, 8rem);
+  border-top: 1px solid var(--line);
+}
+
+.journal-teaser-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(18rem, 0.65fr);
+  align-items: end;
+  margin-bottom: clamp(2.5rem, 5vw, 4rem);
+  gap: 3rem;
+}
+
+.journal-teaser-heading .eyebrow {
+  grid-column: 1 / -1;
+  margin-bottom: -1rem;
+}
+
+.journal-teaser-heading h2 {
+  margin-bottom: 0;
+}
+
+.journal-teaser-heading > p:last-child {
+  max-width: 52ch;
+  margin-bottom: 0.4rem;
+  color: var(--ink-soft);
+}
+
+.journal-entry {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr) auto;
+  align-items: center;
+  padding-block: 1.65rem;
+  gap: clamp(1.25rem, 4vw, 3.5rem);
+  border-block: 1px solid var(--line);
+  text-decoration: none;
+  transition:
+    color 180ms var(--ease-out),
+    padding-inline 220ms var(--ease-out),
+    background-color 180ms var(--ease-out);
+}
+
+.journal-entry:hover {
+  padding-inline: 1rem;
+  background: var(--surface);
+}
+
+.journal-entry time,
+.article-date {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.journal-entry-copy {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.journal-entry-copy strong {
+  font-size: clamp(1.15rem, 2vw, 1.5rem);
+  font-weight: 590;
+  letter-spacing: -0.025em;
+}
+
+.journal-entry-copy > span {
+  max-width: 62ch;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.journal-entry-action {
+  color: var(--violet);
+  font-size: 0.82rem;
+  font-weight: 620;
+}
+
+.journal-hero {
+  display: grid;
+  grid-template-columns: 1fr minmax(18rem, 0.65fr);
+  align-items: end;
+  padding-block: clamp(5rem, 10vw, 9rem) clamp(3.5rem, 7vw, 6rem);
+  gap: clamp(3rem, 8vw, 8rem);
+  border-bottom: 1px solid var(--line);
+}
+
+.journal-hero h1 {
+  max-width: 8ch;
+  margin-bottom: 0;
+}
+
+.journal-hero > p {
+  max-width: 50ch;
+  margin-bottom: 0.5rem;
+  color: var(--ink-soft);
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+}
+
+.journal-index {
+  padding-block: clamp(3rem, 7vw, 6rem) 9rem;
+}
+
+.article-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(18rem, 0.55fr);
+  align-items: end;
+  padding-block: clamp(4rem, 9vw, 8rem) clamp(3rem, 6vw, 5rem);
+  gap: clamp(3rem, 8vw, 7rem);
+  border-bottom: 1px solid var(--line);
+}
+
+.article-hero h1 {
+  max-width: 13ch;
+  margin-bottom: 0;
+  font-size: clamp(3rem, 6.6vw, 6.2rem);
+}
+
+.article-summary {
+  max-width: 52ch;
+  margin-bottom: 1.5rem;
+  color: var(--ink-soft);
+  font-size: clamp(1.05rem, 1.6vw, 1.22rem);
+}
+
+.article-meta {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.article-meta div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  padding-block: 0.65rem;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+
+.article-meta dt {
+  color: var(--ink-soft);
+}
+
+.article-meta dd {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+.snapshot-boundary {
+  margin-bottom: 2rem;
+  padding: 1.25rem;
+  border: 1px solid var(--violet);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--violet) 8%, var(--paper));
+}
+
+.snapshot-boundary strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--violet-deep);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+}
+
+.snapshot-boundary p {
+  margin: 0;
+}
+
+.benchmark-table-wrap {
+  margin-block: 1.75rem;
+  overflow-x: auto;
+  border-block: 1px solid var(--line);
+}
+
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.benchmark-table th,
+.benchmark-table td {
+  padding: 0.78rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.benchmark-table tr:last-child th,
+.benchmark-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.benchmark-table th:first-child,
+.benchmark-table td:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.benchmark-table thead th {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 560;
+}
+
+.benchmark-table tbody th {
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 560;
+}
+
+.benchmark-table tbody td {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.benchmark-table .flyology-result {
+  color: var(--violet-deep);
+  font-weight: 650;
+}
+
+.benchmark-plot {
+  margin-block: 2rem;
+  margin-inline: 0;
+  padding: clamp(1.25rem, 4vw, 2rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.benchmark-plot figcaption {
+  margin-bottom: 1.25rem;
+  color: var(--ink);
+  font-weight: 590;
+}
+
+.plot-row {
+  display: grid;
+  grid-template-columns: 9rem minmax(8rem, 1fr) 5.5rem;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.plot-row + .plot-row {
+  margin-top: 0.8rem;
+}
+
+.plot-label,
+.plot-value {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+
+.plot-value {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.plot-track {
+  height: 0.58rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.plot-bar {
+  display: block;
+  width: var(--value);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--path);
+}
+
+.plot-row-flyology .plot-bar {
+  background: var(--violet);
+}
+
+.plot-row-flyology .plot-label,
+.plot-row-flyology .plot-value {
+  color: var(--ink);
+  font-weight: 620;
+}
+
+.data-links {
+  display: flex;
+  flex-wrap: wrap;
+  margin-block: 1.5rem;
+  padding-block: 1rem;
+  gap: 0.7rem 1.4rem;
+  border-block: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.data-links a {
+  font-weight: 590;
+}
+
 /* Guide and architecture pages */
 .doc-hero {
   display: grid;
@@ -1341,6 +1641,9 @@ code:not(pre code) {
   .mechanics,
   .io-inner,
   .constraint-layout,
+  .journal-teaser-heading,
+  .journal-hero,
+  .article-hero,
   .doc-hero {
     grid-template-columns: 1fr;
   }
@@ -1492,6 +1795,20 @@ code:not(pre code) {
 
   .final-cta {
     align-items: start;
+  }
+
+  .journal-entry {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .journal-entry-action {
+    margin-top: 0.3rem;
+  }
+
+  .plot-row {
+    grid-template-columns: 6.5rem minmax(6rem, 1fr) 4.6rem;
+    gap: 0.55rem;
   }
 
   .state-rail {

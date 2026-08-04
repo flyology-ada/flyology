@@ -21,8 +21,9 @@
           <li><a href="../../">Overview</a></li>
           <li><a href="../" aria-current="page">Guide</a></li>
           <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
           <li><a href="../../api/">API</a></li>
-          <li><a href="https://github.com/yrashk/flyology">GitHub</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
         </ul>
         <div class="nav-tools">
           <button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button>
@@ -316,12 +317,13 @@ end if;</code></pre></figure>
             <figure class="code-panel"><figcaption>500-connection release campaign</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code>./showcases/run_http_benchmark.sh \
   100000 500 500 18080 16 3 10000 release 20 500</code></pre></figure>
             <p>The final two arguments are lane cooldown and warm-up concurrency; this command warms and measures at 500 connections. Record CPU count, build profile, warm-up, request count, connection concurrency, handler capacity, event-loop count, success/error counts, throughput, average latency, and p50/p90/p99 tails. Use identical method, body, route, and limits for both lanes. The maintained campaign covers routed GET, a middleware-heavy route, a small buffered body, a streamed upload, and admission-control overhead. SSE and WebSocket require protocol-aware tools rather than treating an open stream as an ordinary completed HTTP request.</p>
+            <p>The <a href="../../journal/2026-08-http-comparison/">August 2026 development snapshot</a> applies the separate Ada-server comparison harness to Flyology, AWS, EWS, and ServletAda. Its short Docker results are published with resource costs, raw observations, and explicit limits.</p>
             <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p>Loopback results describe one host and toolchain. Before retaining a performance change, capture an immediate baseline, change one relevant variable, repeat the same alternating campaign, and compare distributions.</p></aside>
           </section>
         </article>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-inner"><span>Flyology is experimental. Validate the exact host, GNAT release, and operating constraints for your application.</span><div class="footer-links"><a href="../">Guide</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div></div></footer>
+    <footer class="site-footer"><div class="footer-inner"><span>Flyology is experimental. Validate the exact host, GNAT release, and operating constraints for your application.</span><div class="footer-links"><a href="../">Guide</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div></div></footer>
   </body>
 </html>

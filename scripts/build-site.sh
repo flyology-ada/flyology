@@ -27,6 +27,8 @@ test "$(cat "$site_output/CNAME")" = "flyology.org"
 test -f "$site_output/guide/index.html"
 test -f "$site_output/guide/http/index.html"
 test -f "$site_output/architecture/index.html"
+test -f "$site_output/journal/index.html"
+test -f "$site_output/journal/2026-08-http-comparison/index.html"
 test -f "$site_output/api/index.html"
 
 printf 'Flyology site built at %s\n' "$site_output"
