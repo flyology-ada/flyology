@@ -52,19 +52,37 @@ aws_binary="$comparison_root/servers/aws_plain/bin/aws_plain"
 ews_binary="$comparison_root/servers/ews_plain/bin/ews_plain"
 servletada_aws_binary="$comparison_root/servers/servletada_aws_app/bin/servletada_app"
 servletada_ews_binary="$comparison_root/servers/servletada_ews_app/bin/servletada_app"
+runtime_probe="$project_root/showcases/bin/http_benchmark_runtime_probe"
 for binary in "$flyology_binary" "$flyology_app_binary" "$aws_binary" \
-   "$ews_binary" "$servletada_aws_binary" "$servletada_ews_binary"; do
+   "$ews_binary" "$servletada_aws_binary" "$servletada_ews_binary" \
+   "$runtime_probe"; do
    if [ ! -x "$binary" ]; then
       printf '%s\n' "missing benchmark server: $binary" "run $comparison_root/scripts/build.sh first" >&2
       exit 1
    fi
 done
 
+actual_loops=$("$runtime_probe" | tr -d '[:space:]')
+loops=${HTTP_BENCH_LOOPS:-$actual_loops}
+case "$actual_loops:$loops" in
+   *[!0-9:]*|:*)
+      printf '%s\n' \
+        "invalid Flyology loop counts: requested=$loops observed=$actual_loops" >&2
+      exit 1
+      ;;
+esac
+if [ "$actual_loops" -ne "$loops" ]; then
+   printf '%s\n' \
+     "benchmark linked $actual_loops Flyology loops, expected $loops" >&2
+   exit 1
+fi
+
 mkdir -p "$run_root" "$resource_root" "$log_root"
 HTTP_BENCH_MODE=${HTTP_BENCH_MODE:-local} \
 HTTP_BENCH_CAPACITY="$capacity" \
 HTTP_BENCH_CONCURRENCIES="$concurrencies" \
 HTTP_BENCH_DURATION="$duration" \
+HTTP_BENCH_LOOPS="$loops" \
 HTTP_BENCH_CLIENT_CPUSET="$client_cpuset" \
 HTTP_BENCH_SERVER_CPUSET="$server_cpuset" \
 HTTP_BENCH_TIERS="$tiers" \
@@ -183,6 +201,13 @@ await_ready () {
    return 1
 }
 
+enforce_server_affinity () {
+   if [ -n "$server_cpuset" ]; then
+      "$comparison_root/scripts/enforce_server_affinity.py" \
+         "$server_pid" "$server_cpuset"
+   fi
+}
+
 verify_response () {
    server=$1
    url=$2
@@ -263,6 +288,7 @@ while [ "$trial" -le "$trials" ]; do
             sed -n '1,160p' "$server_log" >&2
             exit 1
          fi
+         enforce_server_affinity
 
          while IFS='|' read -r workload path expected_type expected_bytes; do
             case "$workload" in ''|'#'*) continue ;; esac
@@ -278,6 +304,7 @@ while [ "$trial" -le "$trials" ]; do
                run_oha -z "$warmup" -c 32 -w --no-tui --disable-color \
                   --http-version 1.1 -r 0 -t 5s \
                   "http://127.0.0.1:$port$path" >/dev/null
+               enforce_server_affinity
                for concurrency in $concurrencies; do
                   run_measured "$trial" "$server" "$workload" "$concurrency" \
                      keepalive "http://127.0.0.1:$port$path"

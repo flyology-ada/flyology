@@ -47,13 +47,29 @@ done
 
 server_binary="$project_root/showcases/bin/http_hybrid_benchmark_server"
 calibrator_binary="$project_root/showcases/bin/http_cpu_calibrator"
-for binary in "$server_binary" "$calibrator_binary"; do
+runtime_probe="$project_root/showcases/bin/http_benchmark_runtime_probe"
+for binary in "$server_binary" "$calibrator_binary" "$runtime_probe"; do
    if [ ! -x "$binary" ]; then
       printf '%s\n' "missing benchmark fixture: $binary" >&2
       printf '%s\n' "run $comparison_root/scripts/build.sh first" >&2
       exit 1
    fi
 done
+
+actual_loops=$("$runtime_probe" | tr -d '[:space:]')
+loops=${HTTP_BENCH_LOOPS:-$actual_loops}
+case "$actual_loops:$loops" in
+   *[!0-9:]*|:*)
+      printf '%s\n' \
+        "invalid Flyology loop counts: requested=$loops observed=$actual_loops" >&2
+      exit 1
+      ;;
+esac
+if [ "$actual_loops" -ne "$loops" ]; then
+   printf '%s\n' \
+     "benchmark linked $actual_loops Flyology loops, expected $loops" >&2
+   exit 1
+fi
 
 mkdir -p "$run_root" "$resource_root" "$stats_root" "$log_root"
 set -- "$calibrator_binary" "$calibration" --targets-us $targets_us
@@ -72,6 +88,7 @@ HTTP_BENCH_MODE=${HTTP_BENCH_MODE:-hybrid-local} \
 HTTP_BENCH_CAPACITY="$capacity" \
 HTTP_BENCH_CONCURRENCIES="$concurrencies" \
 HTTP_BENCH_DURATION="$duration" \
+HTTP_BENCH_LOOPS="$loops" \
 HTTP_BENCH_CLIENT_CPUSET="$client_cpuset" \
 HTTP_BENCH_SERVER_CPUSET="$server_cpuset" \
 HTTP_BENCH_TIERS=hybrid \
@@ -141,6 +158,13 @@ await_ready () {
       sleep 0.05
    done
    return 1
+}
+
+enforce_server_affinity () {
+   if [ -n "$server_cpuset" ]; then
+      "$comparison_root/scripts/enforce_server_affinity.py" \
+         "$server_pid" "$server_cpuset"
+   fi
 }
 
 configurations="inline"
@@ -273,6 +297,7 @@ while [ "$trial" -le "$trials" ]; do
             sed -n '1,160p' "$log" >&2
             exit 1
          fi
+         enforce_server_affinity
          printf '%s' control >"$result_root/control.txt"
          verify_body "http://127.0.0.1:$port/io-control" \
             "$result_root/control.txt" "$result_root/verify.body" \
@@ -291,6 +316,7 @@ while [ "$trial" -le "$trials" ]; do
             run_oha -z "$warmup" -c 32 -w --no-tui --disable-color \
                --http-version 1.1 -r 0 -t 30s \
                "http://127.0.0.1:$port$route" >/dev/null
+            enforce_server_affinity
             for concurrency in $concurrencies; do
                run_measured "$trial" "$variant" "$target" "$worker_count" \
                   "$queue" cpu "$concurrency" \

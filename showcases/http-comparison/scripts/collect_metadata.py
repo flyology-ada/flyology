@@ -26,6 +26,13 @@ git_revision = os.environ.get(
 )
 git_dirty_env = os.environ.get("HTTP_BENCH_GIT_DIRTY")
 loops_env = os.environ.get("HTTP_BENCH_LOOPS")
+observed_loops_text = command(
+    str(root / "showcases" / "bin" / "http_benchmark_runtime_probe")
+)
+try:
+    observed_loops: int | None = int(observed_loops_text)
+except ValueError:
+    observed_loops = None
 metadata = {
     "schema": 1,
     "mode": os.environ.get("HTTP_BENCH_MODE", "local"),
@@ -54,6 +61,7 @@ metadata = {
     "trials": int(os.environ.get("HTTP_BENCH_TRIALS", "3")),
     "capacity": int(os.environ.get("HTTP_BENCH_CAPACITY", "256")),
     "flyology_loops": int(loops_env or str(os.cpu_count() or 1)),
+    "flyology_loops_observed": observed_loops,
     "client_cpuset": os.environ.get("HTTP_BENCH_CLIENT_CPUSET", "unrestricted"),
     "server_cpuset": os.environ.get("HTTP_BENCH_SERVER_CPUSET", "unrestricted"),
     "tiers": os.environ.get("HTTP_BENCH_TIERS", "plain application").split(),

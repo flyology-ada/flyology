@@ -51,6 +51,10 @@ Adjust or omit the two CPU sets for machines that do not expose 16 CPUs.
 Set `FLYOLOGY_HTTP_BENCH_KEEP_IMAGE=1` while iterating to retain the image.
 On native Linux, `./showcases/run_http_comparison.sh` builds and runs the same
 matrix without Docker. `HTTP_BENCH_SKIP_BUILD=1` reuses an existing build.
+The build fails if the benchmark probe does not observe the requested compiled
+loop count. When CPU sets are configured, the runner reapplies the server set
+to every live server thread after readiness and warmup and stops on any mask
+mismatch.
 
 ## Reproduce it on Kubernetes
 
@@ -101,7 +105,8 @@ Results are written below `build/http-comparison/`. Each timestamped directory
 contains:
 
 - `metadata.json`: host, kernel, architecture, revision, dirty state, tools,
-  pinned server versions, loop count, and campaign settings;
+  pinned server versions, requested and observed loop counts, and campaign
+  settings;
 - `runs/*.json`: unmodified oha observations;
 - `resources/*.json`: sampled process CPU time, high-water RSS, thread count,
   and context-switch totals;

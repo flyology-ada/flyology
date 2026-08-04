@@ -42,11 +42,26 @@ FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE="$loops" \
    "$project_root/scripts/prepare-rts.sh"
 
 cd "$showcase_root"
-FLYOLOGY_SHOWCASE_PROFILE=release "$alr" exec -- gprbuild \
+FLYOLOGY_SHOWCASE_PROFILE=release "$alr" exec -- env -u GPR_CONFIG gprbuild \
    --RTS="$project_root/build/rts" \
    -f -P showcases.gpr \
    http_plain_benchmark_server.adb http_application_benchmark_server.adb \
-   http_cpu_calibrator.adb http_hybrid_benchmark_server.adb
+   http_benchmark_runtime_probe.adb http_cpu_calibrator.adb \
+   http_hybrid_benchmark_server.adb
+
+actual_loops=$("$showcase_root/bin/http_benchmark_runtime_probe" | tr -d '[:space:]')
+case "$actual_loops" in
+   ''|*[!0-9]*)
+      printf '%s\n' \
+        "benchmark runtime probe returned an invalid loop count: $actual_loops" >&2
+      exit 1
+      ;;
+esac
+if [ "$actual_loops" -ne "$loops" ]; then
+   printf '%s\n' \
+     "benchmark linked $actual_loops Flyology loops, expected $loops" >&2
+   exit 1
+fi
 
 for adapter in aws_plain ews_plain servletada_aws_app servletada_ews_app; do
    adapter_root="$comparison_root/servers/$adapter"
@@ -58,4 +73,4 @@ for adapter in aws_plain ews_plain servletada_aws_app servletada_ews_app; do
 done
 
 printf '%s\n' \
-  "built HTTP comparison with GNAT $toolchain_gnat, gprbuild $toolchain_gprbuild, and $loops Flyology loops"
+  "built HTTP comparison with GNAT $toolchain_gnat, gprbuild $toolchain_gprbuild, and verified $actual_loops Flyology loops"
