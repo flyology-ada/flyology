@@ -40,7 +40,7 @@ procedure HTTP_Benchmark_Server is
       then Sockets.Port'Value (Ada.Command_Line.Argument (3)) else 18_080);
    Capacity : constant Positive :=
      (if Ada.Command_Line.Argument_Count >= 4
-      then Positive'Value (Ada.Command_Line.Argument (4)) else 500);
+      then Positive'Value (Ada.Command_Line.Argument (4)) else 256);
 
    generic
       Model : Flyology.Execution_Model;

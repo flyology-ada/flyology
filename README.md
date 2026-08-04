@@ -1249,7 +1249,7 @@ The benchmark runner uses `oha` and runs the same loopback keep-alive workloads
 against explicit lightweight and native handler pools:
 
 ```sh
-./showcases/run_http_benchmark.sh 100000 500 500 18080 16 3 10000 release 20 500
+./showcases/run_http_benchmark.sh 100000 256 256 18080 16 3 10000 release 20 256
 ```
 
 The campaign includes routed GET, a middleware-heavy GET, a small buffered
