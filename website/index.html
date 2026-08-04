@@ -70,18 +70,18 @@
           </div>
         </div>
 
-        <div class="hero-visual" aria-label="A lightweight task moving through an event loop while ordinary Ada code remains unchanged">
+        <div class="hero-visual" data-code-preview aria-label="A lightweight task moving through an event loop while ordinary Ada code remains unchanged">
           <div class="orbit" aria-hidden="true">
             <div class="orbit-ring"></div>
             <img class="orbit-mark" src="assets/brand/flyology-mark-transparent.svg" alt="">
           </div>
           <div class="model-switcher" role="group" aria-label="Preview a Flyology task lane">
-            <button class="model-note model-note-light" type="button" data-model-sample="lightweight" data-model-file="lightweight_task.adb" aria-pressed="true" aria-controls="hero-code-preview">
+            <button class="model-note model-note-light" type="button" data-preview-sample="lightweight" data-preview-file="lightweight_task.adb" aria-pressed="true" aria-controls="hero-code-preview">
               <strong>Lightweight task</strong>
               <span class="model-direction">Fiber · shared loop</span>
               Waits without blocking its shared loop thread.
             </button>
-            <button class="model-note model-note-native" type="button" data-model-sample="native" data-model-file="native_task.adb" aria-pressed="false" aria-controls="hero-code-preview">
+            <button class="model-note model-note-native" type="button" data-preview-sample="native" data-preview-file="native_task.adb" aria-pressed="false" aria-controls="hero-code-preview">
               <strong>Native task</strong>
               <span class="model-direction">Dedicated OS thread</span>
               Runs on its own OS thread through stock GNARL.
@@ -90,9 +90,9 @@
           <div class="code-window" id="hero-code-preview">
             <div class="code-titlebar">
               <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-              <span data-model-filename aria-live="polite">lightweight_task.adb</span>
+              <span data-preview-filename aria-live="polite">lightweight_task.adb</span>
             </div>
-            <pre class="hero-code-sample" data-model-code="lightweight"><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
+            <pre class="hero-code-sample" data-preview-code="lightweight"><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
    <span class="token-keyword">pragma</span> Task_Info
      (<span class="token-type">Flyology.Lightweight_Task</span>);
 <span class="token-keyword">end</span> Connection;
@@ -100,7 +100,7 @@
 <span class="token-comment">-- An ordinary synchronous Ada call.</span>
 Flyology.IO.Sockets.Receive
   (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
-            <pre class="hero-code-sample" data-model-code="native" hidden><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
+            <pre class="hero-code-sample" data-preview-code="native" hidden><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
    <span class="token-keyword">pragma</span> Task_Info
      (<span class="token-type">Flyology.Native_Task</span>);
 <span class="token-keyword">end</span> Connection;
@@ -112,11 +112,11 @@ Flyology.IO.Sockets.Receive
         </div>
       </section>
 
-      <div class="status-strip" aria-label="Project status">
+      <div class="status-strip" aria-label="Why use Flyology">
         <div class="status-inner">
-          <div class="status-item"><strong>Experimental</strong>Evaluate against the documented constraints.</div>
-          <div class="status-item"><strong>Darwin + Linux</strong><code>kqueue</code> and <code>epoll</code> backends.</div>
-          <div class="status-item"><strong>AArch64 + x86-64</strong>Small ABI-specific context switches.</div>
+          <div class="status-item"><strong>Write ordinary Ada</strong>Keep synchronous calls and Ada task semantics.</div>
+          <div class="status-item"><strong>Wait without tying up the loop</strong>A suspended lightweight task leaves its shared thread available.</div>
+          <div class="status-item"><strong>Keep native tasks</strong>Use the stock OS-thread path where blocking or thread affinity calls for it.</div>
         </div>
       </div>
 
@@ -190,21 +190,99 @@ Flyology.IO.Sockets.Receive
         </ol>
       </section>
 
-      <section class="io-band" aria-labelledby="io-title">
+      <section class="io-band" id="included-building-blocks" aria-labelledby="io-title">
         <div class="io-inner">
-          <div>
-            <p class="eyebrow">Task-aware I/O</p>
-            <h2 id="io-title">Calls stay synchronous. A lightweight wait does not block its loop.</h2>
-            <p class="io-intro">The same public operation works from either lane. Values, exceptions, retry deadlines, and ownership rules stay consistent while the waiting mechanism changes underneath.</p>
+          <div class="capability-copy">
+            <p class="eyebrow">Included building blocks</p>
+            <h2 id="io-title">Ordinary calls, from sockets through HTTP.</h2>
+            <p class="io-intro">Flyology includes task-aware I/O, an HTTP application layer, and bounded ownership-transfer primitives. Deadlines, capacity, and ownership remain explicit at each boundary.</p>
+            <div class="capability-links">
+              <a href="guide/#io">I/O guide</a>
+              <a href="guide/http/">HTTP guide</a>
+              <a href="api/">API reference</a>
+            </div>
           </div>
-          <ul class="io-list">
-            <li><strong>Sockets</strong><span>Readiness-driven connect, accept, receive, and send.</span></li>
-            <li><strong>Files</strong><span>POSIX AIO on Darwin; <code>io_uring</code> or native AIO on Linux.</span></li>
-            <li><strong>Timers</strong><span>Monotonic deadlines in each group poller, with no timer thread.</span></li>
-            <li><strong>DNS</strong><span>Task-aware UDP and TCP resolution without a resolver worker thread.</span></li>
-            <li><strong>TLS</strong><span>Provider-neutral nonblocking steps, including an optional OpenSSL 3 adapter.</span></li>
-          </ul>
+          <div class="capability-demo" data-code-preview>
+            <div class="capability-switcher" role="group" aria-label="Preview an included Flyology building block">
+              <button class="capability-plaque" type="button" data-preview-sample="io" data-preview-file="task_aware_io.adb" aria-pressed="true" aria-controls="capability-code-preview">
+                <strong>Task-aware I/O</strong>
+                <span>Sockets · files · timers · DNS · TLS</span>
+              </button>
+              <button class="capability-plaque" type="button" data-preview-sample="http" data-preview-file="routes.adb" aria-pressed="false" aria-controls="capability-code-preview">
+                <strong>HTTP server</strong>
+                <span>Routing · middleware · streams · WebSockets</span>
+              </button>
+              <button class="capability-plaque" type="button" data-preview-sample="buffers" data-preview-file="buffer_channel.adb" aria-pressed="false" aria-controls="capability-code-preview">
+                <strong>Buffers &amp; channels</strong>
+                <span>Bounded pools · ownership transfer</span>
+              </button>
+            </div>
+            <figure class="capability-code-window" id="capability-code-preview">
+              <figcaption class="code-titlebar">
+                <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+                <span data-preview-filename aria-live="polite">task_aware_io.adb</span>
+              </figcaption>
+              <pre class="capability-code-sample" data-preview-code="io"><code class="language-ada">Flyology.IO.Timers.Sleep_For (0.050);
+
+Flyology.IO.Sockets.Receive
+  (Socket, Buffer, Last, Timeout =&gt; 1.0);
+
+Flyology.IO.Files.Read_At
+  (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
+              <pre class="capability-code-sample" data-preview-code="http" hidden><code class="language-ada">State.Routes.Get
+  ("/", Home'Access, Name =&gt; "home");
+State.Routes.Get
+  ("/users/{id}", Show_User'Access,
+   Name =&gt; "users.show");
+
+State.Routes.Mount
+  ("/admin", Admin_Routes, Name_Prefix =&gt; "admin.");</code></pre>
+              <pre class="capability-code-sample" data-preview-code="buffers" hidden><code class="language-ada">Pool  : aliased Flyology.Buffers.Pool
+  (Block_Size =&gt; 64 * 1_024, Capacity =&gt; 258);
+Queue : Flyology.Buffers.Channels.Channel
+  (Owner =&gt; Pool'Access, Capacity =&gt; 256);
+Value : Flyology.Buffers.Unique_Buffer (Pool'Access);
+
+Flyology.Buffers.Acquire (Value);
+Queue.Send_Move (Value);</code></pre>
+            </figure>
+          </div>
         </div>
+      </section>
+
+      <section class="ecosystem-section page-shell" aria-labelledby="ecosystem-title">
+        <div class="ecosystem-heading">
+          <div>
+            <p class="eyebrow">Ecosystem</p>
+            <h2 id="ecosystem-title">Libraries built on Flyology.</h2>
+          </div>
+          <p>Companion projects use the same synchronous Ada model while adding focused protocol and application layers.</p>
+        </div>
+        <a class="ecosystem-card" href="https://postgres.flyology.org/">
+          <span class="ecosystem-card-mark" aria-hidden="true">
+            <span>01</span>
+            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
+              <ellipse cx="32" cy="15" rx="20" ry="8"/>
+              <path d="M12 15v17c0 4.4 9 8 20 8s20-3.6 20-8V15"/>
+              <path d="M12 32v17c0 4.4 9 8 20 8s20-3.6 20-8V32"/>
+            </svg>
+          </span>
+          <span class="ecosystem-card-copy">
+            <span class="ecosystem-card-type">Protocol library · native Ada</span>
+            <strong>Postgres</strong>
+            <span class="ecosystem-card-description">Client and server primitives for the Postgres frontend/backend protocol over Flyology I/O.</span>
+            <span class="ecosystem-card-tags" aria-label="Postgres library capabilities">
+              <span>Client</span>
+              <span>Server</span>
+              <span>Streaming</span>
+              <span>SCRAM</span>
+            </span>
+          </span>
+          <span class="ecosystem-card-action">
+            postgres.flyology.org
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
+          </span>
+        </a>
       </section>
 
       <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">

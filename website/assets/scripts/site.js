@@ -73,29 +73,31 @@
       });
     });
 
-    const sampleButtons = Array.from(
-      document.querySelectorAll("[data-model-sample]")
-    );
-    const samplePanels = Array.from(
-      document.querySelectorAll("[data-model-code]")
-    );
-    const sampleFilename = document.querySelector("[data-model-filename]");
+    document.querySelectorAll("[data-code-preview]").forEach(function (preview) {
+      const sampleButtons = Array.from(
+        preview.querySelectorAll("[data-preview-sample]")
+      );
+      const samplePanels = Array.from(
+        preview.querySelectorAll("[data-preview-code]")
+      );
+      const sampleFilename = preview.querySelector("[data-preview-filename]");
 
-    if (sampleButtons.length && samplePanels.length && sampleFilename) {
+      if (!sampleButtons.length || !samplePanels.length || !sampleFilename) return;
+
       let selectedSample =
         sampleButtons.find(function (button) {
           return button.getAttribute("aria-pressed") === "true";
-        })?.dataset.modelSample || sampleButtons[0].dataset.modelSample;
+        })?.dataset.previewSample || sampleButtons[0].dataset.previewSample;
 
       function previewSample(name) {
         samplePanels.forEach(function (panel) {
-          panel.hidden = panel.dataset.modelCode !== name;
+          panel.hidden = panel.dataset.previewCode !== name;
         });
 
         const button = sampleButtons.find(function (item) {
-          return item.dataset.modelSample === name;
+          return item.dataset.previewSample === name;
         });
-        if (button) sampleFilename.textContent = button.dataset.modelFile;
+        if (button) sampleFilename.textContent = button.dataset.previewFile;
       }
 
       function selectSample(name) {
@@ -103,14 +105,14 @@
         sampleButtons.forEach(function (button) {
           button.setAttribute(
             "aria-pressed",
-            String(button.dataset.modelSample === name)
+            String(button.dataset.previewSample === name)
           );
         });
         previewSample(name);
       }
 
       sampleButtons.forEach(function (button) {
-        const name = button.dataset.modelSample;
+        const name = button.dataset.previewSample;
 
         button.addEventListener("mouseenter", function () {
           previewSample(name);
@@ -130,7 +132,7 @@
       });
 
       selectSample(selectedSample);
-    }
+    });
 
     window.FlyologyAda.highlightAll("code.language-ada");
     window.FlyologyAda.highlightAllSQL("code.language-sql");
