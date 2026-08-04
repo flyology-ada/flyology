@@ -2155,8 +2155,9 @@ After they have been built, an individual showcase can be rerun directly:
 The examples demonstrate:
 
 - a producer/transform/sink pipeline using entry calls;
-- protected-entry and rendezvous synchronization costs across one lightweight
-  execution group, two lightweight groups, native tasks, and mixed lanes;
+- uncontended and shared protected-procedure, protected-entry, and rendezvous
+  costs across one lightweight execution group, two lightweight groups, native
+  tasks, and mixed lanes;
 - fan-out timers and protected aggregation;
 - uncooperative CPU monopolization versus time-budgeted cooperative checkpoints
   on the same event loop;

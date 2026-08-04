@@ -39,6 +39,17 @@ procedure Synchronization_Benchmark is
    Samples : constant Positive :=
      Positive_Argument (2, Default_Samples);
 
+   function Protected_Procedure_Round_Count return Positive is
+   begin
+      if Rounds > Positive'Last / 200 then
+         raise Program_Error with "benchmark rounds are too large";
+      end if;
+      return 100 * Rounds;
+   end Protected_Procedure_Round_Count;
+
+   Protected_Procedure_Rounds : constant Positive :=
+     Protected_Procedure_Round_Count;
+
    type Duration_Array is array (Positive range <>) of Duration;
 
    procedure Sort (Values : in out Duration_Array) is
@@ -71,7 +82,7 @@ procedure Synchronization_Benchmark is
       return Ordered (Middle);
    end Median;
 
-   protected type Run_Control is
+   protected type Run_Control (Participants : Positive := 2) is
       procedure Arrived;
       entry Wait_Until_Ready;
       procedure Open;
@@ -90,7 +101,7 @@ procedure Synchronization_Benchmark is
          Arrivals := Arrivals + 1;
       end Arrived;
 
-      entry Wait_Until_Ready when Arrivals = 2 is
+      entry Wait_Until_Ready when Arrivals = Participants is
       begin
          null;
       end Wait_Until_Ready;
@@ -110,11 +121,27 @@ procedure Synchronization_Benchmark is
          Completions := Completions + 1;
       end Finished;
 
-      entry Wait_Until_Finished when Completions = 2 is
+      entry Wait_Until_Finished when Completions = Participants is
       begin
          null;
       end Wait_Until_Finished;
    end Run_Control;
+
+   protected type Counter is
+      procedure Increment;
+      function Value return Natural;
+   private
+      Count : Natural := 0;
+   end Counter;
+
+   protected body Counter is
+      procedure Increment is
+      begin
+         Count := Count + 1;
+      end Increment;
+
+      function Value return Natural is (Count);
+   end Counter;
 
    protected type Alternator is
       entry Left;
@@ -175,6 +202,149 @@ procedure Synchronization_Benchmark is
          & " lightweight_wakeups_per_operation="
          & Showcase_Support.Fixed_Image (Wakeups_Per_Operation, 3));
    end Report;
+
+   generic
+      Placement     : String;
+      Worker_Model  : Flyology.Execution_Model;
+      Worker_CPU    : System.Multiprocessors.CPU_Range;
+      Observe_Group : Boolean;
+   procedure Run_Uncontended_Protected_Procedure;
+
+   procedure Run_Uncontended_Protected_Procedure is
+      Timings : Duration_Array (1 .. Samples);
+      Wakeups : Observation.Counter := 0;
+   begin
+      for Sample in Timings'Range loop
+         declare
+            Control : Run_Control (1);
+            State   : Counter;
+
+            task Worker with CPU => Worker_CPU is
+               pragma Task_Info (Worker_Model);
+            end Worker;
+
+            task body Worker is
+            begin
+               Control.Arrived;
+               Control.Start;
+               for Iteration in 1 .. Protected_Procedure_Rounds loop
+                  State.Increment;
+               end loop;
+               Control.Finished;
+            end Worker;
+
+            Before, After : Observation.Group_Snapshot;
+            Started       : RT.Time;
+         begin
+            Control.Wait_Until_Ready;
+            Capture (Observe_Group, 1, Before);
+            Started := RT.Clock;
+            Control.Open;
+            Control.Wait_Until_Finished;
+            Timings (Sample) := RT.To_Duration (RT.Clock - Started);
+            Capture (Observe_Group, 1, After);
+
+            if State.Value /= Protected_Procedure_Rounds then
+               raise Program_Error with
+                 "uncontended protected-procedure benchmark lost an operation";
+            end if;
+            if Sample = Timings'Last and then Observe_Group then
+               Wakeups := After.Wakeups - Before.Wakeups;
+            end if;
+         end;
+      end loop;
+
+      Report
+        ("protected_procedure",
+         Placement,
+         Protected_Procedure_Rounds,
+         Timings,
+         Wakeups);
+   end Run_Uncontended_Protected_Procedure;
+
+   generic
+      Placement        : String;
+      Left_Model       : Flyology.Execution_Model;
+      Right_Model      : Flyology.Execution_Model;
+      Left_CPU         : System.Multiprocessors.CPU_Range;
+      Right_CPU        : System.Multiprocessors.CPU_Range;
+      Observe_Group_1  : Boolean;
+      Observe_Group_2  : Boolean;
+   procedure Run_Shared_Protected_Procedure;
+
+   procedure Run_Shared_Protected_Procedure is
+      Timings : Duration_Array (1 .. Samples);
+      Wakeups : Observation.Counter := 0;
+   begin
+      for Sample in Timings'Range loop
+         declare
+            Control : Run_Control;
+            State   : Counter;
+
+            task Left with CPU => Left_CPU is
+               pragma Task_Info (Left_Model);
+            end Left;
+
+            task Right with CPU => Right_CPU is
+               pragma Task_Info (Right_Model);
+            end Right;
+
+            task body Left is
+            begin
+               Control.Arrived;
+               Control.Start;
+               for Iteration in 1 .. Protected_Procedure_Rounds loop
+                  State.Increment;
+               end loop;
+               Control.Finished;
+            end Left;
+
+            task body Right is
+            begin
+               Control.Arrived;
+               Control.Start;
+               for Iteration in 1 .. Protected_Procedure_Rounds loop
+                  State.Increment;
+               end loop;
+               Control.Finished;
+            end Right;
+
+            Before_1, After_1 : Observation.Group_Snapshot;
+            Before_2, After_2 : Observation.Group_Snapshot;
+            Started           : RT.Time;
+         begin
+            Control.Wait_Until_Ready;
+            Capture (Observe_Group_1, 1, Before_1);
+            Capture (Observe_Group_2, 2, Before_2);
+            Started := RT.Clock;
+            Control.Open;
+            Control.Wait_Until_Finished;
+            Timings (Sample) := RT.To_Duration (RT.Clock - Started);
+            Capture (Observe_Group_1, 1, After_1);
+            Capture (Observe_Group_2, 2, After_2);
+
+            if State.Value /= 2 * Protected_Procedure_Rounds then
+               raise Program_Error with
+                 "shared protected-procedure benchmark lost an operation";
+            end if;
+            if Sample = Timings'Last then
+               if Observe_Group_1 then
+                  Wakeups := Wakeups + After_1.Wakeups - Before_1.Wakeups;
+               end if;
+               if Observe_Group_2 then
+                  Wakeups := Wakeups + After_2.Wakeups - Before_2.Wakeups;
+               end if;
+            end if;
+         end;
+      end loop;
+
+      Report
+        ("protected_procedure",
+         Placement,
+         2 * Protected_Procedure_Rounds,
+         Timings,
+         Wakeups);
+   end Run_Shared_Protected_Procedure;
 
    generic
       Placement        : String;
@@ -334,6 +504,51 @@ procedure Synchronization_Benchmark is
    No_CPU : constant System.Multiprocessors.CPU_Range :=
      System.Multiprocessors.Not_A_Specific_CPU;
 
+   procedure Procedure_Uncontended_Lightweight is new
+     Run_Uncontended_Protected_Procedure
+       ("uncontended_lightweight",
+        Flyology.Lightweight_Task,
+        1,
+        True);
+   procedure Procedure_Uncontended_Native is new
+     Run_Uncontended_Protected_Procedure
+       ("uncontended_native",
+        Flyology.Native_Task,
+        No_CPU,
+        False);
+   procedure Procedure_Same_Group is new Run_Shared_Protected_Procedure
+     ("same_group_lightweight",
+      Flyology.Lightweight_Task,
+      Flyology.Lightweight_Task,
+      1,
+      1,
+      True,
+      False);
+   procedure Procedure_Cross_Group is new Run_Shared_Protected_Procedure
+     ("cross_group_lightweight",
+      Flyology.Lightweight_Task,
+      Flyology.Lightweight_Task,
+      1,
+      2,
+      True,
+      True);
+   procedure Procedure_Native is new Run_Shared_Protected_Procedure
+     ("native",
+      Flyology.Native_Task,
+      Flyology.Native_Task,
+      No_CPU,
+      No_CPU,
+      False,
+      False);
+   procedure Procedure_Mixed is new Run_Shared_Protected_Procedure
+     ("mixed_lightweight_native",
+      Flyology.Lightweight_Task,
+      Flyology.Native_Task,
+      1,
+      No_CPU,
+      True,
+      False);
+
    procedure Protected_Same_Group is new Run_Protected_Entry
      ("same_group_lightweight",
       Flyology.Lightweight_Task,
@@ -402,7 +617,14 @@ procedure Synchronization_Benchmark is
 begin
    TIO.Put_Line
      ("synchronization benchmark rounds=" & Rounds'Image
+      & " procedure_rounds=" & Protected_Procedure_Rounds'Image
       & " samples=" & Samples'Image);
+   Procedure_Uncontended_Lightweight;
+   Procedure_Uncontended_Native;
+   Procedure_Same_Group;
+   Procedure_Cross_Group;
+   Procedure_Native;
+   Procedure_Mixed;
    Protected_Same_Group;
    Protected_Cross_Group;
    Protected_Native;
