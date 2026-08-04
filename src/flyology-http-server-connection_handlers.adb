@@ -1,6 +1,6 @@
 with Ada.Real_Time;
-with GNAT.Sockets;
 with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
 
 package body Flyology.HTTP.Server.Connection_Handlers is
@@ -112,7 +112,7 @@ package body Flyology.HTTP.Server.Connection_Handlers is
             when Flyology.IO.Timeout_Error |
                  Flyology.IO.Device_Error |
                  Flyology.IO.TLS.TLS_Error |
-                 GNAT.Sockets.Socket_Error =>
+                 Flyology.IO.Sockets.Socket_Error =>
                return;
          end;
          exit when Closed;
@@ -137,7 +137,7 @@ package body Flyology.HTTP.Server.Connection_Handlers is
             when Flyology.IO.Timeout_Error |
                  Flyology.IO.Device_Error |
                  Flyology.IO.TLS.TLS_Error |
-                 GNAT.Sockets.Socket_Error =>
+                 Flyology.IO.Sockets.Socket_Error =>
                return;
          end;
          if Item.State = Reading_HTTP and then not Item.Response_Begun then
@@ -149,7 +149,7 @@ package body Flyology.HTTP.Server.Connection_Handlers is
                when Flyology.IO.Timeout_Error |
                     Flyology.IO.Device_Error |
                     Flyology.IO.TLS.TLS_Error |
-                    GNAT.Sockets.Socket_Error =>
+                    Flyology.IO.Sockets.Socket_Error =>
                   return;
             end;
          end if;

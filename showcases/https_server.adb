@@ -1,7 +1,6 @@
 with Ada.Command_Line;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.TLS;
@@ -11,15 +10,13 @@ with Flyology.IO.TLS.OpenSSL;
 
 procedure HTTPS_Server is
    package HTTP renames Flyology.HTTP.Server;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
    package TLS renames Flyology.IO.TLS;
    package OpenSSL renames Flyology.IO.TLS.OpenSSL;
 
-   use type Sockets.Socket_Type;
-
-   Port : constant Sockets.Port_Type :=
+   Port : constant Sockets.Port :=
      (if Ada.Command_Line.Argument_Count >= 1
-      then Sockets.Port_Type'Value (Ada.Command_Line.Argument (1)) else 18_443);
+      then Sockets.Port'Value (Ada.Command_Line.Argument (1)) else 18_443);
    Certificate : constant String :=
      (if Ada.Command_Line.Argument_Count >= 2
       then Ada.Command_Line.Argument (2)
@@ -45,14 +42,12 @@ begin
       (Sockets.Reuse_Address, True));
    Sockets.Bind_Socket
      (Listener,
-      (Family => Sockets.Family_Inet,
-       Addr   => Sockets.Loopback_Inet_Addr,
-       Port   => Port));
+      Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Port));
    Sockets.Listen_Socket (Listener, Length => 16);
    Ada.Text_IO.Put_Line
      ("READY https://127.0.0.1:"
       & Ada.Strings.Fixed.Trim
-          (Sockets.Port_Type'Image (Port), Ada.Strings.Both) & "/");
+          (Sockets.Port'Image (Port), Ada.Strings.Both) & "/");
    Ada.Text_IO.Flush;
 
    declare
@@ -61,8 +56,8 @@ begin
       end Worker;
 
       task body Worker is
-         Socket : Sockets.Socket_Type := Sockets.No_Socket;
-         Peer   : Sockets.Sock_Addr_Type;
+         Socket : Sockets.Socket_Type;
+         Peer   : Sockets.Endpoint;
          Secure : aliased TLS.Connection;
       begin
          Flyology.IO.Sockets.Accept_Connection
@@ -87,7 +82,7 @@ begin
          TLS.Close (Secure);
       exception
          when others =>
-            if Socket /= Sockets.No_Socket then
+            if Sockets.Is_Open (Socket) then
                Sockets.Close_Socket (Socket);
             end if;
             raise;

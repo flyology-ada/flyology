@@ -1,9 +1,9 @@
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Task_Identification;
-with GNAT.Sockets;
 with Flyology.Bytes;
 with Flyology.Cancellation;
+with Flyology.IO.Sockets;
 
 --  Supplies a request-scoped application exchange above the raw HTTP engine.
 --  Exchange borrows its request, connection, application context, and optional
@@ -71,7 +71,7 @@ package Flyology.HTTP.Server.Applications is
    function Create
       (Value    : aliased in out Request;
       Item     : aliased in out Connection;
-      Peer     : GNAT.Sockets.Sock_Addr_Type;
+      Peer     : Flyology.IO.Sockets.Endpoint;
       Token    : access Flyology.Cancellation.Token;
       Deadline : Ada.Real_Time.Time) return Exchange;
 
@@ -112,10 +112,11 @@ package Flyology.HTTP.Server.Applications is
    --  @return True after response framing begins on the wire
    function Wire_Response_Started (Item : Exchange) return Boolean;
 
-   --  Return the connected peer address supplied by the server adapter.
+   --  Return the portable connected-peer endpoint supplied by the server
+   --  adapter.
    --  @param Item Request exchange
-   --  @return Peer socket address
-   function Peer (Item : Exchange) return GNAT.Sockets.Sock_Addr_Type;
+   --  @return Peer endpoint
+   function Peer (Item : Exchange) return Flyology.IO.Sockets.Endpoint;
 
    --  Borrow the request cancellation token, or null when none was supplied.
    --  @param Item Request exchange
@@ -514,7 +515,7 @@ private
    is tagged limited record
       Owner_Task        : Ada.Task_Identification.Task_Id :=
         Ada.Task_Identification.Current_Task;
-      Peer_Value        : GNAT.Sockets.Sock_Addr_Type;
+      Peer_Value        : Flyology.IO.Sockets.Endpoint;
       Deadline_Value    : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
       Route_Value       : Unbounded_String;
       Path_Value        : Unbounded_String;

@@ -1,7 +1,7 @@
 with Ada.Real_Time;
-with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
 
 package body Flyology.HTTP.Server.Middleware_Metrics is
@@ -71,7 +71,7 @@ package body Flyology.HTTP.Server.Middleware_Metrics is
             raise;
          when Flyology.IO.Device_Error |
               Flyology.IO.TLS.TLS_Error |
-              GNAT.Sockets.Socket_Error =>
+              Flyology.IO.Sockets.Socket_Error =>
             Finish;
             raise;
          when others =>

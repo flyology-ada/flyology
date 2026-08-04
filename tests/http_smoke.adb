@@ -4,7 +4,6 @@ with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
-with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.Bounded_Channels;
 with Flyology.Bytes;
@@ -33,10 +32,12 @@ with Flyology.HTTP.Server.SSE_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle;
 with Flyology.IO;
+with Flyology.IO.Sockets;
 
 procedure HTTP_Smoke is
    package HTTP_Server renames Flyology.HTTP.Server;
    package Bytes renames Flyology.Bytes;
+   package Sockets renames Flyology.IO.Sockets;
 
    use Ada.Strings.Unbounded;
    use type Ada.Exceptions.Exception_Id;
@@ -47,6 +48,8 @@ procedure HTTP_Smoke is
    use type HTTP_Server.WebSocket_Data_Kind;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
+   Test_Peer : constant Sockets.Endpoint :=
+     Sockets.Network_Endpoint (Sockets.Loopback_IPv4, 12_345);
 
    type Memory_Transport is limited new HTTP_Server.Transport with record
       Input       : Unbounded_String;
@@ -1436,10 +1439,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router (Capacity => 12, Slashes => Routing.Strict_Slashes);
       Admin  : Routing.Router (Capacity => 2, Slashes => Routing.Strict_Slashes);
       State  : Context;
-      Peer   : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer   : constant Sockets.Endpoint := Test_Peer;
 
       procedure Run
         (Input : String;
@@ -1818,10 +1818,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 7, Slashes => Routing.Strict_Slashes);
       State : Context;
-      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer  : constant Sockets.Endpoint := Test_Peer;
 
       function Run
         (Path    : String;
@@ -1983,7 +1980,7 @@ procedure HTTP_Smoke is
          Target         : String;
          Status         : Natural;
          Request_ID     : String;
-         Peer           : GNAT.Sockets.Sock_Addr_Type;
+         Peer           : Sockets.Endpoint;
          Request_Bytes  : Natural;
          Response_Bytes : Natural;
          Elapsed        : Duration);
@@ -1995,7 +1992,7 @@ procedure HTTP_Smoke is
          Target         : String;
          Status         : Natural;
          Request_ID     : String;
-         Peer           : GNAT.Sockets.Sock_Addr_Type;
+         Peer           : Sockets.Endpoint;
          Request_Bytes  : Natural;
          Response_Bytes : Natural;
          Elapsed        : Duration)
@@ -2111,10 +2108,7 @@ procedure HTTP_Smoke is
       Generated_ID_Routes : Routing.Router
         (Capacity => 1, Slashes => Routing.Strict_Slashes);
       State : Context;
-      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer  : constant Sockets.Endpoint := Test_Peer;
 
       function Run
         (Method, Path : String;
@@ -2384,10 +2378,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 2, Slashes => Routing.Strict_Slashes);
       State : Context;
-      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer  : constant Sockets.Endpoint := Test_Peer;
 
       function Run (Path, Key : String) return String is
          Wire : aliased Memory_Transport;
@@ -2501,10 +2492,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 1, Slashes => Routing.Strict_Slashes);
       State : Context;
-      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer  : constant Sockets.Endpoint := Test_Peer;
       Wire : aliased Memory_Transport;
    begin
       Routes.Get ("/helpers", Helpers'Access, Name => "helpers");
@@ -2656,10 +2644,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 1, Slashes => Routing.Strict_Slashes);
       State  : Boolean := False;
-      Peer   : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer   : constant Sockets.Endpoint := Test_Peer;
       Wire : aliased Memory_Transport;
    begin
       Routing.Get
@@ -2738,10 +2723,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 1, Slashes => Routing.Strict_Slashes);
       Cancelled : Boolean := False;
-      Peer : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer : constant Sockets.Endpoint := Test_Peer;
       Wire : aliased Memory_Transport;
    begin
       Routes.Get
@@ -2855,10 +2837,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 1, Slashes => Routing.Strict_Slashes);
       State  : Boolean := False;
-      Peer   : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer   : constant Sockets.Endpoint := Test_Peer;
       Wire : aliased Memory_Transport;
    begin
       Routing.Get
@@ -3046,10 +3025,7 @@ procedure HTTP_Smoke is
       Routes : Routing.Router
         (Capacity => 1, Slashes => Routing.Strict_Slashes);
       State : Boolean := False;
-      Peer  : constant GNAT.Sockets.Sock_Addr_Type :=
-        (Family => GNAT.Sockets.Family_Inet,
-         Addr   => GNAT.Sockets.Loopback_Inet_Addr,
-         Port   => 12_345);
+      Peer  : constant Sockets.Endpoint := Test_Peer;
       Wire : aliased Memory_Transport;
    begin
       Routing.Get

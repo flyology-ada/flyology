@@ -752,7 +752,7 @@ package body Flyology.HTTP.Server.Routing is
       Context    : in out App_Context;
       Connection : aliased in out Flyology.HTTP.Server.Connection;
       Value      : aliased in out Request;
-      Peer       : GNAT.Sockets.Sock_Addr_Type;
+      Peer       : Flyology.IO.Sockets.Endpoint;
       Token      : access Flyology.Cancellation.Token := null)
    is
       Target_Value : constant String := Target (Value);
@@ -1034,7 +1034,7 @@ package body Flyology.HTTP.Server.Routing is
      (Item         : in out Router;
       Context      : in out App_Context;
       Connection   : aliased in out Flyology.HTTP.Server.Connection;
-      Peer         : GNAT.Sockets.Sock_Addr_Type;
+      Peer         : Flyology.IO.Sockets.Endpoint;
       Timeout      : Duration := 30.0;
       Max_Connection_Age : Duration := 300.0;
       Max_Requests : Natural := 1_000;
@@ -1128,7 +1128,7 @@ package body Flyology.HTTP.Server.Routing is
             when Flyology.IO.Timeout_Error |
                  Flyology.IO.Device_Error |
                  Flyology.IO.TLS.TLS_Error |
-                 GNAT.Sockets.Socket_Error =>
+                 Flyology.IO.Sockets.Socket_Error =>
                return;
          end;
          exit when Closed;
@@ -1143,7 +1143,7 @@ package body Flyology.HTTP.Server.Routing is
                  Flyology.IO.Timeout_Error |
                  Flyology.IO.Device_Error |
                  Flyology.IO.TLS.TLS_Error |
-                 GNAT.Sockets.Socket_Error |
+                 Flyology.IO.Sockets.Socket_Error |
                  Resource_Exhausted =>
                return;
             when others =>

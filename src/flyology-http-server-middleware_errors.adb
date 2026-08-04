@@ -1,6 +1,6 @@
-with GNAT.Sockets;
 with Flyology.Cancellation;
 with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
 
 package body Flyology.HTTP.Server.Middleware_Errors is
@@ -34,7 +34,7 @@ package body Flyology.HTTP.Server.Middleware_Errors is
          raise;
       when Error : Flyology.IO.Device_Error |
            Flyology.IO.TLS.TLS_Error |
-           GNAT.Sockets.Socket_Error =>
+           Flyology.IO.Sockets.Socket_Error =>
          Log (Components.Transport_Failure, Error, X);
          raise;
       when Error : others =>

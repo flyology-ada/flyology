@@ -91,15 +91,15 @@ begin
      (Reader_Socket, Writer_Socket);
 
    declare
-      task Timed is
+      task Timed with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Timed;
 
-      task Descriptor is
+      task Descriptor with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Descriptor;
 
-      task Rendezvous is
+      task Rendezvous with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Rendezvous;
 
@@ -155,7 +155,7 @@ begin
             raise Program_Error with "observation tasks did not start";
          end select;
          for Attempt in 1 .. 2_000 loop
-            Parked_Observed := Observation.Snapshot (0, Before_Release)
+            Parked_Observed := Observation.Snapshot (1, Before_Release)
               and then Parked (Before_Release);
             exit when Parked_Observed;
             delay 0.001;
@@ -186,7 +186,7 @@ begin
    end;
 
    for Attempt in 1 .. 2_000 loop
-      Completion_Observed := Observation.Snapshot (0, After_Release)
+      Completion_Observed := Observation.Snapshot (1, After_Release)
         and then Completed (After_Release);
       exit when Completion_Observed;
       delay 0.001;

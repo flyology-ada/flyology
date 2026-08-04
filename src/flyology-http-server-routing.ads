@@ -1,6 +1,6 @@
 with Ada.Strings.Unbounded;
-with GNAT.Sockets;
 with Flyology.Cancellation;
+with Flyology.IO.Sockets;
 with Flyology.HTTP.Server.Applications;
 with Flyology.HTTP.Server.Middleware;
 
@@ -334,7 +334,7 @@ package Flyology.HTTP.Server.Routing is
       Context    : in out App_Context;
       Connection : aliased in out Flyology.HTTP.Server.Connection;
       Value      : aliased in out Request;
-      Peer       : GNAT.Sockets.Sock_Addr_Type;
+      Peer       : Flyology.IO.Sockets.Endpoint;
       Token      : access Flyology.Cancellation.Token := null);
 
    --  Read and route persistent requests until close or upgrade. This optional
@@ -354,7 +354,7 @@ package Flyology.HTTP.Server.Routing is
      (Item         : in out Router;
       Context      : in out App_Context;
       Connection   : aliased in out Flyology.HTTP.Server.Connection;
-      Peer         : GNAT.Sockets.Sock_Addr_Type;
+      Peer         : Flyology.IO.Sockets.Endpoint;
       Timeout      : Duration := 30.0;
       Max_Connection_Age : Duration := 300.0;
       Max_Requests : Natural := 1_000;

@@ -1,4 +1,4 @@
-with GNAT.Sockets;
+with Flyology.IO.Sockets;
 
 --  Defines an application-provided access-log sink boundary.
 package Flyology.HTTP.Server.Logging is
@@ -27,7 +27,7 @@ package Flyology.HTTP.Server.Logging is
       Target         : String;
       Status         : Natural;
       Request_ID     : String;
-      Peer           : GNAT.Sockets.Sock_Addr_Type;
+      Peer           : Flyology.IO.Sockets.Endpoint;
       Request_Bytes  : Natural;
       Response_Bytes : Natural;
       Elapsed        : Duration) is abstract;

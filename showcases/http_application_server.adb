@@ -6,7 +6,6 @@ with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with System.Multiprocessors;
 with Flyology;
 with Flyology.Bytes;
@@ -36,6 +35,7 @@ with Flyology.HTTP.Server.WebSocket_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle;
 with Flyology.IO.Connections;
 with Flyology.IO.Files;
+with Flyology.IO.Sockets;
 with Flyology.IO.Structured_Servers;
 with Flyology.IO.Timers;
 with Flyology.Native_Executors;
@@ -58,7 +58,7 @@ procedure HTTP_Application_Server is
    package Groups renames Flyology.Execution_Groups;
    package Observation renames Flyology.Observability;
    package Request_Helpers renames Flyology.HTTP.Server.Requests;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
    package Owned renames Flyology.IO.Connections;
 
    --  Keep the command line compatible with the benchmark showcases. A zero
@@ -69,9 +69,9 @@ procedure HTTP_Application_Server is
    Request_Goal : constant Natural :=
      (if Ada.Command_Line.Argument_Count >= 2
       then Natural'Value (Ada.Command_Line.Argument (2)) else 100_000);
-   Port : constant Sockets.Port_Type :=
+   Port : constant Sockets.Port :=
      (if Ada.Command_Line.Argument_Count >= 3
-      then Sockets.Port_Type'Value (Ada.Command_Line.Argument (3)) else 18_082);
+      then Sockets.Port'Value (Ada.Command_Line.Argument (3)) else 18_082);
    Capacity : constant Positive :=
      (if Ada.Command_Line.Argument_Count >= 4
       then Positive'Value (Ada.Command_Line.Argument (4)) else 256);
@@ -321,7 +321,7 @@ procedure HTTP_Application_Server is
          Target         : String;
          Status         : Natural;
          Request_ID     : String;
-         Peer           : Sockets.Sock_Addr_Type;
+         Peer           : Sockets.Endpoint;
          Request_Bytes  : Natural;
          Response_Bytes : Natural;
          Elapsed        : Duration)
@@ -1586,7 +1586,7 @@ procedure HTTP_Application_Server is
       procedure Handle
         (State        : in out Context;
          Connection   : in out Owned.Connection;
-         Peer         : Sockets.Sock_Addr_Type;
+         Peer         : Sockets.Endpoint;
          Cancellation : not null access Owned.Cancellation_Token)
       is
          --  Connection_Transport borrows the structured server's owning
@@ -1760,9 +1760,7 @@ procedure HTTP_Application_Server is
         (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
       Sockets.Bind_Socket
         (Listener,
-         (Family => Sockets.Family_Inet,
-          Addr   => Sockets.Loopback_Inet_Addr,
-          Port   => Port));
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Port));
       Sockets.Listen_Socket (Listener, Length => Capacity);
 
       --  Start workers only after listener setup succeeds. A bind or listen

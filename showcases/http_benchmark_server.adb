@@ -2,7 +2,6 @@ with Ada.Command_Line;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
-with GNAT.Sockets;
 with Flyology;
 with Flyology.HTTP.Server;
 with Flyology.HTTP.Server.Applications;
@@ -17,6 +16,7 @@ with Flyology.HTTP.Server.Middleware_Request_IDs;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
 with Flyology.HTTP.Server.Routing;
 with Flyology.IO.Connections;
+with Flyology.IO.Sockets;
 with Flyology.IO.Structured_Servers;
 
 --  Dedicated release-benchmark fixture. It keeps endpoint behavior fixed and
@@ -26,7 +26,7 @@ procedure HTTP_Benchmark_Server is
 
    package HTTP renames Flyology.HTTP.Server;
    package App renames Flyology.HTTP.Server.Applications;
-   package Sockets renames GNAT.Sockets;
+   package Sockets renames Flyology.IO.Sockets;
    package Owned renames Flyology.IO.Connections;
 
    Lane : constant String :=
@@ -35,9 +35,9 @@ procedure HTTP_Benchmark_Server is
    Request_Goal : constant Natural :=
      (if Ada.Command_Line.Argument_Count >= 2
       then Natural'Value (Ada.Command_Line.Argument (2)) else 0);
-   Port : constant Sockets.Port_Type :=
+   Port : constant Sockets.Port :=
      (if Ada.Command_Line.Argument_Count >= 3
-      then Sockets.Port_Type'Value (Ada.Command_Line.Argument (3)) else 18_080);
+      then Sockets.Port'Value (Ada.Command_Line.Argument (3)) else 18_080);
    Capacity : constant Positive :=
      (if Ada.Command_Line.Argument_Count >= 4
       then Positive'Value (Ada.Command_Line.Argument (4)) else 500);
@@ -75,7 +75,7 @@ procedure HTTP_Benchmark_Server is
       Metrics  : aliased HTTP.Metrics.In_Memory (32);
 
       function Client_Key (X : App.Exchange) return String is
-        (Sockets.Image (X.Peer.Addr));
+        (Sockets.Image (X.Peer.Address));
 
       package Errors is new HTTP.Middleware_Errors
         (Application_Context, Routing.Components);
@@ -156,7 +156,7 @@ procedure HTTP_Benchmark_Server is
       procedure Handle
         (State        : in out Context;
          Connection   : in out Owned.Connection;
-         Peer         : Sockets.Sock_Addr_Type;
+         Peer         : Sockets.Endpoint;
          Cancellation : not null access Owned.Cancellation_Token)
       is
          Channel : aliased HTTP.Connections.Connection_Transport
@@ -218,15 +218,13 @@ procedure HTTP_Benchmark_Server is
         (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
       Sockets.Bind_Socket
         (Listener,
-         (Family => Sockets.Family_Inet,
-          Addr   => Sockets.Loopback_Inet_Addr,
-          Port   => Port));
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Port));
       Sockets.Listen_Socket (Listener, Length => Capacity);
 
       Ada.Text_IO.Put_Line
         ("READY " & Lane & " http://127.0.0.1:"
          & Ada.Strings.Fixed.Trim
-             (Sockets.Port_Type'Image (Port), Ada.Strings.Both) & "/route");
+             (Sockets.Port'Image (Port), Ada.Strings.Both) & "/route");
       Ada.Text_IO.Flush;
 
       declare

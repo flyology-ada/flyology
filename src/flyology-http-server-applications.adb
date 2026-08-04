@@ -17,7 +17,7 @@ package body Flyology.HTTP.Server.Applications is
    function Create
       (Value    : aliased in out Request;
       Item     : aliased in out Connection;
-      Peer     : GNAT.Sockets.Sock_Addr_Type;
+      Peer     : Flyology.IO.Sockets.Endpoint;
       Token    : access Flyology.Cancellation.Token;
       Deadline : Ada.Real_Time.Time) return Exchange
    is
@@ -51,7 +51,7 @@ package body Flyology.HTTP.Server.Applications is
    function Wire_Response_Started (Item : Exchange) return Boolean is
      (Flyology.HTTP.Server.Response_Started (Item.Connection_Handle.all));
 
-   function Peer (Item : Exchange) return GNAT.Sockets.Sock_Addr_Type is
+   function Peer (Item : Exchange) return Flyology.IO.Sockets.Endpoint is
      (Item.Peer_Value);
 
    function Cancellation
