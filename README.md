@@ -2144,6 +2144,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/execution_groups
 ./showcases/bin/runtime_observability
 ./showcases/bin/stall_watchdog
+./showcases/run_synchronization_benchmark.sh 20000 5
 ./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
@@ -2154,6 +2155,8 @@ After they have been built, an individual showcase can be rerun directly:
 The examples demonstrate:
 
 - a producer/transform/sink pipeline using entry calls;
+- protected-entry and rendezvous synchronization costs across one lightweight
+  execution group, two lightweight groups, native tasks, and mixed lanes;
 - fan-out timers and protected aggregation;
 - uncooperative CPU monopolization versus time-budgeted cooperative checkpoints
   on the same event loop;
