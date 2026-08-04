@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Choose relative, monotonic, or wall-clock timer waits in Flyology, including explicit handling for backward clock changes.">
+    <meta name="theme-color" content="#17213d">
+    <title>Timers and clock changes · Flyology guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/timers/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Guide</a></li><li aria-current="page">Timers</li></ol>
+          <h1>Use the clock that matches the promise.</h1>
+        </div>
+        <p class="doc-hero-copy">Wait for elapsed time, a monotonic deadline, or a civil time on the adjustable wall clock. When the wall clock moves backward, return that fact to the application instead of silently extending its schedule.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#choose">Choose a clock</a></li>
+            <li><a href="#relative">Relative waits</a></li>
+            <li><a href="#monotonic">Monotonic deadlines</a></li>
+            <li><a href="#wall-clock">Wall-clock targets</a></li>
+            <li><a href="#backsteps">Jitter and backsteps</a></li>
+            <li><a href="#lanes">Lanes and platforms</a></li>
+            <li><a href="#patterns">Scheduling patterns</a></li>
+            <li><a href="#limits">Operational limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p>Flyology is experimental. Timer waits preserve ordinary synchronous Ada call semantics in both lanes, but they do not provide hard real-time wakeup guarantees.</p>
+          </aside>
+
+          <section id="choose">
+            <span class="step-label">TIMER 01</span>
+            <h2>Choose by what must remain stable.</h2>
+            <p>The three timer operations answer different questions. Make the clock choice part of the operation's contract rather than treating the APIs as interchangeable.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Sleep_For</code></dt><dd>Wait for an elapsed duration. Use it for simple pacing and short pauses where no reusable absolute deadline is needed.</dd></div>
+                <div class="decision-row"><dt><code>Sleep_Until</code></dt><dd>Wait for an <code>Ada.Real_Time</code> deadline. Use it for timeouts, retry budgets, and periodic work that must not follow civil-clock corrections.</dd></div>
+                <div class="decision-row"><dt><code>Wait_Until</code></dt><dd>Wait for an <code>Ada.Calendar</code> target. Use it when the requested time is a point on the adjustable wall clock and the application must react to a backward correction.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Use a monotonic deadline for an operation timeout. A wall-clock correction should not give a socket, retry loop, or shutdown drain extra time.</p>
+            </aside>
+          </section>
+
+          <section id="relative">
+            <span class="step-label">TIMER 02</span>
+            <h2>Wait for an elapsed interval.</h2>
+            <p><code>Sleep_For</code> takes seconds as a <code>Duration</code>. A positive value waits for at least that interval, subject to normal scheduling delay. A zero or negative value performs one <code>delay 0.0</code> yield.</p>
+            <figure class="code-panel">
+              <figcaption>relative pacing</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO.Timers;
+
+Flyology.IO.Timers.Sleep_For (0.050); -- 50 ms
+Flyology.IO.Timers.Sleep_For (0.0);   -- yield once</code></pre>
+            </figure>
+            <p>Repeatedly sleeping for a period after work completes accumulates the work time as drift. Use a sequence of monotonic deadlines when the intended schedule is fixed-rate.</p>
+          </section>
+
+          <section id="monotonic">
+            <span class="step-label">TIMER 03</span>
+            <h2>Carry one monotonic deadline.</h2>
+            <p><code>Sleep_Until</code> accepts an absolute <code>Ada.Real_Time.Time</code>. Compute the deadline once and pass it through the operation so partial progress does not restart the budget. A past deadline returns at the next scheduling point.</p>
+            <figure class="code-panel">
+              <figcaption>one 250 ms budget</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Ada.Real_Time;
+with Flyology.IO.Timers;
+
+use type Ada.Real_Time.Time;
+
+Deadline : constant Ada.Real_Time.Time :=
+  Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (250);
+
+-- Other work may consume part of the same budget.
+Flyology.IO.Timers.Sleep_Until (Deadline);</code></pre>
+            </figure>
+            <p>Changes to the system's civil time do not move an <code>Ada.Real_Time</code> deadline. This makes it the default clock for elapsed-time guarantees.</p>
+          </section>
+
+          <section id="wall-clock">
+            <span class="step-label">TIMER 04</span>
+            <h2>Wait for a time that hits the clock.</h2>
+            <p><code>Wait_Until</code> accepts an absolute <code>Ada.Calendar.Time</code>. A forward clock change may make the target immediately due. A backward change beyond the selected tolerance returns <code>Clock_Moved_Backward</code>, giving the application a chance to recompute or confirm its civil schedule.</p>
+            <figure class="code-panel">
+              <figcaption>wall-clock wait with explicit outcome</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Ada.Calendar;
+with Flyology.IO.Timers;
+
+use type Ada.Calendar.Time;
+package Timers renames Flyology.IO.Timers;
+
+Target : constant Ada.Calendar.Time := Ada.Calendar.Clock + 60.0;
+Result : constant Timers.Wall_Clock_Wait_Result :=
+  Timers.Wait_Until (Target);
+
+case Result.Outcome is
+   when Timers.Target_Reached =&gt;
+      Run_Scheduled_Work;
+   when Timers.Clock_Moved_Backward =&gt;
+      Revalidate_Schedule
+        (Observed   =&gt; Result.Observed_Time,
+         Adjustment =&gt; Result.Backward_Adjustment);
+end case;</code></pre>
+            </figure>
+            <p>The result includes the wall-clock sample used for the decision and an estimated lost-progress duration. The adjustment is zero when the target was reached.</p>
+          </section>
+
+          <section id="backsteps">
+            <span class="step-label">TIMER 05</span>
+            <h2>Separate clock jitter from a schedule change.</h2>
+            <p>The default backstep tolerance is 1 ms. Smaller lost-progress observations are treated as jitter and the wait is rearmed. A larger loss returns to the caller rather than waiting longer without notice. Set a nonnegative application-specific tolerance when the default is not appropriate.</p>
+            <figure class="code-panel">
+              <figcaption>allow up to 10 ms of lost wall-clock progress</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Result := Timers.Wait_Until
+  (Target             =&gt; Target,
+   Backstep_Tolerance =&gt; 0.010);</code></pre>
+            </figure>
+            <p>Detection compares wall-clock progress with monotonic elapsed time. It can therefore identify lost wall-clock progress even when two consecutive wall-clock samples still increase. The returned adjustment is an estimate for policy decisions, not an audit record of the system clock.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Small backward jitter</dt><dd>Rearm the target and continue waiting.</dd></div>
+                <div class="decision-row"><dt>Material backstep</dt><dd>Return <code>Clock_Moved_Backward</code>; the caller decides whether to recompute, confirm, skip, or wait again.</dd></div>
+                <div class="decision-row"><dt>Forward correction</dt><dd>Return <code>Target_Reached</code> once the observed wall clock is at or beyond the target.</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section id="lanes">
+            <span class="step-label">TIMER 06</span>
+            <h2>Keep the same call in either lane.</h2>
+            <p>The public call and outcome are lane-neutral. The waiting mechanism follows the current task designation.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Lightweight task</dt><dd>The fiber suspends on its execution group's event loop. Other ready tasks in that group may continue on the same loop thread.</dd></div>
+                <div class="decision-row"><dt>Native task</dt><dd>The wait uses the native path and blocks only that task's pthread.</dd></div>
+                <div class="decision-row"><dt>Linux</dt><dd>An absolute <code>timerfd</code> wait uses <code>TFD_TIMER_CANCEL_ON_SET</code> so a discontinuous real-time clock change wakes the wait for classification.</dd></div>
+                <div class="decision-row"><dt>Darwin</dt><dd>An absolute <code>kqueue</code> timer is paired with the system clock-set notification. If notification registration is unavailable, a one-second monotonic probe bounds detection latency apart from task scheduling delay.</dd></div>
+              </dl>
+            </div>
+            <p>Both platform paths recheck wall and monotonic time after arming, closing the setup window in which the clock might otherwise change unnoticed.</p>
+          </section>
+
+          <section id="patterns">
+            <span class="step-label">TIMER 07</span>
+            <h2>Match common schedules to one policy.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Operation timeout</dt><dd>Compute one <code>Ada.Real_Time</code> deadline and retain it across retries and partial progress.</dd></div>
+                <div class="decision-row"><dt>Fixed-rate work</dt><dd>Advance a monotonic deadline by the period instead of sleeping for the period after each iteration. Decide explicitly whether an overrun catches up or skips missed ticks.</dd></div>
+                <div class="decision-row"><dt>Civil appointment</dt><dd>Compute an <code>Ada.Calendar</code> target, call <code>Wait_Until</code>, and revalidate the appointment after a reported backstep.</dd></div>
+                <div class="decision-row"><dt>Recurring civil time</dt><dd>After each completion or clock correction, derive the next occurrence from calendar rules. Do not model local-midnight or daily schedules as repeated 24-hour sleeps.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>A wall-clock result reports what happened; it does not choose application policy. Jobs with financial, safety, or duplicate-execution consequences should persist their own schedule identity and completion state.</p>
+            </aside>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">TIMER 08</span>
+            <h2>Account for what a timer cannot promise.</h2>
+            <ul>
+              <li>A timer becomes eligible at its deadline; ordinary OS and Flyology scheduling delay may move actual execution later.</li>
+              <li>The operation does not wake a suspended computer. Resume-time wall-clock changes are classified when the application runs again.</li>
+              <li>Clock-change notifications identify a need to recheck; the wall and monotonic samples determine the public outcome.</li>
+              <li><code>Flyology.IO.Device_Error</code> is raised if wall-clock timer setup or waiting fails.</li>
+              <li>Use the exact contracts in the <a href="../../api/">generated API reference</a> when handling errors or building reusable abstractions.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Return to the <a href="../">main guide</a> for runtime setup and task designation, or continue to the <a href="../../architecture/">architecture guide</a> for scheduler and poller details.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. Validate the exact host, GNAT release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../http/">HTTP applications</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

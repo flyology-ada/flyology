@@ -62,9 +62,11 @@ FLYOLOGY_DNS_TEST_HOOKS=true
 FLYOLOGY_TLS_TEST_HOOKS=true
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
 FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
 export FLYOLOGY_DNS_TEST_HOOKS FLYOLOGY_TLS_TEST_HOOKS
 export FLYOLOGY_CONNECTION_TEST_HOOKS
 export FLYOLOGY_WORKER_POOL_TEST_HOOKS
+export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 
 printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
 "$alr" exec -- "$gnatcov" instrument \
@@ -94,6 +96,9 @@ fairness_smoke
 file_cancellation_smoke
 files_smoke
 flyology-counter_policy_smoke
+flyology-wall_clock_testing-smoke
+flyology-wall_clock_policy-smoke
+flyology-wall_clock_waits-smoke
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke
@@ -123,7 +128,8 @@ tls_smoke
 tls_state_model
 tcp_native_smoke
 wake_source_state_model
-wait_any_smoke'
+wait_any_smoke
+wall_clock_wait_smoke'
 
 set --
 ordinary_count=0

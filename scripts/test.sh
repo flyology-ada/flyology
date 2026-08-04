@@ -6,9 +6,11 @@ alr=$("$project_root/scripts/find-alr.sh")
 test_subdir=behavioral
 connection_test_subdir=behavioral-connection-hooks
 worker_pool_test_subdir=behavioral-worker-pool-hooks
+wall_clock_test_subdir=behavioral-wall-clock-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
+wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 
 cd "$project_root"
 
@@ -222,6 +224,8 @@ fairness_smoke
 file_cancellation_smoke
 files_smoke
 flyology-counter_policy_smoke
+flyology-wall_clock_policy-smoke
+flyology-wall_clock_waits-smoke
 http_smoke
 io_smoke
 io_starvation_smoke
@@ -253,7 +257,8 @@ tls_smoke
 tls_state_model
 tcp_native_smoke
 wake_source_state_model
-wait_any_smoke'
+wait_any_smoke
+wall_clock_wait_smoke'
 
 pool_mains='loop_pool_smoke
 topology_smoke
@@ -268,6 +273,8 @@ connection_tls_upgrade_smoke
 descriptor_ownership_smoke'
 
 worker_pool_hook_mains=concurrency_primitives_smoke
+
+wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
@@ -300,6 +307,7 @@ fi
 #  each compiled ALI closure against the selected RTS before linking.
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 compile_test_mains "$test_subdir" "$all_test_mains"
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
@@ -311,6 +319,11 @@ FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
 export FLYOLOGY_WORKER_POOL_TEST_HOOKS
 compile_test_mains "$worker_pool_test_subdir" "$worker_pool_hook_mains"
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
+
+FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
+export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+compile_test_mains "$wall_clock_test_subdir" "$wall_clock_hook_mains"
+unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains \
@@ -335,7 +348,15 @@ link_test_mains \
   "$worker_pool_hook_mains"
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
 
+FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
+export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+link_test_mains \
+  "$wall_clock_test_subdir" "$project_root/build/rts" \
+  "$wall_clock_hook_mains"
+unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+
 "$test_bin/default_policy_smoke" native
+"$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
 
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"

@@ -52,6 +52,9 @@ project Runtime_Smoke is
       "file_cancellation_smoke.adb",
       "files_smoke.adb",
       "flyology-counter_policy_smoke.adb",
+      "flyology-wall_clock_testing-smoke.adb",
+      "flyology-wall_clock_policy-smoke.adb",
+      "flyology-wall_clock_waits-smoke.adb",
       "http_smoke.adb",
       "io_smoke.adb",
       "io_starvation_smoke.adb",
@@ -92,7 +95,8 @@ project Runtime_Smoke is
       "tls_state_model.adb",
       "tcp_native_smoke.adb",
       "wake_source_state_model.adb",
-      "wait_any_smoke.adb");
+      "wait_any_smoke.adb",
+      "wall_clock_wait_smoke.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

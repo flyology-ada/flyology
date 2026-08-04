@@ -24,6 +24,7 @@ cd "$project_root/proof"
   flyology-connection_policy.adb \
   flyology-topology_policy.adb \
   flyology-time_math.adb \
+  flyology-wall_clock_policy.adb \
   flyology-tls_policy.adb \
   flyology-structured_server_policy.adb \
   flyology-worker_pool_policy.adb \
