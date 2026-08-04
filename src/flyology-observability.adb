@@ -7,7 +7,7 @@ package body Flyology.Observability is
    use type C.size_t;
    use type C.unsigned;
 
-   ABI_Version : constant C.unsigned := 2;
+   ABI_Version : constant C.unsigned := 3;
 
    type Runtime_Group_Snapshot is record
       Version                  : C.unsigned;
@@ -26,6 +26,8 @@ package body Flyology.Observability is
       Interrupt_Waits          : C.unsigned_long_long;
       File_Waits               : C.unsigned_long_long;
       Pending_File_Submissions : C.unsigned_long_long;
+      Dormancy_Candidates      : C.unsigned_long_long;
+      Dormancy_Candidate_Bytes : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
       Poll_Batches             : C.unsigned_long_long;
       Poll_Events              : C.unsigned_long_long;
@@ -102,6 +104,9 @@ package body Flyology.Observability is
          File_Waits               => Counter (Raw.File_Waits),
          Pending_File_Submissions =>
            Counter (Raw.Pending_File_Submissions),
+         Dormancy_Candidates      => Counter (Raw.Dormancy_Candidates),
+         Dormancy_Candidate_Bytes =>
+           Counter (Raw.Dormancy_Candidate_Bytes),
          Dispatches               => Counter (Raw.Dispatches),
          Poll_Batches             => Counter (Raw.Poll_Batches),
          Poll_Events              => Counter (Raw.Poll_Events),

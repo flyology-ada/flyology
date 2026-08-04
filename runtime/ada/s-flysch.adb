@@ -160,6 +160,8 @@ package body System.Flyology.Scheduler is
       Interrupt_Waits          : C.unsigned_long_long;
       File_Waits               : C.unsigned_long_long;
       Pending_File_Submissions : C.unsigned_long_long;
+      Dormancy_Candidates      : C.unsigned_long_long;
+      Dormancy_Candidate_Bytes : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
       Poll_Batches             : C.unsigned_long_long;
       Poll_Events              : C.unsigned_long_long;
@@ -2260,7 +2262,7 @@ package body System.Flyology.Scheduler is
       Lock_Group (Target);
       Output := To_Runtime_Group_Snapshot (Snapshot);
       Output.all :=
-        (ABI_Version              => 2,
+        (ABI_Version              => 3,
          Thread_State             =>
            (if Target.Start_Failed then 3
             elsif Target.Started then 2
@@ -2282,6 +2284,8 @@ package body System.Flyology.Scheduler is
          Interrupt_Waits          => 0,
          File_Waits               => 0,
          Pending_File_Submissions => 0,
+         Dormancy_Candidates      => 0,
+         Dormancy_Candidate_Bytes => 0,
          Dispatches               => Target.Dispatches,
          Poll_Batches             => Target.Poll_Batches,
          Poll_Events              => Target.Poll_Events,
@@ -2318,6 +2322,18 @@ package body System.Flyology.Scheduler is
          if Item.File_Pending then
             Output.Pending_File_Submissions :=
               Output.Pending_File_Submissions + 1;
+         end if;
+         if Item.State = Waiting
+           and then Item.Timer_Index /= 0
+           and then not Item.IO_Wait
+           and then not Item.File_Wait
+         then
+            Output.Dormancy_Candidates :=
+              Output.Dormancy_Candidates + 1;
+            Output.Dormancy_Candidate_Bytes :=
+              Output.Dormancy_Candidate_Bytes
+              + C.unsigned_long_long
+                  (Contexts.Stack_Size (Item.Context));
          end if;
          Item := Item.Next_Group;
       end loop;

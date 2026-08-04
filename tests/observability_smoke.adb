@@ -77,6 +77,8 @@ procedure Observability_Smoke is
       and then Sample.Interrupt_Waits = 0
       and then Sample.File_Waits = 0
       and then Sample.Pending_File_Submissions = 0
+      and then Sample.Dormancy_Candidates = 1
+      and then Sample.Dormancy_Candidate_Bytes > 0
       and then Sample.Dispatches >= 3);
 
    function Completed (Sample : Observation.Group_Snapshot) return Boolean is

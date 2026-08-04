@@ -53,6 +53,8 @@ package Flyology.Observability with Preelaborate is
    --  @field Interrupt_Waits Current waits with cancellation descriptors
    --  @field File_Waits Current submitted file operations awaiting completion
    --  @field Pending_File_Submissions Current file requests queued for submit
+   --  @field Dormancy_Candidates Timer-only waits safe for stack reclamation
+   --  @field Dormancy_Candidate_Bytes Usable stack bytes of those candidates
    --  @field Dispatches Cumulative fiber dispatches
    --  @field Poll_Batches Cumulative event-poller batches
    --  @field Poll_Events Cumulative host events delivered
@@ -76,6 +78,8 @@ package Flyology.Observability with Preelaborate is
       Interrupt_Waits          : Counter;
       File_Waits               : Counter;
       Pending_File_Submissions : Counter;
+      Dormancy_Candidates      : Counter;
+      Dormancy_Candidate_Bytes : Counter;
       Dispatches               : Counter;
       Poll_Batches             : Counter;
       Poll_Events              : Counter;

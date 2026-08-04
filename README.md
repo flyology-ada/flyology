@@ -1586,8 +1586,11 @@ A snapshot reports thread startup state and whether the group is dedicated or
 reserved; total and thread-pinned members; members in ready, waiting, running,
 migrating, and finished states;
 active timer, descriptor, interrupt-enabled, and file waits; file submissions queued behind kernel
-backpressure; and lifetime dispatch, poll-batch, delivered-event, GNARL-wakeup,
-and migration-in/out counters. Wait categories overlap: for example, a
+backpressure; timer-only dormancy candidates and their usable stack bytes; and
+lifetime dispatch, poll-batch, delivered-event, GNARL-wakeup, and
+migration-in/out counters. A dormancy candidate is waiting only on a timer, so
+its scheduler metadata and any kernel-owned buffer are outside its stack. Wait
+categories overlap: for example, a
 descriptor wait with a deadline contributes to both `Descriptor_Waits` and
 `Timer_Waits`; a connection wait also contributes to `Interrupt_Waits` when it
 has a cancellation or shutdown wake source. `Pending_File_Submissions` is the subset of `File_Waits` not yet
