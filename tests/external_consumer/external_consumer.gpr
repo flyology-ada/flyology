@@ -12,4 +12,8 @@ project External_Consumer is
       for Default_Switches ("Ada") use
         ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
    end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
 end External_Consumer;

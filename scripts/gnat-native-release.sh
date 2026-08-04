@@ -3,16 +3,7 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=${1:-$("$project_root/scripts/find-alr.sh")}
-
-if [ -n "${GNAT_NATIVE_ALIRE_PREFIX:-}" ]; then
-  compiler_prefix=$GNAT_NATIVE_ALIRE_PREFIX
-else
-  #  The first call may synchronize a freshly copied consumer and print notes.
-  #  Alire explicitly recommends a second quiet printenv for machine parsing.
-  "$alr" --non-interactive printenv --unix >/dev/null
-  compiler_prefix=$("$alr" --non-interactive -q printenv --unix |
-    sed -n 's/^export GNAT_NATIVE_ALIRE_PREFIX="\([^"]*\)"$/\1/p')
-fi
+compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$alr")
 
 compiler_package=${compiler_prefix##*/}
 case "$compiler_package" in

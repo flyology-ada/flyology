@@ -1,4 +1,5 @@
 with Ada.Command_Line;
+with Ada.Exceptions;
 with Ada.Text_IO;
 with Flyology;
 with Flyology.IO;
@@ -6,6 +7,8 @@ with Flyology.IO.Timers;
 with Flyology.Observability;
 
 procedure External_Consumer is
+   Marker_Error : exception;
+
    Expected_Lightweight : constant Boolean :=
      Ada.Command_Line.Argument_Count = 1
      and then Ada.Command_Line.Argument (1) = "lightweight";
@@ -46,6 +49,62 @@ procedure External_Consumer is
 
    type Default_Worker_Access is access Default_Worker;
    Snapshot : Flyology.Observability.Group_Snapshot;
+
+   procedure Check_Lightweight_Exception is
+      protected Outcome is
+         procedure Report (Passed : Boolean);
+         entry Wait;
+         function Passed return Boolean;
+      private
+         Done : Boolean := False;
+         OK   : Boolean := False;
+      end Outcome;
+
+      protected body Outcome is
+         procedure Report (Passed : Boolean) is
+         begin
+            OK := Passed;
+            Done := True;
+         end Report;
+
+         entry Wait when Done is
+         begin
+            null;
+         end Wait;
+
+         function Passed return Boolean is (OK);
+      end Outcome;
+
+      procedure Raise_Marker is
+      begin
+         raise Marker_Error with "external lightweight traceback marker";
+      end Raise_Marker;
+      pragma No_Inline (Raise_Marker);
+
+      task Worker is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Worker;
+
+      task body Worker is
+      begin
+         delay 0.0;
+         Raise_Marker;
+         Outcome.Report (False);
+      exception
+         when Error : Marker_Error =>
+            Outcome.Report
+              (Ada.Exceptions.Exception_Message (Error) =
+                 "external lightweight traceback marker");
+         when others =>
+            Outcome.Report (False);
+      end Worker;
+   begin
+      Outcome.Wait;
+      if not Outcome.Passed then
+         raise Program_Error with
+           "external lightweight symbolic traceback failed";
+      end if;
+   end Check_Lightweight_Exception;
 begin
    if Ada.Command_Line.Argument_Count /= 1
      or else
@@ -63,6 +122,8 @@ begin
       raise Program_Error with "event loop started before opt-in";
    end if;
 
+   Check_Lightweight_Exception;
+
    declare
       Worker : constant Default_Worker_Access :=
         new Default_Worker (Flyology.Project_Default);
@@ -75,8 +136,8 @@ begin
       raise Program_Error with "prepared project default was not honored";
    end if;
 
-   if Flyology.Observability.Snapshot (0, Snapshot) /= Expected_Lightweight then
-      raise Program_Error with "runtime machinery inertness did not match mode";
+   if not Flyology.Observability.Snapshot (0, Snapshot) then
+      raise Program_Error with "explicit lightweight task started no runtime";
    end if;
 
    Ada.Text_IO.Put_Line

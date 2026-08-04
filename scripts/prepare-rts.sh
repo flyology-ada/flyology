@@ -254,15 +254,8 @@ case "$platform:$compiler_release" in
     ;;
 esac
 
-if [ -n "${GNAT_NATIVE_ALIRE_PREFIX:-}" ] \
-  && [ -x "$GNAT_NATIVE_ALIRE_PREFIX/bin/gcc" ]; then
-  #  When preparation runs under `alr exec`, reuse the selected compiler
-  #  directly. Recursively entering Alire can select a different build sandbox
-  #  for an indexed dependency and conflict with the exported environment.
-  compiler="$GNAT_NATIVE_ALIRE_PREFIX/bin/gcc"
-else
-  compiler=$("$alr" exec -- sh -c 'command -v gcc' | tail -n 1)
-fi
+compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$alr")
+compiler="$compiler_prefix/bin/gcc"
 patch_root="$project_root/runtime/patches/$patch_family"
 
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"

@@ -22,7 +22,7 @@ FLYOLOGY_ROOT.set = "${CRATE_ROOT}"
 GPR_CONFIG.set = "${CRATE_ROOT}/build/flyology.cgpr"
 
 [[actions]]
-type = "post-fetch"
+type = "pre-build"
 command = ["./scripts/prepare-alire-rts.sh"]
 
 [[actions]]

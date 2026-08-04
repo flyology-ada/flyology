@@ -1746,10 +1746,16 @@ index. Remove it with `alr index --del flyology` when Flyology is available
 from the community index.
 
 Alire makes `flyology.gpr` available to the application and exports
-`FLYOLOGY_ROOT` as the dependency root. The first `alr build` runs Flyology's
-post-fetch action, prepares a native-default RTS matching the selected compiler,
-and exports a GPR configuration that selects it. No checkout-relative source
-paths, manual preparation command, or explicit `--RTS` argument is needed.
+`FLYOLOGY_ROOT` as the dependency root. Every `alr build` runs Flyology's
+pre-build action, prepares a native-default RTS matching the selected compiler
+and current Flyology sources, and exports a GPR configuration that selects it.
+This also prevents a path-pinned checkout updated in place from retaining an
+older generated runtime. Preparation uses a content stamp covering the
+toolchain, target, compiled configuration, runtime sources, patches, and build
+scripts, so an unchanged build validates and reuses its existing RTS. The
+archive member and AArch64 unwind root are checked before reuse. No
+checkout-relative source paths, manual preparation command, or explicit
+`--RTS` argument is needed.
 
 The application's GPR file may explicitly `with "flyology.gpr"`; Alire also
 supports its normal automatic GPR dependency wiring. To test an unindexed local
