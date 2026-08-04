@@ -1,3 +1,4 @@
+with Ada.Exceptions;
 with Ada.Unchecked_Deallocate_Subpool;
 with Ada.Unchecked_Deallocation;
 
@@ -186,7 +187,28 @@ package body Flyology.Memory_Regions is
            "region was not created by Flyology.Memory_Regions";
       end if;
       Check_Owner (Task_Pool (Owner.all));
-      Ada.Unchecked_Deallocate_Subpool (Region);
+      begin
+         Ada.Unchecked_Deallocate_Subpool (Region);
+      exception
+         when Failure : others =>
+            declare
+               Saved : Ada.Exceptions.Exception_Occurrence;
+            begin
+               Ada.Exceptions.Save_Occurrence (Saved, Failure);
+
+               --  GNAT finalizes and detaches every controlled object before
+               --  propagating the finalization failure, but leaves the
+               --  subpool attached.
+               --  A second pass skips the completed collection finalization
+               --  and reaches Deallocate_Subpool, preserving bulk release.
+               if Region /= null
+                 and then Subpools.Pool_Of_Subpool (Region) /= null
+               then
+                  Ada.Unchecked_Deallocate_Subpool (Region);
+               end if;
+               Ada.Exceptions.Reraise_Occurrence (Saved);
+            end;
+      end;
    end Release;
 
    function Statistics (Pool : Task_Pool) return Pool_Statistics is

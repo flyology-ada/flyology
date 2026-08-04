@@ -51,9 +51,11 @@ procedure Memory_Regions_Smoke is
    overriding procedure Finalize (Item : in out Tracked);
 
    overriding procedure Finalize (Item : in out Tracked) is
-      pragma Unreferenced (Item);
    begin
       Results.Finalized;
+      if Item.Value = 99 then
+         raise Constraint_Error with "injected region finalization failure";
+      end if;
    end Finalize;
 
    procedure Check_Explicit_Release is
@@ -110,6 +112,42 @@ procedure Memory_Regions_Smoke is
 
       Regions.Release (Region);
    end Check_Explicit_Release;
+
+   procedure Check_Failing_Finalization is
+      Before : constant Natural := Results.Finalization_Count;
+      Pool : aliased Regions.Task_Pool;
+      type Tracked_Access is access Tracked;
+      for Tracked_Access'Storage_Pool use Pool;
+      Region : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 128);
+      Object : constant Tracked_Access :=
+        new (Region) Tracked'(Ada.Finalization.Controlled with 99);
+      pragma Unreferenced (Object);
+      Failed : Boolean := False;
+      Sample : Regions.Pool_Statistics;
+   begin
+      begin
+         Regions.Release (Region);
+      exception
+         when others =>
+            Failed := True;
+            Region := null;
+      end;
+
+      if not Failed then
+         raise Program_Error with "finalization failure did not propagate";
+      elsif Results.Finalization_Count /= Before + 1 then
+         raise Program_Error with "failed release repeated finalization";
+      end if;
+
+      Sample := Regions.Statistics (Pool);
+      if Sample.Live_Regions /= 0
+        or else Sample.Consumed_Storage /= 0
+        or else Sample.Reserved_Storage /= 0
+      then
+         raise Program_Error with "failed finalization retained storage";
+      end if;
+   end Check_Failing_Finalization;
 
    procedure Check_Pool_Finalization is
       Before : constant Natural := Results.Finalization_Count;
@@ -189,6 +227,7 @@ procedure Memory_Regions_Smoke is
 
 begin
    Check_Explicit_Release;
+   Check_Failing_Finalization;
    Check_Pool_Finalization;
    Check_Cross_Task_Rejection;
    Lightweight_Owner.Done;

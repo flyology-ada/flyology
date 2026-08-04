@@ -49,7 +49,11 @@ package Flyology.Memory_Regions is
 
    --  Finalize every controlled object in Region and release all of its
    --  backing chunks. References into the region become invalid. Null is an
-   --  idempotent no-op; a successfully released handle is set to null.
+   --  idempotent no-op; a successful call sets the handle to null. If
+   --  controlled finalization raises, storage is still reclaimed before the
+   --  exception propagates. Ada does not copy an in out scalar back after an
+   --  exceptional return, so the caller must treat every handle copy as
+   --  invalid and set the passed variable to null in its handler.
    --  @param Region Region to finalize and release
    --  @exception Ownership_Error Region belongs to another pool type or task
    procedure Release (Region : in out Region_Handle);
