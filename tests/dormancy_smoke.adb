@@ -45,6 +45,7 @@ procedure Dormancy_Smoke is
    Native_Rejected : Boolean := False;
    Sample          : Observation.Group_Snapshot;
    Parked          : Boolean := False;
+   Paged_Out       : Boolean := False;
 begin
    if Dormancy.Current_Policy /= Dormancy.Prompt then
       raise Program_Error with "native task has a reclaimable stack policy";
@@ -58,6 +59,16 @@ begin
    end;
    if not Native_Rejected then
       raise Program_Error with "native reclaimable policy was accepted";
+   end if;
+   Native_Rejected := False;
+   begin
+      Dormancy.Set_Policy (Dormancy.Page_Out, Minimum_Wait => 0.0);
+   exception
+      when Dormancy.Dormancy_Error =>
+         Native_Rejected := True;
+   end;
+   if not Native_Rejected then
+      raise Program_Error with "native page-out policy was accepted";
    end if;
 
    declare
@@ -76,6 +87,12 @@ begin
             raise Program_Error with "reclaimable policy was not retained";
          end if;
          Control.Started;
+         delay 1.0;
+         Dormancy.Set_Policy
+           (Dormancy.Page_Out, Minimum_Wait => 0.0);
+         if Dormancy.Current_Policy /= Dormancy.Page_Out then
+            raise Program_Error with "page-out policy was not retained";
+         end if;
          delay 1.0;
          Dormancy.Set_Policy (Dormancy.Prompt);
          Control.Finished;
@@ -111,10 +128,25 @@ begin
          raise Program_Error with "dormant stack state was not observed";
       end if;
 
+      if Dormancy.Pageout_Advice_Supported then
+         for Attempt in 1 .. 2_000 loop
+            Paged_Out := Observation.Snapshot (1, Sample)
+              and then Sample.Cold_Stacks = 1
+              and then Sample.Pageout_Advice_Attempts >= 1
+              and then Sample.Pageout_Advice_Accepted >= 1
+              and then Sample.Pageout_Advice_Failures = 0;
+            exit when Paged_Out;
+            delay 0.001;
+         end loop;
+         if not Paged_Out then
+            raise Program_Error with "page-out stack state was not observed";
+         end if;
+      end if;
+
       select
          Control.Wait_Until_Finished;
       or
-         delay 2.0;
+         delay 3.0;
          raise Program_Error with "dormancy worker did not finish";
       end select;
    end;

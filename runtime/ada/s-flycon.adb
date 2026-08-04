@@ -81,6 +81,14 @@ package body System.Flyology.Contexts is
      (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Cold_Pages, "flyology_cold_pages");
 
+   function Pageout_Pages_Supported return C.int;
+   pragma Import
+     (C, Pageout_Pages_Supported, "flyology_pageout_pages_supported");
+
+   function Pageout_Pages
+     (Address : System.Address; Length : C.size_t) return C.int;
+   pragma Import (C, Pageout_Pages, "flyology_pageout_pages");
+
    function In_Fork_Child return C.int;
    pragma Import (C, In_Fork_Child, "flyology_in_fork_child");
 
@@ -563,6 +571,22 @@ package body System.Flyology.Contexts is
       end if;
       return Cold_Pages (Item.Stack, Item.Size);
    end Advise_Stack_Cold;
+
+   function Pageout_Advice_Supported return Boolean is
+     (Pageout_Pages_Supported /= 0);
+
+   function Advise_Stack_Pageout
+     (Item : not null Context_Access) return C.int
+   is
+   begin
+      if not Item.Owns_Mapping
+        or else Item.Stack = System.Null_Address
+        or else Item.Size = 0
+      then
+         return -1;
+      end if;
+      return Pageout_Pages (Item.Stack, Item.Size);
+   end Advise_Stack_Pageout;
 
    function Observe_Stack_Pool
      (Snapshot      : System.Address;

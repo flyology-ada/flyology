@@ -118,6 +118,12 @@ package System.Flyology.Scheduler is
    pragma Export
      (C, Cold_Advice_Supported, "flyology_runtime_cold_advice_supported");
 
+   function Pageout_Advice_Supported return Interfaces.C.int;
+   pragma Export
+     (C,
+      Pageout_Advice_Supported,
+      "flyology_runtime_pageout_advice_supported");
+
    function Create_Dedicated_Group return Interfaces.C.int;
    pragma Export
      (C, Create_Dedicated_Group, "flyology_runtime_create_dedicated_group");

@@ -7,7 +7,7 @@ package body Flyology.Observability is
    use type C.size_t;
    use type C.unsigned;
 
-   ABI_Version : constant C.unsigned := 4;
+   ABI_Version : constant C.unsigned := 5;
 
    type Runtime_Group_Snapshot is record
       Version                  : C.unsigned;
@@ -33,6 +33,9 @@ package body Flyology.Observability is
       Cold_Advice_Attempts     : C.unsigned_long_long;
       Cold_Advice_Accepted     : C.unsigned_long_long;
       Cold_Advice_Failures     : C.unsigned_long_long;
+      Pageout_Advice_Attempts  : C.unsigned_long_long;
+      Pageout_Advice_Accepted  : C.unsigned_long_long;
+      Pageout_Advice_Failures  : C.unsigned_long_long;
       Dispatches               : C.unsigned_long_long;
       Poll_Batches             : C.unsigned_long_long;
       Poll_Events              : C.unsigned_long_long;
@@ -117,6 +120,9 @@ package body Flyology.Observability is
          Cold_Advice_Attempts     => Counter (Raw.Cold_Advice_Attempts),
          Cold_Advice_Accepted     => Counter (Raw.Cold_Advice_Accepted),
          Cold_Advice_Failures     => Counter (Raw.Cold_Advice_Failures),
+         Pageout_Advice_Attempts  => Counter (Raw.Pageout_Advice_Attempts),
+         Pageout_Advice_Accepted  => Counter (Raw.Pageout_Advice_Accepted),
+         Pageout_Advice_Failures  => Counter (Raw.Pageout_Advice_Failures),
          Dispatches               => Counter (Raw.Dispatches),
          Poll_Batches             => Counter (Raw.Poll_Batches),
          Poll_Events              => Counter (Raw.Poll_Events),

@@ -1520,6 +1520,22 @@ removes the stack's cold classification before it becomes ready. Group
 observability reports current cold stacks and bytes plus cumulative advice
 attempts, acceptances, and failures.
 
+For longer, explicitly latency-tolerant waits, `Page_Out` asks a supporting
+Linux kernel to reclaim applicable pages immediately with `MADV_PAGEOUT`:
+
+```ada
+Flyology.Dormancy.Set_Policy
+  (Flyology.Dormancy.Page_Out, Minimum_Wait => 30.0);
+delay 300.0;
+```
+
+The mapping and bytes remain intact. Anonymous pages move through the host's
+configured swap path, which may be disk-backed swap, zswap, or zram; Flyology
+does not create a swap file or embed a stack compressor. The kernel may ignore
+inapplicable pages, and waking the task may incur page faults.
+`Pageout_Advice_Supported` reports the running kernel capability, while group
+observability distinguishes cumulative page-out calls from cold advice.
+
 ### Regular files
 
 Regular files are not readiness-oriented: marking a regular descriptor readable
@@ -2518,9 +2534,9 @@ connections. Results vary with the OS, compiler, allocator, and resource limits.
 
 ### Dormant-stack pressure showcase
 
-`run_dormant_stack_pressure.sh` compares the default `Prompt` policy with
-`Reclaimable` in separate processes. Each lightweight task touches one byte per
-page of a 256 KiB live stack payload and then waits on the same monotonic timer.
+`run_dormant_stack_pressure.sh` compares `Prompt`, `Reclaimable`, and `Page_Out`
+in separate processes. Each lightweight task touches one byte per page of a
+256 KiB live stack payload and then waits on the same monotonic timer.
 The process records its RSS, allocates and touches a temporary pressure mapping,
 releases that mapping, samples RSS again, and reports the latest timer wake.
 
@@ -2528,13 +2544,14 @@ releases that mapping, samples RSS again, and reports the latest timer wake.
 ./showcases/run_dormant_stack_pressure.sh 128 64
 ```
 
-The arguments are task count and temporary pressure MiB. On a Linux host with
-`MADV_COLD`, the reclaimable run also reports accepted cold-stack advice. The
-hint does not force immediate eviction, so an unconstrained host may show no RSS
-reduction. Repeated runs inside the intended deployment cgroup or memory limit
-are more informative than increasing pressure until the entire machine swaps.
-Unsupported hosts still run both cases and explicitly report `supported=FALSE`.
-The benchmark verifies every stack payload after wake; RSS and wake lateness are
+The arguments are task count and temporary pressure MiB. On Linux, the
+reclaimable and page-out runs report their accepted advice separately. Cold
+advice does not force immediate eviction, and page-out still depends on the
+host's swap configuration, so an unconstrained host may show no RSS reduction.
+Repeated runs inside the intended deployment cgroup or memory limit are more
+informative than increasing pressure until the entire machine swaps.
+Unsupported hosts still run all cases and report both capability flags. The
+benchmark verifies every stack payload after wake; RSS and wake lateness are
 measurements, not pass/fail performance thresholds.
 
 ### Cancellation-density showcase

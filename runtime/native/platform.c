@@ -648,8 +648,26 @@ int flyology_discard_pages(void *address, size_t length) {
 
 int flyology_cold_pages_supported(void) {
 #if defined(__linux__) && defined(MADV_COLD)
-    return 1;
+    return madvise(NULL, 0, MADV_COLD) == 0;
 #else
+    return 0;
+#endif
+}
+
+int flyology_pageout_pages_supported(void) {
+#if defined(__linux__) && defined(MADV_PAGEOUT)
+    return madvise(NULL, 0, MADV_PAGEOUT) == 0;
+#else
+    return 0;
+#endif
+}
+
+int flyology_pageout_pages(void *address, size_t length) {
+#if defined(__linux__) && defined(MADV_PAGEOUT)
+    return madvise(address, length, MADV_PAGEOUT) == 0 ? 1 : -1;
+#else
+    (void)address;
+    (void)length;
     return 0;
 #endif
 }

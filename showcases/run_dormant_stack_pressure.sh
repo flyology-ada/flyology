@@ -18,7 +18,7 @@ done
 printf '%s\n' \
   "Each process parks $task_count timer-only lightweight tasks with 256 KiB of touched stack." \
   "It allocates and touches $pressure_mib MiB temporarily, then reports RSS and maximum timer wake lateness." \
-  "MADV_COLD is a reclaim-priority hint: compare repeated runs under representative host or cgroup pressure."
+  "MADV_COLD is a priority hint; MADV_PAGEOUT uses configured swap. Compare under representative pressure."
 
 printf '\n%s\n' "== prompt policy =="
 "$showcase_root/bin/dormant_stack_pressure" \
@@ -27,3 +27,7 @@ printf '\n%s\n' "== prompt policy =="
 printf '\n%s\n' "== reclaimable policy =="
 "$showcase_root/bin/dormant_stack_pressure" \
   reclaimable "$task_count" "$pressure_mib"
+
+printf '\n%s\n' "== page-out policy =="
+"$showcase_root/bin/dormant_stack_pressure" \
+  pageout "$task_count" "$pressure_mib"

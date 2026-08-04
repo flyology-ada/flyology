@@ -38,7 +38,7 @@ procedure Dormant_Stack_Pressure is
 
    procedure Usage is
    begin
-      Put_Line ("usage: dormant_stack_pressure prompt|reclaimable"
+      Put_Line ("usage: dormant_stack_pressure prompt|reclaimable|pageout"
                 & " TASKS PRESSURE_MIB");
    end Usage;
 
@@ -183,8 +183,18 @@ procedure Dormant_Stack_Pressure is
              Observation.Counter (Task_Count)
            and then
              (Selected_Policy = Dormancy.Prompt
-              or else not Dormancy.Cold_Advice_Supported
-              or else Sample.Cold_Stacks = Observation.Counter (Task_Count));
+              or else
+                (Selected_Policy = Dormancy.Reclaimable
+                 and then
+                   (not Dormancy.Cold_Advice_Supported
+                    or else Sample.Cold_Stacks =
+                      Observation.Counter (Task_Count)))
+              or else
+                (Selected_Policy = Dormancy.Page_Out
+                 and then
+                   (not Dormancy.Pageout_Advice_Supported
+                    or else Sample.Cold_Stacks =
+                      Observation.Counter (Task_Count))));
          exit when Observed_Waiters;
          delay 0.001;
       end loop;
@@ -204,14 +214,18 @@ procedure Dormant_Stack_Pressure is
 
       Put_Line
         ("policy=" & Policy_Name
-         & " supported=" & Boolean'Image (Dormancy.Cold_Advice_Supported)
+         & " cold_supported="
+         & Boolean'Image (Dormancy.Cold_Advice_Supported)
+         & " pageout_supported="
+         & Boolean'Image (Dormancy.Pageout_Advice_Supported)
          & " tasks=" & Task_Count'Image
          & " payload=" & Natural'Image (Payload_Bytes / 1_024) & " KiB"
          & " pressure=" & Pressure_MiB'Image & " MiB");
       Put_Line
-        ("  timer_wait: candidates=" & Sample.Dormancy_Candidates'Image
+         ("  timer_wait: candidates=" & Sample.Dormancy_Candidates'Image
          & " cold=" & Sample.Cold_Stacks'Image
-         & " accepted=" & Sample.Cold_Advice_Accepted'Image);
+         & " cold_accepted=" & Sample.Cold_Advice_Accepted'Image
+         & " pageout_accepted=" & Sample.Pageout_Advice_Accepted'Image);
       Put_Line
         ("  rss: before_pressure="
          & Showcase_Support.Fixed_Image (MiB (Before_RSS))
@@ -245,6 +259,8 @@ begin
          Run (Dormancy.Prompt, Policy_Name, Task_Count, Pressure_MiB);
       elsif Policy_Name = "reclaimable" then
          Run (Dormancy.Reclaimable, Policy_Name, Task_Count, Pressure_MiB);
+      elsif Policy_Name = "pageout" then
+         Run (Dormancy.Page_Out, Policy_Name, Task_Count, Pressure_MiB);
       else
          Usage;
          Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);

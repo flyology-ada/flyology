@@ -29,6 +29,12 @@ package body Flyology.Dormancy is
       Runtime_Cold_Advice_Supported,
       "flyology_runtime_cold_advice_supported");
 
+   function Runtime_Pageout_Advice_Supported return C.int;
+   pragma Import
+     (C,
+      Runtime_Pageout_Advice_Supported,
+      "flyology_runtime_pageout_advice_supported");
+
    procedure Set_Policy
      (Value        : Policy;
       Minimum_Wait : Duration := 1.0)
@@ -43,17 +49,24 @@ package body Flyology.Dormancy is
          C.long_long (Minimum_Wait * Nanoseconds_Per_Second));
       if Result /= 0 and then Value /= Prompt then
          raise Dormancy_Error with
-           "reclaimable dormancy requires a lightweight task";
+           "non-prompt dormancy requires a lightweight task";
       end if;
    end Set_Policy;
 
    function Current_Policy return Policy is
       Result : constant C.int := Runtime_Current_Dormancy;
    begin
-      return (if Result = 1 then Reclaimable else Prompt);
+      return
+        (case Result is
+            when 1 => Reclaimable,
+            when 2 => Page_Out,
+            when others => Prompt);
    end Current_Policy;
 
    function Cold_Advice_Supported return Boolean is
      (Runtime_Cold_Advice_Supported /= 0);
+
+   function Pageout_Advice_Supported return Boolean is
+     (Runtime_Pageout_Advice_Supported /= 0);
 
 end Flyology.Dormancy;
