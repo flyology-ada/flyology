@@ -239,7 +239,7 @@ Flyology.Dormancy.Set_Policy (Flyology.Dormancy.Prompt);</code></pre>
             <p><code>Flyology.Memory_Regions.Task_Pool</code> is owned by the native or lightweight task that declares it. Each region grows in backing chunks as named-subpool allocators request storage. Explicit release first finalizes controlled objects and then returns every backing chunk; finalizing the pool releases any regions that remain live.</p>
             <p>A pool object declared in a task body is finalized when the task ends, so its remaining live regions are released automatically. Call <code>Release</code> when an earlier lifetime boundary matters. A dynamically allocated pool is not reclaimed merely because its owning task ends; the application must arrange for the pool to be finalized and deallocated.</p>
             <figure class="code-panel">
-              <figcaption>a task-local pool with one phase region</figcaption>
+              <figcaption>a task-lifetime region released at task termination</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">with Flyology.Memory_Regions;
 
@@ -254,21 +254,16 @@ procedure Memory_Region_Example is
       end record;
       type Node_Access is access Node;
       for Node_Access'Storage_Pool use Pool;
+
+      Region : Flyology.Memory_Regions.Region_Handle :=
+        Flyology.Memory_Regions.Create_Region
+          (Pool, Chunk_Storage =&gt; 64 * 1_024);
+
+      Head : Node_Access := new (Region) Node'(Value =&gt; 42);
    begin
-      declare
-         Region : Flyology.Memory_Regions.Region_Handle :=
-           Flyology.Memory_Regions.Create_Region
-             (Pool, Chunk_Storage =&gt; 64 * 1_024);
+      Head.Value := Head.Value + 1;
 
-         Head : Node_Access := new (Region) Node'(Value =&gt; 42);
-      begin
-         Head.Value := Head.Value + 1;
-
-         --  Release at the phase boundary. Pool finalization is the
-         --  safety net if Worker ends before this call.
-         Flyology.Memory_Regions.Release (Region);
-         --  Head is invalid from this point.
-      end;
+      --  Worker termination now finalizes Pool and releases Region.
    end Worker;
 begin
    null;
