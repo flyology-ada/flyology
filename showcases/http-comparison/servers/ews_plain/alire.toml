@@ -1,0 +1,17 @@
+name = "flyology_benchmark_ews_plain"
+description = "EWS adapter for the Flyology HTTP comparison"
+version = "0.1.0-dev"
+authors = ["Flyology contributors"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+project-files = ["ews_plain.gpr"]
+
+[[depends-on]]
+ews = "=1.11.0"
+
+[[depends-on]]
+gnat = "=15.3.1"
+
+[[depends-on]]
+xmlada = "=26.0.0"

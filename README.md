@@ -1304,6 +1304,16 @@ short campaigns do not exhaust one client-port tuple. It prints the `oha`
 version, complete command, profile, CPU count, port, and execution parallelism with every
 result. Results are host measurements, not portable performance guarantees.
 
+The separate [Ada HTTP server comparison](showcases/http-comparison/README.md)
+keeps raw HTTP-engine and application-server costs in distinct tiers. It runs
+the same verified response contracts against Flyology lightweight/native,
+AWS, EWS, and ServletAda over AWS/EWS, preserves raw `oha` JSON and process
+resource samples, and includes a pinned Linux Docker build:
+
+```sh
+./showcases/http-comparison/scripts/run-linux-docker.sh
+```
+
 The website's [HTTP application guide](https://flyology.org/guide/http/)
 progresses from the raw connection through routing, body policy, middleware,
 streaming lifecycles, structured request work, deployment sizing, and the

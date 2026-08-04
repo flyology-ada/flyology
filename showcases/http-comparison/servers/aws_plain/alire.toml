@@ -1,0 +1,23 @@
+name = "flyology_benchmark_aws_plain"
+description = "AWS adapter for the Flyology HTTP comparison"
+version = "0.1.0-dev"
+authors = ["Flyology contributors"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+project-files = ["aws_plain.gpr"]
+
+[environment]
+PRJ_BUILD.set = "Release"
+
+[[depends-on]]
+aws = "=25.2.0"
+
+[[depends-on]]
+gnat = "=15.3.1"
+
+[[depends-on]]
+gnatcoll = "=25.0.0"
+
+[[depends-on]]
+xmlada = "=25.0.0"

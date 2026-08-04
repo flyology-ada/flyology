@@ -6,5 +6,9 @@ lib
 obj
 showcases/bin
 showcases/obj
+showcases/http-comparison/servers/*/alire
+showcases/http-comparison/servers/*/bin
+showcases/http-comparison/servers/*/config
+showcases/http-comparison/servers/*/obj
 tests/bin
 tests/obj
