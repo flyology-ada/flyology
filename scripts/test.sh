@@ -3,6 +3,8 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
+test_subdir=behavioral
+test_bin="$project_root/tests/bin/$test_subdir"
 
 cd "$project_root"
 
@@ -24,6 +26,41 @@ run_gprbuild () {
     return
   fi
   "$alr" exec -- gprbuild "$@"
+}
+
+compile_test_mains () {
+  test_mains=$1
+  set --
+  test_count=0
+  for test_main in $test_mains; do
+    set -- "$@" "$test_main.adb"
+    test_count=$((test_count + 1))
+  done
+  printf '%s\n' "test: COMPILE $test_count programs"
+  run_gprbuild \
+    --RTS="$project_root/build/rts" \
+    --subdirs="$test_subdir" \
+    -f -c -r -p -j0 \
+    -P tests/runtime_smoke.gpr \
+    "$@"
+}
+
+link_test_mains () {
+  test_rts=$1
+  test_mains=$2
+  set --
+  test_count=0
+  for test_main in $test_mains; do
+    set -- "$@" "$test_main.adb"
+    test_count=$((test_count + 1))
+  done
+  printf '%s\n' "test: LINK $test_count programs"
+  run_gprbuild \
+    --RTS="$test_rts" \
+    --subdirs="$test_subdir" \
+    -f -b -l -p -j0 \
+    -P tests/runtime_smoke.gpr \
+    "$@"
 }
 
 #  The controller test child lives under tests. Verify that the production
@@ -48,21 +85,7 @@ then
   exit 1
 fi
 
-FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  default_policy_smoke.adb
-"$project_root/tests/bin/default_policy_smoke" lightweight
-
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  default_policy_smoke.adb
-"$project_root/tests/bin/default_policy_smoke" native
 
 if FLYOLOGY_LOOP_POOL_SIZE=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
@@ -164,86 +187,110 @@ if [ "$(uname -s)" = Linux ]; then
   "$project_root/build/tests/linux_syscall_probe"
 fi
 
-for test_main in \
-  cancellation_wake_smoke \
-  connection_lifecycle_smoke \
-  connection_state_model \
-  concurrency_primitives_smoke \
-  context_abi_matrix \
-  descriptor_ownership_smoke \
-  dns_smoke \
-  dns_parser_smoke \
-  dns_parser_matrix \
-  execution_groups_smoke \
-  fairness_smoke \
-  file_cancellation_smoke \
-  files_smoke \
-  flyology-counter_policy_smoke \
-  http_smoke \
-  io_smoke \
-  io_starvation_smoke \
-  lazy_event_start_smoke \
-  lifecycle_smoke \
-  loop_thread_placement_smoke \
-  observability_native_smoke \
-  observability_smoke \
-  priority_semantics_smoke \
-  process_exit_live_task_smoke \
-  process_exec_child_smoke \
-  process_lifecycle_smoke \
-  ready_queue_smoke \
-  runtime_smoke \
-  semantic_parity_smoke \
-  stack_guard_violation_child \
-  stack_guard_smoke \
-  stack_pool_smoke \
-  stack_size_parity_smoke \
-  suspension_object_smoke \
-  task_scopes_smoke \
-  stall_watchdog_native_smoke \
-  stall_watchdog_smoke \
-  structured_server_smoke \
-  thread_affinity_smoke \
-  timer_heap_smoke \
-  tls_smoke \
-  tls_state_model \
-  tcp_native_smoke \
-  wake_source_state_model \
-  wait_any_smoke
-do
-  if [ "$test_main" = descriptor_ownership_smoke ] || \
-     [ "$test_main" = connection_state_model ]; then
-    export FLYOLOGY_CONNECTION_TEST_HOOKS=true
-  else
-    unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
-  fi
-  if [ "$test_main" = concurrency_primitives_smoke ]; then
-    export FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
-  else
-    unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
-  fi
+ordinary_mains='cancellation_wake_smoke
+connection_lifecycle_smoke
+connection_state_model
+concurrency_primitives_smoke
+context_abi_matrix
+descriptor_ownership_smoke
+dns_smoke
+dns_parser_smoke
+dns_parser_matrix
+execution_groups_smoke
+fairness_smoke
+file_cancellation_smoke
+files_smoke
+flyology-counter_policy_smoke
+http_smoke
+io_smoke
+io_starvation_smoke
+lazy_event_start_smoke
+lifecycle_smoke
+loop_thread_placement_smoke
+observability_native_smoke
+observability_smoke
+priority_semantics_smoke
+process_exit_live_task_smoke
+process_exec_child_smoke
+process_lifecycle_smoke
+ready_queue_smoke
+runtime_smoke
+semantic_parity_smoke
+stack_guard_violation_child
+stack_guard_smoke
+stack_pool_smoke
+stack_size_parity_smoke
+suspension_object_smoke
+task_scopes_smoke
+stall_watchdog_native_smoke
+stall_watchdog_smoke
+structured_server_smoke
+thread_affinity_smoke
+timer_heap_smoke
+tls_smoke
+tls_state_model
+tcp_native_smoke
+wake_source_state_model
+wait_any_smoke'
+
+pool_mains='loop_pool_smoke
+topology_smoke
+semantic_conformance_matrix
+semantic_termination_matrix'
+
+fault_mains='accept_transient_smoke
+structured_server_reuse_smoke'
+
+all_test_mains="default_policy_smoke
+$ordinary_mains
+$pool_mains
+loop_thread_project_placement_smoke
+$fault_mains"
+if [ "$(uname -s)" = Linux ]; then
+  all_test_mains="$all_test_mains
+fault_injection_smoke
+linux_poller_fairness_smoke"
+fi
+
+#  The test hooks are inert until their C controllers arm a fault or barrier.
+#  Compile every selected main against the native compatibility RTS once. The
+#  alternate RTS configurations change only private runtime policy units and
+#  replace the contents of the same build/rts path. A fresh binder pass checks
+#  the compiled ALI closure against each configuration before linking, and
+#  fails rather than reusing an incompatible object.
+FLYOLOGY_CONNECTION_TEST_HOOKS=true
+FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS FLYOLOGY_WORKER_POOL_TEST_HOOKS
+compile_test_mains "$all_test_mains"
+
+FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
+link_test_mains "$project_root/build/rts" default_policy_smoke
+"$test_bin/default_policy_smoke" lightweight
+
+FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
+native_mains="default_policy_smoke
+$ordinary_mains"
+link_test_mains "$project_root/build/rts" "$native_mains"
+"$test_bin/default_policy_smoke" native
+
+for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
-  run_gprbuild \
-    --RTS="$project_root/build/rts" \
-    -f \
-    -P tests/runtime_smoke.gpr \
-    "$test_main.adb"
   case "$test_main" in
     dns_smoke)
       "$project_root/scripts/run-with-timeout.sh" 20 \
-        "$project_root/tests/bin/$test_main"
+        "$test_bin/$test_main"
       ;;
     dns_parser_matrix)
       "$project_root/scripts/run-with-timeout.sh" 20 \
-        "$project_root/tests/bin/$test_main"
+        "$test_bin/$test_main"
       ;;
     process_lifecycle_smoke|process_exit_live_task_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
-        "$project_root/tests/bin/$test_main"
+        "$test_bin/$test_main"
       ;;
     connection_state_model)
       "$project_root/scripts/run-with-timeout.sh" 30 \
-        "$project_root/tests/bin/$test_main"
+        "$test_bin/$test_main"
       ;;
     tls_smoke)
       tls_library_dir=${FLYOLOGY_TEST_OPENSSL_DIR:-}
@@ -273,25 +320,23 @@ do
         FLYOLOGY_TEST_OPENSSL_DIR="$tls_library_dir" \
         FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR="$tls_mismatch_dir" \
           "$project_root/scripts/run-with-timeout.sh" 90 \
-          "$project_root/tests/bin/$test_main"
+          "$test_bin/$test_main"
       else
         "$project_root/scripts/run-with-timeout.sh" 90 \
-          "$project_root/tests/bin/$test_main"
+          "$test_bin/$test_main"
       fi
       ;;
     tls_state_model)
       "$project_root/scripts/run-with-timeout.sh" 30 \
-        "$project_root/tests/bin/$test_main"
+        "$test_bin/$test_main"
       ;;
     *)
       "$project_root/scripts/run-with-timeout.sh" 60 \
-        "$project_root/tests/bin/$test_main"
+        "$test_bin/$test_main"
       ;;
   esac
   printf '%s\n' "test: PASS $test_main"
 done
-unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
-unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 
 #  Exercise automatic placement separately because the pool policy is compiled
 #  into the prepared RTS. The ordinary suite above intentionally retains the
@@ -300,32 +345,13 @@ FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=3 \
 FLYOLOGY_PLACEMENT=round_robin \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  loop_pool_smoke.adb
-"$project_root/tests/bin/loop_pool_smoke"
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  topology_smoke.adb
-"$project_root/tests/bin/topology_smoke"
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  semantic_conformance_matrix.adb
+link_test_mains "$project_root/build/rts" "$pool_mains"
+"$test_bin/loop_pool_smoke"
+"$test_bin/topology_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
-  "$project_root/tests/bin/semantic_conformance_matrix"
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  semantic_termination_matrix.adb
+  "$test_bin/semantic_conformance_matrix"
 "$project_root/scripts/run-with-timeout.sh" 30 \
-  "$project_root/tests/bin/semantic_termination_matrix"
+  "$test_bin/semantic_termination_matrix"
 
 #  Exercise a compiled project-level policy independently from the public
 #  pre-start API. Darwin tags are advisory; Linux masks are strict and use the
@@ -351,12 +377,9 @@ if [ "$loop_placement" != none ]; then
   FLYOLOGY_LOOP_PLACEMENT="$loop_placement" \
   FLYOLOGY_LOOP_PLACEMENT_MAP="6:$loop_placement_value" \
     "$project_root/scripts/prepare-rts.sh" >/dev/null
-  run_gprbuild \
-    --RTS="$project_root/build/rts" \
-    -f \
-    -P tests/runtime_smoke.gpr \
-    loop_thread_project_placement_smoke.adb
-  "$project_root/tests/bin/loop_thread_project_placement_smoke"
+  link_test_mains \
+    "$project_root/build/rts" loop_thread_project_placement_smoke
+  "$test_bin/loop_thread_project_placement_smoke"
 fi
 
 #  Transient accept behavior depends on errno results that are difficult to
@@ -367,36 +390,30 @@ FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=1 \
 FLYOLOGY_TEST_FAULTS=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  accept_transient_smoke.adb
+if [ "$(uname -s)" = Linux ]; then
+  fault_mains="$fault_mains
+linux_poller_fairness_smoke"
+  if [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]; then
+    fault_mains="$fault_mains
+fault_injection_smoke"
+  fi
+fi
+link_test_mains "$project_root/build/rts" "$fault_mains"
 "$project_root/scripts/run-with-timeout.sh" 30 \
-  "$project_root/tests/bin/accept_transient_smoke"
-run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  -f \
-  -P tests/runtime_smoke.gpr \
-  structured_server_reuse_smoke.adb
+  "$test_bin/accept_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
-  "$project_root/tests/bin/structured_server_reuse_smoke"
+  "$test_bin/structured_server_reuse_smoke"
 
 #  A capable Linux host must prove both initialization-fallback boundaries in
 #  fresh processes.  Forced-native runs cannot reach these post-setup seams.
 if [ "$(uname -s)" = Linux ] && \
    [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]
 then
-  run_gprbuild \
-    --RTS="$project_root/build/rts" \
-    -f \
-    -P tests/runtime_smoke.gpr \
-    fault_injection_smoke.adb
   "$project_root/scripts/run-with-timeout.sh" 30 \
-    "$project_root/tests/bin/fault_injection_smoke" \
+    "$test_bin/fault_injection_smoke" \
     file-uring-probe-fallback
   "$project_root/scripts/run-with-timeout.sh" 30 \
-    "$project_root/tests/bin/fault_injection_smoke" \
+    "$test_bin/fault_injection_smoke" \
     file-uring-post-setup-fallback
 fi
 
@@ -404,14 +421,12 @@ fi
 #  readiness, and a cross-thread eventfd wake in every iteration. The same
 #  deterministic test runs against io_uring and the forced native-AIO lane.
 if [ "$(uname -s)" = Linux ]; then
-  run_gprbuild \
-    --RTS="$project_root/build/rts" \
-    -f \
-    -P tests/runtime_smoke.gpr \
-    linux_poller_fairness_smoke.adb
   "$project_root/scripts/run-with-timeout.sh" 60 \
-    "$project_root/tests/bin/linux_poller_fairness_smoke"
+    "$test_bin/linux_poller_fairness_smoke"
 fi
+
+unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \
