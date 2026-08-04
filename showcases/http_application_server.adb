@@ -1789,6 +1789,7 @@ procedure HTTP_Application_Server is
          Server_Instance.Serve
            (Server, Listener, State, Drain_Timeout => 0.050);
       end;
+      Native_Work.Shutdown (Native_Pool);
 
       --  Access-task allocation gives these workers Run's task master. Stop
       --  every created worker before leaving so none can outlive showcase

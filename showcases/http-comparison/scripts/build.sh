@@ -45,7 +45,8 @@ cd "$showcase_root"
 FLYOLOGY_SHOWCASE_PROFILE=release "$alr" exec -- gprbuild \
    --RTS="$project_root/build/rts" \
    -f -P showcases.gpr \
-   http_plain_benchmark_server.adb http_application_benchmark_server.adb
+   http_plain_benchmark_server.adb http_application_benchmark_server.adb \
+   http_cpu_calibrator.adb http_hybrid_benchmark_server.adb
 
 for adapter in aws_plain ews_plain servletada_aws_app servletada_ews_app; do
    adapter_root="$comparison_root/servers/$adapter"

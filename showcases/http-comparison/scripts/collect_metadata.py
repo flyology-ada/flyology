@@ -25,6 +25,7 @@ git_revision = os.environ.get(
     command("git", "-C", str(root), "rev-parse", "HEAD"),
 )
 git_dirty_env = os.environ.get("HTTP_BENCH_GIT_DIRTY")
+loops_env = os.environ.get("HTTP_BENCH_LOOPS")
 metadata = {
     "schema": 1,
     "mode": os.environ.get("HTTP_BENCH_MODE", "local"),
@@ -52,10 +53,24 @@ metadata = {
     "concurrencies": os.environ.get("HTTP_BENCH_CONCURRENCIES", "1 8 32 128").split(),
     "trials": int(os.environ.get("HTTP_BENCH_TRIALS", "3")),
     "capacity": int(os.environ.get("HTTP_BENCH_CAPACITY", "256")),
-    "flyology_loops": int(os.environ.get("HTTP_BENCH_LOOPS", str(os.cpu_count() or 1))),
+    "flyology_loops": int(loops_env or str(os.cpu_count() or 1)),
     "client_cpuset": os.environ.get("HTTP_BENCH_CLIENT_CPUSET", "unrestricted"),
     "server_cpuset": os.environ.get("HTTP_BENCH_SERVER_CPUSET", "unrestricted"),
     "tiers": os.environ.get("HTTP_BENCH_TIERS", "plain application").split(),
+    "hybrid": {
+        "workers": os.environ.get("HTTP_HYBRID_WORKERS", "").split(),
+        "queue_capacity": os.environ.get("HTTP_HYBRID_QUEUE_CAPACITY"),
+        "target_cost_us": os.environ.get("HTTP_HYBRID_TARGETS_US", "").split(),
+        "cooldown_seconds": os.environ.get("HTTP_HYBRID_COOLDOWN"),
+        "mixed_load": os.environ.get("HTTP_HYBRID_MIXED"),
+        "mixed_start_offset_seconds": 0.2,
+        "mixed_cpu_concurrency": os.environ.get(
+            "HTTP_HYBRID_MIXED_CPU_CONCURRENCY"
+        ),
+        "mixed_control_concurrency": os.environ.get(
+            "HTTP_HYBRID_MIXED_CONTROL_CONCURRENCY"
+        ),
+    },
     "server_versions": {
         "aws_plain": "25.2.0",
         "ews_plain": "1.11.0",

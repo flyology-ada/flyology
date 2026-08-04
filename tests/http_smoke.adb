@@ -3,6 +3,7 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Task_Identification;
 with Ada.Unchecked_Deallocation;
 with Flyology.Cancellation;
 with Flyology.Bounded_Channels;
@@ -24,6 +25,7 @@ with Flyology.HTTP.Server.Middleware_Metrics;
 with Flyology.HTTP.Server.Middleware_Request_IDs;
 with Flyology.HTTP.Server.Middleware_Rate_Limits;
 with Flyology.HTTP.Server.Middleware_Security_Headers;
+with Flyology.HTTP.Server.Native_Routes;
 with Flyology.HTTP.Server.Requests;
 with Flyology.HTTP.Server.Request_Tasks;
 with Flyology.HTTP.Server.Responses;
@@ -33,6 +35,7 @@ with Flyology.HTTP.Server.WebSocket_Handlers;
 with Flyology.HTTP.Server.WebSocket_Handlers.Lifecycle;
 with Flyology.IO;
 with Flyology.IO.Sockets;
+with Flyology.Native_Executors;
 
 procedure HTTP_Smoke is
    package HTTP_Server renames Flyology.HTTP.Server;
@@ -44,6 +47,7 @@ procedure HTTP_Smoke is
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Ada.Task_Identification.Task_Id;
    use type Flyology.HTTP.HTTP_Version;
    use type HTTP_Server.WebSocket_Data_Kind;
 
@@ -3134,6 +3138,242 @@ procedure HTTP_Smoke is
         (Ada.Strings.Fixed.Index (To_String (Wire.Output), " 42") /= 0);
    end Check_Request_Task_Integration;
 
+   procedure Check_Native_Route_Integration is
+      package Applications renames Flyology.HTTP.Server.Applications;
+
+      Native_Failure : exception;
+      type Work_Input is record
+         Value : Integer := 0;
+      end record;
+
+      protected Trace is
+         procedure Prepared;
+         procedure Executed;
+         procedure Rendered;
+         procedure Release;
+         entry Await_Release;
+         function Ownership_Preserved return Boolean;
+         function Worker_Was_Native return Boolean;
+      private
+         Prepare_Task : Ada.Task_Identification.Task_Id :=
+           Ada.Task_Identification.Null_Task_Id;
+         Execute_Task : Ada.Task_Identification.Task_Id :=
+           Ada.Task_Identification.Null_Task_Id;
+         Render_Task : Ada.Task_Identification.Task_Id :=
+           Ada.Task_Identification.Null_Task_Id;
+         Native_Worker : Boolean := False;
+         Released : Boolean := False;
+      end Trace;
+
+      protected body Trace is
+         procedure Prepared is
+         begin
+            Prepare_Task := Ada.Task_Identification.Current_Task;
+         end Prepared;
+
+         procedure Executed is
+         begin
+            Execute_Task := Ada.Task_Identification.Current_Task;
+            Native_Worker := not Flyology.IO.Is_Lightweight_Task;
+         end Executed;
+
+         procedure Rendered is
+         begin
+            Render_Task := Ada.Task_Identification.Current_Task;
+         end Rendered;
+
+         procedure Release is
+         begin
+            Released := True;
+         end Release;
+
+         entry Await_Release when Released is
+         begin
+            null;
+         end Await_Release;
+
+         function Ownership_Preserved return Boolean is
+           (Prepare_Task /= Ada.Task_Identification.Null_Task_Id
+            and then Prepare_Task = Render_Task
+            and then Prepare_Task /= Execute_Task);
+
+         function Worker_Was_Native return Boolean is (Native_Worker);
+      end Trace;
+
+      procedure Execute
+        (Input    : Work_Input;
+         Token    : access Flyology.Cancellation.Token;
+         Deadline : Ada.Real_Time.Time;
+         Result   : out Integer)
+      is
+         pragma Unreferenced (Deadline);
+      begin
+         Trace.Executed;
+         if Input.Value = -1 then
+            raise Native_Failure with "mapped native failure";
+         elsif Input.Value = 0 then
+            Trace.Await_Release;
+         end if;
+         if Token.Requested then
+            raise Flyology.Cancellation.Operation_Cancelled;
+         end if;
+         Result := Input.Value * Input.Value + 17;
+      end Execute;
+
+      package Native_Work is new Flyology.Native_Executors
+        (Work_Input, Integer, Execute);
+      Pool : aliased Native_Work.Executor (Workers => 1, Capacity => 1);
+
+      type Context is record
+         Prepare_Calls : Natural := 0;
+         Render_Calls  : Natural := 0;
+      end record;
+
+      package Routing is new Flyology.HTTP.Server.Routing (Context);
+
+      procedure Prepare
+        (State : in out Context;
+         X     : in out Applications.Exchange;
+         Input : out Work_Input)
+      is
+      begin
+         State.Prepare_Calls := State.Prepare_Calls + 1;
+         Trace.Prepared;
+         Input.Value := Integer'Value (X.Parameter ("value"));
+      end Prepare;
+
+      procedure Render
+        (State  : in out Context;
+         X      : in out Applications.Exchange;
+         Result : Integer)
+      is
+      begin
+         State.Render_Calls := State.Render_Calls + 1;
+         Trace.Rendered;
+         X.Text (200, Integer'Image (Result));
+      end Render;
+
+      package Native_Route is new Flyology.HTTP.Server.Native_Routes
+        (App_Context => Context,
+         Input_Type  => Work_Input,
+         Result_Type => Integer,
+         Operations  => Native_Work,
+         Executor    => Pool'Access,
+         Prepare     => Prepare,
+         Render      => Render);
+
+      procedure Inline
+        (State : in out Context;
+         X     : in out Applications.Exchange)
+      is
+         Input : Work_Input;
+         Result : Integer;
+      begin
+         State.Prepare_Calls := State.Prepare_Calls + 1;
+         Input.Value := Integer'Value (X.Parameter ("value"));
+         Result := Input.Value * Input.Value + 17;
+         State.Render_Calls := State.Render_Calls + 1;
+         X.Text (200, Integer'Image (Result));
+      end Inline;
+
+      procedure Map
+        (State   : in out Context;
+         X       : in out Applications.Exchange;
+         Error   : Ada.Exceptions.Exception_Occurrence;
+         Handled : in out Boolean)
+      is
+         pragma Unreferenced (State);
+      begin
+         if Ada.Exceptions.Exception_Identity (Error) =
+           Native_Failure'Identity
+         then
+            X.Problem (409, "native-mapped", "Mapped native failure");
+            Handled := True;
+         end if;
+      end Map;
+
+      package Errors is new Flyology.HTTP.Server.Middleware_Errors
+        (Context, Routing.Components, Map => Map);
+
+      Routes : Routing.Router
+        (Capacity => 2, Slashes => Routing.Strict_Slashes);
+      State : Context;
+      Peer  : constant Sockets.Endpoint := Test_Peer;
+
+      function Run (Path : String) return String is
+         Wire : aliased Memory_Transport;
+      begin
+         Wire.Input := To_Unbounded_String
+           ("GET " & Path & " HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Routes.Serve (State, Client, Peer);
+         end;
+         return To_String (Wire.Output);
+      end Run;
+
+      function Response_Body (Response : String) return String is
+         Boundary : constant Natural :=
+           Ada.Strings.Fixed.Index (Response, CRLF & CRLF);
+      begin
+         pragma Assert (Boundary > 0);
+         return Response (Boundary + 4 .. Response'Last);
+      end Response_Body;
+   begin
+      Native_Work.Start (Pool);
+      Routes.Get
+        ("/native/{value}", Native_Route.Handle'Access, Name => "native");
+      Routes.Get ("/inline/{value}", Inline'Access, Name => "inline");
+      Routes.Add_Middleware (Errors.Call'Access);
+
+      declare
+         Native_Response : constant String := Run ("/native/7");
+         Inline_Response : constant String := Run ("/inline/7");
+      begin
+         pragma Assert
+           (Response_Body (Native_Response) =
+              Response_Body (Inline_Response));
+         pragma Assert (Trace.Ownership_Preserved);
+         pragma Assert (Trace.Worker_Was_Native);
+      end;
+
+      declare
+         Occupied : Native_Work.Operation_Handle (Pool'Access);
+         Accepted : Boolean;
+         Value    : Integer;
+      begin
+         Native_Work.Submit
+           (Pool, (Value => 0), null, Ada.Real_Time.Time_Last,
+            Occupied, Accepted);
+         pragma Assert (Accepted);
+         declare
+            Response : constant String := Run ("/native/8");
+         begin
+            pragma Assert
+              (Ada.Strings.Fixed.Index
+                 (Response, "503 Service Unavailable") /= 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index
+                 (Response, "native-executor-full") /= 0);
+         end;
+         Trace.Release;
+         Native_Work.Await (Pool, Occupied, Value);
+      end;
+
+      declare
+         Response : constant String := Run ("/native/-1");
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Response, "409 Conflict") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index (Response, "native-mapped") /= 0);
+      end;
+      Native_Work.Shutdown (Pool);
+   end Check_Native_Route_Integration;
+
 begin
    Check_HTTP;
    Check_Chunked_And_Expect;
@@ -3169,4 +3409,5 @@ begin
    Check_High_Level_WebSocket;
    Check_Fragmented_WebSocket_Timeout;
    Check_Request_Task_Integration;
+   Check_Native_Route_Integration;
 end HTTP_Smoke;

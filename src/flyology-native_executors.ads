@@ -3,6 +3,9 @@ with Ada.Finalization;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded;
 with Flyology.Cancellation;
+with Flyology.IO;
+with Flyology.Wake_Sources;
+with Interfaces;
 with System;
 
 --  Supplies an application-owned bounded native-task boundary. A fixed pool
@@ -36,6 +39,30 @@ package Flyology.Native_Executors is
       Capacity : Positive) is
      limited new Ada.Finalization.Limited_Controlled with private;
 
+   --  Point-in-time executor counters. Cumulative counters wrap modulo
+   --  2**64. Outstanding includes queued, running, and completed results that
+   --  have not yet been consumed or abandoned.
+   --  @field Accepted_Submissions Operations admitted since initialization
+   --  @field Rejected_Submissions Submissions refused by bounded admission
+   --  @field Successful_Executions Execute calls that returned normally
+   --  @field Failed_Executions Execute calls that raised an exception
+   --  @field Abandoned_Operations Accepted handles relinquished by callers
+   --  @field Outstanding_Operations Currently occupied operation slots
+   --  @field Queued_Operations Operations awaiting a native worker
+   --  @field Running_Operations Operations currently executing natively
+   --  @field Peak_Outstanding Highest occupied-slot count observed
+   type Executor_Statistics is record
+      Accepted_Submissions   : Interfaces.Unsigned_64 := 0;
+      Rejected_Submissions   : Interfaces.Unsigned_64 := 0;
+      Successful_Executions  : Interfaces.Unsigned_64 := 0;
+      Failed_Executions      : Interfaces.Unsigned_64 := 0;
+      Abandoned_Operations   : Interfaces.Unsigned_64 := 0;
+      Outstanding_Operations : Natural := 0;
+      Queued_Operations      : Natural := 0;
+      Running_Operations     : Natural := 0;
+      Peak_Outstanding       : Natural := 0;
+   end record;
+
    --  Single-use identity for one accepted operation. The access discriminant
    --  makes Ada reject a handle whose lifetime could exceed its executor.
    --  @field Owner Borrowed executor that must outlive the handle
@@ -46,6 +73,15 @@ package Flyology.Native_Executors is
    --  idempotent and must be called by the owning application during setup.
    --  @param Item Application-owned executor
    procedure Start (Item : aliased in out Executor);
+
+   --  Stop admission, request cancellation for every outstanding operation,
+   --  and join all native workers. Shutdown is terminal and idempotent; Start
+   --  raises Program_Error afterward. Execute must observe its executor-owned
+   --  token or deadline for this call to remain bounded. Call Shutdown before
+   --  leaving an Ada task master that contains a started executor; controlled
+   --  finalization performs the same operation only as a fallback.
+   --  @param Item Application-owned executor
+   procedure Shutdown (Item : in out Executor);
 
    --  Submit without waiting. Accepted is false when bounded storage is full
    --  or shutdown has begun. The executor samples Token at submission and
@@ -89,11 +125,20 @@ package Flyology.Native_Executors is
    procedure Abandon
      (Item : aliased in out Executor; Handle : in out Operation_Handle);
 
+   --  Read executor admission, execution, and occupancy counters atomically.
+   --  This is an observability operation; it does not wait for work or change
+   --  executor state.
+   --  @param Item Executor to inspect
+   --  @return Point-in-time executor statistics
+   function Statistics (Item : Executor) return Executor_Statistics;
+
 private
    type Input_Array is array (Positive range <>) of Input_Type;
    type Result_Array is array (Positive range <>) of Result_Type;
    type Token_Access is access all Flyology.Cancellation.Token;
    type Token_Array is array (Positive range <>) of Token_Access;
+   type Wake_Array is array (Positive range <>) of
+     Flyology.Wake_Sources.Source;
    type Time_Array is array (Positive range <>) of Ada.Real_Time.Time;
    type Natural_Array is array (Positive range <>) of Natural;
    type Boolean_Array is array (Positive range <>) of Boolean;
@@ -130,6 +175,11 @@ private
          Error_Id   : out Ada.Exceptions.Exception_Id;
          Message    : out Ada.Strings.Unbounded.Unbounded_String;
          Ready      : out Boolean);
+      procedure Wait_Source
+        (Slot       : Positive;
+         Generation : Natural;
+         FD         : out Flyology.IO.Descriptor;
+         Ready      : out Boolean);
       procedure Abandon
         (Slot       : Positive;
          Generation : Natural;
@@ -140,6 +190,7 @@ private
       procedure Worker_Stopped;
       entry Await_Stopped;
       procedure Take_Token (Slot : Positive; Token : out Token_Access);
+      function Statistics return Executor_Statistics;
    private
       Inputs      : Input_Array (1 .. Capacity);
       Results     : Result_Array (1 .. Capacity);
@@ -152,6 +203,9 @@ private
       Error_Ids   : Exception_Id_Array (1 .. Capacity) :=
         (others => Ada.Exceptions.Null_Id);
       Messages    : Message_Array (1 .. Capacity);
+      Wakes       : Wake_Array (1 .. Capacity);
+      Wake_Armed  : Boolean_Array (1 .. Capacity) := (others => False);
+      Wake_Pending : Boolean_Array (1 .. Capacity) := (others => False);
       Queue       : Natural_Array (1 .. Capacity) := (others => 0);
       Head        : Positive := 1;
       Tail        : Positive := 1;
@@ -160,6 +214,7 @@ private
       Stopped_Workers : Natural := 0;
       Expected_Workers : Natural := 0;
       Expected_Workers_Set : Boolean := False;
+      Counters : Executor_Statistics;
    end Shared_State;
 
    type Shared_State_Access is access all Shared_State;
@@ -194,6 +249,7 @@ private
       State : aliased Shared_State (Capacity);
       Pool  : Worker_Array_Access;
       Started : Boolean := False;
+      Shutdown_Complete : Boolean := False;
       Activated_Workers : Natural := 0;
    end record;
 

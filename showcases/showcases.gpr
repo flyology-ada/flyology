@@ -41,6 +41,8 @@ project Showcases is
       "http_application_benchmark_server.adb",
       "http_plain_benchmark_server.adb",
       "http_benchmark_server.adb",
+      "http_cpu_calibrator.adb",
+      "http_hybrid_benchmark_server.adb",
       "http_application_server.adb",
       "https_server.adb",
       "loop_thread_placement.adb",

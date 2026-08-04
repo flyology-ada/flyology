@@ -69,6 +69,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Scheduling inside one group is cooperative. A CPU-bound lightweight task must
   suspend, execute `delay 0.0`, or call a fairness checkpoint. Separate groups
   may execute in parallel. Do not describe this as forced preemption.
+- Routed native offload must prepare detached input on the request owner, pass
+  only that value through a bounded `Native_Executors` pool, and render on the
+  original owner. Native workers must not receive a live exchange or connection.
 - Ready queues are per-priority FIFO buckets, deadlines are per-group indexed
   min-heaps, and task/descriptor wake lookups are direct. Avoid reintroducing
   linear all-fiber scans or sorted ready-list insertion on hot paths.
@@ -216,6 +219,9 @@ required by the changed boundary.
   generated traces and reports remain outside version control.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
   benchmark before changing a performance table or claim.
+- `showcases/http-comparison/scripts/run-linux-docker-hybrid.sh`: calibrated
+  routed inline/native-pool/fully-native CPU and mixed-load comparison. Preserve
+  its raw oha, resource, executor, calibration, and metadata outputs with claims.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.
   It removes the successfully built test image on success or failure. Set
   `FLYOLOGY_KEEP_LINUX_IMAGE=1` only when retaining it for inspection.

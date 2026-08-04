@@ -120,6 +120,7 @@ project Flyology is
             "flyology-http-server-middleware_request_ids.ads",
             "flyology-http-server-middleware_rate_limits.ads",
             "flyology-http-server-middleware_security_headers.ads",
+            "flyology-http-server-native_routes.ads",
             "flyology-http-server-requests.ads",
             "flyology-http-server-request_tasks.ads",
             "flyology-http-server-responses.ads",

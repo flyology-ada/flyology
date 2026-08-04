@@ -5,8 +5,10 @@ with Flyology.Cancellation;
 with Flyology.IO;
 with Flyology.Native_Executors;
 with Flyology.Task_Scopes;
+with Interfaces;
 
 procedure Task_Scopes_Smoke is
+   use type Interfaces.Unsigned_64;
    type Work_Result is record
       Value       : Integer := 0;
       Lightweight : Boolean := False;
@@ -175,13 +177,81 @@ procedure Task_Scopes_Smoke is
       Native_Executor.Submit
         (Item, 6, null, Ada.Real_Time.Time_Last, Rejected, Accepted);
       pragma Assert (not Accepted);
+      declare
+         Sample : constant Native_Executor.Executor_Statistics :=
+           Native_Executor.Statistics (Item);
+      begin
+         pragma Assert (Sample.Accepted_Submissions = 2);
+         pragma Assert (Sample.Rejected_Submissions = 1);
+         pragma Assert (Sample.Outstanding_Operations = 2);
+         pragma Assert (Sample.Peak_Outstanding = 2);
+      end;
       Native_Executor.Await (Item, First, First_Result);
       Native_Executor.Await (Item, Second, Second_Result);
       pragma Assert (First_Result.Value = 8);
       pragma Assert (not First_Result.Lightweight);
       pragma Assert (Second_Result.Value = 10);
       pragma Assert (Tracker.Peak <= 2);
+      declare
+         Sample : constant Native_Executor.Executor_Statistics :=
+           Native_Executor.Statistics (Item);
+      begin
+         pragma Assert (Sample.Successful_Executions = 2);
+         pragma Assert (Sample.Failed_Executions = 0);
+         pragma Assert (Sample.Outstanding_Operations = 0);
+         pragma Assert (Sample.Queued_Operations = 0);
+         pragma Assert (Sample.Running_Operations = 0);
+      end;
    end Check_Native;
+
+   procedure Check_Native_Exception_And_Deadline is
+      Item : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
+      Accepted : Boolean;
+   begin
+      Native_Executor.Start (Item);
+      declare
+         Failing : Native_Executor.Operation_Handle (Item'Access);
+         Value   : Work_Result;
+         Saw_Failure : Boolean := False;
+      begin
+         Native_Executor.Submit
+           (Item, -1, null, Ada.Real_Time.Time_Last, Failing, Accepted);
+         pragma Assert (Accepted);
+         begin
+            Native_Executor.Await (Item, Failing, Value);
+         exception
+            when Constraint_Error => Saw_Failure := True;
+         end;
+         pragma Assert (Saw_Failure);
+      end;
+      declare
+         Expired : Native_Executor.Operation_Handle (Item'Access);
+         Value   : Work_Result;
+         Saw_Timeout : Boolean := False;
+      begin
+         Native_Executor.Submit
+           (Item, 1, null, Ada.Real_Time.Clock, Expired, Accepted);
+         pragma Assert (Accepted);
+         begin
+            Native_Executor.Await (Item, Expired, Value);
+         exception
+            when Flyology.IO.Timeout_Error => Saw_Timeout := True;
+         end;
+         pragma Assert (Saw_Timeout);
+      end;
+      for Attempt in 1 .. 100 loop
+         exit when
+           Native_Executor.Statistics (Item).Outstanding_Operations = 0;
+         delay 0.001;
+      end loop;
+      declare
+         Sample : constant Native_Executor.Executor_Statistics :=
+           Native_Executor.Statistics (Item);
+      begin
+         pragma Assert (Sample.Failed_Executions = 2);
+         pragma Assert (Sample.Outstanding_Operations = 0);
+      end;
+   end Check_Native_Exception_And_Deadline;
 
    procedure Check_Native_Abandon is
       Item : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
@@ -249,7 +319,36 @@ procedure Task_Scopes_Smoke is
          Native_Executor.Await (Item, Reused, Value);
          pragma Assert (Value.Value = 16);
       end;
+      declare
+         Sample : constant Native_Executor.Executor_Statistics :=
+           Native_Executor.Statistics (Item);
+      begin
+         pragma Assert (Sample.Abandoned_Operations = 2);
+         pragma Assert (Sample.Outstanding_Operations = 0);
+      end;
    end Check_Native_Abandon;
+
+   procedure Check_Native_Shutdown_With_Active_Work is
+      Item : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
+      Waiting : Native_Executor.Operation_Handle (Item'Access);
+      Accepted : Boolean;
+      Value : Work_Result;
+      Cancelled : Boolean := False;
+   begin
+      Native_Executor.Start (Item);
+      Native_Executor.Submit
+        (Item, 0, null, Ada.Real_Time.Time_Last, Waiting, Accepted);
+      pragma Assert (Accepted);
+      Native_Executor.Shutdown (Item);
+      begin
+         Native_Executor.Await (Item, Waiting, Value);
+      exception
+         when Flyology.Cancellation.Operation_Cancelled =>
+            Cancelled := True;
+      end;
+      pragma Assert (Cancelled);
+      Native_Executor.Shutdown (Item);
+   end Check_Native_Shutdown_With_Active_Work;
 
    procedure Check_Failure_Cancels_Sibling is
       Item : Lightweight_Scopes.Scope (Capacity => 2, Parent => null);
@@ -411,7 +510,9 @@ begin
    Check_Input_Copy_Failure;
    Check_Lightweight;
    Check_Native;
+   Check_Native_Exception_And_Deadline;
    Check_Native_Abandon;
+   Check_Native_Shutdown_With_Active_Work;
    Check_Failure_Cancels_Sibling;
    Check_Child_Cancellation_Is_Downward;
    Check_Result_Requires_Join;

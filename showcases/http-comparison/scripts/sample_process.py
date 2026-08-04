@@ -43,14 +43,29 @@ def linux_sample() -> dict[str, float | int]:
         value = status.get(name, "0 kB").split()[0]
         return int(value)
 
+    voluntary = 0
+    involuntary = 0
+    for task_status_path in Path(f"/proc/{pid}/task").glob("*/status"):
+        task_status: dict[str, str] = {}
+        try:
+            task_lines = task_status_path.read_text().splitlines()
+        except FileNotFoundError:
+            continue
+        for line in task_lines:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                task_status[key] = value.strip()
+        voluntary += int(task_status.get("voluntary_ctxt_switches", "0"))
+        involuntary += int(task_status.get("nonvoluntary_ctxt_switches", "0"))
+
     return {
         "elapsed_seconds": time.monotonic() - started,
         "cpu_seconds": (int(stat[13]) + int(stat[14])) / ticks,
         "rss_kib": kib("VmRSS"),
         "high_water_rss_kib": kib("VmHWM"),
         "threads": int(status.get("Threads", "0")),
-        "voluntary_context_switches": int(status.get("voluntary_ctxt_switches", "0")),
-        "involuntary_context_switches": int(status.get("nonvoluntary_ctxt_switches", "0")),
+        "voluntary_context_switches": voluntary,
+        "involuntary_context_switches": involuntary,
     }
 
 
@@ -82,7 +97,7 @@ while not stopping:
 if samples:
     last = samples[-1]
     result = {
-        "schema": 1,
+        "schema": 2,
         "pid": pid,
         "samples": len(samples),
         "elapsed_seconds": last["elapsed_seconds"],
@@ -93,5 +108,5 @@ if samples:
         "involuntary_context_switches": last["involuntary_context_switches"],
     }
 else:
-    result = {"schema": 1, "pid": pid, "samples": 0}
+    result = {"schema": 2, "pid": pid, "samples": 0}
 output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")

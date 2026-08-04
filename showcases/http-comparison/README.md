@@ -155,3 +155,65 @@ power settings, and CPU placement alongside the generated metadata.
 The comparison answers how these exact fixtures behave on the recorded host.
 It does not establish production suitability, protocol completeness, or a
 general ranking of the projects.
+
+## Routed native-offload experiment
+
+The hybrid runner tests a separate question from the cross-server comparison:
+whether a lightweight routed Flyology application benefits from sending only
+selected CPU work to a bounded native executor. All variants use the same
+deterministic allocation-free integer workload and exact response bytes:
+
+| Variant | Request lane | CPU operation | Response I/O |
+| --- | --- | --- | --- |
+| `inline` | lightweight | request task | request task |
+| `hybrid` | lightweight | bounded native pool | original request task |
+| `fully-native` | native | request task | request task |
+
+The fixture provides `/io-control`, `/cpu-inline`, `/cpu-native` in the hybrid
+variant, and `/executor-stats`. Before measuring, the runner calibrates the
+operation near 0.5, 2, and 10 ms on the server CPU set and verifies byte-for-byte
+identity between inline and offloaded results. It rejects any oha observation
+with a failed request or a non-200 response instead of including it in reported
+throughput. Executor rejection counts remain in `executor-stats/`.
+
+Run the response contract only:
+
+```sh
+HTTP_HYBRID_VERIFY_ONLY=1 \
+HTTP_HYBRID_TARGETS_US=500 \
+HTTP_HYBRID_WORKERS=1 \
+  ./showcases/http-comparison/scripts/run-linux-docker-hybrid.sh
+```
+
+Run the final matrix:
+
+```sh
+HTTP_BENCH_LOOPS=8 \
+HTTP_BENCH_SERVER_CPUSET="0-7" \
+HTTP_BENCH_CLIENT_CPUSET="8-15" \
+HTTP_HYBRID_CONCURRENCIES="1 8 32 128" \
+HTTP_HYBRID_WORKERS="1 2 4 8" \
+HTTP_HYBRID_QUEUE_CAPACITY=128 \
+HTTP_HYBRID_TARGETS_US="500 2000 10000" \
+HTTP_HYBRID_TRIALS=7 \
+HTTP_HYBRID_DURATION=30s \
+HTTP_HYBRID_WARMUP=5s \
+HTTP_HYBRID_COOLDOWN=2 \
+HTTP_HYBRID_MIXED=1 \
+HTTP_HYBRID_MIXED_CPU_CONCURRENCY=32 \
+HTTP_HYBRID_MIXED_CONTROL_CONCURRENCY=8 \
+  ./showcases/http-comparison/scripts/run-linux-docker-hybrid.sh
+```
+
+Each trial rotates the inline, pool-size, and fully native server order. Mixed
+load runs only for the heaviest calibrated cost: one oha process sustains the
+CPU route while another measures `/io-control`. Results contain calibration,
+metadata, unmodified oha JSON, process resources, executor statistics, CSV, and
+Markdown summaries under `build/http-comparison/docker-hybrid-results/`.
+
+The materiality rule is fixed before a final run: at concurrency 32 or higher,
+the hypothesis receives support if a zero-error hybrid configuration improves
+CPU-route throughput by at least 50%, reduces CPU-route p99 by at least 50%, or
+reduces mixed-load control-route p99 by at least 50% relative to inline. Every
+worker count remains in the summary, including rejected or slower choices; the
+conclusion must also report thread, RSS, CPU-time, and context-switch costs.

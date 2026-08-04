@@ -1259,6 +1259,44 @@ borrowed exchange or connection to children. Scope failure or exit cancels and
 joins only its children; it does not request the parent token. Native operations
 use executor-owned cancellation tokens, and an unawaited handle automatically
 abandons its result so bounded capacity is reclaimed when the worker returns.
+`Server.Native_Routes` makes that boundary reusable for routed handlers. Its
+`Prepare` callback runs on the request owner and produces a detached value;
+only that value reaches `Execute`, while `Render` resumes on the request owner
+with sole access to the exchange and connection:
+
+```ada
+package CPU_Work is new Flyology.Native_Executors
+  (Work_Input, Work_Result, Execute);
+Pool : aliased CPU_Work.Executor (Workers => 4, Capacity => 68);
+
+package CPU_Route is new Flyology.HTTP.Server.Native_Routes
+  (App_Context => Context,
+   Input_Type  => Work_Input,
+   Result_Type => Work_Result,
+   Operations  => CPU_Work,
+   Executor    => Pool'Access,
+   Prepare     => Prepare,
+   Render      => Render);
+
+CPU_Work.Start (Pool);
+Routes.Get ("/cpu", CPU_Route.Handle'Access, Name => "cpu");
+```
+
+`Workers` fixes native parallelism and `Capacity` bounds all queued, running,
+and completed-but-unclaimed operations. Full or stopping pools receive a 503;
+`CPU_Work.Statistics (Pool)` reports admission, execution, abandonment, current
+occupancy, and peak occupancy. The adapter propagates the exchange's absolute
+deadline and cancellation token and re-raises native exceptions through the
+normal router exception mapper. `Input_Type` and `Result_Type` must not contain
+an exchange, connection, or access value that aliases their mutable state.
+
+Keep short parsing, routing, middleware, and small calculations inline. Use a
+native route when measured CPU work is long enough to amortize submission and
+wakeup while unrelated lightweight requests need responsive event loops. A
+fully native structured server remains the simpler reference when most request
+work is CPU-bound, native thread counts are acceptable, and lightweight
+connection density is not a goal. These are workload choices; the routed CPU
+comparison below records where the crossover occurred on one host.
 
 `Begin_SSE`, `Send_Event`, and `End_SSE` produce a chunked
 `text/event-stream` response. `Accept_WebSocket` validates the RFC 6455 version
