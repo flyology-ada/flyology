@@ -239,26 +239,40 @@ Flyology.Dormancy.Set_Policy (Flyology.Dormancy.Prompt);</code></pre>
             <p><code>Flyology.Memory_Regions.Task_Pool</code> is owned by the native or lightweight task that declares it. Each region grows in backing chunks as named-subpool allocators request storage. Explicit release first finalizes controlled objects and then returns every backing chunk; finalizing the pool releases any regions that remain live.</p>
             <p>A pool object declared in a task body is finalized when the task ends, so its remaining live regions are released automatically. Call <code>Release</code> when an earlier lifetime boundary matters. A dynamically allocated pool is not reclaimed merely because its owning task ends; the application must arrange for the pool to be finalized and deallocated.</p>
             <figure class="code-panel">
-              <figcaption>one region for one task phase</figcaption>
+              <figcaption>a task-local pool with one phase region</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">with Flyology.Memory_Regions;
 
-Pool : aliased Flyology.Memory_Regions.Task_Pool;
+procedure Memory_Region_Example is
+   task Worker;
 
-type Node is record
-   Value : Integer;
-end record;
-type Node_Access is access Node;
-for Node_Access'Storage_Pool use Pool;
+   task body Worker is
+      Pool : aliased Flyology.Memory_Regions.Task_Pool;
 
-Region : Flyology.Memory_Regions.Region_Handle :=
-  Flyology.Memory_Regions.Create_Region
-    (Pool, Chunk_Storage =&gt; 64 * 1_024);
+      type Node is record
+         Value : Integer;
+      end record;
+      type Node_Access is access Node;
+      for Node_Access'Storage_Pool use Pool;
+   begin
+      declare
+         Region : Flyology.Memory_Regions.Region_Handle :=
+           Flyology.Memory_Regions.Create_Region
+             (Pool, Chunk_Storage =&gt; 64 * 1_024);
 
-Head : Node_Access := new (Region) Node'(Value =&gt; 42);
+         Head : Node_Access := new (Region) Node'(Value =&gt; 42);
+      begin
+         Head.Value := Head.Value + 1;
 
---  Head becomes invalid here.
-Flyology.Memory_Regions.Release (Region);</code></pre>
+         --  Release at the phase boundary. Pool finalization is the
+         --  safety net if Worker ends before this call.
+         Flyology.Memory_Regions.Release (Region);
+         --  Head is invalid from this point.
+      end;
+   end Worker;
+begin
+   null;
+end Memory_Region_Example;</code></pre>
             </figure>
             <p>Every allocator for an access type associated with the pool must name a region; an unnamed allocator raises <code>Program_Error</code>. Calls from another task raise <code>Ownership_Error</code>. <code>Statistics</code> reports live regions, consumed storage including allocator overhead, and reserved chunk capacity.</p>
             <p>The current implementation has no region quota, retained-chunk cache, trimming operation, or automatic connection to dormant-stack advice. It does not redirect ordinary Ada allocation. Set application admission limits around potentially large phases, inspect region statistics before release, and treat every access value into a released region as invalid.</p>
