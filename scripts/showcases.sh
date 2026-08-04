@@ -49,6 +49,9 @@ printf '\n== buffer_pool_contention ==\n'
 printf '\n== connection_density ==\n'
 "$project_root/showcases/run_connection_density.sh"
 
+printf '\n== dormant_stack_pressure ==\n'
+"$project_root/showcases/run_dormant_stack_pressure.sh"
+
 #  Leave the kitchen-sink HTTP executable in its host-sized configuration even
 #  though topology-specific demonstrations above rebuild smaller runtimes.
 FLYOLOGY_DEFAULT=lightweight \

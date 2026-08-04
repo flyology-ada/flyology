@@ -2345,6 +2345,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_buffer_handoff.sh
 ./showcases/run_buffer_pool_contention.sh 32 20000
 ./showcases/run_connection_density.sh
+./showcases/run_dormant_stack_pressure.sh 128 64
 ./showcases/run_http_benchmark.sh
 ```
 
@@ -2395,6 +2396,8 @@ The examples demonstrate:
   across execution groups, with empty-block churn and one-byte-touch workloads;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
+- separate-process `Prompt` and `Reclaimable` timer waits with touched stack
+  pages, temporary memory pressure, RSS samples, and maximum wake lateness.
 
 ### Event-loop pool showcase
 
@@ -2512,6 +2515,27 @@ deployment host.
 The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
 connections. Results vary with the OS, compiler, allocator, and resource limits.
+
+### Dormant-stack pressure showcase
+
+`run_dormant_stack_pressure.sh` compares the default `Prompt` policy with
+`Reclaimable` in separate processes. Each lightweight task touches one byte per
+page of a 256 KiB live stack payload and then waits on the same monotonic timer.
+The process records its RSS, allocates and touches a temporary pressure mapping,
+releases that mapping, samples RSS again, and reports the latest timer wake.
+
+```sh
+./showcases/run_dormant_stack_pressure.sh 128 64
+```
+
+The arguments are task count and temporary pressure MiB. On a Linux host with
+`MADV_COLD`, the reclaimable run also reports accepted cold-stack advice. The
+hint does not force immediate eviction, so an unconstrained host may show no RSS
+reduction. Repeated runs inside the intended deployment cgroup or memory limit
+are more informative than increasing pressure until the entire machine swaps.
+Unsupported hosts still run both cases and explicitly report `supported=FALSE`.
+The benchmark verifies every stack payload after wake; RSS and wake lateness are
+measurements, not pass/fail performance thresholds.
 
 ### Cancellation-density showcase
 

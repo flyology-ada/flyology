@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -123,4 +124,35 @@ double flyology_process_cpu_seconds(void) {
            (double)usage.ru_utime.tv_usec / 1000000.0 +
            (double)usage.ru_stime.tv_sec +
            (double)usage.ru_stime.tv_usec / 1000000.0;
+}
+
+int flyology_apply_memory_pressure(int64_t bytes) {
+    volatile unsigned char *mapping;
+    long page_size;
+    size_t index;
+
+    if (bytes <= 0 || (uint64_t)bytes > (uint64_t)SIZE_MAX) {
+        return -1;
+    }
+#if defined(__APPLE__)
+    mapping = mmap(NULL, (size_t)bytes, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON, -1, 0);
+#else
+    mapping = mmap(NULL, (size_t)bytes, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+    if (mapping == MAP_FAILED) {
+        return -1;
+    }
+
+    page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) {
+        munmap((void *)mapping, (size_t)bytes);
+        return -1;
+    }
+    for (index = 0; index < (size_t)bytes; index += (size_t)page_size) {
+        mapping[index] = (unsigned char)(index / (size_t)page_size);
+    }
+    mapping[(size_t)bytes - 1] = 1;
+    return munmap((void *)mapping, (size_t)bytes);
 }
