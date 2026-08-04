@@ -92,19 +92,20 @@
           <section id="build">
             <span class="step-label">STEP 02</span>
             <h2>Add Flyology to an Alire application.</h2>
-            <p>Flyology is temporarily published through a fork of the Alire community index. Create an application, register that index, and add the crate as a normal dependency.</p>
+            <p>Flyology is temporarily published through a separate organization index. Keep the community index enabled for compiler and third-party dependencies, add the Flyology index ahead of it, and add the crate normally.</p>
             <figure class="code-panel">
               <figcaption>shell</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>alr init --bin flyology_app
 cd flyology_app
-alr index --add=git+https://github.com/flyology-ada/alire-index.git#flyology-dev \
-  --name=flyology_fork
+alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
 alr with flyology</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p>The extra index is a testing channel, not a community-index release. Remove it when Flyology is available from the standard Alire index.</p>
+              <p>The Flyology index is a development channel, not a community-index release. Remove it with <code>alr index --del flyology</code> when Flyology is available from the community index.</p>
             </aside>
           </section>
 

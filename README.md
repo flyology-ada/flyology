@@ -1656,21 +1656,23 @@ rather than hidden behind a claim of universal portability.
 
 ## Use as an Alire dependency
 
-Until Flyology has a community-index release, register the temporary test index
-in an Alire application and add the crate normally:
+Until Flyology has a community-index release, keep the community index enabled
+for compiler and third-party dependencies, then add the Flyology organization
+index ahead of it:
 
 ```sh
 alr init --bin flyology_app
 cd flyology_app
-alr index --add=git+https://github.com/flyology-ada/alire-index.git#flyology-dev \
-  --name=flyology_fork
+alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
 alr with flyology
 alr build
 ```
 
-The extra index is a testing channel. Remove it with
-`alr index --del flyology_fork` when Flyology is available from the standard
-Alire community index.
+The organization index is a development channel separate from the community
+index. Remove it with `alr index --del flyology` when Flyology is available
+from the community index.
 
 Alire makes `flyology.gpr` available to the application and exports
 `FLYOLOGY_ROOT` as the dependency root. The first `alr build` runs Flyology's
