@@ -25,6 +25,7 @@ project Showcases is
    for Main use
      ("cancellation_density.adb",
       "buffer_handoff.adb",
+      "buffer_pool_contention.adb",
       "connection_density.adb",
       "connection_lifecycle.adb",
       "cooperative_fairness.adb",

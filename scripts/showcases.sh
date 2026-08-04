@@ -43,6 +43,9 @@ printf '\n== thread_per_core ==\n'
 printf '\n== buffer_handoff ==\n'
 "$project_root/showcases/run_buffer_handoff.sh"
 
+printf '\n== buffer_pool_contention ==\n'
+"$project_root/showcases/run_buffer_pool_contention.sh"
+
 printf '\n== connection_density ==\n'
 "$project_root/showcases/run_connection_density.sh"
 

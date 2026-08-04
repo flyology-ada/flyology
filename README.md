@@ -65,6 +65,8 @@ based on the surviving correspondence.
   - [CI and releases](#ci-and-releases)
 - [Showcases](#showcases)
   - [Event-loop pool showcase](#event-loop-pool-showcase)
+  - [Buffer-handoff showcase](#buffer-handoff-showcase)
+  - [Buffer-pool contention showcase](#buffer-pool-contention-showcase)
   - [Connection-density showcase](#connection-density-showcase)
   - [Cancellation-density showcase](#cancellation-density-showcase)
 - [Performance snapshot](#performance-snapshot)
@@ -642,6 +644,16 @@ atomically with the token and remains separate from the buffer's application
 tag. `Transfer_Metadata` is a distinct 64-bit modular type so it cannot mix
 implicitly with unrelated integers. Each consumer owns its encoding and
 validation; `No_Metadata` is the default zero value, not a presence marker.
+
+One `Pool` has one protected free list and one contiguous payload allocation.
+A shared pool therefore keeps all free capacity available to every caller but
+also makes every acquisition and release contend on the same state. Workloads
+with many independent ownership shards can instead create one pool per stable
+shard and size each pool explicitly. That bounds free-list sharing and permits
+shard-local first touch, at the cost of capacity that can be idle in one pool
+while another is exhausted. Flyology does not silently select a pool from the
+calling execution group: lightweight tasks can migrate, and native tasks have
+no Flyology group identity.
 
 ```ada
 Pool  : aliased Flyology.Buffers.Pool
@@ -2249,6 +2261,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
 ./showcases/run_buffer_handoff.sh
+./showcases/run_buffer_pool_contention.sh 32 20000
 ./showcases/run_connection_density.sh
 ./showcases/run_http_benchmark.sh
 ```
@@ -2296,6 +2309,8 @@ The examples demonstrate:
   from native and lightweight callers and explicit lightweight crossings;
 - value-copy and unique-buffer handoff throughput at payload sizes from 64
   bytes through 64 KiB, both within one execution group and across two groups;
+- shared and per-pair buffer-pool throughput as independent handoff pairs scale
+  across execution groups, with empty-block churn and one-byte-touch workloads;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
 
@@ -2335,6 +2350,31 @@ The reported MiB/s is logical payload throughput, not memory-bus traffic or
 network throughput. Results depend on payload size, build profile, host, and
 group placement, so the showcase reports measurements rather than selecting a
 fixed zero-copy threshold in the API.
+
+### Buffer-pool contention showcase
+
+`run_buffer_pool_contention.sh` scales independent producer/consumer pairs
+across the configured execution-group pool. Every pair has its own channel, so
+there is no single queue lock shared by the workload. The `shared` rows make
+all pairs acquire and release through one buffer pool; the `partitioned` rows
+divide the same total slot capacity among one pool per pair:
+
+```sh
+./showcases/run_buffer_pool_contention.sh 32 20000
+```
+
+The `churn` workload transfers empty 64-byte blocks to emphasize pool and
+channel synchronization. The `touch` workload writes and reads one byte in
+each 4 KiB block, adding page allocation and cache-line movement without a
+full-payload copy. Producer `i` runs on group `i`; its consumer runs on the
+next group, wrapping at the configured group count. Timing excludes pool,
+channel, and task creation but includes initial payload-page faults.
+
+The comparison exposes the tradeoff rather than selecting a pool policy.
+Partitioning can reduce one shared protected-object bottleneck and improve
+first-touch locality, but it can also strand free slots in one pool while
+another is exhausted. A shared pool retains elastic capacity across all
+callers.
 
 ### Connection-density showcase
 
