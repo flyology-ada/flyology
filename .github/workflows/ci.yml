@@ -54,12 +54,13 @@ jobs:
         run: ./scripts/test.sh
       - name: Build connection-density showcase
         working-directory: showcases
-        run: >-
-          alr exec -- gprbuild
-          --RTS="$GITHUB_WORKSPACE/build/rts"
-          -f
-          -P showcases.gpr
-          connection_density.adb
+        run: |
+          ./prepare-alire.sh
+          alr exec -- gprbuild \
+            --RTS="$GITHUB_WORKSPACE/build/rts" \
+            -f \
+            -P showcases.gpr \
+            connection_density.adb
       - name: Run connection-density smoke
         run: ./showcases/run_connection_density.sh 200 1000
 

@@ -44,6 +44,7 @@ if [ "$profile" = release ]; then
 else
   "$alr" build --development >/dev/null
 fi
+"$showcase_root/prepare-alire.sh" "$profile" >/dev/null
 FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE="$loops" \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 cd "$showcase_root"

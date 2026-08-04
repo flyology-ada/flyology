@@ -39,6 +39,8 @@ restore_default () {
   FLYOLOGY_DEFAULT=native FLYOLOGY_LOOP_POOL_SIZE=1 \
     "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1 || true
 }
+
+"$showcase_root/prepare-alire.sh" >/dev/null
 trap restore_default EXIT HUP INT TERM
 
 cd "$showcase_root"

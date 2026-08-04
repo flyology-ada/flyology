@@ -5,6 +5,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 showcase_root="$project_root/showcases"
 alr=$("$project_root/scripts/find-alr.sh")
 
+"$showcase_root/prepare-alire.sh" >/dev/null
 "$project_root/scripts/prepare-rts.sh" >/dev/null
 cd "$showcase_root"
 if [ "$(uname -s)" = Darwin ]; then

@@ -4,6 +4,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
 
+"$project_root/showcases/prepare-alire.sh" >/dev/null
 FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=1 \
   "$project_root/showcases/prepare-rts.sh" >/dev/null
 #  Showcase-only dependencies live in the nested manifest, so the core
