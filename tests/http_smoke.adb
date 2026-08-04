@@ -1548,6 +1548,11 @@ procedure HTTP_Smoke is
       pragma Assert (To_String (State.Last_Value) = "1");
 
       Run
+        ("GET / HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "home");
+
+      Run
         ("HEAD /users/9 HTTP/1.1" & CRLF
          & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
          "Content-Length: 6");
@@ -1623,6 +1628,66 @@ procedure HTTP_Smoke is
         ("GET /users/a%2Fb HTTP/1.1" & CRLF
          & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
          "invalid-path", "400");
+
+      declare
+         Target : Unbounded_String;
+      begin
+         for Index in 1 .. 65 loop
+            pragma Unreferenced (Index);
+            Append (Target, "/x");
+         end loop;
+         Run
+           ("GET " & To_String (Target) & " HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF,
+            "invalid-path", "400");
+      end;
+
+      declare
+         Ignored : Routing.Router
+           (Capacity => 1, Slashes => Routing.Ignore_Slashes);
+         Wire : aliased Memory_Transport;
+         Local_State : Context;
+      begin
+         Ignored.Get ("/users/{id}", User'Access, Name => "ignored.user");
+         Wire.Input := To_Unbounded_String
+           ("GET /users/7/ HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Ignored.Serve (Local_State, Client, Peer);
+         end;
+         pragma Assert
+           (Ada.Strings.Fixed.Index (To_String (Wire.Output), "200 OK") /= 0);
+         pragma Assert (To_String (Local_State.Last_Value) = "7");
+      end;
+
+      declare
+         Redirected : Routing.Router
+           (Capacity => 1, Slashes => Routing.Redirect_Slashes);
+         Wire : aliased Memory_Transport;
+         Local_State : Context;
+      begin
+         Redirected.Get
+           ("/users/{id}", User'Access, Name => "redirected.user");
+         Wire.Input := To_Unbounded_String
+           ("GET /users/7/ HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF);
+         declare
+            Client : aliased HTTP_Server.Connection (Wire'Access);
+         begin
+            Redirected.Serve (Local_State, Client, Peer);
+         end;
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output), "308 Permanent Redirect") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output), "Location: /users/7") /= 0);
+      end;
 
       declare
          Ambiguous : Routing.Router

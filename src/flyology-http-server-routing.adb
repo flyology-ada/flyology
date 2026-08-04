@@ -11,16 +11,6 @@ package body Flyology.HTTP.Server.Routing is
    use type App.Response_State;
    use type App.Upgrade_Mode;
 
-   Max_Segments : constant := 64;
-
-   type Segment_Array is
-     array (Positive range 1 .. Max_Segments) of Unbounded_String;
-   type Segment_List is record
-      Values   : Segment_Array;
-      Count    : Natural := 0;
-      Trailing : Boolean := False;
-   end record;
-
    function Hex_Value (Value : Character) return Natural is
      (if Value in '0' .. '9' then Character'Pos (Value) - Character'Pos ('0')
       elsif Value in 'a' .. 'f'
@@ -436,8 +426,10 @@ package body Flyology.HTTP.Server.Routing is
    is
       Effective_Name : constant String :=
         (if Name = "" then Method & " " & Pattern else Name);
+      Pattern_Segments : Segment_List;
    begin
       Check_Add (Item, Method, Pattern);
+      Split_Path (Pattern, Pattern_Segments);
       if Policy.Max_Body > Max_Request_Body then
          raise Route_Error with "route body limit exceeds server maximum";
       end if;
@@ -448,11 +440,13 @@ package body Flyology.HTTP.Server.Routing is
       end loop;
       Item.Count := Item.Count + 1;
       Item.Routes (Item.Count) :=
-        (Method  => To_Unbounded_String (Method),
-         Pattern => To_Unbounded_String (Pattern),
-         Name    => To_Unbounded_String (Effective_Name),
-         Handler => Handler,
-         Policy  => Policy,
+        (Method              => To_Unbounded_String (Method),
+         Pattern             => To_Unbounded_String (Pattern),
+         Pattern_Segments    => Pattern_Segments,
+         Pattern_Specificity => Specificity (Pattern),
+         Name                => To_Unbounded_String (Effective_Name),
+         Handler             => Handler,
+         Policy              => Policy,
          Middleware =>
            (others =>
               (Component => null,
@@ -625,31 +619,33 @@ package body Flyology.HTTP.Server.Routing is
    end Mount;
 
    function Match_Path
-     (Pattern, Path : String;
+     (Pattern, Path : Segment_List;
       Ignore_Trailing : Boolean;
       Capture : Boolean;
       X : access App.Exchange := null) return Boolean
    is
-      P, V : Segment_List;
       Last_Is_Remainder : Boolean;
       Normal_Count : Natural;
    begin
-      Split_Path (Pattern, P);
-      Split_Path (Path, V);
-      Last_Is_Remainder := P.Count > 0
-        and then Is_Remainder (To_String (P.Values (P.Count)));
-      Normal_Count := (if Last_Is_Remainder then P.Count - 1 else P.Count);
-      if V.Count < Normal_Count
-        or else (not Last_Is_Remainder and then V.Count /= P.Count)
+      Last_Is_Remainder := Pattern.Count > 0
+        and then Is_Remainder
+          (To_String (Pattern.Values (Pattern.Count)));
+      Normal_Count :=
+        (if Last_Is_Remainder then Pattern.Count - 1 else Pattern.Count);
+      if Path.Count < Normal_Count
+        or else
+          (not Last_Is_Remainder and then Path.Count /= Pattern.Count)
         or else (not Ignore_Trailing and then not Last_Is_Remainder
-                 and then P.Trailing /= V.Trailing)
+                 and then Pattern.Trailing /= Path.Trailing)
       then
          return False;
       end if;
       for Index in 1 .. Normal_Count loop
          declare
-            Pattern_Segment : constant String := To_String (P.Values (Index));
-            Value_Segment   : constant String := To_String (V.Values (Index));
+            Pattern_Segment : constant String :=
+              To_String (Pattern.Values (Index));
+            Value_Segment   : constant String :=
+              To_String (Path.Values (Index));
             Name : constant String := Parameter_Name (Pattern_Segment);
          begin
             if Name = "" then
@@ -665,17 +661,19 @@ package body Flyology.HTTP.Server.Routing is
          declare
             Remainder : Unbounded_String;
          begin
-            for Index in P.Count .. V.Count loop
-               if Index > P.Count then
+            for Index in Pattern.Count .. Path.Count loop
+               if Index > Pattern.Count then
                   Append (Remainder, "/");
                end if;
-               Append (Remainder, To_String (V.Values (Index)));
+               Append (Remainder, To_String (Path.Values (Index)));
             end loop;
-            if V.Trailing and then V.Count >= P.Count then
+            if Path.Trailing and then Path.Count >= Pattern.Count then
                Append (Remainder, "/");
             end if;
             App.Add_Parameter
-              (X.all, Remainder_Name (To_String (P.Values (P.Count))),
+              (X.all,
+               Remainder_Name
+                 (To_String (Pattern.Values (Pattern.Count))),
                To_String (Remainder));
          end;
       end if;
@@ -769,6 +767,7 @@ package body Flyology.HTTP.Server.Routing is
       end Decode_For_Dispatch;
 
       Path_Value   : constant String := Decode_For_Dispatch;
+      Path_Segments : Segment_List;
       Request_Method : constant String := Method (Value);
       Selected       : Natural := 0;
       Fallback       : Natural := 0;
@@ -783,16 +782,16 @@ package body Flyology.HTTP.Server.Routing is
       function Matches (Index : Positive; Ignore : Boolean := False)
         return Boolean
       is (Match_Path
-            (To_String (Item.Routes (Index).Pattern), Path_Value,
+            (Item.Routes (Index).Pattern_Segments, Path_Segments,
              Ignore, Capture => False));
 
       procedure Consider (Index : Positive; Is_Fallback : Boolean := False) is
          Score : constant Natural :=
-           Specificity (To_String (Item.Routes (Index).Pattern));
+           Item.Routes (Index).Pattern_Specificity;
       begin
          if Is_Fallback then
             if Fallback = 0 or else Score >
-              Specificity (To_String (Item.Routes (Fallback).Pattern))
+              Item.Routes (Fallback).Pattern_Specificity
             then
                Fallback := Index;
             end if;
@@ -828,6 +827,7 @@ package body Flyology.HTTP.Server.Routing is
          Pipeline.Execute (Context, X, Automatic_Response'Access);
       end Run_Automatic;
    begin
+      Split_Path (Path_Value, Path_Segments);
       if Request_Method = "OPTIONS" and then Raw = "*" then
          Add_Allowed (Allowed, "OPTIONS");
          for Index in 1 .. Item.Count loop
@@ -857,9 +857,9 @@ package body Flyology.HTTP.Server.Routing is
                if Item.Routes (Index).Policy.CORS_Policy /= 0
                  and then
                    (Preflight_Route = 0
-                    or else Specificity
-                      (To_String (Item.Routes (Preflight_Route).Pattern)) <
-                      Specificity (To_String (Item.Routes (Index).Pattern)))
+                    or else
+                      Item.Routes (Preflight_Route).Pattern_Specificity <
+                      Item.Routes (Index).Pattern_Specificity)
                then
                   Preflight_Route := Index;
                end if;
@@ -925,27 +925,30 @@ package body Flyology.HTTP.Server.Routing is
       end if;
 
       declare
-         Route : constant Route_Entry := Item.Routes (Selected);
          Pipeline : aliased Components.Pipeline
            (Capacity =>
               Max_Global_Middleware + Max_Route_Middleware + 2);
       begin
          X.Configure_Route
-           (To_String (Route.Name), Path_Value, Route.Policy.Body_Handling,
-            Route.Policy.Authentication, Route.Policy.CORS_Policy,
-            Route.Policy.Concurrency, Route.Policy.Rate_Per_Second,
-            Route.Policy.Upgrade);
+           (To_String (Item.Routes (Selected).Name), Path_Value,
+            Item.Routes (Selected).Policy.Body_Handling,
+            Item.Routes (Selected).Policy.Authentication,
+            Item.Routes (Selected).Policy.CORS_Policy,
+            Item.Routes (Selected).Policy.Concurrency,
+            Item.Routes (Selected).Policy.Rate_Per_Second,
+            Item.Routes (Selected).Policy.Upgrade);
          if not Match_Path
-           (To_String (Route.Pattern), Path_Value,
+           (Item.Routes (Selected).Pattern_Segments, Path_Segments,
             Item.Slashes = Ignore_Slashes, Capture => True, X => X'Access)
          then
             raise Program_Error with "selected HTTP route no longer matches";
          end if;
          X.Seal_Route;
-         if Route.Policy.Timeout >= 0.0 then
+         if Item.Routes (Selected).Policy.Timeout >= 0.0 then
             declare
                Candidate : constant Ada.Real_Time.Time := Ada.Real_Time.Clock
-                 + Ada.Real_Time.To_Time_Span (Route.Policy.Timeout);
+                 + Ada.Real_Time.To_Time_Span
+                     (Item.Routes (Selected).Policy.Timeout);
             begin
                if Candidate < X.Deadline then
                   X.Narrow_Deadline (Candidate);
@@ -953,7 +956,8 @@ package body Flyology.HTTP.Server.Routing is
             end;
          end if;
          begin
-            Narrow_Body_Limit (Connection, Route.Policy.Max_Body);
+            Narrow_Body_Limit
+              (Connection, Item.Routes (Selected).Policy.Max_Body);
          exception
             when Payload_Too_Large | Protocol_Error =>
                X.Problem (413, "body-too-large", "Request body is too large");
@@ -965,9 +969,11 @@ package body Flyology.HTTP.Server.Routing is
                Pipeline.Add (Item.Middleware (Index).Component);
             end if;
          end loop;
-         for Index in 1 .. Route.Middleware_Count loop
-            if Route.Middleware (Index).Stage = Request_Head then
-               Pipeline.Add (Route.Middleware (Index).Component);
+         for Index in 1 .. Item.Routes (Selected).Middleware_Count loop
+            if Item.Routes (Selected).Middleware (Index).Stage = Request_Head
+            then
+               Pipeline.Add
+                 (Item.Routes (Selected).Middleware (Index).Component);
             end if;
          end loop;
          Pipeline.Add (Require_Authentication'Access);
@@ -977,12 +983,14 @@ package body Flyology.HTTP.Server.Routing is
                Pipeline.Add (Item.Middleware (Index).Component);
             end if;
          end loop;
-         for Index in 1 .. Route.Middleware_Count loop
-            if Route.Middleware (Index).Stage = Application then
-               Pipeline.Add (Route.Middleware (Index).Component);
+         for Index in 1 .. Item.Routes (Selected).Middleware_Count loop
+            if Item.Routes (Selected).Middleware (Index).Stage = Application
+            then
+               Pipeline.Add
+                 (Item.Routes (Selected).Middleware (Index).Component);
             end if;
          end loop;
-         Pipeline.Execute (Context, X, Route.Handler);
+         Pipeline.Execute (Context, X, Item.Routes (Selected).Handler);
          if X.Response = App.Not_Started then
             X.No_Content;
          elsif X.Response in App.Streaming_Response | App.Streaming_SSE |

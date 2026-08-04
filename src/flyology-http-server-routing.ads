@@ -366,6 +366,15 @@ private
 
    Max_Global_Middleware : constant := 16;
    Max_Route_Middleware  : constant := 16;
+   Max_Segments          : constant := 64;
+
+   type Segment_Array is
+     array (Positive range 1 .. Max_Segments) of Unbounded_String;
+   type Segment_List is record
+      Values   : Segment_Array;
+      Count    : Natural := 0;
+      Trailing : Boolean := False;
+   end record;
 
    type Middleware_Entry is record
       Component : Middleware_Access;
@@ -375,14 +384,18 @@ private
    type Middleware_Array is
      array (Positive range <>) of Middleware_Entry;
 
+   --  Registration compiles each pattern into bounded segment storage so
+   --  dispatch does not split and allocate the same pattern per request.
    type Route_Entry is record
-      Method  : Unbounded_String;
-      Pattern : Unbounded_String;
-      Name    : Unbounded_String;
-      Handler : Handler_Access;
-      Policy  : Route_Policy;
-      Middleware : Middleware_Array (1 .. Max_Route_Middleware);
-      Middleware_Count : Natural := 0;
+      Method              : Unbounded_String;
+      Pattern             : Unbounded_String;
+      Pattern_Segments    : Segment_List;
+      Pattern_Specificity : Natural := 0;
+      Name                : Unbounded_String;
+      Handler             : Handler_Access;
+      Policy              : Route_Policy;
+      Middleware          : Middleware_Array (1 .. Max_Route_Middleware);
+      Middleware_Count    : Natural := 0;
    end record;
    type Route_Array is array (Positive range <>) of Route_Entry;
 
