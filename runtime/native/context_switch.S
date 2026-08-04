@@ -38,17 +38,37 @@
 .p2align 2
 .globl _flyology_context_initialize_registers
 _flyology_context_initialize_registers:
-    /* A first restore executes `ret`, so seed LR with the trampoline. */
-    str x2, [x0, #88]
+    /*
+     * Preserve the Ada trampoline in x19.  A first restore enters the assembly
+     * root below; that root supplies an explicit unwind terminator before it
+     * calls Ada code.
+     */
+    str x2, [x0, #0]
+    adr x3, .Lflyology_context_entry
+    str x3, [x0, #88]
 
     /* stack_top is already 16-byte aligned by the Ada stack allocator. */
     str x1, [x0, #96]
 
     /*
      * x29 and all other slots remain zero from Register_Array's default
-     * initialization.  In particular, x29=0 terminates the initial backtrace.
+     * initialization.
      */
     ret
+
+.p2align 2
+.Lflyology_context_entry:
+    .cfi_startproc
+    .cfi_def_cfa sp, 0
+    .cfi_undefined 30
+    /*
+     * The call gives the Ada trampoline a valid return address in this frame.
+     * The CFI above makes this frame the fiber's unwind root, so libunwind does
+     * not try to continue onto the unrelated scheduler pthread stack.
+     */
+    blr x19
+    brk #0
+    .cfi_endproc
 
 .globl _flyology_context_swap_registers
 _flyology_context_swap_registers:
@@ -189,12 +209,23 @@ _flyology_context_swap_registers:
 .globl flyology_context_initialize_registers
 .type flyology_context_initialize_registers, %function
 flyology_context_initialize_registers:
-    /* Seed LR for the first `ret`; SP is already 16-byte aligned. */
-    str x2, [x0, #88]
+    /* Preserve the Ada trampoline and enter it through an unwind root. */
+    str x2, [x0, #0]
+    adr x3, .Lflyology_context_entry
+    str x3, [x0, #88]
     str x1, [x0, #96]
 
-    /* Zero-initialized x29 terminates the fresh context's backtrace. */
     ret
+
+.p2align 2
+.Lflyology_context_entry:
+    .cfi_startproc
+    .cfi_def_cfa sp, 0
+    .cfi_undefined 30
+    /* Stop unwinding at this frame instead of crossing scheduler stacks. */
+    blr x19
+    brk #0
+    .cfi_endproc
 
 .globl flyology_context_swap_registers
 .type flyology_context_swap_registers, %function

@@ -45,6 +45,7 @@ project Runtime_Smoke is
       "dns_parser_matrix.adb",
       "default_policy_smoke.adb",
       "execution_groups_smoke.adb",
+      "exception_traceback_smoke.adb",
       "fault_injection_smoke.adb",
       "fairness_smoke.adb",
       "file_cancellation_smoke.adb",
@@ -98,4 +99,8 @@ project Runtime_Smoke is
         ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
          Connection_Test_Hook_Switch, Worker_Pool_Test_Hook_Switch);
    end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
 end Runtime_Smoke;

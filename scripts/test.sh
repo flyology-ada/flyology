@@ -204,6 +204,7 @@ dns_smoke
 dns_parser_smoke
 dns_parser_matrix
 execution_groups_smoke
+exception_traceback_smoke
 fairness_smoke
 file_cancellation_smoke
 files_smoke

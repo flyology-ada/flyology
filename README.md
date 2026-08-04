@@ -512,7 +512,13 @@ These are independent mechanisms with different jobs:
 
 The poller discovers readiness; the context machinery preserves a suspended
 Ada task's call stack and makes resumption look like an ordinary procedure
-return. Scheduling connects those two mechanisms without exposing either one
+return. Each fresh stack also has an unwind root: AArch64 enters the Ada
+trampoline through an assembly frame whose DWARF CFI marks the return address
+undefined, while x86-64 uses a zero return-address sentinel. Ada exception
+traceback capture, including executables bound with `-Es`, can therefore walk
+the fiber's frames and stop before the unrelated scheduler stack. Debuggers
+likewise stop at this root; Flyology does not splice two independent stacks
+into one backtrace. Scheduling connects these mechanisms without exposing them
 in application code.
 
 The scheduler state transition is:
@@ -1931,10 +1937,10 @@ combination understands Ada. The current Darwin GNAT/libasan combination can
 fail inside fully ASan-instrumented Ada exception propagation, so the checked
 harness instruments C frames and leaves its Ada frames uninstrumented. Leak
 scanning of suspended or migrated custom stacks is not claimed and the test
-disables leak detection. Assembly transfers remain opaque to compiler-generated
-unwind metadata, so debugger backtraces stop at the task's fresh frame unless a
-tool explicitly understands the saved context. TSan fiber identities and
-Valgrind stack registration are not enabled by the ASan switch and require
+disables leak detection. The assembly entry boundary deliberately terminates
+unwind traversal, so debugger and Ada exception tracebacks include the active
+fiber but not the scheduler stack that dispatched it. TSan fiber identities
+and Valgrind stack registration are not enabled by the ASan switch and require
 separate, tool-specific lifecycle designs.
 
 The default short campaign reports every seed and runs four seeds through
