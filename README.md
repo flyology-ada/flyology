@@ -1337,6 +1337,15 @@ recorded host, not a general ranking or a substitute for a longer native-Linux
 campaign. The journal entry publishes the latency tails, CPU/RSS/thread costs,
 metadata, raw observations, and reproduction command alongside the table.
 
+A [longer Linux follow-up](https://flyology.org/journal/2026-08-http-comparison-follow-up/)
+records seven 30-second trials on ARM64 and AMD64 shared hosts. At concurrency
+one, Flyology led every valid peer row in both tiers. Lightweight retained the
+smaller CPU and thread footprint, while native was faster on ARM64. The exact
+EWS fixture did not pass the strict 100% success threshold at concurrency eight,
+so the common higher-concurrency table is excluded rather than treated as a
+ranking. The article publishes sanitized aggregate data without private host or
+orchestration metadata.
+
 The website's [HTTP application guide](https://flyology.org/guide/http/)
 progresses from the raw connection through routing, body policy, middleware,
 streaming lifecycles, structured request work, deployment sizing, and the

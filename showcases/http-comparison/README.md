@@ -52,6 +52,43 @@ Set `FLYOLOGY_HTTP_BENCH_KEEP_IMAGE=1` while iterating to retain the image.
 On native Linux, `./showcases/run_http_comparison.sh` builds and runs the same
 matrix without Docker. `HTTP_BENCH_SKIP_BUILD=1` reuses an existing build.
 
+## Reproduce it on Kubernetes
+
+The Kubernetes runner builds and runs the same revision in parallel on one
+ARM64 node and one AMD64 node. Select ready, lightly loaded nodes after reviewing
+capacity, allocated requests, live node metrics, roles, taints, pressure
+conditions, CPU topology, and memory. Pass node names through the environment;
+the script does not record them in benchmark output:
+
+```sh
+HTTP_BENCH_ARM64_NODE=<selected-arm64-node> \
+HTTP_BENCH_AMD64_NODE=<selected-amd64-node> \
+HTTP_BENCH_TRIALS=7 \
+HTTP_BENCH_DURATION=30s \
+HTTP_BENCH_WARMUP=5s \
+HTTP_BENCH_COOLDOWN=20 \
+  ./showcases/http-comparison/scripts/run-kubernetes.sh
+```
+
+The selected `HTTP_BENCH_GIT_REVISION` defaults to local `HEAD` and must be
+reachable from `HTTP_BENCH_GIT_REPOSITORY`; the repository defaults to the
+public Flyology remote and may be changed for a fork.
+
+Use `HTTP_BENCH_ARM64_CONCURRENCIES` or
+`HTTP_BENCH_AMD64_CONCURRENCIES` when one architecture has a lower verified
+saturation boundary. `HTTP_BENCH_ARCHES=arm64` or `amd64` runs only one side.
+
+The default pod requests and limits 16 CPUs and 8 GiB, while the runner pins
+server and client processes to CPUs `0-7` and `8-15`. Confirm the cluster's CPU
+manager and cgroup behavior before relying on that division. The script copies
+results and logs below the ignored `build/http-comparison/kubernetes-results/`
+directory. A small collector sidecar keeps partial observations available when
+a benchmark process fails. The runner waits for every selected architecture,
+copies complete or partial artifacts, then deletes its temporary namespace on
+success, failure, or interruption. Keep raw node inventories separate and private; do not add node
+names, addresses, provider identifiers, labels, or unrelated workload details
+to a published result bundle.
+
 Treat concurrency 128 and above as a separate saturation probe. EWS's single
 selector can exceed the five-second request deadline there on this harness;
 the strict runner records the raw failing observation and stops rather than

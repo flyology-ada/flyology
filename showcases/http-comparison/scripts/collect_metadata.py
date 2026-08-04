@@ -32,7 +32,12 @@ metadata = {
     "machine": platform.machine(),
     "processor": platform.processor() or "unavailable",
     "logical_cpus": os.cpu_count(),
-    "kernel": command("uname", "-a"),
+    "kernel": (
+        command("uname", "-srmv")
+        if os.environ.get("HTTP_BENCH_REDACT_HOST", "0") == "1"
+        else command("uname", "-a")
+    ),
+    "hostname_redacted": os.environ.get("HTTP_BENCH_REDACT_HOST", "0") == "1",
     "git_revision": git_revision,
     "git_dirty": (
         git_dirty_env == "1" if git_dirty_env is not None
