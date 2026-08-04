@@ -270,6 +270,20 @@ begin
 end Memory_Region_Example;</code></pre>
             </figure>
             <p>Every allocator for an access type associated with the pool must name a region; an unnamed allocator raises <code>Program_Error</code>. Calls from another task raise <code>Ownership_Error</code>. <code>Statistics</code> reports live regions, consumed storage including allocator overhead, and reserved chunk capacity.</p>
+
+            <h3>Understand the region cost model</h3>
+            <p>The efficiency comes from grouping objects that share a lifetime. The pool replaces repeated general-heap allocation and reclamation with allocation from larger chunks and one collective cleanup boundary.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Task pool</dt><dd>Stores fixed ownership and accounting state plus the Ada subpool controller. It has no lock because only its owning task may use it.</dd></div>
+                <div class="decision-row"><dt>Region creation</dt><dd>Allocates one region descriptor and registers it with the pool. The first backing chunk is allocated lazily by the first object.</dd></div>
+                <div class="decision-row"><dt>Common allocation</dt><dd>Checks task ownership, aligns an address, advances the current chunk offset, and updates counters. It does not call the underlying heap while that chunk has room.</dd></div>
+                <div class="decision-row"><dt>Chunk growth</dt><dd>Allocates and links one new chunk when the current chunk is full. The default payload capacity is 64 KiB; a larger object receives enough capacity for its size and alignment.</dd></div>
+                <div class="decision-row"><dt>Bulk cleanup</dt><dd>Finalizes controlled objects, frees each backing chunk, and frees the region descriptor. Explicit <code>Release</code> does this for one region; task-end pool finalization does it for every region still live.</dd></div>
+              </dl>
+            </div>
+            <p>For <code>N</code> region allocations spanning <code>K</code> chunks, the region layer makes one descriptor allocation and <code>K</code> chunk allocations; most object allocations stay within an existing chunk. Reclamation makes <code>K</code> chunk frees, although controlled objects still require individual finalization. This amortization is useful when <code>K</code> is much smaller than <code>N</code>.</p>
+            <p>Reclamation is synchronous rather than background work. Ending a lightweight task with many chunks or expensive finalizers can occupy its event-loop pthread until cleanup finishes. The allocator checks only the current chunk, so unused tails in older chunks remain reserved until release. <code>Reserved_Storage</code> counts chunk payload capacity, not region descriptors, chunk headers, or underlying allocator metadata. Use smaller phase regions and explicit release boundaries when cleanup timing or chunk slack matters.</p>
             <p>The current implementation has no region quota, retained-chunk cache, trimming operation, or automatic connection to dormant-stack advice. It does not redirect ordinary Ada allocation. Set application admission limits around potentially large phases, inspect region statistics before release, and treat every access value into a released region as invalid.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
