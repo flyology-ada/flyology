@@ -8,6 +8,8 @@ alr=$("$project_root/scripts/find-alr.sh")
 toolchain_gnat=${HTTP_BENCH_GNAT_VERSION:-15.3.1}
 toolchain_gprbuild=${HTTP_BENCH_GPRBUILD_VERSION:-25.0.1}
 loops=${HTTP_BENCH_LOOPS:-}
+rust_root="$comparison_root/servers/rust"
+rust_version=${HTTP_BENCH_RUST_VERSION:-1.97.1}
 
 if [ "$(uname -s)" != Linux ] &&
    [ "${HTTP_BENCH_ALLOW_UNSUPPORTED_HOST:-0}" != 1 ]; then
@@ -72,5 +74,26 @@ for adapter in aws_plain ews_plain servletada_aws_app servletada_ews_app; do
    )
 done
 
+if [ "${HTTP_BENCH_SKIP_RUST_BUILD:-0}" = 1 ]; then
+   for binary in hyper_plain axum_app actix_app; do
+      test -x "$rust_root/target/release/$binary"
+   done
+else
+   command -v cargo >/dev/null 2>&1 || {
+      printf '%s\n' "cargo is required to build the Rust comparison fixtures" >&2
+      exit 1
+   }
+   actual_rust=$(rustc --version | awk '{print $2}')
+   if [ "$actual_rust" != "$rust_version" ]; then
+      printf '%s\n' \
+        "Rust $rust_version is required, found $actual_rust" >&2
+      exit 1
+   fi
+   (
+      cd "$rust_root"
+      cargo build --locked --release --bins
+   )
+fi
+
 printf '%s\n' \
-  "built HTTP comparison with GNAT $toolchain_gnat, gprbuild $toolchain_gprbuild, and verified $actual_loops Flyology loops"
+  "built HTTP comparison with GNAT $toolchain_gnat, gprbuild $toolchain_gprbuild, Rust $rust_version, and verified $actual_loops Flyology loops"

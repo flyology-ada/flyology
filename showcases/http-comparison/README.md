@@ -1,12 +1,12 @@
-# Ada HTTP server comparison
+# HTTP server comparison
 
-This harness compares Flyology with maintained Ada HTTP stacks under two
-separate contracts. It does not treat the two tiers as interchangeable.
+This harness compares Flyology with maintained Ada and Rust HTTP stacks under
+two separate contracts. It does not treat the two tiers as interchangeable.
 
 | Tier | Flyology | Other servers | Measured path |
 | --- | --- | --- | --- |
-| Plain HTTP engine | lightweight and native handlers | AWS 25.2.0, EWS 1.11.0 | direct request callback, no router or middleware |
-| Application server | lightweight and native handlers | ServletAda 1.8.2 over AWS and EWS | router/container/servlet dispatch |
+| Plain HTTP engine | lightweight and native handlers | AWS 25.2.0, EWS 1.11.0, hyper 1.11.0 | direct request callback or service, no router or middleware |
+| Application server | lightweight and native handlers | ServletAda 1.8.2 over AWS and EWS, axum 0.8.9, Actix Web 4.14.0 | router/container/framework dispatch |
 
 Every server receives HTTP/1.1 cleartext requests and returns the same status,
 content type, and body bytes. The runner verifies that contract before taking a
@@ -14,16 +14,30 @@ measurement. TLS is deliberately absent: it would primarily compare provider
 configuration and crypto rather than HTTP dispatch. The default workload uses
 persistent connections; optional connection churn is recorded separately.
 
-The website publishes an [August 2026 development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
-from this harness. It includes the aggregate tables, metadata, and raw result
-bundle. The short Docker campaign is labeled as preliminary throughout.
+The Rust fixtures are an aspirational extension to the maintained harness; no
+Rust comparison result is published by this repository. hyper is kept in the
+plain tier because its project describes it as a low-level HTTP building block.
+axum and Actix Web stay in the application tier because both exercise framework
+routing before returning the body. The selected versions were current releases
+on 2026-08-04 according to the projects' release records and crates.io:
+[hyper 1.11.0](https://github.com/hyperium/hyper/releases/tag/v1.11.0),
+[axum 0.8.9](https://github.com/tokio-rs/axum/releases/tag/axum-v0.8.9), and
+[Actix Web 4.14.0](https://github.com/actix/actix-web/releases/tag/web-v4.14.0).
+Rust 1.97.1 is fixed by `rust-toolchain.toml`; direct dependencies use exact
+versions and `Cargo.lock` fixes the complete transitive graph.
+
+The website's August 2026 journal entries predate this extension and remain
+Ada-only historical snapshots. Do not read their tables as Rust comparisons.
 
 ## Reproduce it in Docker
 
 Docker is the supported entry point on macOS and the most convenient entry
 point on Linux. The image pins Alire 2.1.1, GNAT 15.3.1, gprbuild 25.0.1, oha
-1.7.0, and each Ada dependency in its adapter manifest. Downloads for Alire and
-oha are checked against architecture-specific SHA-256 values.
+1.7.0, Rust 1.97.1, the locked Rust graph, and each Ada dependency in its
+adapter manifest. Downloads for Alire and oha are checked against
+architecture-specific SHA-256 values. Rust fixtures use Cargo's release
+profile, thin LTO, one code-generation unit, stripped symbols, and
+`panic = "abort"` behavior.
 
 Run a response-contract smoke test and keep no image:
 
@@ -38,16 +52,44 @@ Run the maintained local comparison profile:
 HTTP_BENCH_TRIALS=7 \
 HTTP_BENCH_DURATION=30s \
 HTTP_BENCH_WARMUP=5s \
-HTTP_BENCH_CONCURRENCIES="1 8 32" \
+HTTP_BENCH_CONCURRENCIES=1 \
 HTTP_BENCH_COOLDOWN=20 \
 HTTP_BENCH_INCLUDE_CHURN=1 \
+HTTP_BENCH_LOOPS=16 \
 HTTP_BENCH_SERVER_CPUSET="0-7" \
 HTTP_BENCH_CLIENT_CPUSET="8-15" \
+HTTP_BENCH_RUST_WORKERS=8 \
+  ./showcases/http-comparison/scripts/run-linux-docker.sh
+```
+
+Run higher concurrency separately as a saturation probe:
+
+```sh
+HTTP_BENCH_TRIALS=1 \
+HTTP_BENCH_DURATION=1s \
+HTTP_BENCH_WARMUP=1s \
+HTTP_BENCH_CONCURRENCIES="8 32 128" \
+HTTP_BENCH_COOLDOWN=0 \
+HTTP_BENCH_LOOPS=16 \
+HTTP_BENCH_SERVER_CPUSET="0-7" \
+HTTP_BENCH_CLIENT_CPUSET="8-15" \
+HTTP_BENCH_RUST_WORKERS=8 \
+HTTP_BENCH_SATURATION_PROBE=1 \
   ./showcases/http-comparison/scripts/run-linux-docker.sh
 ```
 
 Set `HTTP_BENCH_TIERS=plain` or `HTTP_BENCH_TIERS=application` to run one tier.
 Adjust or omit the two CPU sets for machines that do not expose 16 CPUs.
+Set the loop count explicitly for a comparison campaign. The build and runner
+both fail unless the linked runtime reports that exact count; metadata records
+the requested and observed values separately. The maintained 16-vCPU profile
+uses 16 Flyology loops and confines all server threads to CPUs `0-7`, matching
+the corrected local validation that exposed the earlier accidental one-loop
+build. This is a recorded profile, not a claim that 16 is optimal on every
+host.
+`HTTP_BENCH_RUST_WORKERS` fixes the Tokio or Actix Web worker count; if omitted,
+the fixtures use the process's available parallelism after CPU affinity is
+applied.
 Set `FLYOLOGY_HTTP_BENCH_KEEP_IMAGE=1` while iterating to retain the image.
 On native Linux, `./showcases/run_http_comparison.sh` builds and runs the same
 matrix without Docker. `HTTP_BENCH_SKIP_BUILD=1` reuses an existing build.
@@ -71,12 +113,19 @@ HTTP_BENCH_TRIALS=7 \
 HTTP_BENCH_DURATION=30s \
 HTTP_BENCH_WARMUP=5s \
 HTTP_BENCH_COOLDOWN=20 \
+HTTP_BENCH_CONCURRENCIES=1 \
+HTTP_BENCH_LOOPS=16 \
+HTTP_BENCH_RUST_WORKERS=8 \
   ./showcases/http-comparison/scripts/run-kubernetes.sh
 ```
 
 The selected `HTTP_BENCH_GIT_REVISION` defaults to local `HEAD` and must be
 reachable from `HTTP_BENCH_GIT_REPOSITORY`; the repository defaults to the
-public Flyology remote and may be changed for a fork.
+public Flyology remote and may be changed for a fork. By default the runner also
+packages the local `showcases/http-comparison/` tree as a temporary ConfigMap
+overlay. This permits measuring reviewed, uncommitted fixture work without
+pushing it. Set `HTTP_BENCH_LOCAL_OVERLAY=0` to measure the repository revision
+alone. Generated build directories are excluded from the overlay.
 
 Use `HTTP_BENCH_ARM64_CONCURRENCIES` or
 `HTTP_BENCH_AMD64_CONCURRENCIES` when one architecture has a lower verified
@@ -88,18 +137,23 @@ manager and cgroup behavior before relying on that division. The script copies
 results and logs below the ignored `build/http-comparison/kubernetes-results/`
 directory. A small collector sidecar keeps partial observations available when
 a benchmark process fails. The runner waits for every selected architecture,
-copies complete or partial artifacts, then deletes its temporary namespace on
-success, failure, or interruption. Keep raw node inventories separate and private; do not add node
+copies complete or partial artifacts, privacy-scans the sanitized bundle, then
+deletes and verifies removal of its temporary namespace on success, failure, or
+interruption. `cleanup.json` and `privacy-scan.json` retain sanitized proof of
+those checks. Keep raw node inventories separate and private; do not add node
 names, addresses, provider identifiers, labels, or unrelated workload details
 to a published result bundle.
 
-Treat concurrency 128 and above as a separate saturation probe. EWS's single
+Treat higher concurrency as a separate saturation probe rather than a common
+ranking. Set `HTTP_BENCH_SATURATION_PROBE=1` for those runs. The runner keeps an
+invalid raw observation and continues the probe, while `summarize.py` excludes
+every group that fails the strict 100% HTTP 200 gate and records the details in
+`excluded.csv`. EWS's single
 selector can exceed the five-second request deadline there on this harness;
-the strict runner records the raw failing observation and stops rather than
-mixing timed-out requests into a throughput comparison. Set, for example,
+the strict gate prevents timed-out requests from entering a throughput
+comparison. Set, for example,
 `HTTP_BENCH_CONCURRENCIES=128` when the error boundary itself is the subject of
-the run, and test higher levels in separate invocations because a failed level
-ends its campaign immediately.
+the run, and test higher levels in separate invocations.
 
 Results are written below `build/http-comparison/`. Each timestamped directory
 contains:
@@ -113,6 +167,9 @@ contains:
 - `logs/`: server output, kept out of the request path;
 - `summary.csv`, `resources.csv`, and `summary.md`: medians across complete
   trials, plus throughput ranges and context-switch totals in CSV.
+- `excluded.csv`: saturation observations rejected by the 100% success gate;
+- `privacy-scan.json` and `cleanup.json`: sanitized privacy and teardown checks
+  for Kubernetes campaigns.
 
 ## Workload contracts
 
@@ -128,7 +185,9 @@ The source-of-truth workload files are `workloads.conf` and
 The adapters disable per-request logging. Flyology plain uses the raw HTTP
 connection handler; Flyology application uses its router and exchange API. AWS
 plain uses its callback API. EWS plain uses its dynamic handler API. The
-application competitors use one identical ServletAda servlet. The EWS adapter
+hyper plain fixture uses its HTTP/1 connection service without application
+routing. The Ada application competitors use one identical ServletAda servlet;
+axum and Actix Web each use one exact routed GET. The EWS adapter
 uses the same public container/request/response flow as ServletAda's backend,
 but sets EWS tracing to false because the stock backend hard-codes per-request
 tracing on. ServletAda 1.8.2 currently resolves AWS 25.0.0 for that adapter;

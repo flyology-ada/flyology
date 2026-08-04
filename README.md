@@ -1449,17 +1449,18 @@ short campaigns do not exhaust one client-port tuple. It prints the `oha`
 version, complete command, profile, CPU count, port, and execution parallelism with every
 result. Results are host measurements, not portable performance guarantees.
 
-The separate [Ada HTTP server comparison](showcases/http-comparison/README.md)
-keeps raw HTTP-engine and application-server costs in distinct tiers. It runs
-the same verified response contracts against Flyology lightweight/native,
-AWS, EWS, and ServletAda over AWS/EWS, preserves raw `oha` JSON and process
-resource samples, and includes a pinned Linux Docker build:
+The separate [HTTP server comparison](showcases/http-comparison/README.md) keeps
+raw HTTP-engine and routed application-server costs in distinct tiers. It runs
+the same verified response contracts against Flyology lightweight/native, the
+maintained Ada fixtures, hyper, axum, and Actix Web, preserves raw `oha` JSON
+and process resource samples, and includes a pinned Linux Docker build. The Rust
+extension is aspirational and has no published performance result:
 
 ```sh
 ./showcases/http-comparison/scripts/run-linux-docker.sh
 ```
 
-A dated [preliminary development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
+A dated Ada-only [preliminary development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
 records three three-second Linux/AArch64 Docker trials on an Apple M3 Max
 MacBook Pro with 48 GB of memory, from commit `48fdb23`.
 At concurrency 32, the median results were:
@@ -1475,7 +1476,7 @@ recorded host, not a general ranking or a substitute for a longer native-Linux
 campaign. The journal entry publishes the latency tails, CPU/RSS/thread costs,
 metadata, raw observations, and reproduction command alongside the table.
 
-A [longer Linux follow-up](https://flyology.org/journal/2026-08-http-comparison-follow-up/)
+A longer Ada-only [Linux follow-up](https://flyology.org/journal/2026-08-http-comparison-follow-up/)
 records seven 30-second trials on ARM64 and AMD64 shared hosts. At concurrency
 one, Flyology led every valid peer row in both tiers. Lightweight retained the
 smaller CPU and thread footprint, while native was faster on ARM64. The exact

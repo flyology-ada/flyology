@@ -59,6 +59,8 @@ docker run --rm \
    --env HTTP_BENCH_DURATION \
    --env HTTP_BENCH_INCLUDE_CHURN \
    --env "HTTP_BENCH_LOOPS=$loops" \
+   --env HTTP_BENCH_RUST_WORKERS \
+   --env HTTP_BENCH_SATURATION_PROBE \
    --env HTTP_BENCH_SERVER_CPUSET \
    --env HTTP_BENCH_TIERS \
    --env HTTP_BENCH_TRIALS \

@@ -7,6 +7,7 @@ workspace=${HTTP_BENCH_WORKSPACE:-/workspace/flyology}
 output_root=${HTTP_BENCH_OUTPUT_ROOT:-/results}
 alire_version=${HTTP_BENCH_ALIRE_VERSION:-2.1.1}
 oha_version=${HTTP_BENCH_OHA_VERSION:-1.7.0}
+rust_version=${HTTP_BENCH_RUST_VERSION:-1.97.1}
 
 case "$(uname -m)" in
    arm64|aarch64)
@@ -42,6 +43,12 @@ unzip -q /tmp/alire.zip -d /opt/alire
 ln -s /opt/alire/bin/alr /usr/local/bin/alr
 rm /tmp/alire.zip
 
+curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+   -o /tmp/rustup-init.sh
+sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain "$rust_version"
+rm /tmp/rustup-init.sh
+export PATH="/root/.cargo/bin:$PATH"
+
 curl -fsSL \
    "https://github.com/hatoo/oha/releases/download/v${oha_version}/oha-linux-${oha_arch}" \
    -o /usr/local/bin/oha
@@ -50,14 +57,19 @@ chmod +x /usr/local/bin/oha
 
 git clone --filter=blob:none --no-checkout "$repository" "$workspace"
 git -C "$workspace" checkout --detach "$revision"
+if [ -f /bootstrap/overlay.tar.gz ]; then
+   tar -xzf /bootstrap/overlay.tar.gz -C "$workspace"
+fi
 
 export ALR=/usr/local/bin/alr
 export HTTP_BENCH_GNAT_VERSION=${HTTP_BENCH_GNAT_VERSION:-15.3.1}
 export HTTP_BENCH_GPRBUILD_VERSION=${HTTP_BENCH_GPRBUILD_VERSION:-25.0.1}
 export HTTP_BENCH_LOOPS=${HTTP_BENCH_LOOPS:-16}
+export HTTP_BENCH_RUST_VERSION="$rust_version"
+export HTTP_BENCH_CARGO_VERSION="$rust_version"
 "$workspace/showcases/http-comparison/scripts/build.sh"
 
-HTTP_BENCH_GIT_DIRTY=0 \
+HTTP_BENCH_GIT_DIRTY=${HTTP_BENCH_GIT_DIRTY:-0} \
 HTTP_BENCH_MODE=native-linux-loopback \
 HTTP_BENCH_OUTPUT_ROOT="$output_root" \
 HTTP_BENCH_REDACT_HOST=1 \

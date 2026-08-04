@@ -14,5 +14,6 @@
 /showcases/http-comparison/servers/*/bin/
 /showcases/http-comparison/servers/*/config/
 /showcases/http-comparison/servers/*/obj/
+/showcases/http-comparison/servers/rust/target/
 /docs/api/
 /coverage/

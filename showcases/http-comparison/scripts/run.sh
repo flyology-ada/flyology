@@ -5,16 +5,18 @@ comparison_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 project_root=$(CDPATH= cd -- "$comparison_root/../.." && pwd)
 duration=${HTTP_BENCH_DURATION:-10s}
 warmup=${HTTP_BENCH_WARMUP:-2s}
-concurrencies=${HTTP_BENCH_CONCURRENCIES:-"1 8 32"}
+concurrencies=${HTTP_BENCH_CONCURRENCIES:-1}
 trials=${HTTP_BENCH_TRIALS:-3}
 capacity=${HTTP_BENCH_CAPACITY:-256}
 base_port=${HTTP_BENCH_BASE_PORT:-18090}
 cooldown=${HTTP_BENCH_COOLDOWN:-2}
 include_churn=${HTTP_BENCH_INCLUDE_CHURN:-0}
 verify_only=${HTTP_BENCH_VERIFY_ONLY:-0}
+saturation_probe=${HTTP_BENCH_SATURATION_PROBE:-0}
 tiers=${HTTP_BENCH_TIERS:-"plain application"}
 server_cpuset=${HTTP_BENCH_SERVER_CPUSET:-}
 client_cpuset=${HTTP_BENCH_CLIENT_CPUSET:-}
+rust_workers=${HTTP_BENCH_RUST_WORKERS:-}
 output_root=${HTTP_BENCH_OUTPUT_ROOT:-"$project_root/build/http-comparison/results"}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 result_root="$output_root/$timestamp"
@@ -22,9 +24,9 @@ run_root="$result_root/runs"
 resource_root="$result_root/resources"
 log_root="$result_root/logs"
 
-case "$include_churn:$verify_only" in
-   0:0|0:1|1:0|1:1) ;;
-   *) printf '%s\n' "HTTP_BENCH_INCLUDE_CHURN and HTTP_BENCH_VERIFY_ONLY must be 0 or 1" >&2; exit 2 ;;
+case "$include_churn:$verify_only:$saturation_probe" in
+   0:0:0|0:0:1|0:1:0|0:1:1|1:0:0|1:0:1|1:1:0|1:1:1) ;;
+   *) printf '%s\n' "HTTP_BENCH_INCLUDE_CHURN, HTTP_BENCH_VERIFY_ONLY, and HTTP_BENCH_SATURATION_PROBE must be 0 or 1" >&2; exit 2 ;;
 esac
 
 for tier in $tiers; do
@@ -53,9 +55,12 @@ ews_binary="$comparison_root/servers/ews_plain/bin/ews_plain"
 servletada_aws_binary="$comparison_root/servers/servletada_aws_app/bin/servletada_app"
 servletada_ews_binary="$comparison_root/servers/servletada_ews_app/bin/servletada_app"
 runtime_probe="$project_root/showcases/bin/http_benchmark_runtime_probe"
+hyper_binary="$comparison_root/servers/rust/target/release/hyper_plain"
+axum_binary="$comparison_root/servers/rust/target/release/axum_app"
+actix_binary="$comparison_root/servers/rust/target/release/actix_app"
 for binary in "$flyology_binary" "$flyology_app_binary" "$aws_binary" \
    "$ews_binary" "$servletada_aws_binary" "$servletada_ews_binary" \
-   "$runtime_probe"; do
+   "$runtime_probe" "$hyper_binary" "$axum_binary" "$actix_binary"; do
    if [ ! -x "$binary" ]; then
       printf '%s\n' "missing benchmark server: $binary" "run $comparison_root/scripts/build.sh first" >&2
       exit 1
@@ -88,6 +93,8 @@ HTTP_BENCH_SERVER_CPUSET="$server_cpuset" \
 HTTP_BENCH_TIERS="$tiers" \
 HTTP_BENCH_TRIALS="$trials" \
 HTTP_BENCH_WARMUP="$warmup" \
+HTTP_BENCH_RUST_WORKERS="$rust_workers" \
+HTTP_BENCH_SATURATION_PROBE="$saturation_probe" \
    "$comparison_root/scripts/collect_metadata.py" >"$result_root/metadata.json"
 cp "$comparison_root/workloads.conf" "$result_root/workloads.conf"
 cp "$comparison_root/application-workloads.conf" \
@@ -112,21 +119,26 @@ trap cleanup_server EXIT HUP INT TERM
 server_order () {
    tier=$2
    if [ "$tier" = plain ]; then
-      one="flyology-lightweight flyology-native aws ews"
-      two="flyology-native ews flyology-lightweight aws"
-      three="ews aws flyology-native flyology-lightweight"
-      four="aws flyology-lightweight ews flyology-native"
+      one="flyology-lightweight flyology-native aws ews hyper"
+      two="flyology-native ews hyper flyology-lightweight aws"
+      three="ews aws flyology-native hyper flyology-lightweight"
+      four="hyper flyology-lightweight ews aws flyology-native"
+      five="aws hyper flyology-lightweight flyology-native ews"
    else
-      one="flyology-app-lightweight flyology-app-native servletada-aws servletada-ews"
-      two="flyology-app-native servletada-ews flyology-app-lightweight servletada-aws"
-      three="servletada-ews servletada-aws flyology-app-native flyology-app-lightweight"
-      four="servletada-aws flyology-app-lightweight servletada-ews flyology-app-native"
+      one="flyology-app-lightweight flyology-app-native servletada-aws servletada-ews axum actix-web"
+      two="flyology-app-native servletada-ews axum actix-web flyology-app-lightweight servletada-aws"
+      three="servletada-ews servletada-aws actix-web flyology-app-native axum flyology-app-lightweight"
+      four="axum flyology-app-lightweight servletada-ews actix-web servletada-aws flyology-app-native"
+      five="actix-web servletada-aws axum flyology-app-lightweight flyology-app-native servletada-ews"
+      six="servletada-aws actix-web flyology-app-native servletada-ews flyology-app-lightweight axum"
    fi
-   case $((($1 - 1) % 4)) in
+   case $((($1 - 1) % $(if [ "$tier" = plain ]; then printf 5; else printf 6; fi))) in
       0) printf '%s\n' "$one" ;;
       1) printf '%s\n' "$two" ;;
       2) printf '%s\n' "$three" ;;
       3) printf '%s\n' "$four" ;;
+      4) printf '%s\n' "$five" ;;
+      5) printf '%s\n' "$six" ;;
    esac
 }
 
@@ -139,6 +151,16 @@ launch_server () {
       "$@" >"$log" 2>&1 &
    fi
    server_pid=$!
+}
+
+launch_rust_server () {
+   log=$1
+   shift
+   if [ -n "$rust_workers" ]; then
+      HTTP_BENCH_RUST_WORKERS="$rust_workers" launch_server "$log" "$@"
+   else
+      launch_server "$log" "$@"
+   fi
 }
 
 run_oha () {
@@ -166,6 +188,9 @@ start_server () {
       ews)
          launch_server "$log" "$ews_binary" "$port"
          ;;
+      hyper)
+         launch_rust_server "$log" "$hyper_binary" "$port"
+         ;;
       flyology-app-lightweight)
          launch_server "$log" "$flyology_app_binary" lightweight "$port" "$capacity"
          ;;
@@ -177,6 +202,12 @@ start_server () {
          ;;
       servletada-ews)
          launch_server "$log" "$servletada_ews_binary" "$port" "$capacity"
+         ;;
+      axum)
+         launch_rust_server "$log" "$axum_binary" "$port"
+         ;;
+      actix-web)
+         launch_rust_server "$log" "$actix_binary" "$port"
          ;;
       *)
          printf '%s\n' "unknown server: $server" >&2
@@ -262,7 +293,12 @@ run_measured () {
    run_oha -z "$duration" -c "$concurrency" -w --no-tui --disable-color \
       --http-version 1.1 -r 0 -t 5s -j $keepalive_option \
       -o "$destination" "$url"
-   "$comparison_root/scripts/check_oha.py" "$destination"
+   if ! "$comparison_root/scripts/check_oha.py" "$destination"; then
+      if [ "$saturation_probe" -eq 0 ]; then
+         return 1
+      fi
+      printf '%s\n' "excluded invalid saturation observation: $(basename "$destination")" >&2
+   fi
 }
 
 trial=1
@@ -278,7 +314,7 @@ while [ "$trial" -le "$trials" ]; do
          | sed -n '1s/^[^|]*|\([^|]*\).*/\1/p')
       offset=0
       for server in $(server_order "$trial" "$tier"); do
-         port=$((base_port + (trial - 1) * 16 + tier_offset + offset))
+         port=$((base_port + (trial - 1) * 32 + tier_offset + offset))
          offset=$((offset + 1))
          server_log="$log_root/trial-$(printf '%02d' "$trial")-$server.log"
          resource_file="$resource_root/trial-$(printf '%02d' "$trial")-$server.json"
@@ -321,7 +357,7 @@ while [ "$trial" -le "$trials" ]; do
             sleep "$cooldown"
          fi
       done
-      tier_offset=$((tier_offset + 4))
+      tier_offset=$((tier_offset + 8))
    done
    trial=$((trial + 1))
 done

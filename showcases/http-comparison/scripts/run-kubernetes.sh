@@ -11,7 +11,7 @@ amd_node=${HTTP_BENCH_AMD64_NODE:-}
 arches=${HTTP_BENCH_ARCHES:-"arm64 amd64"}
 duration=${HTTP_BENCH_DURATION:-30s}
 warmup=${HTTP_BENCH_WARMUP:-5s}
-concurrencies=${HTTP_BENCH_CONCURRENCIES:-"1 8 32"}
+concurrencies=${HTTP_BENCH_CONCURRENCIES:-1}
 arm_concurrencies=${HTTP_BENCH_ARM64_CONCURRENCIES:-$concurrencies}
 amd_concurrencies=${HTTP_BENCH_AMD64_CONCURRENCIES:-$concurrencies}
 trials=${HTTP_BENCH_TRIALS:-7}
@@ -19,13 +19,22 @@ cooldown=${HTTP_BENCH_COOLDOWN:-20}
 tiers=${HTTP_BENCH_TIERS:-"plain application"}
 server_cpuset=${HTTP_BENCH_SERVER_CPUSET:-0-7}
 client_cpuset=${HTTP_BENCH_CLIENT_CPUSET:-8-15}
+loops=${HTTP_BENCH_LOOPS:-16}
 cpu_limit=${HTTP_BENCH_POD_CPUS:-16}
 memory_limit=${HTTP_BENCH_POD_MEMORY:-8Gi}
+rust_workers=${HTTP_BENCH_RUST_WORKERS:-8}
+saturation_probe=${HTTP_BENCH_SATURATION_PROBE:-0}
+local_overlay=${HTTP_BENCH_LOCAL_OVERLAY:-1}
 deadline=${HTTP_BENCH_JOB_DEADLINE_SECONDS:-14400}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 namespace_timestamp=$(printf '%s' "$timestamp" | tr '[:upper:]' '[:lower:]')
 namespace=${HTTP_BENCH_NAMESPACE:-flyology-http-bench-$namespace_timestamp}
 output_root=${HTTP_BENCH_OUTPUT_ROOT:-"$project_root/build/http-comparison/kubernetes-results/$timestamp"}
+
+case "$local_overlay:$saturation_probe" in
+   0:0|0:1|1:0|1:1) ;;
+   *) printf '%s\n' "HTTP_BENCH_LOCAL_OVERLAY and HTTP_BENCH_SATURATION_PROBE must be 0 or 1" >&2; exit 2 ;;
+esac
 
 for command_name in jq kubectl; do
    if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -37,6 +46,26 @@ done
 mkdir -p "$output_root/logs"
 created_namespace=0
 artifacts_collected=0
+privacy_scanned=0
+overlay_archive=
+overlay_dirty=0
+private_context=$(kubectl config current-context 2>/dev/null || true)
+private_cluster=$(kubectl config view --minify \
+   --output jsonpath='{.contexts[0].context.cluster}' 2>/dev/null || true)
+private_server=$(kubectl config view --minify \
+   --output jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
+
+if [ "$local_overlay" -eq 1 ]; then
+   overlay_archive=$(mktemp /tmp/flyology-http-overlay.XXXXXX.tar.gz)
+   tar -czf "$overlay_archive" -C "$project_root" \
+      --exclude='showcases/http-comparison/servers/*/alire' \
+      --exclude='showcases/http-comparison/servers/*/bin' \
+      --exclude='showcases/http-comparison/servers/*/config' \
+      --exclude='showcases/http-comparison/servers/*/obj' \
+      --exclude='showcases/http-comparison/servers/rust/target' \
+      showcases/http-comparison
+   overlay_dirty=1
+fi
 
 collect_artifacts () {
    [ "$created_namespace" -eq 1 ] || return 0
@@ -58,12 +87,36 @@ collect_artifacts () {
    artifacts_collected=1
 }
 
+privacy_scan () {
+   [ "$artifacts_collected" -eq 1 ] || return 0
+   [ "$privacy_scanned" -eq 0 ] || return 0
+   HTTP_BENCH_PRIVATE_TOKENS=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+      "$arm_node" "$amd_node" "$namespace" "$private_context" \
+      "$private_cluster" "$private_server") \
+      "$comparison_root/scripts/privacy_scan.py" "$output_root"
+   privacy_scanned=1
+}
+
 cleanup () {
    status=$?
    trap - EXIT HUP INT TERM
    collect_artifacts
+   if ! privacy_scan; then
+      status=1
+   fi
+   namespace_deleted=false
    if [ "$created_namespace" -eq 1 ]; then
-      kubectl delete namespace "$namespace" --wait=true >/dev/null 2>&1 || true
+      if kubectl delete namespace "$namespace" --wait=true >/dev/null 2>&1 &&
+         ! kubectl get namespace "$namespace" >/dev/null 2>&1; then
+         namespace_deleted=true
+      else
+         status=1
+      fi
+   fi
+   printf '{"schema":1,"temporary_namespace_deleted":%s}\n' \
+      "$namespace_deleted" >"$output_root/cleanup.json"
+   if [ -n "$overlay_archive" ]; then
+      rm -f "$overlay_archive"
    fi
    exit "$status"
 }
@@ -102,8 +155,14 @@ kubectl label namespace "$namespace" \
    app.kubernetes.io/name=flyology-http-benchmark \
    app.kubernetes.io/managed-by=benchmark-script \
    purpose=temporary-benchmark >/dev/null
-kubectl create configmap benchmark-bootstrap --namespace "$namespace" \
-   --from-file=bootstrap.sh="$bootstrap" >/dev/null
+if [ -n "$overlay_archive" ]; then
+   kubectl create configmap benchmark-bootstrap --namespace "$namespace" \
+      --from-file=bootstrap.sh="$bootstrap" \
+      --from-file=overlay.tar.gz="$overlay_archive" >/dev/null
+else
+   kubectl create configmap benchmark-bootstrap --namespace "$namespace" \
+      --from-file=bootstrap.sh="$bootstrap" >/dev/null
+fi
 
 create_job () {
    arch=$1
@@ -129,8 +188,12 @@ create_job () {
          --arg tiers "$tiers" \
          --arg server_cpuset "$server_cpuset" \
          --arg client_cpuset "$client_cpuset" \
+         --arg loops "$loops" \
          --arg cpu_limit "$cpu_limit" \
          --arg memory_limit "$memory_limit" \
+         --arg rust_workers "$rust_workers" \
+         --arg saturation_probe "$saturation_probe" \
+         --arg git_dirty "$overlay_dirty" \
          --argjson deadline "$deadline" \
          '.spec.backoffLimit = 0
           | .spec.activeDeadlineSeconds = $deadline
@@ -151,8 +214,11 @@ create_job () {
               {name:"HTTP_BENCH_SERVER_CPUSET",value:$server_cpuset},
               {name:"HTTP_BENCH_CLIENT_CPUSET",value:$client_cpuset},
               {name:"HTTP_BENCH_INCLUDE_CHURN",value:"0"},
-              {name:"HTTP_BENCH_LOOPS",value:"16"},
-              {name:"HTTP_BENCH_OUTPUT_ROOT",value:"/results"}
+              {name:"HTTP_BENCH_LOOPS",value:$loops},
+              {name:"HTTP_BENCH_OUTPUT_ROOT",value:"/results"},
+              {name:"HTTP_BENCH_RUST_WORKERS",value:$rust_workers},
+              {name:"HTTP_BENCH_SATURATION_PROBE",value:$saturation_probe},
+              {name:"HTTP_BENCH_GIT_DIRTY",value:$git_dirty}
             ]
           | .spec.template.spec.containers[0].resources = {
               requests:{cpu:$cpu_limit,memory:$memory_limit},

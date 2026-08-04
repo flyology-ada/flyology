@@ -1,3 +1,9 @@
+FROM rust:1.97.1-bookworm AS rust-fixtures
+
+WORKDIR /fixtures
+COPY showcases/http-comparison/servers/rust/ ./
+RUN cargo build --locked --release --bins
+
 FROM ubuntu:24.04
 
 ARG ALIRE_VERSION=2.1.1
@@ -6,6 +12,7 @@ ARG TARGETARCH
 ARG FLYOLOGY_GIT_REVISION=unavailable
 ARG FLYOLOGY_GIT_DIRTY=0
 ARG HTTP_BENCH_LOOPS=
+ARG RUST_VERSION=1.97.1
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -53,6 +60,9 @@ ENV HTTP_BENCH_GPRBUILD_VERSION=25.0.1
 ENV HTTP_BENCH_GIT_REVISION=${FLYOLOGY_GIT_REVISION}
 ENV HTTP_BENCH_GIT_DIRTY=${FLYOLOGY_GIT_DIRTY}
 ENV HTTP_BENCH_LOOPS=${HTTP_BENCH_LOOPS}
+ENV HTTP_BENCH_RUST_VERSION=${RUST_VERSION}
+ENV HTTP_BENCH_CARGO_VERSION=${RUST_VERSION}
+ENV HTTP_BENCH_SKIP_RUST_BUILD=1
 
 WORKDIR /toolchain
 RUN alr --non-interactive toolchain --select \
@@ -61,6 +71,9 @@ RUN alr --non-interactive toolchain --select \
 
 WORKDIR /workspace
 COPY . .
+COPY --from=rust-fixtures /fixtures/target/release/hyper_plain /workspace/showcases/http-comparison/servers/rust/target/release/hyper_plain
+COPY --from=rust-fixtures /fixtures/target/release/axum_app /workspace/showcases/http-comparison/servers/rust/target/release/axum_app
+COPY --from=rust-fixtures /fixtures/target/release/actix_app /workspace/showcases/http-comparison/servers/rust/target/release/actix_app
 RUN ./showcases/http-comparison/scripts/build.sh
 
 ENV HTTP_BENCH_MODE=docker-loopback
