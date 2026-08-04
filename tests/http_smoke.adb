@@ -606,8 +606,22 @@ procedure HTTP_Smoke is
          pragma Assert (not Closed);
          pragma Assert (Kind = HTTP_Server.Text_Frame);
          pragma Assert (Bytes.To_Byte_String (Message) = "Hi");
-         HTTP_Server.Send_WebSocket
-           (Client, Kind, Bytes.To_Array (Message));
+         declare
+            Calls_Before : constant Natural := Wire.Send_Calls;
+         begin
+            HTTP_Server.Send_WebSocket
+              (Client, Kind, Bytes.To_Array (Message));
+            pragma Assert (Wire.Send_Calls = Calls_Before + 1);
+         end;
+         declare
+            Large : constant Ada.Streams.Stream_Element_Array
+              (1 .. 4 * 1_024 + 1) := (others => 42);
+            Calls_Before : constant Natural := Wire.Send_Calls;
+         begin
+            HTTP_Server.Send_WebSocket
+              (Client, HTTP_Server.Binary_Frame, Large);
+            pragma Assert (Wire.Send_Calls = Calls_Before + 2);
+         end;
          HTTP_Server.Close_WebSocket (Client);
       end;
       pragma Assert (HTTP_Server.Current (Budget).Current = 0);
@@ -624,6 +638,12 @@ procedure HTTP_Smoke is
            (Ada.Strings.Fixed.Index
               (Result,
                Character'Val (16#81#) & Character'Val (2) & "Hi") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Result,
+               Character'Val (16#82#) & Character'Val (126)
+               & Character'Val (16#10#) & Character'Val (1)
+               & Character'Val (42) & Character'Val (42)) /= 0);
       end;
    end Check_WebSocket;
 
@@ -842,6 +862,8 @@ procedure HTTP_Smoke is
    procedure Check_WebSocket_Data_Write_Timeout is
       Wire : aliased Memory_Transport;
       Budget : aliased HTTP_Server.Ingress_Budget (Limit => 1_024);
+      Payload : constant Ada.Streams.Stream_Element_Array
+        (1 .. 4 * 1_024 + 1) := (others => 42);
       Terminal : Boolean := False;
       Timed_Out : Boolean := False;
    begin
@@ -860,10 +882,12 @@ procedure HTTP_Smoke is
          HTTP_Server.Configure_Ingress_Budget (Client, Budget'Access);
          HTTP_Server.Read_Request_Head (Client, Request, Closed);
          HTTP_Server.Accept_WebSocket (Client, Request);
-         Wire.Timeout_On_Send_Call := Wire.Send_Calls + 1;
+         --  Exercise failure after the frame header has been written but the
+         --  borrowed payload is still in its original storage.
+         Wire.Timeout_On_Send_Call := Wire.Send_Calls + 2;
          begin
             HTTP_Server.Send_WebSocket
-              (Client, "partial", Timeout => 0.001);
+              (Client, HTTP_Server.Binary_Frame, Payload, Timeout => 0.001);
          exception
             when Flyology.IO.Timeout_Error => Timed_Out := True;
          end;

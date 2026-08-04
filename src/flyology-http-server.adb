@@ -15,6 +15,9 @@ package body Flyology.HTTP.Server is
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    WebSocket_Peer_EOF : exception;
+   WebSocket_Coalesce_Limit : constant := 4 * 1_024;
+   --  Small frames use one transport operation. Larger frames keep the
+   --  caller's payload in place and send the fixed header separately.
 
    function HTTP_Date return String is
       Now : constant Ada.Calendar.Time := Ada.Calendar.Clock;
@@ -701,6 +704,13 @@ package body Flyology.HTTP.Server is
    procedure Write
      (Item    : in out Connection;
       Value   : Ada.Streams.Stream_Element_Array;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token);
+
+   procedure Write_Parts
+     (Item    : in out Connection;
+      First   : Ada.Streams.Stream_Element_Array;
+      Second  : Ada.Streams.Stream_Element_Array;
       Timeout : Duration;
       Token   : access Flyology.Cancellation.Token);
 
@@ -1576,6 +1586,36 @@ package body Flyology.HTTP.Server is
       end if;
    end Write;
 
+   procedure Write_Parts
+     (Item    : in out Connection;
+      First   : Ada.Streams.Stream_Element_Array;
+      Second  : Ada.Streams.Stream_Element_Array;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token)
+   is
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+
+      function Time_Left return Duration is
+         Elapsed : constant Duration := Ada.Real_Time.To_Duration
+           (Ada.Real_Time.Clock - Started);
+      begin
+         if Timeout < 0.0 then
+            return -1.0;
+         elsif Elapsed >= Timeout then
+            return 0.0;
+         else
+            return Timeout - Elapsed;
+         end if;
+      end Time_Left;
+   begin
+      if First'Length > 0 then
+         Item.Channel.Send_All (First, Timeout, Token);
+      end if;
+      if Second'Length > 0 then
+         Item.Channel.Send_All (Second, Time_Left, Token);
+      end if;
+   end Write_Parts;
+
    procedure Respond
      (Item          : in out Connection;
       Status        : Positive;
@@ -2435,46 +2475,46 @@ package body Flyology.HTTP.Server is
       Timeout : Duration;
       Token   : access Flyology.Cancellation.Token)
    is
-      Header : Unbounded_String;
+      Header : Ada.Streams.Stream_Element_Array (1 .. 10);
+      Last   : Ada.Streams.Stream_Element_Offset := Header'First - 1;
       Size   : constant Natural := Data'Length;
+
+      procedure Append_Header (Value : Natural) is
+      begin
+         Last := Last + 1;
+         Header (Last) := Ada.Streams.Stream_Element (Value);
+      end Append_Header;
    begin
-      Append (Header, Character'Val (16#80# + Opcode));
+      Append_Header (16#80# + Opcode);
       if Size <= 125 then
-         Append (Header, Character'Val (Size));
+         Append_Header (Size);
       elsif Size <= 65_535 then
-         Append (Header, Character'Val (126));
-         Append (Header, Character'Val (Size / 256));
-         Append (Header, Character'Val (Size mod 256));
+         Append_Header (126);
+         Append_Header (Size / 256);
+         Append_Header (Size mod 256);
       else
-         Append (Header, Character'Val (127));
+         Append_Header (127);
          for Shift in reverse 0 .. 7 loop
-            Append
-              (Header,
-               Character'Val
-                 (Natural
-                    (Interfaces.Shift_Right
-                       (Interfaces.Unsigned_64 (Size), Shift * 8)
-                     and 16#FF#)));
+            Append_Header
+              (Natural
+                 (Interfaces.Shift_Right
+                    (Interfaces.Unsigned_64 (Size), Shift * 8)
+                  and 16#FF#));
          end loop;
       end if;
-      declare
-         Header_Data : constant Ada.Streams.Stream_Element_Array :=
-           Bytes (To_String (Header));
-         Frame : Ada.Streams.Stream_Element_Array
-           (1 .. Ada.Streams.Stream_Element_Offset
-             (Header_Data'Length + Data'Length));
-         Last : Ada.Streams.Stream_Element_Offset := 0;
-      begin
-         for Value of Header_Data loop
-            Last := Last + 1;
-            Frame (Last) := Value;
-         end loop;
-         for Value of Data loop
-            Last := Last + 1;
-            Frame (Last) := Value;
-         end loop;
-         Write (Item, Frame, Timeout, Token);
-      end;
+      if Size <= WebSocket_Coalesce_Limit then
+         declare
+            Frame : Ada.Streams.Stream_Element_Array
+              (1 .. Last + Ada.Streams.Stream_Element_Offset (Size));
+         begin
+            Frame (1 .. Last) := Header (1 .. Last);
+            Frame (Last + 1 .. Frame'Last) := Data;
+            Write (Item, Frame, Timeout, Token);
+         end;
+      else
+         Write_Parts
+           (Item, Header (Header'First .. Last), Data, Timeout, Token);
+      end if;
    end Send_Frame;
 
    procedure Send_Frame

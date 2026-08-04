@@ -1225,6 +1225,13 @@ capacity remains one FIFO and value-based `Publish` operations are rejected.
 Sessions that are not configured retain the existing `Outgoing_Message` value
 semantics. The pool must outlive the session.
 
+The WebSocket sender currently coalesces headers with payloads up to 4 KiB so
+small messages use one transport operation. Above that boundary it sends the
+fixed header and borrowed payload separately under one deadline, avoiding a
+second Flyology payload copy for buffer-backed outboxes. The synchronous call
+retains the buffer until both writes finish; TLS providers and the kernel may
+still copy data internally.
+
 `Flyology.Task_Scopes` runs a bounded homogeneous group of child operations as
 ordinary structured Ada lightweight tasks; native work is available only
 through the separately application-bounded executor. A scope's parent token is
