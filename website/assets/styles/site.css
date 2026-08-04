@@ -1461,6 +1461,37 @@ code:not(pre code) {
   font-size: 0.9rem;
 }
 
+.callout-body {
+  min-width: 0;
+}
+
+.callout .callout-lede {
+  margin: 0 0 0.9rem;
+}
+
+.callout-table {
+  margin: 0 0 0.9rem;
+}
+
+.callout-table th,
+.callout-table td {
+  padding: 0.65rem 0.55rem;
+}
+
+.callout-table th:first-child,
+.callout-table td:first-child {
+  padding-left: 0;
+}
+
+.callout-table th:last-child,
+.callout-table td:last-child {
+  padding-right: 0;
+}
+
+.callout .callout-note {
+  color: var(--ink-soft);
+}
+
 .decision-list {
   margin-block: 2rem;
   border-top: 1px solid var(--line);
