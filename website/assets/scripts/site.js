@@ -46,6 +46,7 @@
     }
 
     window.FlyologyAda.highlightAll("code.language-ada");
+    window.FlyologyAda.highlightAllSQL("code.language-sql");
 
     document.querySelectorAll("[data-copy]").forEach(function (button) {
       button.addEventListener("click", async function () {

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A routine need for a Flyology Postgres client grew into a bidirectional protocol library, and a way for application-defined programs to answer through familiar Postgres tools.">
+    <meta name="theme-color" content="#17213d">
+    <title>Teaching programs to speak Postgres · Flyology Journal</title>
+    <link rel="canonical" href="https://flyology.org/journal/2026-08-teaching-programs-postgres/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../../guide/">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../" aria-current="page">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="article-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Journal</a></li><li aria-current="page">Postgres</li></ol>
+          <h1>Teaching programs to speak Postgres.</h1>
+        </div>
+        <div>
+          <p class="article-summary">A routine need for a database client grew into a bidirectional protocol library, and a way for application-defined programs to answer through familiar Postgres tools.</p>
+          <dl class="article-meta">
+            <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
+            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93">eb6b685</a></dd></div>
+            <div><dt>Interop</dt><dd>Postgres 18.4 + psql</dd></div>
+            <div><dt>Status</dt><dd>Development baseline</dd></div>
+          </dl>
+        </div>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#client">The routine client need</a></li>
+            <li><a href="#state">The conversation is the API</a></li>
+            <li><a href="#turn">Turning the protocol around</a></li>
+            <li><a href="#lingua-franca">A useful lingua franca</a></li>
+            <li><a href="#start">Start with ordinary Ada</a></li>
+            <li><a href="#pgish">Answering through pgish</a></li>
+            <li><a href="#boundary">Speaking is not becoming</a></li>
+            <li><a href="#evidence">Testing the claim</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="client">
+            <div class="snapshot-boundary">
+              <strong>Development note</strong>
+              <p>This entry describes <a href="https://github.com/flyology-ada/flyology-postgres">Flyology Postgres</a> at a pinned development revision. The implemented client and server interoperate with Postgres 18.4, but TLS and several authentication methods remain outside the current boundary.</p>
+            </div>
+            <p>The immediate need was routine: a Flyology program needed to talk to Postgres. It had to open a connection, authenticate, send a query, and consume the result. The same client calls also needed to work from native tasks and lightweight tasks without changing their ordinary synchronous Ada shape.</p>
+            <p>That last requirement matters to Flyology. A native task may block its own pthread. A lightweight task should suspend while its event loop waits for socket readiness, leaving the loop available to run other lightweight tasks. A Postgres client built directly over Flyology I/O can preserve one call-level model across both lanes.</p>
+            <p>The first version therefore implemented the Postgres frontend/backend protocol in Ada rather than placing an unrelated blocking client on an event-loop thread. It framed startup and normal messages, added transport adapters for Flyology sockets and accepted connections, and supplied client operations that borrow rather than take ownership of their transport.</p>
+            <p>Framing bytes was only the visible beginning. A useful client also has to represent the conversation those bytes belong to.</p>
+          </section>
+
+          <section id="state">
+            <span class="step-label">CLIENT</span>
+            <h2>The conversation is the API.</h2>
+            <p>A simple query does not return one generic result. It may produce a row description, any number of data rows, a command completion, notices or an error, and finally <code>ReadyForQuery</code> with the transaction state. Multiple statements can produce several such sequences before that final ready message.</p>
+            <p>Flyology Postgres returns those items one at a time. A row remains binary-safe, NULL remains different from an empty value, and the caller decides how quickly to consume or display the stream. The high-level path does not silently collect an unlimited result in memory.</p>
+            <p>The extended-query protocol makes ordering more explicit. Parse, Bind, Describe, Execute, Flush, and Sync form a state machine. A portal can stop at <code>PortalSuspended</code> and resume later. After an extended-query error, the client must synchronize and receive the corresponding ready message before the session is reusable. The library exposes those states and rejects invalid local ordering before writing it to the connection.</p>
+            <p>COPY adds three more streaming directions: IN, OUT, and BOTH. Each call reads or writes one bounded chunk. Completion, abort, cancellation, and error recovery stay in the session state rather than becoming undocumented obligations for every caller.</p>
+            <p>Even cancellation is a conversation of its own. Postgres sends backend credentials during startup; a client later opens a separate connection, writes a cancellation request carrying those credentials, and closes without waiting for a reply. The server routes that request to the current handler operation while making invalid, stale, and duplicate credentials externally indistinguishable.</p>
+            <div class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>The design principle is small but consequential: protocol recovery rules belong in the library state, while rows and COPY data should cross the API as bounded events. A synchronous-looking call need not imply a blocking event loop or an unbounded result.</p>
+            </div>
+          </section>
+
+          <section id="turn">
+            <span class="step-label">SERVER</span>
+            <h2>Then the protocol turned around.</h2>
+            <p>Once a client could write frontend messages and understand backend messages, the complementary question became difficult to ignore. Could a Flyology program accept the frontend side and answer with the backend side?</p>
+            <p>The result is a generic protocol server. Flyology's structured server gives each accepted connection its own application handler task. The Postgres layer performs startup and authentication, dispatches every normal frontend command, provides constructors for common responses, streams COPY frames, and routes cancellation. The application supplies the context and decides what each command means.</p>
+            <p><code>pgish</code> makes those connection tasks lightweight by default. This preserves the direct task-per-connection shape without requiring one pthread per connection: the handler can keep session state in ordinary Ada locals and call synchronous-looking Flyology I/O, while many connection tasks share an execution-group thread. When one handler waits for socket readiness, only its fiber suspends and the event loop can run another ready connection.</p>
+            <p>The choice remains explicit. Starting <code>pgish</code> with <code>--task-mode native</code> gives each connection a native task instead. Lightweight scheduling is cooperative, so a CPU-bound handler must suspend, yield at a fairness checkpoint, or move blocking work across a native-task boundary if other connections on the same execution group must progress.</p>
+            <p>This is not simply a client with its arrows reversed. A server must manage connection startup, authentication, session registration, backend keys, cancellation races, error recovery, shutdown, and response ownership. But the same protocol vocabulary now spans both sides: typed messages where the library can provide a useful interpretation, with the original raw message retained for custom state machines and future tags.</p>
+            <dl class="decision-list">
+              <div class="decision-row"><dt>Client side</dt><dd>Connect to a real Postgres server, authenticate, send simple or extended commands, and consume typed streams.</dd></div>
+              <div class="decision-row"><dt>Server side</dt><dd>Give every accepted connection an ordinary Ada handler task, lightweight or native, and dispatch its Postgres commands.</dd></div>
+              <div class="decision-row"><dt>Shared boundary</dt><dd>Keep framing, authentication flow, cancellation, protocol state, and bounded response construction in the library.</dd></div>
+              <div class="decision-row"><dt>Application boundary</dt><dd>Define SQL meaning, data, transaction behavior, prepared-statement storage, and result metadata.</dd></div>
+            </dl>
+          </section>
+
+          <section id="lingua-franca">
+            <span class="step-label">INTERFACE</span>
+            <h2>Postgres is a useful lingua franca.</h2>
+            <p>The server direction changes the reason to implement the protocol. A client is infrastructure for reaching a database. A server lets an application present itself through an interface that already has clients.</p>
+            <p><code>psql</code> already knows how to establish a session, enter queries, display typed rows, distinguish diagnostics by SQLSTATE, recover after an error, cancel work, and inspect familiar catalogs. Postgres client libraries carry the same vocabulary into other programs. An application that answers in Postgres can reuse part of that surrounding practice instead of first inventing a private transport, a result format, an interactive shell, and a client library.</p>
+            <p>That does not make the protocol a universal answer. It is most attractive when an application's state already looks tabular or queryable: runtime observations, administrative state, synthetic catalogs, test fixtures, or a bounded domain-specific view. In those cases, a Postgres session can be both a machine interface and an exploratory one.</p>
+            <p>The useful symmetry is now concrete. A Flyology client can ask a real Postgres server questions. Real <code>psql</code> can ask a Flyology program questions. The two example programs can also talk directly to each other.</p>
+          </section>
+
+          <section id="start">
+            <span class="step-label">START</span>
+            <h2>The first calls are ordinary Ada.</h2>
+            <p>The public API keeps the protocol seam small. A client wraps a Flyology socket in a transport, starts a session, sends a query, and consumes one event at a time. This excerpt leaves row handling to the application but includes the complete connection and streaming shape.</p>
+            <figure class="code-panel">
+              <figcaption>Ada · connect and stream a query</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO.Sockets;
+with Flyology.Postgres.Client;
+with Flyology.Postgres.Protocol;
+with Flyology.Postgres.Transports.Sockets;
+
+procedure Query_Postgres (Secret : String) is
+   package Client renames Flyology.Postgres.Client;
+   package Protocol renames Flyology.Postgres.Protocol;
+   package Sockets renames Flyology.IO.Sockets;
+   package Transports renames Flyology.Postgres.Transports.Sockets;
+
+   Server : constant Sockets.Endpoint := Sockets.Network_Endpoint
+     (Sockets.Parse_IP_Address ("127.0.0.1"), Sockets.Port (5432));
+   Socket  : aliased Sockets.Socket_Type;
+   Channel : aliased Transports.Socket_Transport (Socket'Access);
+   Session : Client.Session (Channel'Access);
+
+begin
+   Sockets.Create_Socket (Socket, Family =&gt; Server.Family);
+   Sockets.Connect (Socket, Server, Timeout =&gt; 5.0);
+   Client.Startup
+     (Session, User =&gt; "app", Database =&gt; "app", Password =&gt; Secret);
+   Client.Send_Query (Session, "select id, name from items");
+
+   loop
+      declare
+         Event : constant Client.Simple_Query_Event :=
+           Client.Receive_Query_Event (Session);
+      begin
+         case Protocol.Response_Kind (Event) is
+            when Protocol.Row_Description_Response =&gt;
+               null; -- Inspect Protocol.Description (Event).
+            when Protocol.Data_Row_Response =&gt;
+               null; -- Consume Protocol.Row_Data (Event).
+            when Protocol.Ready_For_Query_Response =&gt;
+               exit;
+            when others =&gt;
+               null;
+         end case;
+      end;
+   end loop;
+end Query_Postgres;</code></pre>
+            </figure>
+            <p>The server starts at the same level. Supply an application state and three callbacks, choose the handler task model, then serve an ordinary listening socket. The handler receives each frontend command and answers through <code>Server_Sessions</code>.</p>
+            <figure class="code-panel">
+              <figcaption>Ada · instantiate and serve a protocol handler</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Application;
+with Flyology;
+with Flyology.IO.Sockets;
+with Flyology.Postgres;
+with Flyology.Postgres.Server;
+
+procedure Serve_Application is
+   package Sockets renames Flyology.IO.Sockets;
+   package App_Server is new Flyology.Postgres.Server
+     (Handler_Context       =&gt; Application.State,
+      Authenticate          =&gt; Application.Authenticate,
+      Lookup_SCRAM_Verifier =&gt; Application.Lookup_SCRAM_Verifier,
+      Handle                =&gt; Application.Handle,
+      Authentication        =&gt; Flyology.Postgres.SCRAM_SHA_256,
+      Handler_Model         =&gt; Flyology.Lightweight_Task);
+
+   State    : aliased Application.State;
+   Server   : aliased App_Server.Server (Capacity =&gt; 64);
+   Listener : Sockets.Socket_Type;
+
+begin
+   Sockets.Create_Socket (Listener, Family =&gt; Sockets.IPv4);
+   Sockets.Set_Socket_Option
+     (Listener, (Name =&gt; Sockets.Reuse_Address, Enabled =&gt; True));
+   Sockets.Bind_Socket
+     (Listener,
+      Sockets.Network_Endpoint
+        (Sockets.Parse_IP_Address ("127.0.0.1"), Sockets.Port (55432)));
+   Sockets.Listen_Socket (Listener, Length =&gt; 64);
+   App_Server.Serve (Server, Listener, State);
+end Serve_Application;</code></pre>
+            </figure>
+            <p>Real applications still need timeout policy, shutdown, diagnostics, and response construction. The point of the excerpts is narrower: neither direction introduces a second asynchronous language. Both begin with packages, records, callbacks, sockets, and ordinary blocking-shaped Ada calls.</p>
+          </section>
+
+          <section id="pgish">
+            <span class="step-label">EXAMPLE</span>
+            <h2 class="wide-heading"><code>pgish</code> answers in Postgres.</h2>
+            <p><a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93/examples/pgish"><code>pgish</code></a> is a small read-only server built on the production server API. It is deliberately not a database. Its bounded SQL subset exposes virtual tables describing the Flyology server, execution groups, stack pool, live sessions, repository commits, effective settings, selected environment values, and its own catalog.</p>
+            <p>After starting it on its loopback default, an ordinary <code>psql</code> session can ask questions such as:</p>
+            <figure class="code-panel">
+              <figcaption>Querying a Flyology program through psql</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-sql">SELECT protocol_version, task_mode, repository_head
+FROM flyology_server_info;
+
+SELECT group_id, members, ready, waiting, dispatches
+FROM flyology_runtime_groups
+WHERE members &gt; 0
+ORDER BY group_id;
+
+SELECT short_hash, author, subject, committed_at
+FROM flyology_repo_commits
+WHERE subject LIKE '%Postgres%'
+ORDER BY committed_at DESC
+LIMIT 10;</code></pre>
+            </figure>
+            <p>The example also answers the catalog query shapes used by <code>psql</code>'s <code>\dt</code> and <code>\d</code> commands. That compatibility work is intentionally narrow, but it reveals an important property of a lingua franca: a protocol alone is not the whole conversation. Existing tools bring expectations about metadata, errors, session reuse, and query shapes.</p>
+            <p>The companion <a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93/examples/psqlish"><code>psqlish</code></a> example approaches from the other direction. It builds <code>flyology_psql</code>, a compact interactive client with multiline input, history, catalog commands, bounded table rendering, diagnostics, and recovery after SQL errors. It connects to ordinary Postgres and to <code>pgish</code>. Building both examples exposed compatibility gaps that a packet fixture would not: catalog naming, qualified descriptions, NULL and empty display, end-of-input behavior, and realistic session lifecycle.</p>
+          </section>
+
+          <section id="boundary">
+            <span class="step-label">BOUNDARY</span>
+            <h2>Speaking Postgres is not becoming Postgres.</h2>
+            <p>Flyology Postgres supplies protocol machinery. It does not supply a SQL engine, storage, transactions, optimizer, or a general catalog. Those remain application responsibilities. The <code>pgish</code> parser accepts one bounded read-only statement, a small set of predicates and projections, one-column ordering, and at most 32 result rows. It rejects joins, subqueries, DDL, DML, transactions, arbitrary functions, and other unsupported input with a normal error response before returning the session to ready state.</p>
+            <p>The transport boundary is similarly explicit. TLS is deferred until Flyology can upgrade an accepted connection without losing ownership or buffered-byte safety. The current client starts in plaintext and the server refuses an SSL upgrade. Trust and cleartext-password modes therefore belong only on a trusted test or private network; <code>pgish</code> binds to loopback by default. SCRAM-SHA-256 is implemented in both directions, but SCRAM channel binding and several other Postgres authentication methods are not.</p>
+            <p>The library bounds a protocol frame to 16 MiB and validates lengths, counts, terminators, formats, and transaction-state values before exposing typed data. <code>pgish</code> adds much smaller limits for query text, tokens, projections, predicates, rows, columns, values, and sessions. These are choices for a readable example and for lightweight task stacks, not claims about general Postgres limits.</p>
+            <p>Cooperative scheduling remains visible too. A continuously readable COPY OUT stream may keep a lightweight task running without a readiness suspension. A long-running consumer must yield explicitly when fairness on the same execution group matters, or arrange cancellation from an independently scheduled task. Returning one frame per call gives the application a natural place to make that decision.</p>
+          </section>
+
+          <section id="evidence">
+            <span class="step-label">EVIDENCE</span>
+            <h2>The other implementation is part of the test.</h2>
+            <p>The protocol does not count as interoperable because locally encoded frames can be decoded locally. The integration suite starts a real Postgres 18.4 SCRAM server and connects with the Ada client. It exercises typed simple and extended results, named and unnamed statements and portals, mixed text and binary values, errors and recovery, streaming COPY, and separate-connection cancellation.</p>
+            <p>The suite then starts the Flyology protocol server and connects with the freshly built real <code>psql</code>. That direction covers rows, NULL and empty values, COPY in both directions, prepared-statement commands, SCRAM failures, cancellation, and normal recovery. <code>COPY BOTH</code>, which would require replication setup for a live server exercise, remains an exact protocol fixture.</p>
+            <p>An allocation-free SPARK core handles the narrow wire boundary: cursor reads, endian conversion, frame lengths, startup packets, format counts, COPY response structure, cancellation keys, and related contracts. A second core covers bounded SCRAM derivation over proved hashing primitives. Heap-backed messages, transports, tasking, session routing, and socket adapters remain conventional Ada. The proof boundary follows the part that benefits from total parsing and array-bound arguments rather than trying to redescribe the whole networked program as a proof exercise.</p>
+            <p>The project started because a client was needed. The more useful result is not merely that Flyology programs can now ask Postgres questions. They can also answer in Postgres, within an explicit, testable slice of the language that existing tools already understand.</p>
+            <div class="data-links" aria-label="Project links">
+              <a href="https://github.com/flyology-ada/flyology-postgres">Browse Flyology Postgres</a>
+              <a href="https://github.com/flyology-ada/flyology-postgres/blob/eb6b685d7da760bbd211e9922d29a2efda66de93/README.md#current-boundaries">Read the current boundaries</a>
+              <a href="https://github.com/flyology-ada/flyology-postgres/tree/eb6b685d7da760bbd211e9922d29a2efda66de93/examples">Explore the examples</a>
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. This article describes a dated development baseline and its stated boundaries.</span>
+        <div class="footer-links"><a href="../">Journal</a><a href="../../guide/">Guide</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

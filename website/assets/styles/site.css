@@ -1349,6 +1349,10 @@ code:not(pre code) {
   font-size: clamp(2rem, 4vw, 3.3rem);
 }
 
+.prose h2.wide-heading {
+  max-width: none;
+}
+
 .prose h3 {
   margin-top: 2.4rem;
   margin-bottom: 0.8rem;
