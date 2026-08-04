@@ -1757,6 +1757,23 @@ archive member and AArch64 unwind root are checked before reuse. No
 checkout-relative source paths, manual preparation command, or explicit
 `--RTS` argument is needed.
 
+Concurrent Alire processes that share one path-pinned Flyology checkout
+serialize its RTS preparation with a host advisory lock. The lock is released
+by the kernel if its owner exits, including after a signal, so a stale lockfile
+does not block a later build. A rebuild invalidates its currentness stamp before
+changing runtime artifacts, publishes the generated GPR configuration by
+atomic rename, and publishes a new stamp last. An interrupted preparation is
+therefore rebuilt by the next invocation.
+
+This lock covers Flyology's preparation action, not Alire's own workspace
+updates. Two complete `alr build` processes that share one local path pin can
+race in the pin's Alire-owned `alire/build_hash_inputs` before Flyology's
+pre-build action starts. Do not run that configuration concurrently. Give each
+parallel build a separate Flyology checkout and path pin, or serialize the
+complete `alr build` commands externally. An indexed or fetched dependency is
+equivalent to separate checkouts only when inspection confirms that Alire
+deployed a distinct dependency directory for each workspace.
+
 The application's GPR file may explicitly `with "flyology.gpr"`; Alire also
 supports its normal automatic GPR dependency wiring. To test an unindexed local
 checkout while developing Flyology, replace the indexed dependency with a path

@@ -6,6 +6,7 @@ fixture_root="$project_root/tests/external_consumer"
 alr=$("$project_root/scripts/find-alr.sh")
 consumer_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-consumer.XXXXXX")
 pin_root="$consumer_root/flyology-pin"
+concurrent_root="$consumer_root/concurrent-consumer"
 
 cleanup () {
   rm -rf -- "$consumer_root"
@@ -14,17 +15,61 @@ trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$pin_root"
 cp -R "$fixture_root/." "$consumer_root/"
+mkdir -p "$concurrent_root"
+cp -R "$fixture_root/." "$concurrent_root/"
 cp "$project_root/alire.toml" "$project_root/flyology.gpr" "$pin_root/"
 cp -R "$project_root/runtime" "$project_root/scripts" "$project_root/src" \
   "$pin_root/"
 cd "$consumer_root"
 
 "$alr" --non-interactive with flyology --use="$pin_root"
+(cd "$concurrent_root" &&
+  "$alr" --non-interactive with flyology --use="$pin_root")
 
-#  Verify that an ordinary Alire build runs the dependency's pre-build action,
-#  selects a freshly generated native-default RTS through GPR_CONFIG, and does
-#  not depend on generated state in the source worktree.
+#  Launch the dependency's exact pre-build command through two clean consumer
+#  environments against the same cold path pin. Alire's build and recursive
+#  action dispatch both update shared pin metadata before Flyology starts, so
+#  they cannot isolate this critical section. The test probe makes overlapping
+#  entry into Flyology's section fail.
+probe_dir="$consumer_root/preparation-critical-section"
+first_log="$consumer_root/first-consumer.log"
+second_log="$consumer_root/second-consumer.log"
+(
+  cd "$consumer_root"
+  "$alr" exec -- env \
+    FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR="$probe_dir" \
+    "$pin_root/scripts/prepare-alire-rts.sh"
+) >"$first_log" 2>&1 &
+first_pid=$!
+(
+  cd "$concurrent_root"
+  "$alr" exec -- env \
+    FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR="$probe_dir" \
+    "$pin_root/scripts/prepare-alire-rts.sh"
+) >"$second_log" 2>&1 &
+second_pid=$!
+
+concurrent_status=0
+if ! wait "$first_pid"; then
+  concurrent_status=1
+fi
+if ! wait "$second_pid"; then
+  concurrent_status=1
+fi
+if [ "$concurrent_status" -ne 0 ]; then
+  printf '%s\n' "first concurrent consumer output:" >&2
+  sed 's/^/  /' "$first_log" >&2
+  printf '%s\n' "second concurrent consumer output:" >&2
+  sed 's/^/  /' "$second_log" >&2
+  exit 1
+fi
+
+#  Verify that sequential ordinary Alire builds select the shared freshly
+#  generated native-default RTS through GPR_CONFIG without worktree state.
+cd "$consumer_root"
 "$alr" build
+(cd "$concurrent_root" && "$alr" build)
+
 runtime_archive="$pin_root/build/alire-rts/adalib/libgnarl.a"
 runtime_object="$pin_root/build/alire-rts/obj/context_switch.o"
 archive_probe="$consumer_root/context_switch.o"
@@ -54,6 +99,7 @@ case "$(uname -m)" in
     ;;
 esac
 "$consumer_root/build/bin/external_consumer" native
+"$concurrent_root/build/bin/external_consumer" native
 
 #  An unchanged build must retain the prepared runtime, while a change to a
 #  path-pinned runtime input must invalidate it without manual preparation.
@@ -79,12 +125,29 @@ if [ ! "$runtime_object" -nt "$artifact_sentinel" ]; then
   exit 1
 fi
 
-source_sentinel="$consumer_root/source-sentinel"
-touch "$source_sentinel"
 printf '\n' >>"$pin_root/runtime/native/context_switch.S"
+stamp_file="$pin_root/build/alire-rts/.flyology-input-stamp"
+if FLYOLOGY_TEST_RTS_FAIL_BEFORE_PUBLICATION=1 \
+  "$alr" exec -- "$pin_root/scripts/prepare-alire-rts.sh"
+then
+  printf '%s\n' "injected RTS preparation failure unexpectedly succeeded" >&2
+  exit 1
+fi
+if [ -e "$stamp_file" ]; then
+  printf '%s\n' \
+    "interrupted RTS preparation retained its currentness stamp" >&2
+  exit 1
+fi
+
+repair_sentinel="$consumer_root/interruption-repair-sentinel"
+touch "$repair_sentinel"
 "$alr" build
-if [ ! "$runtime_object" -nt "$source_sentinel" ]; then
-  printf '%s\n' "path-pin source change retained a stale prepared runtime" >&2
+if [ ! "$runtime_object" -nt "$repair_sentinel" ]; then
+  printf '%s\n' "interrupted RTS preparation was not rebuilt" >&2
+  exit 1
+fi
+if [ ! -f "$stamp_file" ]; then
+  printf '%s\n' "repaired RTS preparation did not publish its stamp" >&2
   exit 1
 fi
 "$consumer_root/build/bin/external_consumer" native
