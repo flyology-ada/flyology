@@ -194,6 +194,7 @@ if [ "$(uname -s)" = Linux ]; then
 fi
 
 ordinary_mains='cancellation_wake_smoke
+buffers_smoke
 connection_lifecycle_smoke
 connection_state_model
 connection_tls_upgrade_smoke

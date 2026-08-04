@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Flyology.Buffers;
 with Flyology.Cancellation;
 with Interfaces.C;
 
@@ -74,6 +75,25 @@ package Flyology.IO.Files is
       Last   : out Ada.Streams.Stream_Element_Offset;
       Token  : access Cancellation_Token := null);
 
+   --  Read directly into an acquired unique buffer and replace its readable
+   --  length. Kernel ownership and cancellation semantics match the array
+   --  overload.
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Acquired destination buffer
+   --  @param Read Number of bytes read; zero at end of file
+   --  @param Token Optional one-shot cancellation token
+   --  @exception Device_Error Submission, completion, or pread reports failure
+   --  @exception Operation_Cancelled Cancellation reaches a terminal state
+   procedure Read_At
+     (File   : File_Descriptor;
+      Offset : File_Offset;
+      Item   : in out Flyology.Buffers.Unique_Buffer;
+      Read   : out Natural;
+      Token  : access Cancellation_Token := null)
+     with Pre => Flyology.Buffers.Has_Buffer (Item),
+          Post => Flyology.Buffers.Length (Item) = Read;
+
    --  Write at Offset without changing the descriptor's file position. A
    --  single call may transfer fewer than Item'Length elements. Lightweight
    --  tasks suspend for kernel completion; native tasks block in pwrite. Token
@@ -98,6 +118,24 @@ package Flyology.IO.Files is
       Item   : Ada.Streams.Stream_Element_Array;
       Last   : out Ada.Streams.Stream_Element_Offset;
       Token  : access Cancellation_Token := null);
+
+   --  Write directly from a unique buffer's readable payload. Item remains
+   --  owned until the synchronous call returns.
+   --  @param File Open descriptor permitting writes
+   --  @param Offset Starting byte position
+   --  @param Item Acquired source buffer
+   --  @param Written Number of bytes written on normal return
+   --  @param Token Optional one-shot cancellation token
+   --  @exception Device_Error Submission, completion, or pwrite reports
+   --     failure
+   --  @exception Operation_Cancelled Cancellation reaches a terminal state
+   procedure Write_At
+     (File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : Flyology.Buffers.Unique_Buffer;
+      Written : out Natural;
+      Token   : access Cancellation_Token := null)
+     with Pre => Flyology.Buffers.Has_Buffer (Item);
 
 private
    type File_Descriptor is new Interfaces.C.int;

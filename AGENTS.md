@@ -109,6 +109,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   cancellation/close generation-safe. Raw socket APIs do not infer ownership.
 - A submitted file buffer remains kernel-owned until completion. Abort cannot
   release or reuse it early.
+- A `Flyology.Buffers.Unique_Buffer` has exactly one owner. Buffer channels
+  transfer the slot token without copying payload bytes; timeout, close, or
+  abort before acceptance must restore sender ownership. Pool storage outlives
+  every buffer and channel tied to it, and mutation remains exclusive rather
+  than reference-counted or atomically shared.
 
 ## Runtime and ABI boundaries
 

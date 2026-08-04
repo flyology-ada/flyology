@@ -230,6 +230,31 @@ package body Flyology.IO.Files is
       end if;
    end Read_At;
 
+   procedure Read_At
+     (File   : File_Descriptor;
+      Offset : File_Offset;
+      Item   : in out Flyology.Buffers.Unique_Buffer;
+      Read   : out Natural;
+      Token  : access Cancellation_Token := null)
+   is
+      procedure Borrow
+        (Data   : in out Ada.Streams.Stream_Element_Array;
+         Length : in out Natural)
+      is
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Read_At (File, Offset, Data, Last, Token);
+         Length :=
+           (if Last < Data'First
+            then 0
+            else Natural (Last - Data'First + 1));
+         Read := Length;
+      end Borrow;
+   begin
+      Read := 0;
+      Flyology.Buffers.With_Writable_Data (Item, Borrow'Access);
+   end Read_At;
+
    procedure Write_At
      (File   : File_Descriptor;
       Offset : File_Offset;
@@ -281,6 +306,27 @@ package body Flyology.IO.Files is
          Last := Item'First
            + Ada.Streams.Stream_Element_Offset (Transferred) - 1;
       end if;
+   end Write_At;
+
+   procedure Write_At
+     (File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : Flyology.Buffers.Unique_Buffer;
+      Written : out Natural;
+      Token   : access Cancellation_Token := null)
+   is
+      procedure Borrow (Data : Ada.Streams.Stream_Element_Array) is
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Write_At (File, Offset, Data, Last, Token);
+         Written :=
+           (if Last < Data'First
+            then 0
+            else Natural (Last - Data'First + 1));
+      end Borrow;
+   begin
+      Written := 0;
+      Flyology.Buffers.With_Readable_Data (Item, Borrow'Access);
    end Write_At;
 
 end Flyology.IO.Files;

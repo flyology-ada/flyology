@@ -807,6 +807,31 @@ package body Flyology.IO.Sockets is
       Receive_Prepared (Socket, Item, Last, Timeout, Interrupts);
    end Receive;
 
+   procedure Receive
+     (Socket     : Socket_Type;
+      Item       : in out Flyology.Buffers.Unique_Buffer;
+      Received   : out Natural;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   is
+      procedure Borrow
+        (Data   : in out Ada.Streams.Stream_Element_Array;
+         Length : in out Natural)
+      is
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Receive (Socket, Data, Last, Timeout, Interrupts);
+         Length :=
+           (if Last < Data'First
+            then 0
+            else Natural (Last - Data'First + 1));
+         Received := Length;
+      end Borrow;
+   begin
+      Received := 0;
+      Flyology.Buffers.With_Writable_Data (Item, Borrow'Access);
+   end Receive;
+
    procedure Receive_Exactly
      (Socket     : Socket_Type;
       Item       : out Ada.Streams.Stream_Element_Array;
@@ -885,6 +910,27 @@ package body Flyology.IO.Sockets is
       Send_Prepared (Socket, Item, Last, Timeout, Interrupts);
    end Send;
 
+   procedure Send
+     (Socket     : Socket_Type;
+      Item       : Flyology.Buffers.Unique_Buffer;
+      Sent       : out Natural;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   is
+      procedure Borrow (Data : Ada.Streams.Stream_Element_Array) is
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Send (Socket, Data, Last, Timeout, Interrupts);
+         Sent :=
+           (if Last < Data'First
+            then 0
+            else Natural (Last - Data'First + 1));
+      end Borrow;
+   begin
+      Sent := 0;
+      Flyology.Buffers.With_Readable_Data (Item, Borrow'Access);
+   end Send;
+
    procedure Send_All
      (Socket     : Socket_Type;
       Item       : Ada.Streams.Stream_Element_Array;
@@ -905,6 +951,20 @@ package body Flyology.IO.Sockets is
          end if;
          First := Last + 1;
       end loop;
+   end Send_All;
+
+   procedure Send_All
+     (Socket     : Socket_Type;
+      Item       : Flyology.Buffers.Unique_Buffer;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   is
+      procedure Borrow (Data : Ada.Streams.Stream_Element_Array) is
+      begin
+         Send_All (Socket, Data, Timeout, Interrupts);
+      end Borrow;
+   begin
+      Flyology.Buffers.With_Readable_Data (Item, Borrow'Access);
    end Send_All;
 
    procedure Accept_Connection

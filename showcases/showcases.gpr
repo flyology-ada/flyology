@@ -24,6 +24,7 @@ project Showcases is
    for Exec_Dir use "bin";
    for Main use
      ("cancellation_density.adb",
+      "buffer_handoff.adb",
       "connection_density.adb",
       "connection_lifecycle.adb",
       "cooperative_fairness.adb",

@@ -78,6 +78,8 @@ project Flyology is
            ("flyology.ads",
             "flyology-capacity.ads",
             "flyology-bounded_channels.ads",
+            "flyology-buffers.ads",
+            "flyology-buffers-channels.ads",
             "flyology-bytes.ads",
             "flyology-cancellation.ads",
             "flyology-channels.ads",

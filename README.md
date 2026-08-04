@@ -41,6 +41,7 @@ based on the surviving correspondence.
   - [GNARL integration boundary](#gnarl-integration-boundary)
   - [Context switching is not event polling](#context-switching-is-not-event-polling)
 - [Concurrency primitives](#concurrency-primitives)
+  - [Ownership-transfer buffers](#ownership-transfer-buffers)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
   - [TLS](#tls)
@@ -614,6 +615,50 @@ task-only coordination. Descriptor-backed wakeup remains available through
 `Wait_Source` when cancellation must participate in a socket or file wait; a
 task-only request does not allocate an OS descriptor.
 
+### Ownership-transfer buffers
+
+`Flyology.Buffers` supplies fixed-block pools and limited `Unique_Buffer`
+handles for payloads that should cross task boundaries without value
+assignment. A pool allocates one contiguous arena during initialization and
+does not grow. Acquiring a buffer selects one block; `Move` transfers its slot,
+generation, length, and application tag while leaving the payload at the same
+address. Finalization returns a still-owned slot to its pool.
+
+Payload mutation is exclusive rather than atomically shared. Synchronous
+`With_Writable_Data` and `With_Readable_Data` callbacks borrow a block only for
+the duration of the call and must not retain its address. `Flyology.IO.Sockets`
+and `Flyology.IO.Files` accept unique buffers directly, so the kernel borrows
+the pool block under the same completion and cancellation rules as an ordinary
+`Stream_Element_Array`. This avoids a Flyology payload copy; it does not claim
+that a socket backend also avoids the kernel's network copy.
+
+`Flyology.Buffers.Channels.Channel` is a fixed-capacity MPMC FIFO specialized
+for these handles. Its protected storage contains only scalar ownership tokens,
+not payloads. Successful `Send_Move` leaves the sender vacant. A full, timed
+out, closed, or aborted send restores ownership to the sender; a channel being
+finalized returns undelivered buffers to its pool. Close-and-drain behavior
+matches `Flyology.Channels.Bounded`. Optional scalar transfer metadata travels
+atomically with the token and remains separate from the buffer's application
+tag.
+
+```ada
+Pool  : aliased Flyology.Buffers.Pool
+  (Block_Size => 64 * 1_024, Capacity => 258);
+Queue : Flyology.Buffers.Channels.Channel
+  (Owner => Pool'Access, Capacity => 256);
+Value : Flyology.Buffers.Unique_Buffer (Pool'Access);
+
+Flyology.Buffers.Acquire (Value);
+--  Fill Value through With_Writable_Data.
+Queue.Send_Move (Value);       --  Value is vacant on success.
+Queue.Receive_Move (Value);    --  Value is again the sole owner.
+```
+
+The pool free list is protected once per acquisition and release. Payload
+access and channel transit do not increment a reference count. Immutable
+fan-out and interprocess shared arenas remain separate problems; this primitive
+deliberately implements only single-owner transfer.
+
 ## Task-aware I/O
 
 Flyology exposes synchronous operations in:
@@ -1172,6 +1217,13 @@ needed because a reassembled receive result has a runtime-determined length;
 it hides container indices and capacity from protocol users. Explicit
 `From_Byte_String` and `To_Byte_String` helpers provide one-to-one octet
 mapping for already encoded WebSocket text, not character-set conversion.
+For an application that already uses a buffer pool, a WebSocket lifecycle
+`Session` can select it once through `Configure_Buffer_Pool`; `Publish_Move`,
+`Publish_Move_For`, and `Try_Publish_Move` then transfer a `Unique_Buffer` into
+the sole-writer outbox. A configured session is buffer-only, so its declared
+capacity remains one FIFO and value-based `Publish` operations are rejected.
+Sessions that are not configured retain the existing `Outgoing_Message` value
+semantics. The pool must outlive the session.
 
 `Flyology.Task_Scopes` runs a bounded homogeneous group of child operations as
 ordinary structured Ada lightweight tasks; native work is available only
@@ -2186,6 +2238,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
+./showcases/run_buffer_handoff.sh
 ./showcases/run_connection_density.sh
 ./showcases/run_http_benchmark.sh
 ```
@@ -2231,6 +2284,8 @@ The examples demonstrate:
   including per-group task distribution and poll/dispatch counters;
 - task-owned state sharded across configured groups, with rendezvous messages
   from native and lightweight callers and explicit lightweight crossings;
+- value-copy and unique-buffer handoff throughput at payload sizes from 64
+  bytes through 64 KiB, both within one execution group and across two groups;
 - 10,000 simultaneously waiting socket connections on one event-loop thread,
   followed by an isolated same-load resource comparison with native tasks.
 
@@ -2252,6 +2307,24 @@ and dispatch rather than setup density. The pool permits the OS to run several
 loop pthreads concurrently, but it deliberately makes no physical-core-pinning
 claim; load shape, kernel behavior, and host scheduling determine whether more
 loops improve elapsed time.
+
+### Buffer-handoff showcase
+
+`run_buffer_handoff.sh` prepares a two-group lightweight runtime and reports CSV
+rows for the existing value-semantic `Unbounded_Bytes` channel and the
+single-owner buffer channel. Each producer constructs the same payload before
+handoff; the consumer either receives a copied value or takes and releases the
+pool block. The script runs both tasks on group 0 and then places the consumer
+on group 1:
+
+```sh
+./showcases/run_buffer_handoff.sh
+```
+
+The reported MiB/s is logical payload throughput, not memory-bus traffic or
+network throughput. Results depend on payload size, build profile, host, and
+group placement, so the showcase reports measurements rather than selecting a
+fixed zero-copy threshold in the API.
 
 ### Connection-density showcase
 

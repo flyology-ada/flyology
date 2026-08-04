@@ -1,5 +1,6 @@
 with Ada.Exceptions;
 with Ada.Streams;
+with Flyology.Buffers;
 with Interfaces.C;
 
 --  Owns Flyology's portable socket, Internet-address, and endpoint types.
@@ -407,6 +408,28 @@ package Flyology.IO.Sockets is
       Interrupts : Interrupt_Set := No_Interrupts)
      with Pre => Interrupts'Length < Max_Wait_Requests;
 
+   --  Receive directly into an acquired unique buffer and replace its readable
+   --  length. The buffer remains solely owned by the caller while the kernel
+   --  borrows its storage.
+   --  @param Socket Open connected socket
+   --  @param Item Acquired destination buffer
+   --  @param Received Number of bytes received; zero on orderly closure
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before readiness
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails
+   --  @exception Socket_Error Socket receive or setup fails
+   procedure Receive
+     (Socket     : Socket_Type;
+      Item       : in out Flyology.Buffers.Unique_Buffer;
+      Received   : out Natural;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre => Flyology.Buffers.Has_Buffer (Item)
+       and then Interrupts'Length < Max_Wait_Requests,
+          Post => Flyology.Buffers.Length (Item) = Received;
+
    --  Fill Item or raise. One Timeout deadline spans every partial receive.
    --  @param Socket Open connected socket
    --  @param Item Destination buffer to fill
@@ -441,6 +464,26 @@ package Flyology.IO.Sockets is
       Interrupts : Interrupt_Set := No_Interrupts)
      with Pre => Interrupts'Length < Max_Wait_Requests;
 
+   --  Send one available chunk directly from a unique buffer. No Flyology
+   --  payload copy is made and Item remains owned by the caller.
+   --  @param Socket Open connected socket
+   --  @param Item Acquired source buffer
+   --  @param Sent Number of bytes sent
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before readiness
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails
+   --  @exception Socket_Error Socket send or setup fails
+   procedure Send
+     (Socket     : Socket_Type;
+      Item       : Flyology.Buffers.Unique_Buffer;
+      Sent       : out Natural;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre => Flyology.Buffers.Has_Buffer (Item)
+       and then Interrupts'Length < Max_Wait_Requests;
+
    --  Send all of Item or raise. One Timeout deadline spans every partial
    --  send.
    --  @param Socket Open connected socket
@@ -457,6 +500,24 @@ package Flyology.IO.Sockets is
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
      with Pre => Interrupts'Length < Max_Wait_Requests;
+
+   --  Send a unique buffer's complete readable payload without a Flyology
+   --  payload copy. Item remains owned until the synchronous call returns.
+   --  @param Socket Open connected socket
+   --  @param Item Acquired source buffer
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The shared deadline expires
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Polling fails or no forward progress is made
+   --  @exception Socket_Error Socket send or setup fails
+   procedure Send_All
+     (Socket     : Socket_Type;
+      Item       : Flyology.Buffers.Unique_Buffer;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre => Flyology.Buffers.Has_Buffer (Item)
+       and then Interrupts'Length < Max_Wait_Requests;
 
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded

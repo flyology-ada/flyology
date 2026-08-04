@@ -1,5 +1,7 @@
 with Ada.Finalization;
 with Flyology.Bounded_Channels;
+with Flyology.Buffers;
+with Flyology.Buffers.Channels;
 with Flyology.Bytes;
 with Flyology.Cancellation;
 with Flyology.HTTP.Server.Applications;
@@ -32,12 +34,22 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
       Byte_Limit : Positive := Default_Session_Bytes;
       Budget     : access Outbound_Budget := null) is limited private;
 
+   --  Select ownership-transfer publishing from Pool. Configure this once,
+   --  before Run or any producer operation. A configured session accepts only
+   --  Publish_Move operations. Pool must outlive Item.
+   --  @param Item WebSocket session to configure
+   --  @param Pool Storage pool supplying moved payloads
+   procedure Configure_Buffer_Pool
+     (Item : in out Session;
+      Pool : not null access Flyology.Buffers.Pool);
+
    --  Enqueue with backpressure, or return Accepted false after close.
    --  Owner-thread lifecycle callbacks should use Try_Publish to avoid
    --  waiting on their own queue.
    --  @param Item WebSocket session
    --  @param Value Outgoing message
    --  @param Accepted Whether the message was queued
+   --  @exception Program_Error Item is configured for moved buffers
    procedure Publish
      (Item     : in out Session;
       Value    : Outgoing_Message;
@@ -50,6 +62,7 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
    --  @param Timeout Maximum monotonic wait
    --  @param Timed_Out Whether Timeout expired while the queue stayed full
    --  @param Token Optional cancellation source
+   --  @exception Program_Error Item is configured for moved buffers
    procedure Publish_For
      (Item      : in out Session;
       Value     : Outgoing_Message;
@@ -62,10 +75,59 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
    --  @param Item WebSocket session
    --  @param Value Outgoing message
    --  @param Accepted Whether the message was queued
+   --  @exception Program_Error Item is configured for moved buffers
    procedure Try_Publish
      (Item     : in out Session;
       Value    : Outgoing_Message;
       Accepted : out Boolean);
+
+   --  Enqueue a pooled payload by transferring ownership without copying.
+   --  Item must be configured with Value's pool.
+   --  Success leaves Value vacant; close or admission failure preserves it.
+   --  @param Item WebSocket session with a configured buffer pool
+   --  @param Kind Text or binary frame
+   --  @param Value Acquired payload buffer
+   --  @param Accepted Whether ownership transferred to the session
+   procedure Publish_Move
+     (Item     : in out Session;
+      Kind     : WebSocket_Data_Kind;
+      Value    : in out Flyology.Buffers.Unique_Buffer;
+      Accepted : out Boolean)
+     with Pre => Flyology.Buffers.Has_Buffer (Value),
+          Post => Accepted = (not Flyology.Buffers.Has_Buffer (Value));
+
+   --  Enqueue a pooled payload with bounded, cancellation-aware backpressure.
+   --  Timeout or close preserves Value.
+   --  @param Item WebSocket session with a configured buffer pool
+   --  @param Kind Text or binary frame
+   --  @param Value Acquired payload buffer
+   --  @param Accepted Whether ownership transferred to the session
+   --  @param Timeout Maximum monotonic wait
+   --  @param Timed_Out Whether Timeout expired before transfer
+   --  @param Token Optional cancellation source
+   procedure Publish_Move_For
+     (Item      : in out Session;
+      Kind      : WebSocket_Data_Kind;
+      Value     : in out Flyology.Buffers.Unique_Buffer;
+      Accepted  : out Boolean;
+      Timeout   : Duration;
+      Timed_Out : out Boolean;
+      Token     : access Flyology.Cancellation.Token := null)
+     with Pre => Flyology.Buffers.Has_Buffer (Value),
+          Post => Accepted = (not Flyology.Buffers.Has_Buffer (Value));
+
+   --  Attempt to transfer a pooled payload without waiting.
+   --  @param Item WebSocket session with a configured buffer pool
+   --  @param Kind Text or binary frame
+   --  @param Value Acquired payload buffer
+   --  @param Accepted Whether ownership transferred to the session
+   procedure Try_Publish_Move
+     (Item     : in out Session;
+      Kind     : WebSocket_Data_Kind;
+      Value    : in out Flyology.Buffers.Unique_Buffer;
+      Accepted : out Boolean)
+     with Pre => Flyology.Buffers.Has_Buffer (Value),
+          Post => Accepted = (not Flyology.Buffers.Has_Buffer (Value));
 
    --  Request a normal server close after queued messages drain.
    --  @param Item WebSocket session
@@ -137,6 +199,8 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
       Metric_Output  : access Metrics.Sink'Class := null);
 
 private
+   type Outbox_Mode is (Value_Outbox, Buffer_Outbox);
+
    type Outbound_Budget_Access is access all Outbound_Budget;
 
    protected type Retained_Bytes (Limit : Positive) is
@@ -148,6 +212,9 @@ private
    type Retained_Bytes_Access is access all Retained_Bytes;
    type Session_Access is access all Session;
    type Boolean_Access is access all Boolean;
+   type Buffer_Pool_Access is access all Flyology.Buffers.Pool;
+   package Buffer_Channels renames Flyology.Buffers.Channels;
+   type Buffer_Channel_Access is access Buffer_Channels.Channel;
 
    Empty_Message : constant Outgoing_Message := (others => <>);
    package Message_Channels is new
@@ -158,9 +225,12 @@ private
       Byte_Limit : Positive := Default_Session_Bytes;
       Budget     : access Outbound_Budget := null) is
      limited new Ada.Finalization.Limited_Controlled with record
-      Outbox : Message_Channels.Channel (Capacity);
-      Stop   : Flyology.Cancellation.Token;
-      Bytes  : aliased Retained_Bytes (Byte_Limit);
+      Outbox        : Message_Channels.Channel (Capacity);
+      Mode          : Outbox_Mode := Value_Outbox;
+      Buffer_Pool   : Buffer_Pool_Access;
+      Buffer_Outbox : Buffer_Channel_Access;
+      Stop          : Flyology.Cancellation.Token;
+      Bytes         : aliased Retained_Bytes (Byte_Limit);
    end record;
 
    --  @exclude

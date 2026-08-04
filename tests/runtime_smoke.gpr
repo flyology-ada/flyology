@@ -33,6 +33,7 @@ project Runtime_Smoke is
    for Exec_Dir use "bin";
    for Main use
      ("accept_transient_smoke.adb",
+      "buffers_smoke.adb",
       "cancellation_wake_smoke.adb",
       "connection_lifecycle_smoke.adb",
       "connection_state_model.adb",
