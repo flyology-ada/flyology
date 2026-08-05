@@ -84,9 +84,9 @@ and GNAT releases listed under [Build and test](#build-and-test) and fails close
 for an unverified combination.
 
 The current patch family covers exact Alire `gnat_native` releases from 13
-through 16. Linux/x86-64 supports 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1,
-and 16.1.0; Linux/AArch64 is validated with 16.1.0. macOS supports 13.2.2,
-14.1.3, 14.2.1, and 16.1.0. The event backend is
+through 16. Linux/AArch64 and Linux/x86-64 support 13.2.2, 14.1.3, 14.2.1,
+15.1.2, 15.3.1, and 16.1.0. macOS supports 13.2.2, 14.1.3, 14.2.1, and
+16.1.0. The event backend is
 `kqueue` on macOS and `epoll` plus `eventfd` on Linux. Lightweight tasks resume
 through the small ABI-specific context switch described below.
 
@@ -2028,7 +2028,7 @@ below:
 | Host | Releases |
 | --- | --- |
 | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
-| Linux/AArch64 | 16.1.0 |
+| Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 
 The crate declares a generic `gnat >=13 & <17` dependency so Alire can select a
@@ -2635,8 +2635,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
 ## Current constraints
 
 - Supported combinations are macOS/AArch64, Linux/AArch64, and Linux/x86-64.
-  Linux/AArch64 is currently validated with GNAT 16.1.0; the macOS/x86-64
-  context switch is implemented but is not part of the current automated run.
+  Both Linux architectures use the verified Linux release matrix; the
+  macOS/x86-64 context switch is implemented but is not part of the current
+  automated run.
 - Each event group uses one scheduler pthread. Tasks within a group are
   cooperative, while separate groups can execute in parallel.
 - Lightweight tasks without a `CPU` aspect use the compiled automatic pool. Its

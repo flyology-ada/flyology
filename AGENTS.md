@@ -234,7 +234,7 @@ required by the changed boundary.
   `build/autobahn` output. Run `node
   scripts/publish-websocket-conformance.mjs` to restyle every completed profile
   into the checked-in website report bundle.
-- `node scripts/publish-websocket-conformance.mjs`: transform all eight local
+- `node scripts/publish-websocket-conformance.mjs`: transform all fourteen local
   Autobahn profiles into compact Flyology-styled pages and normalized JSON
   under `website/reports/websocket`. Regenerate after replacing report data.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
