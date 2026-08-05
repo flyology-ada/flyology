@@ -1155,12 +1155,36 @@ changing request and response signatures. The current engine implements
 HTTP/1.0 response compatibility and HTTP/1.1 requests; it does not yet provide
 redirect policy, content decoding, proxying, or an HTTP/2 transport.
 
-For request streaming, implement the limited `Request_Body_Source` interface
-and pass the source directly to `Execute`. `Known_Length (Bytes)` generates
-`Content-Length`; `Unknown_Length` uses HTTP/1.1 chunked framing. Each source
-read receives the remaining whole-exchange timeout and the call's cancellation
-token. Sources are borrowed only during `Execute`, and streamed bodies are not
-automatically replayed because the interface does not assume rewindability.
+For request streaming, pass a limited `Request_Body_Source` directly to
+`Execute`. Its `Declared_Length` generates `Content-Length` when known and
+selects HTTP/1.1 chunked framing otherwise. Each source read receives the
+remaining whole-exchange timeout and the call's cancellation token. Sources
+are borrowed only during `Execute`, and streamed bodies are not automatically
+replayed because the interface does not assume rewindability.
+
+`Flyology.HTTP.Client.Request_Bodies` supplies borrowed array, byte-string,
+`Unbounded_Bytes`, and unique-buffer sources. Its `Files` child streams an
+explicit positional file range without changing or closing the descriptor;
+its `Channels` child consumes bounded `Unique_Buffer` channels for generated
+bodies with producer backpressure. Memory and file sources declare their
+length automatically. Channel sources default to unknown length and may be
+given a known total before `Execute`.
+
+```ada
+Payload : aliased constant Ada.Streams.Stream_Element_Array := ...;
+Source  : Flyology.HTTP.Client.Request_Bodies.Array_Source
+  (Payload'Access);
+
+Reply := Flyology.HTTP.Client.Execute (HTTP, Request, Source);
+```
+
+The file adapter uses deadline-aware `Flyology.IO.Files.Read_At`. Lightweight
+timeouts wait for terminal kernel cancellation before returning ownership of
+the staging buffer. Native `pread` cannot be interrupted after entry, so its
+timeout may be delivered only after the syscall returns. A general
+`Ada.Streams.Root_Stream_Type` adapter is intentionally absent because an
+arbitrary stream has no readiness, timeout, or cancellation contract and could
+block an event-loop pthread.
 
 HTTPS uses the `Configure` overload that receives a provider-neutral TLS
 backend. Configure retains independently owned provider state, so the original

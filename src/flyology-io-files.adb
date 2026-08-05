@@ -231,6 +231,33 @@ package body Flyology.IO.Files is
    end Read_At;
 
    procedure Read_At
+     (File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : out Ada.Streams.Stream_Element_Array;
+      Last    : out Ada.Streams.Stream_Element_Offset;
+      Timeout : Duration;
+      Token   : access Cancellation_Token := null) is
+   begin
+      Last := Item'First - 1;
+      if Item'Length = 0 then
+         return;
+      elsif Token /= null and then Token.Requested then
+         raise Operation_Cancelled;
+      elsif Timeout = 0.0 then
+         raise Timeout_Error;
+      elsif Timeout < 0.0 then
+         Read_At (File, Offset, Item, Last, Token);
+      else
+         select
+            delay Timeout;
+            raise Timeout_Error;
+         then abort
+            Read_At (File, Offset, Item, Last, Token);
+         end select;
+      end if;
+   end Read_At;
+
+   procedure Read_At
      (File   : File_Descriptor;
       Offset : File_Offset;
       Item   : in out Flyology.Buffers.Unique_Buffer;
@@ -244,6 +271,32 @@ package body Flyology.IO.Files is
          Last : Ada.Streams.Stream_Element_Offset;
       begin
          Read_At (File, Offset, Data, Last, Token);
+         Length :=
+           (if Last < Data'First
+            then 0
+            else Natural (Last - Data'First + 1));
+         Read := Length;
+      end Borrow;
+   begin
+      Read := 0;
+      Flyology.Buffers.With_Writable_Data (Item, Borrow'Access);
+   end Read_At;
+
+   procedure Read_At
+     (File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : in out Flyology.Buffers.Unique_Buffer;
+      Read    : out Natural;
+      Timeout : Duration;
+      Token   : access Cancellation_Token := null)
+   is
+      procedure Borrow
+        (Data   : in out Ada.Streams.Stream_Element_Array;
+         Length : in out Natural)
+      is
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Read_At (File, Offset, Data, Last, Timeout, Token);
          Length :=
            (if Last < Data'First
             then 0

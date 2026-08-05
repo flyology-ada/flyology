@@ -29,12 +29,14 @@ run_gprbuild \
   --subdirs="$test_subdir" \
   -f -p -P tests/runtime_smoke.gpr \
   http_client_smoke.adb http_client_boundaries_smoke.adb \
+  http_client_body_adapters_smoke.adb \
   http_client_streaming_smoke.adb \
   http_client_parser_matrix.adb http_client_parser_randomized.adb \
   http_client_pool_model.adb http_client_tls_smoke.adb
 
 "$project_root/tests/bin/$test_subdir/http_client_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_boundaries_smoke"
+"$project_root/tests/bin/$test_subdir/http_client_body_adapters_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_streaming_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_parser_matrix"
 "$project_root/tests/bin/$test_subdir/http_client_parser_randomized"
@@ -58,6 +60,25 @@ if ! grep -E \
 then
   cat "$lifetime_log" >&2
   printf '%s\n' "HTTP response lifetime fixture failed unexpectedly" >&2
+  exit 1
+fi
+
+source_lifetime_log="$project_root/build/tests/http-client-body-source-lifetime.log"
+if run_gprbuild \
+  --RTS="$project_root/build/alire-rts" \
+  --subdirs=http-client-compile-fail \
+  -c -p -P tests/runtime_smoke.gpr \
+  http_client_body_source_lifetime_fail.adb >"$source_lifetime_log" 2>&1
+then
+  printf '%s\n' "HTTP body source escaped its borrowed payload lifetime" >&2
+  exit 1
+fi
+if ! grep -E \
+  '^http_client_body_source_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*access discriminant.*statically too deep' \
+  "$source_lifetime_log" >/dev/null
+then
+  cat "$source_lifetime_log" >&2
+  printf '%s\n' "HTTP body source lifetime fixture failed unexpectedly" >&2
   exit 1
 fi
 

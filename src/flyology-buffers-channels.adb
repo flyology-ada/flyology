@@ -318,6 +318,17 @@ package body Flyology.Buffers.Channels is
    end Timed_Receive_Move;
 
    procedure Timed_Receive_Move
+     (Item    : in out Channel;
+      Target  : in out Unique_Buffer;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token)
+   is
+      Metadata : Transfer_Metadata;
+   begin
+      Timed_Receive_Move (Item, Target, Timeout, Metadata, Token);
+   end Timed_Receive_Move;
+
+   procedure Timed_Receive_Move
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;
       Timeout  : Duration;
@@ -363,6 +374,28 @@ package body Flyology.Buffers.Channels is
          delay Timeout;
          raise Timeout_Error with "buffer channel receive timed out";
       end select;
+   end Timed_Receive_Move;
+
+   procedure Timed_Receive_Move
+     (Item     : in out Channel;
+      Target   : in out Unique_Buffer;
+      Timeout  : Duration;
+      Metadata : out Transfer_Metadata;
+      Token    : access Flyology.Cancellation.Token) is
+   begin
+      Metadata := No_Metadata;
+      if Token = null then
+         Timed_Receive_Move (Item, Target, Timeout, Metadata);
+      elsif Token.Requested then
+         raise Operation_Cancelled;
+      else
+         select
+            Token.Await_Request;
+            raise Operation_Cancelled;
+         then abort
+            Timed_Receive_Move (Item, Target, Timeout, Metadata);
+         end select;
+      end if;
    end Timed_Receive_Move;
 
    procedure Close (Item : in out Channel) is

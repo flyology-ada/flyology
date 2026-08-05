@@ -15,6 +15,10 @@ package Flyology.IO.Files is
    Operation_Cancelled : exception renames
      Flyology.Cancellation.Operation_Cancelled;
 
+   --  Raised after a timed file operation's abort has reached a terminal state
+   --  and the caller may safely reuse its buffer.
+   Timeout_Error : exception renames Flyology.IO.Timeout_Error;
+
    --  Shared one-shot token. The token must outlive every operation using it.
    subtype Cancellation_Token is Flyology.Cancellation.Token;
 
@@ -75,6 +79,29 @@ package Flyology.IO.Files is
       Last   : out Ada.Streams.Stream_Element_Offset;
       Token  : access Cancellation_Token := null);
 
+   --  Read positionally within one relative deadline. A lightweight timeout
+   --  requests kernel cancellation and does not return until the kernel has
+   --  relinquished Item. A native pread cannot be interrupted after entry, so
+   --  timeout delivery may be delayed until that syscall returns. Negative
+   --  Timeout waits without a deadline and zero is immediate.
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Destination buffer
+   --  @param Last Last element written, or Item'First - 1 at end of file
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Token Optional one-shot cancellation token
+   --  @exception Device_Error Submission, completion, or pread reports failure
+   --  @exception Operation_Cancelled Token cancellation reaches a terminal
+   --     state
+   --  @exception Timeout_Error Deadline cancellation reaches a terminal state
+   procedure Read_At
+     (File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : out Ada.Streams.Stream_Element_Array;
+      Last    : out Ada.Streams.Stream_Element_Offset;
+      Timeout : Duration;
+      Token   : access Cancellation_Token := null);
+
    --  Read directly into an acquired unique buffer and replace its readable
    --  length. Kernel ownership and cancellation semantics match the array
    --  overload.
@@ -91,6 +118,29 @@ package Flyology.IO.Files is
       Item   : in out Flyology.Buffers.Unique_Buffer;
       Read   : out Natural;
       Token  : access Cancellation_Token := null)
+     with Pre => Flyology.Buffers.Has_Buffer (Item),
+          Post => Flyology.Buffers.Length (Item) = Read;
+
+   --  Read positionally into a unique buffer within one relative deadline.
+   --  Timeout, cancellation, and terminal buffer ownership match the array
+   --  overload.
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Acquired destination buffer
+   --  @param Read Number of bytes read; zero at end of file
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Token Optional one-shot cancellation token
+   --  @exception Device_Error Submission, completion, or pread reports failure
+   --  @exception Operation_Cancelled Token cancellation reaches a terminal
+   --     state
+   --  @exception Timeout_Error Deadline cancellation reaches a terminal state
+   procedure Read_At
+     (File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : in out Flyology.Buffers.Unique_Buffer;
+      Read    : out Natural;
+      Timeout : Duration;
+      Token   : access Cancellation_Token := null)
      with Pre => Flyology.Buffers.Has_Buffer (Item),
           Post => Flyology.Buffers.Length (Item) = Read;
 

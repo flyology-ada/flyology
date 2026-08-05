@@ -1,4 +1,5 @@
 with Ada.Finalization;
+with Flyology.Cancellation;
 
 --  Supplies bounded closeable channels that transfer unique buffer ownership
 --  without copying payload bytes. The protected queue carries only pool slot
@@ -19,6 +20,10 @@ package Flyology.Buffers.Channels is
 
    --  Raised by a timed send or receive whose deadline expires first.
    Timeout_Error : exception;
+
+   --  Raised when a cancellation-aware receive observes its one-shot token.
+   Operation_Cancelled : exception renames
+     Flyology.Cancellation.Operation_Cancelled;
 
    --  Result of a nonblocking send attempt.
    --  @enum Item_Sent Ownership transferred to the channel
@@ -161,6 +166,23 @@ package Flyology.Buffers.Channels is
      with Pre => not Has_Buffer (Target),
           Post => Has_Buffer (Target);
 
+   --  Receive within one relative deadline or until Token is requested.
+   --  Cancellation leaves Target vacant unless delivery completed first.
+   --  @param Item Channel yielding ownership
+   --  @param Target Vacant buffer that receives the oldest payload
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Token Optional one-shot cancellation source
+   --  @exception Channel_Closed Closed channel has fully drained
+   --  @exception Timeout_Error No buffer arrives before the deadline
+   --  @exception Operation_Cancelled Token is requested before delivery
+   procedure Timed_Receive_Move
+     (Item    : in out Channel;
+      Target  : in out Unique_Buffer;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token)
+     with Pre => not Has_Buffer (Target),
+          Post => Has_Buffer (Target);
+
    --  Receive within one relative deadline and return channel-local metadata.
    --  @param Item Channel yielding ownership
    --  @param Target Vacant buffer that receives ownership on success
@@ -173,6 +195,25 @@ package Flyology.Buffers.Channels is
       Target   : in out Unique_Buffer;
       Timeout  : Duration;
       Metadata : out Transfer_Metadata)
+     with Pre => not Has_Buffer (Target),
+          Post => Has_Buffer (Target);
+
+   --  Receive a buffer and metadata within a deadline or until cancellation.
+   --  Ownership and exception semantics match the overload without metadata.
+   --  @param Item Channel yielding ownership
+   --  @param Target Vacant buffer that receives the oldest payload
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Metadata Metadata supplied by the sender
+   --  @param Token Optional one-shot cancellation source
+   --  @exception Channel_Closed Closed channel has fully drained
+   --  @exception Timeout_Error No buffer arrives before the deadline
+   --  @exception Operation_Cancelled Token is requested before delivery
+   procedure Timed_Receive_Move
+     (Item     : in out Channel;
+      Target   : in out Unique_Buffer;
+      Timeout  : Duration;
+      Metadata : out Transfer_Metadata;
+      Token    : access Flyology.Cancellation.Token)
      with Pre => not Has_Buffer (Target),
           Post => Has_Buffer (Target);
 

@@ -639,11 +639,11 @@ package body Flyology.HTTP.Client is
      (Item    : aliased in out Client;
       Value   : Request;
       Source  : in out Request_Body_Source'Class;
-      Length  : Body_Length := Unknown_Length;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response is
      (Execute_Internal
-        (Item, Value, Source => Source'Access, Length => Length,
+        (Item, Value, Source => Source'Access,
+         Length => Declared_Length (Source),
          Timeout => Timeout, Token => Token));
 
    procedure Require_Response (Item : Response) is

@@ -130,12 +130,22 @@ package Flyology.HTTP.Client is
    --  @return Known body length
    function Known_Length (Bytes : Body_Size) return Body_Length;
 
-   --  Pull source for a streaming request body. Execute calls Read serially
-   --  and never retains the source after returning. Implementations must
-   --  honor the remaining whole-exchange timeout and cancellation token when
-   --  they perform blocking work. A call must either produce at least one
-   --  byte or set Finished. Last is Data'First - 1 when no bytes are produced.
+   --  Pull source for a streaming request body. Execute queries
+   --  Declared_Length once, calls Read serially, and never retains the source
+   --  after returning. The declared length must remain stable during Execute.
+   --  Implementations must honor the remaining whole-exchange timeout and
+   --  cancellation token when they perform blocking work. A call must either
+   --  produce at least one byte or set Finished. Last is Data'First - 1 when
+   --  no bytes are produced.
    type Request_Body_Source is limited interface;
+
+   --  Return the source's stable framing length. Known lengths generate
+   --  Content-Length; Unknown_Length selects the protocol's streaming
+   --  framing.
+   --  @param Item Source to inspect before its first read
+   --  @return Known byte count or Unknown_Length
+   function Declared_Length
+     (Item : Request_Body_Source) return Body_Length is abstract;
 
    --  Produce the next request body bytes.
    --  @param Item Source state to advance
@@ -225,15 +235,13 @@ package Flyology.HTTP.Client is
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response;
 
-   --  Execute one request while pulling its body from Source. Length controls
-   --  protocol framing: a known length sends exactly that many bytes, while
-   --  Unknown_Length selects streaming framing. Source is not retained and
+   --  Execute one request while pulling its body from Source. The source's
+   --  Declared_Length controls protocol framing. Source is not retained and
    --  is never replayed automatically, including for idempotent methods. Its
    --  exceptions propagate after the leased transport is discarded.
    --  @param Item Shared configured client that outlives the result
    --  @param Value Request metadata; a retained body is rejected
    --  @param Source Request body producer used only during this call
-   --  @param Length Known byte count or Unknown_Length
    --  @param Timeout Whole-exchange deadline interval
    --  @param Token Optional cancellation source
    --  @return Response head with a streaming response body lease
@@ -254,7 +262,6 @@ package Flyology.HTTP.Client is
      (Item    : aliased in out Client;
       Value   : Request;
       Source  : in out Request_Body_Source'Class;
-      Length  : Body_Length := Unknown_Length;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response;
 

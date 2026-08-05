@@ -8,14 +8,15 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs seven independent programs
-plus one compile-fail client/response lifetime fixture:
+`scripts/http-client-conformance.sh` builds and runs eight independent programs
+plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
 | --- | --- |
 | Shared vocabulary | extensible method tokens, standard method constants, safe/idempotent classification, normalized origins |
 | Request wire form | origin-form target, generated Host, ordered repeated fields |
 | Request streaming | known-length Content-Length, unknown-length chunked coding, source progress and early-end rejection, source exception cleanup, retained-body conflict, and native/lightweight parity |
+| Request body adapters | borrowed arrays with nondefault bounds and explicit rewind, byte strings, owned bytes, unique-buffer ownership retention, positional file ranges, generated channel bodies with known or chunked framing, file timeout, channel timeout/cancellation, backpressure, and lane parity |
 | Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, coherent exchange/transport counters, descriptor restoration |
 | Response head | repeated fields, an informational response before the final response, and byte-at-a-time status/header delivery |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
@@ -24,7 +25,7 @@ plus one compile-fail client/response lifetime fixture:
 | Deadlines and cancellation | pool admission and response-head deadlines, fixed-body deadline continuity, and call-scoped chunked-body cancellation |
 | Task lanes | the same successful, streaming, and boundary exchange sequences from native and explicitly lightweight callers |
 | HTTPS | OpenSSL certificate and hostname verification, retained provider state after the original provider finalizes, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
-| Lifetime | the compiler rejects a response that would escape the aliased client object; runtime shutdown closes and drains active exchanges |
+| Lifetime | the compiler rejects a response that would escape the aliased client and an adapter that would escape its borrowed payload; runtime shutdown closes and drains active exchanges |
 
 The scripted peer sends literal bytes and does not use `Flyology.HTTP.Server`,
 so a shared parser or framing defect cannot make both sides agree incorrectly.

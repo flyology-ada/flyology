@@ -42,7 +42,11 @@ procedure HTTP_Client_Streaming_Smoke is
       Value      : Unbounded_String;
       Next       : Positive := 1;
       Chunk_Size : Positive := 1;
+      Length     : Client.Body_Length := Client.Unknown_Length;
    end record;
+
+   overriding function Declared_Length
+     (Item : String_Source) return Client.Body_Length is (Item.Length);
 
    overriding procedure Read
      (Item     : in out String_Source;
@@ -75,6 +79,10 @@ procedure HTTP_Client_Streaming_Smoke is
 
    type Stalled_Source is new Client.Request_Body_Source with null record;
 
+   overriding function Declared_Length
+     (Item : Stalled_Source) return Client.Body_Length is
+     (Client.Unknown_Length);
+
    overriding procedure Read
      (Item     : in out Stalled_Source;
       Data     : out Stream_Element_Array;
@@ -94,6 +102,10 @@ procedure HTTP_Client_Streaming_Smoke is
    Source_Failure : exception;
 
    type Failing_Source is new Client.Request_Body_Source with null record;
+
+   overriding function Declared_Length
+     (Item : Failing_Source) return Client.Body_Length is
+     (Client.Unknown_Length);
 
    overriding procedure Read
      (Item     : in out Failing_Source;
@@ -304,9 +316,10 @@ procedure HTTP_Client_Streaming_Smoke is
          Source   : String_Source :=
            (Value      => To_Unbounded_String ("abcdef"),
             Next       => 1,
-            Chunk_Size => 2);
+            Chunk_Size => 2,
+            Length     => Client.Known_Length (6));
          Response : constant Client.Response := Client.Execute
-           (HTTP, Request, Source, Client.Known_Length (6));
+           (HTTP, Request, Source);
       begin
          pragma Assert (Client.Status (Response) = 200);
          pragma Assert (Client.Body_Complete (Response));
@@ -317,7 +330,8 @@ procedure HTTP_Client_Streaming_Smoke is
          Source   : String_Source :=
            (Value      => To_Unbounded_String ("helloworld"),
             Next       => 1,
-            Chunk_Size => 5);
+            Chunk_Size => 5,
+            Length     => Client.Unknown_Length);
          Response : constant Client.Response :=
            Client.Execute (HTTP, Request, Source);
       begin
@@ -330,13 +344,14 @@ procedure HTTP_Client_Streaming_Smoke is
          Source : String_Source :=
            (Value      => To_Unbounded_String ("abc"),
             Next       => 1,
-            Chunk_Size => 3);
+            Chunk_Size => 3,
+            Length     => Client.Known_Length (5));
          Raised : Boolean := False;
       begin
          begin
             declare
                Unexpected : Client.Response := Client.Execute
-                 (HTTP, Request, Source, Client.Known_Length (5));
+                 (HTTP, Request, Source);
                pragma Unreferenced (Unexpected);
             begin
                null;
