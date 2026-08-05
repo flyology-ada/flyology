@@ -80,9 +80,10 @@ package Flyology.IO.Structured_Servers is
    --  fixed at activation and cannot change. Serve, Request_Shutdown, and
    --  Current coordinate through protected state. Request_Shutdown may precede
    --  the one permitted Serve call; once that call begins, every normal or
-   --  exceptional return leaves the server terminal. Keep the object alive
-   --  until Serve returns. Listener cleanup is attempted at most once;
-   --  finalization closes only a listener whose cleanup has not begun.
+   --  exceptional return or caller abort leaves the server terminal. Keep the
+   --  object alive until Serve returns or its caller task terminates. Listener
+   --  cleanup is attempted at most once; finalization closes only a listener
+   --  whose Serve cleanup has not begun.
    --  @field Capacity Handler task count and connection admission limit
    type Server (Capacity : Positive) is limited private;
 
@@ -96,7 +97,9 @@ package Flyology.IO.Structured_Servers is
    --  wakes on cancellation, while
    --  CPU-only Handle code must poll Cancellation.Requested cooperatively.
    --  Lightweight handlers suspend on event-loop I/O; native handlers block
-   --  their threads.
+   --  their threads. Aborting the Serve caller joins its dependent handlers,
+   --  closes the transferred listener exactly once, and leaves Item terminal;
+   --  abort is deferred only across bounded ownership and cleanup transitions.
    --  On an exceptional return after ownership transfers, Ada does not
    --  guarantee scalar in-out copy-back. A retained numeric Listener value is
    --  stale and must not be closed or reused. The server attempts close once

@@ -998,14 +998,18 @@ HTTP.Serve (Server, Listener, State, Drain_Timeout => 5.0);
 ```
 
 `Serve` takes ownership of an already-bound listening socket and leaves the
-caller's limited handle closed. It creates exactly `Capacity` dependent Ada
-handler tasks in a lexical task scope; each task accepts at most one connection
-at a time, so accepted work cannot exceed the bound and overload remains in the
-kernel listen backlog. There is no detached task, hidden worker thread, or
-user-space connection queue. A native instantiation creates ordinary GNARL
-native tasks backed by pthreads; a lightweight instantiation creates fibers on the configured loop
-pool. The designation belongs to the instantiated task type and never changes
-during a connection. `Handler_CPU` is also a task-type property: an explicit
+caller's limited handle closed. If the calling task is aborted, the transfer
+still has one owner, the dependent handlers are joined, and the listener is
+closed exactly once. Abort is deferred only across the bounded ownership and
+cleanup transitions, not across the serving loop. `Serve` creates exactly
+`Capacity` dependent Ada handler tasks in a lexical task scope; each task
+accepts at most one connection at a time, so accepted work cannot exceed the
+bound and overload remains in the kernel listen backlog. There is no detached
+task, hidden worker thread, or user-space connection queue. A native
+instantiation creates ordinary GNARL native tasks backed by pthreads; a
+lightweight instantiation creates fibers on the configured loop pool. The
+designation belongs to the instantiated task type and never changes during a
+connection. `Handler_CPU` is also a task-type property: an explicit
 value chooses an event group for lightweight handlers (or keeps normal Ada CPU
 semantics for native handlers), while `Not_A_Specific_CPU` uses the configured
 automatic event-loop pool or stock native placement.
@@ -2406,8 +2410,9 @@ Current smoke coverage includes:
   overload backpressure, handler-failure propagation, concurrent idempotent
   shutdown, accept cancellation, graceful drain, deadline cancellation,
   transient admission recovery, descriptor-pressure backoff, structural
-  listener-failure escalation, final scope joining, and listener descriptor
-  reuse;
+  listener-failure escalation, abort before/during/after ownership transfer,
+  abort while serving and closing, exact-once close, final scope joining, and
+  listener descriptor reuse;
 - descriptor-readiness fairness under a continuously yielding lightweight task;
 - coherent event-group load/counter snapshots and native-only observation that
   does not eagerly start a loop;

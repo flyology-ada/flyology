@@ -6,6 +6,7 @@ alr=$("$project_root/scripts/find-alr.sh")
 test_subdir=behavioral
 connection_test_subdir=behavioral-connection-hooks
 worker_pool_test_subdir=behavioral-worker-pool-hooks
+structured_server_test_subdir=behavioral-structured-server-hooks
 wall_clock_test_subdir=behavioral-wall-clock-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
@@ -93,7 +94,7 @@ export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_' \
+  'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_barrier' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -323,6 +324,8 @@ descriptor_ownership_smoke'
 
 worker_pool_hook_mains=concurrency_primitives_smoke
 
+structured_server_hook_mains=structured_server_abort_smoke
+
 wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 
 ordinary_unhooked_mains=
@@ -356,6 +359,7 @@ fi
 #  each compiled ALI closure against the selected RTS before linking.
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 compile_test_mains "$test_subdir" "$all_test_mains"
 
@@ -368,6 +372,12 @@ FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
 export FLYOLOGY_WORKER_POOL_TEST_HOOKS
 compile_test_mains "$worker_pool_test_subdir" "$worker_pool_hook_mains"
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
+
+FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
+export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
+compile_test_mains \
+  "$structured_server_test_subdir" "$structured_server_hook_mains"
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 
 FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
 export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
@@ -545,10 +555,18 @@ fault_injection_smoke"
   fi
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
+FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
+export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
+link_test_mains \
+  "$structured_server_test_subdir" "$project_root/build/rts" \
+  "$structured_server_hook_mains"
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/accept_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/structured_server_reuse_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$project_root/tests/bin/$structured_server_test_subdir/structured_server_abort_smoke"
 
 #  A capable Linux host must prove both initialization-fallback boundaries in
 #  fresh processes.  Forced-native runs cannot reach these post-setup seams.
@@ -576,6 +594,7 @@ fi
 
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \

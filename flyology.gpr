@@ -49,6 +49,19 @@ project Flyology is
            "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=True";
    end case;
 
+   type Structured_Server_Test_Hooks_Type is ("false", "true");
+   Structured_Server_Test_Hooks : Structured_Server_Test_Hooks_Type :=
+     external ("FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS", "false");
+   Structured_Server_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=False";
+   case Structured_Server_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Structured_Server_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=True";
+   end case;
+
    type Wall_Clock_Test_Hooks_Type is ("false", "true");
    Wall_Clock_Test_Hooks : Wall_Clock_Test_Hooks_Type :=
      external ("FLYOLOGY_WALL_CLOCK_TEST_HOOKS", "false");
@@ -166,7 +179,8 @@ project Flyology is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
         & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
-           Worker_Pool_Test_Hook_Switch, Wall_Clock_Test_Hook_Switch);
+           Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
+           Wall_Clock_Test_Hook_Switch);
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
          Wall_Clock_C_Test_Hook_Switch);

@@ -25,6 +25,28 @@ package body Flyology.IO.Structured_Servers is
    overriding procedure Initialize (Item : in out Listener_Close_Guard);
    overriding procedure Finalize (Item : in out Listener_Close_Guard);
 
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+   function Test_Barrier_Arrive
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_structured_server_barrier_arrive";
+   function Test_Barrier_Released
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_structured_server_barrier_released";
+
+   procedure Test_Barrier (Point : Interfaces.C.int) is
+   begin
+      if Test_Barrier_Arrive (Point) /= 0 then
+         while Test_Barrier_Released (Point) = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Barrier;
+#end if;
+
    overriding procedure Initialize (Item : in out Listener_Close_Guard) is
    begin
       --  Controlled initialization is abort-deferred. Transfer both halves of
@@ -35,6 +57,9 @@ package body Flyology.IO.Structured_Servers is
    overriding procedure Finalize (Item : in out Listener_Close_Guard) is
    begin
       if Item.Value /= Invalid_Descriptor then
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+         Test_Barrier (4);
+#end if;
          Item.Result.all := C_Close_Listener (Item.Value);
          Item.Value := Invalid_Descriptor;
       end if;
@@ -143,8 +168,8 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Abandon_Serve is
       begin
-         --  The task scope has joined before Serve's outer handler runs, so
-         --  no worker can publish another completion after this reset.
+         --  The task scope has joined before Serve's outer cleanup guard
+         --  finalizes, so no worker can publish after this reset.
          Phase := Finished;
          Active := 0;
          Workers_Done := 0;
@@ -222,7 +247,6 @@ package body Flyology.IO.Structured_Servers is
       Drain_Timeout : Duration := Infinite)
    is
       Manager : aliased Connections.Server (Capacity => Item.Capacity);
-      Began : Boolean := False;
 
       procedure Stop_Accepting is
       begin
@@ -236,169 +260,294 @@ package body Flyology.IO.Structured_Servers is
          Manager.Request_Shutdown;
       end Force_Handlers;
 
+      type Serve_Cleanup_Guard is
+        new Ada.Finalization.Limited_Controlled with record
+         Transfer : Descriptor := Invalid_Descriptor;
+         Armed    : Boolean := False;
+      end record;
+
+      overriding procedure Initialize (Guard : in out Serve_Cleanup_Guard);
+      overriding procedure Finalize (Guard : in out Serve_Cleanup_Guard);
+      procedure Complete (Armed : in out Boolean);
+
+      type Worker_Cleanup_Guard
+        (Armed : not null access Boolean)
+      is new Ada.Finalization.Limited_Controlled with null record;
+
+      overriding procedure Finalize (Guard : in out Worker_Cleanup_Guard);
+
+      overriding procedure Initialize (Guard : in out Serve_Cleanup_Guard) is
+      begin
+         if Sockets.Is_Open (Item.Owned_Listener) then
+            raise Program_Error with
+              "structured server already owns a listener";
+         end if;
+
+         Item.State.Begin_Serve (Item.Capacity);
+         begin
+            --  Controlled initialization is abort-deferred. Keep the
+            --  descriptor in exactly one of Listener, Transfer, or
+            --  Owned_Listener while moving it into the server.
+            Sockets.Release (Listener, Guard.Transfer);
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+            Test_Barrier (1);
+#end if;
+            Sockets.Adopt (Guard.Transfer, Item.Owned_Listener);
+            Guard.Armed := True;
+         exception
+            when others =>
+               --  Initialization failure does not finalize Guard. Restore the
+               --  caller's ownership before making the begun lifecycle
+               --  terminal.
+               if Guard.Transfer /= Invalid_Descriptor then
+                  Sockets.Adopt (Guard.Transfer, Listener);
+               end if;
+               Item.State.Abandon_Serve;
+               raise;
+         end;
+      end Initialize;
+
+      overriding procedure Finalize (Guard : in out Serve_Cleanup_Guard) is
+      begin
+         if not Guard.Armed then
+            return;
+         end if;
+
+         --  This finalizer is abort-deferred and the nested worker scope has
+         --  already joined. Isolate every cleanup action so listener release
+         --  and terminal lifecycle publication survive owner abort.
+         begin
+            Stop_Accepting;
+         exception
+            when others =>
+               null;
+         end;
+         begin
+            Item.Handler_Stop.Request;
+         exception
+            when others =>
+               null;
+         end;
+         begin
+            Manager.Request_Shutdown;
+         exception
+            when others =>
+               null;
+         end;
+         begin
+            Close_Owned_Listener (Item);
+         exception
+            when others =>
+               null;
+         end;
+         begin
+            Item.State.Abandon_Serve;
+         exception
+            when others =>
+               null;
+         end;
+         Guard.Armed := False;
+      end Finalize;
+
+      overriding procedure Finalize (Guard : in out Worker_Cleanup_Guard) is
+      begin
+         if not Guard.Armed.all then
+            return;
+         end if;
+
+         --  This nested guard finalizes before the task master joins Workers.
+         --  Wake blocked lifecycle I/O first so native workers do not strand
+         --  an aborted Serve caller at the join boundary.
+         begin
+            Stop_Accepting;
+         exception
+            when others =>
+               null;
+         end;
+         begin
+            Item.Handler_Stop.Request;
+         exception
+            when others =>
+               null;
+         end;
+         begin
+            Manager.Request_Shutdown;
+         exception
+            when others =>
+               null;
+         end;
+         Guard.Armed.all := False;
+      end Finalize;
+
+      procedure Complete (Armed : in out Boolean) is
+      begin
+         --  Close before publishing Finished. If close or lifecycle
+         --  validation raises, Guard remains armed and its finalizer completes
+         --  terminalization without retrying a descriptor already released by
+         --  Listener_Close_Guard.
+         Close_Owned_Listener (Item);
+         Item.State.Finish_Serve;
+         Armed := False;
+      end Complete;
+
    begin
       if not Sockets.Is_Open (Listener) then
          raise Program_Error with
            "structured server requires a listening socket";
       end if;
 
-      Item.State.Begin_Serve (Item.Capacity);
-      Began := True;
-      Sockets.Move (Listener, Item.Owned_Listener);
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+      Test_Barrier (0);
+#end if;
 
       declare
-         task type Worker with CPU => Handler_CPU is
-            pragma Task_Info (Handler_Model);
-         end Worker;
+         Cleanup : Serve_Cleanup_Guard;
+      begin
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+         Test_Barrier (2);
+#end if;
+         declare
+            task type Worker with CPU => Handler_CPU is
+               pragma Task_Info (Handler_Model);
+            end Worker;
 
-         task body Worker is
-            Stop_Worker : Boolean := False;
-            Completion_Reported : Boolean := False;
+            task body Worker is
+               Stop_Worker : Boolean := False;
+               Completion_Reported : Boolean := False;
 
-            procedure Report_Completion is
-            begin
-               if not Completion_Reported then
-                  Completion_Reported := True;
-                  Item.State.Worker_Finished;
-               end if;
-            end Report_Completion;
+               procedure Report_Completion is
+               begin
+                  if not Completion_Reported then
+                     Completion_Reported := True;
+                     Item.State.Worker_Finished;
+                  end if;
+               end Report_Completion;
 
-            procedure Report
-              (Origin : Failure_Origin;
-               Event  : Ada.Exceptions.Exception_Occurrence)
-            is
+               procedure Report
+                 (Origin : Failure_Origin;
+                  Event  : Ada.Exceptions.Exception_Occurrence)
+               is
+               begin
+                  Item.State.Record_Failure
+                    (Origin, Ada.Exceptions.Exception_Information (Event));
+                  Stop_Accepting;
+               end Report;
             begin
-               Item.State.Record_Failure
-                 (Origin, Ada.Exceptions.Exception_Information (Event));
-               Stop_Accepting;
-            end Report;
-         begin
-            begin
-               while not Stop_Worker loop
-                  declare
-                     Connection : Connections.Connection;
-                     Peer       : Sockets.Endpoint;
-                     Admitted   : Boolean := False;
-                     Cancelled  : Boolean := False;
-                     Failed     : Boolean := False;
-                  begin
+               begin
+                  while not Stop_Worker loop
+                     declare
+                        Connection : Connections.Connection;
+                        Peer       : Sockets.Endpoint;
+                        Admitted   : Boolean := False;
+                        Cancelled  : Boolean := False;
+                        Failed     : Boolean := False;
                      begin
-                        Connections.Accept_Connection
-                          (Manager  => Manager,
-                           Listener => Item.Owned_Listener,
-                           Item     => Connection,
-                           Address  => Peer,
-                           Token    => Item.Accept_Stop'Access);
-                        Admitted := True;
-                        Item.State.Handler_Started;
-                     exception
-                        when Connections.Operation_Cancelled |
-                             Connections.Admission_Closed =>
-                           Stop_Worker := True;
-                        when Event : others =>
-                           Report (Admission_Loop, Event);
-                           Stop_Worker := True;
+                        begin
+                           Connections.Accept_Connection
+                             (Manager  => Manager,
+                              Listener => Item.Owned_Listener,
+                              Item     => Connection,
+                              Address  => Peer,
+                              Token    => Item.Accept_Stop'Access);
+                           Admitted := True;
+                           Item.State.Handler_Started;
+                        exception
+                           when Connections.Operation_Cancelled |
+                                Connections.Admission_Closed =>
+                              Stop_Worker := True;
+                           when Event : others =>
+                              Report (Admission_Loop, Event);
+                              Stop_Worker := True;
+                        end;
+
+                        if Admitted then
+                           begin
+                              Handle
+                                (Context,
+                                 Connection,
+                                 Peer,
+                                 Item.Handler_Stop'Access);
+                           exception
+                              when Connections.Operation_Cancelled =>
+                                 Cancelled := True;
+                              when Event : others =>
+                                 Report (Handler_Callback, Event);
+                                 Failed := True;
+                           end;
+
+                           begin
+                              Connections.Close (Connection);
+                           exception
+                              when Event : others =>
+                                 Report (Handler_Callback, Event);
+                                 Failed := True;
+                           end;
+                           Item.State.Handler_Completed (Cancelled, Failed);
+                        end if;
                      end;
 
-                     if Admitted then
-                        begin
-                           Handle
-                             (Context,
-                              Connection,
-                              Peer,
-                              Item.Handler_Stop'Access);
-                        exception
-                           when Connections.Operation_Cancelled =>
-                              Cancelled := True;
-                           when Event : others =>
-                              Report (Handler_Callback, Event);
-                              Failed := True;
-                        end;
-
-                        begin
-                           Connections.Close (Connection);
-                        exception
-                           when Event : others =>
-                              Report (Handler_Callback, Event);
-                              Failed := True;
-                        end;
-                        Item.State.Handler_Completed (Cancelled, Failed);
-                     end if;
-                  end;
-
-                  exit when Item.State.Stop_Was_Requested;
-               end loop;
+                     exit when Item.State.Stop_Was_Requested;
+                  end loop;
+               exception
+                  when Event : others =>
+                     Report (Admission_Loop, Event);
+               end;
+               Report_Completion;
             exception
                when Event : others =>
-                  Report (Admission_Loop, Event);
+                  --  Preserve the task-scope join even if bookkeeping itself
+                  --  detects an invariant failure.
+                  Item.State.Record_Failure
+                    (Admission_Loop,
+                     Ada.Exceptions.Exception_Information (Event));
+                  Report_Completion;
+            end Worker;
+
+            Workers : array (1 .. Item.Capacity) of Worker;
+            pragma Unreferenced (Workers);
+         begin
+            declare
+               Worker_Cleanup_Armed : aliased Boolean := True;
+               Worker_Cleanup : Worker_Cleanup_Guard
+                 (Worker_Cleanup_Armed'Access);
+               pragma Unreferenced (Worker_Cleanup);
+            begin
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+               Test_Barrier (3);
+#end if;
+               if Item.State.Stop_Was_Requested then
+                  Stop_Accepting;
+               else
+                  Item.State.Await_Stop;
+                  Stop_Accepting;
+               end if;
+
+               if Drain_Timeout = Infinite then
+                  Item.State.Await_All_Workers;
+               else
+                  select
+                     Item.State.Await_All_Workers;
+                  or
+                     delay Drain_Timeout;
+                     Force_Handlers;
+                     Item.State.Await_All_Workers;
+                  end select;
+               end if;
+               Worker_Cleanup_Armed := False;
             end;
-            Report_Completion;
          exception
-            when Event : others =>
-               --  Preserve the task-scope join even if bookkeeping itself
-               --  detects an invariant failure.
-               Item.State.Record_Failure
-                 (Admission_Loop,
-                  Ada.Exceptions.Exception_Information (Event));
-               Report_Completion;
-         end Worker;
-
-         Workers : array (1 .. Item.Capacity) of Worker;
-         pragma Unreferenced (Workers);
-      begin
-         if Item.State.Stop_Was_Requested then
-            Stop_Accepting;
-         else
-            Item.State.Await_Stop;
-            Stop_Accepting;
-         end if;
-
-         if Drain_Timeout = Infinite then
-            Item.State.Await_All_Workers;
-         else
-            select
-               Item.State.Await_All_Workers;
-            or
-               delay Drain_Timeout;
+            when others =>
+               Stop_Accepting;
                Force_Handlers;
-               Item.State.Await_All_Workers;
-            end select;
-         end if;
-      exception
-         when others =>
-            Stop_Accepting;
-            Force_Handlers;
-            raise;
+               raise;
+         end;
+
+         Complete (Cleanup.Armed);
       end;
 
-      Close_Owned_Listener (Item);
-      Item.State.Finish_Serve;
       if Item.State.Read_Snapshot.Failures > 0 then
          raise Server_Failed with Item.State.Failure_Information;
       end if;
-   exception
-      when Event : others =>
-         if Began and then Item.State.Read_Snapshot.Running then
-            --  Cleanup failures must not leave the one-shot lifecycle
-            --  appearing reusable. Each action is isolated so terminalization
-            --  always runs after a successfully begun Serve call.
-            begin
-               Stop_Accepting;
-            exception
-               when others =>
-                  null;
-            end;
-            if Sockets.Is_Open (Item.Owned_Listener) then
-               begin
-                  Close_Owned_Listener (Item);
-               exception
-                  when others =>
-                     null;
-               end;
-            end if;
-            Item.State.Abandon_Serve;
-         end if;
-         Ada.Exceptions.Reraise_Occurrence (Event);
    end Serve;
 
    overriding procedure Finalize (Item : in out Server) is
