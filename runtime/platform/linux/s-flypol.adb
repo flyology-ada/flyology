@@ -9,6 +9,7 @@ package body System.Flyology.Poller is
    package Faults renames System.Flyology.Faults;
    package Time_ABI renames System.Flyology.Time_ABI;
    package File_Engines renames System.Flyology.File_Engine;
+   package Poller_Policy renames System.Flyology.Poller_Policy;
    package OSI renames System.OS_Interface;
 
    use type C.int;
@@ -266,8 +267,8 @@ package body System.Flyology.Poller is
          Item.Descriptor := -1;
          return False;
       end if;
-      Item.File_Drain_Pending := False;
-      Item.File_Only_Last_Batch := False;
+      Item.File_Drain_State :=
+        (Pending => False, File_Only_Last_Batch => False);
       return True;
    end Initialize;
 
@@ -284,8 +285,8 @@ package body System.Flyology.Poller is
       Item.State := System.Null_Address;
 
       File_Engines.Finalize (Item.File_State);
-      Item.File_Drain_Pending := False;
-      Item.File_Only_Last_Batch := False;
+      Item.File_Drain_State :=
+        (Pending => False, File_Only_Last_Batch => False);
 
       if Item.Wake_Descriptor >= 0 then
          Result := Close (Item.Wake_Descriptor);
@@ -496,6 +497,10 @@ package body System.Flyology.Poller is
       Wake_Value    : aliased C.unsigned_long_long;
       May_Remain    : Boolean := False;
       Epoll_Capacity : Natural;
+      Drain_Budget   : Poller_Policy.Drain_Budget;
+      Plan           : Poller_Policy.Batch_Plan;
+      Capacity       : constant Poller_Policy.Batch_Capacity :=
+        Poller_Policy.Batch_Capacity (Events'Length);
    begin
       Events :=
         (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
@@ -511,27 +516,36 @@ package body System.Flyology.Poller is
       --  slot for that obligation so a CQE cannot lose its only wake edge.
       --  A one-element caller alternates file and epoll turns; larger batches
       --  still leave all but one slot available to descriptors.
-      if Item.File_Drain_Pending
-        and then
-          (Events'Length > 1 or else not Item.File_Only_Last_Batch)
-      then
+      Plan := Poller_Policy.Plan_Batch (Item.File_Drain_State, Capacity);
+      Item.File_Drain_State := Plan.State;
+      if Plan.Initial_Drain_Budget > 0 then
          if not Drain_File_Events
-           (Item, Events, Count, 1, May_Remain)
+           (Item,
+            Events,
+            Count,
+            Plan.Initial_Drain_Budget,
+            May_Remain)
          then
             return False;
          end if;
-         Item.File_Drain_Pending := May_Remain;
+         Item.File_Drain_State :=
+           Poller_Policy.After_Drain
+             (Item.File_Drain_State, May_Remain);
          if Count = Events'Length then
-            Item.File_Only_Last_Batch := True;
+            Item.File_Drain_State :=
+              Poller_Policy.After_Batch
+                (Item.File_Drain_State,
+                 Capacity,
+                 Poller_Policy.Batch_Count (Count),
+                 Only_File_Events => True);
             return True;
          end if;
-      elsif Events'Length = 1 and then Item.File_Only_Last_Batch then
-         --  Give epoll one nonblocking turn before serving another file-only
-         --  batch. If no descriptor is ready, the trailing drain proceeds.
-         Item.File_Only_Last_Batch := False;
       end if;
 
-      Epoll_Capacity := Events'Length - Count;
+      Drain_Budget :=
+        Poller_Policy.Remaining_Budget
+          (Capacity, Poller_Policy.Batch_Count (Count));
+      Epoll_Capacity := Natural (Drain_Budget);
       Kernel_Count :=
         Epoll_Wait
           (Item.Descriptor,
@@ -542,15 +556,22 @@ package body System.Flyology.Poller is
          return OSI.errno = OSI.EINTR;
       elsif Kernel_Count = 0 and then Count = 0 then
          if not Drain_File_Events
-           (Item, Events, Count, Events'Length, May_Remain)
+           (Item, Events, Count, Drain_Budget, May_Remain)
          then
             return False;
          end if;
-         Item.File_Drain_Pending := May_Remain;
+         Item.File_Drain_State :=
+           Poller_Policy.After_Drain
+             (Item.File_Drain_State, May_Remain);
          if Count > 0 then
-            Item.File_Only_Last_Batch := Events'Length = 1;
+            Item.File_Drain_State :=
+              Poller_Policy.After_Batch
+                (Item.File_Drain_State,
+                 Capacity,
+                 Poller_Policy.Batch_Count (Count),
+                 Only_File_Events => True);
             return True;
-         elsif Item.File_Drain_Pending then
+         elsif Item.File_Drain_State.Pending then
             --  The test-only held-drain seam, or another conservative full
             --  drain, must be retried without sleeping on an edge already
             --  consumed from eventfd.
@@ -581,7 +602,8 @@ package body System.Flyology.Poller is
             if Read_Result < 0 and then OSI.errno /= EAGAIN then
                return False;
             end if;
-            Item.File_Drain_Pending := True;
+            Item.File_Drain_State :=
+              Poller_Policy.After_Wake (Item.File_Drain_State);
             Count := Count + 1;
             Events (Events'First + Count - 1) :=
               (Kind => Wake_Event, Descriptor => Descriptor, others => <>);
@@ -639,20 +661,27 @@ package body System.Flyology.Poller is
             end if;
          end if;
       end loop;
-      if Count < Events'Length then
+      Drain_Budget :=
+        Poller_Policy.Remaining_Budget
+          (Capacity, Poller_Policy.Batch_Count (Count));
+      if Drain_Budget > 0 then
          if not Drain_File_Events
-           (Item, Events, Count, Events'Length - Count, May_Remain)
+           (Item, Events, Count, Drain_Budget, May_Remain)
          then
             return False;
          end if;
-         Item.File_Drain_Pending := May_Remain;
+         Item.File_Drain_State :=
+           Poller_Policy.After_Drain
+             (Item.File_Drain_State, May_Remain);
       end if;
-      if Events'Length = 1 and then Count > 0 then
-         Item.File_Only_Last_Batch :=
-           Events (Events'First).Kind = File_Event;
-      else
-         Item.File_Only_Last_Batch := False;
-      end if;
+      Item.File_Drain_State :=
+        Poller_Policy.After_Batch
+          (Item.File_Drain_State,
+           Capacity,
+           Poller_Policy.Batch_Count (Count),
+           Only_File_Events =>
+             Count = 1
+             and then Events (Events'First).Kind = File_Event);
       return True;
    end Wait_Batch;
 

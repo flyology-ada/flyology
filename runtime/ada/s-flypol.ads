@@ -1,5 +1,6 @@
 with Interfaces.C;
 with System.Flyology.File_Engine;
+with System.Flyology.Poller_Policy;
 
 package System.Flyology.Poller is
    pragma Preelaborate;
@@ -83,7 +84,9 @@ package System.Flyology.Poller is
       Timeout             : Duration;
       Events              : out Poll_Event_Array;
       Count               : out Natural) return Boolean
-   with Pre => Events'Length in 1 .. Natural (Interfaces.C.int'Last),
+   with Pre =>
+          Events'Length in
+            1 .. System.Flyology.Poller_Policy.Max_Batch_Capacity,
         Post => Count <= Events'Length;
 
    --  Safe to invoke from a designated native thread.
@@ -97,7 +100,6 @@ private
       File_State : System.Flyology.File_Engine.Engine;
       --  Linux retains a drain obligation after consuming the shared eventfd.
       --  A one-result caller alternates sources while that obligation remains.
-      File_Drain_Pending : Boolean := False;
-      File_Only_Last_Batch : Boolean := False;
+      File_Drain_State : System.Flyology.Poller_Policy.Drain_State;
    end record;
 end System.Flyology.Poller;

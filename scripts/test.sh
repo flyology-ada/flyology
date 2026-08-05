@@ -106,6 +106,22 @@ assert_archive_excludes \
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 
+if [ "$(uname -s)" = Linux ]; then
+  runtime_archive="$project_root/build/rts/adalib/libgnarl.a"
+  poller_object_dir="$project_root/build/tests/poller-policy-symbols"
+  if ! ar -t "$runtime_archive" | grep '^s-flypol[.]o$' >/dev/null; then
+    printf '%s\n' "production runtime omitted s-flypol.o" >&2
+    exit 1
+  fi
+  mkdir -p "$poller_object_dir"
+  (
+    cd "$poller_object_dir"
+    ar -x "$runtime_archive" s-flypol.o
+  )
+  "$project_root/scripts/check-linux-poller-policy-inlining.sh" \
+    "$poller_object_dir/s-flypol.o"
+fi
+
 compile_fail_log="$project_root/build/tests/websocket-pool-lifetime.log"
 mkdir -p "$(dirname -- "$compile_fail_log")"
 if run_gprbuild \
@@ -291,6 +307,7 @@ loop_thread_placement_smoke
 memory_regions_smoke
 observability_native_smoke
 observability_smoke
+poller_policy_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke
 process_exec_child_smoke

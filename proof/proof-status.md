@@ -19,6 +19,16 @@ proved transitions preserve payload phase, frame identity, remaining bytes,
 absolute mask position, and the separate completion and abandonment reset
 boundaries. Focused behavioral coverage exercises the surrounding I/O paths;
 protocol I/O itself remains outside SPARK.
+Finding #1 has partial prevention coverage. Its targeted proofs and fresh
+whole-unit widening passed at level 1 and mode all, establishing only bounded
+batch budgets and the deterministic Ada file-drain latch and state transitions
+consumed by Linux `Wait_Batch`. They do not prove kernel readiness or liveness,
+eventfd, epoll, io_uring, the C bridge, CQE existence or delivery, or buffer
+ownership; Linux integration and stress coverage remain authoritative for
+those behaviors. The widening continued with partial representation data after
+the non-code-generating root package spec `s-flyolo.ads` produced no
+representation information; the poller-policy unit itself was analyzed with no
+warning, assumption, justified check, or unproved check.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -29,6 +39,14 @@ protocol I/O itself remains outside SPARK.
 
 - [x] Pre-change application policy suite (level 1, mode all)
 - [x] Pre-change runtime scheduling policy suite (level 1, mode all)
+- [x] Finding #1 production-used deterministic poller batch policy
+      (level 1, mode all; partial prevention boundary)
+  - [x] `System.Flyology.Poller_Policy.Plan_Batch`
+  - [x] `System.Flyology.Poller_Policy.Remaining_Budget`
+  - [x] `System.Flyology.Poller_Policy.After_Wake`
+  - [x] `System.Flyology.Poller_Policy.After_Drain`
+  - [x] `System.Flyology.Poller_Policy.After_Batch`
+  - [x] Whole `System.Flyology.Poller_Policy` unit widening
 - [x] Finding #5 production-used nonzero generation-successor policy
       (level 1, mode all)
   - [x] `Flyology.Counter_Policy.Nonzero_Successor`
@@ -84,6 +102,7 @@ protocol I/O itself remains outside SPARK.
 - [x] Finding #17 prevention coverage
 - [x] Finding #13 prevention coverage
 - [x] Finding #18 missing-distance prevention coverage
+- [x] Finding #1 deterministic poller-policy boundary
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -123,6 +142,17 @@ protocol I/O itself remains outside SPARK.
 - [x] Re-ran the focused production build and WebSocket smoke tests after the
       final cursor contracts
 - [ ] Re-run the application and runtime proof suites serially after integration
+- [x] Prove finding #1 `Poller_Policy.Plan_Batch` at targeted subprogram scope
+- [x] Prove finding #1 `Poller_Policy.After_Wake` at targeted subprogram scope
+- [x] Prove finding #1 `Poller_Policy.Remaining_Budget` at targeted subprogram
+      scope
+- [x] Prove finding #1 `Poller_Policy.After_Batch` at targeted subprogram scope
+- [x] Cover finding #1 `Poller_Policy.After_Drain` in the whole-unit widening
+- [x] Widen finding #1 through the whole `Poller_Policy` unit
+- [x] Linux `Wait_Batch` consumes the bounded batch budgets and persistent
+      file-drain state transitions
+- [x] Boundary tests cover a consumed wake with a full 64-event epoll batch,
+      conservative drain retention, and one-result source alternation
 - [x] Prove `Flyology.HTTP.Expect_Policy.Classify`, then widen its whole unit
 - [x] Prove `Flyology.HTTP.Route_Parameter_Policy.Advance`, then widen its
       whole unit

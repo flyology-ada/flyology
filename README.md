@@ -1915,6 +1915,16 @@ constant-time, while choosing the next non-empty priority scans only the fixed
 lock ownership, descriptor-generation matching, and the actual context handoff
 remain outside SPARK.
 
+The Linux poller consumes a separate SPARK batch-arbitration policy. Its
+contracts bound the epoll and file-drain budgets, latch a file-drain obligation
+when the shared eventfd is consumed, and make a retained obligation take the
+next bounded drain turn even when the preceding epoll batch used all 64 result
+slots. GNATprove coverage of these contracts concerns only the deterministic
+Ada state transitions; it does not prove kernel readiness or liveness, eventfd,
+epoll, io_uring, the C bridge, or the existence and delivery of a completion.
+Linux integration and stress tests remain authoritative for those behaviors
+and for kernel-owned buffer lifetime.
+
 The HTTP chunk-size encoder used by production streaming and SSE responses is
 also inside the SPARK boundary. Its proof covers the uppercase hexadecimal
 buffer and index arithmetic through `Natural'Last`; behavioral boundary tests

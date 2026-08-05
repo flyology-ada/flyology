@@ -548,6 +548,7 @@ fi
   "$generated_include/s-flyasa.adb" \
   "$generated_include/s-flyfau.adb" \
   "$generated_include/s-flfien.adb" \
+  "$generated_include/s-flpopo.adb" \
   "$generated_include/s-flypol.adb" \
   "$generated_include/s-flscpo.adb" \
   "$generated_include/s-flysch.adb" \
@@ -562,7 +563,7 @@ fi
 cp \
   s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-flycon.ali \
   s-flyasa.ali \
-  s-flyfau.ali s-flfien.ali s-flypol.ali \
+  s-flyfau.ali s-flfien.ali s-flpopo.ali s-flypol.ali \
   s-flscpo.ali s-flysch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$compat_family" = gnat-legacy ]; then
@@ -580,6 +581,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-flyasa.o \
   s-flyfau.o \
   s-flfien.o \
+  s-flpopo.o \
   s-flypol.o \
   s-flscpo.o \
   s-flysch.o \

@@ -88,6 +88,7 @@ project Runtime_Smoke is
       "memory_regions_smoke.adb",
       "observability_native_smoke.adb",
       "observability_smoke.adb",
+      "poller_policy_smoke.adb",
       "priority_semantics_smoke.adb",
       "process_exit_live_task_smoke.adb",
       "process_exec_child_smoke.adb",
