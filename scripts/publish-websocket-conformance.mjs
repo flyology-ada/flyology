@@ -11,6 +11,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { basename, dirname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -909,15 +910,62 @@ async function removeSafeDirectory(path, label) {
   await rm(path, { recursive: true });
 }
 
-async function requireSafePublicationTargets(stageRoot, backupRoot) {
+async function requireSafeFile(path, label, allowMissing = false) {
+  const value = await pathType(path);
+  if (!value && allowMissing) return false;
+  if (!value) throw new Error(`${label} does not exist: ${path}`);
+  if (value.isSymbolicLink() || !value.isFile()) {
+    throw new Error(`${label} must be an ordinary file: ${path}`);
+  }
+  return true;
+}
+
+async function removeSafeFile(path, label) {
+  if (!(await requireSafeFile(path, label, true))) return;
+  await rm(path);
+}
+
+async function requireSafePublicationTargets(paths) {
   const parent = dirname(outputRoot);
   await requireSafeDirectory(parent, "publication parent");
   if ((await realpath(parent)) !== parent) {
     throw new Error(`publication parent traverses a symbolic link: ${parent}`);
   }
   await requireSafeDirectory(outputRoot, "publication output", true);
-  await requireSafeDirectory(stageRoot, "publication stage", true);
-  await requireSafeDirectory(backupRoot, "publication backup", true);
+  await requireSafeDirectory(paths.stageRoot, "publication stage", true);
+  await requireSafeDirectory(paths.backupRoot, "publication backup", true);
+  await requireSafeDirectory(paths.retiredRoot, "retired publication backup", true);
+  await requireSafeDirectory(paths.invalidRoot, "invalid publication quarantine", true);
+  await requireSafeFile(paths.transactionPath, "publication transaction", true);
+  await requireSafeFile(paths.transactionTemp, "temporary publication transaction", true);
+}
+
+async function fingerprintDirectory(root, directory = root, records = []) {
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  )) {
+    const path = join(directory, entry.name);
+    const name = relative(root, path).split(sep).join("/");
+    const info = await lstat(path);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`publication tree contains a symbolic link: ${name}`);
+    }
+    if (entry.isDirectory()) {
+      records.push(["directory", name, info.mode]);
+      await fingerprintDirectory(root, path, records);
+    } else if (entry.isFile()) {
+      records.push([
+        "file",
+        name,
+        info.mode,
+        info.size,
+        createHash("sha256").update(await readFile(path)).digest("hex"),
+      ]);
+    } else {
+      throw new Error(`publication tree contains a special file: ${name}`);
+    }
+  }
+  return createHash("sha256").update(JSON.stringify(records)).digest("hex");
 }
 
 async function walkBundle(root, directory = root) {
@@ -1067,6 +1115,212 @@ function injectFailure(point) {
   }
 }
 
+function injectCrash(point) {
+  if (process.env.FLYOLOGY_WEBSOCKET_PUBLISH_FAIL === point) {
+    const error = new Error(`forced WebSocket publication crash at ${point}`);
+    error.simulatedPublicationCrash = true;
+    throw error;
+  }
+}
+
+async function removeOneBackupFile(root, directory = root) {
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  )) {
+    const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`retired publication backup contains a symbolic link: ${path}`);
+    }
+    if (entry.isDirectory()) {
+      if (await removeOneBackupFile(root, path)) return true;
+    } else if (entry.isFile()) {
+      await rm(path);
+      return true;
+    } else {
+      throw new Error(`retired publication backup contains a special file: ${path}`);
+    }
+  }
+  return false;
+}
+
+async function cleanRetiredBackup(retiredRoot) {
+  if (!(await requireSafeDirectory(retiredRoot, "retired publication backup", true))) {
+    return;
+  }
+  if (process.env.FLYOLOGY_WEBSOCKET_PUBLISH_FAIL === "backup-cleanup-partial") {
+    await removeOneBackupFile(retiredRoot);
+    throw new Error(
+      `forced partial retired-backup cleanup failure; verified live bundle retained and ` +
+        `partial backup quarantined at ${retiredRoot}`
+    );
+  }
+  await removeSafeDirectory(retiredRoot, "retired publication backup");
+}
+
+async function writeTransaction(paths, transaction) {
+  await removeSafeFile(paths.transactionTemp, "temporary publication transaction");
+  await writeFile(
+    paths.transactionTemp,
+    `${JSON.stringify({ schema: 1, ...transaction }, null, 2)}\n`,
+    { flag: "wx" }
+  );
+  await rename(paths.transactionTemp, paths.transactionPath);
+}
+
+async function readTransaction(path) {
+  if (!(await requireSafeFile(path, "publication transaction", true))) return null;
+  const transaction = JSON.parse(await readFile(path, "utf8"));
+  if (
+    transaction.schema !== 1 ||
+    transaction.output !== basename(outputRoot) ||
+    !/^[0-9a-f]{40}$/.test(transaction.expectedRevision) ||
+    !/^[0-9a-f]{64}$/.test(transaction.stageFingerprint) ||
+    !(
+      transaction.backupFingerprint === null ||
+      /^[0-9a-f]{64}$/.test(transaction.backupFingerprint)
+    )
+  ) {
+    throw new Error("publication transaction marker is invalid");
+  }
+  return transaction;
+}
+
+async function verifyRollbackBackup(backupRoot, expectedFingerprint) {
+  if (!(await requireSafeDirectory(backupRoot, "publication backup", true))) {
+    throw new Error("publication rollback backup is missing");
+  }
+  const actual = await fingerprintDirectory(backupRoot);
+  if (actual !== expectedFingerprint) {
+    throw new Error(
+      `publication rollback backup is not intact: expected ${expectedFingerprint}, got ${actual}`
+    );
+  }
+}
+
+async function quarantineInvalidLive(paths) {
+  if (await requireSafeDirectory(paths.invalidRoot, "invalid publication quarantine", true)) {
+    throw new Error(
+      `cannot quarantine invalid live bundle while ${paths.invalidRoot} already exists`
+    );
+  }
+  await rename(outputRoot, paths.invalidRoot);
+}
+
+async function restoreRollbackBackup(paths, transaction) {
+  await verifyRollbackBackup(paths.backupRoot, transaction.backupFingerprint);
+  if (await requireSafeDirectory(outputRoot, "publication output", true)) {
+    await quarantineInvalidLive(paths);
+  }
+  await rename(paths.backupRoot, outputRoot);
+  await removeSafeDirectory(paths.stageRoot, "abandoned publication stage");
+  await removeSafeDirectory(paths.invalidRoot, "invalid publication quarantine");
+  await removeSafeFile(paths.transactionPath, "publication transaction");
+}
+
+async function retireCommittedBackup(paths) {
+  if (!(await requireSafeDirectory(paths.backupRoot, "publication backup", true))) return;
+  if (await requireSafeDirectory(paths.retiredRoot, "retired publication backup", true)) {
+    throw new Error(
+      `cannot quarantine committed backup while ${paths.retiredRoot} already exists`
+    );
+  }
+  await rename(paths.backupRoot, paths.retiredRoot);
+}
+
+async function recoverPublication(paths, loaded, provenance) {
+  const transaction = await readTransaction(paths.transactionPath);
+  if (transaction) {
+    const outputExists = await requireSafeDirectory(
+      outputRoot,
+      "publication output",
+      true
+    );
+    let committed = false;
+    if (outputExists) {
+      let outputFingerprint = null;
+      try {
+        outputFingerprint = await fingerprintDirectory(outputRoot);
+        committed = outputFingerprint === transaction.stageFingerprint;
+      } catch {
+        committed = false;
+      }
+      if (!committed) {
+        const backupExists = await requireSafeDirectory(
+          paths.backupRoot,
+          "publication backup",
+          true
+        );
+        if (
+          !backupExists &&
+          transaction.backupFingerprint !== null &&
+          outputFingerprint === transaction.backupFingerprint
+        ) {
+          await removeSafeDirectory(paths.stageRoot, "abandoned publication stage");
+          await removeSafeDirectory(paths.invalidRoot, "invalid publication quarantine");
+          await removeSafeFile(paths.transactionPath, "publication transaction");
+        } else if (transaction.backupFingerprint === null) {
+          throw new Error(
+            `live bundle is invalid and the interrupted publication has no rollback ` +
+              `backup`
+          );
+        } else {
+          await restoreRollbackBackup(paths, transaction);
+        }
+      }
+    } else if (transaction.backupFingerprint !== null) {
+      await restoreRollbackBackup(paths, transaction);
+    } else {
+      await removeSafeFile(paths.transactionPath, "publication transaction");
+      await removeSafeDirectory(paths.stageRoot, "abandoned publication stage");
+    }
+
+    if (committed) {
+      await retireCommittedBackup(paths);
+      await removeSafeFile(paths.transactionPath, "publication transaction");
+      await removeSafeDirectory(paths.stageRoot, "committed publication stage");
+    }
+  }
+
+  const outputExists = await requireSafeDirectory(
+    outputRoot,
+    "publication output",
+    true
+  );
+  const backupExists = await requireSafeDirectory(
+    paths.backupRoot,
+    "publication backup",
+    true
+  );
+  if (backupExists && !outputExists) {
+    throw new Error(
+      "refusing to restore an unmarked publication backup without an intact transaction marker"
+    );
+  }
+  if (backupExists) {
+    try {
+      await verifyBundle(outputRoot, loaded, provenance);
+    } catch (error) {
+      throw new Error(
+        `refusing to retire an unmarked publication backup because the live bundle ` +
+          `cannot be verified: ${error.message}`
+      );
+    }
+    await retireCommittedBackup(paths);
+  }
+  if (
+    (await requireSafeDirectory(paths.invalidRoot, "invalid publication quarantine", true)) &&
+    !outputExists
+  ) {
+    throw new Error("invalid publication quarantine exists without a live bundle");
+  }
+  await cleanRetiredBackup(paths.retiredRoot);
+  if (outputExists) {
+    await removeSafeDirectory(paths.invalidRoot, "invalid publication quarantine");
+  }
+  await removeSafeDirectory(paths.stageRoot, "stale publication stage");
+  await removeSafeFile(paths.transactionTemp, "temporary publication transaction");
+}
+
 async function renderBundle(root, loaded, provenance) {
   await mkdir(root);
   injectFailure("render");
@@ -1113,69 +1367,90 @@ async function renderBundle(root, loaded, provenance) {
 async function publishBundle(loaded, provenance) {
   const parent = dirname(outputRoot);
   const name = basename(outputRoot);
-  const stageRoot = join(parent, `.${name}.publish-stage`);
-  const backupRoot = join(parent, `.${name}.publish-backup`);
-  await requireSafePublicationTargets(stageRoot, backupRoot);
-
-  const backupExists = await requireSafeDirectory(
-    backupRoot,
-    "stale publication backup",
-    true
-  );
-  const outputExists = await requireSafeDirectory(
-    outputRoot,
-    "publication output",
-    true
-  );
-  if (backupExists && !outputExists) {
-    await rename(backupRoot, outputRoot);
-  } else if (backupExists) {
-    try {
-      await verifyBundle(outputRoot, loaded, provenance);
-    } catch (error) {
-      throw new Error(
-        `refusing to remove stale publication backup because the live bundle ` +
-          `cannot be verified: ${error.message}`
-      );
-    }
-    await removeSafeDirectory(backupRoot, "stale publication backup");
-  }
-  await removeSafeDirectory(stageRoot, "stale publication stage");
+  const paths = {
+    stageRoot: join(parent, `.${name}.publish-stage`),
+    backupRoot: join(parent, `.${name}.publish-backup`),
+    retiredRoot: join(parent, `.${name}.publish-retired`),
+    invalidRoot: join(parent, `.${name}.publish-invalid-live`),
+    transactionPath: join(parent, `.${name}.publish-transaction.json`),
+    transactionTemp: join(parent, `.${name}.publish-transaction.tmp`),
+  };
+  await requireSafePublicationTargets(paths);
+  await recoverPublication(paths, loaded, provenance);
 
   let backedUp = false;
-  let published = false;
+  let committed = false;
+  let transaction = null;
   try {
-    await renderBundle(stageRoot, loaded, provenance);
+    await renderBundle(paths.stageRoot, loaded, provenance);
     injectFailure("verify");
-    await verifyBundle(stageRoot, loaded, provenance);
+    await verifyBundle(paths.stageRoot, loaded, provenance);
+    const stageFingerprint = await fingerprintDirectory(paths.stageRoot);
 
+    let backupFingerprint = null;
     if (await requireSafeDirectory(outputRoot, "publication output", true)) {
-      await rename(outputRoot, backupRoot);
+      backupFingerprint = await fingerprintDirectory(outputRoot);
+    }
+    transaction = {
+      output: name,
+      expectedRevision: provenance.source.revision,
+      stageFingerprint,
+      backupFingerprint,
+    };
+    await writeTransaction(paths, transaction);
+    injectCrash("crash-before-backup");
+    if (backupFingerprint !== null) {
+      await rename(outputRoot, paths.backupRoot);
       backedUp = true;
     }
     injectFailure("swap-after-backup");
-    await rename(stageRoot, outputRoot);
-    published = true;
+    injectCrash("crash-after-backup");
+    await rename(paths.stageRoot, outputRoot);
+    committed = true;
     injectFailure("swap-after-publish");
+    injectCrash("crash-after-commit");
     if (backedUp) {
-      await removeSafeDirectory(backupRoot, "publication backup");
+      await retireCommittedBackup(paths);
       backedUp = false;
     }
+    await removeSafeFile(paths.transactionPath, "publication transaction");
+    await cleanRetiredBackup(paths.retiredRoot);
   } catch (error) {
+    if (error.simulatedPublicationCrash) throw error;
     const rollbackErrors = [];
+    if (committed) {
+      try {
+        if (backedUp) {
+          await retireCommittedBackup(paths);
+          backedUp = false;
+        }
+        await removeSafeFile(paths.transactionPath, "publication transaction");
+      } catch (cleanupError) {
+        rollbackErrors.push(cleanupError);
+      }
+      const committedError = new Error(
+        `WebSocket publication committed; verified live bundle retained. ` +
+          `Post-commit cleanup failed: ${error.message}`
+      );
+      if (rollbackErrors.length) {
+        throw new AggregateError(
+          [committedError, ...rollbackErrors],
+          "WebSocket publication committed but backup quarantine was incomplete"
+        );
+      }
+      throw committedError;
+    }
+
     try {
-      if (published) await removeSafeDirectory(outputRoot, "failed publication output");
       if (backedUp) {
-        await rename(backupRoot, outputRoot);
+        await restoreRollbackBackup(paths, transaction);
         backedUp = false;
+      } else {
+        await removeSafeFile(paths.transactionPath, "publication transaction");
+        await removeSafeDirectory(paths.stageRoot, "failed publication stage");
       }
     } catch (rollbackError) {
       rollbackErrors.push(rollbackError);
-    }
-    try {
-      await removeSafeDirectory(stageRoot, "failed publication stage");
-    } catch (cleanupError) {
-      rollbackErrors.push(cleanupError);
     }
     if (rollbackErrors.length) {
       throw new AggregateError(

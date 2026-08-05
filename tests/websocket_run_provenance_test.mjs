@@ -256,7 +256,14 @@ async function snapshotDirectory(root, directory = root) {
 function publicationSiblings(output) {
   const name = basename(output);
   const parent = resolve(output, "..");
-  return [join(parent, `.${name}.publish-stage`), join(parent, `.${name}.publish-backup`)];
+  return [
+    join(parent, `.${name}.publish-stage`),
+    join(parent, `.${name}.publish-backup`),
+    join(parent, `.${name}.publish-retired`),
+    join(parent, `.${name}.publish-invalid-live`),
+    join(parent, `.${name}.publish-transaction.json`),
+    join(parent, `.${name}.publish-transaction.tmp`),
+  ];
 }
 
 test("finalization records sanitized observed environment after recapturing source", async (t) => {
@@ -505,7 +512,7 @@ test("publisher rejects inconsistent campaigns before replacing output", async (
   assert.deepEqual(await snapshotDirectory(output), before);
 });
 
-test("render, write, and swap failures preserve the prior bundle byte-for-byte", async (t) => {
+test("pre-commit render, write, verify, and swap failures preserve the prior bundle", async (t) => {
   const input = await mkdtemp(join(tmpdir(), "flyology-websocket-failures-"));
   const output = join(outputBase, `.fixture-failures-${process.pid}`);
   t.after(async () => {
@@ -521,13 +528,7 @@ test("render, write, and swap failures preserve the prior bundle byte-for-byte",
   await writeFile(join(output, "prior/data.bin"), Buffer.from([0, 1, 2, 3]));
   const before = await snapshotDirectory(output);
 
-  for (const failure of [
-    "render",
-    "write",
-    "verify",
-    "swap-after-backup",
-    "swap-after-publish",
-  ]) {
+  for (const failure of ["render", "write", "verify", "swap-after-backup"]) {
     const result = runPublisher(input, output, failure);
     assert.notEqual(result.status, 0, failure);
     assert.match(result.stderr, new RegExp(`forced WebSocket publication failure at ${failure}`));
@@ -535,6 +536,171 @@ test("render, write, and swap failures preserve the prior bundle byte-for-byte",
     for (const path of publicationSiblings(output)) {
       assert.equal(await lstat(path).catch(() => null), null, `${failure}: stale sibling`);
     }
+  }
+});
+
+test("post-commit failure retains the verified new live bundle", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-post-commit-"));
+  const output = join(outputBase, `.fixture-post-commit-${process.pid}`);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  await mkdir(output, { recursive: true });
+  await writeFile(join(output, "sentinel"), "prior bundle\n");
+
+  const result = runPublisher(input, output, "swap-after-publish");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /publication committed; verified live bundle retained/i);
+  assert.notEqual(await lstat(join(output, ".publication-manifest.json")).catch(() => null), null);
+  assert.equal(await lstat(join(output, "sentinel")).catch(() => null), null);
+  const siblings = publicationSiblings(output);
+  const retired = siblings[2];
+  assert.notEqual(await lstat(retired).catch(() => null), null);
+  for (const path of siblings.filter((path) => path !== retired)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale sibling: ${path}`);
+  }
+});
+
+test("partial retired-backup deletion cannot roll back the committed bundle", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-partial-cleanup-"));
+  const output = join(outputBase, `.fixture-partial-cleanup-${process.pid}`);
+  const [, , retired] = publicationSiblings(output);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  await mkdir(join(output, "prior"), { recursive: true });
+  await writeFile(join(output, "index.html"), "prior index\n");
+  await writeFile(join(output, "prior/a"), "first old file\n");
+  await writeFile(join(output, "prior/b"), "second old file\n");
+  const oldSnapshot = await snapshotDirectory(output);
+
+  const failedCleanup = runPublisher(input, output, "backup-cleanup-partial");
+  assert.notEqual(failedCleanup.status, 0);
+  assert.match(failedCleanup.stderr, /verified live bundle retained/i);
+  const committedSnapshot = await snapshotDirectory(output);
+  assert.notDeepEqual(committedSnapshot, oldSnapshot);
+  assert.notEqual(await lstat(join(output, ".publication-manifest.json")).catch(() => null), null);
+  assert.notEqual(await lstat(retired).catch(() => null), null);
+  assert.notDeepEqual(await snapshotDirectory(retired), oldSnapshot);
+
+  const restart = runPublisher(input, output, "render");
+  assert.notEqual(restart.status, 0);
+  assert.deepEqual(await snapshotDirectory(output), committedSnapshot);
+  assert.equal(await lstat(retired).catch(() => null), null);
+});
+
+test("restart restores only an intact pre-commit backup", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-precommit-crash-"));
+  const output = join(outputBase, `.fixture-precommit-crash-${process.pid}`);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  await mkdir(join(output, "prior"), { recursive: true });
+  await writeFile(join(output, "prior/data"), "intact old bundle\n");
+  const prior = await snapshotDirectory(output);
+
+  const crash = runPublisher(input, output, "crash-after-backup");
+  assert.notEqual(crash.status, 0);
+  assert.equal(await lstat(output).catch(() => null), null);
+  const restart = runPublisher(input, output, "render");
+  assert.notEqual(restart.status, 0);
+  assert.deepEqual(await snapshotDirectory(output), prior);
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale sibling: ${path}`);
+  }
+});
+
+test("restart refuses a partially deleted pre-commit backup", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-damaged-backup-"));
+  const output = join(outputBase, `.fixture-damaged-backup-${process.pid}`);
+  const [, backup] = publicationSiblings(output);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  await mkdir(join(output, "prior"), { recursive: true });
+  await writeFile(join(output, "prior/a"), "first old file\n");
+  await writeFile(join(output, "prior/b"), "second old file\n");
+  assert.notEqual(runPublisher(input, output, "crash-after-backup").status, 0);
+
+  await rm(join(backup, "prior/a"));
+  const damaged = await snapshotDirectory(backup);
+  const restart = runPublisher(input, output, "render");
+  assert.notEqual(restart.status, 0);
+  assert.match(restart.stderr, /rollback backup is not intact/);
+  assert.equal(await lstat(output).catch(() => null), null);
+  assert.deepEqual(await snapshotDirectory(backup), damaged);
+});
+
+test("restart recognizes a committed live bundle and never restores its backup", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-commit-crash-"));
+  const output = join(outputBase, `.fixture-commit-crash-${process.pid}`);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  await mkdir(output, { recursive: true });
+  await writeFile(join(output, "sentinel"), "old bundle\n");
+
+  const crash = runPublisher(input, output, "crash-after-commit");
+  assert.notEqual(crash.status, 0);
+  const committed = await snapshotDirectory(output);
+  assert.notEqual(await lstat(join(output, ".publication-manifest.json")).catch(() => null), null);
+  const restart = runPublisher(input, output, "render");
+  assert.notEqual(restart.status, 0);
+  assert.deepEqual(await snapshotDirectory(output), committed);
+  assert.equal(await lstat(join(output, "sentinel")).catch(() => null), null);
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale sibling: ${path}`);
+  }
+});
+
+test("restart atomically quarantines invalid live output before restoring backup", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-invalid-live-"));
+  const output = join(outputBase, `.fixture-invalid-live-${process.pid}`);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  await mkdir(join(output, "prior"), { recursive: true });
+  await writeFile(join(output, "prior/data"), "intact old bundle\n");
+  const prior = await snapshotDirectory(output);
+  assert.notEqual(runPublisher(input, output, "crash-after-backup").status, 0);
+
+  await mkdir(output);
+  await writeFile(join(output, "partial-new-live"), "invalid\n");
+  const restart = runPublisher(input, output, "render");
+  assert.notEqual(restart.status, 0);
+  assert.deepEqual(await snapshotDirectory(output), prior);
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale sibling: ${path}`);
   }
 });
 
@@ -556,7 +722,7 @@ test("publisher refuses symlink publication targets", async (t) => {
   assert.equal(await readFile(join(target, "sentinel"), "utf8"), "keep\n");
 });
 
-test("publisher safely recovers stale siblings and refuses sibling symlinks", async (t) => {
+test("publisher refuses unmarked backups and sibling symlinks", async (t) => {
   const input = await mkdtemp(join(tmpdir(), "flyology-websocket-stale-input-"));
   const target = await mkdtemp(join(tmpdir(), "flyology-websocket-stale-target-"));
   const output = join(outputBase, `.fixture-stale-${process.pid}`);
@@ -573,12 +739,18 @@ test("publisher safely recovers stale siblings and refuses sibling symlinks", as
   await writeFile(join(backup, "prior/data"), "recover me\n");
   await mkdir(stage);
   await writeFile(join(stage, "stale"), "discard me\n");
-  const prior = await snapshotDirectory(backup);
   const recovered = runPublisher(input, output, "render");
   assert.notEqual(recovered.status, 0);
-  assert.deepEqual(await snapshotDirectory(output), prior);
-  assert.equal(await lstat(stage).catch(() => null), null);
-  assert.equal(await lstat(backup).catch(() => null), null);
+  assert.match(recovered.stderr, /unmarked publication backup/);
+  assert.equal(await lstat(output).catch(() => null), null);
+  assert.notEqual(await lstat(stage).catch(() => null), null);
+  assert.notEqual(await lstat(backup).catch(() => null), null);
+
+  await rm(stage, { recursive: true });
+  await rm(backup, { recursive: true });
+  await mkdir(output);
+  await writeFile(join(output, "sentinel"), "keep\n");
+  const prior = await snapshotDirectory(output);
 
   await symlink(target, stage);
   const stageResult = runPublisher(input, output);
