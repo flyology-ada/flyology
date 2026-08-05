@@ -181,6 +181,8 @@ begin
             raise Program_Error with "lightweight policy did not default prompt";
          end if;
          Dormancy.Set_Policy
+           (Dormancy.Reclaimable, Minimum_Wait => 30.0);
+         Dormancy.Set_Policy
            (Dormancy.Reclaimable, Minimum_Wait => 0.0);
          if Dormancy.Current_Policy /= Dormancy.Reclaimable then
             raise Program_Error with "reclaimable policy was not retained";

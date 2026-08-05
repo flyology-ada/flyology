@@ -1,4 +1,5 @@
 with Interfaces.C;
+with Flyology.Time_Math;
 
 package body Flyology.Dormancy is
    package C renames Interfaces.C;
@@ -46,7 +47,7 @@ package body Flyology.Dormancy is
       end if;
       Result := Runtime_Set_Current_Dormancy
         (C.int (Policy'Pos (Value)),
-         C.long_long (Minimum_Wait * Nanoseconds_Per_Second));
+         Flyology.Time_Math.To_Nanoseconds (Minimum_Wait));
       if Result /= 0 and then Value /= Prompt then
          raise Dormancy_Error with
            "non-prompt dormancy requires a lightweight task";
