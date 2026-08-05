@@ -3088,7 +3088,7 @@ procedure HTTP_Smoke is
         ("/high-rate", Limited_Handler'Access, Name => "high-rate",
          Policy =>
            (Routing.Default_Route_Policy with delta
-              Rate_Per_Second => 1_000_000));
+              Rate_Per_Second => Positive'Last));
       Routes.Add_Middleware (Deadlines.Call'Access);
       Routes.Add_Middleware (Rates.Call'Access);
       Routes.Add_Middleware (Bulkheads.Call'Access);

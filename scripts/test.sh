@@ -274,6 +274,7 @@ fairness_smoke
 file_cancellation_smoke
 files_smoke
 flyology-counter_policy_smoke
+flyology-rate_limit_policy_smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 http_smoke
