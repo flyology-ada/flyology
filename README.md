@@ -1613,7 +1613,11 @@ Linux submission pressure is explicit backpressure: Flyology caps outstanding
 `io_uring` SQEs at the kernel-reported completion-queue capacity, and a task
 that cannot yet be submitted remains suspended in a per-group FIFO. The engine
 also detects a kernel overflow backlog and asks `io_uring_enter` to flush it
-before admitting more work. No Ada worker task, pthread pool, or blocking
+before admitting more work. After consuming the shared eventfd, the poller
+retains a file-drain obligation until it observes spare completion capacity.
+Under continuous descriptor readiness, one slot in each 64-event scheduler
+batch is reserved for that drain; one-event callers alternate sources. No Ada
+worker task, pthread pool, or blocking
 `pread`/`pwrite` call is hidden behind the lightweight API. Native-designated
 callers use direct positional syscalls. Explicit offsets avoid shared
 file-position races in both lanes.

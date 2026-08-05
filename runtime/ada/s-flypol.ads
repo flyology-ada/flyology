@@ -95,5 +95,9 @@ private
       Wake_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       State : System.Address := System.Null_Address;
       File_State : System.Flyology.File_Engine.Engine;
+      --  Linux retains a drain obligation after consuming the shared eventfd.
+      --  A one-result caller alternates sources while that obligation remains.
+      File_Drain_Pending : Boolean := False;
+      File_Only_Last_Batch : Boolean := False;
    end record;
 end System.Flyology.Poller;

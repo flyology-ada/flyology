@@ -64,18 +64,30 @@ if [ "$run_faults" = 1 ]; then
     -f -P tests/runtime_smoke.gpr \
     fault_injection_smoke.adb reap_finalize_race_smoke.adb
 
+  if [ "$(uname -s)" = Linux ]; then
+    run_gprbuild \
+      --RTS="$project_root/build/rts" \
+      -f -P tests/runtime_smoke.gpr linux_poller_fairness_smoke.adb
+    printf '%s\n' "fault case=linux-poller-fairness"
+    run_timed "$case_timeout" \
+      "$project_root/tests/bin/linux_poller_fairness_smoke"
+  fi
+
   printf '%s\n' "fault case=final-reap-window"
   run_timed "$case_timeout" \
     "$project_root/tests/bin/reap_finalize_race_smoke"
 
-  for fault_case in \
-    fiber-allocation stack-map stack-protect stack-discard group-startup \
-    watch-error eintr file-saturation file-dormancy-exclusion \
-    file-uring-cq-backpressure file-uring-probe-fallback \
-    file-uring-post-setup-fallback \
-    file-cancellation file-abort file-pre-park-abort file-backend-cancel \
-    file-cancel-fallback file-uring-identity file-uring-last-fiber \
-    file-darwin-cancel-cleanup
+  fault_cases='
+    fiber-allocation stack-map stack-protect stack-discard group-startup
+    watch-error eintr file-saturation file-dormancy-exclusion
+    file-uring-cq-backpressure file-uring-probe-fallback
+    file-uring-post-setup-fallback
+    file-cancellation file-abort file-pre-park-abort file-backend-cancel
+    file-cancel-fallback file-uring-identity file-uring-last-fiber'
+  if [ "$(uname -s)" = Darwin ]; then
+    fault_cases="$fault_cases file-darwin-cancel-cleanup"
+  fi
+  for fault_case in $fault_cases
   do
     printf '%s\n' "fault case=$fault_case"
     run_timed "$case_timeout" \
