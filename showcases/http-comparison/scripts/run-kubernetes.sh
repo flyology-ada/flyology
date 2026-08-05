@@ -59,11 +59,16 @@ if [ "$local_overlay" -eq 1 ]; then
    overlay_archive=$(mktemp /tmp/flyology-http-overlay.XXXXXX.tar.gz)
    tar -czf "$overlay_archive" -C "$project_root" \
       --exclude='showcases/http-comparison/servers/*/alire' \
-      --exclude='showcases/http-comparison/servers/*/bin' \
+      --exclude='showcases/http-comparison/servers/aws_plain/bin' \
+      --exclude='showcases/http-comparison/servers/ews_plain/bin' \
+      --exclude='showcases/http-comparison/servers/servletada_aws_app/bin' \
+      --exclude='showcases/http-comparison/servers/servletada_ews_app/bin' \
       --exclude='showcases/http-comparison/servers/*/config' \
       --exclude='showcases/http-comparison/servers/*/obj' \
       --exclude='showcases/http-comparison/servers/rust/target' \
-      showcases/http-comparison
+      showcases/http-comparison \
+      showcases/http_benchmark_runtime_probe.adb \
+      showcases/showcases.gpr
    overlay_dirty=1
 fi
 
