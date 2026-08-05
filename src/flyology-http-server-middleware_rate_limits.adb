@@ -79,9 +79,13 @@ package body Flyology.HTTP.Server.Middleware_Rate_Limits is
                    (0.0, Ada.Real_Time.To_Duration
                       (Now - Values (Slot).Seen));
             begin
-               Values (Slot).Tokens := Duration'Min
-                 (Duration (Rate),
-                  Values (Slot).Tokens + Elapsed * Rate);
+               if Elapsed >= 1.0 then
+                  Values (Slot).Tokens := Duration (Rate);
+               else
+                  Values (Slot).Tokens := Duration'Min
+                    (Duration (Rate),
+                     Values (Slot).Tokens + Elapsed * Rate);
+               end if;
                Values (Slot).Seen := Now;
             end;
          end if;

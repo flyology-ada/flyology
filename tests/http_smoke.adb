@@ -2742,7 +2742,7 @@ procedure HTTP_Smoke is
       end Fails_Once;
 
       Routes : Routing.Router
-        (Capacity => 2, Slashes => Routing.Strict_Slashes);
+        (Capacity => 3, Slashes => Routing.Strict_Slashes);
       State : Context;
       Peer  : constant Sockets.Endpoint := Test_Peer;
 
@@ -2777,6 +2777,11 @@ procedure HTTP_Smoke is
         ("/permit", Fails_Once'Access, Name => "permit",
          Policy =>
            (Routing.Default_Route_Policy with delta Concurrency => 1));
+      Routes.Get
+        ("/high-rate", Limited_Handler'Access, Name => "high-rate",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Rate_Per_Second => 1_000_000));
       Routes.Add_Middleware (Deadlines.Call'Access);
       Routes.Add_Middleware (Rates.Call'Access);
       Routes.Add_Middleware (Bulkheads.Call'Access);
@@ -2800,6 +2805,14 @@ procedure HTTP_Smoke is
         (Ada.Strings.Fixed.Index (Run ("/limited", "b"), "200 OK") /= 0);
       pragma Assert
         (Ada.Strings.Fixed.Index (Run ("/limited", "a"), "200 OK") /= 0);
+
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/high-rate", "a"), "200 OK") /= 0);
+      Clock_Value := Clock_Value + Ada.Real_Time.Seconds (10_000);
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/high-rate", "a"), "200 OK") /= 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index (Run ("/high-rate", "a"), "200 OK") /= 0);
 
       Permit_Calls := 0;
       declare
