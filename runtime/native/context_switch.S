@@ -114,7 +114,8 @@ _flyology_context_swap_registers:
 
     /*
      * x30 now names either the suspended caller of swap_registers or, for a
-     * fresh context, the Ada trampoline.  `ret` performs the actual transfer.
+     * fresh context, the assembly unwind-root stub.  `ret` performs the
+     * actual transfer.
      */
     ret
 
@@ -268,7 +269,7 @@ flyology_context_swap_registers:
     ldr w2, [x1, #172]
     msr fpsr, x2
 
-    /* Resume the saved caller, or enter the trampoline for a fresh image. */
+    /* Resume the saved caller, or enter the unwind-root stub when fresh. */
     ret
 
 /* Mark stacks non-executable for ELF linkers. */
