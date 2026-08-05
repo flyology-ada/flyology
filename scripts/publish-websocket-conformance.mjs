@@ -245,6 +245,27 @@ function countStatuses(cases) {
   return counts;
 }
 
+const acceptedVerdicts = new Set(["OK", "NON-STRICT", "INFORMATIONAL"]);
+
+function requirePassingVerdicts(profile, cases) {
+  const failures = [];
+  for (const item of cases) {
+    if (!acceptedVerdicts.has(item.behavior)) {
+      failures.push(`${item.id} behavior=${item.behavior || "MISSING"}`);
+    }
+    if (!acceptedVerdicts.has(item.behaviorClose)) {
+      failures.push(
+        `${item.id} behaviorClose=${item.behaviorClose || "MISSING"}`
+      );
+    }
+  }
+  if (failures.length) {
+    throw new Error(
+      `${profile.slug} contains failed Autobahn verdicts: ${failures.join(", ")}`
+    );
+  }
+}
+
 function performanceCase(item) {
   const match = plainText(item.description).match(
     /Send (\d+) (text|binary) messages of payload size (\d+)/i
@@ -316,6 +337,7 @@ async function loadProfile(profile) {
   }
   cases.sort(compareCaseIds);
   if (!cases.length) throw new Error(`no Autobahn cases found in ${directory}`);
+  requirePassingVerdicts(profile, cases);
   const loaded = {
     ...profile,
     cases,
