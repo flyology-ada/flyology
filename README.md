@@ -1915,6 +1915,12 @@ constant-time, while choosing the next non-empty priority scans only the fixed
 lock ownership, descriptor-generation matching, and the actual context handoff
 remain outside SPARK.
 
+The HTTP chunk-size encoder used by production streaming and SSE responses is
+also inside the SPARK boundary. Its proof covers the uppercase hexadecimal
+buffer and index arithmetic through `Natural'Last`; behavioral boundary tests
+check the emitted representation at the seven-to-eight-digit transition and at
+the maximum value.
+
 Run the proof through the Alire-provided GNATprove toolchain:
 
 ```sh

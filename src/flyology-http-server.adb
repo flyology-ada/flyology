@@ -3,6 +3,7 @@ with Ada.Calendar;
 with Ada.Calendar.Formatting;
 with Ada.Strings.Fixed;
 with Interfaces;
+with Flyology.HTTP_Chunk_Encoding;
 with Flyology.HTTP.Server.WebSocket_Deflate;
 with Flyology.IO;
 with GNAT.Sockets;
@@ -13,6 +14,8 @@ package body Flyology.HTTP.Server is
    use type Interfaces.Unsigned_8;
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+
+   package Chunk_Encoding renames Flyology.HTTP_Chunk_Encoding;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    WebSocket_Peer_EOF : exception;
@@ -1700,21 +1703,6 @@ package body Flyology.HTTP.Server is
    function Response_Started (Item : Connection) return Boolean is
      (Item.Response_Begun);
 
-   function Hex (Value : Natural) return String is
-      Hex_Digits : constant String := "0123456789ABCDEF";
-      Buffer : String (1 .. (Natural'Size + 3) / 4);
-      Cursor : Natural := Buffer'Last;
-      Rest   : Natural := Value;
-   begin
-      loop
-         Buffer (Cursor) := Hex_Digits (Rest mod 16 + 1);
-         Rest := Rest / 16;
-         exit when Rest = 0;
-         Cursor := Cursor - 1;
-      end loop;
-      return Buffer (Cursor .. Buffer'Last);
-   end Hex;
-
    procedure Begin_Response_Stream
      (Item          : in out Connection;
       Status        : Positive;
@@ -1792,7 +1780,10 @@ package body Flyology.HTTP.Server is
       elsif Item.Current_Version = HTTP_1_1 then
          begin
             Write
-              (Item, Hex (Data'Length) & CRLF & Data & CRLF, Timeout, Token);
+              (Item,
+               Chunk_Encoding.Encode (Data'Length) & CRLF & Data & CRLF,
+               Timeout,
+               Token);
          exception
             when others =>
                Item.Request_Close := True;
@@ -1825,7 +1816,8 @@ package body Flyology.HTTP.Server is
       elsif Item.Current_Version = HTTP_1_1 then
          declare
             Prefix : constant Ada.Streams.Stream_Element_Array :=
-              Bytes (Hex (Natural (Data'Length)) & CRLF);
+              Bytes
+                (Chunk_Encoding.Encode (Natural (Data'Length)) & CRLF);
             Suffix : constant Ada.Streams.Stream_Element_Array := Bytes (CRLF);
             Frame  : Ada.Streams.Stream_Element_Array
               (1 .. Ada.Streams.Stream_Element_Offset
@@ -2139,7 +2131,10 @@ package body Flyology.HTTP.Server is
       begin
          begin
             Write
-              (Item, Hex (Value'Length) & CRLF & Value & CRLF, Timeout, Token);
+              (Item,
+               Chunk_Encoding.Encode (Value'Length) & CRLF & Value & CRLF,
+               Timeout,
+               Token);
          exception
             when others =>
                Item.Request_Close := True;
@@ -2202,7 +2197,10 @@ package body Flyology.HTTP.Server is
       begin
          begin
             Write
-              (Item, Hex (Value'Length) & CRLF & Value & CRLF, Timeout, Token);
+              (Item,
+               Chunk_Encoding.Encode (Value'Length) & CRLF & Value & CRLF,
+               Timeout,
+               Token);
          exception
             when others =>
                Item.Request_Close := True;
