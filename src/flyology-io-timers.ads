@@ -148,17 +148,18 @@ package Flyology.IO.Timers is
    --  @param Timers Nonempty timer collection to wait on and update
    --  @param Activated Complete due set, or an empty batch on timeout
    --  @param Timeout Maximum active monotonic wait in seconds
-   --  @return Whether timers activated or the bounded wait expired
-   function Wait_Next
+   --  @param Outcome Whether timers activated or the bounded wait expired
+   procedure Wait_Next
      (Timers    : in out Timer_Set;
       Activated : out Activation_Batch;
-      Timeout   : Duration) return Timer_Wait_Outcome
+      Timeout   : Duration;
+      Outcome   : out Timer_Wait_Outcome)
    with Pre =>
      Armed_Count (Timers) > 0
      and then Activated.Capacity = Timers.Capacity
      and then Timeout >= 0.0,
         Post =>
-          (if Wait_Next'Result = Timers_Activated then
+          (if Outcome = Timers_Activated then
               Activated.Count in 1 .. Activated.Capacity
            else Activated.Count = 0);
 

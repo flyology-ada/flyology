@@ -178,10 +178,11 @@ package body Flyology.IO.Timers is
       end loop;
    end Wait_Next;
 
-   function Wait_Next
+   procedure Wait_Next
      (Timers    : in out Timer_Set;
       Activated : out Activation_Batch;
-      Timeout   : Duration) return Timer_Wait_Outcome
+      Timeout   : Duration;
+      Outcome   : out Timer_Wait_Outcome)
    is
       Started    : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Timeout_At : constant Ada.Real_Time.Time :=
@@ -195,11 +196,13 @@ package body Flyology.IO.Timers is
          Timer_Policy.Collect_Due (Timers.State, Observed, Due);
          if Due.Count > 0 then
             Publish (Due, Activated);
-            return Timers_Activated;
+            Outcome := Timers_Activated;
+            return;
          elsif Observed >= Timeout_At then
             Activated.Count := 0;
             Activated.Ids := (others => Timer_Id'First);
-            return Wait_Timed_Out;
+            Outcome := Wait_Timed_Out;
+            return;
          end if;
 
          Wake_At := Timer_Policy.Earliest_Deadline (Timers.State);

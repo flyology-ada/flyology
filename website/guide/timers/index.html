@@ -172,14 +172,18 @@ end Wait_For_Timers;</code></pre>
             <figure class="code-panel">
               <figcaption>bounded wait</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">case Timers.Wait_Next
-  (Schedule, Activated, Timeout =&gt; 0.050)
-is
-   when Timers.Timers_Activated =&gt;
-      Process (Activated);
-   when Timers.Wait_Timed_Out =&gt;
-      Run_Maintenance;
-end case;</code></pre>
+              <pre><code class="language-ada">declare
+   Outcome : Timers.Timer_Wait_Outcome;
+begin
+   Timers.Wait_Next
+     (Schedule, Activated, Timeout =&gt; 0.050, Outcome =&gt; Outcome);
+   case Outcome is
+      when Timers.Timers_Activated =&gt;
+         Process (Activated);
+      when Timers.Wait_Timed_Out =&gt;
+         Run_Maintenance;
+   end case;
+end;</code></pre>
             </figure>
             <div class="decision-list">
               <dl>

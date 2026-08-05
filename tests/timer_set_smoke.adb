@@ -36,6 +36,7 @@ procedure Timer_Set_Smoke is
    procedure Exercise is
       Small       : Timers.Timer_Set (6);
       Small_Batch : Timers.Activation_Batch (6);
+      Outcome     : Timers.Timer_Wait_Outcome;
       Shared      : RT.Time;
    begin
       --  A timer activated while the caller is doing other work must be
@@ -81,17 +82,17 @@ procedure Timer_Set_Smoke is
       --  A bounded wait leaves later timers armed, while a due timer wins over
       --  a simultaneous zero-time poll and is still delivered exactly once.
       Timers.Arm (Small, 6, RT.Clock + RT.Milliseconds (100));
-      if Timers.Wait_Next (Small, Small_Batch, Timeout => 0.010) /=
-        Timers.Wait_Timed_Out
-        or else Small_Batch.Count /= 0
+      Timers.Wait_Next
+        (Small, Small_Batch, Timeout => 0.010, Outcome => Outcome);
+      if Outcome /= Timers.Wait_Timed_Out or else Small_Batch.Count /= 0
         or else not Timers.Is_Armed (Small, 6)
       then
          raise Program_Error with "bounded timer wait did not time out cleanly";
       end if;
       Timers.Arm (Small, 6, RT.Clock - RT.Milliseconds (1));
-      if Timers.Wait_Next (Small, Small_Batch, Timeout => 0.0) /=
-        Timers.Timers_Activated
-        or else Small_Batch.Count /= 1
+      Timers.Wait_Next
+        (Small, Small_Batch, Timeout => 0.0, Outcome => Outcome);
+      if Outcome /= Timers.Timers_Activated or else Small_Batch.Count /= 1
         or else Small_Batch.Ids (1) /= 6
         or else Timers.Is_Armed (Small, 6)
       then

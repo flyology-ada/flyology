@@ -1564,12 +1564,18 @@ caller-owned rather than task safe, so one task must serialize its operations.
 The timed overload bounds one wait without cancelling later timers:
 
 ```ada
-case Timers.Wait_Next (Schedule, Activated, Timeout => 0.050) is
-   when Timers.Timers_Activated =>
-      Process (Activated);
-   when Timers.Wait_Timed_Out =>
-      Run_Maintenance;
-end case;
+declare
+   Outcome : Timers.Timer_Wait_Outcome;
+begin
+   Timers.Wait_Next
+     (Schedule, Activated, Timeout => 0.050, Outcome => Outcome);
+   case Outcome is
+      when Timers.Timers_Activated =>
+         Process (Activated);
+      when Timers.Wait_Timed_Out =>
+         Run_Maintenance;
+   end case;
+end;
 ```
 
 A zero timeout polls once. Timers due at that terminal monotonic-clock sample
