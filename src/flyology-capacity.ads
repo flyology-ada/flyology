@@ -19,37 +19,53 @@ package Flyology.Capacity is
      (Permit_Acquired, Gate_Full, Gate_Closed, Acquire_Timed_Out);
 
    --  Thread-safe bounded admission controller. The object must outlive every
-   --  holder that has successfully acquired a permit.
+   --  holder that has successfully acquired a permit. The optional
+   --  Cleanup_Armed parameters let a controlled caller publish its cleanup
+   --  obligation in the same protected action as permit ownership changes.
    protected type Gate
      (Capacity : Positive)  --  Maximum number of active permits
    is
       --  Idempotently reject new acquisitions and release queued callers.
-      --  Borrowed shutdown and admission readiness descriptors are signalled;
-      --  a signalling failure raises Program_Error after shutdown is recorded.
+      --  Borrowed shutdown and admission readiness descriptors are signalled.
+      --  Program_Error is raised when a borrowed wake descriptor cannot be
+      --  signalled; shutdown remains recorded.
       procedure Request_Shutdown;
 
       --  Wait until a permit is available or shutdown has been requested.
       --  @param Accepted True when one permit was acquired; False on shutdown
-      --  @param Cleanup_Armed Optional caller-owned cleanup obligation; it is
-      --     set in the protected action that acquires the permit
+      --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
+      --     non-null it must designate False on call. It remains False when
+      --     Accepted is False and becomes True in the protected action that
+      --     acquires the permit. The caller must then release or atomically
+      --     transfer that obligation.
+      --  @exception Program_Error Cleanup_Armed designates True on call, or a
+      --     pending admission readiness signal cannot be consumed
       entry Acquire
         (Accepted      : out Boolean;
          Cleanup_Armed : access Boolean := null);
 
       --  Attempt to acquire without waiting.
       --  @param Result Permit_Acquired, Gate_Full, or Gate_Closed
-      --  @param Cleanup_Armed Optional caller-owned cleanup obligation; it is
-      --     set only when Result is Permit_Acquired
+      --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
+      --     non-null it must designate False on call. It remains False for
+      --     Gate_Full or Gate_Closed and becomes True in the protected action
+      --     that returns Permit_Acquired. The caller must then release or
+      --     atomically transfer that obligation.
+      --  @exception Program_Error Cleanup_Armed designates True on call, or a
+      --     pending admission readiness signal cannot be consumed
       procedure Try_Acquire
         (Result        : out Acquire_Result;
          Cleanup_Armed : access Boolean := null);
 
       --  Release one acquired permit. If an Acquire_Wait_Source has been
       --  borrowed, releasing the permit also wakes its waiters.
-      --  @exception Program_Error No permit is active, or the admission wake
-      --     source cannot be signalled
-      --  @param Cleanup_Armed Optional caller-owned cleanup obligation; it is
-      --     cleared in the protected action that releases the permit
+      --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
+      --     non-null it must designate True on call and becomes False in the
+      --     protected action that releases the permit, before any fallible
+      --     wake. It remains False if wake signalling then fails.
+      --  @exception Program_Error Cleanup_Armed designates False on call, no
+      --     permit is active, or the admission readiness source cannot be
+      --     signalled. A signalling failure leaves the permit released.
       procedure Release (Cleanup_Armed : access Boolean := null);
 
       --  Wait until shutdown has been requested and every permit is released.
@@ -102,6 +118,8 @@ package Flyology.Capacity is
    --  @param Item Gate from which to acquire one permit
    --  @param Timeout Deadline interval in seconds
    --  @param Result Permit_Acquired, Gate_Closed, or Acquire_Timed_Out
+   --  @exception Program_Error A pending admission readiness signal cannot be
+   --     consumed
    procedure Timed_Acquire
      (Item    : in out Gate;
       Timeout : Duration;

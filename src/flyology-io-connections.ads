@@ -42,12 +42,18 @@ package Flyology.IO.Connections is
    --  Wait indefinitely for one Manager permit, then transfer Socket to Item.
    --  This compatibility operation has no timeout or cancellation token;
    --  Manager shutdown releases its admission wait with Admission_Closed. On
-   --  success Socket is closed and Item is the sole closing owner.
+   --  success Socket is closed and Item is the sole closing owner. If an
+   --  unsuccessful transfer releases its permit but admission readiness
+   --  signalling fails, the permit remains released and Socket remains owned
+   --  by the caller. Ada finalization rules determine the observable exception
+   --  occurrence when that cleanup failure accompanies another exception.
    --  @param Manager Admission controller that must outlive Item
    --  @param Socket Open socket whose ownership transfers on success
    --  @param Item Closed Connection that receives ownership
    --  @exception Admission_Closed Manager has started shutdown
-   --  @exception Program_Error Socket or Item is invalid, or wake setup fails
+   --  @exception Program_Error Socket or Item is invalid, wake setup fails, or
+   --     failed-transfer cleanup releases its permit but cannot signal
+   --     admission readiness
    procedure Take
      (Manager : aliased in out Server;
       Socket  : in out Flyology.IO.Sockets.Socket_Type;
@@ -61,7 +67,12 @@ package Flyology.IO.Connections is
    --  interrupt a full-capacity admission wait without polling.
    --  Cancellation_Quantum must be positive for compatibility but is ignored;
    --  wake-source readiness notices cancellation without periodic polling.
-   --  Lightweight tasks suspend; native tasks block their threads.
+   --  Lightweight tasks suspend; native tasks block their threads. On failure
+   --  after admission, cleanup independently releases the permit and attempts
+   --  to close any accepted socket. If admission readiness signalling fails,
+   --  the permit remains released. Ada finalization rules determine the
+   --  observable exception occurrence when that cleanup failure accompanies
+   --  a timeout, cancellation, socket failure, or another exception.
    --  @param Manager Admission controller that must outlive Item
    --  @param Listener Open listening socket; ownership is retained
    --  @param Item Closed Connection that receives the accepted socket
@@ -76,7 +87,8 @@ package Flyology.IO.Connections is
    --  @exception Timeout_Error The accept deadline expires
    --  @exception Device_Error Readiness polling fails
    --  @exception Flyology.IO.Sockets.Socket_Error Accept or setup fails
-   --  @exception Program_Error Item is open or a wake source cannot be created
+   --  @exception Program_Error Item is open, a wake source cannot be created,
+   --     or cleanup releases its permit but cannot signal admission readiness
    procedure Accept_Connection
      (Manager              : aliased in out Server;
       Listener             : Flyology.IO.Sockets.Socket_Type;
@@ -97,6 +109,8 @@ package Flyology.IO.Connections is
    --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider session
    --     violates its non-raising finalization contract; cleanup still
    --     completes
+   --  @exception Program_Error The Server permit is released but admission
+   --     readiness cannot be signalled
    procedure Close (Item : in out Connection);
    --  Query the protected ownership state.
    --  @param Item Connection to inspect
