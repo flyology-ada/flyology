@@ -3,6 +3,10 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
+#if defined(FLYOLOGY_WALL_CLOCK_TEST_HOOKS) && \
+    FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+#include <stdatomic.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 
@@ -22,6 +26,33 @@ struct flyology_wall_wait_state {
     int token;
 };
 
+#if defined(FLYOLOGY_WALL_CLOCK_TEST_HOOKS) && \
+    FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+static _Atomic int64_t flyology_test_remaining_nanoseconds = -1;
+static _Atomic int64_t flyology_test_last_arm_nanoseconds = -1;
+
+void flyology_wall_wait_test_set_remaining(int64_t nanoseconds)
+{
+    atomic_store_explicit(&flyology_test_remaining_nanoseconds, nanoseconds,
+                          memory_order_relaxed);
+}
+
+int64_t flyology_wall_wait_test_last_arm(void)
+{
+    return atomic_load_explicit(&flyology_test_last_arm_nanoseconds,
+                                memory_order_relaxed);
+}
+
+int flyology_wall_wait_test_uses_relative_timer(void)
+{
+#if defined(__APPLE__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+#endif
+
 static void add_nanoseconds(struct timespec *value, int64_t nanoseconds)
 {
     value->tv_sec += (time_t)(nanoseconds / INT64_C(1000000000));
@@ -38,6 +69,19 @@ static bool timespec_before(
     return left->tv_sec < right->tv_sec ||
         (left->tv_sec == right->tv_sec && left->tv_nsec < right->tv_nsec);
 }
+
+#if defined(FLYOLOGY_WALL_CLOCK_TEST_HOOKS) && \
+    FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+static void subtract_nanoseconds(struct timespec *value, int64_t nanoseconds)
+{
+    value->tv_sec -= (time_t)(nanoseconds / INT64_C(1000000000));
+    value->tv_nsec -= (long)(nanoseconds % INT64_C(1000000000));
+    if (value->tv_nsec < 0) {
+        value->tv_sec -= 1;
+        value->tv_nsec += 1000000000L;
+    }
+}
+#endif
 
 #if defined(__APPLE__)
 static int64_t timespec_difference_nanoseconds(
@@ -128,8 +172,7 @@ int flyology_wall_wait_arm(
         target_second < 0 || target_second > 59 ||
         (target_is_leap_second != 0 && target_is_leap_second != 1) ||
         target_nanoseconds < 0 ||
-        target_nanoseconds >= 1000000000L || maximum_slice_nanoseconds <= 0 ||
-        clock_gettime(CLOCK_REALTIME, &now) != 0) {
+        target_nanoseconds >= 1000000000L || maximum_slice_nanoseconds <= 0) {
         errno = EINVAL;
         return -1;
     }
@@ -144,6 +187,23 @@ int flyology_wall_wait_arm(
         errno = EOVERFLOW;
         return -1;
     }
+#if defined(FLYOLOGY_WALL_CLOCK_TEST_HOOKS) && \
+    FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+    {
+        int64_t remaining = atomic_load_explicit(
+            &flyology_test_remaining_nanoseconds, memory_order_relaxed);
+        if (remaining >= 0) {
+            now = target;
+            subtract_nanoseconds(&now, remaining);
+        } else if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+            return -1;
+        }
+    }
+#else
+    if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+        return -1;
+    }
+#endif
     probe = now;
     add_nanoseconds(&probe, maximum_slice_nanoseconds);
     deadline = timespec_before(&target, &probe) ? target : probe;
@@ -161,24 +221,23 @@ int flyology_wall_wait_arm(
     return errno == ECANCELED ? 1 : -1;
 #elif defined(__APPLE__)
     struct kevent timer;
-    if (state->change_fd >= 0) {
-        int64_t target_microseconds =
-            (int64_t)deadline.tv_sec * INT64_C(1000000) +
-            deadline.tv_nsec / 1000;
-        EV_SET(&timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT,
-               NOTE_ABSOLUTE | NOTE_USECONDS, target_microseconds, NULL);
-    } else {
-        int64_t timeout_nanoseconds =
-            timespec_difference_nanoseconds(&deadline, &now);
-        /* A monotonic probe bounds backstep detection when notifyd is absent.
-           A target crossed during setup becomes an immediate one-nanosecond
-           probe and is classified by the caller's post-arm sample. */
-        if (timeout_nanoseconds <= 0) {
-            timeout_nanoseconds = 1;
-        }
-        EV_SET(&timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT,
-               NOTE_NSECONDS, timeout_nanoseconds, NULL);
+    int64_t timeout_nanoseconds =
+        timespec_difference_nanoseconds(&deadline, &now);
+    /* NOTE_ABSOLUTE converts a calendar deadline into Mach absolute time at
+       registration and then ignores later wall-clock adjustment. A relative
+       monotonic timer is rearmed from a fresh realtime sample after every
+       clock notification or bounded probe. A target crossed during setup is
+       classified by the caller's post-arm sample. */
+    if (timeout_nanoseconds <= 0) {
+        timeout_nanoseconds = 1;
     }
+#if defined(FLYOLOGY_WALL_CLOCK_TEST_HOOKS) && \
+    FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+    atomic_store_explicit(&flyology_test_last_arm_nanoseconds,
+                          timeout_nanoseconds, memory_order_relaxed);
+#endif
+    EV_SET(&timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT,
+           NOTE_NSECONDS, timeout_nanoseconds, NULL);
     return kevent(state->wait_fd, &timer, 1, NULL, 0, NULL) < 0 ? -1 : 0;
 #endif
 }

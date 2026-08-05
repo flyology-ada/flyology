@@ -190,7 +190,7 @@ end case;</code></pre>
                 <div class="decision-row"><dt>Lightweight task</dt><dd>The fiber suspends on its execution group's event loop. Other ready tasks in that group may continue on the same loop thread.</dd></div>
                 <div class="decision-row"><dt>Native task</dt><dd>The wait uses the native path and blocks only that task's pthread.</dd></div>
                 <div class="decision-row"><dt>Linux</dt><dd>An absolute <code>timerfd</code> wait uses <code>TFD_TIMER_CANCEL_ON_SET</code> so a discontinuous real-time clock change wakes the wait for classification.</dd></div>
-                <div class="decision-row"><dt>Darwin</dt><dd>An absolute <code>kqueue</code> timer is paired with the system clock-set notification. If notification registration is unavailable, a one-second monotonic probe bounds detection latency apart from task scheduling delay.</dd></div>
+                <div class="decision-row"><dt>Darwin</dt><dd>A relative monotonic <code>kqueue</code> timer is armed from a fresh wall-clock sample and paired with the system clock-set notification. The wall deadline is sampled at least once per second, so a missing or missed notification has bounded detection latency apart from task scheduling delay.</dd></div>
               </dl>
             </div>
             <p>Both platform paths recheck wall and monotonic time after arming, closing the setup window in which the clock might otherwise change unnoticed.</p>

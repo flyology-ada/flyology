@@ -1494,14 +1494,16 @@ monotonic time, so wall-clock changes do not alter elapsed waits.
 `Flyology.IO.Timers.Wait_Until` is the explicit wall-clock exception to that
 rule. It accepts an `Ada.Calendar.Time`, completes when the adjustable clock
 reaches that target, and reports a backward adjustment larger than the caller's
-tolerance instead of silently extending the wait. Linux uses an absolute
-cancel-on-clock-set `timerfd`; Darwin combines an absolute realtime kqueue timer
-with the system clock-set notification, with bounded dual-clock sampling when
-the notification service is unavailable. That fallback checks once per second.
-These are ordinary readiness sources, so a lightweight caller suspends only its
-fiber while a native caller blocks only its pthread. A forward clock change may
-complete the wait; a backward change has precedence when both conditions are
-observed together.
+tolerance instead of silently extending the wait. The steady sample is
+monotonic and the wall sample remains `Ada.Calendar.Clock`. Linux uses an
+absolute cancel-on-clock-set `timerfd`. Darwin arms a relative monotonic kqueue
+timer from a fresh wall sample, pairs it with the system clock-set notification,
+and re-evaluates the wall deadline at least once per second so a missed
+notification has bounded detection latency apart from task scheduling delay.
+These are ordinary readiness sources, so a lightweight caller suspends only
+its fiber while a native caller blocks only its pthread. A forward clock change
+may complete the wait; a backward change has precedence when both conditions
+are observed together.
 
 Each loop stores finite deadlines in an indexed binary min-heap. Insertion and
 cancellation are `O(log n)`, the next poll deadline is available in `O(1)`, and

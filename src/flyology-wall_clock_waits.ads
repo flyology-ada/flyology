@@ -3,7 +3,8 @@ with Ada.Finalization;
 with Interfaces.C;
 
 --  Internal controlled owner of one platform wall-clock readiness source.
---  Linux uses timerfd; Darwin uses a kqueue timer and clock-set notification.
+--  Linux uses timerfd; Darwin uses a relative kqueue timer, clock-set
+--  notification, and bounded wall-clock re-evaluation.
 private package Flyology.Wall_Clock_Waits is
    use type Interfaces.C.int;
 
@@ -25,8 +26,8 @@ private package Flyology.Wall_Clock_Waits is
    procedure Consume (Item : in out Source);
    --  Borrow the descriptor registered with Flyology.IO.
    function Descriptor (Item : Source) return Interfaces.C.int;
-   --  Report whether the source receives discontinuous clock-change events.
-   function Detects_Clock_Changes (Item : Source) return Boolean;
+   --  Report whether the kernel timer itself cancels on a clock change.
+   function Cancels_On_Clock_Set (Item : Source) return Boolean;
 
 private
    type Native_Wait_State is record

@@ -96,8 +96,9 @@ package body Flyology.Wall_Clock_Waits is
    function Descriptor (Item : Source) return C.int is
      (Item.Native.Wait_FD);
 
-   function Detects_Clock_Changes (Item : Source) return Boolean is
-     (Item.Native.Change_FD >= 0);
+   function Cancels_On_Clock_Set (Item : Source) return Boolean is
+     (Item.Native.Wait_FD >= 0
+      and then Item.Native.Change_FD = Item.Native.Wait_FD);
 
    overriding procedure Finalize (Item : in out Source) is
    begin

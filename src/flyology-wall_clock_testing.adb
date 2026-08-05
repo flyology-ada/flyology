@@ -1,4 +1,23 @@
+with Interfaces.C;
+with Flyology.Time_Math;
+
 package body Flyology.Wall_Clock_Testing is
+   package C renames Interfaces.C;
+   use type C.int;
+   use type C.long_long;
+
+   procedure Native_Set_Remaining (Value : C.long_long);
+   pragma Import
+     (C, Native_Set_Remaining, "flyology_wall_wait_test_set_remaining");
+
+   function Native_Last_Arm return C.long_long;
+   pragma Import (C, Native_Last_Arm, "flyology_wall_wait_test_last_arm");
+
+   function Native_Uses_Relative_Timer return C.int;
+   pragma Import
+     (C,
+      Native_Uses_Relative_Timer,
+      "flyology_wall_wait_test_uses_relative_timer");
    protected Control is
       procedure Set_Offset (Value : Duration);
       function Offset return Duration;
@@ -78,4 +97,20 @@ package body Flyology.Wall_Clock_Testing is
    begin
       Control.Wait_For_Baseline;
    end Wait_For_Baseline;
+
+   procedure Set_Native_Remaining (Value : Duration) is
+   begin
+      Native_Set_Remaining (Flyology.Time_Math.To_Nanoseconds (Value));
+   end Set_Native_Remaining;
+
+   procedure Reset_Native_Remaining is
+   begin
+      Native_Set_Remaining (-1);
+   end Reset_Native_Remaining;
+
+   function Last_Native_Arm return Duration is
+     (Duration (Native_Last_Arm) / 1_000_000_000);
+
+   function Uses_Native_Relative_Timer return Boolean is
+     (Native_Uses_Relative_Timer /= 0);
 end Flyology.Wall_Clock_Testing;

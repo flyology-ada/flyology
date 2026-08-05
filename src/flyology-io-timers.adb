@@ -69,15 +69,22 @@ package body Flyology.IO.Timers is
         return Flyology.Wall_Clock_Policy.Wait_Action
       is
          Wall_Elapsed : constant Duration := Current.Wall - Previous.Wall;
-         Steady_Elapsed : constant Duration := Ada.Real_Time.To_Duration
-           (Current.Steady - Previous.Steady);
       begin
-         return
-           Flyology.Wall_Clock_Policy.Classify
-             (Target_Reached => Current.Wall >= Target,
-              Wall_Elapsed   => Wall_Elapsed,
-              Steady_Elapsed => Steady_Elapsed,
-              Tolerance      => Backstep_Tolerance);
+         if Current.Steady < Previous.Steady then
+            raise Flyology.IO.Device_Error with
+              "monotonic clock moved backward during wall-clock wait";
+         end if;
+         declare
+            Steady_Elapsed : constant Duration := Ada.Real_Time.To_Duration
+              (Current.Steady - Previous.Steady);
+         begin
+            return
+              Flyology.Wall_Clock_Policy.Classify
+                (Target_Reached => Current.Wall >= Target,
+                 Wall_Elapsed   => Wall_Elapsed,
+                 Steady_Elapsed => Steady_Elapsed,
+                 Tolerance      => Backstep_Tolerance);
+         end;
       end Classify;
    begin
       if Initial.Wall >= Target then
@@ -103,7 +110,7 @@ package body Flyology.IO.Timers is
          loop
             declare
                Maximum_Slice : constant Duration :=
-                 (if Flyology.Wall_Clock_Waits.Detects_Clock_Changes (Source)
+                 (if Flyology.Wall_Clock_Waits.Cancels_On_Clock_Set (Source)
                   then Maximum_Wait_Slice
                   else Fallback_Wait_Slice);
                Clock_Changed : constant Boolean :=

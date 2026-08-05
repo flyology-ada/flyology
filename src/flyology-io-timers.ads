@@ -45,15 +45,17 @@ package Flyology.IO.Timers is
    --  revalidate its schedule; smaller changes are treated as jitter and the
    --  wait is rearmed. The comparison uses monotonic elapsed time and
    --  therefore detects a backstep even when successive wall-clock samples
-   --  still increase. If the platform clock-change notification is
-   --  unavailable, a one-second monotonic sampling fallback bounds detection
-   --  latency apart from normal task-scheduling delay.
+   --  still increase. Linux uses cancel-on-clock-set readiness. Darwin pairs
+   --  clock-set notification with a relative monotonic timer and samples the
+   --  wall clock at least once per second, bounding a missed notification's
+   --  detection latency apart from normal task-scheduling delay.
    --  A lightweight task suspends on its event loop; a native task blocks only
    --  its pthread. The operation does not wake a suspended computer.
    --  @param Target Absolute Ada.Calendar wall-clock target
    --  @param Backstep_Tolerance Permitted lost wall-clock progress in seconds
    --  @return Terminal outcome, observation, and estimated backward adjustment
-   --  @exception Flyology.IO.Device_Error Clock timer setup or waiting fails
+   --  @exception Flyology.IO.Device_Error Clock sampling, timer setup, or
+   --     waiting fails
    function Wait_Until
      (Target             : Ada.Calendar.Time;
       Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
