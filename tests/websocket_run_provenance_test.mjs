@@ -672,6 +672,29 @@ test("live verification failure restores the fingerprinted prior bundle", async 
   for (const path of publicationSiblings(output)) {
     assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
   }
+
+  const cleanupFailed = runPublisher(
+    newInput,
+    output,
+    "live-verify,rollback-cleanup-after-restore"
+  );
+  assert.notEqual(cleanupFailed.status, 0);
+  assert.match(cleanupFailed.stderr, /prior bundle restored/);
+  assert.match(cleanupFailed.stderr, /rollback-cleanup-after-restore/);
+  assert.deepEqual(await snapshotDirectory(output), prior);
+  await assertCompletePublishedBundle(output, oldRevision);
+  const [, backup, , invalid, transaction, , lock] = publicationSiblings(output);
+  assert.equal(await lstat(backup).catch(() => null), null);
+  assert.notEqual(await lstat(invalid).catch(() => null), null);
+  assert.notEqual(await lstat(transaction).catch(() => null), null);
+  assert.equal(await lstat(lock).catch(() => null), null);
+
+  const cleanup = runPublisher(newInput, output, "render");
+  assert.notEqual(cleanup.status, 0);
+  assert.deepEqual(await snapshotDirectory(output), prior);
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
+  }
 });
 
 test("crash after invalid live rename recovers the intact prior bundle", async (t) => {
@@ -697,6 +720,19 @@ test("crash after invalid live rename recovers the intact prior bundle", async (
   assert.notEqual(crashed.status, 0);
   assert.equal(await lstat(output).catch(() => null), null);
   await assertCompletePublishedBundle(backup, oldRevision);
+  assert.notEqual(await lstat(invalid).catch(() => null), null);
+  assert.notEqual(await lstat(transaction).catch(() => null), null);
+  assert.equal(await lstat(lock).catch(() => null), null);
+
+  const cleanupFailed = runPublisher(
+    newInput,
+    output,
+    "rollback-cleanup-after-restore"
+  );
+  assert.notEqual(cleanupFailed.status, 0);
+  assert.match(cleanupFailed.stderr, /rollback-cleanup-after-restore/);
+  await assertCompletePublishedBundle(output, oldRevision);
+  assert.equal(await lstat(backup).catch(() => null), null);
   assert.notEqual(await lstat(invalid).catch(() => null), null);
   assert.notEqual(await lstat(transaction).catch(() => null), null);
   assert.equal(await lstat(lock).catch(() => null), null);

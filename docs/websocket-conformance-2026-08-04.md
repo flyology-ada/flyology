@@ -223,14 +223,16 @@ The publication commit completes only after the stage-to-live rename is
 re-verified against the staged fingerprint. A verification failure before that
 point restores only an intact fingerprinted prior bundle; without a prior
 bundle, the unverified tree is atomically quarantined and its transaction
-marker is retained for operator inspection. After live verification, the old
-bundle moves to a non-rollback quarantine, and cleanup failure cannot replace
-the verified live tree with a partially deleted backup. The lock remains owned
-through that cleanup, and every shared stage, transaction, backup, and
-quarantine rename or removal checks the same owner nonce first. The 2026-08-04
-raw outputs predate the metadata schema, so this historical report preserves
-the implementation and complete harness/report snapshots above rather than
-inventing per-run revisions.
+marker is retained for operator inspection. Once the restored prior tree
+matches its recorded fingerprint, later quarantine or transaction cleanup
+failure cannot reclassify or move that live tree. After live verification, the
+old bundle moves to a non-rollback quarantine, and cleanup failure cannot
+replace the verified live tree with a partially deleted backup. The lock
+remains owned through that cleanup, and every shared stage, transaction,
+backup, and quarantine rename or removal checks the same owner nonce first.
+The 2026-08-04 raw outputs predate the metadata schema, so this historical
+report preserves the implementation and complete harness/report snapshots
+above rather than inventing per-run revisions.
 
 The published report is available at
 [flyology.org/reports/websocket](https://flyology.org/reports/websocket/).

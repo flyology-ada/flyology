@@ -1229,7 +1229,8 @@ async function verifyBundle(root, loaded, provenance) {
 }
 
 function injectFailure(point) {
-  if (process.env.FLYOLOGY_WEBSOCKET_PUBLISH_FAIL === point) {
+  const requested = (process.env.FLYOLOGY_WEBSOCKET_PUBLISH_FAIL || "").split(",");
+  if (requested.includes(point)) {
     throw new Error(`forced WebSocket publication failure at ${point}`);
   }
 }
@@ -1380,9 +1381,22 @@ async function restoreRollbackBackup(lock, paths, transaction) {
   if (restoredFingerprint !== transaction.backupFingerprint) {
     throw new Error("restored publication output differs from the verified rollback backup");
   }
+}
+
+async function cleanupRestoredRollback(lock, paths) {
+  injectFailure("rollback-cleanup-after-restore");
   await removeOwnedDirectory(lock, paths.stageRoot, "abandoned publication stage");
   await removeOwnedDirectory(lock, paths.invalidRoot, "invalid publication quarantine");
   await removeOwnedFile(lock, paths.transactionPath, "publication transaction");
+}
+
+async function outputMatchesRollbackFingerprint(transaction) {
+  if (!(await requireSafeDirectory(outputRoot, "restored publication output", true))) {
+    return false;
+  }
+  return (
+    (await fingerprintDirectory(outputRoot)) === transaction.backupFingerprint
+  );
 }
 
 async function retireCommittedBackup(lock, paths) {
@@ -1433,10 +1447,12 @@ async function recoverPublication(lock, paths, loaded, provenance) {
           );
         } else {
           await restoreRollbackBackup(lock, paths, transaction);
+          await cleanupRestoredRollback(lock, paths);
         }
       }
     } else if (transaction.backupFingerprint !== null) {
       await restoreRollbackBackup(lock, paths, transaction);
+      await cleanupRestoredRollback(lock, paths);
     } else {
       if (
         await requireSafeDirectory(
@@ -1646,16 +1662,29 @@ async function publishBundle(loaded, provenance) {
 
       if (liveRenamed) {
         let restoredPrior = false;
-        try {
-          if (backedUp) {
+        if (backedUp) {
+          try {
             await restoreRollbackBackup(lock, paths, transaction);
             backedUp = false;
             restoredPrior = true;
-          } else {
-            await quarantineInvalidLive(lock, paths);
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+            try {
+              restoredPrior = await outputMatchesRollbackFingerprint(transaction);
+              if (restoredPrior) backedUp = false;
+            } catch (fingerprintError) {
+              rollbackErrors.push(fingerprintError);
+            }
           }
-        } catch (rollbackError) {
-          rollbackErrors.push(rollbackError);
+          if (restoredPrior) {
+            try {
+              await cleanupRestoredRollback(lock, paths);
+            } catch (cleanupError) {
+              rollbackErrors.push(cleanupError);
+            }
+          }
+        }
+        if (!restoredPrior) {
           if (await requireSafeDirectory(outputRoot, "unverified live output", true)) {
             try {
               await quarantineInvalidLive(lock, paths);
@@ -1683,6 +1712,7 @@ async function publishBundle(loaded, provenance) {
         if (backedUp) {
           await restoreRollbackBackup(lock, paths, transaction);
           backedUp = false;
+          await cleanupRestoredRollback(lock, paths);
         } else {
           await removeOwnedFile(lock, paths.transactionPath, "publication transaction");
           await removeOwnedDirectory(lock, paths.stageRoot, "failed publication stage");
