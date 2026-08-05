@@ -28,10 +28,8 @@ package body Flyology.Channels.Bounded is
       begin
          case Policy.Classify_Receive (Stopped, Count) is
             when Policy.Accept_Receive =>
-               Position := Head;
-               Value := Buffer (Position);
-               Head := Policy.Advance (Head, Capacity);
-               Count := Policy.Count_After_Receive (Count);
+               Value := Buffer (Head);
+               Policy.Apply_Dequeue (Head, Count, Capacity, Position);
                --  Commit logical removal before clearing controlled storage.
                --  Element operations are required not to raise, but this
                --  ordering prevents a violating finalizer from making the
@@ -71,10 +69,8 @@ package body Flyology.Channels.Bounded is
       begin
          case Policy.Classify_Receive (Stopped, Count) is
             when Policy.Accept_Receive =>
-               Position := Head;
-               Value := Buffer (Position);
-               Head := Policy.Advance (Head, Capacity);
-               Count := Policy.Count_After_Receive (Count);
+               Value := Buffer (Head);
+               Policy.Apply_Dequeue (Head, Count, Capacity, Position);
                Buffer (Position) := Empty_Value;
                Result := Item_Received;
             when Policy.Wait_To_Receive =>

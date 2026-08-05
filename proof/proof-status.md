@@ -2,9 +2,16 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #10, #12, #13, #14, #15, #16, #17, #18, #19, and #47 are
+Findings #5, #8, #10, #12, #13, #14, #15, #16, #17, #18, #19, and #47 are
 prevented by production-consumed SPARK units. Their assigned targeted
 subprogram proofs and fresh whole-unit widenings passed at level 1.
+Finding #8 proves the scalar dequeue transition consumed by both bounded-channel
+receive paths: its vacated position is the old head, while its next head and
+count are the corresponding ring advance and decrement. The generic channel
+body, its use of the returned position, arbitrary element resource semantics,
+and controlled assignment/finalization remain outside SPARK. Capacity-two wrap,
+controlled-retention, and exceptional-ordering tests cover that boundary in
+both task lanes.
 Finding #10 proves only that the Ada listener descriptor token is consumed
 after the imported close function returns. It does not model `close(2)`, its
 return semantics, or descriptor reuse; focused fault-enabled coverage exercises
@@ -50,6 +57,11 @@ warning, assumption, justified check, or unproved check.
 
 - [x] Pre-change application policy suite (level 1, mode all)
 - [x] Pre-change runtime scheduling policy suite (level 1, mode all)
+- [x] Finding #8 production-used bounded-channel dequeue transition
+      (level 1, mode all)
+  - [x] `Flyology.Channel_Policy.Next_Dequeue`
+  - [x] `Flyology.Channel_Policy.Apply_Dequeue`
+  - [x] Whole `Flyology.Channel_Policy` unit widening
 - [x] Finding #10 production-used listener close-attempt ownership transition
       (level 1, mode all)
   - [x] `Flyology.Structured_Server_Policy.Consume_After_Close_Attempt`
@@ -113,6 +125,7 @@ warning, assumption, justified check, or unproved check.
      step (Strategic Loop Step 4) in workflow.md in the /gnatprove Skill -->
 
 - [x] Finding #5 prevention coverage
+- [x] Finding #8 bounded-channel dequeue-transition prevention coverage
 - [x] Finding #14 prevention coverage
 - [x] Finding #16 prevention coverage
 - [x] Finding #12 prevention coverage
@@ -140,6 +153,24 @@ warning, assumption, justified check, or unproved check.
 
 ## Discovered Obligations
 
+- [x] Prove finding #8 old-head dequeue action at targeted subprogram scope
+- [x] Prove finding #8 scalar dequeue commit at targeted subprogram scope
+- [x] Record that the controlled generic slot assignment is outside SPARK;
+      omission or misdirection remains covered by behavioral tests
+- [x] Widen the complete `Flyology.Channel_Policy` unit at level 1 and mode all
+- [x] Confirm production `Receive` and `Try_Receive` consume the scalar
+      transition and clear its returned vacated position; the generic body and
+      this call-site coupling remain outside SPARK
+- [x] Cover multi-slot dequeue position and circular wrap behavior alongside
+      controlled resource release and exceptional ordering in both task lanes
+- [x] Independent read-only review confirmed the scalar proof and controlled
+      ordering, and its documentation-boundary finding was corrected
+- [x] Re-ran the application and runtime proof suites serially after finding #8
+      integration
+- [x] Re-ran the full behavioral suite after rebasing findings #8 and #47 and
+      strengthening the capacity-two wrong-slot coverage
+- [x] Final post-rebase read-only review found the blocking-tail test gap; the
+      strengthened sequence was independently rechecked with no findings
 - [x] Re-verified callers of `Begin_Frame`, `Mask_Offset`, `Advance`,
       `Complete_Frame`, and `Abandon_Frame` contracts
 - [x] Fresh host `-f` widening for `Begin_Frame`

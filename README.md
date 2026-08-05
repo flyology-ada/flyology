@@ -603,6 +603,15 @@ reuses the slot. Element assignment and finalization run under the channel's
 protected lock and must not block, reenter the same channel, or propagate an
 exception. Dequeue state is committed before slot clearing, so a raising
 finalizer cannot make an already copied value available a second time.
+The production dequeue consumes one SPARK-proved scalar transition that returns
+the old-head position while advancing the head and decrementing the count. It
+then replaces that returned slot with `Empty_Value`. The proof ties the three
+scalar results together; it does not analyze the generic element assignment,
+prove that an application's `Empty_Value` releases every resource, or prove
+controlled finalization behavior. The capacity-two wrap test catches an omitted
+clear or use of the updated head, tail, or other slot along that blocking and
+nonblocking two-slot sequence. Controlled-element tests cover immediate release
+and exceptional ordering in both task lanes.
 
 ```ada
 package Jobs is new Flyology.Channels.Bounded

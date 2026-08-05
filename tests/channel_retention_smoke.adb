@@ -6,6 +6,7 @@ with Flyology.Channels.Bounded;
 procedure Channel_Retention_Smoke is
    type Resource is record
       References : Positive := 1;
+      Identity   : Positive := 1;
    end record;
    type Resource_Access is access Resource;
 
@@ -52,9 +53,17 @@ procedure Channel_Retention_Smoke is
       end if;
    end Finalize;
 
-   function Make return Tracked_Value is
+   function Make (Identity : Positive := 1) return Tracked_Value is
      (Ada.Finalization.Controlled with
-        Owner => new Resource'(References => 1));
+        Owner => new Resource'(References => 1, Identity => Identity));
+
+   function Resource_Identity (Item : Tracked_Value) return Positive is
+   begin
+      if Item.Owner = null then
+         raise Program_Error with "received an empty channel slot";
+      end if;
+      return Item.Owner.Identity;
+   end Resource_Identity;
 
    procedure Drop (Item : in out Tracked_Value) is
    begin
@@ -103,6 +112,47 @@ procedure Channel_Retention_Smoke is
       Drop (Received);
       Check_Released (Before + 1, "Try_Receive");
    end Exercise_Try_Receive;
+
+   procedure Exercise_Position_And_Wrap is
+      use type Channels.Try_Receive_Result;
+      Queue           : Channels.Channel (Capacity => 2);
+      First           : Tracked_Value := Make (1);
+      Second          : Tracked_Value := Make (2);
+      Third           : Tracked_Value := Make (3);
+      Received_First  : Tracked_Value;
+      Received_Second : Tracked_Value;
+      Received_Third  : Tracked_Value;
+      Result           : Channels.Try_Receive_Result;
+      Before          : constant Natural := Released;
+   begin
+      Queue.Send (First);
+      Drop (First);
+
+      Queue.Receive (Received_First);
+      pragma Assert (Resource_Identity (Received_First) = 1);
+      Drop (Received_First);
+      --  With one item buffered, Tail differs from the old Head.  Checking
+      --  release before either slot is reused distinguishes the vacated slot
+      --  from both the updated Head and Tail on the blocking path.
+      Check_Released (Before + 1, "blocking position");
+
+      Queue.Send (Second);
+      Queue.Send (Third);
+      Drop (Second);
+      Drop (Third);
+
+      Queue.Try_Receive (Received_Second, Result);
+      pragma Assert (Result = Channels.Item_Received);
+      Queue.Try_Receive (Received_Third, Result);
+      pragma Assert (Result = Channels.Item_Received);
+      pragma Assert (Resource_Identity (Received_Second) = 2);
+      pragma Assert (Resource_Identity (Received_Third) = 3);
+      pragma Assert (Queue.Current.Pending = 0);
+
+      Drop (Received_Second);
+      Drop (Received_Third);
+      Check_Released (Before + 3, "position and wrap");
+   end Exercise_Position_And_Wrap;
 
    procedure Exercise_Close_And_Drain is
       use type Channels.Try_Receive_Result;
@@ -236,6 +286,7 @@ procedure Channel_Retention_Smoke is
          begin
             Exercise_Receive;
             Exercise_Try_Receive;
+            Exercise_Position_And_Wrap;
             Exercise_Close_And_Drain;
             Exercise_Timeouts;
             Exercise_Raising_Adjust;

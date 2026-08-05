@@ -71,6 +71,46 @@ is
    function Count_After_Receive (Count : Positive) return Natural
    with Post => Count_After_Receive'Result = Count - 1;
 
+   type Dequeue_Transition is record
+      Vacated_Position : Positive;
+      Next_Head        : Positive;
+      Next_Count       : Natural;
+   end record;
+
+   --  Bind the slot vacated by one dequeue to the old head and carry the
+   --  corresponding head and count updates as one transition.
+   function Next_Dequeue
+     (Head     : Positive;
+      Count    : Positive;
+      Capacity : Positive) return Dequeue_Transition
+   with Global => null,
+        Pre    => Head <= Capacity and then Count <= Capacity,
+        Post   =>
+          Next_Dequeue'Result.Vacated_Position = Head
+          and then Next_Dequeue'Result.Next_Head = Advance (Head, Capacity)
+          and then Next_Dequeue'Result.Next_Count =
+            Count_After_Receive (Count);
+
+   --  Commit the scalar portion of a dequeue and return the old-head slot
+   --  that the caller must clear after copying its value.
+   procedure Apply_Dequeue
+     (Head             : in out Positive;
+      Count            : in out Natural;
+      Capacity         : Positive;
+      Vacated_Position : out Positive)
+   with Global => null,
+        Pre    => Head <= Capacity and then Count in 1 .. Capacity,
+        Post   =>
+          Vacated_Position =
+            Next_Dequeue
+              (Head'Old, Positive (Count'Old), Capacity).Vacated_Position
+          and then Head =
+            Next_Dequeue
+              (Head'Old, Positive (Count'Old), Capacity).Next_Head
+          and then Count =
+            Next_Dequeue
+              (Head'Old, Positive (Count'Old), Capacity).Next_Count;
+
    --  Open the drain barrier only after close reaches an empty buffer.
    function Is_Drained
      (Stopped : Boolean;

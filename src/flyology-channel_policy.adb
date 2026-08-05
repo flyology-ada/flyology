@@ -46,6 +46,29 @@ is
    function Count_After_Receive (Count : Positive) return Natural is
      (Count - 1);
 
+   function Next_Dequeue
+     (Head     : Positive;
+      Count    : Positive;
+      Capacity : Positive) return Dequeue_Transition
+   is
+     (Vacated_Position => Head,
+      Next_Head        => Advance (Head, Capacity),
+      Next_Count       => Count_After_Receive (Count));
+
+   procedure Apply_Dequeue
+     (Head             : in out Positive;
+      Count            : in out Natural;
+      Capacity         : Positive;
+      Vacated_Position : out Positive)
+   is
+      Transition : constant Dequeue_Transition :=
+        Next_Dequeue (Head, Positive (Count), Capacity);
+   begin
+      Vacated_Position := Transition.Vacated_Position;
+      Head := Transition.Next_Head;
+      Count := Transition.Next_Count;
+   end Apply_Dequeue;
+
    function Is_Drained
      (Stopped : Boolean;
       Count   : Natural) return Boolean
