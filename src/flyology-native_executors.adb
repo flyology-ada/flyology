@@ -210,16 +210,16 @@ package body Flyology.Native_Executors is
 
       procedure Abandon
         (Slot       : Positive;
-         Generation : Natural;
-         Token      : out Token_Access) is
+         Generation : Natural) is
       begin
-         Token := null;
          if Generations (Slot) /= Generation or else Generation = 0
            or else Status (Slot) = Free
          then
             raise Invalid_Handle;
          end if;
-         Token := Tokens (Slot);
+         if Tokens (Slot) /= null then
+            Tokens (Slot).Request;
+         end if;
          Counters.Abandoned_Operations :=
            Counters.Abandoned_Operations + 1;
          if Status (Slot) = Completed then
@@ -573,7 +573,6 @@ package body Flyology.Native_Executors is
    procedure Abandon
      (Item : aliased in out Executor; Handle : in out Operation_Handle)
    is
-      Token : Token_Access;
    begin
       if not Handle.Guard.Active
         or else Handle.Owner.all'Address /= Item'Address
@@ -581,25 +580,18 @@ package body Flyology.Native_Executors is
          raise Invalid_Handle;
       end if;
       Item.State.Abandon
-        (Handle.Guard.Slot, Handle.Guard.Generation, Token);
+        (Handle.Guard.Slot, Handle.Guard.Generation);
       Handle.Guard.Active := False;
-      if Token /= null and then not Token.Requested then
-         Token.Request;
-      end if;
    end Abandon;
 
    function Statistics (Item : Executor) return Executor_Statistics is
      (Item.State.Statistics);
 
    overriding procedure Finalize (Item : in out Handle_Guard) is
-      Token : Token_Access;
    begin
       if Item.Active and then Item.State /= null then
          begin
-            Item.State.Abandon (Item.Slot, Item.Generation, Token);
-            if Token /= null and then not Token.Requested then
-               Token.Request;
-            end if;
+            Item.State.Abandon (Item.Slot, Item.Generation);
          exception
             when others => null;
          end;

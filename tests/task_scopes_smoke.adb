@@ -300,10 +300,17 @@ procedure Task_Scopes_Smoke is
          Abandoned : Native_Executor.Operation_Handle (Item'Access);
       begin
          Native_Executor.Submit
-           (Item, 0, null, Ada.Real_Time.Time_Last, Abandoned, Accepted);
+           (Item, 9, null, Ada.Real_Time.Time_Last, Abandoned, Accepted);
          pragma Assert (Accepted);
-         --  Finalizing Abandoned requests its executor-owned token and marks
-         --  the slot for automatic reclamation.
+         for Attempt in 1 .. 100 loop
+            exit when
+              Native_Executor.Statistics (Item).Successful_Executions = 2;
+            delay 0.001;
+         end loop;
+         pragma Assert
+           (Native_Executor.Statistics (Item).Successful_Executions = 2);
+         --  Finalizing a completed handle requests its executor-owned token
+         --  and immediately releases the slot for reuse.
       end;
       declare
          Reused : Native_Executor.Operation_Handle (Item'Access);

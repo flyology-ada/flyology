@@ -182,8 +182,7 @@ private
          Ready      : out Boolean);
       procedure Abandon
         (Slot       : Positive;
-         Generation : Natural;
-         Token      : out Token_Access);
+         Generation : Natural);
       procedure Shutdown;
       procedure Token_At (Slot : Positive; Token : out Token_Access);
       procedure Set_Expected_Workers (Count : Natural);
