@@ -1,33 +1,47 @@
 {
-  "schema": 2,
+  "schema": 3,
   "source_revision": "46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9",
-  "source_revision_reachable_equivalent": "49ef1ca535dced0fde888e291914d7fab9beb61f",
-  "source_revision_equivalence": {
-    "basis": "identical showcases/http-comparison subtree and stable patch-id",
+  "source_revision_reachable_showcase_analogue": "49ef1ca535dced0fde888e291914d7fab9beb61f",
+  "source_revision_analogue": {
+    "scope": "showcases/http-comparison subtree only",
+    "basis": "identical showcases/http-comparison subtree; stable patch-id identifies the same commit delta",
     "showcase_tree": "2d9f8d5b2af866506b97fa5d41df2e1be7dce8e6",
-    "stable_patch_id": "1bfe43a0b88ecf13dd91bc2bcb9c793e20e1b116"
+    "stable_patch_id": "1bfe43a0b88ecf13dd91bc2bcb9c793e20e1b116",
+    "complete_benchmark_input_equivalent": false,
+    "reproduction_checkout": false,
+    "note": "No equivalence proof covers every file packaged by the Kubernetes overlay or the complete benchmark build inputs."
   },
   "harness_correction_revision": "b0cfa28b1d31313f022f42a0d79d4e7b84a5719b",
   "measurement_sources": {
     "local": {
       "revision": "d0abaa294e7c650aef3e94c10b757d103ef561ee",
-      "reachable_equivalent_revision": "6110161d0806d504a1802030c6ce74c519c15e7f",
-      "equivalence": {
-        "basis": "identical showcases/http-comparison subtree and stable patch-id",
+      "reachable_showcase_analogue_revision": "6110161d0806d504a1802030c6ce74c519c15e7f",
+      "analogue": {
+        "scope": "showcases/http-comparison subtree and commit delta only",
+        "basis": "identical showcases/http-comparison subtree; stable patch-id identifies the same commit delta",
         "showcase_tree": "f439cde5aa47d23219abe0d8460cc6c311a11886",
-        "stable_patch_id": "d436bc7585d767a044bc5d44fd1222a5ef28c5f9"
+        "stable_patch_id": "d436bc7585d767a044bc5d44fd1222a5ef28c5f9",
+        "recorded_src_tree": "973d62b85a59326c19657e7f3d73407858c4a5fc",
+        "reachable_analogue_src_tree": "b7dd01c7293dfa3fe52756829379533197e2ef2c",
+        "measured_binary_equivalent": false,
+        "reproduction_checkout": false,
+        "note": "The local Docker build compiles Flyology sources outside the matching showcase subtree; the differing src trees mean this analogue cannot reproduce the recorded binary."
       },
       "dirty": false
     },
     "kubernetes": {
       "checkout_revision": "7880b4e231e043bf1fb102d34b0b362ac0505fe7",
       "local_overlay": true,
-      "overlay_equivalent_revision": "46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9",
-      "overlay_reachable_equivalent_revision": "49ef1ca535dced0fde888e291914d7fab9beb61f",
-      "overlay_equivalence": {
-        "basis": "identical showcases/http-comparison subtree and stable patch-id",
+      "overlay_recorded_revision": "46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9",
+      "overlay_reachable_showcase_analogue_revision": "49ef1ca535dced0fde888e291914d7fab9beb61f",
+      "overlay_analogue": {
+        "scope": "showcases/http-comparison subtree only",
+        "basis": "identical showcases/http-comparison subtree; stable patch-id identifies the same commit delta",
         "showcase_tree": "2d9f8d5b2af866506b97fa5d41df2e1be7dce8e6",
-        "stable_patch_id": "1bfe43a0b88ecf13dd91bc2bcb9c793e20e1b116"
+        "stable_patch_id": "1bfe43a0b88ecf13dd91bc2bcb9c793e20e1b116",
+        "complete_overlay_equivalent": false,
+        "reproduction_checkout": false,
+        "note": "The tree proof does not cover the other files packaged by the overlay runner, so the reachable commit is not presented as the recorded overlay or a reproduction checkout."
       },
       "note": "The overlay commit was created after launch without changing the running overlay bytes."
     }

@@ -39,15 +39,23 @@ function patchId(revision) {
   return result.stdout.trim().split(/\s+/, 1)[0];
 }
 
-test("method schema retains recorded hashes and reachable equivalents", async () => {
+test("method schema retains recorded hashes and scopes reachable analogues", async () => {
   const method = JSON.parse(await readFile(methodPath, "utf8"));
-  assert.equal(method.schema, 2);
+  assert.equal(method.schema, 3);
   assert.equal(method.source_revision, recordedOverlay);
-  assert.equal(method.source_revision_reachable_equivalent, reachableOverlay);
+  assert.equal(method.source_revision_reachable_showcase_analogue, reachableOverlay);
+  assert.equal(method.source_revision_analogue.complete_benchmark_input_equivalent, false);
+  assert.equal(method.source_revision_analogue.reproduction_checkout, false);
   assert.equal(method.measurement_sources.local.revision, recordedLocal);
   assert.equal(
-    method.measurement_sources.local.reachable_equivalent_revision,
+    method.measurement_sources.local.reachable_showcase_analogue_revision,
     reachableLocal
+  );
+  assert.equal(method.measurement_sources.local.analogue.measured_binary_equivalent, false);
+  assert.equal(method.measurement_sources.local.analogue.reproduction_checkout, false);
+  assert.equal(
+    method.measurement_sources.kubernetes.overlay_analogue.complete_overlay_equivalent,
+    false
   );
   assert.equal(
     method.measurement_sources.kubernetes.checkout_revision,
@@ -61,31 +69,50 @@ test("method schema retains recorded hashes and reachable equivalents", async ()
   assert.match(method.validity.aggregate_regeneration, /cannot be independently regenerated/);
 });
 
-test("reachable equivalents match the recorded subtree and patch evidence", async () => {
+test("reachable analogues match only the recorded subtree and patch evidence", async () => {
   const method = JSON.parse(await readFile(methodPath, "utf8"));
   assert.equal(
     git("rev-parse", `${reachableLocal}:showcases/http-comparison`),
-    method.measurement_sources.local.equivalence.showcase_tree
+    method.measurement_sources.local.analogue.showcase_tree
   );
   assert.equal(
     patchId(reachableLocal),
-    method.measurement_sources.local.equivalence.stable_patch_id
+    method.measurement_sources.local.analogue.stable_patch_id
   );
   assert.equal(
     git("rev-parse", `${reachableOverlay}:showcases/http-comparison`),
-    method.source_revision_equivalence.showcase_tree
+    method.source_revision_analogue.showcase_tree
   );
-  assert.equal(patchId(reachableOverlay), method.source_revision_equivalence.stable_patch_id);
+  assert.equal(
+    patchId(reachableOverlay),
+    method.source_revision_analogue.stable_patch_id
+  );
+  assert.equal(
+    git("rev-parse", `${recordedLocal}:src`),
+    method.measurement_sources.local.analogue.recorded_src_tree
+  );
+  assert.equal(
+    git("rev-parse", `${reachableLocal}:src`),
+    method.measurement_sources.local.analogue.reachable_analogue_src_tree
+  );
+  assert.notEqual(
+    method.measurement_sources.local.analogue.recorded_src_tree,
+    method.measurement_sources.local.analogue.reachable_analogue_src_tree
+  );
 });
 
-test("journal links and reproduction commands use reachable snapshots", async () => {
+test("journal links analogues without offering them as reproduction checkouts", async () => {
   const html = await readFile(join(journalRoot, "index.html"), "utf8");
   assert.match(html, new RegExp(`/tree/${reachableLocal}/showcases/http-comparison`));
   assert.match(html, new RegExp(`/tree/${reachableOverlay}/showcases/http-comparison`));
   assert.doesNotMatch(html, new RegExp(`/tree/${recordedLocal}/`));
   assert.doesNotMatch(html, new RegExp(`/tree/${recordedOverlay}/`));
-  assert.match(html, new RegExp(`git switch --detach ${reachableLocal}`));
-  assert.match(html, new RegExp(`git switch --detach ${reachableOverlay}`));
+  assert.doesNotMatch(html, new RegExp(`git switch --detach ${reachableLocal}`));
+  assert.doesNotMatch(html, new RegExp(`git switch --detach ${reachableOverlay}`));
+  assert.match(html, /It cannot reproduce the measured binary/);
+  assert.match(html, /Neither reachable analogue is a historical reproduction checkout/);
+  assert.match(html, /git switch --detach &lt;reachable-commit-to-measure&gt;/);
+  assert.match(html, /HTTP_BENCH_LOCAL_OVERLAY=0/);
   assert.match(html, /raw oha JSON[\s\S]*are no longer available/);
   assert.match(html, /No measurement was rerun/);
 });

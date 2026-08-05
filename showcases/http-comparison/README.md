@@ -32,7 +32,9 @@ superseded because their builds linked one event loop while reporting 16. The
 publishes tier-separated aggregate results from the verified harness. Its
 historical raw ignored outputs were not retained, so the checked-in aggregates
 cannot be independently regenerated from the published artifacts; its method
-record identifies reachable source equivalents without claiming a rerun.
+record identifies reachable showcase-subtree analogues without presenting them
+as measured-binary equivalents or reproduction checkouts. A new claim requires
+a complete rerun from one exact committed source tree with retained raw output.
 
 ## Reproduce it in Docker
 
