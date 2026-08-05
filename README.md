@@ -1921,6 +1921,13 @@ buffer and index arithmetic through `Natural'Last`; behavioral boundary tests
 check the emitted representation at the seven-to-eight-digit transition and at
 the maximum value.
 
+The high-level WebSocket handler also consumes a proved timeout classifier.
+Given the failed-or-terminal state reported by the connection wrapper and the
+remaining request budget, it permits another receive quantum only when the
+connection is still active and budget remains. This proof does not establish
+that the I/O core sets terminal state; focused behavioral tests still exercise
+control-write and message-deadline propagation plus active quantum retry.
+
 Run the proof through the Alire-provided GNATprove toolchain:
 
 ```sh

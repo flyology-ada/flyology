@@ -69,6 +69,7 @@ project Runtime_Smoke is
       "flyology-counter_policy_smoke.adb",
       "flyology-rate_limit_policy_smoke.adb",
       "flyology-http_chunk_encoding-smoke.adb",
+      "flyology-websocket_policy-smoke.adb",
       "flyology-wall_clock_testing-smoke.adb",
       "flyology-wall_clock_policy-smoke.adb",
       "flyology-wall_clock_waits-smoke.adb",

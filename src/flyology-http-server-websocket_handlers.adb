@@ -4,6 +4,7 @@ with Ada.Strings;
 with Ada.Strings.Fixed;
 with Ada.Unchecked_Deallocation;
 with Flyology.IO;
+with Flyology.WebSocket_Policy;
 
 package body Flyology.HTTP.Server.WebSocket_Handlers is
    use type Ada.Real_Time.Time;
@@ -546,12 +547,16 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
                end if;
             exception
                when Flyology.IO.Timeout_Error =>
-                  if X.Response = Applications.Failed
-                    or else X.Remaining = 0.0
-                  then
-                     raise;
-                  end if;
-                  Outgoing_Burst := 0;
+                  case Flyology.WebSocket_Policy.Classify_Timeout
+                    (Failed_Or_Terminal =>
+                       X.Response = Applications.Failed,
+                     Remaining          => X.Remaining)
+                  is
+                     when Flyology.WebSocket_Policy.Retry_Receive =>
+                        Outgoing_Burst := 0;
+                     when Flyology.WebSocket_Policy.Propagate_Timeout =>
+                        raise;
+                  end case;
             end;
          end if;
       end loop;

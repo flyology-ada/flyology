@@ -3603,9 +3603,11 @@ procedure HTTP_Smoke is
       package Routing is new Flyology.HTTP.Server.Routing (Boolean);
       package WebSockets renames
         Flyology.HTTP.Server.WebSocket_Handlers;
+      use type Applications.Response_State;
       use type Routing.Components.Failure_Kind;
 
       Timeout_Failures : Natural := 0;
+      Terminal_Timeout_Failures : Natural := 0;
       Application_Failures : Natural := 0;
 
       procedure Log
@@ -3613,10 +3615,13 @@ procedure HTTP_Smoke is
          Error : Ada.Exceptions.Exception_Occurrence;
          X     : in out Applications.Exchange)
       is
-         pragma Unreferenced (Error, X);
+         pragma Unreferenced (Error);
       begin
          if Kind = Routing.Components.Timeout_Failure then
             Timeout_Failures := Timeout_Failures + 1;
+            if X.Response = Applications.Failed then
+               Terminal_Timeout_Failures := Terminal_Timeout_Failures + 1;
+            end if;
          elsif Kind = Routing.Components.Application_Failure then
             Application_Failures := Application_Failures + 1;
          end if;
@@ -3641,6 +3646,9 @@ procedure HTTP_Smoke is
                     (Character'Pos (Mask (1))))));
          return To_String (Value);
       end Ping;
+
+      function Close_Frame return String is
+        (Character'Val (16#88#) & Character'Val (16#80#) & "mask");
 
       procedure Chat
         (State : in out Boolean;
@@ -3678,10 +3686,11 @@ procedure HTTP_Smoke is
       end Deadline_Chat;
 
       Routes : Routing.Router
-        (Capacity => 2, Slashes => Routing.Strict_Slashes);
+        (Capacity => 3, Slashes => Routing.Strict_Slashes);
       State  : Boolean := False;
       Control_Wire : aliased Memory_Transport;
       Deadline_Wire : aliased Memory_Transport;
+      Quantum_Wire : aliased Memory_Transport;
    begin
       Routes.Add_Middleware (Errors.Call'Access);
       Routing.Get
@@ -3693,6 +3702,12 @@ procedure HTTP_Smoke is
       Routing.Get
         (Routes,
          "/deadline", Deadline_Chat'Access, Name => "deadline-timeout",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade => Routing.Allow_WebSocket));
+      Routing.Get
+        (Routes,
+         "/quantum", Chat'Access, Name => "quantum-retry",
          Policy =>
            (Routing.Default_Route_Policy with delta
               Upgrade => Routing.Allow_WebSocket));
@@ -3711,6 +3726,7 @@ procedure HTTP_Smoke is
          Routing.Serve (Routes, State, Client, Test_Peer);
       end;
       pragma Assert (Timeout_Failures = 1);
+      pragma Assert (Terminal_Timeout_Failures = 1);
       pragma Assert (Application_Failures = 0);
 
       Deadline_Wire.Input := To_Unbounded_String
@@ -3726,6 +3742,31 @@ procedure HTTP_Smoke is
          Routing.Serve (Routes, State, Client, Test_Peer);
       end;
       pragma Assert (Timeout_Failures = 2);
+      pragma Assert (Terminal_Timeout_Failures = 2);
+      pragma Assert (Application_Failures = 0);
+
+      declare
+         Head : constant String :=
+           "GET /quantum HTTP/1.1" & CRLF
+           & "Host: localhost" & CRLF
+           & "Upgrade: websocket" & CRLF
+           & "Connection: Upgrade" & CRLF
+           & "Sec-WebSocket-Version: 13" & CRLF
+           & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+           & CRLF & CRLF;
+      begin
+         Quantum_Wire.Input := To_Unbounded_String (Head & Close_Frame);
+         Quantum_Wire.First_Receive_Max := Head'Length;
+         Quantum_Wire.Timeout_On_Call := 2;
+         declare
+            Client : aliased HTTP_Server.Connection (Quantum_Wire'Access);
+         begin
+            Routing.Serve (Routes, State, Client, Test_Peer);
+         end;
+      end;
+      pragma Assert (Quantum_Wire.Receive_Calls = 3);
+      pragma Assert (Timeout_Failures = 2);
+      pragma Assert (Terminal_Timeout_Failures = 2);
       pragma Assert (Application_Failures = 0);
    end Check_High_Level_WebSocket_Terminal_Timeout;
 

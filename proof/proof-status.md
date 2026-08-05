@@ -2,10 +2,13 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #14, and #16 are prevented by production-consumed SPARK units.
-Targeted subprogram proofs and fresh whole-unit widenings passed at level 1.
-The chunk encoder proof includes complete hexadecimal-digit consumption through
-`Natural'Last`, so the historical seven-digit capacity cannot prove.
+Findings #5, #14, #16, and #19 are prevented by production-consumed SPARK
+units. Targeted subprogram proofs and fresh whole-unit widenings passed at
+level 1. The chunk encoder proof includes complete hexadecimal-digit
+consumption through `Natural'Last`, so the historical seven-digit capacity
+cannot prove. The WebSocket timeout classifier treats failed-or-terminal state
+as an input and does not prove that the I/O core sets that state, so behavioral
+integration coverage remains required.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -28,6 +31,10 @@ The chunk encoder proof includes complete hexadecimal-digit consumption through
       (level 1, mode all)
   - [x] `Flyology.HTTP_Chunk_Encoding.Encode`
   - [x] Whole `Flyology.HTTP_Chunk_Encoding` unit widening
+- [x] Finding #19 production-used WebSocket timeout retry policy
+      (level 1, mode all)
+  - [x] `Flyology.WebSocket_Policy.Classify_Timeout`
+  - [x] Whole `Flyology.WebSocket_Policy` unit widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -36,6 +43,7 @@ The chunk encoder proof includes complete hexadecimal-digit consumption through
 - [x] Finding #5 prevention coverage
 - [x] Finding #14 prevention coverage
 - [x] Finding #16 prevention coverage
+- [x] Finding #19 prevention coverage
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -57,5 +65,10 @@ The chunk encoder proof includes complete hexadecimal-digit consumption through
 - [x] Production `Native_Executors.Submit` consumes `Nonzero_Successor`
 - [x] Production rate-limit middleware consumes `Refilled_Tokens`
 - [x] Production HTTP chunk and SSE paths consume `HTTP_Chunk_Encoding.Encode`
+- [x] Production high-level WebSocket handler consumes
+      `WebSocket_Policy.Classify_Timeout`
 - [x] Boundary tests cover generation rollover, refill saturation, and chunk
       encoding through `Natural'Last`
+- [x] Behavioral tests cover failed exchange state and propagation for terminal
+      control-write and message-deadline timeouts, plus active receive-quantum
+      retry
