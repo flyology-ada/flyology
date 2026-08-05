@@ -180,6 +180,12 @@ package Flyology.HTTP.Client is
    --  @return Three-digit status
    function Status (Item : Response) return Status_Code;
 
+   --  Return the final response reason phrase. HTTP/2 and later protocols may
+   --  return an empty string because they do not carry one.
+   --  @param Item Response to inspect
+   --  @return Preserved HTTP/1.x reason phrase after its status separator
+   function Reason_Phrase (Item : Response) return String;
+
    --  Return the negotiated protocol.
    --  @param Item Response to inspect
    --  @return HTTP_1_1_Protocol in the initial implementation
@@ -190,6 +196,23 @@ package Flyology.HTTP.Client is
    --  @param Name Field name
    --  @return Physical occurrence count
    function Header_Count (Item : Response; Name : String) return Natural;
+
+   --  Return the number of physical response fields.
+   --  @param Item Response to inspect
+   --  @return Field count
+   function Header_Count (Item : Response) return Natural;
+
+   --  Return one response field name by wire order.
+   --  @param Item Response to inspect
+   --  @param Index One-based physical field index
+   --  @return Preserved field name, or empty when absent
+   function Header_Name (Item : Response; Index : Positive) return String;
+
+   --  Return one response field value by wire order.
+   --  @param Item Response to inspect
+   --  @param Index One-based physical field index
+   --  @return Preserved field value, or empty when absent
+   function Header_Value (Item : Response; Index : Positive) return String;
 
    --  Return one physical response field occurrence.
    --  @param Item Response to inspect
@@ -205,6 +228,24 @@ package Flyology.HTTP.Client is
    --  @param Name Trailer name
    --  @return Physical occurrence count
    function Trailer_Count (Item : Response; Name : String) return Natural;
+
+   --  Return the number of physical trailer fields available after body
+   --  completion.
+   --  @param Item Response to inspect
+   --  @return Trailer field count
+   function Trailer_Count (Item : Response) return Natural;
+
+   --  Return one trailer field name by wire order.
+   --  @param Item Response to inspect
+   --  @param Index One-based physical field index
+   --  @return Preserved trailer name, or empty when absent
+   function Trailer_Name (Item : Response; Index : Positive) return String;
+
+   --  Return one trailer field value by wire order.
+   --  @param Item Response to inspect
+   --  @param Index One-based physical field index
+   --  @return Preserved trailer value, or empty when absent
+   function Trailer_Value (Item : Response; Index : Positive) return String;
 
    --  Return one completed chunked trailer occurrence.
    --  @param Item Response whose body has completed

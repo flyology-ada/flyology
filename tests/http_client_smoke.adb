@@ -85,10 +85,14 @@ procedure HTTP_Client_Smoke is
          Timed_Out : Boolean := False;
       begin
          pragma Assert (Client.Status (Response) = 200);
+         pragma Assert (Client.Reason_Phrase (Response) = "OK");
          pragma Assert
            (Client.Negotiated_Protocol (Response) =
               Flyology.HTTP.HTTP_1_1_Protocol);
          pragma Assert (Client.Header_Count (Response, "x-repeat") = 2);
+         pragma Assert (Client.Header_Count (Response) = 3);
+         pragma Assert (Client.Header_Name (Response, 2) = "X-Repeat");
+         pragma Assert (Client.Header_Value (Response, 3) = "second");
          pragma Assert (Client.Header (Response, "X-Repeat", 2) = "second");
          begin
             declare
@@ -116,6 +120,9 @@ procedure HTTP_Client_Smoke is
            (Flyology.Bytes.To_Byte_String (Client.Read_All (Response)) =
               "Wikipedia");
          pragma Assert (Client.Trailer (Response, "x-trailer") = "done");
+         pragma Assert (Client.Trailer_Count (Response) = 1);
+         pragma Assert (Client.Trailer_Name (Response, 1) = "X-Trailer");
+         pragma Assert (Client.Trailer_Value (Response, 1) = "done");
       end;
 
       Client.Set_Target (Value, "/abandon");

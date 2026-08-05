@@ -1174,6 +1174,27 @@ Run it with `./scripts/http-client-conformance.sh`. The stateless production
 parser fuzz wrapper is prepared with `./scripts/http-client-fuzz.sh prepare`
 when AdaCore GNATfuzz is installed.
 
+The maintained `http_client_cli` showcase is a small curl-like command. It
+streams the response body to standard output or a file and supports custom
+methods, repeated request headers, inline request data, a whole-exchange
+timeout, an output-size bound, authenticated HTTPS, and concise diagnostics:
+
+```sh
+./showcases/run_http_client_cli.sh -v https://example.com/
+./showcases/bin/http_client_cli -X POST -H 'Content-Type: text/plain' \
+  -d 'hello' --timeout 5 -o response.txt https://example.com/upload
+./showcases/bin/http_client_cli --ca-file tests/fixtures/tls/server-cert.pem \
+  https://localhost:8443/health
+```
+
+Verbose mode writes the complete generated request line and headers, followed
+by the final response status line, physical headers, trailers, and transport
+summary, to standard error. Response body bytes remain on standard output.
+
+It deliberately has no insecure TLS switch. Redirects, proxies, content
+decoding, authentication helpers, and streaming request bodies await those
+policies in the library rather than being reimplemented in the example.
+
 ### HTTP server
 
 `Flyology.HTTP` holds protocol concepts shared by the client and server.
@@ -2681,6 +2702,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/cancellation_density lightweight 1000
 ./showcases/bin/hybrid_blocking_bridge
 ./showcases/bin/structured_http
+./showcases/bin/http_client_cli http://127.0.0.1:8080/health
 ./showcases/bin/http_server lightweight 100 18080 64
 ./showcases/bin/https_server 18443
 ./showcases/bin/lightweight_vs_native

@@ -568,6 +568,7 @@ package body Flyology.HTTP.Client is
       Connection     : Pooled_Connection_Access := null;
       Slot_Index     : Natural := 0;
       Status_Value   : Status_Code := 200;
+      Reason_Value   : Unbounded_String;
       Protocol_Value : Protocol := HTTP_1_1_Protocol;
       Version_Value  : HTTP_Version := HTTP_1_1;
       Fields         : Flyology.HTTP.Headers.List;
@@ -1190,6 +1191,7 @@ package body Flyology.HTTP.Client is
       Data.Connection := null;
       Data.Slot_Index := 0;
       Data.Status_Value := 200;
+      Data.Reason_Value := Null_Unbounded_String;
       Data.Protocol_Value := HTTP_1_1_Protocol;
       Data.Version_Value := HTTP_1_1;
       Data.Pending := Null_Unbounded_String;
@@ -1364,6 +1366,11 @@ package body Flyology.HTTP.Client is
             raise Protocol_Error with "invalid HTTP response reason phrase";
          end if;
          Data.Status_Value := Status_Code (Parsed);
+         Data.Reason_Value :=
+           (if Status_Line'Last > Start + 3
+            then To_Unbounded_String
+              (Status_Line (Start + 4 .. Status_Line'Last))
+            else Null_Unbounded_String);
       end;
 
       Cursor := First_CRLF + CRLF'Length;
@@ -1741,6 +1748,14 @@ package body Flyology.HTTP.Client is
       return Item.Data.Status_Value;
    end Status;
 
+   function Reason_Phrase (Item : Response) return String is
+   begin
+      if Item.Data = null then
+         return "";
+      end if;
+      return To_String (Item.Data.Reason_Value);
+   end Reason_Phrase;
+
    function Negotiated_Protocol (Item : Response) return Protocol is
    begin
       if Item.Data = null then
@@ -1756,6 +1771,34 @@ package body Flyology.HTTP.Client is
       end if;
       return Flyology.HTTP.Headers.Count (Item.Data.Fields, Name);
    end Header_Count;
+
+   function Header_Count (Item : Response) return Natural is
+   begin
+      if Item.Data = null then
+         return 0;
+      end if;
+      return Flyology.HTTP.Headers.Count (Item.Data.Fields);
+   end Header_Count;
+
+   function Header_Name (Item : Response; Index : Positive) return String is
+   begin
+      if Item.Data = null
+        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Fields)
+      then
+         return "";
+      end if;
+      return Flyology.HTTP.Headers.Name (Item.Data.Fields, Index);
+   end Header_Name;
+
+   function Header_Value (Item : Response; Index : Positive) return String is
+   begin
+      if Item.Data = null
+        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Fields)
+      then
+         return "";
+      end if;
+      return Flyology.HTTP.Headers.Value (Item.Data.Fields, Index);
+   end Header_Value;
 
    function Header
      (Item : Response; Name : String; Occurrence : Positive := 1) return String
@@ -1774,6 +1817,34 @@ package body Flyology.HTTP.Client is
       end if;
       return Flyology.HTTP.Headers.Count (Item.Data.Trailers, Name);
    end Trailer_Count;
+
+   function Trailer_Count (Item : Response) return Natural is
+   begin
+      if Item.Data = null then
+         return 0;
+      end if;
+      return Flyology.HTTP.Headers.Count (Item.Data.Trailers);
+   end Trailer_Count;
+
+   function Trailer_Name (Item : Response; Index : Positive) return String is
+   begin
+      if Item.Data = null
+        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Trailers)
+      then
+         return "";
+      end if;
+      return Flyology.HTTP.Headers.Name (Item.Data.Trailers, Index);
+   end Trailer_Name;
+
+   function Trailer_Value (Item : Response; Index : Positive) return String is
+   begin
+      if Item.Data = null
+        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Trailers)
+      then
+         return "";
+      end if;
+      return Flyology.HTTP.Headers.Value (Item.Data.Trailers, Index);
+   end Trailer_Value;
 
    function Trailer
      (Item : Response; Name : String; Occurrence : Positive := 1) return String
