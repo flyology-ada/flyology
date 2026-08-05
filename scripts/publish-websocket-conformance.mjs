@@ -11,12 +11,13 @@ const outputRoot = resolve(
 );
 const expectedOutput = resolve(projectRoot, "website/reports/websocket");
 
-if (outputRoot !== expectedOutput) {
-  const fromWebsite = relative(resolve(projectRoot, "website"), outputRoot);
-  if (fromWebsite === ".." || fromWebsite.startsWith(".." + sep)) {
-    console.error(`refusing output outside website: ${outputRoot}`);
-    process.exit(2);
-  }
+const fromExpectedOutput = relative(expectedOutput, outputRoot);
+if (
+  fromExpectedOutput === ".." ||
+  fromExpectedOutput.startsWith(".." + sep)
+) {
+  console.error(`refusing output outside WebSocket reports: ${outputRoot}`);
+  process.exit(2);
 }
 
 const suiteVersion = "25.10.1";
