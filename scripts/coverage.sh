@@ -101,6 +101,7 @@ flyology-http-expect_policy-smoke
 flyology-http-route_parameter_policy-smoke
 flyology-rate_limit_policy_smoke
 flyology-websocket_policy-smoke
+flyology-websocket_deflate_policy_smoke
 flyology-wall_clock_testing-smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke

@@ -1928,6 +1928,15 @@ connection is still active and budget remains. This proof does not establish
 that the I/O core sets terminal state; focused behavioral tests still exercise
 control-write and message-deadline propagation plus active quantum retry.
 
+The production WebSocket DEFLATE policy also shares one proved encoder-window
+bound between extension negotiation and the fixed-window encoder. A separate
+proved decision classifies exactly one declared zero-length distance code as
+`No_Tree`, and the decoder consults a proved requirement classifier that
+rejects length symbols when no distance tree exists. This establishes the
+negotiation bound, distance-tree classification, and missing-distance
+enforcement. Reserved-symbol rejection remains a separate production check;
+neither decision is a proof of general DEFLATE correctness.
+
 Run the proof through the Alire-provided GNATprove toolchain:
 
 ```sh

@@ -2,11 +2,15 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #14, #15, #16, #17, and #19 are prevented by
+Findings #5, #13, #14, #15, #16, #17, #18, and #19 are prevented by
 production-consumed SPARK units. Their assigned targeted subprogram proofs and
 fresh whole-unit widenings passed at level 1.
 The chunk encoder proof includes complete hexadecimal-digit consumption through
 `Natural'Last`, so the historical seven-digit capacity cannot prove.
+Finding #13 proves the negotiated encoder-window bound. Finding #18 proves only
+exact distance-tree classification and missing-distance enforcement; it
+excludes reserved-symbol rejection and does not claim general DEFLATE
+correctness.
 The WebSocket timeout classifier treats failed-or-terminal state as an input
 and does not prove that the I/O core sets that state, so behavioral integration
 coverage remains required.
@@ -44,6 +48,15 @@ coverage remains required.
       (level 1, mode all)
   - [x] `Flyology.HTTP.Route_Parameter_Policy.Advance`
   - [x] Whole `Flyology.HTTP.Route_Parameter_Policy` unit widening
+- [x] Finding #13 production-used negotiated encoder-window bound
+      (level 1, mode all)
+  - [x] `Flyology.WebSocket_Deflate_Policy.Negotiated_Server_Window_Bits`
+  - [x] Whole `Flyology.WebSocket_Deflate_Policy` unit widening
+- [x] Finding #18 production-used distance-tree classification and
+      missing-distance enforcement (level 1, mode all)
+  - [x] `Flyology.WebSocket_Deflate_Policy.Select_Distance_Tree`
+  - [x] `Flyology.WebSocket_Deflate_Policy.Distance_Requirement_Is_Satisfied`
+  - [x] Whole `Flyology.WebSocket_Deflate_Policy` unit widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -55,6 +68,8 @@ coverage remains required.
 - [x] Finding #19 prevention coverage
 - [x] Finding #15 prevention coverage
 - [x] Finding #17 prevention coverage
+- [x] Finding #13 prevention coverage
+- [x] Finding #18 missing-distance prevention coverage
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -89,3 +104,17 @@ coverage remains required.
 - [x] Behavioral tests cover failed exchange state and propagation for terminal
       control-write and message-deadline timeouts, plus active receive-quantum
       retry
+- [x] Prove finding #13 window capability at targeted subprogram scope
+- [x] Prove finding #18 distance-tree selection at targeted subprogram scope
+- [x] Prove finding #18 missing-distance enforcement at targeted subprogram
+      scope
+- [x] Review finding #18 policy revision for proof antipatterns
+- [x] Widen the revised WebSocket DEFLATE policy unit at level 1 and mode all
+- [x] Production negotiation and the fixed-window encoder consume one shared
+      WebSocket DEFLATE capability policy
+- [x] Production dynamic-block tree construction and symbol decoding consume
+      the empty-distance-tree classification and missing-distance policy;
+      reserved-symbol rejection remains separate
+- [x] Focused policy tests cover supported and unsupported window offers, the
+      exact one-zero-code `No_Tree` shape, missing-distance enforcement, and
+      the separate 286/287 reserved-symbol boundary

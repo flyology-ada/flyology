@@ -7,6 +7,7 @@ with Flyology.HTTP_Chunk_Encoding;
 with Flyology.HTTP.Expect_Policy;
 with Flyology.HTTP.Server.WebSocket_Deflate;
 with Flyology.IO;
+with Flyology.WebSocket_Deflate_Policy;
 with GNAT.Sockets;
 
 package body Flyology.HTTP.Server is
@@ -18,6 +19,8 @@ package body Flyology.HTTP.Server is
 
    package Chunk_Encoding renames Flyology.HTTP_Chunk_Encoding;
    package Expect_Policy renames Flyology.HTTP.Expect_Policy;
+   package WebSocket_Deflate_Policy renames
+     Flyology.WebSocket_Deflate_Policy;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    WebSocket_Peer_EOF : exception;
@@ -2639,8 +2642,10 @@ package body Flyology.HTTP.Server is
                           and then not Seen_Server_Bits
                         then
                            Bits := Window_Bits (Parameter_Text, Parsed);
-                           Valid := Parsed and then Bits = 15;
-                           Server_Bits := Bits;
+                           Server_Bits :=
+                             WebSocket_Deflate_Policy
+                               .Negotiated_Server_Window_Bits (Bits);
+                           Valid := Parsed and then Server_Bits /= 0;
                            Seen_Server_Bits := True;
                         elsif Parameter_Name = "client_max_window_bits"
                           and then not Seen_Client_Bits

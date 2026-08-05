@@ -279,6 +279,7 @@ flyology-http_chunk_encoding-smoke
 flyology-websocket_policy-smoke
 flyology-http-expect_policy-smoke
 flyology-http-route_parameter_policy-smoke
+flyology-websocket_deflate_policy_smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 http_smoke

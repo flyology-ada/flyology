@@ -1,11 +1,15 @@
 with Ada.Unchecked_Deallocation;
 with Interfaces;
+with Flyology.WebSocket_Deflate_Policy;
 
 package body Flyology.HTTP.Server.WebSocket_Deflate is
 
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_32;
+
+   package Policy renames Flyology.WebSocket_Deflate_Policy;
+   use type Policy.Distance_Tree_Disposition;
 
    Max_Code_Bits : constant := 15;
    Max_Symbols   : constant := 288;
@@ -254,10 +258,10 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
       is
          Literal_Tree : Huffman_Tree;
          Distance_Tree : Huffman_Tree;
-         --  RFC 1951 permits this form when the block contains no matches.
-         No_Distance_Codes : constant Boolean :=
-           Distance_Lengths'Length = 1
-           and then Distance_Lengths (Distance_Lengths'First) = 0;
+         Distance_Tree_Mode : constant Policy.Distance_Tree_Disposition :=
+           Policy.Select_Distance_Tree
+             (Distance_Lengths'Length,
+              Distance_Lengths (Distance_Lengths'First));
          Length_Base : constant array (Natural range 257 .. 285) of Natural :=
            (3, 4, 5, 6, 7, 8, 9, 10,
             11, 13, 15, 17, 19, 23, 27, 31,
@@ -281,14 +285,19 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
       begin
          Build_Tree
            (Literal_Lengths, Literal_Length_Codes, Literal_Tree);
-         if not No_Distance_Codes then
+         if Distance_Tree_Mode = Policy.Decode_Tree then
             Build_Tree (Distance_Lengths, Distance_Codes, Distance_Tree);
          end if;
          loop
             declare
                Symbol : constant Natural := Decode (Literal_Tree);
             begin
-               if Symbol <= 255 then
+               if not Policy.Distance_Requirement_Is_Satisfied
+                 (Distance_Tree_Mode, Symbol)
+               then
+                  raise Invalid_Data with
+                    "DEFLATE length has no distance code";
+               elsif Symbol <= 255 then
                   Append_Byte (Symbol);
                elsif Symbol = 256 then
                   exit;
@@ -299,10 +308,6 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
                      Distance_Symbol : Natural;
                      Distance : Natural;
                   begin
-                     if No_Distance_Codes then
-                        raise Invalid_Data with
-                          "DEFLATE length has no distance code";
-                     end if;
                      Distance_Symbol := Decode (Distance_Tree);
                      if Distance_Symbol > 29 then
                         raise Invalid_Data with
@@ -463,10 +468,10 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
    procedure Encode_Fixed
      (Output : out Flyology.Bytes.Unbounded_Bytes)
    is
-      Window_Size : constant := 32 * 1_024;
+      Window_Size : constant := Policy.Encoder_Window_Bytes;
       Match_Limit : constant := 258;
       Bucket_Count : constant Positive := Natural'Max
-        (64, Natural'Min (32 * 1_024, Length * 2));
+        (64, Natural'Min (Policy.Encoder_Window_Bytes, Length * 2));
 
       type Position_Array is array (Natural range <>) of Natural;
       Head : Position_Array (0 .. Bucket_Count - 1) := (others => 0);

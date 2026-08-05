@@ -1043,6 +1043,13 @@ procedure HTTP_Smoke is
         & Character'Val (16#A0#) & Character'Val (16#6D#)
         & Character'Val (16#FE#) & Character'Val (16#3F#)
         & Character'Val (16#55#) & Character'Val (16#18#);
+      --  Non-final fixed-Huffman blocks beginning with reserved literal/length
+      --  symbols 286 and 287. Their rejection is separate from distance-tree
+      --  requirement enforcement.
+      Reserved_Length_286 : constant String :=
+        Character'Val (16#1A#) & Character'Val (16#03#);
+      Reserved_Length_287 : constant String :=
+        Character'Val (16#1A#) & Character'Val (16#07#);
       --  Code-length alphabet has two length-2 symbols and is incomplete.
       Incomplete_Code_Length_Tree : constant String :=
         Character'Val (16#04#) & Character'Val (16#00#)
@@ -1157,6 +1164,8 @@ procedure HTTP_Smoke is
       Assert_Accepted (All_Literal, "A");
       Assert_Accepted (Single_Symbol_Trees, "");
       Assert_Rejected (Missing_Distance);
+      Assert_Rejected (Reserved_Length_286);
+      Assert_Rejected (Reserved_Length_287);
       Assert_Rejected (Incomplete_Code_Length_Tree);
       Assert_Rejected (Incomplete_Literal_Tree);
       Assert_Rejected (Incomplete_Distance_Tree);
