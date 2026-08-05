@@ -57,7 +57,7 @@ procedure Structured_Server_Reuse_Smoke is
          Handler_Model   => Model,
          Handler_CPU     => CPU);
 
-      procedure Run_Close_Failures (Injected_Count : Positive) is
+      procedure Run_Close_Failure is
          Listener    : Sockets.Socket_Type;
          Address     : Sockets.Endpoint;
          Old_FD      : Flyology.IO.Descriptor;
@@ -81,12 +81,11 @@ procedure Structured_Server_Reuse_Smoke is
             pragma Assert
               (not Structured.Current (Item).Forced_Cancellation);
 
-            --  All workers stop before listener cleanup. One injected failure
-            --  exercises the immediate retry; two leave ownership in Item for
-            --  the controlled finalization retry below.
+            --  Report failure after the close consumes the descriptor. The
+            --  server must release ownership without retrying that number.
             Fault_Control.Arm
               (Fault_Control.Structured_Listener_Close,
-               Count => Injected_Count);
+               Count => 1);
             Caller_Owns := False;
             begin
                Structured.Serve
@@ -98,7 +97,7 @@ procedure Structured_Server_Reuse_Smoke is
             pragma Assert (Close_Failed);
             pragma Assert
               (Fault_Control.Calls
-                 (Fault_Control.Structured_Listener_Close) = 2);
+                 (Fault_Control.Structured_Listener_Close) = 1);
             pragma Assert (not Structured.Current (Item).Running);
             pragma Assert (Structured.Current (Item).Shutdown_Requested);
             pragma Assert
@@ -121,24 +120,16 @@ procedure Structured_Server_Reuse_Smoke is
             end;
             pragma Assert (Rejected);
             pragma Assert (Sockets.Is_Open (Listener));
-            Sockets.Close_Socket (Listener);
-            Caller_Owns := False;
          end;
 
          pragma Assert
            (Fault_Control.Calls (Fault_Control.Structured_Listener_Close) =
-              (if Injected_Count = 1 then 2 else 3));
-
-         --  Finalization has released the original descriptor even when both
-         --  Serve-side close attempts failed.
-         declare
-            Probe : Sockets.Socket_Type;
-         begin
-            Sockets.Create_Socket (Probe);
-            pragma Assert
-              (Flyology.IO.Sockets.Native_Descriptor (Probe) = Old_FD);
-            Sockets.Close_Socket (Probe);
-         end;
+              1);
+         pragma Assert (Sockets.Is_Open (Listener));
+         pragma Assert
+           (Flyology.IO.Sockets.Native_Descriptor (Listener) = Old_FD);
+         Sockets.Close_Socket (Listener);
+         Caller_Owns := False;
          Fault_Control.Reset;
       exception
          when others =>
@@ -147,10 +138,9 @@ procedure Structured_Server_Reuse_Smoke is
                Sockets.Close_Socket (Listener);
             end if;
             raise;
-      end Run_Close_Failures;
+      end Run_Close_Failure;
    begin
-      Run_Close_Failures (1);
-      Run_Close_Failures (2);
+      Run_Close_Failure;
    end Run_Lane;
 
    procedure Run_Lightweight is new Run_Lane

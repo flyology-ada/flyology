@@ -177,11 +177,11 @@ package body Flyology.IO.Structured_Servers is
       if Sockets.Is_Open (Item.Owned_Listener) then
          Result := C_Close_Listener
            (Flyology.IO.Sockets.Native_Descriptor (Item.Owned_Listener));
+         Sockets.Release (Item.Owned_Listener, Released);
          if Result /= 0 then
             raise Sockets.Socket_Error with
               "listener close failed, errno=" & GNAT.OS_Lib.Errno'Image;
          end if;
-         Sockets.Release (Item.Owned_Listener, Released);
       end if;
    end Close_Owned_Listener;
 

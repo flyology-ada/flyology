@@ -99,9 +99,9 @@ package Flyology.IO.Structured_Servers is
    --  their threads.
    --  On an exceptional return after ownership transfers, Ada does not
    --  guarantee scalar in-out copy-back. A retained numeric Listener value is
-   --  stale and must not be closed or reused; the server object retains
-   --  authoritative closing ownership until cleanup succeeds or it is
-   --  finalized.
+   --  stale and must not be closed or reused. The server attempts close once
+   --  and releases its handle even when the syscall reports an error because
+   --  the descriptor number may already have been recycled.
    --  @param Item One-shot server kept alive for the call
    --  @param Listener Bound listening socket; transferred and always closed
    --  @param Context Shared handler context kept alive for the call

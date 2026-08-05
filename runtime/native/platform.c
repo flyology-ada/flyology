@@ -580,17 +580,21 @@ int flyology_errno_system_file_limit(void) {
 }
 
 /* Keep listener close injection at the syscall boundary. Production builds
-   contain one direct close(2), while fault-enabled tests can make a close fail
-   before the descriptor is consumed and verify the structured cleanup retry. */
+   contain one direct close(2). Fault-enabled tests report an error after a
+   successful close so cleanup must not retry a consumed descriptor number. */
 int flyology_structured_listener_close(int descriptor) {
 #ifdef FLYOLOGY_TEST_FAULTS
-    if (flyology_test_fault_hit(
-            FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE)) {
+    int inject_failure = flyology_test_fault_hit(
+        FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE);
+    int result = close(descriptor);
+    if (inject_failure && result == 0) {
         errno = EIO;
         return -1;
     }
-#endif
+    return result;
+#else
     return close(descriptor);
+#endif
 }
 
 /* The production path remains one direct accept call.  Deterministic errno
