@@ -230,8 +230,12 @@ required by the changed boundary.
   Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
   generated traces and reports remain outside version control.
 - `./scripts/http-client-conformance.sh`: build and run the HTTP/1.1 client
-  baseline against a raw scripted peer. It exercises native and lightweight
-  callers, pool lifecycle, valid framing, and the maintained negative matrix.
+  deterministic campaign: raw peer, parser boundaries, pool model, lifetime
+  compile failure, and OpenSSL parity in both task lanes.
+- `./scripts/http-client-fuzz.sh prepare`: analyze the stateless production
+  parser wrapper, generate an isolated GNATfuzz harness, build it in
+  `afl_plain` mode, and seed its ignored corpus. Run the `fuzz` action for a
+  campaign when AdaCore GNATfuzz is installed.
 - `./scripts/websocket-conformance.sh core lightweight`: pinned Autobahn
   server-side framing profile. Run `core native` for lane parity, `core-wss
   lightweight` and `core-wss native` for the same profile through the

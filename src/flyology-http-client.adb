@@ -40,13 +40,18 @@ package body Flyology.HTTP.Client is
       Born         : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Last_Used    : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Request_Count : Natural := 0;
+      Interrupting : Boolean := False;
+      Interrupt_Sent : Boolean := False;
+      Owner_Done   : Boolean := False;
    end record;
    type Slot_Array is array (Positive range <>) of Slot;
 
    type Checkout_Result is
      (Checkout_Idle, Checkout_Create, Checkout_Discard, Checkout_Busy,
       Checkout_Closed);
-   type Return_Result is (Returned_Idle, Return_Close);
+   type Return_Result is
+     (Returned_Idle, Return_Close, Return_Close_Deferred);
+   type Failure_Result is (Failure_Free, Failure_Free_Deferred);
 
    protected type Pool_Controller (Capacity : Positive) is
       procedure Configure (Value : Pool_Configuration);
@@ -59,7 +64,10 @@ package body Flyology.HTTP.Client is
         (Slot_Index : Positive;
          Connection : Pooled_Connection_Access;
          Now        : Ada.Real_Time.Time);
-      procedure Creation_Failed (Slot_Index : Positive);
+      procedure Publish_Connecting
+        (Slot_Index : Positive; Connection : Pooled_Connection_Access);
+      procedure Creation_Failed
+        (Slot_Index : Positive; Result : out Failure_Result);
       procedure Return_Lease
         (Slot_Index : Positive;
          Reusable   : Boolean;
@@ -72,6 +80,14 @@ package body Flyology.HTTP.Client is
          Slot_Index : out Natural;
          Connection : out Pooled_Connection_Access);
       procedure Request_Shutdown;
+      procedure Take_Active_For_Interrupt
+        (Found      : out Boolean;
+         Slot_Index : out Natural;
+         Connection : out Pooled_Connection_Access);
+      procedure Finish_Interrupt
+        (Slot_Index : Positive;
+         Release_Ownership : out Boolean;
+         Connection : out Pooled_Connection_Access);
       entry Await_Drained;
       procedure Wait_Source
         (FD : out Flyology.IO.Descriptor; Can_Checkout : out Boolean);
@@ -80,7 +96,9 @@ package body Flyology.HTTP.Client is
       procedure Register_Waiter;
       procedure Unregister_Waiter;
       procedure Record_Admission_Timeout;
-      function Snapshot return Pool_Snapshot;
+      procedure Record_Stale_Retry;
+      function Snapshot return Client_Diagnostics;
+      function Is_Stopping return Boolean;
    private
       Policy       : Pool_Configuration := Default_Pool_Configuration;
       Slots        : Slot_Array (1 .. Capacity);
@@ -95,10 +113,20 @@ package body Flyology.HTTP.Client is
       Reused_Count : Natural := 0;
       Closed_Count : Natural := 0;
       Timeout_Count : Natural := 0;
+      Stale_Retry_Count : Natural := 0;
       Checkout_Wake : Flyology.Wake_Sources.Source;
       Checkout_Signalled : Boolean := False;
       Shutdown_Wake : Flyology.Wake_Sources.Source;
    end Pool_Controller;
+
+   protected type State_Lifetime is
+      procedure Retain_Response;
+      procedure Release_Response (Final_Reference : out Boolean);
+      procedure Release_Client (Final_Reference : out Boolean);
+   private
+      Client_Live : Boolean := True;
+      Responses   : Natural := 0;
+   end State_Lifetime;
 
    protected body Pool_Controller is
       procedure Configure (Value : Pool_Configuration) is
@@ -202,32 +230,61 @@ package body Flyology.HTTP.Client is
            or else Connection = null
          then
             raise Program_Error with "invalid HTTP pool connection install";
+         elsif Stopping then
+            raise Client_Closed;
          end if;
          Slots (Slot_Index) :=
            (Phase         => Leased,
             Connection    => Connection,
             Born          => Now,
             Last_Used     => Now,
-            Request_Count => 1);
+            Request_Count => 1,
+            Interrupting  => False,
+            Interrupt_Sent => False,
+            Owner_Done    => False);
          Connecting_Count := Connecting_Count - 1;
          Leased_Count := Leased_Count + 1;
          Created_Count := Created_Count + 1;
       end Install;
 
-      procedure Creation_Failed (Slot_Index : Positive) is
+      procedure Publish_Connecting
+        (Slot_Index : Positive; Connection : Pooled_Connection_Access) is
+      begin
+         if Slot_Index > Capacity
+           or else Slots (Slot_Index).Phase /= Connecting
+           or else Connection = null
+         then
+            raise Program_Error with
+              "invalid HTTP pool connecting transport publication";
+         elsif Stopping then
+            raise Client_Closed;
+         end if;
+         Slots (Slot_Index).Connection := Connection;
+      end Publish_Connecting;
+
+      procedure Creation_Failed
+        (Slot_Index : Positive; Result : out Failure_Result) is
       begin
          if Slot_Index > Capacity
            or else Slots (Slot_Index).Phase /= Connecting
          then
             raise Program_Error with "invalid HTTP pool creation failure";
          end if;
-         Slots (Slot_Index).Phase := Empty;
          Connecting_Count := Connecting_Count - 1;
-         if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
-           and then not Checkout_Signalled
-         then
-            Flyology.Wake_Sources.Signal (Checkout_Wake);
-            Checkout_Signalled := True;
+         if Slots (Slot_Index).Interrupting then
+            Slots (Slot_Index).Phase := Closing;
+            Slots (Slot_Index).Owner_Done := True;
+            Closing_Count := Closing_Count + 1;
+            Result := Failure_Free_Deferred;
+         else
+            Slots (Slot_Index) := (others => <>);
+            Result := Failure_Free;
+            if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
+              and then not Checkout_Signalled
+            then
+               Flyology.Wake_Sources.Signal (Checkout_Wake);
+               Checkout_Signalled := True;
+            end if;
          end if;
       end Creation_Failed;
 
@@ -263,8 +320,14 @@ package body Flyology.HTTP.Client is
             Slots (Slot_Index).Last_Used := Now;
             Idle_Count := Idle_Count + 1;
             Result := Returned_Idle;
+         elsif Slots (Slot_Index).Interrupting then
+            Slots (Slot_Index).Phase := Closing;
+            Slots (Slot_Index).Owner_Done := True;
+            Closing_Count := Closing_Count + 1;
+            Result := Return_Close_Deferred;
          else
             Slots (Slot_Index).Phase := Closing;
+            Slots (Slot_Index).Owner_Done := True;
             Closing_Count := Closing_Count + 1;
             Result := Return_Close;
          end if;
@@ -330,6 +393,59 @@ package body Flyology.HTTP.Client is
          end if;
       end Request_Shutdown;
 
+      procedure Take_Active_For_Interrupt
+        (Found      : out Boolean;
+         Slot_Index : out Natural;
+         Connection : out Pooled_Connection_Access) is
+      begin
+         Found := False;
+         Slot_Index := 0;
+         Connection := null;
+         for Index in Slots'Range loop
+            if Slots (Index).Phase in Connecting | Leased
+              and then Slots (Index).Connection /= null
+              and then not Slots (Index).Interrupt_Sent
+            then
+               Slots (Index).Interrupting := True;
+               Slots (Index).Interrupt_Sent := True;
+               Found := True;
+               Slot_Index := Index;
+               Connection := Slots (Index).Connection;
+               exit;
+            end if;
+         end loop;
+      end Take_Active_For_Interrupt;
+
+      procedure Finish_Interrupt
+        (Slot_Index : Positive;
+         Release_Ownership : out Boolean;
+         Connection : out Pooled_Connection_Access) is
+      begin
+         if Slot_Index > Capacity
+           or else not Slots (Slot_Index).Interrupting
+         then
+            raise Program_Error with "invalid HTTP pool interrupt completion";
+         end if;
+         Slots (Slot_Index).Interrupting := False;
+         Release_Ownership :=
+           Slots (Slot_Index).Phase = Closing
+             and then Slots (Slot_Index).Owner_Done;
+         if Release_Ownership then
+            Connection := Slots (Slot_Index).Connection;
+            Slots (Slot_Index) := (others => <>);
+            Closing_Count := Closing_Count - 1;
+            Closed_Count := Closed_Count + 1;
+            if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
+              and then not Checkout_Signalled
+            then
+               Flyology.Wake_Sources.Signal (Checkout_Wake);
+               Checkout_Signalled := True;
+            end if;
+         else
+            Connection := null;
+         end if;
+      end Finish_Interrupt;
+
       entry Await_Drained
         when Connecting_Count + Leased_Count + Idle_Count + Closing_Count = 0
       is
@@ -388,22 +504,59 @@ package body Flyology.HTTP.Client is
          Timeout_Count := Timeout_Count + 1;
       end Record_Admission_Timeout;
 
-      function Snapshot return Pool_Snapshot is
-        (Capacity          => Capacity,
-         Connecting        => Connecting_Count,
-         Leased            => Leased_Count,
-         Idle              => Idle_Count,
-         Closing           => Closing_Count,
-         Waiters            => Waiter_Count,
-         Created            => Created_Count,
-         Reused             => Reused_Count,
-         Closed             => Closed_Count,
+      procedure Record_Stale_Retry is
+      begin
+         Stale_Retry_Count := Stale_Retry_Count + 1;
+      end Record_Stale_Retry;
+
+      function Snapshot return Client_Diagnostics is
+        (Transport_Capacity => Capacity,
+         Pending_Transports => Connecting_Count,
+         Active_Exchanges   => Leased_Count,
+         Reusable_Transports => Idle_Count,
+         Closing_Transports => Closing_Count,
+         Admission_Waiters  => Waiter_Count,
+         Transports_Created => Created_Count,
+         Transport_Reuses   => Reused_Count,
+         Transports_Closed  => Closed_Count,
+         Stale_Retries      => Stale_Retry_Count,
          Admission_Timeouts => Timeout_Count);
+
+      function Is_Stopping return Boolean is (Stopping);
    end Pool_Controller;
+
+   protected body State_Lifetime is
+      procedure Retain_Response is
+      begin
+         if not Client_Live then
+            raise Program_Error with "HTTP client is finalizing";
+         end if;
+         Responses := Responses + 1;
+      end Retain_Response;
+
+      procedure Release_Response (Final_Reference : out Boolean) is
+      begin
+         if Responses = 0 then
+            raise Program_Error with "HTTP response state released twice";
+         end if;
+         Responses := Responses - 1;
+         Final_Reference := not Client_Live and then Responses = 0;
+      end Release_Response;
+
+      procedure Release_Client (Final_Reference : out Boolean) is
+      begin
+         if not Client_Live then
+            raise Program_Error with "HTTP client state released twice";
+         end if;
+         Client_Live := False;
+         Final_Reference := Responses = 0;
+      end Release_Client;
+   end State_Lifetime;
 
    type Client_State (Capacity : Positive) is limited record
       Manager       : aliased Connections.Server (Capacity => Capacity);
       Pool          : Pool_Controller (Capacity);
+      Lifetime      : State_Lifetime;
       Origin_Value  : Origin;
       Is_Configured : Boolean := False;
    end record;
@@ -427,6 +580,8 @@ package body Flyology.HTTP.Client is
       Reading_Trailers : Boolean := False;
       Complete       : Boolean := False;
       Reusable       : Boolean := False;
+      Saw_Response_Bytes : Boolean := False;
+      Retains_Owner  : Boolean := False;
       Started        : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout        : Duration := 0.0;
       Token          : access Flyology.Cancellation.Token := null;
@@ -506,6 +661,14 @@ package body Flyology.HTTP.Client is
       Connection : in out Pooled_Connection_Access) is
    begin
       if Connection /= null then
+         if Scheme (Owner.Origin_Value) = Secure_HTTPS then
+            begin
+               Flyology.IO.Connections.TLS.Shutdown
+                 (Connection.Channel, Timeout => 0.0);
+            exception
+               when others => null;
+            end;
+         end if;
          begin
             Connections.Close (Connection.Channel);
          exception
@@ -515,6 +678,30 @@ package body Flyology.HTTP.Client is
       end if;
       Owner.Pool.Finish_Close (Slot_Index);
    end Close_And_Finish;
+
+   procedure Interrupt_Active (Owner : not null Client_State_Access) is
+      Found       : Boolean;
+      Slot_Index  : Natural;
+      Connection  : Pooled_Connection_Access;
+      Release_Ownership : Boolean;
+      Released    : Pooled_Connection_Access;
+   begin
+      loop
+         Owner.Pool.Take_Active_For_Interrupt
+           (Found, Slot_Index, Connection);
+         exit when not Found;
+         begin
+            Connections.Close (Connection.Channel);
+         exception
+            when others => null;
+         end;
+         Owner.Pool.Finish_Interrupt
+           (Positive (Slot_Index), Release_Ownership, Released);
+         if Release_Ownership and then Released /= null then
+            Free_Connection (Released);
+         end if;
+      end loop;
+   end Interrupt_Active;
 
    procedure Release_Lease
      (Data : in out Response_Data; Reusable : Boolean) is
@@ -621,7 +808,10 @@ package body Flyology.HTTP.Client is
       if Item.Control.State /= null then
          raise Program_Error with "HTTP client is already configured";
       end if;
-      Item.TLS_Backend := Backend;
+      --  Anonymous access parameters do not carry the caller's accessibility
+      --  level into a stored access component. Configure's documented
+      --  lifetime contract requires Backend to outlive Item.
+      Item.TLS_Backend := Backend.all'Unchecked_Access;
       Item.Control.State := new Client_State (Item.Capacity);
       Item.Control.State.Origin_Value := Origin_Value;
       Item.Control.State.Pool.Configure (Pool);
@@ -684,6 +874,7 @@ package body Flyology.HTTP.Client is
    procedure Establish
      (Item       : in out Client;
       State      : not null Client_State_Access;
+      Slot_Index : Positive;
       Connection : in out Pooled_Connection_Access;
       Started    : Ada.Real_Time.Time;
       Timeout    : Duration;
@@ -707,7 +898,6 @@ package body Flyology.HTTP.Client is
             exception
                when others => null;
             end;
-            Free_Connection (Connection);
          end if;
       end Cleanup;
    begin
@@ -764,6 +954,7 @@ package body Flyology.HTTP.Client is
 
       Connection := new Pooled_Connection;
       Connections.Take (State.Manager, Socket, Connection.Channel);
+      State.Pool.Publish_Connecting (Slot_Index, Connection);
       if Scheme (State.Origin_Value) = Secure_HTTPS then
          Flyology.IO.Connections.TLS.Upgrade
            (Connection.Channel, Item.TLS_Backend.all,
@@ -845,6 +1036,7 @@ package body Flyology.HTTP.Client is
      (Item       : in out Client;
       Connection : out Pooled_Connection_Access;
       Slot_Index : out Positive;
+      Was_Reused : out Boolean;
       Started    : Ada.Real_Time.Time;
       Timeout    : Duration;
       Token      : access Flyology.Cancellation.Token)
@@ -859,6 +1051,7 @@ package body Flyology.HTTP.Client is
       then
          raise Program_Error with "HTTP client is not configured";
       end if;
+      Was_Reused := False;
       loop
          Item.Control.State.Pool.Try_Checkout
            (Ada.Real_Time.Clock, Result, Index, Value);
@@ -870,17 +1063,26 @@ package body Flyology.HTTP.Client is
                end if;
                Connection := Value;
                Slot_Index := Positive (Index);
+               Was_Reused := True;
                return;
             when Checkout_Create =>
                begin
                   Establish
-                    (Item, Item.Control.State, Value, Started, Timeout, Token);
+                    (Item, Item.Control.State, Positive (Index), Value,
+                     Started, Timeout, Token);
                   Item.Control.State.Pool.Install
                     (Positive (Index), Value, Ada.Real_Time.Clock);
                exception
                   when others =>
-                     Item.Control.State.Pool.Creation_Failed
-                       (Positive (Index));
+                     declare
+                        Failure : Failure_Result;
+                     begin
+                        Item.Control.State.Pool.Creation_Failed
+                          (Positive (Index), Failure);
+                        if Failure = Failure_Free and then Value /= null then
+                           Free_Connection (Value);
+                        end if;
+                     end;
                      if Waiting then
                         Item.Control.State.Pool.Unregister_Waiter;
                         Waiting := False;
@@ -893,6 +1095,7 @@ package body Flyology.HTTP.Client is
                end if;
                Connection := Value;
                Slot_Index := Positive (Index);
+               Was_Reused := False;
                return;
             when Checkout_Discard =>
                Close_And_Finish
@@ -975,9 +1178,30 @@ package body Flyology.HTTP.Client is
          Remaining (Data.Started, Data.Timeout), Token => Data.Token);
       Peer_Closed := Last < Buffer'First;
       if not Peer_Closed then
+         Data.Saw_Response_Bytes := True;
          Append (Data.Pending, Byte_String (Buffer (Buffer'First .. Last)));
       end if;
    end Receive_More;
+
+   procedure Reset_Attempt (Data : in out Response_Data) is
+   begin
+      Flyology.HTTP.Headers.Clear (Data.Fields);
+      Flyology.HTTP.Headers.Clear (Data.Trailers);
+      Data.Connection := null;
+      Data.Slot_Index := 0;
+      Data.Status_Value := 200;
+      Data.Protocol_Value := HTTP_1_1_Protocol;
+      Data.Version_Value := HTTP_1_1;
+      Data.Pending := Null_Unbounded_String;
+      Data.Mode := No_Body;
+      Data.Remaining_Body := 0;
+      Data.Chunk_Remaining := 0;
+      Data.Need_Chunk_CRLF := False;
+      Data.Reading_Trailers := False;
+      Data.Complete := False;
+      Data.Reusable := False;
+      Data.Saw_Response_Bytes := False;
+   end Reset_Attempt;
 
    function Trim_OWS (Value : String) return String is
       First : Natural := Value'First;
@@ -1298,6 +1522,116 @@ package body Flyology.HTTP.Client is
       end if;
    end Select_Body_Mode;
 
+   procedure Remove_Pending_Prefix
+     (Data : in out Response_Data; Count : Natural);
+   function Chunk_Size (Line : String) return Natural;
+   procedure Add_Trailer (Data : in out Response_Data; Line : String);
+
+   procedure Validate_Response_Bytes_For_Testing
+     (Value : Ada.Streams.Stream_Element_Array)
+   is
+      Data          : Response_Data;
+      Informational : Natural := 0;
+
+      procedure Take_Line (Line : out Unbounded_String) is
+         Text : constant String := To_String (Data.Pending);
+         Mark : constant Natural := Ada.Strings.Fixed.Index (Text, CRLF);
+      begin
+         if Mark = 0 then
+            raise Protocol_Error with "incomplete HTTP framing line";
+         end if;
+         Line := To_Unbounded_String (Text (Text'First .. Mark - 1));
+         Remove_Pending_Prefix (Data, Mark - Text'First + CRLF'Length);
+      end Take_Line;
+   begin
+      Data.Pending := To_Unbounded_String (Byte_String (Value));
+      loop
+         declare
+            Text : constant String := To_String (Data.Pending);
+            Mark : constant Natural := Ada.Strings.Fixed.Index
+              (Text, CRLF & CRLF);
+         begin
+            if Mark = 0 then
+               if Text'Length >= Flyology.HTTP.Headers.Default_Max_Bytes then
+                  raise Response_Too_Large;
+               end if;
+               raise Protocol_Error with "incomplete HTTP response head";
+            end if;
+            declare
+               Head_Last : constant Natural := Mark + CRLF'Length - 1;
+            begin
+               if Head_Last - Text'First + 1 >
+                 Flyology.HTTP.Headers.Default_Max_Bytes
+               then
+                  raise Response_Too_Large;
+               end if;
+               Parse_Response_Head (Data, Text (Text'First .. Head_Last));
+               Data.Pending :=
+                 (if Head_Last + CRLF'Length >= Text'Last
+                  then Null_Unbounded_String
+                  else To_Unbounded_String
+                    (Text (Head_Last + CRLF'Length + 1 .. Text'Last)));
+            end;
+         end;
+         exit when Data.Status_Value not in 100 .. 199;
+         if Data.Status_Value = 101 then
+            raise Protocol_Error with "HTTP protocol upgrade is unsupported";
+         elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
+           or else Flyology.HTTP.Headers.Count
+             (Data.Fields, "Transfer-Encoding") > 0
+         then
+            raise Protocol_Error with
+              "informational HTTP response contains body framing";
+         end if;
+         Informational := Informational + 1;
+         if Informational > Max_Informational_Responses then
+            raise Protocol_Error with "too many informational HTTP responses";
+         end if;
+      end loop;
+
+      Select_Body_Mode (Data, To_Method ("GET"));
+      case Data.Mode is
+         when No_Body | Until_Close_Body =>
+            null;
+         when Fixed_Body =>
+            if Length (Data.Pending) < Data.Remaining_Body then
+               raise Protocol_Error with
+                 "peer closed before Content-Length was received";
+            end if;
+         when Chunked_Body =>
+            loop
+               declare
+                  Line : Unbounded_String;
+                  Size : Natural;
+               begin
+                  Take_Line (Line);
+                  Size := Chunk_Size (To_String (Line));
+                  if Size = 0 then
+                     loop
+                        Take_Line (Line);
+                        exit when Length (Line) = 0;
+                        Add_Trailer (Data, To_String (Line));
+                     end loop;
+                     exit;
+                  end if;
+                  if Length (Data.Pending) < Size + CRLF'Length then
+                     raise Protocol_Error with "incomplete HTTP chunk data";
+                  end if;
+                  declare
+                     Text : constant String := To_String (Data.Pending);
+                     CRLF_First : constant Natural := Text'First + Size;
+                  begin
+                     if Text (CRLF_First .. CRLF_First + 1) /= CRLF then
+                        raise Protocol_Error with
+                          "missing CRLF after HTTP chunk data";
+                     end if;
+                  end;
+                  Remove_Pending_Prefix (Data, Size + CRLF'Length);
+               end;
+            end loop;
+      end case;
+   end Validate_Response_Bytes_For_Testing;
+
    function Execute
      (Item    : aliased in out Client;
       Value   : Request;
@@ -1307,6 +1641,7 @@ package body Flyology.HTTP.Client is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Connection : Pooled_Connection_Access;
       Slot       : Positive;
+      Was_Reused : Boolean;
    begin
       if Item.Control.State = null
         or else not Item.Control.State.Is_Configured
@@ -1316,33 +1651,86 @@ package body Flyology.HTTP.Client is
       Validate_Request (Value);
       return Result : Response do
          Result.Data := new Response_Data;
+         Result.Data.Owner := Item.Control.State;
+         Item.Control.State.Lifetime.Retain_Response;
+         Result.Data.Retains_Owner := True;
          Result.Data.Started := Started;
          Result.Data.Timeout := Timeout;
-         Result.Data.Token := Token;
-         Checkout (Item, Connection, Slot, Started, Timeout, Token);
-         Result.Data.Owner := Item.Control.State;
-         Result.Data.Connection := Connection;
-         Result.Data.Slot_Index := Slot;
-         declare
-            Head : constant String := Request_Head
-              (Item.Control.State.all, Value);
-         begin
-            Connections.Send_All
-              (Result.Data.Connection.Channel, Byte_Array (Head),
-               Remaining (Started, Timeout), Token => Token);
-         end;
-         if Flyology.Bytes.Length (Value.Body_Value) > 0 then
-            Connections.Send_All
-              (Result.Data.Connection.Channel,
-               Flyology.Bytes.To_Array (Value.Body_Value),
-               Remaining (Started, Timeout), Token => Token);
+         if Token /= null then
+            --  Token's documented contract requires it to outlive Result.
+            Result.Data.Token := Token.all'Unchecked_Access;
          end if;
-         Read_Final_Head (Result.Data.all);
-         Select_Body_Mode (Result.Data.all, Value.Method_Value);
+         declare
+            Retried : Boolean := False;
+
+            function Can_Retry return Boolean is
+              (Was_Reused
+                 and then not Retried
+                 and then Is_Idempotent (Value.Method_Value)
+                 and then not Result.Data.Saw_Response_Bytes
+                 and then
+                   (Timeout < 0.0 or else Remaining (Started, Timeout) > 0.0));
+
+            procedure Retry_Stale is
+            begin
+               Release_Lease (Result.Data.all, False);
+               Item.Control.State.Pool.Record_Stale_Retry;
+               Retried := True;
+               Reset_Attempt (Result.Data.all);
+            end Retry_Stale;
+         begin
+            loop
+               Checkout
+                 (Item, Connection, Slot, Was_Reused, Started, Timeout, Token);
+               Result.Data.Connection := Connection;
+               Result.Data.Slot_Index := Slot;
+               begin
+                  declare
+                     Head : constant String := Request_Head
+                       (Item.Control.State.all, Value);
+                  begin
+                     Connections.Send_All
+                       (Result.Data.Connection.Channel, Byte_Array (Head),
+                        Remaining (Started, Timeout), Token => Token);
+                  end;
+                  if Flyology.Bytes.Length (Value.Body_Value) > 0 then
+                     Connections.Send_All
+                       (Result.Data.Connection.Channel,
+                        Flyology.Bytes.To_Array (Value.Body_Value),
+                        Remaining (Started, Timeout), Token => Token);
+                  end if;
+                  Read_Final_Head (Result.Data.all);
+                  Select_Body_Mode (Result.Data.all, Value.Method_Value);
+                  exit;
+               exception
+                  when Protocol_Error =>
+                     if Can_Retry then
+                        Retry_Stale;
+                     else
+                        raise;
+                     end if;
+                  when Flyology.IO.Device_Error |
+                       Flyology.IO.Sockets.Socket_Error |
+                       Flyology.IO.TLS.TLS_Error =>
+                     if Can_Retry then
+                        Retry_Stale;
+                     else
+                        raise;
+                     end if;
+               end;
+            end loop;
+         end;
       end return;
    exception
       when Flyology.Cancellation.Operation_Cancelled =>
          Translate_Interruption (Item.Control.State, Token);
+      when others =>
+         if Item.Control.State /= null
+           and then Item.Control.State.Pool.Is_Stopping
+         then
+            raise Client_Closed;
+         end if;
+         raise;
    end Execute;
 
    function Status (Item : Response) return Status_Code is
@@ -1565,6 +1953,16 @@ package body Flyology.HTTP.Client is
          return;
       end if;
 
+      declare
+         FD        : Flyology.IO.Descriptor;
+         Requested : Boolean;
+      begin
+         Item.Data.Owner.Pool.Shutdown_Source (FD, Requested);
+         if Requested then
+            raise Client_Closed;
+         end if;
+      end;
+
       case Item.Data.Mode is
          when No_Body =>
             Release_Lease (Item.Data.all, Item.Data.Reusable);
@@ -1689,6 +2087,12 @@ package body Flyology.HTTP.Client is
          if Item.Data /= null and then Item.Data.Connection /= null then
             Release_Lease (Item.Data.all, False);
          end if;
+         if Item.Data /= null
+           and then Item.Data.Owner /= null
+           and then Item.Data.Owner.Pool.Is_Stopping
+         then
+            raise Client_Closed;
+         end if;
          raise;
    end Read_Body;
 
@@ -1730,15 +2134,18 @@ package body Flyology.HTTP.Client is
       return Result;
    end Read_All;
 
-   function Pool_State (Item : Client) return Pool_Snapshot is
+   function Diagnostics (Item : Client) return Client_Diagnostics is
    begin
       if Item.Control.State = null then
          return
-           (Capacity => Item.Capacity, Connecting | Leased | Idle | Closing |
-              Waiters | Created | Reused | Closed | Admission_Timeouts => 0);
+           (Transport_Capacity => Item.Capacity,
+            Pending_Transports | Active_Exchanges | Reusable_Transports |
+              Closing_Transports | Admission_Waiters | Transports_Created |
+              Transport_Reuses | Transports_Closed | Stale_Retries |
+              Admission_Timeouts => 0);
       end if;
       return Item.Control.State.Pool.Snapshot;
-   end Pool_State;
+   end Diagnostics;
 
    procedure Prune_Idle (Item : in out Client) is
       Found      : Boolean;
@@ -1764,6 +2171,7 @@ package body Flyology.HTTP.Client is
       end if;
       Item.Control.State.Pool.Request_Shutdown;
       Item.Control.State.Manager.Request_Shutdown;
+      Interrupt_Active (Item.Control.State);
       Prune_Idle (Item);
       if Timeout < 0.0 then
          Item.Control.State.Pool.Await_Drained;
@@ -1778,10 +2186,10 @@ package body Flyology.HTTP.Client is
    end Shutdown;
 
    overriding procedure Finalize (Item : in out Client_Control) is
-      Snapshot : Pool_Snapshot;
       Found      : Boolean;
       Slot_Index : Natural;
       Connection : Pooled_Connection_Access;
+      Final_Reference : Boolean := False;
    begin
       if Item.State = null then
          return;
@@ -1789,6 +2197,7 @@ package body Flyology.HTTP.Client is
       begin
          Item.State.Pool.Request_Shutdown;
          Item.State.Manager.Request_Shutdown;
+         Interrupt_Active (Item.State);
          loop
             Item.State.Pool.Take_Idle (Found, Slot_Index, Connection);
             exit when not Found;
@@ -1798,26 +2207,47 @@ package body Flyology.HTTP.Client is
       exception
          when others => null;
       end;
-      Snapshot := Item.State.Pool.Snapshot;
-      if Snapshot.Connecting = 0 and then Snapshot.Leased = 0
-        and then Snapshot.Idle = 0 and then Snapshot.Closing = 0
-      then
+      Item.State.Lifetime.Release_Client (Final_Reference);
+      if Final_Reference then
          Free_State (Item.State);
       end if;
    end Finalize;
 
    overriding procedure Finalize (Item : in out Response) is
+      Owner           : Client_State_Access;
+      Final_Reference : Boolean := False;
    begin
       if Item.Data = null then
          return;
       end if;
+      Owner := Item.Data.Owner;
       if Item.Data.Connection /= null then
          Release_Lease (Item.Data.all, False);
       end if;
+      if Item.Data.Retains_Owner then
+         Item.Data.Retains_Owner := False;
+         Owner.Lifetime.Release_Response (Final_Reference);
+      end if;
       Free_Response_Data (Item.Data);
+      if Final_Reference then
+         Free_State (Owner);
+      end if;
    exception
       when others =>
+         if Item.Data /= null and then Item.Data.Retains_Owner
+           and then Owner /= null
+         then
+            Item.Data.Retains_Owner := False;
+            begin
+               Owner.Lifetime.Release_Response (Final_Reference);
+            exception
+               when others => null;
+            end;
+         end if;
          Free_Response_Data (Item.Data);
+         if Final_Reference and then Owner /= null then
+            Free_State (Owner);
+         end if;
    end Finalize;
 
 end Flyology.HTTP.Client;

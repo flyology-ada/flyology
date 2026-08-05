@@ -149,6 +149,27 @@ then
   exit 1
 fi
 
+http_client_lifetime_log="$project_root/build/tests/http-client-response-lifetime.log"
+if run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  --subdirs=compile-fail-http-client \
+  -c -p \
+  -P tests/runtime_smoke.gpr \
+  http_client_response_lifetime_fail.adb \
+  >"$http_client_lifetime_log" 2>&1
+then
+  printf '%s\n' "HTTP response escaped its client's lifetime" >&2
+  exit 1
+fi
+if ! grep -E \
+  '^http_client_response_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*accessibility.*return' \
+  "$http_client_lifetime_log" >/dev/null
+then
+  cat "$http_client_lifetime_log" >&2
+  printf '%s\n' "HTTP response lifetime fixture failed unexpectedly" >&2
+  exit 1
+fi
+
 if FLYOLOGY_LOOP_POOL_SIZE=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
@@ -306,6 +327,9 @@ flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 http_smoke
 http_client_smoke
+http_client_parser_matrix
+http_client_pool_model
+http_client_tls_smoke
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke

@@ -8,16 +8,20 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`http_client_smoke.adb` is included in `scripts/test.sh` and currently covers:
+`scripts/http-client-conformance.sh` builds and runs four independent programs
+plus one compile-fail lifetime fixture:
 
 | Boundary | Cases |
 | --- | --- |
 | Shared vocabulary | extensible method tokens, standard method constants, safe/idempotent classification, normalized origins |
 | Request wire form | origin-form target, generated Host, ordered repeated fields |
-| Pool | bounded admission timeout, idle reuse, abandonment close, new connection after close, coherent counters |
+| Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, coherent exchange/transport counters, descriptor restoration |
 | Response head | repeated fields and an informational response before the final response |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
+| Parser matrix | exact and over-limit heads, field-count exhaustion, invalid names and values, equal and conflicting lengths, decimal/chunk overflow, coding chains, missing delimiters, forbidden/incomplete trailers, and bodyless status rules |
 | Task lanes | the same successful exchange sequence from a native caller and an explicitly lightweight caller |
+| HTTPS | OpenSSL certificate and hostname verification, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
+| Lifetime | the compiler rejects a response that would escape the aliased client object; runtime shutdown closes and drains active exchanges |
 
 The scripted peer sends literal bytes and does not use `Flyology.HTTP.Server`,
 so a shared parser or framing defect cannot make both sides agree incorrectly.
@@ -27,15 +31,14 @@ HTTP/1.1 conformant:
 
 | Area | Required additions |
 | --- | --- |
-| Syntax limits | head exactly at and one byte beyond the bound, field-count exhaustion, empty and invalid field names, control bytes, fragmented delimiters |
-| Length rules | repeated equal lengths, comma-list variants, decimal overflow, zero length, bodyless HEAD/1xx/204/304 responses with misleading fields |
-| Transfer coding | split chunk-size lines, upper/lower hex, size overflow, missing data CRLF, forbidden trailers, incomplete trailer block, unsupported coding chains |
-| Persistence | HTTP/1.0 keep-alive, HTTP/1.1 close, stale idle peer, age/request rotation, pruning, shutdown during connect/admission/body read |
-| Deadlines | timeout at admission, DNS, connect, TLS handshake, send, head, fixed body, chunk data, and close-delimited body without restarting the clock |
-| Cancellation | the same boundaries as deadlines, plus cancellation/shutdown races and exact exception translation |
+| Fragmentation | force every response-head delimiter and chunk/trailer boundary across separate kernel reads rather than relying on TCP segmentation |
+| Length rules | dedicated HEAD cases and the remaining RFC 9110 status/method combinations with misleading framing fields |
+| Persistence | shutdown during DNS/connect and pool admission, plus simultaneous shutdown/return races |
+| Deadlines | timeout at DNS, connect, send, head, fixed body, chunk data, and close-delimited body without restarting the clock |
+| Cancellation | the same remaining boundaries as deadlines, plus abort and cancellation/shutdown races at every lease transition |
 | Addressing | DNS fallback, IPv4/IPv6 literals, bracketed IPv6 Host, default and explicit ports, all-address failure |
-| TLS | verification failure, hostname mismatch, handshake timeout/cancellation, clean and abrupt closure, pool parity with plaintext |
-| Resource behavior | descriptor counts after every failure class, abort at each lease transition, client/response finalization ordering |
+| TLS | trust-chain rejection distinct from hostname mismatch, clean/abrupt closure while streaming each body mode, and shutdown during provider setup |
+| Resource behavior | descriptor counts after every remaining failure class and abort at each lease transition |
 
 Each deterministic case should assert both the caller-visible outcome and the
 pool/descriptor lifecycle. Timing checks use bounded deadlines only; they do
@@ -61,23 +64,27 @@ scenario sources for Flyology's raw peer and parser model.
 
 ## Model and fuzz campaigns
 
-The pool controller should also have a deterministic state-model test that
-generates checkout, connect success/failure, return, discard, prune, timeout,
-and shutdown transitions, then compares every counter and slot phase with a
-small reference model. This checks interleavings that a socket scenario may
-not reach reliably.
+`http_client_pool_model.adb` drives the public client through checkout,
+successful creation, stale failure, one-time retry, return, request-count
+discard, prune, active-read shutdown, and final drain. It compares every
+observable exchange/transport counter with its transition table and restores
+the process descriptor baseline. Internal-only slot phases are not exposed as
+public API; forced abort and simultaneous transition races remain in the table
+above.
 
-The HTTP head and chunk decoder need a stateless fuzz wrapper accepting a
-bounded `Ada.Streams.Stream_Element_Array`, a fragmentation schedule, and a
-small expected-body limit. Normal outcomes are a decoded message, a documented
-protocol/size exception, or a need-more-data state; assertion failures, range
-checks, hangs, and unbounded allocation are crashes. Seeds should include every
-deterministic wire case plus boundary-sized heads and chunks.
+`Flyology.HTTP.Client.Testing.Fuzz_Response` is a stateless wrapper around the
+production status, header, length, chunk, and trailer validators. It accepts a
+fixed 1,000-byte array plus a prefix length. Documented protocol and size
+rejections are normal outcomes; assertion failures, runtime checks, hangs, and
+other exceptions remain crashes. The larger exact-boundary cases stay in the
+deterministic parser matrix because GNATfuzz's automatic marshaller limits
+array parameters to 1,000 components.
 
-Run GNATfuzz through Alire when the AdaCore tool is available. Generated
-analysis, harness, corpus, and session directories remain build output and must
-not be committed. Use an isolated process mode unless the wrapper proves it
-resets all parser state between iterations, replay every saved crash, and
-record the tool version, seed revision, duration, engines, coverage plateau,
-and minimized reproducer. GNATfuzz was not available in the toolchain when this
-ledger was introduced, so no fuzz result is claimed here.
+Run `./scripts/http-client-fuzz.sh prepare` through Alire when the AdaCore tool
+is available. It analyzes the dedicated wrapper, selects its reported
+subprogram id, generates an isolated `afl_plain` harness, builds it, and creates
+a starting corpus under ignored `build/gnatfuzz/http-client`. Run
+`./scripts/http-client-fuzz.sh fuzz` for the campaign. Replay every saved crash
+and record the tool version, seed revision, duration, engines, coverage
+plateau, and minimized reproducer. GNATfuzz was not available in the current
+toolchain, so no fuzz result is claimed here.

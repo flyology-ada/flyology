@@ -42,27 +42,32 @@ package Flyology.HTTP.Client is
    --  Default conservative pool policy.
    Default_Pool_Configuration : constant Pool_Configuration := (others => <>);
 
-   --  Coherent connection-pool counters.
-   --  @field Capacity Configured slot bound
-   --  @field Connecting Slots reserved for connection establishment
-   --  @field Leased Connections owned by active responses
-   --  @field Idle Reusable connections
-   --  @field Closing Connections being closed outside the pool lock
-   --  @field Waiters Requests waiting for a slot
-   --  @field Created Successfully established connections
-   --  @field Reused Idle connection checkouts
-   --  @field Closed Connections removed from the pool
+   --  Coherent client counters. Exchange and transport counts are separate so
+   --  a later multiplexed protocol can report several exchanges on one
+   --  transport without changing this record's meaning.
+   --  @field Transport_Capacity Configured transport slot bound
+   --  @field Pending_Transports Transports being established
+   --  @field Active_Exchanges Requests that own protocol exchanges
+   --  @field Reusable_Transports Established transports eligible for reuse
+   --  @field Closing_Transports Transports being closed outside the pool lock
+   --  @field Admission_Waiters Requests waiting for exchange capacity
+   --  @field Transports_Created Successfully established transports
+   --  @field Transport_Reuses Exchanges assigned an existing transport
+   --  @field Transports_Closed Transports removed from the client
+   --  @field Stale_Retries Idempotent exchanges retried once after an existing
+   --     transport failed before producing response bytes
    --  @field Admission_Timeouts Pool waits whose request deadline expired
-   type Pool_Snapshot is record
-      Capacity           : Positive;
-      Connecting         : Natural;
-      Leased             : Natural;
-      Idle               : Natural;
-      Closing            : Natural;
-      Waiters             : Natural;
-      Created             : Natural;
-      Reused              : Natural;
-      Closed              : Natural;
+   type Client_Diagnostics is record
+      Transport_Capacity : Positive;
+      Pending_Transports : Natural;
+      Active_Exchanges    : Natural;
+      Reusable_Transports : Natural;
+      Closing_Transports  : Natural;
+      Admission_Waiters   : Natural;
+      Transports_Created  : Natural;
+      Transport_Reuses    : Natural;
+      Transports_Closed   : Natural;
+      Stale_Retries       : Natural;
       Admission_Timeouts  : Natural;
    end record;
 
@@ -105,8 +110,11 @@ package Flyology.HTTP.Client is
 
    --  Origin-bound client. Capacity is the maximum number of open plus
    --  connecting transports. Configure must complete before concurrent use.
-   --  Finalize requests shutdown and closes idle connections; normal Ada
-   --  scoping must ensure active requests and responses finalize first.
+   --  Finalize requests shutdown and closes transports. Execute's aliased
+   --  controlling parameter lets Ada accessibility reject a response that
+   --  would escape Item's lifetime. Internal retention also protects cleanup
+   --  during abort and finalization races. Application TLS providers and
+   --  cancellation tokens must satisfy their separately documented lifetimes.
    type Client (Capacity : Positive := 4) is limited private;
 
    --  Bind a new client to one origin and immutable pool policy. The call does
@@ -148,6 +156,10 @@ package Flyology.HTTP.Client is
    --  @param Value Request to execute
    --  @param Timeout Whole-exchange deadline interval
    --  @param Token Optional cancellation source
+   --  An idempotent request assigned a reused transport is retried once when
+   --  that transport fails before any response byte is received. The retry
+   --  remains inside the original deadline. Non-idempotent requests are never
+   --  retried automatically.
    --  @return Response head with a streaming body lease
    --  @exception Client_Closed Client is stopping
    --  @exception Connection_Error Resolution or all address attempts fail
@@ -235,10 +247,10 @@ package Flyology.HTTP.Client is
       Maximum : Natural := 1_024 * 1_024)
       return Flyology.Bytes.Unbounded_Bytes;
 
-   --  Return a coherent pool snapshot without starting I/O.
+   --  Return coherent exchange and transport diagnostics without starting I/O.
    --  @param Item Client to inspect
    --  @return Current and cumulative counters
-   function Pool_State (Item : Client) return Pool_Snapshot;
+   function Diagnostics (Item : Client) return Client_Diagnostics;
 
    --  Close every currently idle connection. Active leases are unaffected.
    --  @param Item Configured client
@@ -257,6 +269,10 @@ private
    --  response abstraction can later represent a multiplexed protocol stream.
    type Client_State (Capacity : Positive);
    type Client_State_Access is access Client_State;
+
+   --  @exclude
+   procedure Validate_Response_Bytes_For_Testing
+     (Value : Ada.Streams.Stream_Element_Array);
 
    type Client_Control is new Ada.Finalization.Limited_Controlled with record
       State : Client_State_Access := null;

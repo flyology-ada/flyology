@@ -1129,11 +1129,20 @@ reusable connection; finalizing an incomplete response closes it. This keeps
 pool ownership out of application code and prevents a partially consumed
 message from contaminating the next exchange.
 
+An idempotent request that receives no response bytes from a reused transport
+is replayed once on a new transport under the same deadline. Non-idempotent
+requests are never replayed automatically. `Diagnostics` reports active
+exchanges separately from pending, reusable, and closing transports; this
+distinction remains meaningful if a later protocol multiplexes exchanges over
+one transport.
+
 The same calls work from lightweight and native tasks. One monotonic timeout
 starts before pool admission and continues through DNS, all connection
 attempts, TLS, request transmission, response-head parsing, and later body
 reads. `Shutdown` rejects new admission, interrupts admitted transport work,
 closes idle connections, and waits for active response leases to drain.
+Ada accessibility rejects a response that would escape the aliased client
+object. A cancellation token supplied to `Execute` must outlive its response.
 
 Standard methods are constants in `Flyology.HTTP.Methods`; `To_Method` admits
 extension tokens without making applications depend on a closed enumeration.
@@ -1154,13 +1163,16 @@ Flyology.HTTP.Client.Configure
   (HTTP, Flyology.HTTP.Parse_Origin ("https://example.com"), Backend'Access);
 ```
 
-The behavioral suite tests the client against a raw scripted peer rather than
-the Flyology server. It runs native and lightweight callers and covers pool
-admission, reuse, abandonment, repeated fields, chunk trailers, informational
-responses, and fixed and chunked bodies. The coverage ledger
-and remaining negative matrix are in
+The deterministic suite combines a raw scripted peer, a parser boundary
+matrix, a pool transition model, a compile-time lifetime fixture, and real
+OpenSSL client/server exchanges. It covers native/lightweight parity, reuse,
+stale recovery, shutdown interruption, certificate and hostname verification,
+handshake timeout/cancellation, and descriptor restoration. The coverage
+ledger and remaining negative matrix are in
 [`tests/http-client-conformance.md`](tests/http-client-conformance.md).
-Run its deterministic baseline with `./scripts/http-client-conformance.sh`.
+Run it with `./scripts/http-client-conformance.sh`. The stateless production
+parser fuzz wrapper is prepared with `./scripts/http-client-fuzz.sh prepare`
+when AdaCore GNATfuzz is installed.
 
 ### HTTP server
 

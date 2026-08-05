@@ -1,5 +1,8 @@
 --  Supplies constants for standardized HTTP methods while the parent Method
---  type remains open to extension tokens.
+--  type remains open to extension tokens. A constant identifies wire spelling
+--  and semantics; an individual protocol engine may still reject a method it
+--  cannot complete safely. In particular, the initial Client has no tunnel
+--  handoff API and therefore rejects CONNECT.
 package Flyology.HTTP.Methods is
 
    --  GET retrieval method.

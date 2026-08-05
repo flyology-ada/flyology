@@ -58,6 +58,25 @@ procedure HTTP_Client_Smoke is
           Max_Connection_Age          => 60.0,
           Max_Requests_Per_Connection => 0));
 
+      Client.Set_Method (Value, Flyology.HTTP.Methods.CONNECT);
+      declare
+         Rejected : Boolean := False;
+      begin
+         begin
+            declare
+               Unexpected : Client.Response := Client.Execute (Item, Value);
+               pragma Unreferenced (Unexpected);
+            begin
+               null;
+            end;
+         exception
+            when Constraint_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
+      Client.Set_Method (Value, Flyology.HTTP.Methods.GET);
+
       Client.Set_Target (Value, "/fixed");
       Client.Add_Header (Value, "X-Order", "first");
       Client.Add_Header (Value, "X-Order", "second");
@@ -115,12 +134,15 @@ procedure HTTP_Client_Smoke is
       end;
 
       declare
-         State : constant Client.Pool_Snapshot := Client.Pool_State (Item);
+         State : constant Client.Client_Diagnostics :=
+           Client.Diagnostics (Item);
       begin
-         pragma Assert (State.Created = 2);
-         pragma Assert (State.Reused = 2);
+         pragma Assert (State.Transports_Created = 2);
+         pragma Assert (State.Transport_Reuses = 2);
          pragma Assert (State.Admission_Timeouts = 1);
-         pragma Assert (State.Leased = 0 and then State.Idle = 0);
+         pragma Assert
+           (State.Active_Exchanges = 0
+              and then State.Reusable_Transports = 0);
       end;
       Client.Shutdown (Item);
    end Exercise_Client;
