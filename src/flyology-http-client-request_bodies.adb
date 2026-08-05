@@ -46,7 +46,7 @@ package body Flyology.HTTP.Client.Request_Bodies is
          Last, Finished);
    end Read;
 
-   procedure Rewind (Item : in out Array_Source) is
+   overriding procedure Rewind (Item : in out Array_Source) is
    begin
       Item.Position := 0;
    end Rewind;
@@ -83,7 +83,7 @@ package body Flyology.HTTP.Client.Request_Bodies is
          Last, Finished);
    end Read;
 
-   procedure Rewind (Item : in out Byte_String_Source) is
+   overriding procedure Rewind (Item : in out Byte_String_Source) is
    begin
       Item.Position := 0;
    end Rewind;
@@ -118,7 +118,7 @@ package body Flyology.HTTP.Client.Request_Bodies is
         (Data'First, Count, Item.Position = Total, Last, Finished);
    end Read;
 
-   procedure Rewind (Item : in out Bytes_Source) is
+   overriding procedure Rewind (Item : in out Bytes_Source) is
    begin
       Item.Position := 0;
    end Rewind;
@@ -168,7 +168,7 @@ package body Flyology.HTTP.Client.Request_Bodies is
         (Data'First, Count, Item.Position = Total, Last, Finished);
    end Read;
 
-   procedure Rewind (Item : in out Buffer_Source) is
+   overriding procedure Rewind (Item : in out Buffer_Source) is
    begin
       Item.Position := 0;
    end Rewind;

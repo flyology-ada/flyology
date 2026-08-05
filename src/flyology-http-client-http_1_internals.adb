@@ -11,6 +11,7 @@ package body HTTP_1_Internals is
       Result : Unbounded_String;
       Body_Length : constant Natural :=
         Flyology.Bytes.Length (Value.Body_Value);
+      First_Trailer : Boolean := True;
    begin
       Validate_Request (Value);
       Append
@@ -22,6 +23,17 @@ package body HTTP_1_Internals is
            (Result, Flyology.HTTP.Headers.Name (Value.Fields, Index) & ": " &
             Flyology.HTTP.Headers.Value (Value.Fields, Index) & CRLF);
       end loop;
+      if Value.Expect_Continue
+        and then
+          (Body_Length > 0
+             or else
+               (Streaming
+                  and then
+                    (not Stream_Length.Is_Known
+                       or else Stream_Length.Bytes > 0)))
+      then
+         Append (Result, "Expect: 100-continue" & CRLF);
+      end if;
       if Streaming and then Stream_Length.Is_Known then
          Append
            (Result,
@@ -31,6 +43,40 @@ package body HTTP_1_Internals is
       elsif Body_Length > 0 then
          Append (Result, "Content-Length: " & Decimal (Body_Length) & CRLF);
       end if;
+      if Streaming
+        and then not Stream_Length.Is_Known
+        and then Flyology.HTTP.Headers.Count (Value.Trailer_Fields) > 0
+      then
+         Append (Result, "Trailer: ");
+         for Index in 1 .. Flyology.HTTP.Headers.Count
+           (Value.Trailer_Fields)
+         loop
+            declare
+               Name  : constant String := Flyology.HTTP.Headers.Name
+                 (Value.Trailer_Fields, Index);
+               First : Boolean := True;
+            begin
+               for Earlier in 1 .. Index - 1 loop
+                  if Ada.Characters.Handling.To_Lower
+                    (Flyology.HTTP.Headers.Name
+                       (Value.Trailer_Fields, Earlier)) =
+                     Ada.Characters.Handling.To_Lower (Name)
+                  then
+                     First := False;
+                     exit;
+                  end if;
+               end loop;
+               if First then
+                  if not First_Trailer then
+                     Append (Result, ", ");
+                  end if;
+                  Append (Result, Name);
+                  First_Trailer := False;
+               end if;
+            end;
+         end loop;
+         Append (Result, CRLF);
+      end if;
       Append (Result, CRLF);
       return To_String (Result);
    end Request_Head;
@@ -39,6 +85,7 @@ package body HTTP_1_Internals is
      (Data   : in out Response_Data;
       Source : in out Request_Body_Source'Class;
       Length : Body_Length;
+      Trailers : Flyology.HTTP.Headers.List;
       Token  : access Flyology.Cancellation.Token)
    is
       Buffer    : Ada.Streams.Stream_Element_Array
@@ -60,9 +107,15 @@ package body HTTP_1_Internals is
 
       procedure Pull is
       begin
-         Read
-           (Source, Buffer, Last, Finished,
-            Remaining (Data.Started, Data.Timeout), Token);
+         begin
+            Read
+              (Source, Buffer, Last, Finished,
+               Remaining (Data.Started, Data.Timeout), Token);
+         exception
+            when others =>
+               Data.Source_Failed := True;
+               raise;
+         end;
          if Produced = 0 and then not Finished then
             raise Request_Body_Error with
               "request body source made no progress";
@@ -121,7 +174,18 @@ package body HTTP_1_Internals is
             exit when Finished;
          end loop;
          Connections.Send_All
-           (Data.Connection.Channel, Byte_Array ("0" & CRLF & CRLF),
+           (Data.Connection.Channel, Byte_Array ("0" & CRLF),
+            Remaining (Data.Started, Data.Timeout), Token => Token);
+         for Index in 1 .. Flyology.HTTP.Headers.Count (Trailers) loop
+            Connections.Send_All
+              (Data.Connection.Channel,
+               Byte_Array
+                 (Flyology.HTTP.Headers.Name (Trailers, Index) & ": " &
+                  Flyology.HTTP.Headers.Value (Trailers, Index) & CRLF),
+               Remaining (Data.Started, Data.Timeout), Token => Token);
+         end loop;
+         Connections.Send_All
+           (Data.Connection.Channel, Byte_Array (CRLF),
             Remaining (Data.Started, Data.Timeout), Token => Token);
       end if;
    end Send_Streaming_Body;
@@ -129,15 +193,22 @@ package body HTTP_1_Internals is
    procedure Receive_More
      (Data        : in out Response_Data;
       Peer_Closed : out Boolean;
-      Token       : access Flyology.Cancellation.Token)
+      Token       : access Flyology.Cancellation.Token;
+      Maximum_Wait : Duration := Flyology.IO.Infinite)
    is
       Buffer : Ada.Streams.Stream_Element_Array
         (1 .. Ada.Streams.Stream_Element_Offset (Receive_Buffer_Size));
       Last   : Ada.Streams.Stream_Element_Offset;
+      Whole_Wait : constant Duration := Remaining
+        (Data.Started, Data.Timeout);
+      Wait : constant Duration :=
+        (if Maximum_Wait < 0.0 then Whole_Wait
+         elsif Whole_Wait < 0.0 then Maximum_Wait
+         else Duration'Min (Whole_Wait, Maximum_Wait));
    begin
       Connections.Receive
         (Data.Connection.Channel, Buffer, Last,
-         Remaining (Data.Started, Data.Timeout), Token => Token);
+         Wait, Token => Token);
       Peer_Closed := Last < Buffer'First;
       if not Peer_Closed then
          Data.Saw_Response_Bytes := True;
@@ -164,6 +235,8 @@ package body HTTP_1_Internals is
       Data.Complete := False;
       Data.Reusable := False;
       Data.Saw_Response_Bytes := False;
+      Data.Source_Failed := False;
+      Data.Informational_Count := 0;
    end Reset_Attempt;
 
    function Trim_OWS (Value : String) return String is
@@ -367,66 +440,153 @@ package body HTTP_1_Internals is
       end loop;
    end Parse_Response_Head;
 
+   procedure Read_Next_Head
+     (Data         : in out Response_Data;
+      Token        : access Flyology.Cancellation.Token;
+      Maximum_Wait : Duration := Flyology.IO.Infinite)
+   is
+      Closed       : Boolean;
+      Read_Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+
+      function Wait_Remaining return Duration is
+      begin
+         if Maximum_Wait < 0.0 then
+            return Flyology.IO.Infinite;
+         end if;
+         return Flyology.Time_Math.Remaining
+           (Maximum_Wait,
+            Ada.Real_Time.To_Duration
+              (Ada.Real_Time.Clock - Read_Started));
+      end Wait_Remaining;
+   begin
+      loop
+         declare
+            Text : constant String := To_String (Data.Pending);
+            Mark : constant Natural := Ada.Strings.Fixed.Index
+              (Text, CRLF & CRLF);
+         begin
+            if Mark /= 0 then
+               declare
+                  Head_Last : constant Natural := Mark + CRLF'Length - 1;
+               begin
+                  if Head_Last - Text'First + 1 >
+                    Flyology.HTTP.Headers.Default_Max_Bytes
+                  then
+                     raise Response_Too_Large;
+                  end if;
+                  Parse_Response_Head
+                    (Data, Text (Text'First .. Head_Last));
+                  Data.Pending :=
+                    (if Head_Last = Text'Last
+                     then Null_Unbounded_String
+                     else To_Unbounded_String
+                       (Text (Head_Last + CRLF'Length + 1 .. Text'Last)));
+               end;
+               return;
+            elsif Text'Length >=
+              Flyology.HTTP.Headers.Default_Max_Bytes
+            then
+               raise Response_Too_Large;
+            end if;
+         end;
+         Receive_More (Data, Closed, Token, Wait_Remaining);
+         if Closed then
+            raise Protocol_Error with
+              "peer closed during HTTP response head";
+         end if;
+      end loop;
+   end Read_Next_Head;
+
+   procedure Accept_Informational (Data : in out Response_Data) is
+   begin
+      if Data.Status_Value = 101 then
+         raise Protocol_Error with "HTTP protocol upgrade is unsupported";
+      elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
+        or else Flyology.HTTP.Headers.Count
+          (Data.Fields, "Transfer-Encoding") > 0
+      then
+         raise Protocol_Error with
+           "informational HTTP response contains body framing";
+      end if;
+      Data.Informational_Count := Data.Informational_Count + 1;
+      if Data.Informational_Count > Max_Informational_Responses then
+         raise Protocol_Error with "too many informational HTTP responses";
+      end if;
+   end Accept_Informational;
+
    procedure Read_Final_Head
      (Data  : in out Response_Data;
       Token : access Flyology.Cancellation.Token) is
-      Closed : Boolean;
-      Informational : Natural := 0;
    begin
       loop
-         loop
-            declare
-               Text : constant String := To_String (Data.Pending);
-               Mark : constant Natural := Ada.Strings.Fixed.Index
-                 (Text, CRLF & CRLF);
-            begin
-               if Mark /= 0 then
-                  declare
-                     Head_Last : constant Natural := Mark + CRLF'Length - 1;
-                  begin
-                     if Head_Last - Text'First + 1 >
-                       Flyology.HTTP.Headers.Default_Max_Bytes
-                     then
-                        raise Response_Too_Large;
-                     end if;
-                     Parse_Response_Head
-                       (Data, Text (Text'First .. Head_Last));
-                     Data.Pending :=
-                       (if Head_Last = Text'Last
-                        then Null_Unbounded_String
-                        else To_Unbounded_String
-                          (Text (Head_Last + CRLF'Length + 1 .. Text'Last)));
-                  end;
-                  exit;
-               elsif Text'Length >=
-                 Flyology.HTTP.Headers.Default_Max_Bytes
-               then
-                  raise Response_Too_Large;
-               end if;
-            end;
-            Receive_More (Data, Closed, Token);
-            if Closed then
-               raise Protocol_Error with
-                 "peer closed during HTTP response head";
-            end if;
-         end loop;
-
+         Read_Next_Head (Data, Token);
          exit when Data.Status_Value not in 100 .. 199;
-         if Data.Status_Value = 101 then
-            raise Protocol_Error with "HTTP protocol upgrade is unsupported";
-         elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
-           or else Flyology.HTTP.Headers.Count
-             (Data.Fields, "Transfer-Encoding") > 0
-         then
-            raise Protocol_Error with
-              "informational HTTP response contains body framing";
-         end if;
-         Informational := Informational + 1;
-         if Informational > Max_Informational_Responses then
-            raise Protocol_Error with "too many informational HTTP responses";
-         end if;
+         Accept_Informational (Data);
       end loop;
    end Read_Final_Head;
+
+   procedure Await_Continue
+     (Data         : in out Response_Data;
+      Wait_Timeout : Duration;
+      Token        : access Flyology.Cancellation.Token;
+      Final_Ready  : out Boolean)
+   is
+      Wait_Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+
+      function Continue_Remaining return Duration is
+      begin
+         if Wait_Timeout < 0.0 then
+            return Flyology.IO.Infinite;
+         end if;
+         return Flyology.Time_Math.Remaining
+           (Wait_Timeout,
+            Ada.Real_Time.To_Duration
+              (Ada.Real_Time.Clock - Wait_Started));
+      end Continue_Remaining;
+
+      function Read_Within_Continue_Wait return Boolean is
+         Continue_Wait : constant Duration := Continue_Remaining;
+         Whole_Wait    : constant Duration := Remaining
+           (Data.Started, Data.Timeout);
+         Continue_Is_Limit : constant Boolean :=
+           Continue_Wait >= 0.0
+             and then (Whole_Wait < 0.0 or else Continue_Wait < Whole_Wait);
+      begin
+         if Continue_Wait = 0.0 and then Length (Data.Pending) = 0 then
+            return False;
+         end if;
+         begin
+            Read_Next_Head (Data, Token, Continue_Wait);
+            return True;
+         exception
+            when Flyology.IO.Timeout_Error =>
+               if not Continue_Is_Limit then
+                  raise;
+               elsif Length (Data.Pending) = 0 then
+                  return False;
+               else
+                  --  Do not interleave a request body with a partially
+                  --  received response head. Finish it under the whole
+                  --  exchange deadline instead of applying the fallback.
+                  Read_Next_Head (Data, Token);
+                  return True;
+               end if;
+         end;
+      end Read_Within_Continue_Wait;
+   begin
+      Final_Ready := False;
+      loop
+         exit when not Read_Within_Continue_Wait;
+         if Data.Status_Value not in 100 .. 199 then
+            Final_Ready := True;
+            return;
+         end if;
+         Accept_Informational (Data);
+         if Data.Status_Value = 100 then
+            return;
+         end if;
+      end loop;
+   end Await_Continue;
 
    procedure Select_Body_Mode
      (Data : in out Response_Data; Request_Method : Method)

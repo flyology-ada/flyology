@@ -6,19 +6,21 @@ with Flyology.IO.Files;
 package Flyology.HTTP.Client.Request_Bodies.Files is
 
    --  Borrow Count bytes beginning at Offset. File must remain open through
-   --  Execute. The range must fit File_Offset; invalid ranges are rejected
-   --  when Execute queries Declared_Length. Reaching end-of-file early causes
-   --  the client's known-length source validation to raise Request_Body_Error.
+   --  Execute, and its bytes must remain unchanged until Execute returns so a
+   --  stale-transport retry reproduces the same request. The range must fit
+   --  File_Offset; invalid ranges are rejected when Execute queries
+   --  Declared_Length. Reaching end-of-file early causes the client's
+   --  known-length source validation to raise Request_Body_Error.
    type Range_Source
      (File   : not null access Flyology.IO.Files.File_Descriptor;
       Offset : Flyology.IO.Files.File_Offset;
       Count  : Body_Size)
-   is limited new Request_Body_Source with private;
+   is limited new Rewindable_Request_Body_Source with private;
 
    --  Rewind a file range for an explicit later Execute call. The descriptor
    --  remains borrowed and the HTTP client never rewinds automatically.
    --  @param Item Source whose next read returns to Offset
-   procedure Rewind (Item : in out Range_Source);
+   overriding procedure Rewind (Item : in out Range_Source);
 
    --  @exclude
    --  @param Item File range to inspect
@@ -46,7 +48,7 @@ private
      (File   : not null access Flyology.IO.Files.File_Descriptor;
       Offset : Flyology.IO.Files.File_Offset;
       Count  : Body_Size)
-   is limited new Request_Body_Source with record
+   is limited new Rewindable_Request_Body_Source with record
       Position : Body_Size := 0;
    end record;
 

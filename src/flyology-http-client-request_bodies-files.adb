@@ -68,7 +68,7 @@ package body Flyology.HTTP.Client.Request_Bodies.Files is
       Finished := Item.Position = Item.Count;
    end Read;
 
-   procedure Rewind (Item : in out Range_Source) is
+   overriding procedure Rewind (Item : in out Range_Source) is
    begin
       Item.Position := 0;
    end Rewind;

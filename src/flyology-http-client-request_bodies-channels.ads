@@ -3,7 +3,8 @@ with Flyology.Buffers.Channels;
 
 --  Adapts a bounded unique-buffer channel into a generated HTTP request body.
 --  Producers retain ordinary channel backpressure and close the channel to
---  finish an unknown-length body.
+--  finish an unknown-length body. A channel source is deliberately one-shot
+--  and does not opt into Rewindable_Request_Body_Source retries.
 package Flyology.HTTP.Client.Request_Bodies.Channels is
 
    --  Consume buffers from Input. Pool must be Input's owner. The source holds

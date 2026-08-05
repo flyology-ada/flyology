@@ -104,6 +104,36 @@ package Flyology.HTTP.Client is
    procedure Add_Header
      (Item : in out Request; Name : String; Value : String);
 
+   --  Enable or disable the Expect: 100-continue handshake. When enabled for
+   --  a nonempty retained or streaming body, Execute sends the request head
+   --  first and waits up to Wait_Timeout for 100 Continue or a final response.
+   --  A positive wait expiry with no partial response sends the body; a
+   --  negative value waits within the whole exchange deadline and zero sends
+   --  immediately after the head. A final response suppresses body reads and
+   --  transmission. The whole exchange deadline is never extended.
+   --  @param Item Request to change
+   --  @param Enabled Whether to generate Expect: 100-continue
+   --  @param Wait_Timeout Maximum continue-specific wait in seconds
+   procedure Set_Expect_Continue
+     (Item         : in out Request;
+      Enabled      : Boolean := True;
+      Wait_Timeout : Duration := 1.0);
+
+   --  Append one request trailer field. The client generates the Trailer
+   --  declaration and sends retained trailer values after an unknown-length
+   --  chunked source finishes. Trailers are rejected for retained or
+   --  known-length bodies. Fields affecting framing, routing, authentication,
+   --  request semantics, or payload interpretation are prohibited.
+   --  @param Item Request to change
+   --  @param Name Trailer field name
+   --  @param Value Trailer field value retained by Item
+   --  @exception Constraint_Error Name is prohibited in request trailers or
+   --     Name or Value has invalid HTTP field syntax
+   --  @exception Flyology.HTTP.Headers.Headers_Too_Large Trailer storage is
+   --     exhausted
+   procedure Add_Trailer
+     (Item : in out Request; Name : String; Value : String);
+
    --  Replace the request body using a one-to-one byte mapping.
    --  @param Item Request to change
    --  @param Value Request representation bytes
@@ -162,6 +192,19 @@ package Flyology.HTTP.Client is
       Timeout  : Duration;
       Token    : access Flyology.Cancellation.Token) is abstract;
 
+   --  Request source that can reproduce exactly the same byte sequence after
+   --  a failed transport attempt. Rewind must be nonblocking and restore the
+   --  initial cursor without changing Declared_Length. Execute calls it only
+   --  after discarding a failed reused transport and only when the method is
+   --  idempotent and no response byte was received.
+   type Rewindable_Request_Body_Source is
+     limited interface and Request_Body_Source;
+
+   --  Restore a rewindable source to its initial byte before one safe retry.
+   --  @param Item Source whose exact initial sequence is restored
+   procedure Rewind
+     (Item : in out Rewindable_Request_Body_Source) is abstract;
+
    --  Origin-bound client. Capacity is the maximum number of open plus
    --  connecting transports. Configure must complete before concurrent use.
    --  Finalize requests shutdown and closes transports. Execute's aliased
@@ -214,9 +257,10 @@ package Flyology.HTTP.Client is
    --  @param Timeout Whole-exchange deadline interval
    --  @param Token Optional cancellation source
    --  An idempotent request assigned a reused transport is retried once when
-   --  that transport fails before any response byte is received. The retry
-   --  remains inside the original deadline. Non-idempotent requests are never
-   --  retried automatically.
+   --  that transport fails before any response byte is received. Retained
+   --  bodies can be replayed directly; streamed bodies are eligible only when
+   --  Source implements Rewindable_Request_Body_Source. The retry remains
+   --  inside the original deadline. Non-idempotent requests are never retried.
    --  @return Response head with a streaming body lease
    --  @exception Client_Closed Client is stopping
    --  @exception Connection_Error Resolution or all address attempts fail
@@ -237,7 +281,8 @@ package Flyology.HTTP.Client is
 
    --  Execute one request while pulling its body from Source. The source's
    --  Declared_Length controls protocol framing. Source is not retained and
-   --  is never replayed automatically, including for idempotent methods. Its
+   --  is replayed only when it implements Rewindable_Request_Body_Source and
+   --  the ordinary idempotent stale-transport retry conditions hold. Its
    --  exceptions propagate after the leased transport is discarded.
    --  @param Item Shared configured client that outlives the result
    --  @param Value Request metadata; a retained body is rejected
@@ -454,7 +499,10 @@ private
       Target_Value : Ada.Strings.Unbounded.Unbounded_String :=
         Ada.Strings.Unbounded.To_Unbounded_String ("/");
       Fields       : Flyology.HTTP.Headers.List;
+      Trailer_Fields : Flyology.HTTP.Headers.List;
       Body_Value   : Flyology.Bytes.Unbounded_Bytes;
+      Expect_Continue : Boolean := False;
+      Continue_Wait   : Duration := 1.0;
    end record;
 
    type Body_Length is record

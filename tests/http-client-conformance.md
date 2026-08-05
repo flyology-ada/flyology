@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs eight independent programs
+`scripts/http-client-conformance.sh` builds and runs nine independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -17,6 +17,7 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | Request wire form | origin-form target, generated Host, ordered repeated fields |
 | Request streaming | known-length Content-Length, unknown-length chunked coding, source progress and early-end rejection, source exception cleanup, retained-body conflict, and native/lightweight parity |
 | Request body adapters | borrowed arrays with nondefault bounds and explicit rewind, byte strings, owned bytes, unique-buffer ownership retention, positional file ranges, generated channel bodies with known or chunked framing, file timeout, channel timeout/cancellation, backpressure, and lane parity |
+| Upload controls | Expect/continue after informational responses, final-response body suppression, bounded continue fallback, request trailer declaration and emission, prohibited trailer rejection, one idempotent rewindable-source stale retry, one-shot non-retry, and lane parity |
 | Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, coherent exchange/transport counters, descriptor restoration |
 | Response head | repeated fields, an informational response before the final response, and byte-at-a-time status/header delivery |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |

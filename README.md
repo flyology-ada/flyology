@@ -1130,11 +1130,14 @@ pool ownership out of application code and prevents a partially consumed
 message from contaminating the next exchange.
 
 An idempotent request that receives no response bytes from a reused transport
-is replayed once on a new transport under the same deadline. Non-idempotent
-requests are never replayed automatically. `Diagnostics` reports active
-exchanges separately from pending, reusable, and closing transports; this
-distinction remains meaningful if a later protocol multiplexes exchanges over
-one transport.
+is replayed once on a new transport under the same deadline. Retained bodies
+can be replayed directly. A streamed body is eligible only through the
+explicit `Rewindable_Request_Body_Source` interface; the client discards the
+failed transport and calls `Rewind` before the second attempt. Non-idempotent
+and one-shot streamed requests are never replayed automatically. `Diagnostics`
+reports active exchanges separately from pending, reusable, and closing
+transports; this distinction remains meaningful if a later protocol
+multiplexes exchanges over one transport.
 
 The same calls work from lightweight and native tasks. One monotonic timeout
 starts before pool admission and continues through DNS, all connection
@@ -1155,27 +1158,49 @@ changing request and response signatures. The current engine implements
 HTTP/1.0 response compatibility and HTTP/1.1 requests; it does not yet provide
 redirect policy, content decoding, proxying, or an HTTP/2 transport.
 
+`Set_Expect_Continue` opts a nonempty retained or streamed request into
+`Expect: 100-continue`. The client sends the head first, accepts bounded
+informational responses, and transmits the body after `100 Continue`. A final
+response suppresses the body entirely. If no response byte arrives within the
+continue-specific wait, the client falls back to sending under the original
+whole-exchange deadline; a partial response head is completed instead of being
+interleaved with request bytes.
+
+`Add_Trailer` retains request trailer fields and generates their `Trailer`
+declaration. Trailers require an unknown-length source because HTTP/1.1 sends
+them after the terminating chunk. Fields affecting framing, routing,
+authentication, request semantics, or payload interpretation are rejected.
+Trailer values are fixed request metadata; a generator that needs a computed
+digest must finish that value before calling `Execute`.
+
 For request streaming, pass a limited `Request_Body_Source` directly to
 `Execute`. Its `Declared_Length` generates `Content-Length` when known and
 selects HTTP/1.1 chunked framing otherwise. Each source read receives the
 remaining whole-exchange timeout and the call's cancellation token. Sources
-are borrowed only during `Execute`, and streamed bodies are not automatically
-replayed because the interface does not assume rewindability.
+are borrowed only during `Execute`. A plain source is one-shot; only the
+explicit rewindable interface opts into the idempotent stale-transport retry.
 
 `Flyology.HTTP.Client.Request_Bodies` supplies borrowed array, byte-string,
 `Unbounded_Bytes`, and unique-buffer sources. Its `Files` child streams an
-explicit positional file range without changing or closing the descriptor;
-its `Channels` child consumes bounded `Unique_Buffer` channels for generated
-bodies with producer backpressure. Memory and file sources declare their
-length automatically. Channel sources default to unknown length and may be
-given a known total before `Execute`.
+explicit positional file range without changing or closing the descriptor.
+These bounded memory and file adapters are rewindable and require their
+borrowed bytes to remain unchanged through `Execute`. The `Channels` child
+consumes bounded `Unique_Buffer` channels for generated bodies with producer
+backpressure; it is deliberately one-shot. Memory and file sources declare
+their length automatically. Channel sources default to unknown length and may
+be given a known total before `Execute`.
 
 ```ada
 Payload : aliased constant Ada.Streams.Stream_Element_Array := ...;
 Source  : Flyology.HTTP.Client.Request_Bodies.Array_Source
   (Payload'Access);
 
-Reply := Flyology.HTTP.Client.Execute (HTTP, Request, Source);
+declare
+   Reply : Flyology.HTTP.Client.Response :=
+     Flyology.HTTP.Client.Execute (HTTP, Request, Source);
+begin
+   null;
+end;
 ```
 
 The file adapter uses deadline-aware `Flyology.IO.Files.Read_At`. Lightweight
@@ -1226,8 +1251,9 @@ by the final response status line, physical headers, trailers, and transport
 summary, to standard error. Response body bytes remain on standard output.
 
 It deliberately has no insecure TLS switch. Redirects, proxies, content
-decoding, authentication helpers, and streaming request bodies await those
-policies in the library rather than being reimplemented in the example.
+decoding, and authentication helpers await library policies rather than being
+reimplemented in the example. The CLI currently accepts inline request data;
+it does not expose the library's streaming body adapters or request trailers.
 
 ### HTTP server
 

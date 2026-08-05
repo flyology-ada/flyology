@@ -163,6 +163,8 @@ package body Flyology.HTTP.Client is
       Complete       : Boolean := False;
       Reusable       : Boolean := False;
       Saw_Response_Bytes : Boolean := False;
+      Source_Failed      : Boolean := False;
+      Informational_Count : Natural := 0;
       Retains_Owner  : Boolean := False;
       Started        : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout        : Duration := 0.0;
@@ -373,6 +375,35 @@ package body Flyology.HTTP.Client is
       Flyology.HTTP.Headers.Add (Item.Fields, Name, Value);
    end Add_Header;
 
+   procedure Set_Expect_Continue
+     (Item         : in out Request;
+      Enabled      : Boolean := True;
+      Wait_Timeout : Duration := 1.0) is
+   begin
+      Item.Expect_Continue := Enabled;
+      Item.Continue_Wait := Wait_Timeout;
+   end Set_Expect_Continue;
+
+   procedure Add_Trailer
+     (Item : in out Request; Name : String; Value : String)
+   is
+      Lower : constant String := Ada.Characters.Handling.To_Lower (Name);
+   begin
+      if Lower in
+        "authorization" | "connection" | "content-encoding" |
+        "content-length" | "content-range" | "content-type" | "cookie" |
+        "expect" | "host" | "if-match" | "if-modified-since" |
+        "if-none-match" | "if-range" | "if-unmodified-since" |
+        "keep-alive" | "max-forwards" | "proxy-authorization" |
+        "proxy-connection" | "range" | "te" | "trailer" |
+        "transfer-encoding" | "upgrade"
+      then
+         raise Constraint_Error with
+           "field is prohibited in HTTP request trailers";
+      end if;
+      Flyology.HTTP.Headers.Add (Item.Trailer_Fields, Name, Value);
+   end Add_Trailer;
+
    procedure Set_Body (Item : in out Request; Value : String) is
    begin
       Item.Body_Value := Flyology.Bytes.From_Byte_String (Value);
@@ -485,7 +516,14 @@ package body Flyology.HTTP.Client is
         (Data   : in out Response_Data;
          Source : in out Request_Body_Source'Class;
          Length : Body_Length;
+         Trailers : Flyology.HTTP.Headers.List;
          Token  : access Flyology.Cancellation.Token);
+
+      procedure Await_Continue
+        (Data         : in out Response_Data;
+         Wait_Timeout : Duration;
+         Token        : access Flyology.Cancellation.Token;
+         Final_Ready  : out Boolean);
 
       procedure Reset_Attempt (Data : in out Response_Data);
 
@@ -528,16 +566,31 @@ package body Flyology.HTTP.Client is
       Connection : Pooled_Connection_Access;
       Slot       : Positive;
       Was_Reused : Boolean;
+      Retained_Length : constant Natural :=
+        Flyology.Bytes.Length (Value.Body_Value);
+      Has_Stream_Body : constant Boolean :=
+        Source /= null
+          and then (not Length.Is_Known or else Length.Bytes > 0);
+      Has_Request_Body : constant Boolean :=
+        Retained_Length > 0 or else Has_Stream_Body;
    begin
       if Item.Control.State = null
         or else not Item.Control.State.Is_Configured
       then
          raise Program_Error with "HTTP client is not configured";
       elsif Source /= null
-        and then Flyology.Bytes.Length (Value.Body_Value) > 0
+        and then Retained_Length > 0
       then
          raise Constraint_Error with
            "streaming request cannot also contain a retained body";
+      elsif Flyology.HTTP.Headers.Count (Value.Trailer_Fields) > 0
+        and then (Source = null or else Length.Is_Known)
+      then
+         raise Constraint_Error with
+           "request trailers require an unknown-length streaming body";
+      elsif Value.Expect_Continue and then not Has_Request_Body then
+         raise Constraint_Error with
+           "Expect: 100-continue requires a nonempty request body";
       end if;
       Validate_Request (Value);
       return Result : Response do
@@ -551,20 +604,34 @@ package body Flyology.HTTP.Client is
             Retried : Boolean := False;
 
             function Can_Retry return Boolean is
-              (Source = null
+              ((Source = null
+                  or else Source.all in
+                    Rewindable_Request_Body_Source'Class)
                  and then Was_Reused
                  and then not Retried
                  and then Is_Idempotent (Value.Method_Value)
                  and then not Result.Data.Saw_Response_Bytes
+                 and then not Result.Data.Source_Failed
                  and then
                    (Timeout < 0.0 or else Remaining (Started, Timeout) > 0.0));
 
             procedure Retry_Stale is
             begin
                Release_Lease (Result.Data.all, False);
+               Reset_Attempt (Result.Data.all);
+               if Source /= null then
+                  if Token /= null and then Token.Requested then
+                     raise Flyology.Cancellation.Operation_Cancelled;
+                  elsif Timeout >= 0.0
+                    and then Remaining (Started, Timeout) <= 0.0
+                  then
+                     raise Flyology.IO.Timeout_Error;
+                  end if;
+                  Rewind
+                    (Rewindable_Request_Body_Source'Class (Source.all));
+               end if;
                Item.Control.State.Pool.Record_Stale_Retry;
                Retried := True;
-               Reset_Attempt (Result.Data.all);
             end Retry_Stale;
          begin
             loop
@@ -583,16 +650,28 @@ package body Flyology.HTTP.Client is
                        (Result.Data.Connection.Channel, Byte_Array (Head),
                         Remaining (Started, Timeout), Token => Token);
                   end;
-                  if Flyology.Bytes.Length (Value.Body_Value) > 0 then
-                     Connections.Send_All
-                       (Result.Data.Connection.Channel,
-                        Flyology.Bytes.To_Array (Value.Body_Value),
-                        Remaining (Started, Timeout), Token => Token);
-                  elsif Source /= null then
-                     Send_Streaming_Body
-                       (Result.Data.all, Source.all, Length, Token);
-                  end if;
-                  Read_Final_Head (Result.Data.all, Token);
+                  declare
+                     Final_Ready : Boolean := False;
+                  begin
+                     if Value.Expect_Continue and then Has_Request_Body then
+                        Await_Continue
+                          (Result.Data.all, Value.Continue_Wait, Token,
+                           Final_Ready);
+                     end if;
+                     if not Final_Ready then
+                        if Retained_Length > 0 then
+                           Connections.Send_All
+                             (Result.Data.Connection.Channel,
+                              Flyology.Bytes.To_Array (Value.Body_Value),
+                              Remaining (Started, Timeout), Token => Token);
+                        elsif Source /= null then
+                           Send_Streaming_Body
+                             (Result.Data.all, Source.all, Length,
+                              Value.Trailer_Fields, Token);
+                        end if;
+                        Read_Final_Head (Result.Data.all, Token);
+                     end if;
+                  end;
                   Select_Body_Mode (Result.Data.all, Value.Method_Value);
                   exit;
                exception
