@@ -10,7 +10,7 @@ Flyology uses the terms "lightweight task" and "native task." Lightweight schedu
 - [Guide](https://flyology.org/guide/): Toolchain requirements, runtime preparation, task designation, stack and memory policy, execution groups, task-aware I/O, resource budgets, observability, verification, and constraints.
 - [Architecture](https://flyology.org/architecture/): Tasking integration, native and lightweight lanes, schedulers, pollers, stackful contexts, memory ownership, and lifecycle boundaries.
 - [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, bounded multi-deadline, and wall-clock timer behavior, including complete due activation batches and backward clock changes.
-- [HTTP applications](https://flyology.org/guide/http/): Optional HTTP routing, middleware, streaming, structured request work, WebSockets, security, and measurement guidance.
+- [HTTP clients and applications](https://flyology.org/guide/http/): Origin-bound clients, bounded request-body adapters, optional server routing, middleware, streaming, structured request work, WebSockets, security, and measurement guidance.
 - [API reference](https://flyology.org/api/): Generated reference for Flyology's public Ada packages.
 
 ## Project sources

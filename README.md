@@ -1655,10 +1655,12 @@ performance conclusions are superseded: those campaigns linked one Flyology
 event loop while reporting 16 and did not verify every server thread's CPU
 mask.
 
-The website's [HTTP application guide](https://flyology.org/guide/http/)
-progresses from the raw connection through routing, body policy, middleware,
-streaming lifecycles, structured request work, deployment sizing, and the
-reproducible benchmark campaign.
+The website's
+[HTTP client and application guide](https://flyology.org/guide/http/) covers
+bounded outbound request-body sources, then progresses from the raw server
+connection through routing, body policy, middleware, streaming lifecycles,
+structured request work, deployment sizing, and the reproducible benchmark
+campaign.
 
 ### Timers
 
