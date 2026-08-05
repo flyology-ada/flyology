@@ -635,11 +635,13 @@ package body Flyology.IO.Sockets is
               (Family => IPv4,
                V4 => (Address (1), Address (2), Address (3), Address (4))),
             Port => Flyology.IO.Sockets.Port (Port), Scope => 0);
-      else
+      elsif Family = 6 then
          From :=
            (Family => IPv6, Address => (Family => IPv6, V6 => Address),
             Port => Flyology.IO.Sockets.Port (Port),
             Scope => Scope_ID (Scope));
+      else
+         From := No_Endpoint;
       end if;
    end Receive_Socket;
 

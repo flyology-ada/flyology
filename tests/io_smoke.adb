@@ -9,6 +9,7 @@ with Flyology.IO.Timers;
 procedure IO_Smoke is
    use Ada.Streams;
    use type Flyology.IO.Descriptor;
+   use type Flyology.IO.Sockets.Endpoint;
 
    Event_Socket  : Flyology.IO.Sockets.Socket_Type;
    Native_Socket : Flyology.IO.Sockets.Socket_Type;
@@ -132,6 +133,25 @@ begin
 
    Flyology.IO.Sockets.Create_Socket_Pair
      (Event_Socket, Native_Socket);
+   declare
+      Receiver : Flyology.IO.Sockets.Socket_Type;
+      Sender   : Flyology.IO.Sockets.Socket_Type;
+      Payload  : constant Stream_Element_Array := [16#A5#, 16#5A#];
+      Incoming : Stream_Element_Array (Payload'Range);
+      Last     : Stream_Element_Offset;
+      From     : Flyology.IO.Sockets.Endpoint;
+   begin
+      Flyology.IO.Sockets.Create_Socket_Pair
+        (Receiver, Sender, Flyology.IO.Sockets.Socket_Datagram);
+      Flyology.IO.Sockets.Send_Socket (Sender, Payload, Last);
+      pragma Assert (Last = Payload'Last);
+      Flyology.IO.Sockets.Receive_Socket (Receiver, Incoming, Last, From);
+      pragma Assert (Last = Incoming'Last);
+      pragma Assert (Incoming = Payload);
+      pragma Assert (From = Flyology.IO.Sockets.No_Endpoint);
+      Flyology.IO.Sockets.Close_Socket (Receiver);
+      Flyology.IO.Sockets.Close_Socket (Sender);
+   end;
    declare
       Released : Flyology.IO.Descriptor;
       Original : constant Flyology.IO.Descriptor :=

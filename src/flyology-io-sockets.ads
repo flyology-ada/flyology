@@ -310,7 +310,9 @@ package Flyology.IO.Sockets is
       Item   : out Ada.Streams.Stream_Element_Array;
       Last   : out Ada.Streams.Stream_Element_Offset);
 
-   --  Receive one datagram and its source endpoint.
+   --  Receive one datagram and its source endpoint. From is No_Endpoint when
+   --  the socket source has no Internet endpoint, including an AF_UNIX socket
+   --  pair.
    --  @param Socket Open datagram socket
    --  @param Item Destination buffer
    --  @param Last Last element received

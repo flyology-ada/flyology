@@ -87,12 +87,21 @@ static int flyology_socket_make_address(
 
 static int flyology_socket_split_address(
     const struct sockaddr *address,
+    socklen_t length,
     unsigned char *family,
     unsigned char *bytes,
     unsigned *port,
     uint32_t *scope)
 {
+    if (length < (socklen_t)sizeof(address->sa_family)) {
+        errno = EINVAL;
+        return -1;
+    }
     if (address->sa_family == AF_INET) {
+        if (length < (socklen_t)sizeof(struct sockaddr_in)) {
+            errno = EINVAL;
+            return -1;
+        }
         const struct sockaddr_in *value =
             (const struct sockaddr_in *)address;
         *family = 4;
@@ -103,6 +112,10 @@ static int flyology_socket_split_address(
         return 0;
     }
     if (address->sa_family == AF_INET6) {
+        if (length < (socklen_t)sizeof(struct sockaddr_in6)) {
+            errno = EINVAL;
+            return -1;
+        }
         const struct sockaddr_in6 *value =
             (const struct sockaddr_in6 *)address;
         *family = 6;
@@ -272,7 +285,7 @@ int flyology_socket_name(int fd, int peer, unsigned char *family,
         ? getpeername(fd, (struct sockaddr *)&storage, &length)
         : getsockname(fd, (struct sockaddr *)&storage, &length);
     if (result < 0 ||
-        flyology_socket_split_address((struct sockaddr *)&storage,
+        flyology_socket_split_address((struct sockaddr *)&storage, length,
                                       family, address, port, scope) < 0) {
         *error = errno;
         return -1;
@@ -293,7 +306,7 @@ int flyology_socket_accept(int listener, unsigned char *family,
         return -1;
     }
     if (flyology_socket_configure(fd, 1) < 0 ||
-        flyology_socket_split_address((struct sockaddr *)&storage,
+        flyology_socket_split_address((struct sockaddr *)&storage, length,
                                       family, address, port, scope) < 0) {
         *error = errno;
         close(fd);
@@ -343,11 +356,21 @@ long flyology_socket_receive_from(int fd, void *buffer, size_t length,
 {
     struct sockaddr_storage storage;
     socklen_t address_length = (socklen_t)sizeof(storage);
+    memset(&storage, 0, sizeof(storage));
+    *family = 0;
+    memset(address, 0, 16);
+    *port = 0;
+    *scope = 0;
     ssize_t result = recvfrom(fd, buffer, length, 0,
                               (struct sockaddr *)&storage, &address_length);
-    if (result < 0 ||
+    if (result < 0) {
+        *error = errno;
+        return -1;
+    }
+    if (address_length >= (socklen_t)sizeof(storage.ss_family) &&
         flyology_socket_split_address((struct sockaddr *)&storage,
-                                      family, address, port, scope) < 0) {
+                                      address_length, family, address, port,
+                                      scope) < 0 && errno != EAFNOSUPPORT) {
         *error = errno;
         return -1;
     }
