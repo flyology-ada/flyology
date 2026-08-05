@@ -29,6 +29,5 @@
   "exclusive_cpuset": false,
   "flyology_event_loops": 16,
   "tiers": ["plain", "application"],
-  "success_requirement": 1.0,
-  "privacy_note": "Host identity and orchestration metadata are intentionally omitted."
+  "success_requirement": 1.0
 }

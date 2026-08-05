@@ -1562,6 +1562,152 @@ code:not(pre code) {
   font-weight: 620;
 }
 
+.benchmark-diagram {
+  margin-block: 2rem;
+  margin-inline: 0;
+  padding: clamp(1.1rem, 3vw, 1.75rem);
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.benchmark-diagram figcaption {
+  margin-bottom: 0.6rem;
+  color: var(--ink);
+  font-weight: 590;
+}
+
+.diagram-subtitle {
+  margin: 0 0 1rem;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+
+.diagram-axis-label {
+  margin: -0.4rem 0 0.8rem;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+}
+
+.diagram-key {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  gap: 0.55rem 1.1rem;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.diagram-key span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.diagram-key i {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 1px;
+  background: var(--path);
+}
+
+.diagram-key .key-arm64 {
+  background: var(--violet);
+}
+
+.diagram-key .key-amd64 {
+  background: var(--teal-deep);
+}
+
+.diagram-key .key-excluded {
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  color: var(--ink-soft);
+  font-style: normal;
+}
+
+.diagram-body {
+  display: grid;
+  grid-template-columns: 3.7rem minmax(34rem, 1fr);
+  min-width: 38rem;
+  gap: 0.75rem;
+}
+
+.diagram-y-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 16.5rem;
+  padding-bottom: 2.7rem;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  text-align: right;
+}
+
+.diagram-plot {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(4.8rem, 1fr);
+  height: 16.5rem;
+  border-left: 1px solid var(--ink-soft);
+  border-bottom: 1px solid var(--ink-soft);
+  background-image: linear-gradient(to top, var(--line) 1px, transparent 1px);
+  background-size: 100% 25%;
+}
+
+.diagram-group {
+  display: grid;
+  grid-template-rows: 1fr 2.7rem;
+  min-width: 0;
+  padding-inline: 0.35rem;
+}
+
+.diagram-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: clamp(0.16rem, 0.5vw, 0.35rem);
+}
+
+.diagram-bar {
+  width: clamp(0.75rem, 1.8vw, 1.15rem);
+  height: var(--height);
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--path);
+}
+
+.diagram-bar-arm64 {
+  background: var(--violet);
+}
+
+.diagram-bar-amd64 {
+  background: var(--teal-deep);
+}
+
+.diagram-excluded {
+  align-self: end;
+  width: clamp(0.75rem, 1.8vw, 1.15rem);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.diagram-label {
+  align-self: start;
+  padding-top: 0.55rem;
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+  line-height: 1.25;
+  text-align: center;
+}
+
 .data-links {
   display: flex;
   flex-wrap: wrap;
@@ -2515,6 +2661,46 @@ code:not(pre code) {
   font-size: 0.72rem;
 }
 
+.code-foldout {
+  margin-block: 1.5rem;
+  border-block: 1px solid var(--line);
+}
+
+.code-foldout summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 0.9rem;
+  gap: 1rem;
+  color: var(--ink);
+  font-weight: 590;
+  cursor: pointer;
+  list-style: none;
+}
+
+.code-foldout summary::-webkit-details-marker {
+  display: none;
+}
+
+.code-foldout summary::after {
+  flex: none;
+  color: var(--violet);
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 400;
+  line-height: 1;
+  content: "+";
+  transition: transform 180ms var(--ease-out);
+}
+
+.code-foldout[open] summary::after {
+  transform: rotate(45deg);
+}
+
+.code-foldout .code-panel {
+  margin-block: 0 1.25rem;
+}
+
 .copy-button {
   position: absolute;
   top: 0.55rem;
@@ -3135,6 +3321,14 @@ code:not(pre code) {
   }
 
   .docs-layout {
+    display: block;
+  }
+
+  .code-foldout summary {
+    display: none;
+  }
+
+  .code-foldout:not([open]) > *:not(summary) {
     display: block;
   }
 }

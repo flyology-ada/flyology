@@ -200,10 +200,12 @@
             <span class="step-label">REPRODUCE</span>
             <h2>Run the same short snapshot.</h2>
             <p>The Docker image pins Alire, GNAT, gprbuild, <code>oha</code>, and the Ada server dependencies. Adjust or omit the CPU sets on hosts with fewer than 16 logical CPUs.</p>
-            <figure class="code-panel">
-              <figcaption>Three-trial development snapshot</figcaption>
-              <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>HTTP_BENCH_TRIALS=3 \
+            <details class="code-foldout">
+              <summary>Three-trial development command</summary>
+              <figure class="code-panel">
+                <figcaption>Local Docker snapshot</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code>HTTP_BENCH_TRIALS=3 \
 HTTP_BENCH_DURATION=3s \
 HTTP_BENCH_WARMUP=1s \
 HTTP_BENCH_CONCURRENCIES="1 8 32" \
@@ -211,7 +213,8 @@ HTTP_BENCH_COOLDOWN=1 \
 HTTP_BENCH_SERVER_CPUSET="0-7" \
 HTTP_BENCH_CLIENT_CPUSET="8-15" \
   ./showcases/http-comparison/scripts/run-linux-docker.sh</code></pre>
-            </figure>
+              </figure>
+            </details>
             <p>For a publishable machine comparison, the repository guide recommends seven 30-second trials on an otherwise idle native-Linux host, plus a second architecture. See the <a href="https://github.com/flyology-ada/flyology/blob/48fdb2365977e6f30a8db3cfb59df886367c8e66/showcases/http-comparison/README.md">complete comparison guide</a>.</p>
           </section>
         </article>

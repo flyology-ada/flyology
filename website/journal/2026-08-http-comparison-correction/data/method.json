@@ -92,6 +92,24 @@
       "warmup_duration": "5s",
       "cooldown_seconds": 20,
       "concurrency": 1
+    },
+    "cluster_arm64_saturation_probe": {
+      "environment": "shared native-architecture Linux host",
+      "trials": 3,
+      "measurement_duration": "10s",
+      "warmup_duration": "5s",
+      "cooldown_seconds": 5,
+      "concurrencies": [8, 32, 128],
+      "classification": "repeated saturation probe; strict-gate failures excluded"
+    },
+    "cluster_amd64_saturation_probe": {
+      "environment": "shared native-architecture Linux host",
+      "trials": 3,
+      "measurement_duration": "10s",
+      "warmup_duration": "5s",
+      "cooldown_seconds": 5,
+      "concurrencies": [8, 32, 128],
+      "classification": "repeated saturation probe; strict-gate failures excluded"
     }
   },
   "machine_profiles": {
@@ -126,7 +144,6 @@
     "required_timeout_count": 0,
     "timeout_bearing_rows_in_common_rankings": false,
     "raw_results_location": "ignored build output",
-    "published_data": "sanitized aggregates only"
-  },
-  "privacy_note": "Cluster, host, node, network, provider, location, label, and unrelated workload identities are intentionally omitted."
+    "published_data": "valid aggregates, excluded observations, and lifecycle resources as CSV"
+  }
 }

@@ -83,16 +83,16 @@
           <section id="boundary">
             <div class="snapshot-boundary">
               <strong>Superseded measurement</strong>
-              <p>A later linked-runtime check found that this campaign used one Flyology event loop while its metadata reported 16, and it did not verify every server thread's CPU affinity. Keep the sanitized files as a historical record, but do not use these tables as current performance evidence. See the <a href="../2026-08-http-comparison-correction/">corrected comparison</a>.</p>
+              <p>A later linked-runtime check found that this campaign used one Flyology event loop while its metadata reported 16, and it did not verify every server thread's CPU affinity. Keep the files as a historical record, but do not use these tables as current performance evidence. See the <a href="../2026-08-http-comparison-correction/">corrected comparison</a>.</p>
             </div>
             <p>This follow-up extends the <a href="../2026-08-http-comparison/">preliminary three-second Docker snapshot</a> to two architectures, seven trials, 30-second measurements, five-second warmups, and 20-second cooldowns. Every included request returned the expected HTTP 200 response and exact body.</p>
             <p>The ARM64 host used Neoverse-N1 processors with 80 physical and 80 logical cores and 256 GB of memory. The AMD64 host used an Intel Xeon Gold 5412U with 24 physical cores, 48 logical CPUs, and 256 GB of memory. These are whole-machine totals, not resources reserved exclusively for the benchmark.</p>
-            <p>Each container had a 16-CPU quota, but not an exclusive CPU set. The server was pinned to CPUs 0–7 and the client to CPUs 8–15 within the container. The aggregate downloads intentionally omit host identity and orchestration metadata.</p>
+            <p>Each container had a 16-CPU quota, but not an exclusive CPU set. The server was pinned to CPUs 0–7 and the client to CPUs 8–15 within the container.</p>
             <div class="data-links" aria-label="Benchmark data downloads">
               <a href="data/summary.csv" download>Throughput and latency CSV</a>
               <a href="data/resources.csv" download>Resource CSV</a>
               <a href="data/saturation.csv" download>Excluded saturation probes</a>
-              <a href="data/method.json" download>Sanitized method record</a>
+              <a href="data/method.json" download>Method record</a>
             </div>
           </section>
 
@@ -183,11 +183,13 @@
           <section id="reproduce">
             <span class="step-label">REPRODUCE</span>
             <h2>Bring your own two Linux nodes.</h2>
-            <p>The generic runner creates an isolated namespace, builds the benchmark image once per architecture, runs the campaign, copies the artifacts, and removes the namespace. Node names remain local inputs and are not written into the public aggregate files.</p>
-            <figure class="code-panel">
-              <figcaption>Seven-trial ARM64 and AMD64 campaign</figcaption>
-              <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>HTTP_BENCH_ARM64_NODE=&lt;arm64-node&gt; \
+            <p>The generic runner creates an isolated namespace, builds the benchmark image once per architecture, runs the campaign, copies the artifacts, and removes the namespace.</p>
+            <details class="code-foldout">
+              <summary>Seven-trial ARM64 and AMD64 command</summary>
+              <figure class="code-panel">
+                <figcaption>Native Linux campaign</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code>HTTP_BENCH_ARM64_NODE=&lt;arm64-node&gt; \
 HTTP_BENCH_AMD64_NODE=&lt;amd64-node&gt; \
 HTTP_BENCH_TRIALS=7 \
 HTTP_BENCH_DURATION=30s \
@@ -198,7 +200,8 @@ HTTP_BENCH_SERVER_CPUSET=0-7 \
 HTTP_BENCH_CLIENT_CPUSET=8-15 \
 HTTP_BENCH_LOOPS=16 \
   ./showcases/http-comparison/scripts/run-kubernetes.sh</code></pre>
-            </figure>
+              </figure>
+            </details>
             <p>Read the <a href="https://github.com/flyology-ada/flyology/blob/main/showcases/http-comparison/README.md">comparison guide</a> before substituting hosts or changing the validity threshold. The fixture source used for these measurements is pinned in the article metadata.</p>
           </section>
         </article>

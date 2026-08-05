@@ -55,7 +55,7 @@
           <h1>A corrected HTTP harness changes the comparison.</h1>
         </div>
         <div>
-          <p class="article-summary">A linked-runtime probe found that two earlier campaigns ran one Flyology event loop while reporting 16. With 16 loops observed and every server thread pinned, lightweight and native converge under local saturation; pinned Rust fixtures lead several concurrency-one rows.</p>
+          <p class="article-summary">A linked-runtime probe found that two earlier campaigns ran one Flyology event loop while reporting 16. With 16 loops observed and every server thread pinned, lightweight and native converge under saturation on local ARM64 and both native Linux architectures; pinned Rust fixtures lead the tier comparisons.</p>
           <dl class="article-meta">
             <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
             <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9/showcases/http-comparison">46a718a</a></dd></div>
@@ -74,9 +74,9 @@
             <li><a href="#saturation">Local saturation gate</a></li>
             <li><a href="#throughput">Common throughput</a></li>
             <li><a href="#resources">Efficiency and tails</a></li>
+            <li><a href="#high-concurrency">High-concurrency comparison</a></li>
             <li><a href="#limits">Validity boundary</a></li>
             <li><a href="#reproduce">Reproduce it</a></li>
-            <li><a href="#high-concurrency">High-concurrency appendix</a></li>
           </ol>
         </nav>
 
@@ -103,12 +103,14 @@
               <div class="decision-row"><dt>Validity</dt><dd>Only exact responses with 100% HTTP 200 success and zero timeouts enter common tables.</dd></div>
             </dl>
             <p>The Rust side is pinned to Rust 1.97.1, hyper 1.11.0, axum 0.8.9, Actix Web 4.14.0, and Tokio 1.53.1. Direct dependencies use exact versions and <code>Cargo.lock</code> fixes the transitive graph.</p>
-            <p>The shared hosts used 16-CPU pod quotas, not exclusive CPU sets. Their sanitized profiles are Neoverse-N1 with 80 physical cores and 256 GB, and Intel Xeon Gold 5412U with 24 physical cores, 48 logical CPUs, and 256 GB. Host and orchestration identities are intentionally absent.</p>
+            <p>The shared hosts used 16-CPU pod quotas, not exclusive CPU sets. The ARM64 host used Neoverse-N1 with 80 physical cores and 256 GB; the AMD64 host used Intel Xeon Gold 5412U with 24 physical cores, 48 logical CPUs, and 256 GB.</p>
             <div class="data-links" aria-label="Benchmark data downloads">
               <a href="data/summary.csv" download>Throughput and latency CSV</a>
               <a href="data/resources.csv" download>Resource CSV</a>
-              <a href="data/saturation.csv" download>Local saturation probe CSV</a>
-              <a href="data/method.json" download>Sanitized method record</a>
+              <a href="data/saturation.csv" download>High-concurrency aggregates</a>
+              <a href="data/saturation-excluded.csv" download>Excluded observations</a>
+              <a href="data/saturation-resources.csv" download>High-concurrency resources</a>
+              <a href="data/method.json" download>Method record</a>
             </div>
           </section>
 
@@ -186,12 +188,115 @@
             <p>Lightweight's thread reduction did not become a CPU win here: CPU time was nearly equal locally and native used 2–5% less on the shared hosts. Lightweight did keep a modest RSS advantage. The Rust throughput leaders also used fewer CPU seconds, less RSS, and nine or ten threads in these c1 fixtures. Complete CPU, RSS, thread, throughput-range, p50, p99, p99.9, success, and timeout values for every fixture are in the CSV downloads.</p>
           </section>
 
+          <section id="high-concurrency">
+            <span class="step-label">SATURATION PROFILE</span>
+            <h2>More concurrency closes the lane gap, not the tier gap.</h2>
+            <p>The c1 profile above asks about per-request overhead. This separate profile asks what happens as persistent connections rise to c8, c32, and c128. Local ARM64 is a one-second gate; the two native Linux views are medians from three 10-second trials. Every shared-host result plotted below passed all three trials with 100% HTTP 200 responses and zero timeouts.</p>
+
+            <div class="snapshot-boundary">
+              <strong>The short answer</strong>
+              <p>At c128, lightweight was ahead of native on shared ARM64 and effectively tied on shared AMD64. That convergence did not become overall leadership: hyper led both plain workloads and Actix Web led routed dispatch on both shared architectures.</p>
+            </div>
+
+            <figure class="benchmark-diagram">
+              <figcaption>c128 plain HTTP, 13-byte body</figcaption>
+              <p class="diagram-subtitle">Thousands of requests per second; local is one observation, shared results are three-trial medians.</p>
+              <p class="diagram-axis-label">Y: throughput (k req/s) · X: entrant</p>
+              <div class="diagram-key" aria-hidden="true"><span><i></i>Local ARM64</span><span><i class="key-arm64"></i>Shared ARM64</span><span><i class="key-amd64"></i>Shared AMD64</span><span><i class="key-excluded">×</i>Excluded</span></div>
+              <div class="diagram-body" aria-hidden="true">
+                <div class="diagram-y-axis"><span>900k</span><span>675k</span><span>450k</span><span>225k</span><span>0</span></div>
+                <div class="diagram-plot">
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:58.9%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:27.2%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:39.5%"></span></div><span class="diagram-label">Flyology<br>LW</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:56.2%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:24.8%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:39.6%"></span></div><span class="diagram-label">Flyology<br>native</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:60.1%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:64.7%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:87.3%"></span></div><span class="diagram-label">hyper</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:3.5%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:4.1%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:8.3%"></span></div><span class="diagram-label">AWS</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:2.7%"></span><span class="diagram-excluded">×</span><span class="diagram-excluded">×</span></div><span class="diagram-label">EWS</span></div>
+                </div>
+              </div>
+            </figure>
+
+            <figure class="benchmark-diagram">
+              <figcaption>c128 plain HTTP, 1 KiB body</figcaption>
+              <p class="diagram-subtitle">Thousands of requests per second; the y-axis matches the 13-byte chart.</p>
+              <p class="diagram-axis-label">Y: throughput (k req/s) · X: entrant</p>
+              <div class="diagram-key" aria-hidden="true"><span><i></i>Local ARM64</span><span><i class="key-arm64"></i>Shared ARM64</span><span><i class="key-amd64"></i>Shared AMD64</span><span><i class="key-excluded">×</i>Excluded</span></div>
+              <div class="diagram-body" aria-hidden="true">
+                <div class="diagram-y-axis"><span>900k</span><span>675k</span><span>450k</span><span>225k</span><span>0</span></div>
+                <div class="diagram-plot">
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:54.6%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:25.7%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:37.7%"></span></div><span class="diagram-label">Flyology<br>LW</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:54.5%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:23.6%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:37.4%"></span></div><span class="diagram-label">Flyology<br>native</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:52.5%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:62.7%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:86.1%"></span></div><span class="diagram-label">hyper</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:3.3%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:4%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:8.1%"></span></div><span class="diagram-label">AWS</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:1.5%"></span><span class="diagram-excluded">×</span><span class="diagram-excluded">×</span></div><span class="diagram-label">EWS</span></div>
+                </div>
+              </div>
+            </figure>
+
+            <figure class="benchmark-diagram">
+              <figcaption>c128 routed application GET</figcaption>
+              <p class="diagram-subtitle">Thousands of requests per second; frameworks remain separate from the plain-engine tier.</p>
+              <p class="diagram-axis-label">Y: throughput (k req/s) · X: entrant</p>
+              <div class="diagram-key" aria-hidden="true"><span><i></i>Local ARM64</span><span><i class="key-arm64"></i>Shared ARM64</span><span><i class="key-amd64"></i>Shared AMD64</span><span><i class="key-excluded">×</i>Excluded</span></div>
+              <div class="diagram-body" aria-hidden="true">
+                <div class="diagram-y-axis"><span>1.8M</span><span>1.35M</span><span>900k</span><span>450k</span><span>0</span></div>
+                <div class="diagram-plot">
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:24.7%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:11.3%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:15.7%"></span></div><span class="diagram-label">Flyology<br>LW</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:23.9%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:10.7%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:15.9%"></span></div><span class="diagram-label">Flyology<br>native</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:28.2%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:28.7%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:42.1%"></span></div><span class="diagram-label">axum</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:93.9%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:39.7%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:48.7%"></span></div><span class="diagram-label">Actix Web</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:1%"></span><span class="diagram-bar diagram-bar-arm64" style="--height:1%"></span><span class="diagram-bar diagram-bar-amd64" style="--height:2.1%"></span></div><span class="diagram-label">ServletAda<br>AWS</span></div>
+                  <div class="diagram-group"><div class="diagram-bars"><span class="diagram-bar" style="--height:0.8%"></span><span class="diagram-excluded">×</span><span class="diagram-excluded">×</span></div><span class="diagram-label">ServletAda<br>EWS</span></div>
+                </div>
+              </div>
+            </figure>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>c128 plain HTTP, 13-byte body: thousands of requests per second</caption>
+                <thead><tr><th>Environment</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Local ARM64, one trial</th><td>530.2</td><td>505.4</td><td>541.1</td><td>31.5</td><td>24.7</td></tr>
+                  <tr><th scope="row">Shared ARM64, median</th><td>245.2</td><td>223.3</td><td>582.1</td><td>36.9</td><td>excluded</td></tr>
+                  <tr><th scope="row">Shared AMD64, median</th><td>355.7</td><td>356.2</td><td>785.4</td><td>74.9</td><td>excluded</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>c128 plain HTTP, 1 KiB body: thousands of requests per second</caption>
+                <thead><tr><th>Environment</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Local ARM64, one trial</th><td>491.8</td><td>490.4</td><td>472.3</td><td>29.8</td><td>13.7</td></tr>
+                  <tr><th scope="row">Shared ARM64, median</th><td>231.6</td><td>212.3</td><td>563.9</td><td>35.8</td><td>excluded</td></tr>
+                  <tr><th scope="row">Shared AMD64, median</th><td>339.2</td><td>336.3</td><td>775.2</td><td>73.3</td><td>excluded</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>c128 routed GET: thousands of requests per second</caption>
+                <thead><tr><th>Environment</th><th>Flyology LW</th><th>Flyology native</th><th>axum</th><th>Actix Web</th><th>ServletAda/AWS</th><th>ServletAda/EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Local ARM64, one trial</th><td>445.4</td><td>429.7</td><td>507.4</td><td>1,689.3</td><td>18.6</td><td>13.8</td></tr>
+                  <tr><th scope="row">Shared ARM64, median</th><td>203.4</td><td>193.3</td><td>517.5</td><td>715.5</td><td>18.2</td><td>excluded</td></tr>
+                  <tr><th scope="row">Shared AMD64, median</th><td>282.5</td><td>286.5</td><td>757.6</td><td>877.1</td><td>37.3</td><td>excluded</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>A tentative interpretation</h3>
+            <p>One plausible reading is that, with 16 verified loops and enough persistent connections in flight, cooperative scheduling no longer keeps lightweight throughput below native: lightweight leads native by 5–10% on shared ARM64 and stays within 1.5% on shared AMD64. That interpretation is incomplete on its own. Lightweight still uses 17 threads instead of 257, but native's c128 p99 is 3.6–6.7 times lower, while hyper and Actix Web retain the highest valid tier throughput. These CPU-small loopback endpoints do not establish the same ordering for database or external-I/O services.</p>
+            <p>EWS and ServletAda/EWS timed out at c8, c32, and c128 in all three shared-host trials, so they are marked excluded rather than ranked. The <a href="data/saturation.csv" download>aggregate CSV</a> publishes every valid c8/c32/c128 median, range, and latency percentile; the <a href="data/saturation-excluded.csv" download>excluded-observation CSV</a> records each timeout-bearing trial; and the <a href="data/saturation-resources.csv" download>resource CSV</a> records CPU, RSS, threads, and context switches.</p>
+          </section>
+
           <section id="limits">
             <span class="step-label">LIMITS</span>
             <h2>The result stops at HTTP dispatch.</h2>
             <p>These endpoints do almost no application work. They do not use TLS, rotate connections, query a database, call a remote service, serialize a meaningful object, or exercise backpressure under external I/O. Do not extrapolate the ordering to those systems.</p>
             <p>The shared hosts were lightly loaded when selected, but they were not dedicated. Kubernetes applied a CPU quota rather than an exclusive static CPU set. The process masks separated server and client CPUs, but unrelated host work could still run there. The local ARM64 run also crosses a macOS virtualization boundary and heterogeneous host cores.</p>
-            <p>Architecture and concurrency change the lane gap: native led lightweight by 5–6% locally at c1, 6–9% on shared ARM64, and 15–18% on shared AMD64. The local c128 probe reversed that ordering, with lightweight ahead by 0.3–4.9%. At c1 native generally had the lower p99, while lightweight generally had the lower p99.9; no single lane owns every latency tail.</p>
+            <p>Architecture and concurrency change the lane gap: native led lightweight by 5–6% locally at c1, 6–9% on shared ARM64, and 15–18% on shared AMD64. At c128, lightweight led by 0.3–4.9% locally and 5–10% on shared ARM64; the shared AMD64 lanes stayed within 1.5%. At c1 native generally had the lower p99, while lightweight generally had the lower p99.9; no single lane owns every latency tail.</p>
             <div class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
               <p>The corrected evidence is narrower than the superseded claim. With 16 verified loops, lightweight offers a 17-thread server and reaches native-like saturation throughput, but native is faster at c1 and has a much lower c128 p99. hyper, axum, and Actix Web establish higher throughput and efficiency reference points for these exact fixtures. None of this predicts a database-backed or external-I/O service.</p>
@@ -201,10 +306,12 @@
           <section id="reproduce">
             <span class="step-label">REPRODUCE</span>
             <h2>Verify topology before accepting a number.</h2>
-            <figure class="code-panel">
-              <figcaption>Local ARM64 saturation probe</figcaption>
-              <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>HTTP_BENCH_TRIALS=1 \
+            <details class="code-foldout">
+              <summary>Local ARM64 saturation command</summary>
+              <figure class="code-panel">
+                <figcaption>One-second c8, c32, and c128 probe</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code>HTTP_BENCH_TRIALS=1 \
 HTTP_BENCH_DURATION=1s \
 HTTP_BENCH_WARMUP=1s \
 HTTP_BENCH_CONCURRENCIES="8 32 128" \
@@ -215,11 +322,14 @@ HTTP_BENCH_CLIENT_CPUSET=8-15 \
 HTTP_BENCH_RUST_WORKERS=8 \
 HTTP_BENCH_SATURATION_PROBE=1 \
   ./showcases/http-comparison/scripts/run-linux-docker.sh</code></pre>
-            </figure>
-            <figure class="code-panel">
-              <figcaption>Seven-trial native Linux campaign</figcaption>
-              <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
+              </figure>
+            </details>
+            <details class="code-foldout">
+              <summary>Seven-trial native Linux command</summary>
+              <figure class="code-panel">
+                <figcaption>ARM64 and AMD64 campaign</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code>HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
 HTTP_BENCH_AMD64_NODE=&lt;selected-amd64-node&gt; \
 HTTP_BENCH_TRIALS=7 \
 HTTP_BENCH_DURATION=30s \
@@ -231,91 +341,29 @@ HTTP_BENCH_SERVER_CPUSET=0-7 \
 HTTP_BENCH_CLIENT_CPUSET=8-15 \
 HTTP_BENCH_RUST_WORKERS=8 \
   ./showcases/http-comparison/scripts/run-kubernetes.sh</code></pre>
-            </figure>
-            <p>The runner validates response bytes before measurement, rejects any common row with a timeout or non-200 response, preserves raw observations only below ignored <code>build/</code>, privacy-scans copied cluster artifacts, and verifies deletion of its temporary namespace.</p>
-          </section>
-
-          <section id="high-concurrency">
-            <span class="step-label">SATURATION APPENDIX</span>
-            <h2>All entrants at c8, c32, and c128.</h2>
-            <div class="snapshot-boundary">
-              <strong>Probe, not ranking</strong>
-              <p>Each cell below is one one-second observation from the local ARM64 Docker environment after a one-second warmup. The exact response contract was validated before measurement, and every measured response was HTTP 200 with zero timeouts. There are no repeated trials or useful ranges, so treat the tables as saturation-shape evidence only.</p>
-            </div>
-
-            <div class="benchmark-table-wrap">
-              <table class="benchmark-table">
-                <caption>Plain HTTP, 13-byte body: thousands of requests per second</caption>
-                <thead><tr><th>Concurrency</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row">c8</th><td>142.6</td><td>142.8</td><td>244.4</td><td>42.2</td><td>29.1</td></tr>
-                  <tr><th scope="row">c32</th><td>381.2</td><td>385.9</td><td>396.2</td><td>30.0</td><td>14.4</td></tr>
-                  <tr><th scope="row">c128</th><td>530.2</td><td>505.4</td><td>541.1</td><td>31.5</td><td>24.7</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="benchmark-table-wrap">
-              <table class="benchmark-table">
-                <caption>Plain HTTP, 1 KiB body: thousands of requests per second</caption>
-                <thead><tr><th>Concurrency</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row">c8</th><td>140.8</td><td>140.0</td><td>229.8</td><td>46.0</td><td>29.0</td></tr>
-                  <tr><th scope="row">c32</th><td>380.7</td><td>360.8</td><td>379.0</td><td>29.4</td><td>27.6</td></tr>
-                  <tr><th scope="row">c128</th><td>491.8</td><td>490.4</td><td>472.3</td><td>29.8</td><td>13.7</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="benchmark-table-wrap">
-              <table class="benchmark-table">
-                <caption>Routed application GET: thousands of requests per second</caption>
-                <thead><tr><th>Concurrency</th><th>Flyology LW</th><th>Flyology native</th><th>axum</th><th>Actix Web</th><th>ServletAda/AWS</th><th>ServletAda/EWS</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row">c8</th><td>136.0</td><td>135.9</td><td>219.8</td><td>173.4</td><td>35.9</td><td>24.3</td></tr>
-                  <tr><th scope="row">c32</th><td>356.7</td><td>324.1</td><td>324.4</td><td>688.7</td><td>17.5</td><td>24.6</td></tr>
-                  <tr><th scope="row">c128</th><td>445.4</td><td>429.7</td><td>507.4</td><td>1,689.3</td><td>18.6</td><td>13.8</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <p>At c128, hyper remained narrowly ahead for the 13-byte plain response, while Flyology lightweight led the 1 KiB plain row. Actix Web was the routed throughput leader by a wide margin. Flyology lightweight stayed 0.3–4.9% ahead of Flyology native across the three c128 workloads.</p>
-
-            <div class="benchmark-table-wrap">
-              <table class="benchmark-table">
-                <caption>c128 latency tails, plain HTTP</caption>
-                <thead><tr><th>Workload</th><th>Server</th><th>p99 ms</th><th>p99.9 ms</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row" rowspan="5">13 B</th><td>Flyology lightweight</td><td>3.442</td><td>5.243</td></tr>
-                  <tr><td>Flyology native</td><td>0.609</td><td>1.113</td></tr>
-                  <tr><td>hyper</td><td>0.646</td><td>0.901</td></tr>
-                  <tr><td>AWS</td><td>4.616</td><td>12.580</td></tr>
-                  <tr><td>EWS</td><td>0.318</td><td>1,004.959</td></tr>
-                  <tr><th scope="row" rowspan="5">1 KiB</th><td>Flyology lightweight</td><td>3.888</td><td>6.731</td></tr>
-                  <tr><td>Flyology native</td><td>0.605</td><td>1.346</td></tr>
-                  <tr><td>hyper</td><td>0.837</td><td>2.025</td></tr>
-                  <tr><td>AWS</td><td>4.130</td><td>14.902</td></tr>
-                  <tr><td>EWS</td><td>0.318</td><td>1,420.597</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="benchmark-table-wrap">
-              <table class="benchmark-table">
-                <caption>c128 latency tails, routed application GET</caption>
-                <thead><tr><th>Server</th><th>p99 ms</th><th>p99.9 ms</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row">Flyology lightweight</th><td>3.737</td><td>6.211</td></tr>
-                  <tr><th scope="row">Flyology native</th><td>0.673</td><td>1.307</td></tr>
-                  <tr><th scope="row">axum</th><td>0.718</td><td>1.017</td></tr>
-                  <tr><th scope="row">Actix Web</th><td>0.224</td><td>0.580</td></tr>
-                  <tr><th scope="row">ServletAda/AWS</th><td>10.076</td><td>24.291</td></tr>
-                  <tr><th scope="row">ServletAda/EWS</th><td>0.093</td><td>1,481.490</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <p>The tail table prevents the throughput view from hiding queueing behavior. In particular, the EWS-based rows have low p99 values alongside p99.9 latencies around one to one-and-a-half seconds. The expanded <a href="data/saturation.csv" download>saturation CSV</a> contains p50, p90, p99, p99.9, success, and timeout fields for every c8, c32, and c128 observation.</p>
+              </figure>
+            </details>
+            <details class="code-foldout">
+              <summary>Repeated high-concurrency Kubernetes command</summary>
+              <figure class="code-panel">
+                <figcaption>Three 10-second trials at c8, c32, and c128</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code>HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
+HTTP_BENCH_AMD64_NODE=&lt;selected-amd64-node&gt; \
+HTTP_BENCH_TRIALS=3 \
+HTTP_BENCH_DURATION=10s \
+HTTP_BENCH_WARMUP=5s \
+HTTP_BENCH_COOLDOWN=5 \
+HTTP_BENCH_CONCURRENCIES="8 32 128" \
+HTTP_BENCH_LOOPS=16 \
+HTTP_BENCH_SERVER_CPUSET=0-7 \
+HTTP_BENCH_CLIENT_CPUSET=8-15 \
+HTTP_BENCH_RUST_WORKERS=8 \
+HTTP_BENCH_SATURATION_PROBE=1 \
+  ./showcases/http-comparison/scripts/run-kubernetes.sh</code></pre>
+              </figure>
+            </details>
+            <p>The runner validates response bytes before measurement, rejects any common row with a timeout or non-200 response, preserves raw observations below ignored <code>build/</code>, and verifies deletion of its temporary namespace.</p>
           </section>
         </article>
       </div>
