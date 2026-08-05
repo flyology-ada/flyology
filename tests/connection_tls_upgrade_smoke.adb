@@ -1,3 +1,4 @@
+with Ada.Real_Time;
 with Ada.Streams;
 with Flyology;
 with Flyology.IO.Connections;
@@ -16,6 +17,7 @@ procedure Connection_TLS_Upgrade_Smoke is
    package Provider renames TLS_Test_Provider;
 
    use Ada.Streams;
+   use type Ada.Real_Time.Time;
    use type Provider.Operation_Counts;
    use type TLS.Step_Status;
 
@@ -575,14 +577,38 @@ procedure Connection_TLS_Upgrade_Smoke is
             when Connections.Operation_Cancelled =>
                Queued_Cancelled := True;
          end;
-         pragma Assert (Queued_Cancelled);
          Closer.Start;
-         while not Connection_Testing.Close_Requested (Item) loop
-            delay 0.0;
-         end loop;
+         if not Queued_Cancelled then
+            Provider.Release_Handshake;
+            raise Program_Error with
+              "queued operation was not cancelled during TLS upgrade";
+         end if;
+         declare
+            Deadline : constant Ada.Real_Time.Time :=
+              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+         begin
+            while not Connection_Testing.Close_Requested (Item) loop
+               if Ada.Real_Time.Clock >= Deadline then
+                  Provider.Release_Handshake;
+                  raise Program_Error with
+                    "close did not publish its generation barrier";
+               end if;
+               delay 0.001;
+            end loop;
+         end;
          Provider.Release_Handshake;
-         Upgrade_Result.Wait;
-         Close_Result.Wait;
+         select
+            Upgrade_Result.Wait;
+         or
+            delay 2.0;
+            raise Program_Error with "TLS upgrader did not drain after close";
+         end select;
+         select
+            Close_Result.Wait;
+         or
+            delay 2.0;
+            raise Program_Error with "concurrent TLS close did not finish";
+         end select;
       end;
 
       pragma Assert (Upgrade_Result.Passed);
