@@ -2104,6 +2104,19 @@ procedure HTTP_Smoke is
             pragma Assert (Ada.Strings.Fixed.Index (Output, Expected) /= 0);
          end;
       end Run;
+
+      procedure Run_Rejected_Path (Target : String) is
+         Calls_Before : constant Natural := State.Calls;
+         Value_Before : constant Unbounded_String := State.Last_Value;
+      begin
+         Run
+           ("GET " & Target & " HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Connection: close" & CRLF & CRLF,
+            "invalid-path", "400");
+         pragma Assert (State.Calls = Calls_Before);
+         pragma Assert (State.Last_Value = Value_Before);
+      end Run_Rejected_Path;
    begin
       Routes.Add_Middleware
         (Stamp_Global'Access, Name => "response-stamp");
@@ -2202,6 +2215,29 @@ procedure HTTP_Smoke is
          & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
          "css/site.css");
       pragma Assert (To_String (State.Last_Value) = "css/site.css");
+
+      Run_Rejected_Path ("/.");
+      Run_Rejected_Path ("/..");
+      Run_Rejected_Path ("/users/./7?source=test");
+      Run_Rejected_Path ("/users/%2e");
+      Run_Rejected_Path ("/users/%2E%2e?source=test");
+      Run_Rejected_Path ("/users/.%2E");
+      Run_Rejected_Path ("/assets/css/../secret.txt");
+      Run_Rejected_Path ("/assets/css/%2e%2E/secret.txt?source=test");
+      Run_Rejected_Path
+        ("http://localhost/assets/%2E./secret.txt?source=test");
+
+      Run
+        ("GET /users/alice.smith?next=/../ HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         "user alice.smith");
+      pragma Assert (To_String (State.Last_Value) = "alice.smith");
+
+      Run
+        ("GET /assets/.../site.min.css HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF & "Connection: close" & CRLF & CRLF,
+         ".../site.min.css");
+      pragma Assert (To_String (State.Last_Value) = ".../site.min.css");
 
       Run
         ("POST /users/2 HTTP/1.1" & CRLF

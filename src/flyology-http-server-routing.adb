@@ -112,6 +112,28 @@ package body Flyology.HTTP.Server.Routing is
         (if Query = 0 then "" else Target (Query .. Target'Last));
    end Raw_Query_Suffix;
 
+   function Has_Dot_Segment (Value : String) return Boolean is
+      First : Natural := Value'First + 1;
+      Slash : Natural;
+   begin
+      while First <= Value'Last loop
+         Slash := Ada.Strings.Fixed.Index (Value (First .. Value'Last), "/");
+         declare
+            Last : constant Natural :=
+              (if Slash = 0 then Value'Last else Slash - 1);
+         begin
+            if Last >= First
+              and then Value (First .. Last) in "." | ".."
+            then
+               return True;
+            end if;
+         end;
+         exit when Slash = 0 or else Slash = Value'Last;
+         First := Slash + 1;
+      end loop;
+      return False;
+   end Has_Dot_Segment;
+
    function Decode_Path (Value : String) return String is
       Result : Unbounded_String;
       Index  : Natural := Value'First;
@@ -155,6 +177,8 @@ package body Flyology.HTTP.Server.Routing is
       begin
          if Ada.Strings.Fixed.Index (Decoded, "//") /= 0 then
             raise Route_Error with "empty HTTP path segment is ambiguous";
+         elsif Has_Dot_Segment (Decoded) then
+            raise Route_Error with "decoded dot segment in HTTP path";
          elsif not Valid_UTF8 (Decoded) then
             raise Route_Error with "HTTP path is not valid UTF-8";
          end if;

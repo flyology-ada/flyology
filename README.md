@@ -1149,9 +1149,10 @@ Router.Get
 
 Route patterns contain static segments, `{name}` parameters, or one final
 `{*remainder}`. Paths are split before percent-decoding, encoded separators and
-malformed UTF-8 are rejected, and `+` remains a literal plus in a path. Routers
-provide automatic 404, 405 with `Allow`, and HEAD fallback to GET. Trailing
-slash behavior is selected explicitly when the bounded router is declared.
+malformed UTF-8 are rejected, decoded `.` and `..` segments are rejected, and
+`+` remains a literal plus in a path. Routers provide automatic 404, 405 with
+`Allow`, and HEAD fallback to GET. Trailing slash behavior is selected
+explicitly when the bounded router is declared.
 
 Router setup can attach optional stable names to middleware, and the completed
 registry can be described without exposing handler access values:
