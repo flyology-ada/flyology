@@ -76,6 +76,7 @@
             <li><a href="#resources">Efficiency and tails</a></li>
             <li><a href="#limits">Validity boundary</a></li>
             <li><a href="#reproduce">Reproduce it</a></li>
+            <li><a href="#high-concurrency">High-concurrency appendix</a></li>
           </ol>
         </nav>
 
@@ -232,6 +233,89 @@ HTTP_BENCH_RUST_WORKERS=8 \
   ./showcases/http-comparison/scripts/run-kubernetes.sh</code></pre>
             </figure>
             <p>The runner validates response bytes before measurement, rejects any common row with a timeout or non-200 response, preserves raw observations only below ignored <code>build/</code>, privacy-scans copied cluster artifacts, and verifies deletion of its temporary namespace.</p>
+          </section>
+
+          <section id="high-concurrency">
+            <span class="step-label">SATURATION APPENDIX</span>
+            <h2>All entrants at c8, c32, and c128.</h2>
+            <div class="snapshot-boundary">
+              <strong>Probe, not ranking</strong>
+              <p>Each cell below is one one-second observation from the local ARM64 Docker environment after a one-second warmup. The exact response contract was validated before measurement, and every measured response was HTTP 200 with zero timeouts. There are no repeated trials or useful ranges, so treat the tables as saturation-shape evidence only.</p>
+            </div>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Plain HTTP, 13-byte body: thousands of requests per second</caption>
+                <thead><tr><th>Concurrency</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">c8</th><td>142.6</td><td>142.8</td><td>244.4</td><td>42.2</td><td>29.1</td></tr>
+                  <tr><th scope="row">c32</th><td>381.2</td><td>385.9</td><td>396.2</td><td>30.0</td><td>14.4</td></tr>
+                  <tr><th scope="row">c128</th><td>530.2</td><td>505.4</td><td>541.1</td><td>31.5</td><td>24.7</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Plain HTTP, 1 KiB body: thousands of requests per second</caption>
+                <thead><tr><th>Concurrency</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">c8</th><td>140.8</td><td>140.0</td><td>229.8</td><td>46.0</td><td>29.0</td></tr>
+                  <tr><th scope="row">c32</th><td>380.7</td><td>360.8</td><td>379.0</td><td>29.4</td><td>27.6</td></tr>
+                  <tr><th scope="row">c128</th><td>491.8</td><td>490.4</td><td>472.3</td><td>29.8</td><td>13.7</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Routed application GET: thousands of requests per second</caption>
+                <thead><tr><th>Concurrency</th><th>Flyology LW</th><th>Flyology native</th><th>axum</th><th>Actix Web</th><th>ServletAda/AWS</th><th>ServletAda/EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">c8</th><td>136.0</td><td>135.9</td><td>219.8</td><td>173.4</td><td>35.9</td><td>24.3</td></tr>
+                  <tr><th scope="row">c32</th><td>356.7</td><td>324.1</td><td>324.4</td><td>688.7</td><td>17.5</td><td>24.6</td></tr>
+                  <tr><th scope="row">c128</th><td>445.4</td><td>429.7</td><td>507.4</td><td>1,689.3</td><td>18.6</td><td>13.8</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p>At c128, hyper remained narrowly ahead for the 13-byte plain response, while Flyology lightweight led the 1 KiB plain row. Actix Web was the routed throughput leader by a wide margin. Flyology lightweight stayed 0.3–4.9% ahead of Flyology native across the three c128 workloads.</p>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>c128 latency tails, plain HTTP</caption>
+                <thead><tr><th>Workload</th><th>Server</th><th>p99 ms</th><th>p99.9 ms</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row" rowspan="5">13 B</th><td>Flyology lightweight</td><td>3.442</td><td>5.243</td></tr>
+                  <tr><td>Flyology native</td><td>0.609</td><td>1.113</td></tr>
+                  <tr><td>hyper</td><td>0.646</td><td>0.901</td></tr>
+                  <tr><td>AWS</td><td>4.616</td><td>12.580</td></tr>
+                  <tr><td>EWS</td><td>0.318</td><td>1,004.959</td></tr>
+                  <tr><th scope="row" rowspan="5">1 KiB</th><td>Flyology lightweight</td><td>3.888</td><td>6.731</td></tr>
+                  <tr><td>Flyology native</td><td>0.605</td><td>1.346</td></tr>
+                  <tr><td>hyper</td><td>0.837</td><td>2.025</td></tr>
+                  <tr><td>AWS</td><td>4.130</td><td>14.902</td></tr>
+                  <tr><td>EWS</td><td>0.318</td><td>1,420.597</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>c128 latency tails, routed application GET</caption>
+                <thead><tr><th>Server</th><th>p99 ms</th><th>p99.9 ms</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Flyology lightweight</th><td>3.737</td><td>6.211</td></tr>
+                  <tr><th scope="row">Flyology native</th><td>0.673</td><td>1.307</td></tr>
+                  <tr><th scope="row">axum</th><td>0.718</td><td>1.017</td></tr>
+                  <tr><th scope="row">Actix Web</th><td>0.224</td><td>0.580</td></tr>
+                  <tr><th scope="row">ServletAda/AWS</th><td>10.076</td><td>24.291</td></tr>
+                  <tr><th scope="row">ServletAda/EWS</th><td>0.093</td><td>1,481.490</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p>The tail table prevents the throughput view from hiding queueing behavior. In particular, the EWS-based rows have low p99 values alongside p99.9 latencies around one to one-and-a-half seconds. The expanded <a href="data/saturation.csv" download>saturation CSV</a> contains p50, p90, p99, p99.9, success, and timeout fields for every c8, c32, and c128 observation.</p>
           </section>
         </article>
       </div>
