@@ -422,7 +422,9 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
       Max_Message    : Natural := Default_Max_WebSocket_Message;
       Receive_Quantum : Duration := 0.05;
       Max_Outgoing_Burst : Positive := 16;
-      Metric_Output  : access Metrics.Sink'Class := null)
+      Metric_Output  : access Metrics.Sink'Class := null;
+      Compression    : WebSocket_Compression_Mode :=
+        No_WebSocket_Compression)
    is
       Outgoing  : Outgoing_Message;
       Available : Boolean;
@@ -506,7 +508,8 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
          Item.Stop.Request;
          return;
       end if;
-      X.Accept_WebSocket (Protocol, Origin_Policy, Allowed_Origin);
+      X.Accept_WebSocket
+        (Protocol, Origin_Policy, Allowed_Origin, Compression);
       if Open /= null then
          Open.all (X, Item);
       end if;

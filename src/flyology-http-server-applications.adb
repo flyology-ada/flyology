@@ -583,7 +583,9 @@ package body Flyology.HTTP.Server.Applications is
      (Item           : in out Exchange;
       Protocol       : String := "";
       Origin_Policy  : WebSocket_Origin_Policy := Reject_Browser_Origins;
-      Allowed_Origin : String := "")
+      Allowed_Origin : String := "";
+      Compression    : WebSocket_Compression_Mode :=
+        No_WebSocket_Compression)
    is
    begin
       Require_Owner (Item);
@@ -599,8 +601,14 @@ package body Flyology.HTTP.Server.Applications is
          raise Program_Error with "route does not permit WebSocket upgrade";
       end if;
       Flyology.HTTP.Server.Accept_WebSocket
-        (Item.Connection_Handle.all, Item.Request_Handle.all, Protocol,
-         Origin_Policy, Allowed_Origin, Remaining (Item), Item.Token_Handle);
+        (Item             => Item.Connection_Handle.all,
+         Value            => Item.Request_Handle.all,
+         Protocol         => Protocol,
+         Origin_Policy    => Origin_Policy,
+         Allowed_Origin   => Allowed_Origin,
+         Compression      => Compression,
+         Timeout          => Remaining (Item),
+         Token            => Item.Token_Handle);
       Item.Status_Value := 101;
       Item.Response_Value := Upgraded;
    exception

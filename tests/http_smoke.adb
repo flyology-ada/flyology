@@ -591,6 +591,7 @@ procedure HTTP_Smoke is
          & "Upgrade: websocket" & CRLF
          & "Connection: Upgrade" & CRLF
          & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Extensions: permessage-deflate" & CRLF
          & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF
          & Frame (16#01#, "H")
          & Frame (16#89#, "?")
@@ -638,6 +639,9 @@ procedure HTTP_Smoke is
            (Ada.Strings.Fixed.Index
               (Result,
                "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") /= 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Result, "Sec-WebSocket-Extensions:") = 0);
          pragma Assert
            (Ada.Strings.Fixed.Index
               (Result,
@@ -710,6 +714,275 @@ procedure HTTP_Smoke is
            (To_String (Wire.Output),
             Character'Val (16#82#) & Character'Val (3) & Payload) /= 0);
    end Check_WebSocket_Binary_Bytes;
+
+   procedure Check_WebSocket_Deflate is
+      Payload : constant String :=
+        Character'Val (16#F2#) & Character'Val (16#48#)
+        & Character'Val (16#CD#) & Character'Val (16#C9#)
+        & Character'Val (16#C9#) & Character'Val (16#07#)
+        & Character'Val (16#00#);
+
+      function Frame (Data : String) return String is
+         Mask   : constant String := "mask";
+         Result : Unbounded_String;
+      begin
+         Append (Result, Character'Val (16#C1#));
+         Append (Result, Character'Val (16#80# + Data'Length));
+         Append (Result, Mask);
+         for Index in Data'Range loop
+            Append
+              (Result,
+               Character'Val
+                 (Natural
+                    (Ada.Streams.Stream_Element
+                       (Character'Pos (Data (Index)))
+                     xor Ada.Streams.Stream_Element
+                       (Character'Pos
+                          (Mask ((Index - Data'First) mod 4 + 1))))));
+         end loop;
+         return To_String (Result);
+      end Frame;
+
+      Wire : aliased Memory_Transport;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("GET /compressed HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Extensions: permessage-deflate; "
+         & "client_max_window_bits" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF
+         & Frame (Payload));
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Message : Bytes.Unbounded_Bytes;
+         Kind    : HTTP_Server.WebSocket_Data_Kind;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request (Client, Request, Closed);
+         HTTP_Server.Accept_WebSocket
+           (Client, Request, Compression => HTTP_Server.Permessage_Deflate);
+         HTTP_Server.Receive_WebSocket (Client, Kind, Message, Closed);
+         pragma Assert (not Closed);
+         pragma Assert (Kind = HTTP_Server.Text_Frame);
+         pragma Assert (Bytes.To_Byte_String (Message) = "Hello");
+         HTTP_Server.Send_WebSocket (Client, Kind, Bytes.To_Array (Message));
+         HTTP_Server.Close_WebSocket (Client);
+      end;
+      declare
+         Result   : constant String := To_String (Wire.Output);
+         Boundary : constant Natural :=
+           Ada.Strings.Fixed.Index (Result, CRLF & CRLF);
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Result,
+               "Sec-WebSocket-Extensions: permessage-deflate; "
+               & "server_no_context_takeover; client_no_context_takeover") /= 0);
+         pragma Assert (Boundary > 0);
+         pragma Assert
+           (Character'Pos (Result (Boundary + 4)) = 16#C1#);
+      end;
+
+      declare
+         Expanded : constant String :=
+           Character'Val (16#72#) & Character'Val (16#74#)
+           & Character'Val (16#A4#) & Character'Val (16#3D#)
+           & Character'Val (16#00#) & Character'Val (16#00#);
+         Bomb_Wire : aliased Memory_Transport;
+         Rejected  : Boolean := False;
+      begin
+         Bomb_Wire.Input := To_Unbounded_String
+           ("GET /compressed-limit HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Upgrade: websocket" & CRLF
+            & "Connection: Upgrade" & CRLF
+            & "Sec-WebSocket-Version: 13" & CRLF
+            & "Sec-WebSocket-Extensions: permessage-deflate" & CRLF
+            & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+            & CRLF & CRLF & Frame (Expanded));
+         declare
+            Client  : HTTP_Server.Connection (Bomb_Wire'Access);
+            Request : HTTP_Server.Request;
+            Message : Bytes.Unbounded_Bytes;
+            Kind    : HTTP_Server.WebSocket_Data_Kind;
+            Closed  : Boolean;
+         begin
+            HTTP_Server.Read_Request (Client, Request, Closed);
+            HTTP_Server.Accept_WebSocket
+              (Client, Request,
+               Compression => HTTP_Server.Permessage_Deflate);
+            begin
+               HTTP_Server.Receive_WebSocket
+                 (Client, Kind, Message, Closed, Max_Message => 16);
+            exception
+               when Flyology.HTTP.Protocol_Error =>
+                  Rejected := True;
+            end;
+         end;
+         pragma Assert (Rejected);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Bomb_Wire.Output),
+               Character'Val (16#88#) & Character'Val (2)
+               & Character'Val (3) & Character'Val (16#F1#)) /= 0);
+      end;
+   end Check_WebSocket_Deflate;
+
+   procedure Check_WebSocket_Deflate_Reduction is
+      Repeated : constant String (1 .. 256) := (others => 'A');
+      Wire     : aliased Memory_Transport;
+   begin
+      Wire.Input := To_Unbounded_String
+        ("GET /compressed-output HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Extensions: permessage-deflate" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+         & CRLF & CRLF);
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request (Client, Request, Closed);
+         HTTP_Server.Accept_WebSocket
+           (Client, Request, Compression => HTTP_Server.Permessage_Deflate);
+         HTTP_Server.Send_WebSocket (Client, Repeated);
+         HTTP_Server.Close_WebSocket (Client);
+      end;
+      declare
+         Result   : constant String := To_String (Wire.Output);
+         Boundary : constant Natural :=
+           Ada.Strings.Fixed.Index (Result, CRLF & CRLF);
+         Payload_Length : Natural;
+      begin
+         pragma Assert (Boundary > 0);
+         pragma Assert
+           (Character'Pos (Result (Boundary + 4)) = 16#C1#);
+         Payload_Length := Character'Pos (Result (Boundary + 5));
+         pragma Assert (Payload_Length in 1 .. 125);
+         pragma Assert (Payload_Length < Repeated'Length);
+      end;
+   end Check_WebSocket_Deflate_Reduction;
+
+   procedure Check_WebSocket_Deflate_Adversarial is
+      Seed : constant String :=
+        Character'Val (16#F2#) & Character'Val (16#48#)
+        & Character'Val (16#CD#) & Character'Val (16#C9#)
+        & Character'Val (16#C9#) & Character'Val (16#07#)
+        & Character'Val (16#00#);
+      Accepted : Natural := 0;
+      Rejected : Natural := 0;
+
+      function Frame (Data : String) return String is
+         Mask   : constant String := "mask";
+         Result : Unbounded_String;
+      begin
+         Append (Result, Character'Val (16#C2#));
+         Append (Result, Character'Val (16#80# + Data'Length));
+         Append (Result, Mask);
+         for Index in Data'Range loop
+            Append
+              (Result,
+               Character'Val
+                 (Natural
+                    (Ada.Streams.Stream_Element
+                       (Character'Pos (Data (Index)))
+                     xor Ada.Streams.Stream_Element
+                       (Character'Pos
+                          (Mask ((Index - Data'First) mod 4 + 1))))));
+         end loop;
+         return To_String (Result);
+      end Frame;
+
+      procedure Try_Payload (Payload : String) is
+         Wire : aliased Memory_Transport;
+      begin
+         Wire.Input := To_Unbounded_String
+           ("GET /compressed-mutation HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & "Upgrade: websocket" & CRLF
+            & "Connection: Upgrade" & CRLF
+            & "Sec-WebSocket-Version: 13" & CRLF
+            & "Sec-WebSocket-Extensions: permessage-deflate" & CRLF
+            & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+            & CRLF & CRLF & Frame (Payload));
+         declare
+            Client  : HTTP_Server.Connection (Wire'Access);
+            Request : HTTP_Server.Request;
+            Message : Bytes.Unbounded_Bytes;
+            Kind    : HTTP_Server.WebSocket_Data_Kind;
+            Closed  : Boolean;
+         begin
+            HTTP_Server.Read_Request (Client, Request, Closed);
+            HTTP_Server.Accept_WebSocket
+              (Client, Request,
+               Compression => HTTP_Server.Permessage_Deflate);
+            begin
+               HTTP_Server.Receive_WebSocket
+                 (Client, Kind, Message, Closed, Max_Message => 64);
+               pragma Assert (not Closed);
+               pragma Assert (Kind = HTTP_Server.Binary_Frame);
+               pragma Assert (Bytes.Length (Message) <= 64);
+               Accepted := Accepted + 1;
+            exception
+               when Flyology.HTTP.Protocol_Error =>
+                  declare
+                     Output : constant String := To_String (Wire.Output);
+                     Invalid_Data_Close : constant String :=
+                       Character'Val (16#88#) & Character'Val (2)
+                       & Character'Val (3) & Character'Val (16#EF#);
+                     Too_Large_Close : constant String :=
+                       Character'Val (16#88#) & Character'Val (2)
+                       & Character'Val (3) & Character'Val (16#F1#);
+                  begin
+                     pragma Assert
+                       (Ada.Strings.Fixed.Index
+                          (Output, Invalid_Data_Close) /= 0
+                        or else Ada.Strings.Fixed.Index
+                          (Output, Too_Large_Close) /= 0);
+                  end;
+                  Rejected := Rejected + 1;
+            end;
+         end;
+      end Try_Payload;
+   begin
+      --  Exercise every one-byte input, structured two-byte prefixes,
+      --  truncations, and every single-bit mutation of a known-valid stream.
+      Try_Payload (Seed);
+      Try_Payload ("");
+      for Value in 0 .. 255 loop
+         Try_Payload (String'(1 => Character'Val (Value)));
+         Try_Payload
+           (Character'Val (Value) & Character'Val (16#00#));
+      end loop;
+      for Count in 1 .. Seed'Length - 1 loop
+         Try_Payload (Seed (Seed'First .. Seed'First + Count - 1));
+      end loop;
+      for Index in Seed'Range loop
+         for Bit in 0 .. 7 loop
+            declare
+               Mutated : String := Seed;
+            begin
+               Mutated (Index) := Character'Val
+                 (Natural
+                    (Ada.Streams.Stream_Element
+                       (Character'Pos (Seed (Index)))
+                     xor Ada.Streams.Stream_Element (2 ** Bit)));
+               Try_Payload (Mutated);
+            end;
+         end loop;
+      end loop;
+      pragma Assert (Accepted > 0);
+      pragma Assert (Rejected > 0);
+      pragma Assert (Accepted + Rejected = 576);
+   end Check_WebSocket_Deflate_Adversarial;
 
    procedure Check_Idle_WebSocket_Budget is
       Count : constant := 65;
@@ -3383,6 +3656,9 @@ begin
    Check_SSE;
    Check_WebSocket;
    Check_WebSocket_Binary_Bytes;
+   Check_WebSocket_Deflate;
+   Check_WebSocket_Deflate_Reduction;
+   Check_WebSocket_Deflate_Adversarial;
    Check_Idle_WebSocket_Budget;
    Check_Periodic_WebSocket_Pings;
    Check_WebSocket_Control_Write_Timeout;

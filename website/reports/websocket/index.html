@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Dated Autobahn WebSocket conformance results for Flyology over plain WebSocket and OpenSSL-backed WSS.">
+    <meta name="description" content="Dated Autobahn framing, compression, limits, WSS, and timing results for Flyology WebSockets.">
     <meta name="theme-color" content="#17213d">
     <title>WebSocket conformance · Flyology</title>
     <link rel="canonical" href="https://flyology.org/reports/websocket/">
@@ -53,10 +53,10 @@
           <h1>WebSocket framing, case by case.</h1>
         </div>
         <div class="report-hero-copy">
-          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate section 9 runs keep Flyology's configurable boundary and per-lane echo timings visible.</p>
+          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate runs cover configurable boundaries, RFC 7692 compression, and per-lane echo timings.</p>
           <dl class="report-run-meta">
             <div><dt>Suite</dt><dd>Autobahn 25.10.1</dd></div>
-            <div><dt>Revision</dt><dd>7880b4e</dd></div>
+            <div><dt>Revision</dt><dd>ae236fa</dd></div>
             <div><dt>Transport</dt><dd>ws:// + wss://</dd></div>
           </dl>
         </div>
@@ -65,7 +65,7 @@
       <section class="report-finding" aria-labelledby="finding-title">
         <div>
           <p class="report-section-index">01 / RESULT</p>
-          <h2 id="finding-title">No RFC-focused failures in either lane or over TLS.</h2>
+          <h2 id="finding-title">No core framing failures in either lane or over TLS.</h2>
         </div>
         <div class="report-lane-comparison" aria-label="Core profile comparison">
           <div class="report-lane-row"><span>Lightweight / ws</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
@@ -115,6 +115,38 @@
           </span>
           <span class="report-profile-outcome"><strong>42</strong> cases</span>
         </a>
+        <a class="report-profile-row" href="compression-lightweight/">
+          <span class="report-profile-id">RFC 7692 sections 12–13</span>
+          <span class="report-profile-copy">
+            <strong>Compression, lightweight task</strong>
+            <span>Compressed messages and extension negotiation through a lightweight task. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>216</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="compression-native/">
+          <span class="report-profile-id">RFC 7692 sections 12–13</span>
+          <span class="report-profile-copy">
+            <strong>Compression, native task</strong>
+            <span>The same compression and negotiation profile through a native task. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>216</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="compression-lightweight-wss/">
+          <span class="report-profile-id">RFC 7692 sections 12–13 over TLS</span>
+          <span class="report-profile-copy">
+            <strong>Compression over WSS, lightweight task</strong>
+            <span>The compression profile after a nonblocking OpenSSL server handshake. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>216</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="compression-native-wss/">
+          <span class="report-profile-id">RFC 7692 sections 12–13 over TLS</span>
+          <span class="report-profile-copy">
+            <strong>Compression over WSS, native task</strong>
+            <span>The same secure compression profile through an ordinary native task. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>216</strong> cases</span>
+        </a>
         <a class="report-profile-row" href="performance-lightweight/">
           <span class="report-profile-id">Section 9.7–9.8 timing</span>
           <span class="report-profile-copy">
@@ -133,29 +165,56 @@
         </a>
       </section>
 
+      <section class="report-compression" aria-labelledby="compression-title">
+        <div>
+          <p class="report-section-index">03 / COMPRESSION</p>
+          <h2 id="compression-title">864 compressed-message and negotiation cases.</h2>
+        </div>
+        <div>
+          <p>Flyology explicitly opts into <code>permessage-deflate</code> with no context takeover in either direction. The pure-Ada decoder accepts stored, fixed-Huffman, and dynamic-Huffman DEFLATE blocks while enforcing the configured decompressed message limit.</p>
+          <div class="report-lane-comparison" aria-label="Compression profile comparison">
+            <div class="report-lane-row"><span>Lightweight / deflate</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 216"></i></span><strong>216 cases</strong></div>
+            <div class="report-lane-row"><span>Native / deflate</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 216"></i></span><strong>216 cases</strong></div>
+            <div class="report-lane-row"><span>Lightweight / wss</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 216"></i></span><strong>216 cases</strong></div>
+            <div class="report-lane-row"><span>Native / wss</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 216"></i></span><strong>216 cases</strong></div>
+          </div>
+        </div>
+      </section>
+
       <section class="report-performance" aria-labelledby="performance-title">
         <div>
-          <p class="report-section-index">03 / TIMING</p>
+          <p class="report-section-index">04 / TIMING</p>
           <h2 id="performance-title">24,000 sequential echoes completed across both lanes.</h2>
         </div>
         <div>
-          <p>All 24 section 9.7–9.8 timing probes passed. Each lane completed 1,000 sequential round trips at every text and binary payload size.</p>
+          <p>All 24 section 9.7–9.8 timing probes passed. Each lane completed 1,000 sequential round trips at every text and binary payload size from a recorded Alire release build with <code>-O3</code>.</p>
           <p>These loopback observations include case setup and close work. They are recorded for regression comparison, not as a portable throughput or latency claim.</p>
           <nav class="report-performance-links" aria-label="Performance profiles">
-            <a href="performance-lightweight/"><span>Lightweight task</span><strong>113–350 ms</strong></a>
-            <a href="performance-native/"><span>Native task</span><strong>106–265 ms</strong></a>
+            <a href="performance-lightweight/"><span>Lightweight task</span><strong>113–271 ms</strong></a>
+            <a href="performance-native/"><span>Native task</span><strong>113–291 ms</strong></a>
           </nav>
+        </div>
+      </section>
+
+      <section class="report-boundary" aria-labelledby="coverage-title">
+        <div>
+          <p class="report-section-index">05 / SOURCE COVERAGE</p>
+          <h2 id="coverage-title">38% statements; 17% decisions fully covered.</h2>
+        </div>
+        <div>
+          <p>GNATcoverage FSF 26.2 consolidated 56 executions of 56 portable behavioral programs across 3 runtime configurations.</p>
+          <p>This is project-wide source coverage for Flyology-owned Ada library units across the portable behavioral suite, not a WebSocket-only percentage. Decisions also recorded 21% partial coverage.</p>
         </div>
       </section>
 
       <section class="report-boundary" aria-labelledby="boundary-title">
         <div>
-          <p class="report-section-index">04 / BOUNDARY</p>
+          <p class="report-section-index">06 / BOUNDARY</p>
           <h2 id="boundary-title">The limit is application policy.</h2>
         </div>
         <div>
           <p>All 42 boundary and chunking cases pass from 64 KiB through 16 MiB. The adapter explicitly selects the 16 MiB supported maximum; ordinary calls retain Flyology's 1 MiB default.</p>
-          <p>RFC 7692 compression cases were excluded because Flyology does not negotiate <code>permessage-deflate</code>. The core framing profile was also repeated over <code>wss://</code>; the section 9 boundary and timing campaigns used loopback <code>ws://</code>.</p>
+          <p>The core framing and compression profiles were also repeated over <code>wss://</code> in both task lanes. The limits and timing campaigns used loopback <code>ws://</code>.</p>
         </div>
       </section>
     </main>

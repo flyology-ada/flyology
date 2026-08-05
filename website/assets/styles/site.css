@@ -1637,6 +1637,7 @@ code:not(pre code) {
 }
 
 .report-finding,
+.report-compression,
 .report-performance,
 .report-boundary {
   display: grid;
@@ -1647,6 +1648,7 @@ code:not(pre code) {
 }
 
 .report-finding h2,
+.report-compression h2,
 .report-performance h2,
 .report-boundary h2,
 .report-section-heading h2,
@@ -1847,6 +1849,15 @@ code:not(pre code) {
 .report-boundary > div:last-child p {
   max-width: 62ch;
   color: var(--ink-soft);
+}
+
+.report-compression > div:last-child > p {
+  max-width: 62ch;
+  color: var(--ink-soft);
+}
+
+.report-compression .report-lane-comparison {
+  margin-top: 1.6rem;
 }
 
 .report-performance > div:last-child p {
@@ -2714,6 +2725,7 @@ code:not(pre code) {
   .report-hero,
   .report-profile-hero,
   .report-finding,
+  .report-compression,
   .report-performance,
   .report-boundary,
   .report-equipment,

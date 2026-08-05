@@ -466,6 +466,16 @@ package Flyology.HTTP.Server is
    --  @enum Binary_Frame Binary payload
    type WebSocket_Data_Kind is (Text_Frame, Binary_Frame);
 
+   --  WebSocket extension policy selected explicitly at upgrade time.
+   --  Permessage_Deflate negotiates RFC 7692 with no context takeover in
+   --  both directions so compression state and history do not cross message
+   --  boundaries. Applications must assess compression side channels before
+   --  enabling it for secret-bearing messages.
+   --  @enum No_WebSocket_Compression Decline compression offers
+   --  @enum Permessage_Deflate Negotiate bounded per-message raw DEFLATE
+   type WebSocket_Compression_Mode is
+     (No_WebSocket_Compression, Permessage_Deflate);
+
    --  Browser-origin policy applied before a WebSocket upgrade.
    --  @enum Reject_Browser_Origins Reject requests containing Origin
    --  @enum Allow_Any_Origin Accept zero or one syntactically bounded Origin
@@ -482,6 +492,7 @@ package Flyology.HTTP.Server is
    --  @param Allowed_Origin Exact origin required by Require_Exact_Origin
    --  @param Timeout Transport send deadline
    --  @param Token Optional cancellation source
+   --  @param Compression Explicit RFC 7692 negotiation policy
    --  @exception Protocol_Error Request is not a valid version 13 upgrade
    procedure Accept_WebSocket
      (Item     : in out Connection;
@@ -490,7 +501,8 @@ package Flyology.HTTP.Server is
       Origin_Policy : WebSocket_Origin_Policy := Reject_Browser_Origins;
       Allowed_Origin : String := "";
       Timeout  : Duration := 30.0;
-      Token    : access Flyology.Cancellation.Token := null);
+      Token    : access Flyology.Cancellation.Token := null;
+      Compression : WebSocket_Compression_Mode := No_WebSocket_Compression);
 
    --  Receive one complete client message, reassembling fragments within
    --  Max_Message. Timeout bounds one wait quantum; Message_Timeout is one
@@ -498,6 +510,8 @@ package Flyology.HTTP.Server is
    --  interleaved control frames. Ping is answered automatically and close
    --  sets Closed.
    --  Client frames must be masked. Protocol failure makes Item terminal.
+   --  Negotiated compression is decoded before return; compressed and
+   --  decompressed storage is charged to the shared ingress budget.
    --  @param Item Upgraded WebSocket connection
    --  @param Kind Text or binary message kind
    --  @param Data Message payload
@@ -652,6 +666,8 @@ private
       WebSocket_Message : Flyology.Bytes.Unbounded_Bytes;
       WebSocket_Message_Limit : Natural := 0;
       WebSocket_Control_Count : Natural := 0;
+      WebSocket_Deflate_Enabled : Boolean := False;
+      WebSocket_Message_Compressed : Boolean := False;
    end record;
 
    --  Release any active buffered reservation.

@@ -76,7 +76,6 @@ printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
   --dump-trigger=main-end \
   --dump-channel=bin-file \
   --dump-filename-env-var=FLYOLOGY_COVERAGE_TRACE \
-  --RTS="$prepared_rts" \
   --restricted-to-languages=Ada \
   --subdirs="$coverage_subdir" \
   --quiet \
@@ -286,7 +285,6 @@ printf 'coverage: consolidating %s executions from %s configurations\n' \
   -P tests/runtime_smoke.gpr \
   --projects=flyology \
   --level=stmt+decision \
-  --RTS="$prepared_rts" \
   --subdirs="$coverage_subdir" \
   --restricted-to-languages=Ada \
   --excluded-source-files='flyology_config.*' \

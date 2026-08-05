@@ -22,7 +22,7 @@ if (outputRoot !== expectedOutput) {
 const suiteVersion = "25.10.1";
 const imageDigest =
   "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074";
-const revision = "7880b4e";
+const revision = "ae236fa";
 const environment = JSON.parse(
   await readFile(join(projectRoot, "tests/autobahn/run-environment.json"), "utf8")
 );
@@ -70,6 +70,50 @@ const profiles = [
     scope: "Section 9.1–9.6 limits",
     summary:
       "Boundary probes with the adapter explicitly configured for 16 MiB.",
+  },
+  {
+    slug: "compression-lightweight",
+    title: "Compression, lightweight task",
+    lane: "Lightweight task",
+    comparisonLabel: "Lightweight / deflate",
+    kind: "compression",
+    transport: "Plain ws:// with permessage-deflate",
+    scope: "RFC 7692 sections 12–13",
+    summary:
+      "Compressed messages and extension negotiation through a lightweight task.",
+  },
+  {
+    slug: "compression-native",
+    title: "Compression, native task",
+    lane: "Native task",
+    comparisonLabel: "Native / deflate",
+    kind: "compression",
+    transport: "Plain ws:// with permessage-deflate",
+    scope: "RFC 7692 sections 12–13",
+    summary:
+      "The same compression and negotiation profile through a native task.",
+  },
+  {
+    slug: "compression-lightweight-wss",
+    title: "Compression over WSS, lightweight task",
+    lane: "Lightweight task",
+    comparisonLabel: "Lightweight / wss",
+    kind: "compression",
+    transport: `WSS via ${environment.tlsProvider} with permessage-deflate`,
+    scope: "RFC 7692 sections 12–13 over TLS",
+    summary:
+      "The compression profile after a nonblocking OpenSSL server handshake.",
+  },
+  {
+    slug: "compression-native-wss",
+    title: "Compression over WSS, native task",
+    lane: "Native task",
+    comparisonLabel: "Native / wss",
+    kind: "compression",
+    transport: `WSS via ${environment.tlsProvider} with permessage-deflate`,
+    scope: "RFC 7692 sections 12–13 over TLS",
+    summary:
+      "The same secure compression profile through an ordinary native task.",
   },
   {
     slug: "performance-lightweight",
@@ -189,6 +233,18 @@ function closeCode(value) {
 }
 
 function reportDate(cases) {
+  if (environment.captured) {
+    const captured = new Date(`${environment.captured}T00:00:00Z`);
+    return {
+      iso: environment.captured,
+      display: new Intl.DateTimeFormat("en", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(captured),
+    };
+  }
   const started = cases.map((item) => item.started).filter(Boolean).sort()[0];
   if (!started) return { iso: "2026-08-04", display: "4 August 2026" };
   const date = new Date(started);
@@ -220,9 +276,23 @@ async function loadProfile(profile) {
     counts: countStatuses(cases),
     date: reportDate(cases),
   };
-  return profile.kind === "performance"
-    ? { ...loaded, performance: performanceData(loaded) }
-    : loaded;
+  if (profile.kind !== "performance") return loaded;
+  const runMetadata = JSON.parse(
+    await readFile(join(directory, "run-metadata.json"), "utf8")
+  );
+  if (
+    runMetadata.buildProfile !== "release" ||
+    runMetadata.adaOptimization !== "-O3"
+  ) {
+    throw new Error(
+      `${profile.slug} is not a recorded release/-O3 execution`
+    );
+  }
+  return {
+    ...loaded,
+    performance: performanceData(loaded),
+    runMetadata,
+  };
 }
 
 function documentHead({ title, description, canonical, depth }) {
@@ -333,9 +403,16 @@ function overallPage(loaded) {
   const coreProfiles = loaded.filter((profile) =>
     profile.kind === "core" || profile.kind === "core-tls"
   );
+  const compressionProfiles = loaded.filter(
+    (profile) => profile.kind === "compression"
+  );
+  const compressionCases = compressionProfiles.reduce(
+    (sum, profile) => sum + profile.cases.length,
+    0
+  );
   return `${documentHead({
     title: "WebSocket conformance",
-    description: "Dated Autobahn WebSocket conformance results for Flyology over plain WebSocket and OpenSSL-backed WSS.",
+    description: "Dated Autobahn framing, compression, limits, WSS, and timing results for Flyology WebSockets.",
     canonical: "https://flyology.org/reports/websocket/",
     depth: 2,
   })}
@@ -348,7 +425,7 @@ ${siteHeader(2)}
           <h1>WebSocket framing, case by case.</h1>
         </div>
         <div class="report-hero-copy">
-          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate section 9 runs keep Flyology's configurable boundary and per-lane echo timings visible.</p>
+          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate runs cover configurable boundaries, RFC 7692 compression, and per-lane echo timings.</p>
           <dl class="report-run-meta">
             <div><dt>Suite</dt><dd>Autobahn ${suiteVersion}</dd></div>
             <div><dt>Revision</dt><dd>${revision}</dd></div>
@@ -360,7 +437,7 @@ ${siteHeader(2)}
       <section class="report-finding" aria-labelledby="finding-title">
         <div>
           <p class="report-section-index">01 / RESULT</p>
-          <h2 id="finding-title">No RFC-focused failures in either lane or over TLS.</h2>
+          <h2 id="finding-title">No core framing failures in either lane or over TLS.</h2>
         </div>
         <div class="report-lane-comparison" aria-label="Core profile comparison">
           ${coreProfiles.map((profile) => `<div class="report-lane-row"><span>${escapeHTML(profile.comparisonLabel)}</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: ${profile.counts.OK}"></i><i class="is-non-strict" style="--segment: ${profile.counts["NON-STRICT"]}"></i><i class="is-informational" style="--segment: ${profile.counts.INFORMATIONAL}"></i></span><strong>${profile.cases.length} cases</strong></div>`).join("\n          ")}
@@ -377,13 +454,26 @@ ${siteHeader(2)}
 ${loaded.map(profileIndexItem).join("\n")}
       </section>
 
+      <section class="report-compression" aria-labelledby="compression-title">
+        <div>
+          <p class="report-section-index">03 / COMPRESSION</p>
+          <h2 id="compression-title">${compressionCases.toLocaleString("en-US")} compressed-message and negotiation cases.</h2>
+        </div>
+        <div>
+          <p>Flyology explicitly opts into <code>permessage-deflate</code> with no context takeover in either direction. The pure-Ada decoder accepts stored, fixed-Huffman, and dynamic-Huffman DEFLATE blocks while enforcing the configured decompressed message limit.</p>
+          <div class="report-lane-comparison" aria-label="Compression profile comparison">
+            ${compressionProfiles.map((profile) => `<div class="report-lane-row"><span>${escapeHTML(profile.comparisonLabel || profile.lane)}</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: ${profile.counts.OK}"></i></span><strong>${profile.cases.length} cases</strong></div>`).join("\n            ")}
+          </div>
+        </div>
+      </section>
+
       <section class="report-performance" aria-labelledby="performance-title">
         <div>
-          <p class="report-section-index">03 / TIMING</p>
+          <p class="report-section-index">04 / TIMING</p>
           <h2 id="performance-title">${performanceRoundTrips.toLocaleString("en-US")} sequential echoes completed across both lanes.</h2>
         </div>
         <div>
-          <p>All ${performanceCases} section 9.7–9.8 timing probes passed. Each lane completed 1,000 sequential round trips at every text and binary payload size.</p>
+          <p>All ${performanceCases} section 9.7–9.8 timing probes passed. Each lane completed 1,000 sequential round trips at every text and binary payload size from a recorded Alire release build with <code>-O3</code>.</p>
           <p>These loopback observations include case setup and close work. They are recorded for regression comparison, not as a portable throughput or latency claim.</p>
           <nav class="report-performance-links" aria-label="Performance profiles">
             ${performanceProfiles.map((profile) => `<a href="${profile.slug}/"><span>${escapeHTML(profile.lane)}</span><strong>${profile.performance.minimumMs}–${profile.performance.maximumMs} ms</strong></a>`).join("\n            ")}
@@ -391,14 +481,25 @@ ${loaded.map(profileIndexItem).join("\n")}
         </div>
       </section>
 
+      <section class="report-boundary" aria-labelledby="coverage-title">
+        <div>
+          <p class="report-section-index">05 / SOURCE COVERAGE</p>
+          <h2 id="coverage-title">${environment.sourceCoverage.statementsCovered}% statements; ${environment.sourceCoverage.decisionsCovered}% decisions fully covered.</h2>
+        </div>
+        <div>
+          <p>${escapeHTML(environment.sourceCoverage.tool)} consolidated ${environment.sourceCoverage.executions} executions of ${environment.sourceCoverage.programs} portable behavioral programs across ${environment.sourceCoverage.configurations} runtime configurations.</p>
+          <p>This is project-wide source coverage for ${escapeHTML(environment.sourceCoverage.scope)}, not a WebSocket-only percentage. Decisions also recorded ${environment.sourceCoverage.decisionsPartial}% partial coverage.</p>
+        </div>
+      </section>
+
       <section class="report-boundary" aria-labelledby="boundary-title">
         <div>
-          <p class="report-section-index">04 / BOUNDARY</p>
+          <p class="report-section-index">06 / BOUNDARY</p>
           <h2 id="boundary-title">The limit is application policy.</h2>
         </div>
         <div>
           <p>All ${limits.cases.length} boundary and chunking cases pass from 64 KiB through 16 MiB. The adapter explicitly selects the 16 MiB supported maximum; ordinary calls retain Flyology's 1 MiB default.</p>
-          <p>RFC 7692 compression cases were excluded because Flyology does not negotiate <code>permessage-deflate</code>. The core framing profile was also repeated over <code>wss://</code>; the section 9 boundary and timing campaigns used loopback <code>ws://</code>.</p>
+          <p>The core framing and compression profiles were also repeated over <code>wss://</code> in both task lanes. The limits and timing campaigns used loopback <code>ws://</code>.</p>
         </div>
       </section>
     </main>
@@ -477,6 +578,7 @@ ${rows}
           <div><dt>Memory</dt><dd>${escapeHTML(environment.memory)}</dd></div>
           <div><dt>System</dt><dd>${escapeHTML(environment.os)}, ${escapeHTML(environment.architecture)}</dd></div>
           <div><dt>Toolchain</dt><dd>${escapeHTML(environment.compiler)}, ${escapeHTML(environment.alire)}</dd></div>
+          <div><dt>Build</dt><dd>${escapeHTML(environment.buildProfile)}, ${escapeHTML(environment.optimization)}</dd></div>
           <div><dt>Test client</dt><dd>${escapeHTML(environment.testClient)}</dd></div>
         </dl>
       </section>`;
@@ -485,11 +587,14 @@ ${rows}
 function profilePage(profile) {
   const resultHeading = {
     limits: "Every configured boundary probe passes.",
+    compression: "Every compression and negotiation probe passes.",
     performance: "Every timing probe completed in the suite deadline.",
   }[profile.kind] || "The profile has no failed verdicts.";
   const resultCopy = {
     limits:
       "The adapter opts into Flyology's 16 MiB supported maximum. The public API keeps a 1 MiB default unless the application selects a larger message limit.",
+    compression:
+      "The adapter explicitly enables permessage-deflate with no context takeover. Decoded payloads remain subject to the configured message and shared ingress limits.",
     performance:
       "The cases record one loopback observation across six payload sizes for text and binary messages. They do not define a performance threshold.",
   }[profile.kind] || "Four non-strict cases defer invalid UTF-8 rejection until the fragmented message is complete. Autobahn accepts that timing. Three further cases are informational.";
@@ -539,7 +644,7 @@ ${profile.cases.map(caseRow).join("\n")}
 
       <aside class="report-method" aria-label="Report method">
         <strong>Reproducible input</strong>
-        <p>Autobahn ${suiteVersion}, container <code>${imageDigest.slice(0, 19)}…</code>, Flyology revision <code>${revision}</code>, ${escapeHTML(profile.transport)}. Wire logs remain in local generated output and are not published.</p>
+        <p>Autobahn ${suiteVersion}, container <code>${imageDigest.slice(0, 19)}…</code>, Flyology revision <code>${revision}</code>, ${escapeHTML(profile.transport)}.${profile.kind === "performance" ? ` Recorded from the ${escapeHTML(profile.runMetadata.libraryProfileSource)} configuration with ${escapeHTML(profile.runMetadata.adaOptimization)}.` : ""} Wire logs remain in local generated output and are not published.</p>
       </aside>
     </main>
 ${siteFooter(3)}`;
@@ -594,6 +699,7 @@ for (const profile of loaded) {
         profile: profile.title,
         transport: profile.transport,
         date: profile.date.iso,
+        ...(profile.runMetadata ? { runMetadata: profile.runMetadata } : {}),
         cases: normalizedCases(profile),
       },
       null,

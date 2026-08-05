@@ -221,12 +221,16 @@ required by the changed boundary.
   server-side framing profile. Run `core native` for lane parity, `core-wss
   lightweight` for the same profile through the OpenSSL-backed TLS transport,
   and `limits lightweight` for the documented message-boundary profile. Run
+  `compression lightweight` and `compression native` for the RFC 7692
+  compressed-message and negotiation profiles, and repeat them as
+  `compression-wss lightweight` and `compression-wss native` for TLS lane
+  parity. The runner verifies and records an Alire release/-O3 build. Run
   `performance lightweight` and `performance native` for per-lane section 9
   RTT/echo timing probes. Generated HTML and per-case JSON remain under ignored
   `build/autobahn` output. Run `node
   scripts/publish-websocket-conformance.mjs` to restyle every completed profile
   into the checked-in website report bundle.
-- `node scripts/publish-websocket-conformance.mjs`: transform all six local
+- `node scripts/publish-websocket-conformance.mjs`: transform all eight local
   Autobahn profiles into compact Flyology-styled pages and normalized JSON
   under `website/reports/websocket`. Regenerate after replacing report data.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a

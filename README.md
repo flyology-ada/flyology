@@ -1312,11 +1312,25 @@ select a larger `Max_Message` through the supported 16 MiB frame maximum; large
 owned messages are received and sent in bounded chunks rather than copied onto
 the calling task's stack.
 
+`Accept_WebSocket` declines extension offers by default. Applications may
+explicitly select `Permessage_Deflate` to negotiate RFC 7692 with no context
+takeover in either direction. The bounded pure-Ada codec accepts stored,
+fixed-Huffman, and dynamic-Huffman raw DEFLATE blocks, including fragmented
+compressed messages, and applies `Max_Message` plus the shared ingress budget
+to decompressed bytes. Outbound messages use deterministic fixed-Huffman
+DEFLATE with a bounded LZ77 search; unmatched bytes remain literals, while
+small repetitive messages shrink. To bound event-loop CPU, the
+server selectively leaves outbound messages larger than 4 KiB uncompressed,
+which RFC 7692 permits on a per-message basis. Compression can expose
+secret-bearing content through message-size side channels, so it remains an
+application policy rather than a default.
+
 The server-side framing profile can be reproduced with the pinned Autobahn
 runner in `scripts/websocket-conformance.sh`. The maintained
 [2026-08-04 conformance report](docs/websocket-conformance-2026-08-04.md)
-records the tested profiles, limits, exclusions, per-lane results, and the
-OpenSSL-backed WSS campaign. A
+records the tested profiles, limits, RFC 7692 compression, per-lane results,
+the OpenSSL-backed WSS campaign, and the release/-O3 build record attached to
+the timing profiles. A
 [published case browser](https://flyology.org/reports/websocket/) retains the
 individual verdicts, test equipment, and separate per-lane section 9 timing
 observations in the website's visual system.

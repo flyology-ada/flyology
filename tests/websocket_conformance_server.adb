@@ -85,6 +85,7 @@ procedure WebSocket_Conformance_Server is
             HTTP.Accept_WebSocket
               (Item, Value,
                Origin_Policy => HTTP.Allow_Any_Origin,
+               Compression   => HTTP.Permessage_Deflate,
                Timeout       => 5.0,
                Token         => Cancellation);
             loop

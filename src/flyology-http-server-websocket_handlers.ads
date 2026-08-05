@@ -172,6 +172,7 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
    --  @param Receive_Quantum Maximum idle receive interval
    --  @param Max_Outgoing_Burst Messages sent before servicing inbound frames
    --  @param Metric_Output Optional lifecycle metric sink
+   --  @param Compression Explicit RFC 7692 negotiation policy
    procedure Run
      (X              : in out Applications.Exchange;
       Item           : in out Session;
@@ -190,7 +191,9 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
       Max_Message    : Natural := Default_Max_WebSocket_Message;
       Receive_Quantum : Duration := 0.05;
       Max_Outgoing_Burst : Positive := 16;
-      Metric_Output  : access Metrics.Sink'Class := null);
+      Metric_Output  : access Metrics.Sink'Class := null;
+      Compression    : WebSocket_Compression_Mode :=
+        No_WebSocket_Compression);
 
 private
    type Outbound_Budget_Access is access all Outbound_Budget;

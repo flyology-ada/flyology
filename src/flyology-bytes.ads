@@ -60,6 +60,20 @@ package Flyology.Bytes is
      (Data  : in out Unbounded_Bytes;
       Value : Ada.Streams.Stream_Element_Array);
 
+   --  Append one byte, growing owned storage as required.
+   --  @param Data Destination sequence
+   --  @param Value Byte to append
+   procedure Append
+     (Data  : in out Unbounded_Bytes;
+      Value : Ada.Streams.Stream_Element);
+
+   --  Ensure capacity for at least Capacity bytes without changing Length.
+   --  @param Data Destination sequence
+   --  @param Capacity Requested retained capacity
+   procedure Reserve_Capacity
+     (Data     : in out Unbounded_Bytes;
+      Capacity : Natural);
+
    --  Append a one-to-one byte string. This is not a character encoding.
    --  @param Data Destination sequence
    --  @param Value Byte string to append

@@ -380,11 +380,14 @@ package Flyology.HTTP.Server.Applications is
    --  @param Protocol Optional selected subprotocol
    --  @param Origin_Policy Browser-origin policy
    --  @param Allowed_Origin Exact origin for Require_Exact_Origin
+   --  @param Compression Explicit RFC 7692 negotiation policy
    procedure Accept_WebSocket
      (Item           : in out Exchange;
       Protocol       : String := "";
       Origin_Policy  : WebSocket_Origin_Policy := Reject_Browser_Origins;
-      Allowed_Origin : String := "");
+      Allowed_Origin : String := "";
+      Compression    : WebSocket_Compression_Mode :=
+        No_WebSocket_Compression);
 
    --  Receive one complete WebSocket message through the borrowed connection.
    --  @param Item Upgraded request exchange

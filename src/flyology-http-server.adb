@@ -3,6 +3,7 @@ with Ada.Calendar;
 with Ada.Calendar.Formatting;
 with Ada.Strings.Fixed;
 with Interfaces;
+with Flyology.HTTP.Server.WebSocket_Deflate;
 with Flyology.IO;
 with GNAT.Sockets;
 
@@ -16,6 +17,7 @@ package body Flyology.HTTP.Server is
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    WebSocket_Peer_EOF : exception;
    WebSocket_Coalesce_Limit : constant := 4 * 1_024;
+   WebSocket_Compression_Limit : constant := 4 * 1_024;
    --  Small frames use one transport operation. Larger frames keep the
    --  caller's payload in place and send the fixed header separately.
 
@@ -2409,6 +2411,167 @@ package body Flyology.HTTP.Server is
       return Found;
    end Header_Has_Exact_Token;
 
+   procedure Negotiate_WebSocket_Deflate
+     (Value    : Request;
+      Enabled  : out Boolean;
+      Response : out Unbounded_String)
+   is
+      Offers : constant String := Header (Value, "Sec-WebSocket-Extensions");
+      Offer_First : Positive := Offers'First;
+
+      function Parameter_Value (Raw : String; Valid : out Boolean)
+        return String
+      is
+         Item : constant String := Trim (Raw);
+      begin
+         if Item'Length >= 2
+           and then Item (Item'First) = '"'
+           and then Item (Item'Last) = '"'
+         then
+            Valid := True;
+            return Item (Item'First + 1 .. Item'Last - 1);
+         end if;
+         Valid := Item'Length > 0;
+         return Item;
+      end Parameter_Value;
+
+      function Window_Bits (Raw : String; Valid : out Boolean)
+        return Natural
+      is
+         Value_Valid : Boolean;
+         Text : constant String := Parameter_Value (Raw, Value_Valid);
+         Result : Natural := 0;
+      begin
+         Valid := False;
+         if not Value_Valid or else Text'Length not in 1 .. 2 then
+            return 0;
+         end if;
+         for Digit of Text loop
+            if Digit not in '0' .. '9' then
+               return 0;
+            end if;
+            Result := Result * 10
+              + Character'Pos (Digit) - Character'Pos ('0');
+         end loop;
+         Valid := Result in 8 .. 15
+           and then (Text'Length = 1 or else Text (Text'First) /= '0');
+         return Result;
+      end Window_Bits;
+   begin
+      Enabled := False;
+      Response := Null_Unbounded_String;
+      if Offers'Length = 0 then
+         return;
+      end if;
+
+      while Offer_First <= Offers'Last loop
+         declare
+            Relative_Comma : constant Natural := Ada.Strings.Fixed.Index
+              (Offers (Offer_First .. Offers'Last), ",");
+            Offer_Last : constant Natural :=
+              (if Relative_Comma = 0 then Offers'Last
+               else Relative_Comma - 1);
+            Offer : constant String := Trim
+              (Offers (Offer_First .. Offer_Last));
+            First_Semicolon : constant Natural :=
+              Ada.Strings.Fixed.Index (Offer, ";");
+            Name_Last : constant Natural :=
+              (if First_Semicolon = 0 then Offer'Last
+               else First_Semicolon - 1);
+         begin
+            if Offer'Length > 0
+              and then Lower (Trim (Offer (Offer'First .. Name_Last))) =
+                "permessage-deflate"
+            then
+               declare
+                  Valid : Boolean := True;
+                  Position : Natural :=
+                    (if First_Semicolon = 0 then Offer'Last + 1
+                     else First_Semicolon + 1);
+                  Server_Bits : Natural := 0;
+                  Seen_Server_Bits : Boolean := False;
+                  Seen_Client_Bits : Boolean := False;
+                  Seen_Server_No_Context : Boolean := False;
+                  Seen_Client_No_Context : Boolean := False;
+               begin
+                  while Valid and then Position <= Offer'Last loop
+                     declare
+                        Relative_End : constant Natural :=
+                          Ada.Strings.Fixed.Index
+                            (Offer (Position .. Offer'Last), ";");
+                        Parameter_Last : constant Natural :=
+                          (if Relative_End = 0 then Offer'Last
+                           else Relative_End - 1);
+                        Parameter : constant String := Trim
+                          (Offer (Position .. Parameter_Last));
+                        Equals : constant Natural :=
+                          Ada.Strings.Fixed.Index (Parameter, "=");
+                        Parameter_Name : constant String := Lower
+                          (Trim
+                             (Parameter
+                                (Parameter'First ..
+                                 (if Equals = 0 then Parameter'Last
+                                  else Equals - 1))));
+                        Parsed : Boolean;
+                        Bits : Natural;
+                     begin
+                        if Parameter'Length = 0 then
+                           Valid := False;
+                        elsif Parameter_Name = "server_no_context_takeover"
+                          and then Equals = 0
+                          and then not Seen_Server_No_Context
+                        then
+                           Seen_Server_No_Context := True;
+                        elsif Parameter_Name = "client_no_context_takeover"
+                          and then Equals = 0
+                          and then not Seen_Client_No_Context
+                        then
+                           Seen_Client_No_Context := True;
+                        elsif Parameter_Name = "server_max_window_bits"
+                          and then Equals /= 0
+                          and then not Seen_Server_Bits
+                        then
+                           Bits := Window_Bits
+                             (Parameter (Equals + 1 .. Parameter'Last),
+                              Parsed);
+                           Valid := Parsed;
+                           Server_Bits := Bits;
+                           Seen_Server_Bits := True;
+                        elsif Parameter_Name = "client_max_window_bits"
+                          and then not Seen_Client_Bits
+                        then
+                           if Equals /= 0 then
+                              Bits := Window_Bits
+                                (Parameter (Equals + 1 .. Parameter'Last),
+                                 Parsed);
+                              Valid := Parsed;
+                           end if;
+                           Seen_Client_Bits := True;
+                        else
+                           Valid := False;
+                        end if;
+                        Position := Parameter_Last + 2;
+                     end;
+                  end loop;
+                  if Valid then
+                     Enabled := True;
+                     Response := To_Unbounded_String
+                       ("permessage-deflate; server_no_context_takeover;"
+                        & " client_no_context_takeover"
+                        & (if Seen_Server_Bits
+                           then "; server_max_window_bits="
+                             & Trim (Natural'Image (Server_Bits))
+                           else ""));
+                     return;
+                  end if;
+               end;
+            end if;
+            exit when Relative_Comma = 0;
+            Offer_First := Offer_Last + 2;
+         end;
+      end loop;
+   end Negotiate_WebSocket_Deflate;
+
    procedure Accept_WebSocket
      (Item     : in out Connection;
       Value    : Request;
@@ -2416,12 +2579,15 @@ package body Flyology.HTTP.Server is
       Origin_Policy : WebSocket_Origin_Policy := Reject_Browser_Origins;
       Allowed_Origin : String := "";
       Timeout  : Duration := 30.0;
-      Token    : access Flyology.Cancellation.Token := null)
+      Token    : access Flyology.Cancellation.Token := null;
+      Compression : WebSocket_Compression_Mode := No_WebSocket_Compression)
    is
       Key : constant String := Header (Value, "Sec-WebSocket-Key");
       Origin : constant String := Header (Value, "Origin");
       Origin_Count : constant Natural := Header_Field_Count (Value, "Origin");
       GUID : constant String := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+      Deflate_Enabled : Boolean := False;
+      Deflate_Response : Unbounded_String;
    begin
       if Item.State /= Reading_HTTP or else Item.Response_Begun then
          raise Program_Error with "HTTP response already started";
@@ -2474,6 +2640,10 @@ package body Flyology.HTTP.Server is
             raise Protocol_Error with "WebSocket subprotocol was not offered";
          end if;
       end if;
+      if Compression = Permessage_Deflate then
+         Negotiate_WebSocket_Deflate
+           (Value, Deflate_Enabled, Deflate_Response);
+      end if;
       Reserve_Buffered (Item, Length (Item.Pending));
       Item.Response_Begun := True;
       Item.State := WebSocket;
@@ -2484,6 +2654,8 @@ package body Flyology.HTTP.Server is
       Item.WebSocket_Close_Sent := False;
       Flyology.Bytes.Clear (Item.WebSocket_Message);
       Item.WebSocket_Control_Count := 0;
+      Item.WebSocket_Deflate_Enabled := Deflate_Enabled;
+      Item.WebSocket_Message_Compressed := False;
       begin
          Write
            (Item,
@@ -2494,6 +2666,9 @@ package body Flyology.HTTP.Server is
             & "Sec-WebSocket-Accept: " & Base64 (SHA1 (Key & GUID)) & CRLF
             & (if Protocol'Length = 0 then ""
                else "Sec-WebSocket-Protocol: " & Protocol & CRLF)
+            & (if not Deflate_Enabled then ""
+               else "Sec-WebSocket-Extensions: "
+                 & To_String (Deflate_Response) & CRLF)
             & CRLF,
             Timeout, Token);
       exception
@@ -2534,6 +2709,7 @@ package body Flyology.HTTP.Server is
    procedure Build_Frame_Header
      (Opcode : Natural;
       Size   : Natural;
+      Compressed : Boolean;
       Header : out Ada.Streams.Stream_Element_Array;
       Last   : out Ada.Streams.Stream_Element_Offset)
    is
@@ -2544,7 +2720,7 @@ package body Flyology.HTTP.Server is
       end Append_Header;
    begin
       Last := Header'First - 1;
-      Append_Header (16#80# + Opcode);
+      Append_Header (16#80# + (if Compressed then 16#40# else 0) + Opcode);
       if Size <= 125 then
          Append_Header (Size);
       elsif Size <= 65_535 then
@@ -2568,13 +2744,14 @@ package body Flyology.HTTP.Server is
       Opcode  : Natural;
       Data    : Ada.Streams.Stream_Element_Array;
       Timeout : Duration;
-      Token   : access Flyology.Cancellation.Token)
+      Token   : access Flyology.Cancellation.Token;
+      Compressed : Boolean := False)
    is
       Header : Ada.Streams.Stream_Element_Array (1 .. 10);
       Last   : Ada.Streams.Stream_Element_Offset;
       Size   : constant Natural := Data'Length;
    begin
-      Build_Frame_Header (Opcode, Size, Header, Last);
+      Build_Frame_Header (Opcode, Size, Compressed, Header, Last);
       if Size <= WebSocket_Coalesce_Limit then
          declare
             Frame : Ada.Streams.Stream_Element_Array
@@ -2595,7 +2772,8 @@ package body Flyology.HTTP.Server is
       Opcode  : Natural;
       Data    : Flyology.Bytes.Unbounded_Bytes;
       Timeout : Duration;
-      Token   : access Flyology.Cancellation.Token)
+      Token   : access Flyology.Cancellation.Token;
+      Compressed : Boolean := False)
    is
       Chunk_Size : constant := 16 * 1_024;
       Header : Ada.Streams.Stream_Element_Array (1 .. 10);
@@ -2618,7 +2796,7 @@ package body Flyology.HTTP.Server is
          end if;
       end Time_Left;
    begin
-      Build_Frame_Header (Opcode, Size, Header, Last);
+      Build_Frame_Header (Opcode, Size, Compressed, Header, Last);
       Write (Item, Header (Header'First .. Last), Timeout, Token);
       while First <= Size loop
          declare
@@ -2665,6 +2843,9 @@ package body Flyology.HTTP.Server is
       Size         : Interfaces.Unsigned_64;
       Header_Size  : Natural;
       Final        : Boolean;
+      Reserved_Bits : Natural;
+      Compressed_Frame : Boolean;
+      Client_Masked : Boolean;
       Message_Limit : constant Natural := Natural'Min
         (Max_Message, Max_WebSocket_Frame);
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
@@ -2728,6 +2909,34 @@ package body Flyology.HTTP.Server is
 
       procedure Finish_Message is
       begin
+         if Item.WebSocket_Message_Compressed then
+            declare
+               Compressed_Length : constant Natural :=
+                 Flyology.Bytes.Length (Item.WebSocket_Message);
+               Inflated : Flyology.Bytes.Unbounded_Bytes;
+
+               procedure Reserve_Output (Bytes : Natural) is
+               begin
+                  Resize_Buffered (Item, Compressed_Length + Bytes);
+               end Reserve_Output;
+            begin
+               begin
+                  WebSocket_Deflate.Inflate
+                    (Item.WebSocket_Message, Inflated,
+                     Item.WebSocket_Message_Limit, Reserve_Output'Access);
+               exception
+                  when WebSocket_Deflate.Output_Too_Large =>
+                     Fail (1_009,
+                       "decompressed WebSocket message is too large");
+                  when WebSocket_Deflate.Invalid_Data =>
+                     Fail (1_007, "invalid compressed WebSocket message");
+               end;
+               Flyology.Bytes.Clear (Item.WebSocket_Message);
+               Flyology.Bytes.Move (Item.WebSocket_Message, Inflated);
+               Resize_Buffered
+                 (Item, Flyology.Bytes.Length (Item.WebSocket_Message));
+            end;
+         end if;
          if Item.WebSocket_Message_Kind = Text_Frame
            and then not Valid_UTF8
              (Item.WebSocket_Message)
@@ -2740,6 +2949,7 @@ package body Flyology.HTTP.Server is
          Item.WebSocket_Reserved := False;
          Item.WebSocket_Message_Limit := 0;
          Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Message_Compressed := False;
          Item.WebSocket_Receive_Active := False;
          Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
          Resize_Buffered (Item, Length (Item.Pending));
@@ -2753,6 +2963,7 @@ package body Flyology.HTTP.Server is
          Item.WebSocket_Reserved := False;
          Item.WebSocket_Message_Limit := 0;
          Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Message_Compressed := False;
          Item.WebSocket_Receive_Active := False;
          Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
          Release_Buffered (Item);
@@ -2783,12 +2994,20 @@ package body Flyology.HTTP.Server is
             Second : constant Natural := Character'Pos (Buffer (2));
          begin
             Final := First / 128 = 1;
-            if (First / 16) mod 8 /= 0 or else Second / 128 /= 1 then
-               Fail (1_002, "invalid WebSocket frame flags");
-            end if;
+            Reserved_Bits := (First / 16) mod 8;
+            Compressed_Frame := Reserved_Bits = 4;
+            Client_Masked := Second / 128 = 1;
             Opcode := First mod 16;
             Size := Interfaces.Unsigned_64 (Second mod 128);
          end;
+         if not Client_Masked
+           or else Reserved_Bits not in 0 | 4
+           or else (Compressed_Frame
+                    and then (not Item.WebSocket_Deflate_Enabled
+                              or else Opcode not in 1 | 2))
+         then
+            Fail (1_002, "invalid WebSocket frame flags");
+         end if;
          if Opcode not in 0 | 1 | 2 | 8 | 9 | 10 then
             Fail (1_002, "unsupported WebSocket opcode");
          elsif Opcode >= 8 and then not Final then
@@ -2875,11 +3094,13 @@ package body Flyology.HTTP.Server is
                      Fail (1_002, "new data frame inside fragmented message");
                   end if;
                   Item.WebSocket_Message_Kind := Text_Frame;
+                  Item.WebSocket_Message_Compressed := Compressed_Frame;
                when 2 =>
                   if Item.WebSocket_Fragmented then
                      Fail (1_002, "new data frame inside fragmented message");
                   end if;
                   Item.WebSocket_Message_Kind := Binary_Frame;
+                  Item.WebSocket_Message_Compressed := Compressed_Frame;
                when others =>
                   null;
             end case;
@@ -3061,8 +3282,27 @@ package body Flyology.HTTP.Server is
       then
          raise Constraint_Error with "WebSocket text must contain valid UTF-8";
       end if;
-      Send_Frame
-        (Item, (if Kind = Text_Frame then 1 else 2), Data, Timeout, Token);
+      if Item.WebSocket_Deflate_Enabled
+        and then Data'Length <= WebSocket_Compression_Limit
+      then
+         declare
+            Encoded : Flyology.Bytes.Unbounded_Bytes;
+         begin
+            WebSocket_Deflate.Deflate (Data, Encoded);
+            if Flyology.Bytes.Length (Encoded) <= Max_WebSocket_Frame then
+               Send_Frame
+                 (Item, (if Kind = Text_Frame then 1 else 2), Encoded,
+                  Timeout, Token, Compressed => True);
+            else
+               Send_Frame
+                 (Item, (if Kind = Text_Frame then 1 else 2), Data,
+                  Timeout, Token);
+            end if;
+         end;
+      else
+         Send_Frame
+           (Item, (if Kind = Text_Frame then 1 else 2), Data, Timeout, Token);
+      end if;
    exception
       when others =>
          Item.Pending := Null_Unbounded_String;
@@ -3091,8 +3331,27 @@ package body Flyology.HTTP.Server is
       elsif Kind = Text_Frame and then not Valid_UTF8 (Data) then
          raise Constraint_Error with "WebSocket text must contain valid UTF-8";
       end if;
-      Send_Frame
-        (Item, (if Kind = Text_Frame then 1 else 2), Data, Timeout, Token);
+      if Item.WebSocket_Deflate_Enabled
+        and then Flyology.Bytes.Length (Data) <= WebSocket_Compression_Limit
+      then
+         declare
+            Encoded : Flyology.Bytes.Unbounded_Bytes;
+         begin
+            WebSocket_Deflate.Deflate (Data, Encoded);
+            if Flyology.Bytes.Length (Encoded) <= Max_WebSocket_Frame then
+               Send_Frame
+                 (Item, (if Kind = Text_Frame then 1 else 2), Encoded,
+                  Timeout, Token, Compressed => True);
+            else
+               Send_Frame
+                 (Item, (if Kind = Text_Frame then 1 else 2), Data,
+                  Timeout, Token);
+            end if;
+         end;
+      else
+         Send_Frame
+           (Item, (if Kind = Text_Frame then 1 else 2), Data, Timeout, Token);
+      end if;
    exception
       when others =>
          Item.Pending := Null_Unbounded_String;

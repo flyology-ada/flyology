@@ -27,6 +27,24 @@ case "$profile:$lane" in
     spec=fuzzingclient-limits.json
     report_name=limits-lightweight
     ;;
+  compression:lightweight)
+    spec=fuzzingclient-compression.json
+    report_name=compression-lightweight
+    ;;
+  compression:native)
+    spec=fuzzingclient-compression-native.json
+    report_name=compression-native
+    ;;
+  compression-wss:lightweight)
+    spec=fuzzingclient-compression-wss.json
+    report_name=compression-lightweight-wss
+    transport=tls
+    ;;
+  compression-wss:native)
+    spec=fuzzingclient-compression-wss-native.json
+    report_name=compression-native-wss
+    transport=tls
+    ;;
   performance:lightweight)
     spec=fuzzingclient-performance.json
     report_name=performance-lightweight
@@ -37,7 +55,7 @@ case "$profile:$lane" in
     ;;
   *)
     printf '%s\n' \
-      "usage: $0 {core lightweight|core native|core-wss lightweight|limits lightweight|performance lightweight|performance native}" >&2
+      "usage: $0 {core lightweight|core native|core-wss lightweight|limits lightweight|compression lightweight|compression native|compression-wss lightweight|compression-wss native|performance lightweight|performance native}" >&2
     exit 2
     ;;
 esac
@@ -63,7 +81,15 @@ cleanup () {
 trap cleanup EXIT HUP INT TERM
 
 cd "$project_root"
-"$alr" build
+"$alr" build --release
+release_config="$project_root/config/flyology_config.gpr"
+if ! grep -Eq 'Build_Profile[^:]*:[^=]*=[[:space:]]*"release"' "$release_config" ||
+   ! grep -q '"-O3"' "$release_config"
+then
+  printf '%s\n' \
+    "Alire did not generate the expected release/-O3 project configuration" >&2
+  exit 1
+fi
 FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 "$alr" exec -- env -u GPR_CONFIG gprbuild \
@@ -71,10 +97,20 @@ FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=1 \
   --subdirs=autobahn \
   -f -p \
   -P tests/runtime_smoke.gpr \
-  websocket_conformance_server.adb
+  websocket_conformance_server.adb \
+  -cargs:Ada -O3
 
 mkdir -p "$report_dir"
 find "$report_dir" -type f -delete
+{
+  printf '%s\n' '{'
+  printf '%s\n' '  "buildProfile": "release",'
+  printf '%s\n' '  "libraryProfileSource": "Alire --release",'
+  printf '%s\n' '  "adaOptimization": "-O3",'
+  printf '  "profile": "%s",\n' "$profile"
+  printf '  "lane": "%s"\n' "$lane"
+  printf '%s\n' '}'
+} >"$report_dir/run-metadata.json"
 "$server" "$lane" "$port" 32 "$transport" \
   "$project_root/tests/fixtures/tls/server-cert.pem" \
   "$project_root/tests/fixtures/tls/server-key.pem" \

@@ -2,7 +2,7 @@
   "generatedFrom": "core-lightweight",
   "suite": "Autobahn 25.10.1",
   "imageDigest": "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074",
-  "revision": "7880b4e",
+  "revision": "ae236fa",
   "profile": "Core, lightweight task",
   "transport": "Plain ws://",
   "date": "2026-08-04",
@@ -18,7 +18,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 4
+      "durationMs": 3
     },
     {
       "id": "1.1.2",
@@ -31,7 +31,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 1
     },
     {
       "id": "1.1.3",
@@ -44,7 +44,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "1.1.4",
@@ -109,7 +109,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 8
+      "durationMs": 7
     },
     {
       "id": "1.2.1",
@@ -278,7 +278,7 @@
       "remoteCloseCode": 1002,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 3
     },
     {
       "id": "2.6",
@@ -291,7 +291,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 22
+      "durationMs": 17
     },
     {
       "id": "2.7",
@@ -343,7 +343,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 5
+      "durationMs": 4
     },
     {
       "id": "2.11",
@@ -356,7 +356,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 18
+      "durationMs": 12
     },
     {
       "id": "3.1",
@@ -473,7 +473,7 @@
       "remoteCloseCode": 1002,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "4.1.3",
@@ -512,7 +512,7 @@
       "remoteCloseCode": 1002,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 3
+      "durationMs": 2
     },
     {
       "id": "4.2.1",
@@ -577,7 +577,7 @@
       "remoteCloseCode": 1002,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 7
+      "durationMs": 5
     },
     {
       "id": "5.1",
@@ -616,7 +616,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 1
     },
     {
       "id": "5.4",
@@ -629,7 +629,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 3
     },
     {
       "id": "5.5",
@@ -642,7 +642,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 8
+      "durationMs": 5
     },
     {
       "id": "5.6",
@@ -681,7 +681,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 6
+      "durationMs": 7
     },
     {
       "id": "5.9",
@@ -824,7 +824,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1002
+      "durationMs": 1008
     },
     {
       "id": "5.20",
@@ -837,7 +837,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1006
+      "durationMs": 1026
     },
     {
       "id": "6.1.1",
@@ -850,7 +850,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.1.2",
@@ -863,7 +863,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.1.3",
@@ -876,7 +876,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 3
     },
     {
       "id": "6.2.1",
@@ -889,7 +889,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.2.2",
@@ -902,7 +902,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 7
     },
     {
       "id": "6.2.3",
@@ -915,7 +915,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 3
     },
     {
       "id": "6.2.4",
@@ -967,7 +967,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2002
+      "durationMs": 2019
     },
     {
       "id": "6.4.2",
@@ -980,7 +980,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2003
+      "durationMs": 2008
     },
     {
       "id": "6.4.3",
@@ -993,7 +993,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2002
+      "durationMs": 2007
     },
     {
       "id": "6.4.4",
@@ -1006,7 +1006,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2006
+      "durationMs": 2009
     },
     {
       "id": "6.5.1",
@@ -1019,7 +1019,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 4
     },
     {
       "id": "6.5.2",
@@ -1032,7 +1032,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.5.3",
@@ -1045,7 +1045,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.5.4",
@@ -1058,7 +1058,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 4
+      "durationMs": 2
     },
     {
       "id": "6.5.5",
@@ -1071,7 +1071,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.6.1",
@@ -1097,7 +1097,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 4
+      "durationMs": 7
     },
     {
       "id": "6.6.3",
@@ -1435,7 +1435,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 11
+      "durationMs": 1
     },
     {
       "id": "6.11.5",
@@ -1539,7 +1539,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 1
     },
     {
       "id": "6.12.8",
@@ -1669,7 +1669,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "6.14.5",
@@ -1721,7 +1721,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "6.14.9",
@@ -1760,7 +1760,7 @@
       "remoteCloseCode": 1007,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 1
     },
     {
       "id": "6.16.1",
@@ -2241,7 +2241,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 1
     },
     {
       "id": "6.22.5",
@@ -2280,7 +2280,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.22.8",
@@ -2293,7 +2293,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 5
+      "durationMs": 1
     },
     {
       "id": "6.22.9",
@@ -2345,7 +2345,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.22.13",
@@ -2410,7 +2410,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.22.18",
@@ -2436,7 +2436,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.22.20",
@@ -2514,7 +2514,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 6
+      "durationMs": 2
     },
     {
       "id": "6.22.26",
@@ -2527,7 +2527,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "6.22.27",
@@ -2540,7 +2540,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 12
     },
     {
       "id": "6.22.28",
@@ -2644,7 +2644,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 3
+      "durationMs": 1
     },
     {
       "id": "6.23.2",
@@ -2670,7 +2670,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 5
+      "durationMs": 1
     },
     {
       "id": "6.23.4",
@@ -2800,7 +2800,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 23
+      "durationMs": 28
     },
     {
       "id": "7.3.1",
@@ -2904,7 +2904,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 9
+      "durationMs": 1
     },
     {
       "id": "7.7.2",
@@ -2969,7 +2969,7 @@
       "remoteCloseCode": 1008,
       "localCloseCode": 1008,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 1
     },
     {
       "id": "7.7.7",
@@ -2982,7 +2982,7 @@
       "remoteCloseCode": 1009,
       "localCloseCode": 1009,
       "cleanClose": true,
-      "durationMs": 2
+      "durationMs": 4
     },
     {
       "id": "7.7.8",
@@ -3086,7 +3086,7 @@
       "remoteCloseCode": 1002,
       "localCloseCode": 999,
       "cleanClose": true,
-      "durationMs": 8
+      "durationMs": 1
     },
     {
       "id": "7.9.3",
@@ -3151,7 +3151,7 @@
       "remoteCloseCode": 1002,
       "localCloseCode": 1100,
       "cleanClose": true,
-      "durationMs": 1
+      "durationMs": 2
     },
     {
       "id": "7.9.8",
@@ -3216,7 +3216,7 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 8
+      "durationMs": 7
     }
   ]
 }

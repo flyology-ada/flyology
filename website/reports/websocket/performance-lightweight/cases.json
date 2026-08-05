@@ -2,10 +2,17 @@
   "generatedFrom": "performance-lightweight",
   "suite": "Autobahn 25.10.1",
   "imageDigest": "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074",
-  "revision": "7880b4e",
+  "revision": "ae236fa",
   "profile": "Performance, lightweight task",
   "transport": "Plain ws://",
   "date": "2026-08-04",
+  "runMetadata": {
+    "buildProfile": "release",
+    "libraryProfileSource": "Alire --release",
+    "adaOptimization": "-O3",
+    "profile": "performance",
+    "lane": "lightweight"
+  },
   "cases": [
     {
       "id": "9.7.1",
@@ -18,11 +25,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 350,
+      "durationMs": 271,
       "roundTrips": 1000,
       "payloadBytes": 0,
-      "meanRoundTripMs": 0.35,
-      "roundTripsPerSecond": 2857.143
+      "meanRoundTripMs": 0.271,
+      "roundTripsPerSecond": 3690.037
     },
     {
       "id": "9.7.2",
@@ -35,11 +42,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 249,
+      "durationMs": 212,
       "roundTrips": 1000,
       "payloadBytes": 16,
-      "meanRoundTripMs": 0.249,
-      "roundTripsPerSecond": 4016.064
+      "meanRoundTripMs": 0.212,
+      "roundTripsPerSecond": 4716.981
     },
     {
       "id": "9.7.3",
@@ -52,11 +59,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 131,
+      "durationMs": 118,
       "roundTrips": 1000,
       "payloadBytes": 64,
-      "meanRoundTripMs": 0.131,
-      "roundTripsPerSecond": 7633.588
+      "meanRoundTripMs": 0.118,
+      "roundTripsPerSecond": 8474.576
     },
     {
       "id": "9.7.4",
@@ -69,11 +76,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 206,
+      "durationMs": 181,
       "roundTrips": 1000,
       "payloadBytes": 256,
-      "meanRoundTripMs": 0.206,
-      "roundTripsPerSecond": 4854.369
+      "meanRoundTripMs": 0.181,
+      "roundTripsPerSecond": 5524.862
     },
     {
       "id": "9.7.5",
@@ -86,11 +93,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 151,
+      "durationMs": 133,
       "roundTrips": 1000,
       "payloadBytes": 1024,
-      "meanRoundTripMs": 0.151,
-      "roundTripsPerSecond": 6622.517
+      "meanRoundTripMs": 0.133,
+      "roundTripsPerSecond": 7518.797
     },
     {
       "id": "9.7.6",
@@ -103,11 +110,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 237,
+      "durationMs": 192,
       "roundTrips": 1000,
       "payloadBytes": 4096,
-      "meanRoundTripMs": 0.237,
-      "roundTripsPerSecond": 4219.409
+      "meanRoundTripMs": 0.192,
+      "roundTripsPerSecond": 5208.333
     },
     {
       "id": "9.8.1",
@@ -120,11 +127,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 128,
+      "durationMs": 121,
       "roundTrips": 1000,
       "payloadBytes": 0,
-      "meanRoundTripMs": 0.128,
-      "roundTripsPerSecond": 7812.5
+      "meanRoundTripMs": 0.121,
+      "roundTripsPerSecond": 8264.463
     },
     {
       "id": "9.8.2",
@@ -137,11 +144,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 137,
+      "durationMs": 133,
       "roundTrips": 1000,
       "payloadBytes": 16,
-      "meanRoundTripMs": 0.137,
-      "roundTripsPerSecond": 7299.27
+      "meanRoundTripMs": 0.133,
+      "roundTripsPerSecond": 7518.797
     },
     {
       "id": "9.8.3",
@@ -171,11 +178,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 147,
+      "durationMs": 132,
       "roundTrips": 1000,
       "payloadBytes": 256,
-      "meanRoundTripMs": 0.147,
-      "roundTripsPerSecond": 6802.721
+      "meanRoundTripMs": 0.132,
+      "roundTripsPerSecond": 7575.758
     },
     {
       "id": "9.8.5",
@@ -188,11 +195,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 122,
+      "durationMs": 123,
       "roundTrips": 1000,
       "payloadBytes": 1024,
-      "meanRoundTripMs": 0.122,
-      "roundTripsPerSecond": 8196.721
+      "meanRoundTripMs": 0.123,
+      "roundTripsPerSecond": 8130.081
     },
     {
       "id": "9.8.6",
@@ -205,11 +212,11 @@
       "remoteCloseCode": 1000,
       "localCloseCode": 1000,
       "cleanClose": true,
-      "durationMs": 195,
+      "durationMs": 165,
       "roundTrips": 1000,
       "payloadBytes": 4096,
-      "meanRoundTripMs": 0.195,
-      "roundTripsPerSecond": 5128.205
+      "meanRoundTripMs": 0.165,
+      "roundTripsPerSecond": 6060.606
     }
   ]
 }

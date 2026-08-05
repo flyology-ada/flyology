@@ -27,6 +27,20 @@ package body Flyology.Bytes is
       end loop;
    end Append;
 
+   procedure Append
+     (Data  : in out Unbounded_Bytes;
+      Value : Ada.Streams.Stream_Element) is
+   begin
+      Data.Value.Append (Value);
+   end Append;
+
+   procedure Reserve_Capacity
+     (Data     : in out Unbounded_Bytes;
+      Capacity : Natural) is
+   begin
+      Data.Value.Reserve_Capacity (Ada.Containers.Count_Type (Capacity));
+   end Reserve_Capacity;
+
    procedure Append_Byte_String
      (Data  : in out Unbounded_Bytes;
       Value : String)

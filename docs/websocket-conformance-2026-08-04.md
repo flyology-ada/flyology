@@ -4,8 +4,8 @@ Flyology's server-side RFC 6455 implementation was exercised with the official
 [Autobahn Testsuite](https://github.com/crossbario/autobahn-testsuite), release
 25.10.1. The immutable container image digest was
 `sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074`.
-The code under test was repository revision `7880b4e`, plus the test adapter
-recorded with this report, on Darwin/AArch64 with GNAT 16.1.0.
+The code under test was repository revision `ae236fa`, plus the implementation
+and test changes recorded with this report, on Darwin/AArch64 with GNAT 16.1.0.
 
 ## Result
 
@@ -49,6 +49,41 @@ opt into a larger `Max_Message` when their ingress budget and workload justify
 it. The large-frame path moves masking and echo writes through bounded chunks,
 so the configured message limit does not become a task-stack allocation.
 
+## Compression profile
+
+Autobahn sections 12 and 13 were run through both execution lanes over both
+plaintext and OpenSSL-backed WSS, with the adapter explicitly enabling RFC 7692
+`permessage-deflate`:
+
+| Lane and transport | Cases | Message exchanges | OK | Failed |
+| --- | ---: | ---: | ---: | ---: |
+| Lightweight task, `ws://` | 216 | 216,000 | 216 | 0 |
+| Native task, `ws://` | 216 | 216,000 | 216 | 0 |
+| Lightweight task, `wss://` | 216 | 216,000 | 216 | 0 |
+| Native task, `wss://` | 216 | 216,000 | 216 | 0 |
+
+All behavior and close verdicts were `OK`. The profile covers compressed text
+and binary data, fragmentation, payload sizes from 16 through 131,072 bytes,
+and seven client offer/server-response combinations for context takeover and
+window bits.
+
+Flyology's opt-in policy responds with no context takeover in both directions.
+Its bounded pure-Ada decoder accepts stored, fixed-Huffman, and dynamic-Huffman
+raw DEFLATE blocks and applies the configured message and shared ingress limits
+to decompressed output. The deterministic outbound encoder uses a bounded LZ77
+search and fixed Huffman coding, falling back to literals when no match is
+useful. A direct regression check verifies that a repetitive 256-byte message
+is smaller on the wire. Messages larger than 4 KiB are selectively sent
+uncompressed to bound event-loop CPU, as RFC 7692 permits.
+
+The local behavioral suite also applies 576 deterministic adversarial inputs:
+known-valid streams, all one-byte values, structured prefixes, truncations, and
+every single-bit mutation of a valid stream. Each must either decode within the
+configured output limit or fail with WebSocket close code 1007/1009; runtime
+check failures are rejected. GNATfuzz was not available in the installed Alire
+toolchain, so this is a repeatable mutation corpus rather than a
+coverage-guided fuzzing campaign.
+
 ## Performance profile
 
 Autobahn's section 9.7–9.8 echo timing family was recorded separately through
@@ -56,13 +91,17 @@ both execution lanes:
 
 | Lane | Cases | Round trips | OK | Failed | Case-duration range |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Lightweight task | 12 | 12,000 | 12 | 0 | 113–350 ms |
-| Native task | 12 | 12,000 | 12 | 0 | 106–265 ms |
+| Lightweight task | 12 | 12,000 | 12 | 0 | 113–271 ms |
+| Native task | 12 | 12,000 | 12 | 0 | 113–291 ms |
 
 Each case sends 1,000 sequential text or binary messages at one of six payload
 sizes from 0 through 4,096 bytes. The published profile retains Autobahn's total
 case duration and shows derived mean round-trip time and echo rate on a separate
-page for each lane. These are single-host loopback observations that include
+page for each lane. The runner verifies Alire's generated `release` profile,
+requires its `-O3` switch, explicitly compiles the standalone Autobahn harness
+with `-O3`, and writes that evidence beside the raw results. The publisher
+refuses performance input without this release record. These are single-host
+loopback observations that include
 case setup and close work, not portable performance guarantees, pass/fail
 thresholds, or evidence of a general performance ordering between lanes.
 
@@ -75,27 +114,46 @@ The timing observation was recorded on this equipment:
 | Memory | 48 GB |
 | System | macOS 26.5.2 (25F84), arm64 |
 | Toolchain | GNAT 16.1.0, Alire 2.1.1 |
+| Build | Alire release; `-O3` library and harness |
 | Test client | Autobahn 25.10.1 `linux/amd64` container on the same host |
 
 This equipment record supports like-for-like regression comparison. It does not
 turn one loopback run into a cross-machine benchmark.
 
-## Scope and exclusions
+## Source coverage and platform check
+
+GNATcoverage FSF 26.2 consolidated 56 executions of 56 portable behavioral
+programs across three runtime configurations. Across Flyology-owned Ada library
+units, it reported 38% of 7,936 statement obligations covered, 0% partial, and
+61% uncovered; decisions were 17% of 1,661 obligations fully covered, 21%
+partial, and 60% uncovered. These are project-wide figures, not a
+WebSocket-only coverage percentage.
+
+The current tree also passed `./scripts/test-linux-docker.sh` on native
+Linux/AArch64, including both external-consumer project defaults. This checks
+that the pure-Ada codec and its integration are portable across the maintained
+Darwin and Linux implementations; it is not a second performance recording.
+
+## Scope and boundaries
 
 The core profile includes every non-performance, non-compression server case
 selected by this Autobahn release: case families 1–7 and 10. Section 9 limits
-and timing are reported separately above. Sections 12 and 13 exercise the optional RFC 7692
-`permessage-deflate` extension and were excluded because Flyology does not
-implement or negotiate that extension.
+and timing are reported separately above. Sections 12 and 13 exercise the
+optional RFC 7692 `permessage-deflate` extension and are reported in the
+compression profile.
 
 The core run tested `ws://` framing, fragmentation, control frames, close
 handling, masking enforcement, lengths, and UTF-8 behavior, then repeated the
 same cases over `wss://`. The TLS campaign used the repository's deterministic
 self-signed fixture and Autobahn's local fuzzing client without hostname
 verification; it exercises secure transport integration and WebSocket behavior,
-not public-key infrastructure policy. This report does not claim WebSocket
-compression support or acceptance above the supported 16 MiB bound. The default
-message limit remains 1 MiB.
+not public-key infrastructure policy. Compression was repeated over both
+`ws://` and `wss://`, and acceptance remains bounded by the supported 16 MiB
+maximum. The default message limit remains 1 MiB.
+
+Flyology currently exposes a WebSocket server API, not a WebSocket client API,
+so Autobahn's client-under-test role is outside the implemented surface rather
+than an unrun server conformance case family.
 
 ## Reproduction
 
@@ -108,6 +166,10 @@ runs as `linux/amd64`.
 ./scripts/websocket-conformance.sh core native
 ./scripts/websocket-conformance.sh core-wss lightweight
 ./scripts/websocket-conformance.sh limits lightweight
+./scripts/websocket-conformance.sh compression lightweight
+./scripts/websocket-conformance.sh compression native
+./scripts/websocket-conformance.sh compression-wss lightweight
+./scripts/websocket-conformance.sh compression-wss native
 ./scripts/websocket-conformance.sh performance lightweight
 ./scripts/websocket-conformance.sh performance native
 ```
