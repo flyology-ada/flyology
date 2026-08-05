@@ -877,6 +877,13 @@ procedure HTTP_Smoke is
          return To_String (Wire.Output);
       end Upgrade;
 
+      procedure Assert_Declined (Extensions : String) is
+      begin
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (Upgrade (Extensions), "Sec-WebSocket-Extensions:") = 0);
+      end Assert_Declined;
+
       Accepted : constant String := Upgrade
         ("permessage-deflate; server_max_window_bits=15");
       Fallback : constant String := Upgrade
@@ -894,14 +901,55 @@ procedure HTTP_Smoke is
         (Ada.Strings.Fixed.Index
            (Upgrade ("permessage-deflate; server_max_window_bits=""1\5"""),
             "server_max_window_bits=15") /= 0);
-      pragma Assert
-        (Ada.Strings.Fixed.Index
-           (Upgrade ("permessage-deflate; server_max_window_bits=8"),
-            "Sec-WebSocket-Extensions:") = 0);
-      pragma Assert
-        (Ada.Strings.Fixed.Index
-           (Upgrade ("permessage-deflate; server_max_window_bits=14"),
-            "Sec-WebSocket-Extensions:") = 0);
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=8");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=14");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=""14, "
+         & "permessage-deflate, x""");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=""15; "
+         & "server_no_context_takeover""");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=""15");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=""15\");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=""1 5""");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits=15; "
+         & "server_max_window_bits=15");
+      Assert_Declined
+        ("permessage-deflate; server_no_context_takeover; "
+         & "server_no_context_takeover");
+      Assert_Declined
+        ("permessage-deflate; client_max_window_bits; "
+         & "client_max_window_bits");
+      Assert_Declined
+        ("permessage-deflate; server_max_window_bits");
+      Assert_Declined
+        ("permessage-deflate; server_no_context_takeover=1");
+      Assert_Declined
+        ("permessage-deflate/invalid, permessage-deflate");
+      declare
+         Rejected : Boolean := False;
+      begin
+         begin
+            declare
+               Ignored : constant String := Upgrade
+                 ("permessage-deflate; server_max_window_bits="
+                  & Character'Val (1) & "15");
+               pragma Unreferenced (Ignored);
+            begin
+               null;
+            end;
+         exception
+            when Flyology.HTTP.Protocol_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
       pragma Assert
         (Ada.Strings.Fixed.Index
            (Fallback,

@@ -2420,6 +2420,61 @@ package body Flyology.HTTP.Server is
       Offers : constant String := Header (Value, "Sec-WebSocket-Extensions");
       Offer_First : Positive := Offers'First;
 
+      function Is_Token (Item : String) return Boolean is
+      begin
+         if Item'Length = 0 then
+            return False;
+         end if;
+         for Value of Item loop
+            if not Is_Token_Character (Value) then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Is_Token;
+
+      function Find_Top_Level
+        (Item      : String;
+         Delimiter : Character;
+         Valid     : out Boolean) return Natural
+      is
+         --  Delimiters inside quoted strings or quoted-pairs are data.
+         Quoted  : Boolean := False;
+         Escaped : Boolean := False;
+      begin
+         Valid := False;
+         for Index in Item'Range loop
+            declare
+               Value : constant Character := Item (Index);
+            begin
+               if Character'Pos (Value) < 32
+                 and then Value /= Character'Val (9)
+               then
+                  return 0;
+               elsif Character'Pos (Value) = 127 then
+                  return 0;
+               elsif Quoted then
+                  if Escaped then
+                     Escaped := False;
+                  elsif Value = '\' then
+                     Escaped := True;
+                  elsif Value = '"' then
+                     Quoted := False;
+                  end if;
+               elsif Value = '"' then
+                  Quoted := True;
+               elsif Value = '\' then
+                  return 0;
+               elsif Value = Delimiter then
+                  Valid := True;
+                  return Index;
+               end if;
+            end;
+         end loop;
+         Valid := not Quoted and then not Escaped;
+         return 0;
+      end Find_Top_Level;
+
       function Parameter_Value (Raw : String; Valid : out Boolean)
         return String
       is
@@ -2453,39 +2508,21 @@ package body Flyology.HTTP.Server is
                      end if;
                   end;
                end loop;
-               Valid := not Escaped and then Length (Result) > 0;
-               if Valid then
-                  for Value of To_String (Result) loop
-                     if not Is_Token_Character (Value) then
-                        Valid := False;
-                        exit;
-                     end if;
-                  end loop;
-               end if;
+               Valid := not Escaped and then Is_Token (To_String (Result));
                return To_String (Result);
             end;
          end if;
-         Valid := Item'Length > 0;
-         if Valid then
-            for Value of Item loop
-               if not Is_Token_Character (Value) then
-                  Valid := False;
-                  exit;
-               end if;
-            end loop;
-         end if;
+         Valid := Is_Token (Item);
          return Item;
       end Parameter_Value;
 
-      function Window_Bits (Raw : String; Valid : out Boolean)
+      function Window_Bits (Text : String; Valid : out Boolean)
         return Natural
       is
-         Value_Valid : Boolean;
-         Text : constant String := Parameter_Value (Raw, Value_Valid);
          Result : Natural := 0;
       begin
          Valid := False;
-         if not Value_Valid or else Text'Length not in 1 .. 2 then
+         if Text'Length not in 1 .. 2 then
             return 0;
          end if;
          for Digit of Text loop
@@ -2508,22 +2545,29 @@ package body Flyology.HTTP.Server is
 
       while Offer_First <= Offers'Last loop
          declare
-            Relative_Comma : constant Natural := Ada.Strings.Fixed.Index
-              (Offers (Offer_First .. Offers'Last), ",");
+            Comma_Valid : Boolean;
+            Relative_Comma : constant Natural := Find_Top_Level
+              (Offers (Offer_First .. Offers'Last), ',', Comma_Valid);
             Offer_Last : constant Natural :=
               (if Relative_Comma = 0 then Offers'Last
                else Relative_Comma - 1);
             Offer : constant String := Trim
               (Offers (Offer_First .. Offer_Last));
-            First_Semicolon : constant Natural :=
-              Ada.Strings.Fixed.Index (Offer, ";");
+            Semicolon_Valid : Boolean;
+            First_Semicolon : constant Natural := Find_Top_Level
+              (Offer, ';', Semicolon_Valid);
             Name_Last : constant Natural :=
               (if First_Semicolon = 0 then Offer'Last
                else First_Semicolon - 1);
+            Name : constant String := Trim
+              (Offer (Offer'First .. Name_Last));
          begin
-            if Offer'Length > 0
-              and then Lower (Trim (Offer (Offer'First .. Name_Last))) =
-                "permessage-deflate"
+            if not Comma_Valid
+              or else not Semicolon_Valid
+              or else not Is_Token (Name)
+            then
+               return;
+            elsif Lower (Name) = "permessage-deflate"
             then
                declare
                   Valid : Boolean := True;
@@ -2538,27 +2582,39 @@ package body Flyology.HTTP.Server is
                begin
                   while Valid and then Position <= Offer'Last loop
                      declare
-                        Relative_End : constant Natural :=
-                          Ada.Strings.Fixed.Index
-                            (Offer (Position .. Offer'Last), ";");
+                        Parameter_Scan_Valid : Boolean;
+                        Relative_End : constant Natural := Find_Top_Level
+                          (Offer (Position .. Offer'Last), ';',
+                           Parameter_Scan_Valid);
                         Parameter_Last : constant Natural :=
                           (if Relative_End = 0 then Offer'Last
                            else Relative_End - 1);
                         Parameter : constant String := Trim
                           (Offer (Position .. Parameter_Last));
-                        Equals : constant Natural :=
-                          Ada.Strings.Fixed.Index (Parameter, "=");
+                        Equals_Scan_Valid : Boolean;
+                        Equals : constant Natural := Find_Top_Level
+                          (Parameter, '=', Equals_Scan_Valid);
                         Parameter_Name : constant String := Lower
                           (Trim
                              (Parameter
                                 (Parameter'First ..
-                                 (if Equals = 0 then Parameter'Last
-                                  else Equals - 1))));
+                                  (if Equals = 0 then Parameter'Last
+                                   else Equals - 1))));
+                        Value_Valid : Boolean := Equals = 0;
+                        Parameter_Text : constant String :=
+                          (if Equals = 0 then ""
+                           else Parameter_Value
+                             (Parameter (Equals + 1 .. Parameter'Last),
+                              Value_Valid));
                         Parsed : Boolean;
                         Bits : Natural;
                      begin
-                        if Parameter'Length = 0 then
-                           Valid := False;
+                        if not Parameter_Scan_Valid
+                          or else not Equals_Scan_Valid
+                          or else not Is_Token (Parameter_Name)
+                          or else not Value_Valid
+                        then
+                           return;
                         elsif Parameter_Name = "server_no_context_takeover"
                           and then Equals = 0
                           and then not Seen_Server_No_Context
@@ -2573,9 +2629,7 @@ package body Flyology.HTTP.Server is
                           and then Equals /= 0
                           and then not Seen_Server_Bits
                         then
-                           Bits := Window_Bits
-                             (Parameter (Equals + 1 .. Parameter'Last),
-                              Parsed);
+                           Bits := Window_Bits (Parameter_Text, Parsed);
                            Valid := Parsed and then Bits = 15;
                            Server_Bits := Bits;
                            Seen_Server_Bits := True;
@@ -2583,9 +2637,7 @@ package body Flyology.HTTP.Server is
                           and then not Seen_Client_Bits
                         then
                            if Equals /= 0 then
-                              Bits := Window_Bits
-                                (Parameter (Equals + 1 .. Parameter'Last),
-                                 Parsed);
+                              Bits := Window_Bits (Parameter_Text, Parsed);
                               Valid := Parsed;
                            end if;
                            Seen_Client_Bits := True;
