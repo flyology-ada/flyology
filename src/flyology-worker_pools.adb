@@ -1,49 +1,14 @@
 with Ada.Exceptions;
 with Ada.Finalization;
 with Flyology.Counter_Policy;
+with Flyology.Worker_Pool_Test_Hooks;
 with Flyology.Worker_Pool_Policy;
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-with Interfaces.C;
-#end if;
 
 package body Flyology.Worker_Pools is
 
    package Counters renames Flyology.Counter_Policy;
    package Policy renames Flyology.Worker_Pool_Policy;
-
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-   use type Interfaces.C.int;
-
-   function Test_Activation_Failure return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_activation_failure";
-   function Test_Shutdown_Barrier_Arrive return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_shutdown_barrier_arrive";
-   function Test_Shutdown_Barrier_Released return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_shutdown_barrier_released";
-
-   function Check_Test_Activation return Boolean is
-   begin
-      if Test_Activation_Failure /= 0 then
-         raise Program_Error with "injected worker activation failure";
-      end if;
-      return True;
-   end Check_Test_Activation;
-
-   procedure Test_Shutdown_Barrier is
-   begin
-      if Test_Shutdown_Barrier_Arrive /= 0 then
-         while Test_Shutdown_Barrier_Released = 0 loop
-            delay 0.0;
-         end loop;
-      end if;
-   end Test_Shutdown_Barrier;
-#end if;
+   package Test_Hooks renames Flyology.Worker_Pool_Test_Hooks;
 
    protected body Lifecycle is
       procedure Begin_Run (Expected_Workers : Positive) is
@@ -218,9 +183,7 @@ package body Flyology.Worker_Pools is
                Failed := True;
          end;
 
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-         Test_Shutdown_Barrier;
-#end if;
+         Test_Hooks.Shutdown_Barrier;
 
          begin
             Item.Jobs.Close;
@@ -330,10 +293,9 @@ package body Flyology.Worker_Pools is
          end Worker;
 
          task body Worker is
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-            Activation_Checked : constant Boolean := Check_Test_Activation;
+            Activation_Checked : constant Boolean :=
+              Test_Hooks.Check_Activation;
             pragma Unreferenced (Activation_Checked);
-#end if;
             Completion_Reported : Boolean := False;
 
             procedure Report_Finished is

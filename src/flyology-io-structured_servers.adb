@@ -1,11 +1,13 @@
 with Ada.Exceptions;
 with Flyology.Counter_Policy;
+with Flyology.Structured_Server_Test_Hooks;
 with GNAT.OS_Lib;
 with Interfaces.C;
 package body Flyology.IO.Structured_Servers is
    package Connections renames Flyology.IO.Connections;
    package Counters renames Flyology.Counter_Policy;
    package Sockets renames Flyology.IO.Sockets;
+   package Test_Hooks renames Flyology.Structured_Server_Test_Hooks;
 
    use type Interfaces.C.int;
    use type Policy.Run_Phase;
@@ -25,43 +27,6 @@ package body Flyology.IO.Structured_Servers is
    overriding procedure Initialize (Item : in out Listener_Close_Guard);
    overriding procedure Finalize (Item : in out Listener_Close_Guard);
 
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-   function Test_Barrier_Arrive
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_arrive";
-   function Test_Barrier_Released
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_released";
-   function Test_Activation_Failure return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_structured_server_activation_failure";
-
-   procedure Test_Barrier (Point : Interfaces.C.int) is
-   begin
-      if Test_Barrier_Arrive (Point) /= 0 then
-         while Test_Barrier_Released (Point) = 0 loop
-            delay 0.0;
-         end loop;
-      end if;
-   end Test_Barrier;
-
-   function Check_Test_Activation return Boolean is
-   begin
-      Test_Barrier (5);
-      if Test_Activation_Failure /= 0 then
-         raise Program_Error with
-           "injected structured server worker activation failure";
-      end if;
-      return True;
-   end Check_Test_Activation;
-#end if;
-
    overriding procedure Initialize (Item : in out Listener_Close_Guard) is
    begin
       --  Controlled initialization is abort-deferred. Transfer both halves of
@@ -72,9 +37,7 @@ package body Flyology.IO.Structured_Servers is
    overriding procedure Finalize (Item : in out Listener_Close_Guard) is
    begin
       if Item.Value /= Invalid_Descriptor then
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-         Test_Barrier (4);
-#end if;
+         Test_Hooks.Barrier (4);
          Item.Result.all := C_Close_Listener (Item.Value);
          Policy.Consume_After_Close_Attempt (Item.Value);
       end if;
@@ -304,9 +267,7 @@ package body Flyology.IO.Structured_Servers is
             --  descriptor in exactly one of Listener, Transfer, or
             --  Owned_Listener while moving it into the server.
             Sockets.Release (Listener, Guard.Transfer);
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-            Test_Barrier (1);
-#end if;
+            Test_Hooks.Barrier (1);
             Sockets.Adopt (Guard.Transfer, Item.Owned_Listener);
             Guard.Armed := True;
          exception
@@ -411,16 +372,12 @@ package body Flyology.IO.Structured_Servers is
            "structured server requires a listening socket";
       end if;
 
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-      Test_Barrier (0);
-#end if;
+      Test_Hooks.Barrier (0);
 
       declare
          Cleanup : Serve_Cleanup_Guard;
       begin
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-         Test_Barrier (2);
-#end if;
+         Test_Hooks.Barrier (2);
          declare
             task type Worker with CPU => Handler_CPU is
                pragma Task_Info (Handler_Model);
@@ -428,11 +385,9 @@ package body Flyology.IO.Structured_Servers is
             end Worker;
 
             task body Worker is
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
                Activation_Checked : constant Boolean :=
-                 Check_Test_Activation;
+                 Test_Hooks.Check_Activation;
                pragma Unreferenced (Activation_Checked);
-#end if;
                Stop_Worker : Boolean := False;
                Completion_Reported : Boolean := False;
 
@@ -536,9 +491,7 @@ package body Flyology.IO.Structured_Servers is
 
             Workers : array (1 .. Item.Capacity) of Worker;
          begin
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-            Test_Barrier (6);
-#end if;
+            Test_Hooks.Barrier (6);
             declare
                Worker_Cleanup_Armed : aliased Boolean := True;
                Worker_Cleanup : Worker_Cleanup_Guard
@@ -548,9 +501,7 @@ package body Flyology.IO.Structured_Servers is
                for Index in Workers'Range loop
                   Workers (Index).Start;
                end loop;
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
-               Test_Barrier (3);
-#end if;
+               Test_Hooks.Barrier (3);
                if Item.State.Stop_Was_Requested then
                   Stop_Accepting;
                else
