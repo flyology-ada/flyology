@@ -13,7 +13,9 @@ package Flyology.IO.Connections.Testing is
       Admission_Wait_Armed,
       Take_Admission_Acquired,
       Accept_Adopted,
-      Take_Adopted);
+      Take_Adopted,
+      Raw_Accept_Returned,
+      Accept_Socket_Owned);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.
@@ -30,5 +32,7 @@ package Flyology.IO.Connections.Testing is
    procedure Wait_Reached (Point : Barrier_Point);
 
    procedure Release (Point : Barrier_Point);
+
+   procedure Fail_Next_Release_Wake;
 
 end Flyology.IO.Connections.Testing;

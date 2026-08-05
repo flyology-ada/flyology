@@ -22,6 +22,11 @@ package body Flyology.IO.Connections.Testing is
      with Import,
           Convention => C,
           External_Name => "flyology_test_connection_barrier_release";
+   procedure C_Fail_Next_Release_Wake
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_connection_arm_capacity_release_wake_failure";
 
    function Waiting_Operations (Item : Connection) return Natural is
      (Item.Controller.Waiting_Count);
@@ -58,5 +63,10 @@ package body Flyology.IO.Connections.Testing is
    begin
       C_Release (Barrier_Point'Pos (Point));
    end Release;
+
+   procedure Fail_Next_Release_Wake is
+   begin
+      C_Fail_Next_Release_Wake;
+   end Fail_Next_Release_Wake;
 
 end Flyology.IO.Connections.Testing;

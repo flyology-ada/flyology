@@ -1,10 +1,17 @@
 #include <stdatomic.h>
+#include <pthread.h>
 
-enum { barrier_count = 13 };
+enum {
+   raw_accept_returned = 13,
+   barrier_count = 15
+};
 
 static _Atomic int armed[barrier_count];
 static _Atomic int reached[barrier_count];
 static _Atomic int released[barrier_count];
+static _Atomic int fail_next_capacity_release_wake;
+static pthread_mutex_t raw_accept_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t raw_accept_condition = PTHREAD_COND_INITIALIZER;
 
 static int valid_point(int point)
 {
@@ -13,6 +20,8 @@ static int valid_point(int point)
 
 void flyology_test_connection_barrier_reset(void)
 {
+   atomic_store_explicit(
+     &fail_next_capacity_release_wake, 0, memory_order_seq_cst);
    for (int point = 0; point < barrier_count; ++point) {
       atomic_store_explicit(&armed[point], 0, memory_order_seq_cst);
       atomic_store_explicit(&reached[point], 0, memory_order_seq_cst);
@@ -67,4 +76,36 @@ void flyology_test_connection_barrier_release(int point)
    if (!valid_point(point)) return;
    atomic_store_explicit(&released[point], 1, memory_order_seq_cst);
    atomic_store_explicit(&armed[point], 0, memory_order_seq_cst);
+   if (point == raw_accept_returned) {
+      pthread_mutex_lock(&raw_accept_mutex);
+      pthread_cond_broadcast(&raw_accept_condition);
+      pthread_mutex_unlock(&raw_accept_mutex);
+   }
+}
+
+void flyology_test_connection_raw_accept_return_barrier(void)
+{
+   pthread_mutex_lock(&raw_accept_mutex);
+   if (atomic_load_explicit(
+         &armed[raw_accept_returned], memory_order_seq_cst) != 0) {
+      atomic_store_explicit(
+        &reached[raw_accept_returned], 1, memory_order_seq_cst);
+      while (atomic_load_explicit(
+               &released[raw_accept_returned], memory_order_seq_cst) == 0) {
+         pthread_cond_wait(&raw_accept_condition, &raw_accept_mutex);
+      }
+   }
+   pthread_mutex_unlock(&raw_accept_mutex);
+}
+
+void flyology_test_connection_arm_capacity_release_wake_failure(void)
+{
+   atomic_store_explicit(
+     &fail_next_capacity_release_wake, 1, memory_order_seq_cst);
+}
+
+int flyology_test_connection_fail_next_capacity_release_wake(void)
+{
+   return atomic_exchange_explicit(
+     &fail_next_capacity_release_wake, 0, memory_order_seq_cst);
 }

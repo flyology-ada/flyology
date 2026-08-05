@@ -1,3 +1,4 @@
+with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.Connection_Policy;
@@ -400,14 +401,34 @@ package body Flyology.IO.Connections is
    end Finalize;
 
    overriding procedure Finalize (Guard : in out Admission_Guard) is
+      Failure : Ada.Exceptions.Exception_Occurrence;
+      Failed  : Boolean := False;
    begin
       if Guard.Armed then
-         Guard.Owner.Release (Guard.Armed'Access);
+         begin
+            Guard.Owner.Release (Guard.Armed'Access);
+         exception
+            when Occurrence : others =>
+               Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+               Failed := True;
+         end;
       end if;
-      --  Release capacity first. A fallible descriptor close cannot strand a
-      --  permit, and adoption has already moved Socket when it disarms Guard.
+      --  Both obligations are attempted independently. Release clears Armed
+      --  in the protected action before its fallible wake, and Close_Socket
+      --  invalidates Socket even when close reports an error.
       if Sockets.Is_Open (Guard.Socket) then
-         Sockets.Close_Socket (Guard.Socket);
+         begin
+            Sockets.Close_Socket (Guard.Socket);
+         exception
+            when Occurrence : others =>
+               if not Failed then
+                  Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                  Failed := True;
+               end if;
+         end;
+      end if;
+      if Failed then
+         Ada.Exceptions.Reraise_Occurrence (Failure);
       end if;
    end Finalize;
 
@@ -864,6 +885,9 @@ package body Flyology.IO.Connections is
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
       end;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (14);
+#end if;
       if Manager.Shutdown_Requested
         or else (Token /= null and then Token.Requested)
       then

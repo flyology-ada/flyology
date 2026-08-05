@@ -429,9 +429,156 @@ procedure Connection_Admission_Smoke is
       end loop;
    end Run_Abort_Boundaries;
 
+   procedure Run_Raw_Accept_Abort (Model : Flyology.Execution_Model) is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+      Point  : constant Testing.Barrier_Point :=
+        Testing.Raw_Accept_Returned;
+   begin
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Listener, Client : Sockets.Socket_Type;
+         Listener_Address : Sockets.Endpoint;
+      begin
+         Open_Listener (Listener, Listener_Address);
+         Sockets.Create_Socket (Client);
+         Sockets.Connect_Socket (Client, Listener_Address);
+         Testing.Reset_Barriers;
+         Testing.Arm (Point);
+         declare
+            task Worker is
+               pragma Task_Info (Model);
+            end Worker;
+
+            task body Worker is
+               Item : Connections.Connection;
+               Peer : Sockets.Endpoint;
+            begin
+               Connections.Accept_Connection
+                 (Manager, Listener, Item, Peer, Token => null);
+            end Worker;
+         begin
+            Testing.Wait_Reached (Point);
+            if Manager.Active /= 1 then
+               raise Program_Error with
+                 "raw accept boundary did not hold one permit";
+            end if;
+            abort Worker;
+            Testing.Release (Point);
+         exception
+            when others =>
+               Testing.Release (Point);
+               abort Worker;
+               raise;
+         end;
+
+         if Manager.Active /= 0 then
+            raise Program_Error with
+              "raw accept boundary leaked an admission permit";
+         end if;
+         declare
+            Result : Flyology.Capacity.Acquire_Result;
+         begin
+            Manager.Try_Acquire (Result);
+            pragma Assert (Result = Flyology.Capacity.Permit_Acquired);
+            Manager.Release;
+         end;
+         Close_If_Open (Client);
+         Close_If_Open (Listener);
+         Testing.Reset_Barriers;
+      exception
+         when others =>
+            Testing.Release (Point);
+            Close_If_Open (Client);
+            Close_If_Open (Listener);
+            raise;
+      end;
+      if Open_FD_Count /= Before then
+         raise Program_Error with
+           "raw accept boundary leaked a descriptor in " & Model'Image;
+      end if;
+   end Run_Raw_Accept_Abort;
+
+   procedure Run_Release_Wake_Failure (Model : Flyology.Execution_Model) is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+      Point  : constant Testing.Barrier_Point :=
+        Testing.Accept_Socket_Owned;
+   begin
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Listener, Client : Sockets.Socket_Type;
+         Listener_Address : Sockets.Endpoint;
+      begin
+         Open_Listener (Listener, Listener_Address);
+         Sockets.Create_Socket (Client);
+         Sockets.Connect_Socket (Client, Listener_Address);
+         Testing.Reset_Barriers;
+         Testing.Arm (Point);
+         declare
+            task Worker is
+               pragma Task_Info (Model);
+            end Worker;
+
+            task body Worker is
+               Item : Connections.Connection;
+               Peer : Sockets.Endpoint;
+            begin
+               Connections.Accept_Connection
+                 (Manager, Listener, Item, Peer, Token => null);
+            end Worker;
+         begin
+            Testing.Wait_Reached (Point);
+            declare
+               FD          : Interfaces.C.int;
+               Can_Acquire : Boolean;
+            begin
+               Manager.Acquire_Wait_Source (FD, Can_Acquire);
+               pragma Assert (FD >= 0 and then not Can_Acquire);
+            end;
+            Testing.Fail_Next_Release_Wake;
+            abort Worker;
+            Testing.Release (Point);
+         exception
+            when others =>
+               Testing.Release (Point);
+               abort Worker;
+               raise;
+         end;
+
+         if Manager.Active /= 0 then
+            raise Program_Error with
+              "release-wake failure leaked an admission permit";
+         end if;
+         declare
+            Result : Flyology.Capacity.Acquire_Result;
+         begin
+            Manager.Try_Acquire (Result);
+            pragma Assert (Result = Flyology.Capacity.Permit_Acquired);
+            Manager.Release;
+         end;
+         Close_If_Open (Client);
+         Close_If_Open (Listener);
+         Testing.Reset_Barriers;
+      exception
+         when others =>
+            Testing.Release (Point);
+            Close_If_Open (Client);
+            Close_If_Open (Listener);
+            raise;
+      end;
+      if Open_FD_Count /= Before then
+         raise Program_Error with
+           "release-wake failure skipped accepted socket close in "
+           & Model'Image;
+      end if;
+   end Run_Release_Wake_Failure;
+
 begin
    Run (Flyology.Lightweight_Task);
    Run (Flyology.Native_Task);
    Run_Abort_Boundaries (Flyology.Lightweight_Task);
    Run_Abort_Boundaries (Flyology.Native_Task);
+   Run_Raw_Accept_Abort (Flyology.Lightweight_Task);
+   Run_Raw_Accept_Abort (Flyology.Native_Task);
+   Run_Release_Wake_Failure (Flyology.Lightweight_Task);
+   Run_Release_Wake_Failure (Flyology.Native_Task);
 end Connection_Admission_Smoke;

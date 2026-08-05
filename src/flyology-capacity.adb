@@ -5,6 +5,14 @@ package body Flyology.Capacity is
    use type Interfaces.C.int;
    package Policy renames Flyology.Capacity_Policy;
 
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+   function Test_Fail_Next_Release_Wake return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_connection_fail_next_capacity_release_wake";
+#end if;
+
    protected body Gate is
       entry Acquire
         (Accepted      : out Boolean;
@@ -83,6 +91,12 @@ package body Flyology.Capacity is
          if Wake_Sources.Descriptor (Acquire_Wake) >= 0
            and then not Acquire_Signalled
          then
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+            if Test_Fail_Next_Release_Wake /= 0 then
+               raise Program_Error with
+                 "injected capacity release wake failure";
+            end if;
+#end if;
             Wake_Sources.Signal (Acquire_Wake);
             Acquire_Signalled := True;
          end if;

@@ -119,6 +119,29 @@ package body Flyology.IO.Sockets is
       Error   : access Interfaces.C.int) return Interfaces.C.int;
    pragma Import (C, C_Accept, "flyology_socket_accept");
 
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+   procedure Test_Raw_Accept_Return_Barrier
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_connection_raw_accept_return_barrier";
+#end if;
+
+   --  A protected call defers abort from the C accept return through
+   --  publication in the caller-owned handle. The listener is nonblocking,
+   --  so the foreign call itself never waits for a connection.
+   protected type Accept_Return_Bridge is
+      procedure Invoke
+        (Listener : Interfaces.C.int;
+         Family   : access Interfaces.C.unsigned_char;
+         Address  : System.Address;
+         Port     : access Interfaces.C.unsigned;
+         Scope    : access Interfaces.C.unsigned;
+         Error    : access Interfaces.C.int;
+         Target   : in out Socket_Type;
+         Result   : out Interfaces.C.int);
+   end Accept_Return_Bridge;
+
    function C_Connect
      (Socket  : Interfaces.C.int;
       Family  : Interfaces.C.int;
@@ -232,6 +255,29 @@ package body Flyology.IO.Sockets is
 
    function Mode_Code (Mode : Socket_Mode) return Interfaces.C.int is
      (Flyology.Socket_Policy.Mode_Code (Mode = Socket_Datagram));
+
+   protected body Accept_Return_Bridge is
+      procedure Invoke
+        (Listener : Interfaces.C.int;
+         Family   : access Interfaces.C.unsigned_char;
+         Address  : System.Address;
+         Port     : access Interfaces.C.unsigned;
+         Scope    : access Interfaces.C.unsigned;
+         Error    : access Interfaces.C.int;
+         Target   : in out Socket_Type;
+         Result   : out Interfaces.C.int)
+      is
+      begin
+         Result := C_Accept
+           (Listener, Family, Address, Port, Scope, Error);
+         if Result >= 0 then
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+            Test_Raw_Accept_Return_Barrier;
+#end if;
+            Target.Value := Result;
+         end if;
+      end Invoke;
+   end Accept_Return_Bridge;
 
    function Address_Data (Value : IP_Address) return System.Address is
      (case Value.Family is
@@ -978,6 +1024,7 @@ package body Flyology.IO.Sockets is
    is
       Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Pressure_Backoff : Duration := 0.001;
+      Bridge : Accept_Return_Bridge;
 
       procedure Pause_Before_Retry (Requested : Duration) is
          Requests : Wait_Request_Array (Interrupts'Range);
@@ -1023,11 +1070,17 @@ package body Flyology.IO.Sockets is
             Port    : aliased Interfaces.C.unsigned;
             Scope   : aliased Interfaces.C.unsigned;
             Error   : aliased Interfaces.C.int;
-            Result  : constant Interfaces.C.int := C_Accept
-              (Server.Value, Family'Access,
-               Bytes (Bytes'First)'Address, Port'Access, Scope'Access,
-               Error'Access);
+            Result : Interfaces.C.int;
          begin
+            Bridge.Invoke
+              (Server.Value,
+               Family'Access,
+               Bytes (Bytes'First)'Address,
+               Port'Access,
+               Scope'Access,
+               Error'Access,
+               Socket,
+               Result);
             if Result < 0 then
                case Wait_Policy.Classify_Accept_Error
                  (Error,
@@ -1051,7 +1104,6 @@ package body Flyology.IO.Sockets is
                      Raise_Error ("accept", Error);
                end case;
             else
-               Socket.Value := Result;
                if Family = 4 then
                   Address :=
                     (Family => IPv4,
