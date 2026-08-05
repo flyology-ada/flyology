@@ -1,4 +1,5 @@
 with Ada.Unchecked_Deallocation;
+with Flyology.Counter_Policy;
 with System.Address_To_Access_Conversions;
 #if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
 with Interfaces.C;
@@ -135,10 +136,8 @@ package body Flyology.Native_Executors is
             return;
          end if;
          Slot := Found;
-         Generations (Slot) := Generations (Slot) + 1;
-         if Generations (Slot) = 0 then
-            Generations (Slot) := Generations (Slot) + 1;
-         end if;
+         Generations (Slot) :=
+           Flyology.Counter_Policy.Nonzero_Successor (Generations (Slot));
          Generation := Generations (Slot);
          Inputs (Slot) := Input;
          Messages (Slot) := Ada.Strings.Unbounded.Null_Unbounded_String;
