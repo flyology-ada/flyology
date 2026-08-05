@@ -179,6 +179,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   clean sibling tree, and replaces `build/rts` only after a successful build.
   Applications must compile with `--RTS=<prepared-runtime>`; the public library
   intentionally does not link against stock GNARL by itself.
+- A nonempty `FLYOLOGY_RTS_DIR` may be replaced only when it has Flyology's
+  `.flyology-rts-root` ownership marker or the recognized complete shape of a
+  legacy prepared RTS. Reject project, workspace, home, ancestor, broad,
+  symbolic-link, and `..` destinations before assembly. Stage the ownership
+  marker in every replacement tree.
 - Important preparation controls:
   - `FLYOLOGY_RTS_DIR`: generated RTS destination.
   - `FLYOLOGY_DEFAULT`: `native` or `lightweight`.

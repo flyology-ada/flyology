@@ -2,7 +2,14 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+caller_root=$(pwd -P)
 requested_build_root=${FLYOLOGY_RTS_DIR:-"$project_root/build/rts"}
+case "/$requested_build_root/" in
+  */../*)
+    printf '%s\n' "FLYOLOGY_RTS_DIR must not contain '..': $requested_build_root" >&2
+    exit 1
+    ;;
+esac
 case "$requested_build_root" in
   /*) ;;
   *) requested_build_root="$(pwd)/$requested_build_root" ;;
@@ -13,6 +20,10 @@ case "$requested_build_root" in
     exit 1
     ;;
 esac
+if [ -L "$requested_build_root" ]; then
+  printf '%s\n' "FLYOLOGY_RTS_DIR must not be a symbolic link: $requested_build_root" >&2
+  exit 1
+fi
 if [ -d "$requested_build_root" ]; then
   requested_build_root=$(CDPATH= cd -- "$requested_build_root" && pwd -P)
 fi
@@ -28,8 +39,70 @@ esac
 mkdir -p "$build_parent"
 build_parent=$(CDPATH= cd -- "$build_parent" && pwd -P)
 destination_root="$build_parent/$build_name"
+if [ -L "$destination_root" ]; then
+  printf '%s\n' "FLYOLOGY_RTS_DIR must not be a symbolic link: $destination_root" >&2
+  exit 1
+fi
 if [ -e "$destination_root" ] && [ ! -d "$destination_root" ]; then
   printf '%s\n' "FLYOLOGY_RTS_DIR is not a directory: $destination_root" >&2
+  exit 1
+fi
+
+reject_protected_target () {
+  protected_root=$1
+  protected_kind=$2
+  [ -n "$protected_root" ] || return 0
+  case "$protected_root" in
+    "$destination_root"|"$destination_root"/*)
+      printf '%s\n' \
+        "FLYOLOGY_RTS_DIR must not be the $protected_kind or its ancestor: $destination_root" \
+        >&2
+      exit 1
+      ;;
+  esac
+}
+
+case "$destination_root" in
+  /|/Applications|/Library|/System|/Users|/bin|/etc|/home|/opt|/private|\
+  /private/tmp|/private/var|/sbin|/tmp|/usr|/var|/var/tmp)
+    printf '%s\n' "FLYOLOGY_RTS_DIR is too broad: $destination_root" >&2
+    exit 1
+    ;;
+esac
+reject_protected_target "$project_root" "Flyology project root"
+reject_protected_target "$caller_root" "caller workspace"
+user_home_root=
+if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+  user_home_root=$(CDPATH= cd -- "$HOME" && pwd -P)
+fi
+reject_protected_target "$user_home_root" "user home directory"
+
+marker_name=.flyology-rts-root
+marker_value='Flyology prepared RTS version 1'
+destination_is_owned () {
+  marker_file="$destination_root/$marker_name"
+  if [ -f "$marker_file" ] \
+    && [ ! -L "$marker_file" ] \
+    && [ "$(sed -n '1p' "$marker_file")" = "$marker_value" ]; then
+    return 0
+  fi
+
+  #  Accept complete runtimes created before the ownership marker existed.
+  [ -d "$destination_root/adainclude" ] \
+    && [ -d "$destination_root/adalib" ] \
+    && [ -d "$destination_root/obj" ] \
+    && [ -f "$destination_root/adainclude/s-stalib.adb" ] \
+    && [ -f "$destination_root/adalib/libgnat.a" ] \
+    && [ -f "$destination_root/adalib/libgnarl.a" ]
+}
+
+if [ -d "$destination_root" ] \
+  && [ -n "$(find "$destination_root" -mindepth 1 -maxdepth 1 -print -quit)" ] \
+  && ! destination_is_owned; then
+  printf '%s\n' \
+    "refusing to replace non-Flyology directory: $destination_root" \
+    "choose a new or empty FLYOLOGY_RTS_DIR, or remove the target after inspecting it" \
+    >&2
   exit 1
 fi
 
@@ -37,6 +110,7 @@ fi
 #  finished tree prevents files from an older compiler or configuration from
 #  surviving a rebuild and leaves the previous tree usable if assembly fails.
 build_root=$(mktemp -d "$build_parent/.${build_name}.flyology-build.XXXXXX")
+printf '%s\n' "$marker_value" >"$build_root/$marker_name"
 backup_root=
 replacement_state=building
 cleanup_build () {
@@ -44,20 +118,36 @@ cleanup_build () {
   trap - EXIT
 
   case "$replacement_state" in
-    displaced|installing)
+    backup_placeholder)
+      if [ -n "$backup_root" ]; then
+        rmdir "$backup_root" 2>/dev/null || true
+      fi
+      ;;
+    displacing|displaced|installing)
       if [ "$replacement_state" = installing ] && [ -e "$destination_root" ]; then
-        rm -rf -- "$destination_root"
+        installed_marker="$destination_root/$marker_name"
+        if [ -f "$installed_marker" ] \
+          && [ "$(sed -n '1p' "$installed_marker")" = "$marker_value" ]; then
+          rm -rf -- "$destination_root"
+        else
+          printf '%s\n' \
+            "refusing to remove an unmarked destination during rollback: $destination_root" \
+            >&2
+        fi
       fi
       if [ -n "$backup_root" ] && [ -e "$backup_root" ]; then
-        mv "$backup_root" "$destination_root"
-        backup_root=
+        if [ -e "$destination_root" ]; then
+          printf '%s\n' \
+            "could not restore the previous RTS; preserved it at: $backup_root" \
+            >&2
+        else
+          mv "$backup_root" "$destination_root"
+          backup_root=
+        fi
       fi
       ;;
   esac
 
-  if [ -n "$backup_root" ] && [ -e "$backup_root" ]; then
-    rm -rf -- "$backup_root"
-  fi
   if [ -n "$build_root" ] && [ -e "$build_root" ]; then
     rm -rf -- "$build_root"
   fi
@@ -79,6 +169,20 @@ loop_placement_map=${FLYOLOGY_LOOP_PLACEMENT_MAP:-}
 test_faults=${FLYOLOGY_TEST_FAULTS:-0}
 deny_io_uring=${FLYOLOGY_TEST_DENY_IO_URING:-0}
 sanitizer=${FLYOLOGY_SANITIZER:-none}
+
+for test_switch in \
+  "${FLYOLOGY_TEST_RTS_FAIL_DURING_ASSEMBLY:-0}" \
+  "${FLYOLOGY_TEST_RTS_SIGNAL_BEFORE_DISPLACEMENT:-0}" \
+  "${FLYOLOGY_TEST_RTS_SIGNAL_DURING_DISPLACEMENT:-0}"
+do
+  case "$test_switch" in
+    0|1) ;;
+    *)
+      printf '%s\n' "Flyology RTS transaction test switches accept only 0 or 1" >&2
+      exit 1
+      ;;
+  esac
+done
 
 case "$execution_default" in
   native|lightweight) ;;
@@ -379,6 +483,11 @@ if [ "$compat_family" = gnat-legacy ]; then
     "$legacy_suspension_body_patch"
 fi
 
+if [ "${FLYOLOGY_TEST_RTS_FAIL_DURING_ASSEMBLY:-0}" = 1 ]; then
+  printf '%s\n' "injected failure during Flyology RTS assembly" >&2
+  exit 96
+fi
+
 cc -O2 -c "$project_root/runtime/native/context_switch.S" \
   -o "$build_root/obj/context_switch.o"
 cc -O2 $fault_cflags $io_uring_test_cflags \
@@ -448,16 +557,26 @@ if [ "$platform" = linux ]; then
 fi
 ranlib "$generated_lib/libgnarl.a"
 
+if [ "${FLYOLOGY_TEST_RTS_SIGNAL_BEFORE_DISPLACEMENT:-0}" = 1 ]; then
+  printf '%s\n' "injected signal before Flyology RTS displacement" >&2
+  kill -TERM "$$"
+fi
 if [ -e "$destination_root" ]; then
   backup_root=$(mktemp -d "$build_parent/.${build_name}.flyology-old.XXXXXX")
+  replacement_state=backup_placeholder
   rmdir "$backup_root"
+  replacement_state=displacing
   mv "$destination_root" "$backup_root"
+  if [ "${FLYOLOGY_TEST_RTS_SIGNAL_DURING_DISPLACEMENT:-0}" = 1 ]; then
+    printf '%s\n' "injected signal during Flyology RTS displacement" >&2
+    kill -TERM "$$"
+  fi
   replacement_state=displaced
 fi
 replacement_state=installing
 mv "$build_root" "$destination_root"
-build_root=
 replacement_state=published
+build_root=
 if [ -n "$backup_root" ]; then
   rm -rf -- "$backup_root"
   backup_root=

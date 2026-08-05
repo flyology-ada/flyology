@@ -22,6 +22,49 @@ cp -R "$project_root/runtime" "$project_root/scripts" "$project_root/src" \
   "$pin_root/"
 cd "$consumer_root"
 
+sentinel_value='valuable directory contents remain intact'
+unrelated_target="$consumer_root/unrelated populated target"
+mkdir -p "$unrelated_target"
+printf '%s\n' "$sentinel_value" >"$unrelated_target/sentinel"
+
+expect_target_rejection () {
+  label=$1
+  target=$2
+  log="$consumer_root/rejected-$label.log"
+  if FLYOLOGY_RTS_DIR="$target" \
+    "$pin_root/scripts/prepare-rts.sh" >"$log" 2>&1
+  then
+    printf '%s\n' "unsafe RTS target was accepted: $label" >&2
+    exit 1
+  fi
+  if [ "$(sed -n '1p' "$unrelated_target/sentinel")" != "$sentinel_value" ]; then
+    printf '%s\n' "RTS target rejection damaged the populated sentinel: $label" >&2
+    exit 1
+  fi
+}
+
+#  Reject valuable, protected, ambiguous, and linked destinations before any
+#  runtime assembly. All targets are confined to this disposable workspace.
+expect_target_rejection populated "$unrelated_target"
+expect_target_rejection workspace "$consumer_root"
+expect_target_rejection project "$pin_root"
+mkdir -p "$consumer_root/path component"
+expect_target_rejection dotdot \
+  "$consumer_root/path component/../unrelated populated target"
+ln -s "$unrelated_target" "$consumer_root/runtime-link"
+expect_target_rejection symlink "$consumer_root/runtime-link"
+if HOME="$unrelated_target" FLYOLOGY_RTS_DIR="$unrelated_target" \
+  "$pin_root/scripts/prepare-rts.sh" \
+  >"$consumer_root/rejected-home.log" 2>&1
+then
+  printf '%s\n' "user home directory was accepted as an RTS target" >&2
+  exit 1
+fi
+if [ "$(sed -n '1p' "$unrelated_target/sentinel")" != "$sentinel_value" ]; then
+  printf '%s\n' "home-directory rejection damaged the populated sentinel" >&2
+  exit 1
+fi
+
 "$alr" --non-interactive with flyology --use="$pin_root"
 (cd "$concurrent_root" &&
   "$alr" --non-interactive with flyology --use="$pin_root")
@@ -74,7 +117,12 @@ runtime_archive="$pin_root/build/alire-rts/adalib/libgnarl.a"
 runtime_object="$pin_root/build/alire-rts/obj/context_switch.o"
 generated_config="$pin_root/build/flyology.cgpr"
 persisted_policy="$pin_root/build/flyology-rts.conf"
+runtime_marker="$pin_root/build/alire-rts/.flyology-rts-root"
 archive_probe="$consumer_root/context_switch.o"
+if ! grep '^Flyology prepared RTS version 1$' "$runtime_marker" >/dev/null; then
+  printf '%s\n' "prepared runtime lacks its Flyology ownership marker" >&2
+  exit 1
+fi
 ar -p "$runtime_archive" context_switch.o >"$archive_probe"
 case "$(uname -m)" in
   arm64|aarch64)
@@ -102,6 +150,52 @@ case "$(uname -m)" in
 esac
 "$consumer_root/build/bin/external_consumer" native
 "$concurrent_root/build/bin/external_consumer" native
+
+#  A failed assembly or signal on either side of displacement must preserve the
+#  complete old tree. The during-displacement hook fires after mv and before
+#  the state assignment that previously made cleanup delete the backup.
+transaction_root="$consumer_root/transaction target"
+mkdir -p "$transaction_root"
+cp -R "$pin_root/build/alire-rts/." "$transaction_root/"
+printf '%s\n' "$sentinel_value" >"$transaction_root/preserved-sentinel"
+
+expect_transaction_failure () {
+  test_switch=$1
+  label=$2
+  log="$consumer_root/transaction-$label.log"
+  if env \
+    FLYOLOGY_RTS_DIR="$transaction_root" \
+    "$test_switch=1" \
+    "$alr" exec -- "$pin_root/scripts/prepare-rts.sh" >"$log" 2>&1
+  then
+    printf '%s\n' "injected RTS transaction failure succeeded: $label" >&2
+    exit 1
+  fi
+  if [ "$(sed -n '1p' "$transaction_root/preserved-sentinel")" \
+    != "$sentinel_value" ]; then
+    printf '%s\n' "RTS transaction failure lost the old tree: $label" >&2
+    exit 1
+  fi
+  if ! grep '^Flyology prepared RTS version 1$' \
+    "$transaction_root/.flyology-rts-root" >/dev/null; then
+    printf '%s\n' "RTS transaction failure lost the ownership marker: $label" >&2
+    exit 1
+  fi
+  leftovers=$(find "$consumer_root" -maxdepth 1 \
+    -name '.transaction target.flyology-*' -print)
+  if [ -n "$leftovers" ]; then
+    printf '%s\n' "RTS transaction failure left temporary trees: $label" \
+      "$leftovers" >&2
+    exit 1
+  fi
+}
+
+expect_transaction_failure \
+  FLYOLOGY_TEST_RTS_FAIL_DURING_ASSEMBLY failed-assembly
+expect_transaction_failure \
+  FLYOLOGY_TEST_RTS_SIGNAL_BEFORE_DISPLACEMENT before-displacement
+expect_transaction_failure \
+  FLYOLOGY_TEST_RTS_SIGNAL_DURING_DISPLACEMENT during-displacement
 
 #  Persist an explicit project policy, then prove that a normal build with no
 #  configuration environment retains it instead of reverting to defaults.
@@ -167,8 +261,6 @@ esac
 "$alr" build
 "$consumer_root/build/bin/external_consumer" native
 
-#  An unchanged build must retain the prepared runtime, while a change to a
-#  path-pinned runtime input must invalidate it without manual preparation.
 noop_sentinel="$consumer_root/noop-sentinel"
 touch "$noop_sentinel"
 touch -t 200001010000 "$runtime_object"

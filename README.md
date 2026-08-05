@@ -2114,6 +2114,12 @@ sibling directory before replacing the requested destination.
 Set `FLYOLOGY_RTS_DIR` to put that generated runtime somewhere other than the
 crate checkout. Relative values are resolved from the caller's current
 directory; the resulting path is canonicalized before patching runtime files.
+The destination must be new, empty, marked as a Flyology-owned RTS, or have the
+complete shape of an older prepared RTS. Preparation rejects nonempty unrelated
+directories, symbolic links, paths containing `..`, broad system directories,
+and the project, caller workspace, home directory, or any of their ancestors.
+Every newly prepared tree contains `.flyology-rts-root`; do not copy that marker
+into a directory that Flyology does not own.
 `FLYOLOGY_DEFAULT` accepts only `native` or `lightweight`.
 `FLYOLOGY_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
 `FLYOLOGY_PLACEMENT` currently accepts `round_robin`.
