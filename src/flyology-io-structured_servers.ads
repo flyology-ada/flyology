@@ -81,8 +81,8 @@ package Flyology.IO.Structured_Servers is
    --  Current coordinate through protected state. Request_Shutdown may precede
    --  the one permitted Serve call; once that call begins, every normal or
    --  exceptional return leaves the server terminal. Keep the object alive
-   --  until Serve returns. If listener cleanup fails, the object retains
-   --  closing ownership for a retry when it is finalized.
+   --  until Serve returns. Listener cleanup is attempted at most once;
+   --  finalization closes only a listener whose cleanup has not begun.
    --  @field Capacity Handler task count and connection admission limit
    type Server (Capacity : Positive) is limited private;
 
@@ -190,8 +190,8 @@ private
       Owned_Listener : aliased Flyology.IO.Sockets.Socket_Type;
    end record;
 
-   --  Request shutdown and cancellation if Item is still serving. Retry the
-   --  close of a listener retained after terminal Serve cleanup.
+   --  Request shutdown and cancellation if Item is still serving. Close only
+   --  a listener retained because terminal Serve cleanup did not begin.
    --  @param Item Server being finalized
    overriding procedure Finalize (Item : in out Server);
 
