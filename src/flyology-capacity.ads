@@ -30,17 +30,27 @@ package Flyology.Capacity is
 
       --  Wait until a permit is available or shutdown has been requested.
       --  @param Accepted True when one permit was acquired; False on shutdown
-      entry Acquire (Accepted : out Boolean);
+      --  @param Cleanup_Armed Optional caller-owned cleanup obligation; it is
+      --     set in the protected action that acquires the permit
+      entry Acquire
+        (Accepted      : out Boolean;
+         Cleanup_Armed : access Boolean := null);
 
       --  Attempt to acquire without waiting.
       --  @param Result Permit_Acquired, Gate_Full, or Gate_Closed
-      procedure Try_Acquire (Result : out Acquire_Result);
+      --  @param Cleanup_Armed Optional caller-owned cleanup obligation; it is
+      --     set only when Result is Permit_Acquired
+      procedure Try_Acquire
+        (Result        : out Acquire_Result;
+         Cleanup_Armed : access Boolean := null);
 
       --  Release one acquired permit. If an Acquire_Wait_Source has been
       --  borrowed, releasing the permit also wakes its waiters.
       --  @exception Program_Error No permit is active, or the admission wake
       --     source cannot be signalled
-      procedure Release;
+      --  @param Cleanup_Armed Optional caller-owned cleanup obligation; it is
+      --     cleared in the protected action that releases the permit
+      procedure Release (Cleanup_Armed : access Boolean := null);
 
       --  Wait until shutdown has been requested and every permit is released.
       entry Await_Drained;

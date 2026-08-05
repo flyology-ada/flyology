@@ -35,6 +35,17 @@ package body Flyology.IO.Connections is
 
    overriding procedure Finalize (Guard : in out Operation_Guard);
 
+   --  The gate and descriptor controller update Armed in their protected
+   --  ownership transitions. Socket holds an accepted descriptor until the
+   --  same adoption transition moves it into the Connection.
+   type Admission_Guard (Owner : not null Server_Access) is
+     new Ada.Finalization.Limited_Controlled with record
+      Armed  : aliased Boolean := False;
+      Socket : Sockets.Socket_Type;
+   end record;
+
+   overriding procedure Finalize (Guard : in out Admission_Guard);
+
    type Upgrade_Cleanup_Guard (Item : not null access Connection) is
      new Ada.Finalization.Limited_Controlled with record
       Armed : aliased Boolean := False;
@@ -91,9 +102,10 @@ package body Flyology.IO.Connections is
 
    protected body Descriptor_Controller is
       procedure Adopt
-        (FD     : Descriptor;
-         Socket : in out Sockets.Socket_Type;
-         Owner  : Server_Access)
+        (FD            : Descriptor;
+         Socket        : in out Sockets.Socket_Type;
+         Owner         : Server_Access;
+         Cleanup_Armed : not null access Boolean)
       is
       begin
          if FD < 0
@@ -103,6 +115,7 @@ package body Flyology.IO.Connections is
            or else Current_FD >= 0
            or else Active
            or else Closing
+           or else not Cleanup_Armed.all
          then
             raise Program_Error with
               "descriptor controller already owns a resource";
@@ -114,6 +127,10 @@ package body Flyology.IO.Connections is
          Current_FD := FD;
          Current_Generation := Current_Generation + 1;
          Current_Transport := Plain_Transport;
+         --  The Connection now owns both resources. A pending abort cannot
+         --  leave the protected action until the cleanup obligation reflects
+         --  that transfer.
+         Cleanup_Armed.all := False;
       end Adopt;
 
       procedure Start_Operation
@@ -382,6 +399,18 @@ package body Flyology.IO.Connections is
       end case;
    end Finalize;
 
+   overriding procedure Finalize (Guard : in out Admission_Guard) is
+   begin
+      if Guard.Armed then
+         Guard.Owner.Release (Guard.Armed'Access);
+      end if;
+      --  Release capacity first. A fallible descriptor close cannot strand a
+      --  permit, and adoption has already moved Socket when it disarms Guard.
+      if Sockets.Is_Open (Guard.Socket) then
+         Sockets.Close_Socket (Guard.Socket);
+      end if;
+   end Finalize;
+
    overriding procedure Finalize (Guard : in out Upgrade_Cleanup_Guard) is
    begin
       if Guard.Armed then
@@ -573,15 +602,17 @@ package body Flyology.IO.Connections is
 
    procedure Reserve
      (Manager : aliased in out Server;
-      Owner   : out Server_Access)
+      Guard   : in out Admission_Guard)
    is
       Accepted : Boolean;
    begin
-      Manager.Acquire (Accepted);
+      Manager.Acquire (Accepted, Guard.Armed'Access);
       if not Accepted then
          raise Admission_Closed;
       end if;
-      Owner := Manager'Unchecked_Access;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (10);
+#end if;
    end Reserve;
 
    procedure Reserve_Interruptibly
@@ -589,7 +620,7 @@ package body Flyology.IO.Connections is
       Started : Ada.Real_Time.Time;
       Timeout : Duration;
       Token   : access Cancellation_Token;
-      Owner   : out Server_Access)
+      Guard   : in out Admission_Guard)
    is
       Result      : Flyology.Capacity.Acquire_Result;
       Acquire_FD  : Descriptor;
@@ -600,13 +631,12 @@ package body Flyology.IO.Connections is
       Interrupts  : Interrupt_Set (1 .. 1);
    begin
       loop
-         Manager.Try_Acquire (Result);
+         Manager.Try_Acquire (Result, Guard.Armed'Access);
          case Result is
             when Flyology.Capacity.Permit_Acquired =>
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
                Test_Barrier (8);
 #end if;
-               Owner := Manager'Unchecked_Access;
                return;
             when Flyology.Capacity.Gate_Closed =>
                raise Admission_Closed;
@@ -659,8 +689,7 @@ package body Flyology.IO.Connections is
       Socket  : in out Sockets.Socket_Type;
       Item    : in out Connection)
    is
-      Owner    : Server_Access;
-      Reserved : Boolean := False;
+      Guard : Admission_Guard (Manager'Unchecked_Access);
    begin
       if not Sockets.Is_Open (Socket) then
          raise Program_Error with "cannot own a closed socket";
@@ -668,21 +697,15 @@ package body Flyology.IO.Connections is
          raise Program_Error with "connection already owns a socket";
       end if;
 
-      Reserve (Manager, Owner);
-      Reserved := True;
-      begin
-         Item.Controller.Adopt
-           (Flyology.IO.Sockets.Native_Descriptor (Socket),
-            Socket,
-            Owner);
-         Reserved := False;
-      exception
-         when others =>
-            if Reserved then
-               Owner.Release;
-            end if;
-            raise;
-      end;
+      Reserve (Manager, Guard);
+      Item.Controller.Adopt
+        (Flyology.IO.Sockets.Native_Descriptor (Socket),
+         Socket,
+         Guard.Owner,
+         Guard.Armed'Access);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (12);
+#end if;
    end Take;
 
    procedure Upgrade_TLS
@@ -819,10 +842,8 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Owner    : Server_Access;
-      Socket   : Sockets.Socket_Type;
-      Reserved : Boolean := False;
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Guard   : Admission_Guard (Manager'Unchecked_Access);
       Interrupts : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
       pragma Unreferenced (Cancellation_Quantum);
@@ -830,15 +851,14 @@ package body Flyology.IO.Connections is
       if Is_Open (Item) then
          raise Program_Error with "connection already owns a socket";
       end if;
-      Reserve_Interruptibly (Manager, Started, Timeout, Token, Owner);
-      Reserved := True;
+      Reserve_Interruptibly (Manager, Started, Timeout, Token, Guard);
 
       Interrupt_Sources
-        (Owner, Token, Interrupts, Interrupt_Count);
+        (Guard.Owner, Token, Interrupts, Interrupt_Count);
 
       begin
          Flyology.IO.Sockets.Accept_Connection
-           (Listener, Socket, Address, Remaining (Started, Timeout),
+           (Listener, Guard.Socket, Address, Remaining (Started, Timeout),
             Interrupts (1 .. Interrupt_Count));
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
@@ -850,19 +870,13 @@ package body Flyology.IO.Connections is
          raise Operation_Cancelled;
       end if;
       Item.Controller.Adopt
-        (Flyology.IO.Sockets.Native_Descriptor (Socket), Socket, Owner);
-      Reserved := False;
-   exception
-      when others =>
-         if Reserved then
-            Owner.Release;
-         end if;
-         --  Capacity is released before a fallible cleanup close so a close
-         --  error cannot strand the admission permit.
-         if Sockets.Is_Open (Socket) then
-            Sockets.Close_Socket (Socket);
-         end if;
-         raise;
+        (Flyology.IO.Sockets.Native_Descriptor (Guard.Socket),
+         Guard.Socket,
+         Guard.Owner,
+         Guard.Armed'Access);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (11);
+#end if;
    end Accept_Connection;
 
    procedure Close (Item : in out Connection) is

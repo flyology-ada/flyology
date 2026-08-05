@@ -6,11 +6,16 @@ package body Flyology.Capacity is
    package Policy renames Flyology.Capacity_Policy;
 
    protected body Gate is
-      entry Acquire (Accepted : out Boolean)
+      entry Acquire
+        (Accepted      : out Boolean;
+         Cleanup_Armed : access Boolean := null)
         when Policy.Acquire_Entry_Open
           (Stopping, Active_Count, Capacity)
       is
       begin
+         if Cleanup_Armed /= null and then Cleanup_Armed.all then
+            raise Program_Error with "capacity cleanup is already armed";
+         end if;
          case Policy.Classify_Acquire
            (Stopping, Active_Count, Capacity)
          is
@@ -21,6 +26,9 @@ package body Flyology.Capacity is
                end if;
                Active_Count :=
                  Policy.Active_After_Acquire (Active_Count, Capacity);
+               if Cleanup_Armed /= null then
+                  Cleanup_Armed.all := True;
+               end if;
                Accepted := True;
             when Policy.Reject_Closed =>
                Accepted := False;
@@ -29,8 +37,14 @@ package body Flyology.Capacity is
          end case;
       end Acquire;
 
-      procedure Try_Acquire (Result : out Acquire_Result) is
+      procedure Try_Acquire
+        (Result        : out Acquire_Result;
+         Cleanup_Armed : access Boolean := null)
+      is
       begin
+         if Cleanup_Armed /= null and then Cleanup_Armed.all then
+            raise Program_Error with "capacity cleanup is already armed";
+         end if;
          case Policy.Classify_Acquire
            (Stopping, Active_Count, Capacity)
          is
@@ -41,6 +55,9 @@ package body Flyology.Capacity is
                end if;
                Active_Count :=
                  Policy.Active_After_Acquire (Active_Count, Capacity);
+               if Cleanup_Armed /= null then
+                  Cleanup_Armed.all := True;
+               end if;
                Result := Permit_Acquired;
             when Policy.Wait_For_Permit =>
                Result := Gate_Full;
@@ -49,12 +66,20 @@ package body Flyology.Capacity is
          end case;
       end Try_Acquire;
 
-      procedure Release is
+      procedure Release (Cleanup_Armed : access Boolean := null) is
       begin
+         if Cleanup_Armed /= null and then not Cleanup_Armed.all then
+            raise Program_Error with "capacity cleanup is not armed";
+         end if;
          if not Policy.Release_Allowed (Active_Count) then
             raise Program_Error with "capacity permit released twice";
          end if;
          Active_Count := Policy.Active_After_Release (Active_Count);
+         if Cleanup_Armed /= null then
+            --  Publish completion before a fallible wake. The permit is no
+            --  longer active even when signalling reports an error.
+            Cleanup_Armed.all := False;
+         end if;
          if Wake_Sources.Descriptor (Acquire_Wake) >= 0
            and then not Acquire_Signalled
          then

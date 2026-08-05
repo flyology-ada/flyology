@@ -1,13 +1,23 @@
 with Flyology;
+with Flyology.Capacity;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Connections.Testing;
 with Flyology.IO.Sockets;
+with Interfaces.C;
 
 procedure Connection_Admission_Smoke is
    package Connections renames Flyology.IO.Connections;
    package Sockets renames Flyology.IO.Sockets;
    package Testing renames Flyology.IO.Connections.Testing;
+
+   use type Flyology.Capacity.Acquire_Result;
+   use type Interfaces.C.int;
+
+   function Open_FD_Count return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_open_fd_count";
 
    type Admission_Result is
      (Pending, Accepted, Timed_Out, Cancelled, Closed, Failed);
@@ -296,7 +306,132 @@ procedure Connection_Admission_Smoke is
       end loop;
    end Run;
 
+   type Abort_Path is (Accept_Path, Take_Path);
+   type Abort_Boundary is (Permit_Boundary, Adopt_Boundary);
+
+   procedure Run_Abort_Boundary
+     (Model    : Flyology.Execution_Model;
+      Path     : Abort_Path;
+      Boundary : Abort_Boundary;
+      Shutdown : Boolean)
+   is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+   begin
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Listener, Client : Sockets.Socket_Type;
+         Listener_Address : Sockets.Endpoint;
+         Taken, Taken_Peer : Sockets.Socket_Type;
+         Point : constant Testing.Barrier_Point :=
+           (case Path is
+               when Accept_Path =>
+                 (if Boundary = Permit_Boundary
+                  then Testing.Admission_Acquired
+                  else Testing.Accept_Adopted),
+               when Take_Path =>
+                 (if Boundary = Permit_Boundary
+                  then Testing.Take_Admission_Acquired
+                  else Testing.Take_Adopted));
+      begin
+         if Path = Accept_Path then
+            Open_Listener (Listener, Listener_Address);
+            if Boundary = Adopt_Boundary then
+               Sockets.Create_Socket (Client);
+               Sockets.Connect_Socket (Client, Listener_Address);
+            end if;
+         else
+            Sockets.Create_Socket_Pair (Taken, Taken_Peer);
+         end if;
+
+         Testing.Reset_Barriers;
+         Testing.Arm (Point);
+         declare
+            task Worker is
+               pragma Task_Info (Model);
+            end Worker;
+
+            task body Worker is
+               Item : Connections.Connection;
+               Peer : Sockets.Endpoint;
+            begin
+               if Path = Accept_Path then
+                  Connections.Accept_Connection
+                    (Manager, Listener, Item, Peer, Token => null);
+               else
+                  Connections.Take (Manager, Taken, Item);
+               end if;
+            end Worker;
+         begin
+            Testing.Wait_Reached (Point);
+            if Manager.Active /= 1 then
+               raise Program_Error with
+                 "abort seam did not hold exactly one permit";
+            end if;
+            if Shutdown then
+               Manager.Request_Shutdown;
+            end if;
+            abort Worker;
+            Testing.Release (Point);
+         exception
+            when others =>
+               Testing.Release (Point);
+               abort Worker;
+               raise;
+         end;
+
+         if Shutdown then
+            Manager.Await_Drained;
+         end if;
+         if Manager.Active /= 0 then
+            raise Program_Error with "abort seam leaked a permit";
+         end if;
+         if not Shutdown then
+            declare
+               Result : Flyology.Capacity.Acquire_Result;
+            begin
+               Manager.Try_Acquire (Result);
+               if Result /= Flyology.Capacity.Permit_Acquired then
+                  raise Program_Error with
+                    "abort seam did not restore admission capacity";
+               end if;
+               Manager.Release;
+            end;
+         end if;
+
+         Close_If_Open (Taken);
+         Close_If_Open (Taken_Peer);
+         Close_If_Open (Client);
+         Close_If_Open (Listener);
+         Testing.Reset_Barriers;
+      exception
+         when others =>
+            Testing.Release (Point);
+            Close_If_Open (Taken);
+            Close_If_Open (Taken_Peer);
+            Close_If_Open (Client);
+            Close_If_Open (Listener);
+            raise;
+      end;
+      if Open_FD_Count /= Before then
+         raise Program_Error with
+           "abort seam leaked a descriptor on " & Path'Image & "/"
+           & Boundary'Image & "/" & Model'Image;
+      end if;
+   end Run_Abort_Boundary;
+
+   procedure Run_Abort_Boundaries (Model : Flyology.Execution_Model) is
+   begin
+      for Path in Abort_Path loop
+         for Boundary in Abort_Boundary loop
+            Run_Abort_Boundary (Model, Path, Boundary, Shutdown => False);
+            Run_Abort_Boundary (Model, Path, Boundary, Shutdown => True);
+         end loop;
+      end loop;
+   end Run_Abort_Boundaries;
+
 begin
    Run (Flyology.Lightweight_Task);
    Run (Flyology.Native_Task);
+   Run_Abort_Boundaries (Flyology.Lightweight_Task);
+   Run_Abort_Boundaries (Flyology.Native_Task);
 end Connection_Admission_Smoke;

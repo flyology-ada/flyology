@@ -10,7 +10,10 @@ package Flyology.IO.Connections.Testing is
       Stale_Operation_Registration,
       TLS_Session_Installed,
       Admission_Acquired,
-      Admission_Wait_Armed);
+      Admission_Wait_Armed,
+      Take_Admission_Acquired,
+      Accept_Adopted,
+      Take_Adopted);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.

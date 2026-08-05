@@ -199,9 +199,10 @@ private
    protected type Descriptor_Controller is
       --  Publish descriptor, socket, and admission ownership atomically.
       procedure Adopt
-        (FD     : Flyology.IO.Descriptor;
-         Socket : in out Flyology.IO.Sockets.Socket_Type;
-         Owner  : Server_Access);
+        (FD            : Flyology.IO.Descriptor;
+         Socket        : in out Flyology.IO.Sockets.Socket_Type;
+         Owner         : Server_Access;
+         Cleanup_Armed : not null access Boolean);
       --  Register an open generation before waiting for its exclusive lease.
       --  Close retains the borrowed sources until Try_Acquire, abandonment, or
       --  operation release resolves this registration.
