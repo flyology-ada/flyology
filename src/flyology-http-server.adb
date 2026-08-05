@@ -16,13 +16,18 @@ package body Flyology.HTTP.Server is
    use type Interfaces.Unsigned_8;
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Flyology.WebSocket_Policy.Cursor_Phase;
 
    package Chunk_Encoding renames Flyology.HTTP_Chunk_Encoding;
    package Expect_Policy renames Flyology.HTTP.Expect_Policy;
    package WebSocket_Deflate_Policy renames
      Flyology.WebSocket_Deflate_Policy;
+   package WebSocket_Policy renames Flyology.WebSocket_Policy;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
+   pragma Compile_Time_Error
+     (Max_WebSocket_Frame /= WebSocket_Policy.Max_Frame_Length,
+      "WebSocket cursor and protocol frame limits differ");
    WebSocket_Peer_EOF : exception;
    WebSocket_Coalesce_Limit : constant := 4 * 1_024;
    WebSocket_Compression_Limit : constant := 4 * 1_024;
@@ -2685,12 +2690,7 @@ package body Flyology.HTTP.Server is
 
    procedure Reset_WebSocket_Frame (Item : in out Connection) is
    begin
-      Item.WebSocket_Frame_Active := False;
-      Item.WebSocket_Frame_Opcode := 0;
-      Item.WebSocket_Frame_Final := False;
-      Item.WebSocket_Frame_Remaining := 0;
-      Item.WebSocket_Frame_Position := 0;
-      Item.WebSocket_Frame_Mask := (others => 0);
+      WebSocket_Policy.Abandon_Frame (Item.WebSocket_Frame);
       Item.WebSocket_Control_Payload := (others => 0);
    end Reset_WebSocket_Frame;
 
@@ -2974,6 +2974,19 @@ package body Flyology.HTTP.Server is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Writing_Control : Boolean := False;
 
+      function Frame_Opcode_For
+        (Value : Natural) return WebSocket_Policy.Frame_Opcode
+      is
+        (case Value is
+            when 0  => WebSocket_Policy.Continuation_Opcode,
+            when 1  => WebSocket_Policy.Text_Opcode,
+            when 2  => WebSocket_Policy.Binary_Opcode,
+            when 8  => WebSocket_Policy.Close_Opcode,
+            when 9  => WebSocket_Policy.Ping_Opcode,
+            when 10 => WebSocket_Policy.Pong_Opcode,
+            when others =>
+              raise Program_Error with "unvalidated WebSocket opcode");
+
       function Time_Left return Duration is
          Elapsed : constant Duration := Ada.Real_Time.To_Duration
            (Ada.Real_Time.Clock - Started);
@@ -3080,7 +3093,8 @@ package body Flyology.HTTP.Server is
 
       procedure Finish_Frame is
       begin
-         Reset_WebSocket_Frame (Item);
+         WebSocket_Policy.Complete_Frame (Item.WebSocket_Frame);
+         Item.WebSocket_Control_Payload := (others => 0);
       end Finish_Frame;
 
       procedure Abandon_Message is
@@ -3092,7 +3106,7 @@ package body Flyology.HTTP.Server is
          Item.WebSocket_Message_Limit := 0;
          Item.WebSocket_Control_Count := 0;
          Item.WebSocket_Message_Compressed := False;
-         Finish_Frame;
+         Reset_WebSocket_Frame (Item);
          Item.WebSocket_Receive_Active := False;
          Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
          Release_Buffered (Item);
@@ -3116,7 +3130,7 @@ package body Flyology.HTTP.Server is
       Closed := False;
       loop
          Check_Deadline;
-         if not Item.WebSocket_Frame_Active then
+         if Item.WebSocket_Frame.Phase = WebSocket_Policy.Awaiting_Header then
             Ensure_Pending (Item, 2, Ada.Real_Time.Clock, Time_Left, Token);
             declare
                Buffer : constant String := To_String (Item.Pending);
@@ -3221,31 +3235,33 @@ package body Flyology.HTTP.Server is
             end case;
             declare
                Mask_First : constant Natural := Header_Size + 1;
+               Mask : WebSocket_Policy.Mask_Key;
             begin
-               for Index in Item.WebSocket_Frame_Mask'Range loop
-                  Item.WebSocket_Frame_Mask (Index) :=
+               for Index in Mask'Range loop
+                  Mask (Index) :=
                     Ada.Streams.Stream_Element
                       (Character'Pos
                          (Element
-                            (Item.Pending, Mask_First + Natural (Index))));
+                            (Item.Pending, Mask_First + Index)));
                end loop;
+               WebSocket_Policy.Begin_Frame
+                 (Item.WebSocket_Frame,
+                  Frame_Opcode_For (Opcode),
+                  Final,
+                  WebSocket_Policy.Frame_Length (Size),
+                  Mask);
             end;
-            Item.WebSocket_Frame_Opcode := Opcode;
-            Item.WebSocket_Frame_Final := Final;
-            Item.WebSocket_Frame_Remaining := Natural (Size);
-            Item.WebSocket_Frame_Position := 0;
-            Item.WebSocket_Frame_Active := True;
             Consume (Item, Header_Size + 4);
          end if;
 
-         while Item.WebSocket_Frame_Remaining > 0 loop
+         while Item.WebSocket_Frame.Remaining > 0 loop
             if Length (Item.Pending) = 0 then
                Ensure_Pending
                  (Item, 1, Ada.Real_Time.Clock, Time_Left, Token);
             end if;
             declare
                Count : constant Natural := Natural'Min
-                 (Item.WebSocket_Frame_Remaining,
+                 (Item.WebSocket_Frame.Remaining,
                   Natural'Min (Length (Item.Pending), 16 * 1_024));
                Chunk : Ada.Streams.Stream_Element_Array
                  (1 .. Ada.Streams.Stream_Element_Offset (Count));
@@ -3259,25 +3275,23 @@ package body Flyology.HTTP.Server is
                          (Character'Pos
                             (Element (Item.Pending, Index + 1)))
                        xor Interfaces.Unsigned_8
-                         (Item.WebSocket_Frame_Mask
-                            (Ada.Streams.Stream_Element_Offset
-                               ((Item.WebSocket_Frame_Position + Index)
-                                mod 4))));
+                         (Item.WebSocket_Frame.Mask
+                            (WebSocket_Policy.Mask_Offset
+                               (Item.WebSocket_Frame, Index))));
                end loop;
                Consume (Item, Count);
-               if Item.WebSocket_Frame_Opcode >= 8 then
+               if WebSocket_Policy.Is_Control
+                 (Item.WebSocket_Frame.Opcode)
+               then
                   Item.WebSocket_Control_Payload
                     (Ada.Streams.Stream_Element_Offset
-                       (Item.WebSocket_Frame_Position + 1)
+                       (Item.WebSocket_Frame.Position + 1)
                      .. Ada.Streams.Stream_Element_Offset
-                       (Item.WebSocket_Frame_Position + Count)) := Chunk;
+                       (Item.WebSocket_Frame.Position + Count)) := Chunk;
                else
                   Flyology.Bytes.Append (Item.WebSocket_Message, Chunk);
                end if;
-               Item.WebSocket_Frame_Position :=
-                 Item.WebSocket_Frame_Position + Count;
-               Item.WebSocket_Frame_Remaining :=
-                 Item.WebSocket_Frame_Remaining - Count;
+               WebSocket_Policy.Advance (Item.WebSocket_Frame, Count);
                Resize_Buffered
                  (Item,
                   Length (Item.Pending)
@@ -3285,26 +3299,28 @@ package body Flyology.HTTP.Server is
             end;
          end loop;
 
-         Opcode := Item.WebSocket_Frame_Opcode;
-         Final := Item.WebSocket_Frame_Final;
          declare
-            Position : constant Natural := Item.WebSocket_Frame_Position;
+            Current_Opcode : constant WebSocket_Policy.Frame_Opcode :=
+              Item.WebSocket_Frame.Opcode;
+            Position : constant Natural := Item.WebSocket_Frame.Position;
+            Frame_Final : constant Boolean := Item.WebSocket_Frame.Final;
          begin
-            case Opcode is
-               when 0 =>
+            case Current_Opcode is
+               when WebSocket_Policy.Continuation_Opcode =>
                   Finish_Frame;
-                  if Final then
+                  if Frame_Final then
                      Finish_Message;
                      return;
                   end if;
-               when 1 | 2 =>
+               when WebSocket_Policy.Text_Opcode |
+                    WebSocket_Policy.Binary_Opcode =>
                   Finish_Frame;
-                  if Final then
+                  if Frame_Final then
                      Finish_Message;
                      return;
                   end if;
                   Item.WebSocket_Fragmented := True;
-               when 8 =>
+               when WebSocket_Policy.Close_Opcode =>
                   if Position = 1 then
                      Fail (1_002, "invalid WebSocket close frame");
                   elsif Position >= 2 then
@@ -3340,7 +3356,7 @@ package body Flyology.HTTP.Server is
                   Closed := True;
                   Abandon_Message;
                   return;
-               when 9 =>
+               when WebSocket_Policy.Ping_Opcode =>
                   Item.WebSocket_Control_Count :=
                     Item.WebSocket_Control_Count + 1;
                   if Item.WebSocket_Control_Count > 32 then
@@ -3354,15 +3370,13 @@ package body Flyology.HTTP.Server is
                      Time_Left, Token);
                   Writing_Control := False;
                   Finish_Frame;
-               when 10 =>
+               when WebSocket_Policy.Pong_Opcode =>
                   Item.WebSocket_Control_Count :=
                     Item.WebSocket_Control_Count + 1;
                   if Item.WebSocket_Control_Count > 32 then
                      Fail (1_008, "too many WebSocket control frames");
                   end if;
                   Finish_Frame;
-               when others =>
-                  raise Program_Error with "unreachable WebSocket opcode";
             end case;
             Resize_Buffered
               (Item,
@@ -3382,7 +3396,8 @@ package body Flyology.HTTP.Server is
          elsif Length (Item.Pending) = 0
            and then Flyology.Bytes.Length (Item.WebSocket_Message) = 0
            and then not Item.WebSocket_Fragmented
-           and then not Item.WebSocket_Frame_Active
+           and then Item.WebSocket_Frame.Phase =
+             WebSocket_Policy.Awaiting_Header
          then
             Item.WebSocket_Receive_Active := False;
             Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;

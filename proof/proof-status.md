@@ -2,7 +2,7 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #13, #14, #15, #16, #17, #18, and #19 are prevented by
+Findings #5, #12, #13, #14, #15, #16, #17, #18, and #19 are prevented by
 production-consumed SPARK units. Their assigned targeted subprogram proofs and
 fresh whole-unit widenings passed at level 1.
 The chunk encoder proof includes complete hexadecimal-digit consumption through
@@ -14,6 +14,11 @@ correctness.
 The WebSocket timeout classifier treats failed-or-terminal state as an input
 and does not prove that the I/O core sets that state, so behavioral integration
 coverage remains required.
+Finding #12 uses the production connection's persistent frame cursor. Its
+proved transitions preserve payload phase, frame identity, remaining bytes,
+absolute mask position, and the separate completion and abandonment reset
+boundaries. Focused behavioral coverage exercises the surrounding I/O paths;
+protocol I/O itself remains outside SPARK.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -36,6 +41,14 @@ coverage remains required.
       (level 1, mode all)
   - [x] `Flyology.HTTP_Chunk_Encoding.Encode`
   - [x] Whole `Flyology.HTTP_Chunk_Encoding` unit widening
+- [x] Finding #12 production-used incremental WebSocket frame cursor
+      (level 1, mode all)
+  - [x] `Flyology.WebSocket_Policy.Begin_Frame`
+  - [x] `Flyology.WebSocket_Policy.Mask_Offset`
+  - [x] `Flyology.WebSocket_Policy.Advance`
+  - [x] `Flyology.WebSocket_Policy.Complete_Frame`
+  - [x] `Flyology.WebSocket_Policy.Abandon_Frame`
+  - [x] Whole `Flyology.WebSocket_Policy` unit widening
 - [x] Finding #19 production-used WebSocket timeout retry policy
       (level 1, mode all)
   - [x] `Flyology.WebSocket_Policy.Classify_Timeout`
@@ -65,6 +78,7 @@ coverage remains required.
 - [x] Finding #5 prevention coverage
 - [x] Finding #14 prevention coverage
 - [x] Finding #16 prevention coverage
+- [x] Finding #12 prevention coverage
 - [x] Finding #19 prevention coverage
 - [x] Finding #15 prevention coverage
 - [x] Finding #17 prevention coverage
@@ -87,6 +101,27 @@ coverage remains required.
 
 ## Discovered Obligations
 
+- [x] Re-verified callers of `Begin_Frame`, `Mask_Offset`, `Advance`,
+      `Complete_Frame`, and `Abandon_Frame` contracts
+- [x] Fresh host `-f` widening for `Begin_Frame`
+- [x] Fresh host `-f` widening for `Mask_Offset`
+- [x] Fresh host `-f` widening for `Advance`
+- [x] Fresh host `-f` widening for `Complete_Frame`
+- [x] Fresh host `-f` widening for `Abandon_Frame`
+- [x] Production `Begin_Frame` caller supplies the unconstrained
+      cursor required for its discriminant-changing transition
+- [x] Production `Complete_Frame` caller supplies the
+      unconstrained cursor required for its discriminant-changing transition
+- [x] Production `Abandon_Frame` callers supply the unconstrained cursor
+      required for its discriminant-changing transition
+- [x] Widened the revised `Flyology.WebSocket_Policy` unit at level 1 and mode
+      all after the tactical subprogram proofs
+- [x] Production `Receive_WebSocket` consumes the cursor state and
+      transitions, including phase-gated header parsing
+- [x] Deterministically cover repeated mid-header and masked mid-payload
+      quantum timeouts with fragmented data and an interleaved control frame
+- [x] Re-ran the focused production build and WebSocket smoke tests after the
+      final cursor contracts
 - [ ] Re-run the application and runtime proof suites serially after integration
 - [x] Prove `Flyology.HTTP.Expect_Policy.Classify`, then widen its whole unit
 - [x] Prove `Flyology.HTTP.Route_Parameter_Policy.Advance`, then widen its

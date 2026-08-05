@@ -3880,18 +3880,30 @@ procedure HTTP_Smoke is
       Wire  : aliased Memory_Transport;
       Value : HTTP_Server.Request;
       Closed : Boolean;
-      Timed_Out : Boolean := False;
       Kind : HTTP_Server.WebSocket_Data_Kind;
       Data : Bytes.Unbounded_Bytes;
       Budget : aliased HTTP_Server.Ingress_Budget (Limit => 256);
    begin
       Wire.Input := To_Unbounded_String (Head & First & Ping & Last);
-      --  Leave the first frame's header, mask, and two payload bytes buffered,
-      --  then force the read for its final payload byte to time out.
-      Wire.First_Receive_Max := Head'Length + 6 + 2;
+      --  Retain one frame-header byte after the upgrade, then force a quantum
+      --  timeout while the header is incomplete.
+      Wire.First_Receive_Max := Head'Length + 1;
       Wire.Timeout_On_Call := 2;
       declare
          Client : HTTP_Server.Connection (Wire'Access);
+
+         procedure Expect_Quantum_Timeout is
+            Timed_Out : Boolean := False;
+         begin
+            begin
+               HTTP_Server.Receive_WebSocket
+                 (Client, Kind, Data, Closed, Max_Message => 100,
+                  Timeout => 1.0, Message_Timeout => 1.0);
+            exception
+               when Flyology.IO.Timeout_Error => Timed_Out := True;
+            end;
+            pragma Assert (Timed_Out);
+         end Expect_Quantum_Timeout;
       begin
          HTTP_Server.Configure_Ingress_Budget (Client, Budget'Access);
          HTTP_Server.Read_Request_Head
@@ -3900,16 +3912,30 @@ procedure HTTP_Smoke is
          HTTP_Server.Accept_WebSocket
            (Client, Value, Timeout => 1.0,
             Compression => HTTP_Server.Permessage_Deflate);
-         begin
-            HTTP_Server.Receive_WebSocket
-              (Client, Kind, Data, Closed, Max_Message => 100,
-               Timeout => 0.001,
-               Message_Timeout => 1.0);
-         exception
-            when Flyology.IO.Timeout_Error => Timed_Out := True;
-         end;
-         pragma Assert (Timed_Out);
+         Expect_Quantum_Timeout;
+         pragma Assert (HTTP_Server.Current (Budget).Current = 1);
+
+         --  A second timeout without another byte preserves the same partial
+         --  header and whole-message receive state.
+         Wire.Timeout_On_Call := Wire.Receive_Calls + 1;
+         Expect_Quantum_Timeout;
+         pragma Assert (HTTP_Server.Current (Budget).Current = 1);
+
+         --  Complete the header and mask plus two masked payload bytes, then
+         --  pause before the final byte. This is the historical cursor-loss
+         --  boundary: retry must retain remaining count, mask, and position.
+         Wire.Receive_Max := 7;
+         Wire.Timeout_On_Call := Wire.Receive_Calls + 2;
+         Expect_Quantum_Timeout;
          pragma Assert (HTTP_Server.Current (Budget).Current = 2);
+
+         --  Repeated payload timeouts must not reset the mask position or
+         --  permit the buffered/next payload byte to be parsed as a header.
+         Wire.Timeout_On_Call := Wire.Receive_Calls + 1;
+         Expect_Quantum_Timeout;
+         pragma Assert (HTTP_Server.Current (Budget).Current = 2);
+
+         Wire.Receive_Max := Natural'Last;
          HTTP_Server.Receive_WebSocket
            (Client, Kind, Data, Closed, Max_Message => 100, Timeout => 1.0,
             Message_Timeout => 1.0);

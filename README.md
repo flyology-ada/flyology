@@ -1928,6 +1928,16 @@ connection is still active and budget remains. This proof does not establish
 that the I/O core sets terminal state; focused behavioral tests still exercise
 control-write and message-deadline propagation plus active quantum retry.
 
+The production WebSocket receive core stores its incremental frame cursor on
+the connection and consumes proved transitions for header-to-payload entry,
+absolute masking position, payload progress, normal completion, and terminal
+abandonment. The contracts keep payload state active until an explicit reset,
+so a retryable quantum timeout cannot make the next payload byte eligible for
+header parsing. Deterministic tests pause repeatedly within the header and a
+masked fragmented payload, then resume through an interleaved control frame.
+Transport reads, protocol validation, and exception classification remain
+outside this SPARK unit.
+
 The production WebSocket DEFLATE policy also shares one proved encoder-window
 bound between extension negotiation and the fixed-window encoder. A separate
 proved decision classifies exactly one declared zero-length distance code as
