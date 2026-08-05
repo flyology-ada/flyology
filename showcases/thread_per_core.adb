@@ -157,14 +157,16 @@ begin
             Completion.Finished (False);
       end Native_Client;
 
-      task Lightweight_Client with CPU => 0 is
+      task Lightweight_Client is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Lightweight_Client;
 
       task body Lightweight_Client is
          Accepted : Boolean;
-         OK       : Boolean := Groups.Current = 0;
+         OK       : Boolean := True;
       begin
+         Topology.Cross_To_Shard (0);
+         OK := Groups.Current = 0;
          for Key in Natural range 0 .. Operations - 1 loop
             declare
                Hash   : constant Interfaces.Unsigned_64 :=
@@ -182,7 +184,7 @@ begin
             Completion.Finished (False);
       end Lightweight_Client;
 
-      task Crossing_Client with CPU => 0 is
+      task Crossing_Client is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Crossing_Client;
 
