@@ -11,6 +11,7 @@ import {
   readFile,
   readdir,
   rm,
+  rmdir,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -179,13 +180,14 @@ async function writeFixture(root, mutate) {
   }
 }
 
-function runPublisher(input, output, failure) {
+function runPublisher(input, output, failure, extraEnv = {}) {
   return spawnSync(process.execPath, [publisher, input, output], {
     cwd: projectRoot,
     encoding: "utf8",
     env: {
       ...process.env,
       ...(failure ? { FLYOLOGY_WEBSOCKET_PUBLISH_FAIL: failure } : {}),
+      ...extraEnv,
     },
   });
 }
@@ -265,6 +267,20 @@ function publicationSiblings(output) {
     join(parent, `.${name}.publish-transaction.tmp`),
     join(parent, `.${name}.publish-lock`),
   ];
+}
+
+async function removeLockAsOperator(output) {
+  const lock = publicationSiblings(output).at(-1);
+  const lockInfo = await lstat(lock);
+  assert.equal(lockInfo.isDirectory(), true);
+  assert.equal(lockInfo.isSymbolicLink(), false);
+  assert.deepEqual((await readdir(lock)).sort(), ["owner.json"]);
+  const owner = join(lock, "owner.json");
+  const ownerInfo = await lstat(owner);
+  assert.equal(ownerInfo.isFile(), true);
+  assert.equal(ownerInfo.isSymbolicLink(), false);
+  await rm(owner);
+  await rmdir(lock);
 }
 
 async function waitForPath(path, timeoutMs = 10_000) {
@@ -627,6 +643,101 @@ test("post-commit failure retains the verified new live bundle", async (t) => {
   }
 });
 
+test("live verification failure restores the fingerprinted prior bundle", async (t) => {
+  const oldInput = await mkdtemp(join(tmpdir(), "flyology-websocket-live-old-"));
+  const newInput = await mkdtemp(join(tmpdir(), "flyology-websocket-live-new-"));
+  const output = join(outputBase, `.fixture-live-verify-${process.pid}`);
+  const oldRevision = "0".repeat(40);
+  await writeFixture(oldInput, (_profile, metadata) => {
+    metadata.source.revision = oldRevision;
+  });
+  await writeFixture(newInput);
+  t.after(async () => {
+    await rm(oldInput, { recursive: true, force: true });
+    await rm(newInput, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  assert.equal(runPublisher(oldInput, output).status, 0);
+  const prior = await snapshotDirectory(output);
+
+  const failed = runPublisher(newInput, output, "live-verify");
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /live verification failed before commit; prior bundle restored/);
+  assert.doesNotMatch(failed.stderr, /verified live bundle retained/);
+  assert.deepEqual(await snapshotDirectory(output), prior);
+  await assertCompletePublishedBundle(output, oldRevision);
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
+  }
+});
+
+test("crash after invalid live rename recovers the intact prior bundle", async (t) => {
+  const oldInput = await mkdtemp(join(tmpdir(), "flyology-websocket-invalid-old-"));
+  const newInput = await mkdtemp(join(tmpdir(), "flyology-websocket-invalid-new-"));
+  const output = join(outputBase, `.fixture-invalid-crash-${process.pid}`);
+  const oldRevision = "0".repeat(40);
+  await writeFixture(oldInput, (_profile, metadata) => {
+    metadata.source.revision = oldRevision;
+  });
+  await writeFixture(newInput);
+  t.after(async () => {
+    await rm(oldInput, { recursive: true, force: true });
+    await rm(newInput, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  assert.equal(runPublisher(oldInput, output).status, 0);
+  const [, backup, , invalid, transaction, , lock] = publicationSiblings(output);
+  const crashed = runPublisher(newInput, output, "crash-after-invalid-live-rename");
+  assert.notEqual(crashed.status, 0);
+  assert.equal(await lstat(output).catch(() => null), null);
+  await assertCompletePublishedBundle(backup, oldRevision);
+  assert.notEqual(await lstat(invalid).catch(() => null), null);
+  assert.notEqual(await lstat(transaction).catch(() => null), null);
+  assert.equal(await lstat(lock).catch(() => null), null);
+
+  const restarted = runPublisher(newInput, output, "render");
+  assert.notEqual(restarted.status, 0);
+  await assertCompletePublishedBundle(output, oldRevision);
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
+  }
+});
+
+test("failed initial live verification leaves no published output", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-initial-live-"));
+  const output = join(outputBase, `.fixture-initial-live-${process.pid}`);
+  await writeFixture(input);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  const failed = runPublisher(input, output, "live-verify");
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /invalid live bundle quarantined/);
+  assert.equal(await lstat(output).catch(() => null), null);
+  const [, backup, , invalid, transaction, , lock] = publicationSiblings(output);
+  assert.equal(await lstat(backup).catch(() => null), null);
+  assert.notEqual(await lstat(invalid).catch(() => null), null);
+  assert.notEqual(await lstat(transaction).catch(() => null), null);
+  assert.equal(await lstat(lock).catch(() => null), null);
+
+  const retry = runPublisher(input, output);
+  assert.notEqual(retry.status, 0);
+  assert.match(retry.stderr, /failed initial publication is quarantined/);
+  assert.equal(await lstat(output).catch(() => null), null);
+  assert.notEqual(await lstat(invalid).catch(() => null), null);
+  assert.notEqual(await lstat(transaction).catch(() => null), null);
+});
+
 test("partial retired-backup deletion cannot roll back the committed bundle", async (t) => {
   const input = await mkdtemp(join(tmpdir(), "flyology-websocket-partial-cleanup-"));
   const output = join(outputBase, `.fixture-partial-cleanup-${process.pid}`);
@@ -802,9 +913,18 @@ test("concurrent publishers serialize every publication boundary", async (t) => 
 
     const paused = startPausedPublisher(inputA, output, point, controlRoot);
     await waitForPath(paused.ready);
+    const lock = publicationSiblings(output).at(-1);
+    const owner = JSON.parse(await readFile(join(lock, "owner.json"), "utf8"));
+    assert.deepEqual(Object.keys(owner).sort(), [
+      "nonce",
+      "output",
+      "pid",
+      "schema",
+      "startedAt",
+    ]);
     const contender = runPublisher(inputB, output);
     assert.notEqual(contender.status, 0, point);
-    assert.match(contender.stderr, /lock is held by active PID/, point);
+    assert.match(contender.stderr, /publication lock already exists for PID/, point);
     assert.match(contender.stderr, /Retry after the current publisher exits/, point);
 
     const [, backup] = publicationSiblings(output);
@@ -831,7 +951,7 @@ test("concurrent publishers serialize every publication boundary", async (t) => 
   }
 });
 
-test("a crashed lock owner is recovered only after its PID exits", async (t) => {
+test("a crashed lock owner requires exact-path operator cleanup", async (t) => {
   const input = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-crash-"));
   const control = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-control-"));
   const output = join(outputBase, `.fixture-lock-crash-${process.pid}`);
@@ -848,17 +968,105 @@ test("a crashed lock owner is recovered only after its PID exits", async (t) => 
   await waitForPath(paused.ready);
   const activeAttempt = runPublisher(input, output);
   assert.notEqual(activeAttempt.status, 0);
-  assert.match(activeAttempt.stderr, /lock is held by active PID/);
+  assert.match(activeAttempt.stderr, /publication lock already exists for PID/);
 
   paused.child.kill("SIGKILL");
   const killed = await paused.completion;
   assert.equal(killed.signal, "SIGKILL");
+  const staleAttempt = runPublisher(input, output);
+  assert.notEqual(staleAttempt.status, 0);
+  assert.match(staleAttempt.stderr, /Automatic stale-lock removal is disabled/);
+  const lock = publicationSiblings(output).at(-1);
+  assert.notEqual(await lstat(lock).catch(() => null), null);
+  assert.equal(await lstat(output).catch(() => null), null);
+
+  await removeLockAsOperator(output);
   const recovered = runPublisher(input, output);
   assert.equal(recovered.status, 0, recovered.stderr);
   await assertCompletePublishedBundle(output, "a".repeat(40));
   for (const path of publicationSiblings(output)) {
     assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
   }
+});
+
+test("three concurrent contenders cannot mutate a dead owner lock", async (t) => {
+  const oldInput = await mkdtemp(join(tmpdir(), "flyology-websocket-aba-old-"));
+  const newInput = await mkdtemp(join(tmpdir(), "flyology-websocket-aba-new-"));
+  const controlA = await mkdtemp(join(tmpdir(), "flyology-websocket-aba-a-"));
+  const controlB = await mkdtemp(join(tmpdir(), "flyology-websocket-aba-b-"));
+  const output = join(outputBase, `.fixture-lock-aba-${process.pid}`);
+  const oldRevision = "0".repeat(40);
+  await writeFixture(oldInput, (_profile, metadata) => {
+    metadata.source.revision = oldRevision;
+  });
+  await writeFixture(newInput);
+  t.after(async () => {
+    for (const path of [oldInput, newInput, controlA, controlB]) {
+      await rm(path, { recursive: true, force: true });
+    }
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  assert.equal(runPublisher(oldInput, output).status, 0);
+  await assertCompletePublishedBundle(output, oldRevision);
+
+  const lock = publicationSiblings(output).at(-1);
+  await mkdir(lock);
+  const deadOwner = `${JSON.stringify(
+    {
+      schema: 1,
+      output: basename(output),
+      pid: 99_999_999,
+      startedAt: "2026-08-05T12:00:00.000Z",
+      nonce: "22222222-2222-4222-8222-222222222222",
+    },
+    null,
+    2
+  )}\n`;
+  await writeFile(join(lock, "owner.json"), deadOwner);
+
+  const contenderA = startPausedPublisher(
+    newInput,
+    output,
+    "after-existing-lock-observation",
+    controlA
+  );
+  const contenderB = startPausedPublisher(
+    newInput,
+    output,
+    "after-existing-lock-observation",
+    controlB
+  );
+  await Promise.all([waitForPath(contenderA.ready), waitForPath(contenderB.ready)]);
+  assert.equal(await readFile(join(lock, "owner.json"), "utf8"), deadOwner);
+
+  const reacquirer = runPublisher(newInput, output);
+  assert.notEqual(reacquirer.status, 0);
+  assert.match(reacquirer.stderr, /Automatic stale-lock removal is disabled/);
+  assert.equal(reacquirer.stderr.includes(lock), true);
+  assert.match(reacquirer.stderr, /never remove its parent/);
+  assert.equal(await readFile(join(lock, "owner.json"), "utf8"), deadOwner);
+  await assertCompletePublishedBundle(output, oldRevision);
+
+  await writeFile(contenderA.release, "release\n");
+  await writeFile(contenderB.release, "release\n");
+  const [resultA, resultB] = await Promise.all([
+    contenderA.completion,
+    contenderB.completion,
+  ]);
+  assert.notEqual(resultA.status, 0);
+  assert.notEqual(resultB.status, 0);
+  assert.equal(await readFile(join(lock, "owner.json"), "utf8"), deadOwner);
+  for (const path of publicationSiblings(output).slice(0, -1)) {
+    assert.equal(await lstat(path).catch(() => null), null, `unexpected mutation: ${path}`);
+  }
+
+  await removeLockAsOperator(output);
+  const afterCleanup = runPublisher(newInput, output);
+  assert.equal(afterCleanup.status, 0, afterCleanup.stderr);
+  await assertCompletePublishedBundle(output, "a".repeat(40));
 });
 
 test("an ownership change prevents cleanup of another owner's stage", async (t) => {
@@ -901,6 +1109,10 @@ test("an ownership change prevents cleanup of another owner's stage", async (t) 
   assert.notEqual(await lstat(stage).catch(() => null), null);
   assert.notEqual(await lstat(lock).catch(() => null), null);
 
+  const blocked = runPublisher(newInput, output);
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /Automatic stale-lock removal is disabled/);
+  await removeLockAsOperator(output);
   const recovered = runPublisher(newInput, output);
   assert.equal(recovered.status, 0, recovered.stderr);
   await assertCompletePublishedBundle(output, "a".repeat(40));
@@ -909,7 +1121,7 @@ test("an ownership change prevents cleanup of another owner's stage", async (t) 
   }
 });
 
-test("malformed, symlinked, and conservatively live locks are never stolen", async (t) => {
+test("malformed, symlinked, and cross-timezone identity locks are never stolen", async (t) => {
   const input = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-guards-"));
   const target = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-target-"));
   await writeFixture(input);
@@ -918,7 +1130,7 @@ test("malformed, symlinked, and conservatively live locks are never stolen", asy
     await rm(target, { recursive: true, force: true });
   });
 
-  const cases = ["malformed", "owner-symlink", "root-symlink", "pid-reuse"];
+  const cases = ["malformed", "owner-symlink", "root-symlink", "cross-timezone"];
   for (const kind of cases) {
     const output = join(outputBase, `.fixture-lock-${kind}-${process.pid}`);
     const lock = publicationSiblings(output).at(-1);
@@ -948,23 +1160,22 @@ test("malformed, symlinked, and conservatively live locks are never stolen", asy
             pid: process.pid,
             startedAt: new Date().toISOString(),
             nonce: "00000000-0000-4000-8000-000000000000",
-            processStartIdentity: "different-process-start",
+            processStartIdentity: "ps:Tue Aug  5 12:00:00 UTC 2026",
           })}\n`
         );
       }
     }
 
-    const result = runPublisher(input, output);
-    if (kind === "pid-reuse" && result.status === 0) {
-      assert.equal(result.status, 0, result.stderr);
-      await assertCompletePublishedBundle(output, "a".repeat(40));
-      assert.equal(await lstat(lock).catch(() => null), null);
-    } else {
-      assert.notEqual(result.status, 0, kind);
-      assert.match(result.stderr, /remove only that lock directory/, kind);
-      assert.notEqual(await lstat(lock).catch(() => null), null, kind);
-      assert.equal(await lstat(output).catch(() => null), null, kind);
-    }
+    const result = runPublisher(
+      input,
+      output,
+      undefined,
+      kind === "cross-timezone" ? { TZ: "America/Vancouver", LC_ALL: "en_CA.UTF-8" } : {}
+    );
+    assert.notEqual(result.status, 0, kind);
+    assert.match(result.stderr, /Remove only that entry/, kind);
+    assert.notEqual(await lstat(lock).catch(() => null), null, kind);
+    assert.equal(await lstat(output).catch(() => null), null, kind);
   }
 });
 

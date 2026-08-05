@@ -12,7 +12,6 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,8 +26,6 @@ const outputRoot = resolve(
   process.argv[3] || join(projectRoot, "website/reports/websocket")
 );
 const expectedOutput = resolve(projectRoot, "website/reports/websocket");
-const currentProcessFallbackIdentity =
-  `self:${Math.round(Date.now() - process.uptime() * 1000)}`;
 
 const fromExpectedOutput = relative(expectedOutput, outputRoot);
 if (
@@ -931,45 +928,10 @@ async function removeSafeFile(path, label) {
 
 function lockGuidance(lockRoot) {
   return (
-    `Retry after the current publisher exits. If no publisher is running, inspect ` +
-    `${lockRoot} and remove only that lock directory after confirming its owner is gone.`
+    `Retry after the current publisher exits. If no publisher is running, inspect the ` +
+    `exact lock entry ${lockRoot}. Remove only that entry after confirming its owner is ` +
+    `gone; never remove its parent or any stage, transaction, backup, or quarantine sibling.`
   );
-}
-
-async function processStartIdentity(pid) {
-  if (process.platform === "linux") {
-    try {
-      const [statText, bootId] = await Promise.all([
-        readFile(`/proc/${pid}/stat`, "utf8"),
-        readFile("/proc/sys/kernel/random/boot_id", "utf8"),
-      ]);
-      const commandEnd = statText.lastIndexOf(")");
-      const fields = statText.slice(commandEnd + 2).trim().split(/\s+/);
-      if (commandEnd > 0 && /^[0-9]+$/.test(fields[19] || "")) {
-        return `linux:${bootId.trim()}:${fields[19]}`;
-      }
-    } catch (error) {
-      if (error.code === "ENOENT" || error.code === "ESRCH") return null;
-    }
-  }
-
-  const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-    encoding: "utf8",
-  });
-  const value = result.status === 0 ? result.stdout.trim() : "";
-  if (value) return `ps:${value}`;
-  return pid === process.pid ? currentProcessFallbackIdentity : null;
-}
-
-function processExists(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error.code === "EPERM") return true;
-    if (error.code === "ESRCH") return false;
-    throw error;
-  }
 }
 
 function validateLockOwner(owner, outputName) {
@@ -985,11 +947,7 @@ function validateLockOwner(owner, outputName) {
     typeof owner.nonce !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       owner.nonce
-    ) ||
-    typeof owner.processStartIdentity !== "string" ||
-    owner.processStartIdentity.length < 3 ||
-    owner.processStartIdentity.length > 512 ||
-    /[\r\n]/.test(owner.processStartIdentity)
+    )
   ) {
     throw new Error("publication lock owner record is malformed");
   }
@@ -1013,85 +971,49 @@ async function readLockOwner(lockRoot, outputName) {
   return validateLockOwner(owner, outputName);
 }
 
-async function recoverStaleLock(lockRoot, outputName) {
+async function rejectExistingPublicationLock(lockRoot, outputName) {
   let owner;
   try {
     owner = await readLockOwner(lockRoot, outputName);
   } catch (error) {
-    throw new Error(`${error.message}. ${lockGuidance(lockRoot)}`);
-  }
-
-  const alive = processExists(owner.pid);
-  const observedIdentity = alive ? await processStartIdentity(owner.pid) : null;
-  if (alive && (!observedIdentity || observedIdentity === owner.processStartIdentity)) {
     throw new Error(
-      `WebSocket publication lock is held by active PID ${owner.pid} since ` +
-        `${owner.startedAt}. ${lockGuidance(lockRoot)}`
+      `${error.message}. Automatic stale-lock removal is disabled to prevent ABA races. ` +
+        lockGuidance(lockRoot)
     );
   }
-
-  const current = await readLockOwner(lockRoot, outputName);
-  if (JSON.stringify(current) !== JSON.stringify(owner)) {
-    throw new Error(
-      `publication lock ownership changed during stale recovery. ${lockGuidance(lockRoot)}`
-    );
-  }
-  const quarantine = `${lockRoot}.stale-${randomUUID()}`;
-  if (await pathType(quarantine)) {
-    throw new Error(`refusing existing stale-lock quarantine: ${quarantine}`);
-  }
-  try {
-    await rename(lockRoot, quarantine);
-  } catch (error) {
-    if (error.code === "ENOENT") return;
-    throw error;
-  }
-  const quarantinedOwner = await readLockOwner(quarantine, outputName);
-  if (JSON.stringify(quarantinedOwner) !== JSON.stringify(owner)) {
-    throw new Error(
-      `stale publication lock changed while being quarantined at ${quarantine}; ` +
-        "manual inspection is required"
-    );
-  }
-  await rm(join(quarantine, "owner.json"));
-  await rmdir(quarantine);
+  await pauseWithoutOwnership("after-existing-lock-observation");
+  throw new Error(
+    `WebSocket publication lock already exists for PID ${owner.pid} since ` +
+      `${owner.startedAt}. PID liveness and process-start identity are not used to authorize ` +
+      `lock removal. Automatic stale-lock removal is disabled to prevent ABA races. ` +
+      lockGuidance(lockRoot)
+  );
 }
 
 async function acquirePublicationLock(lockRoot, outputName) {
-  const processIdentity = await processStartIdentity(process.pid);
-  if (!processIdentity) {
-    throw new Error("cannot determine publisher process start identity on this host");
+  try {
+    await mkdir(lockRoot);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    await rejectExistingPublicationLock(lockRoot, outputName);
   }
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    try {
-      await mkdir(lockRoot);
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      await recoverStaleLock(lockRoot, outputName);
-      continue;
-    }
 
-    const owner = {
-      schema: 1,
-      output: outputName,
-      pid: process.pid,
-      startedAt: new Date().toISOString(),
-      nonce: randomUUID(),
-      processStartIdentity: processIdentity,
-    };
-    try {
-      await writeFile(join(lockRoot, "owner.json"), `${JSON.stringify(owner, null, 2)}\n`, {
-        flag: "wx",
-      });
-      return { lockRoot, outputName, owner };
-    } catch (error) {
-      await rmdir(lockRoot).catch(() => {});
-      throw error;
-    }
+  const owner = {
+    schema: 1,
+    output: outputName,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    nonce: randomUUID(),
+  };
+  try {
+    await writeFile(join(lockRoot, "owner.json"), `${JSON.stringify(owner, null, 2)}\n`, {
+      flag: "wx",
+    });
+    return { lockRoot, outputName, owner };
+  } catch (error) {
+    await rmdir(lockRoot).catch(() => {});
+    throw error;
   }
-  throw new Error(
-    `could not acquire publication lock after stale recovery. ${lockGuidance(lockRoot)}`
-  );
 }
 
 async function assertLockOwnership(lock) {
@@ -1320,26 +1242,47 @@ function injectCrash(point) {
   }
 }
 
-async function pausePublication(lock, point) {
+async function injectInvalidLiveCrash(lock, paths) {
+  if (
+    process.env.FLYOLOGY_WEBSOCKET_PUBLISH_FAIL !==
+    "crash-after-invalid-live-rename"
+  ) {
+    return;
+  }
+  await assertLockOwnership(lock);
+  await rm(join(outputRoot, ".publication-manifest.json"));
+  await quarantineInvalidLive(lock, paths);
+  injectCrash("crash-after-invalid-live-rename");
+}
+
+async function pauseForTest(point, verify = async () => {}) {
   if (process.env.FLYOLOGY_WEBSOCKET_PUBLISH_PAUSE !== point) return;
   const ready = process.env.FLYOLOGY_WEBSOCKET_PUBLISH_PAUSE_READY;
   const release = process.env.FLYOLOGY_WEBSOCKET_PUBLISH_PAUSE_RELEASE;
   if (!ready || !release) {
     throw new Error("publication pause requires ready and release control paths");
   }
-  await assertLockOwnership(lock);
+  await verify();
   await writeFile(ready, `${JSON.stringify({ schema: 1, point, pid: process.pid })}\n`, {
     flag: "wx",
   });
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (await pathType(release)) {
-      await assertLockOwnership(lock);
+      await verify();
       return;
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
   throw new Error(`timed out waiting for publication pause release at ${point}`);
+}
+
+async function pauseWithoutOwnership(point) {
+  await pauseForTest(point);
+}
+
+async function pausePublication(lock, point) {
+  await pauseForTest(point, () => assertLockOwnership(lock));
 }
 
 async function removeOneBackupFile(lock, root, directory = root) {
@@ -1433,6 +1376,10 @@ async function restoreRollbackBackup(lock, paths, transaction) {
     await quarantineInvalidLive(lock, paths);
   }
   await renameOwned(lock, paths.backupRoot, outputRoot);
+  const restoredFingerprint = await fingerprintDirectory(outputRoot);
+  if (restoredFingerprint !== transaction.backupFingerprint) {
+    throw new Error("restored publication output differs from the verified rollback backup");
+  }
   await removeOwnedDirectory(lock, paths.stageRoot, "abandoned publication stage");
   await removeOwnedDirectory(lock, paths.invalidRoot, "invalid publication quarantine");
   await removeOwnedFile(lock, paths.transactionPath, "publication transaction");
@@ -1491,6 +1438,18 @@ async function recoverPublication(lock, paths, loaded, provenance) {
     } else if (transaction.backupFingerprint !== null) {
       await restoreRollbackBackup(lock, paths, transaction);
     } else {
+      if (
+        await requireSafeDirectory(
+          paths.invalidRoot,
+          "invalid publication quarantine",
+          true
+        )
+      ) {
+        throw new Error(
+          `failed initial publication is quarantined at ${paths.invalidRoot}; ` +
+            `the transaction marker is retained for operator inspection`
+        );
+      }
       await removeOwnedFile(lock, paths.transactionPath, "publication transaction");
       await removeOwnedDirectory(lock, paths.stageRoot, "abandoned publication stage");
     }
@@ -1611,7 +1570,8 @@ async function publishBundle(loaded, provenance) {
     await recoverPublication(lock, paths, loaded, provenance);
 
     let backedUp = false;
-    let committed = false;
+    let liveRenamed = false;
+    let liveVerified = false;
     let transaction = null;
     try {
       await renderBundle(lock, paths.stageRoot, loaded, provenance);
@@ -1640,12 +1600,15 @@ async function publishBundle(loaded, provenance) {
       injectFailure("swap-after-backup");
       injectCrash("crash-after-backup");
       await renameOwned(lock, paths.stageRoot, outputRoot);
-      committed = true;
+      liveRenamed = true;
+      injectFailure("live-verify");
+      await injectInvalidLiveCrash(lock, paths);
       await verifyBundle(outputRoot, loaded, provenance);
       const liveFingerprint = await fingerprintDirectory(outputRoot);
       if (liveFingerprint !== stageFingerprint) {
         throw new Error("published live bundle differs from the verified staging bundle");
       }
+      liveVerified = true;
       await pausePublication(lock, "after-commit");
       injectFailure("swap-after-publish");
       injectCrash("crash-after-commit");
@@ -1658,7 +1621,7 @@ async function publishBundle(loaded, provenance) {
     } catch (error) {
       if (error.simulatedPublicationCrash) throw error;
       const rollbackErrors = [];
-      if (committed) {
+      if (liveVerified) {
         try {
           if (backedUp) {
             await retireCommittedBackup(lock, paths);
@@ -1679,6 +1642,41 @@ async function publishBundle(loaded, provenance) {
           );
         }
         throw committedError;
+      }
+
+      if (liveRenamed) {
+        let restoredPrior = false;
+        try {
+          if (backedUp) {
+            await restoreRollbackBackup(lock, paths, transaction);
+            backedUp = false;
+            restoredPrior = true;
+          } else {
+            await quarantineInvalidLive(lock, paths);
+          }
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+          if (await requireSafeDirectory(outputRoot, "unverified live output", true)) {
+            try {
+              await quarantineInvalidLive(lock, paths);
+            } catch (quarantineError) {
+              rollbackErrors.push(quarantineError);
+            }
+          }
+        }
+        const verificationError = new Error(
+          restoredPrior
+            ? `live verification failed before commit; prior bundle restored: ${error.message}`
+            : `live verification failed before commit; invalid live bundle quarantined and ` +
+                `transaction evidence retained: ${error.message}`
+        );
+        if (rollbackErrors.length) {
+          throw new AggregateError(
+            [verificationError, ...rollbackErrors],
+            "WebSocket live verification failed and recovery was incomplete"
+          );
+        }
+        throw verificationError;
       }
 
       try {
