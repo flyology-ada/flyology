@@ -99,6 +99,7 @@ flyology-counter_policy_smoke
 flyology-http_chunk_encoding-smoke
 flyology-http-expect_policy-smoke
 flyology-http-route_parameter_policy-smoke
+flyology-structured_server_policy-smoke
 flyology-rate_limit_policy_smoke
 flyology-websocket_policy-smoke
 flyology-websocket_deflate_policy_smoke

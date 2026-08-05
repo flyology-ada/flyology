@@ -2,9 +2,13 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #12, #13, #14, #15, #16, #17, #18, and #19 are prevented by
+Findings #5, #10, #12, #13, #14, #15, #16, #17, #18, and #19 are prevented by
 production-consumed SPARK units. Their assigned targeted subprogram proofs and
 fresh whole-unit widenings passed at level 1.
+Finding #10 proves only that the Ada listener descriptor token is consumed
+after the imported close function returns. It does not model `close(2)`, its
+return semantics, or descriptor reuse; focused fault-enabled coverage exercises
+that boundary in both task lanes.
 The finding #6 fix consumes the pre-existing proved
 `Flyology.Time_Math.To_Nanoseconds`; this follow-up required no new policy unit.
 The chunk encoder proof includes complete hexadecimal-digit consumption through
@@ -41,6 +45,10 @@ warning, assumption, justified check, or unproved check.
 
 - [x] Pre-change application policy suite (level 1, mode all)
 - [x] Pre-change runtime scheduling policy suite (level 1, mode all)
+- [x] Finding #10 production-used listener close-attempt ownership transition
+      (level 1, mode all)
+  - [x] `Flyology.Structured_Server_Policy.Consume_After_Close_Attempt`
+  - [x] Whole `Flyology.Structured_Server_Policy` unit widening
 - [x] Finding #1 production-used deterministic poller batch policy
       (level 1, mode all; partial prevention boundary)
   - [x] `System.Flyology.Poller_Policy.Plan_Batch`
@@ -105,12 +113,13 @@ warning, assumption, justified check, or unproved check.
 - [x] Finding #13 prevention coverage
 - [x] Finding #18 missing-distance prevention coverage
 - [x] Finding #1 deterministic poller-policy boundary
+- [x] Finding #10 listener close-attempt ownership boundary
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
      It should update this section as it works. -->
 
-- [ ] Finding #10 listener descriptor ownership after a close attempt
+- None.
 
 ## Not Started
 <!-- Whenever a subprogram is added (due to refactoring) or discovered
@@ -150,6 +159,14 @@ warning, assumption, justified check, or unproved check.
 - [x] Prove finding #1 `Poller_Policy.After_Batch` at targeted subprogram scope
 - [x] Cover finding #1 `Poller_Policy.After_Drain` in the whole-unit widening
 - [x] Widen finding #1 through the whole `Poller_Policy` unit
+- [x] Production listener finalizer consumes
+      `Consume_After_Close_Attempt` after the imported close returns
+- [x] Boundary tests cover descriptor zero, the descriptor upper bound, and a
+      close failure followed by descriptor-number reuse in both task lanes
+- [x] Fresh targeted proof of `Consume_After_Close_Attempt` at level 1 and
+      mode all
+- [x] Fresh whole-unit widening of `Flyology.Structured_Server_Policy` at
+      level 1 and mode all
 - [x] Linux `Wait_Batch` consumes the bounded batch budgets and persistent
       file-drain state transitions
 - [x] Boundary tests cover a consumed wake with a full 64-event epoll batch,

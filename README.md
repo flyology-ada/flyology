@@ -1901,6 +1901,12 @@ pools likewise consume proved start, completion classification, worker join,
 and terminal-state decisions. Resource destruction, task activation,
 protected-object mutual exclusion, and provider calls remain outside SPARK.
 
+Structured listener cleanup also consumes a proved descriptor-token transition
+after the imported close function returns: the token becomes invalid before a
+reported close error can reach another cleanup path. This proves only the Ada
+ownership-state update. It does not model `close(2)`, its return semantics, or
+descriptor reuse; the fault-enabled cross-lane reuse test covers that boundary.
+
 The scheduler policy unit proves deadline classification and safe calculation
 of the next poll timeout. It also proves earliest-deadline selection,
 maintenance cadence, dispatch-counter safety, and the distinction between

@@ -1,11 +1,24 @@
---  Internal, proved lifecycle decisions for structured servers. Task
---  creation, failure text, cancellation sources, and listener ownership stay
---  in the generic server implementation that consumes these decisions.
+with Interfaces.C;
+
+--  Internal, proved lifecycle and ownership decisions for structured servers.
+--  Task creation, failure text, cancellation sources, and system calls stay in
+--  the generic server implementation that consumes these decisions.
 private package Flyology.Structured_Server_Policy
   with Preelaborate,
        SPARK_Mode
 is
    --  @exclude Internal proof policy, not part of the public API.
+
+   use type Interfaces.C.int;
+
+   --  Consume the listener descriptor token after one close attempt returns.
+   --  This transition neither models close(2) nor interprets its result.
+   --  @param Value Descriptor token whose closing ownership is consumed
+   procedure Consume_After_Close_Attempt
+     (Value : in out Interfaces.C.int)
+   with Global => null,
+        Pre    => Value /= Interfaces.C.int (-1),
+        Post   => Value = Interfaces.C.int (-1);
 
    --  Lifecycle phase of one structured server invocation.
    --  @enum Idle Serve has not started

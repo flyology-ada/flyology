@@ -76,7 +76,7 @@ package body Flyology.IO.Structured_Servers is
          Test_Barrier (4);
 #end if;
          Item.Result.all := C_Close_Listener (Item.Value);
-         Item.Value := Invalid_Descriptor;
+         Policy.Consume_After_Close_Attempt (Item.Value);
       end if;
    end Finalize;
 

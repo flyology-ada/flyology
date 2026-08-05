@@ -1,6 +1,13 @@
 package body Flyology.Structured_Server_Policy
   with SPARK_Mode
 is
+   procedure Consume_After_Close_Attempt
+     (Value : in out Interfaces.C.int)
+   is
+   begin
+      Value := -1;
+   end Consume_After_Close_Attempt;
+
    function Begin_Allowed
      (Phase         : Run_Phase;
       Serve_Started : Boolean) return Boolean
