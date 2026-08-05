@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { basename, join, relative, resolve, sep } from "node:path";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   requireConsistentRunMetadata,
@@ -23,10 +33,6 @@ if (
   console.error(`refusing output outside WebSocket reports: ${outputRoot}`);
   process.exit(2);
 }
-
-const environment = JSON.parse(
-  await readFile(join(projectRoot, "tests/autobahn/run-environment.json"), "utf8")
-);
 
 const profiles = [
   {
@@ -69,7 +75,7 @@ const profiles = [
     invocationLane: "lightweight",
     config: "tests/autobahn/fuzzingclient-wss.json",
     transportMode: "tls",
-    transport: `WSS via ${environment.tlsProvider}`,
+    transport: "WSS",
     scope: "RFC-focused over TLS",
     summary:
       "The framing profile after a nonblocking OpenSSL server handshake.",
@@ -84,7 +90,7 @@ const profiles = [
     invocationLane: "native",
     config: "tests/autobahn/fuzzingclient-wss-native.json",
     transportMode: "tls",
-    transport: `WSS via ${environment.tlsProvider}`,
+    transport: "WSS",
     scope: "RFC-focused over TLS",
     summary:
       "The same secure framing profile through an ordinary native task.",
@@ -157,7 +163,7 @@ const profiles = [
     invocationLane: "lightweight",
     config: "tests/autobahn/fuzzingclient-compression-wss.json",
     transportMode: "tls",
-    transport: `WSS via ${environment.tlsProvider} with permessage-deflate`,
+    transport: "WSS with permessage-deflate",
     scope: "RFC 7692 sections 12–13 over TLS",
     summary:
       "The compression profile after a nonblocking OpenSSL server handshake.",
@@ -172,7 +178,7 @@ const profiles = [
     invocationLane: "native",
     config: "tests/autobahn/fuzzingclient-compression-wss-native.json",
     transportMode: "tls",
-    transport: `WSS via ${environment.tlsProvider} with permessage-deflate`,
+    transport: "WSS with permessage-deflate",
     scope: "RFC 7692 sections 12–13 over TLS",
     summary:
       "The same secure compression profile through an ordinary native task.",
@@ -217,7 +223,7 @@ const profiles = [
     invocationLane: "lightweight",
     config: "tests/autobahn/fuzzingclient-performance-wss.json",
     transportMode: "tls",
-    transport: `WSS via ${environment.tlsProvider}`,
+    transport: "WSS",
     scope: "Section 9.7–9.8 timing over TLS",
     summary:
       "The timing probes after a nonblocking OpenSSL server handshake.",
@@ -232,12 +238,20 @@ const profiles = [
     invocationLane: "native",
     config: "tests/autobahn/fuzzingclient-performance-wss-native.json",
     transportMode: "tls",
-    transport: `WSS via ${environment.tlsProvider}`,
+    transport: "WSS",
     scope: "Section 9.7–9.8 timing over TLS",
     summary:
       "The same secure timing profile through an ordinary native task.",
   },
 ];
+
+function requireEqual(actual, expected, context) {
+  if (actual !== expected) {
+    throw new Error(
+      `${context}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+    );
+  }
+}
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -416,8 +430,15 @@ async function loadProfile(profile) {
   cases.sort(compareCaseIds);
   if (!cases.length) throw new Error(`no Autobahn cases found in ${directory}`);
   requirePassingVerdicts(profile, cases);
+  const transport =
+    runMetadata.transport === "tls"
+      ? `WSS via ${runMetadata.tls.version}${
+          profile.kind === "compression" ? " with permessage-deflate" : ""
+        }`
+      : profile.transport;
   const loaded = {
     ...profile,
+    transport,
     cases,
     counts: countStatuses(cases),
     date: reportDate(cases, runMetadata),
@@ -489,7 +510,7 @@ function siteFooter(depth) {
   const prefix = "../".repeat(depth);
   return `    <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology is experimental. This dated report describes one reproducible conformance run.</span>
+        <span>Flyology is experimental. This dated report bundle records a bounded conformance campaign.</span>
         <div class="footer-links"><a href="${prefix}journal/">Journal</a><a href="${prefix}guide/http/">HTTP guide</a><a href="${prefix}architecture/">Architecture</a><a href="${prefix}api/">API reference</a></div>
       </div>
     </footer>
@@ -713,6 +734,8 @@ function caseRow(item) {
 
 function performanceSummary(profile) {
   if (profile.kind !== "performance") return "";
+  const environment = profile.runMetadata.environment;
+  const toolchain = profile.runMetadata.toolchain;
   const maximum = profile.performance.maximumMs;
   const rows = profile.performance.points
     .map((point) => {
@@ -752,13 +775,14 @@ ${rows}
           <h2 id="equipment-title">One host, recorded with the observation.</h2>
         </div>
         <dl>
-          <div><dt>Host</dt><dd>${escapeHTML(environment.host)}</dd></div>
-          <div><dt>Processor</dt><dd>${escapeHTML(environment.chip)}, ${escapeHTML(environment.cpu)}</dd></div>
-          <div><dt>Memory</dt><dd>${escapeHTML(environment.memory)}</dd></div>
-          <div><dt>System</dt><dd>${escapeHTML(environment.os)}, ${escapeHTML(environment.architecture)}</dd></div>
-          <div><dt>Toolchain</dt><dd>${escapeHTML(environment.compiler)}, ${escapeHTML(environment.alire)}</dd></div>
-          <div><dt>Build</dt><dd>${escapeHTML(environment.buildProfile)}, ${escapeHTML(environment.optimization)}</dd></div>
-          <div><dt>Test client</dt><dd>${escapeHTML(environment.testClient)}</dd></div>
+          <div><dt>Processor</dt><dd>${escapeHTML(environment.cpu.model)}, ${environment.cpu.logicalCount} logical CPUs</dd></div>
+          <div><dt>Memory</dt><dd>${(environment.memoryBytes / 1_073_741_824).toFixed(1)} GiB</dd></div>
+          <div><dt>System</dt><dd>${escapeHTML(environment.os.platform)} ${escapeHTML(environment.os.release)}, ${escapeHTML(environment.os.architecture)}</dd></div>
+          <div><dt>Toolchain</dt><dd>${escapeHTML(toolchain.gnat)}, ${escapeHTML(toolchain.alire)}</dd></div>
+          <div><dt>Build</dt><dd>${escapeHTML(profile.runMetadata.build.libraryProfileSource)}, ${escapeHTML(profile.runMetadata.build.libraryOptimization)} library and ${escapeHTML(profile.runMetadata.build.harnessOptimization)} harness</dd></div>
+          <div><dt>Test client</dt><dd>Autobahn ${escapeHTML(profile.runMetadata.autobahn.suiteVersion)}, ${escapeHTML(profile.runMetadata.autobahn.platform)}, <code>${escapeHTML(profile.runMetadata.autobahn.imageDigest.slice(0, 19))}…</code></dd></div>
+          ${profile.runMetadata.tls ? `<div><dt>TLS</dt><dd>${escapeHTML(profile.runMetadata.tls.provider)}, ${escapeHTML(profile.runMetadata.tls.version)}; module digests recorded in JSON</dd></div>` : ""}
+          <div><dt>Privacy</dt><dd>Hostname and filesystem paths intentionally omitted.</dd></div>
         </dl>
       </section>`;
 }
@@ -856,6 +880,313 @@ function normalizedCases(profile) {
   });
 }
 
+function inside(root, path) {
+  const fromRoot = relative(root, path);
+  return fromRoot === "" || (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`));
+}
+
+async function pathType(path) {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function requireSafeDirectory(path, label, allowMissing = false) {
+  const value = await pathType(path);
+  if (!value && allowMissing) return false;
+  if (!value) throw new Error(`${label} does not exist: ${path}`);
+  if (value.isSymbolicLink() || !value.isDirectory()) {
+    throw new Error(`${label} must be an ordinary directory: ${path}`);
+  }
+  return true;
+}
+
+async function removeSafeDirectory(path, label) {
+  if (!(await requireSafeDirectory(path, label, true))) return;
+  await rm(path, { recursive: true });
+}
+
+async function requireSafePublicationTargets(stageRoot, backupRoot) {
+  const parent = dirname(outputRoot);
+  await requireSafeDirectory(parent, "publication parent");
+  if ((await realpath(parent)) !== parent) {
+    throw new Error(`publication parent traverses a symbolic link: ${parent}`);
+  }
+  await requireSafeDirectory(outputRoot, "publication output", true);
+  await requireSafeDirectory(stageRoot, "publication stage", true);
+  await requireSafeDirectory(backupRoot, "publication backup", true);
+}
+
+async function walkBundle(root, directory = root) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`published bundle contains a symbolic link: ${relative(root, path)}`);
+    }
+    if (entry.isDirectory()) files.push(...(await walkBundle(root, path)));
+    else if (entry.isFile()) files.push(relative(root, path).split(sep).join("/"));
+    else throw new Error(`published bundle contains a special file: ${relative(root, path)}`);
+  }
+  return files.sort();
+}
+
+function htmlIds(html) {
+  return new Set(
+    Array.from(
+      html.matchAll(/\s(?:id|name)=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi),
+      (match) => match[1] || match[2] || match[3]
+    )
+  );
+}
+
+function localReferences(html) {
+  return Array.from(
+    html.matchAll(/\s(?:href|src)=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi),
+    (match) => match[1] || match[2] || match[3]
+  ).filter(
+    (value) =>
+      !/^(?:[a-z]+:|\/\/)/i.test(value) &&
+      !value.startsWith("data:") &&
+      !value.startsWith("javascript:")
+  );
+}
+
+async function resolvePublishedLink(stageRoot, sourceRelative, reference) {
+  const websiteRoot = resolve(projectRoot, "website");
+  const virtualSource = join(expectedOutput, sourceRelative);
+  const [rawPath, fragment] = reference.split("#", 2);
+  const decoded = decodeURIComponent(rawPath || "");
+  const virtualTarget = decoded
+    ? normalize(resolve(dirname(virtualSource), decoded))
+    : virtualSource;
+  if (!inside(websiteRoot, virtualTarget)) {
+    throw new Error(`${sourceRelative}: link escapes the website: ${reference}`);
+  }
+
+  const apiRoot = join(websiteRoot, "api");
+  if (inside(apiRoot, virtualTarget)) return;
+
+  let actualTarget;
+  if (inside(expectedOutput, virtualTarget)) {
+    actualTarget = join(stageRoot, relative(expectedOutput, virtualTarget));
+  } else {
+    const brandRoot = join(websiteRoot, "assets/brand");
+    actualTarget = inside(brandRoot, virtualTarget)
+      ? join(projectRoot, "assets/brand", relative(brandRoot, virtualTarget))
+      : virtualTarget;
+  }
+
+  let info;
+  try {
+    info = await stat(actualTarget);
+    if (info.isDirectory()) {
+      actualTarget = join(actualTarget, "index.html");
+      info = await stat(actualTarget);
+    }
+  } catch {
+    throw new Error(`${sourceRelative}: missing link target: ${reference}`);
+  }
+  if (!info.isFile()) {
+    throw new Error(`${sourceRelative}: link target is not a file: ${reference}`);
+  }
+  if (fragment && actualTarget.endsWith(".html")) {
+    const targetHtml = await readFile(actualTarget, "utf8");
+    if (!htmlIds(targetHtml).has(decodeURIComponent(fragment))) {
+      throw new Error(`${sourceRelative}: missing link fragment: ${reference}`);
+    }
+  }
+}
+
+async function verifyBundle(root, loaded, provenance) {
+  const expectedFiles = [".publication-manifest.json", "index.html"];
+  for (const profile of profiles) {
+    expectedFiles.push(`${profile.slug}/cases.json`, `${profile.slug}/index.html`);
+  }
+  expectedFiles.sort();
+  const actualFiles = await walkBundle(root);
+  if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
+    throw new Error(
+      `published bundle file set is incomplete: expected ${JSON.stringify(expectedFiles)}, ` +
+        `got ${JSON.stringify(actualFiles)}`
+    );
+  }
+
+  const manifest = JSON.parse(
+    await readFile(join(root, ".publication-manifest.json"), "utf8")
+  );
+  requireEqual(manifest.schema, 1, "publication manifest schema");
+  requireEqual(manifest.revision, provenance.source.revision, "publication revision");
+  requireEqual(
+    JSON.stringify(manifest.profiles),
+    JSON.stringify(profiles.map((profile) => profile.slug)),
+    "publication profile list"
+  );
+
+  for (const profile of loaded) {
+    const casesPath = join(root, profile.slug, "cases.json");
+    const published = JSON.parse(await readFile(casesPath, "utf8"));
+    requireEqual(published.generatedFrom, profile.slug, `${profile.slug} generatedFrom`);
+    requireEqual(published.revision, profile.runMetadata.source.revision, `${profile.slug} revision`);
+    validateRunMetadata(
+      published.runMetadata,
+      {
+        name: profile.invocationProfile,
+        lane: profile.invocationLane,
+        report: profile.slug,
+        config: profile.config,
+        transport: profile.transportMode,
+      },
+      `${profile.slug} published run metadata`
+    );
+    if (!Array.isArray(published.cases) || published.cases.length !== profile.cases.length) {
+      throw new Error(`${profile.slug} published case count is inconsistent`);
+    }
+  }
+
+  for (const path of actualFiles.filter((path) => path.endsWith(".html"))) {
+    const html = await readFile(join(root, path), "utf8");
+    if (!/<html\b[^>]*\blang="en"/i.test(html)) {
+      throw new Error(`${path}: missing html lang`);
+    }
+    if (!/<meta\b[^>]*\bname="viewport"/i.test(html)) {
+      throw new Error(`${path}: missing viewport metadata`);
+    }
+    for (const reference of localReferences(html)) {
+      await resolvePublishedLink(root, path, reference);
+    }
+  }
+}
+
+function injectFailure(point) {
+  if (process.env.FLYOLOGY_WEBSOCKET_PUBLISH_FAIL === point) {
+    throw new Error(`forced WebSocket publication failure at ${point}`);
+  }
+}
+
+async function renderBundle(root, loaded, provenance) {
+  await mkdir(root);
+  injectFailure("render");
+  await writeFile(join(root, "index.html"), overallPage(loaded, provenance));
+  injectFailure("write");
+
+  for (const profile of loaded) {
+    const directory = join(root, profile.slug);
+    await mkdir(directory);
+    await writeFile(join(directory, "index.html"), profilePage(profile, provenance));
+    await writeFile(
+      join(directory, "cases.json"),
+      JSON.stringify(
+        {
+          generatedFrom: basename(join(inputRoot, profile.slug)),
+          suite: `Autobahn ${provenance.autobahn.suiteVersion}`,
+          imageDigest: provenance.autobahn.imageDigest,
+          revision: provenance.source.revision,
+          profile: profile.title,
+          transport: profile.transport,
+          date: profile.date.iso,
+          runMetadata: profile.runMetadata,
+          cases: normalizedCases(profile),
+        },
+        null,
+        2
+      ) + "\n"
+    );
+  }
+  await writeFile(
+    join(root, ".publication-manifest.json"),
+    JSON.stringify(
+      {
+        schema: 1,
+        revision: provenance.source.revision,
+        profiles: profiles.map((profile) => profile.slug),
+      },
+      null,
+      2
+    ) + "\n"
+  );
+}
+
+async function publishBundle(loaded, provenance) {
+  const parent = dirname(outputRoot);
+  const name = basename(outputRoot);
+  const stageRoot = join(parent, `.${name}.publish-stage`);
+  const backupRoot = join(parent, `.${name}.publish-backup`);
+  await requireSafePublicationTargets(stageRoot, backupRoot);
+
+  const backupExists = await requireSafeDirectory(
+    backupRoot,
+    "stale publication backup",
+    true
+  );
+  const outputExists = await requireSafeDirectory(
+    outputRoot,
+    "publication output",
+    true
+  );
+  if (backupExists && !outputExists) {
+    await rename(backupRoot, outputRoot);
+  } else if (backupExists) {
+    try {
+      await verifyBundle(outputRoot, loaded, provenance);
+    } catch (error) {
+      throw new Error(
+        `refusing to remove stale publication backup because the live bundle ` +
+          `cannot be verified: ${error.message}`
+      );
+    }
+    await removeSafeDirectory(backupRoot, "stale publication backup");
+  }
+  await removeSafeDirectory(stageRoot, "stale publication stage");
+
+  let backedUp = false;
+  let published = false;
+  try {
+    await renderBundle(stageRoot, loaded, provenance);
+    injectFailure("verify");
+    await verifyBundle(stageRoot, loaded, provenance);
+
+    if (await requireSafeDirectory(outputRoot, "publication output", true)) {
+      await rename(outputRoot, backupRoot);
+      backedUp = true;
+    }
+    injectFailure("swap-after-backup");
+    await rename(stageRoot, outputRoot);
+    published = true;
+    injectFailure("swap-after-publish");
+    if (backedUp) {
+      await removeSafeDirectory(backupRoot, "publication backup");
+      backedUp = false;
+    }
+  } catch (error) {
+    const rollbackErrors = [];
+    try {
+      if (published) await removeSafeDirectory(outputRoot, "failed publication output");
+      if (backedUp) {
+        await rename(backupRoot, outputRoot);
+        backedUp = false;
+      }
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    try {
+      await removeSafeDirectory(stageRoot, "failed publication stage");
+    } catch (cleanupError) {
+      rollbackErrors.push(cleanupError);
+    }
+    if (rollbackErrors.length) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "WebSocket publication failed and rollback was incomplete"
+      );
+    }
+    throw error;
+  }
+}
+
 const loaded = [];
 for (const profile of profiles) loaded.push(await loadProfile(profile));
 const provenance = requireConsistentRunMetadata(
@@ -865,33 +1196,7 @@ const provenance = requireConsistentRunMetadata(
   }))
 );
 
-await rm(outputRoot, { recursive: true, force: true });
-await mkdir(outputRoot, { recursive: true });
-await writeFile(join(outputRoot, "index.html"), overallPage(loaded, provenance));
-
-for (const profile of loaded) {
-  const directory = join(outputRoot, profile.slug);
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "index.html"), profilePage(profile, provenance));
-  await writeFile(
-    join(directory, "cases.json"),
-    JSON.stringify(
-      {
-        generatedFrom: basename(join(inputRoot, profile.slug)),
-        suite: `Autobahn ${provenance.autobahn.suiteVersion}`,
-        imageDigest: provenance.autobahn.imageDigest,
-        revision: provenance.source.revision,
-        profile: profile.title,
-        transport: profile.transport,
-        date: profile.date.iso,
-        runMetadata: profile.runMetadata,
-        cases: normalizedCases(profile),
-      },
-      null,
-      2
-    ) + "\n"
-  );
-}
+await publishBundle(loaded, provenance);
 
 console.log(
   `Published ${loaded.reduce((sum, profile) => sum + profile.cases.length, 0)} case records to ${outputRoot}`

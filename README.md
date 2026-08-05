@@ -1344,8 +1344,9 @@ runner in `scripts/websocket-conformance.sh`. The maintained
 records the tested profiles, limits, RFC 7692 compression, per-lane results,
 the OpenSSL-backed WSS campaign, and the release/-O3 build record attached to
 the timing profiles. The runner now records source, profile/config, image, and
-build provenance beside every raw profile; the publisher requires a complete,
-consistent 14-profile set. A
+observed sanitized environment provenance beside every raw profile after a
+post-verdict source recapture; the publisher requires a complete, consistent
+14-profile set and replaces reports through a verified staging swap. A
 [published case browser](https://flyology.org/reports/websocket/) retains the
 individual verdicts, test equipment, and separate section 9 timing observations
 for each lane and transport in the website's visual system.

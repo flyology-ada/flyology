@@ -7,6 +7,7 @@ profile=${1:-core}
 lane=${2:-lightweight}
 port=${FLYOLOGY_WEBSOCKET_PORT:-18081}
 image=${FLYOLOGY_AUTOBAHN_IMAGE:-crossbario/autobahn-testsuite@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074}
+tls_library_directory=${FLYOLOGY_OPENSSL_LIBRARY_DIR:-}
 transport=plain
 
 case "$profile:$lane" in
@@ -84,17 +85,24 @@ if [ "$port" != 18081 ]; then
     "FLYOLOGY_WEBSOCKET_PORT currently must be 18081 (the pinned specs use it)" >&2
   exit 2
 fi
+if [ "$transport" = tls ] && [ -z "$tls_library_directory" ]; then
+  printf '%s\n' \
+    "TLS profiles require FLYOLOGY_OPENSSL_LIBRARY_DIR so module identity can be recorded" >&2
+  exit 2
+fi
 
 report_dir="$project_root/build/autobahn/$report_name"
 server_log="$report_dir/server.log"
 suite_log="$report_dir/autobahn.log"
 server="$project_root/tests/bin/autobahn/websocket_conformance_server"
+initial_metadata="$report_dir/.run-metadata.initial.json"
+final_metadata="$report_dir/run-metadata.json"
 server_pid=
 
 mkdir -p "$report_dir"
 find "$report_dir" -type f -delete
-node "$project_root/scripts/websocket-run-provenance.mjs" capture \
-  "$report_dir/run-metadata.json" \
+node "$project_root/scripts/websocket-run-provenance.mjs" begin \
+  "$initial_metadata" \
   "$profile" \
   "$lane" \
   "$report_name" \
@@ -133,7 +141,7 @@ FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=1 \
 "$server" "$lane" "$port" 32 "$transport" \
   "$project_root/tests/fixtures/tls/server-cert.pem" \
   "$project_root/tests/fixtures/tls/server-key.pem" \
-  "${FLYOLOGY_OPENSSL_LIBRARY_DIR:-}" >"$server_log" 2>&1 &
+  "$tls_library_directory" >"$server_log" 2>&1 &
 server_pid=$!
 
 ready=false
@@ -170,4 +178,10 @@ fi
 
 node "$project_root/scripts/check-websocket-verdicts.mjs" \
   "$report_dir" "$profile" "$lane"
+node "$project_root/scripts/websocket-run-provenance.mjs" finalize \
+  "$initial_metadata" \
+  "$final_metadata" \
+  "$alr" \
+  "$server_log" \
+  "$tls_library_directory"
 printf '%s\n' "HTML report: $report_dir/index.html"

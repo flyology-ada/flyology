@@ -159,7 +159,10 @@ than an unrun server conformance case family.
 
 The checked-in adapter uses only Flyology's public HTTP, WebSocket, connection,
 and TLS APIs. Docker must support host networking; the pinned Autobahn image
-runs as `linux/amd64`.
+runs as `linux/amd64`. WSS profiles require
+`FLYOLOGY_OPENSSL_LIBRARY_DIR` to name one OpenSSL 3 installation containing
+the matched `libssl` and `libcrypto` modules; the runner hashes those exact
+files and validates the provider name and version reported by the server.
 
 ```sh
 ./scripts/websocket-conformance.sh core lightweight
@@ -179,9 +182,15 @@ runs as `linux/amd64`.
 ```
 
 Each invocation writes Autobahn's HTML and per-case JSON reports under
-`build/autobahn/`. It also writes `run-metadata.json` with the full Git HEAD,
-tree and dirty state, exact profile/config identity and config hash, pinned
-Autobahn image digest and platform, transport, and release/-O3 build settings.
+`build/autobahn/`. Before building, it writes a non-publishable initial source
+snapshot. Only after the verdict gate passes does it recapture the full Git
+HEAD and tree, clean tracked/untracked status, submodule state, branch or
+detached-worktree identity, and profile-config hash. Any change prevents final
+metadata from being written. The final `run-metadata.json` also records the
+observed OS, architecture, CPU, memory, exact GNAT and Alire version strings,
+pinned Autobahn image digest and platform, release/-O3 build/runtime settings,
+and transport-specific TLS provider, version, module basenames, sizes, and
+SHA-256 digests. Hostnames and filesystem paths are intentionally omitted.
 Generated reports remain outside version control.
 
 To regenerate the compact, restyled pages committed under `website/reports`,
@@ -193,9 +202,15 @@ node scripts/publish-websocket-conformance.mjs
 
 The publisher requires valid metadata for every profile and rejects dirty,
 profile-mismatched, or cross-run-inconsistent inputs before replacing the
-checked-in report bundle. The 2026-08-04 raw outputs predate that metadata
-schema, so this historical report preserves the implementation and complete
-harness/report snapshots above rather than inventing per-run revisions.
+checked-in report bundle. Source, sanitized host facts, toolchain, image, and
+build settings must match across all profiles; profile/config, capture time,
+lane, and transport may differ, while TLS identity must match across WSS
+profiles and is absent from plaintext profiles. Publication renders and checks
+the complete file, JSON, and link set in a guarded sibling staging directory,
+then swaps it into place with backup restoration on failure. The 2026-08-04
+raw outputs predate that metadata schema, so this historical report preserves
+the implementation and complete harness/report snapshots above rather than
+inventing per-run revisions.
 
 The published report is available at
 [flyology.org/reports/websocket](https://flyology.org/reports/websocket/).

@@ -150,7 +150,10 @@ procedure WebSocket_Conformance_Server is
              (Sockets.Port'Image (Port), Ada.Strings.Both)
          & "/websocket");
       if Use_TLS then
-         Ada.Text_IO.Put_Line ("TLS " & OpenSSL.Version (State.Backend));
+         Ada.Text_IO.Put_Line
+           ("TLS_PROVIDER " & OpenSSL.Name (State.Backend));
+         Ada.Text_IO.Put_Line
+           ("TLS_VERSION " & OpenSSL.Version (State.Backend));
       end if;
       Ada.Text_IO.Flush;
       Server_Instance.Serve (Server, Listener, State);
