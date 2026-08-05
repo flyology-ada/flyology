@@ -123,11 +123,18 @@ HTTP_BENCH_RUST_WORKERS=8 \
 
 The selected `HTTP_BENCH_GIT_REVISION` defaults to local `HEAD` and must be
 reachable from `HTTP_BENCH_GIT_REPOSITORY`; the repository defaults to the
-public Flyology remote and may be changed for a fork. By default the runner also
-packages all Git-tracked and unignored local files needed from the root project,
-`src/`, `runtime/`, `scripts/`, and `showcases/` as a temporary ConfigMap
-overlay. This applies uncommitted Flyology server/runtime work symmetrically
-with competitor fixture changes without pushing it. A manifest records every
+public Flyology remote and may be changed for a fork. With the local overlay
+enabled, the selected revision must resolve locally to the current `HEAD`.
+Branches, tags, symbolic revisions, and detached commits are resolved to their
+commit id before any cluster command. To benchmark another revision, check it
+out before building the overlay or set `HTTP_BENCH_LOCAL_OVERLAY=0` to use the
+repository revision without local changes.
+
+By default the runner packages all Git-tracked and unignored local files needed
+from the root project plus `src/`, `runtime/`, `scripts/`, and `showcases/` as a
+temporary ConfigMap overlay. This applies uncommitted Flyology server/runtime
+work symmetrically with competitor fixture changes without pushing it. A
+manifest records every
 file checksum, deletion, base revision, dirty path, content checksum, and archive
 checksum. The runner verifies that manifest against the working tree before
 contacting the cluster, and the pod verifies it again before building. Symlinks,
@@ -141,6 +148,13 @@ Validate overlay completeness locally without cluster credentials:
 HTTP_BENCH_OVERLAY_DRY_RUN=1 \
   ./showcases/http-comparison/scripts/run-kubernetes.sh
 python3 showcases/http-comparison/scripts/test_kubernetes_overlay.py
+```
+
+Verify a copied timestamped bundle independently of its parent results tree:
+
+```sh
+python3 showcases/http-comparison/scripts/kubernetes_overlay.py verify-bundle \
+  --result-root build/http-comparison/kubernetes-results/RUN/ARCH/TIMESTAMP
 ```
 
 Use `HTTP_BENCH_ARM64_CONCURRENCIES` or
@@ -175,10 +189,12 @@ Results are written below `build/http-comparison/`. Each timestamped directory
 contains:
 
 - `metadata.json`: host, kernel, architecture, revision, dirty state, source
-  overlay checksums, tools, pinned server versions, requested and observed loop
-  counts, and campaign settings;
+  overlay archive/content/manifest checksums, tools, pinned server versions,
+  requested and observed loop counts, and campaign settings;
 - `overlay-manifest.json`: every overlaid or deleted source path and its content
-  checksum for Kubernetes runs using the local overlay;
+  checksum for Kubernetes runs using the local overlay. It is copied into the
+  same timestamped directory before metadata is generated, and metadata binds
+  the exact manifest file by SHA-256;
 - `runs/*.json`: unmodified oha observations;
 - `resources/*.json`: sampled process CPU time, high-water RSS, thread count,
   and context-switch totals;

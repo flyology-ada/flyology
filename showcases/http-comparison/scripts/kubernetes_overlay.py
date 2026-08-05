@@ -415,6 +415,58 @@ def verify_overlay(
     return manifest
 
 
+def publish_manifest(manifest_path: Path, result_root: Path) -> tuple[Path, str]:
+    load_manifest(manifest_path)
+    data = manifest_path.read_bytes()
+    result_root.mkdir(parents=True, exist_ok=True)
+    destination = result_root / "overlay-manifest.json"
+    descriptor, temporary = tempfile.mkstemp(prefix=".overlay-manifest-", dir=result_root)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(data)
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    if destination.read_bytes() != data:
+        raise OverlayError("published overlay manifest differs from its source")
+    load_manifest(destination)
+    return destination, sha256(data)
+
+
+def verify_result_bundle(result_root: Path) -> dict[str, Any]:
+    metadata_path = result_root / "metadata.json"
+    manifest_path = result_root / "overlay-manifest.json"
+    try:
+        metadata = json.loads(metadata_path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise OverlayError(f"cannot read result metadata: {error}") from error
+    provenance = metadata.get("source_overlay")
+    if not isinstance(provenance, dict) or provenance.get("applied") is not True:
+        raise OverlayError("result metadata does not identify an applied source overlay")
+    manifest = load_manifest(manifest_path)
+    manifest_checksum = sha256(manifest_path.read_bytes())
+    if provenance.get("manifest_sha256") != manifest_checksum:
+        raise OverlayError("result metadata does not bind the bundled overlay manifest")
+    for field in (
+        "schema",
+        "kind",
+        "base_revision",
+        "source_dirty",
+        "file_count",
+        "deleted_paths",
+        "content_sha256",
+        "archive_sha256",
+    ):
+        if provenance.get(field) != manifest.get(field):
+            raise OverlayError(f"result overlay provenance differs for {field}")
+    if metadata.get("git_revision") != manifest["base_revision"]:
+        raise OverlayError("result revision differs from the overlay base revision")
+    if metadata.get("git_dirty") is not manifest["source_dirty"]:
+        raise OverlayError("result dirty state differs from the overlay manifest")
+    return manifest
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -427,6 +479,11 @@ def parse_args() -> argparse.Namespace:
     verify.add_argument("--manifest", type=Path, required=True)
     verify.add_argument("--source-root", type=Path)
     verify.add_argument("--extract", type=Path)
+    publish = subparsers.add_parser("publish")
+    publish.add_argument("--manifest", type=Path, required=True)
+    publish.add_argument("--result-root", type=Path, required=True)
+    bundle = subparsers.add_parser("verify-bundle")
+    bundle.add_argument("--result-root", type=Path, required=True)
     return parser.parse_args()
 
 
@@ -439,13 +496,22 @@ def main() -> None:
                 f"created overlay with {manifest['file_count']} files "
                 f"({manifest['archive_sha256']})"
             )
-        else:
+        elif args.command == "verify":
             manifest = verify_overlay(
                 args.archive, args.manifest, args.source_root, args.extract
             )
             print(
                 f"verified overlay with {manifest['file_count']} files "
                 f"({manifest['archive_sha256']})"
+            )
+        elif args.command == "publish":
+            destination, checksum = publish_manifest(args.manifest, args.result_root)
+            print(f"published overlay manifest {destination} ({checksum})")
+        else:
+            manifest = verify_result_bundle(args.result_root)
+            print(
+                f"verified result overlay with {manifest['file_count']} files "
+                f"({manifest['content_sha256']})"
             )
     except OverlayError as error:
         raise SystemExit(f"kubernetes overlay: {error}") from error

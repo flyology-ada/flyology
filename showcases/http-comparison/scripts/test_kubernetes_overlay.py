@@ -120,6 +120,109 @@ class KubernetesOverlayTest(unittest.TestCase):
         self.assertEqual(provenance["archive_sha256"], self.manifest["archive_sha256"])
         self.assertEqual(provenance["content_sha256"], self.manifest["content_sha256"])
 
+    def test_timestamped_bundle_retains_and_binds_complete_manifest(self) -> None:
+        bundle = self.root / self._testMethodName / "20260805T120000Z"
+        published, checksum = overlay.publish_manifest(self.manifest_path, bundle)
+        environment = os.environ.copy()
+        environment["HTTP_BENCH_OVERLAY_MANIFEST"] = str(published)
+        environment["HTTP_BENCH_GIT_REVISION"] = self.manifest["base_revision"]
+        environment["HTTP_BENCH_GIT_DIRTY"] = str(
+            int(self.manifest["source_dirty"])
+        )
+        metadata = subprocess.check_output(
+            (
+                sys.executable,
+                str(self.project_root / "showcases/http-comparison/scripts/collect_metadata.py"),
+            ),
+            env=environment,
+            text=True,
+        )
+        (bundle / "metadata.json").write_text(metadata)
+        verified = overlay.verify_result_bundle(bundle)
+        self.assertEqual(verified["files"], self.manifest["files"])
+        self.assertEqual(
+            json.loads(metadata)["source_overlay"]["manifest_sha256"], checksum
+        )
+        subprocess.run(
+            (
+                sys.executable,
+                str(
+                    self.project_root
+                    / "showcases/http-comparison/scripts/kubernetes_overlay.py"
+                ),
+                "verify-bundle",
+                "--result-root",
+                str(bundle),
+            ),
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        published.write_text(published.read_text() + "\n")
+        with self.assertRaises(overlay.OverlayError):
+            overlay.verify_result_bundle(bundle)
+
+    def test_alternate_overlay_revision_fails_before_kubectl(self) -> None:
+        test_root = self.root / self._testMethodName
+        fake_bin = test_root / "bin"
+        fake_bin.mkdir(parents=True)
+        marker = test_root / "kubectl-called"
+        kubectl = fake_bin / "kubectl"
+        kubectl.write_text(f"#!/bin/sh\n: > '{marker}'\nexit 99\n")
+        kubectl.chmod(0o755)
+        environment = os.environ.copy()
+        environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+        environment["HTTP_BENCH_GIT_REVISION"] = "HEAD^"
+        environment["HTTP_BENCH_LOCAL_OVERLAY"] = "1"
+        result = subprocess.run(
+            ("./showcases/http-comparison/scripts/run-kubernetes.sh",),
+            cwd=self.project_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("local overlay is based on HEAD", result.stderr)
+        self.assertFalse(marker.exists())
+
+    def test_current_revision_forms_allow_local_dry_run(self) -> None:
+        test_root = self.root / self._testMethodName
+        fake_bin = test_root / "bin"
+        fake_bin.mkdir(parents=True)
+        marker = test_root / "kubectl-called"
+        kubectl = fake_bin / "kubectl"
+        kubectl.write_text(f"#!/bin/sh\n: > '{marker}'\nexit 99\n")
+        kubectl.chmod(0o755)
+        revisions = ["HEAD", self.manifest["base_revision"]]
+        branch = subprocess.run(
+            ("git", "-C", str(self.project_root), "symbolic-ref", "--short", "HEAD"),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if branch.returncode == 0:
+            revisions.append(branch.stdout.strip())
+        for revision in dict.fromkeys(revisions):
+            with self.subTest(revision=revision):
+                environment = os.environ.copy()
+                environment["PATH"] = (
+                    f"{fake_bin}{os.pathsep}{environment['PATH']}"
+                )
+                environment["HTTP_BENCH_GIT_REVISION"] = revision
+                environment["HTTP_BENCH_LOCAL_OVERLAY"] = "1"
+                environment["HTTP_BENCH_OVERLAY_DRY_RUN"] = "1"
+                result = subprocess.run(
+                    ("./showcases/http-comparison/scripts/run-kubernetes.sh",),
+                    cwd=self.project_root,
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("local overlay dry run passed", result.stdout)
+                self.assertFalse(marker.exists())
+
     def malicious_archive(self, member: tarfile.TarInfo) -> tuple[Path, Path]:
         archive = self.root / f"{self._testMethodName}.tar.gz"
         with archive.open("wb") as raw:

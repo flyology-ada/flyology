@@ -63,8 +63,6 @@ if [ -f /bootstrap/overlay.tar.gz ]; then
       --manifest /bootstrap/overlay-manifest.json \
       --extract "$workspace" \
       --source-root "$workspace"
-   mkdir -p "$output_root"
-   cp /bootstrap/overlay-manifest.json "$output_root/overlay-manifest.json"
 fi
 
 export ALR=/usr/local/bin/alr

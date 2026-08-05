@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -37,7 +38,8 @@ overlay_manifest_path = os.environ.get("HTTP_BENCH_OVERLAY_MANIFEST", "")
 source_overlay: dict[str, object] = {"applied": False}
 if overlay_manifest_path:
     try:
-        overlay_manifest = json.loads(Path(overlay_manifest_path).read_text())
+        overlay_manifest_bytes = Path(overlay_manifest_path).read_bytes()
+        overlay_manifest = json.loads(overlay_manifest_bytes)
         if (
             overlay_manifest.get("schema") != 1
             or overlay_manifest.get("kind")
@@ -54,8 +56,9 @@ if overlay_manifest_path:
             "deleted_paths": overlay_manifest["deleted_paths"],
             "content_sha256": overlay_manifest["content_sha256"],
             "archive_sha256": overlay_manifest["archive_sha256"],
+            "manifest_sha256": hashlib.sha256(overlay_manifest_bytes).hexdigest(),
         }
-    except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, KeyError, UnicodeError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(f"invalid HTTP_BENCH_OVERLAY_MANIFEST: {error}") from error
 metadata = {
     "schema": 1,

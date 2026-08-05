@@ -83,6 +83,13 @@ if [ "$actual_loops" -ne "$loops" ]; then
 fi
 
 mkdir -p "$run_root" "$resource_root" "$log_root"
+metadata_overlay_manifest=
+if [ -n "${HTTP_BENCH_OVERLAY_MANIFEST:-}" ]; then
+   python3 "$comparison_root/scripts/kubernetes_overlay.py" publish \
+      --manifest "$HTTP_BENCH_OVERLAY_MANIFEST" \
+      --result-root "$result_root"
+   metadata_overlay_manifest="$result_root/overlay-manifest.json"
+fi
 HTTP_BENCH_MODE=${HTTP_BENCH_MODE:-local} \
 HTTP_BENCH_CAPACITY="$capacity" \
 HTTP_BENCH_CONCURRENCIES="$concurrencies" \
@@ -95,6 +102,7 @@ HTTP_BENCH_TRIALS="$trials" \
 HTTP_BENCH_WARMUP="$warmup" \
 HTTP_BENCH_RUST_WORKERS="$rust_workers" \
 HTTP_BENCH_SATURATION_PROBE="$saturation_probe" \
+HTTP_BENCH_OVERLAY_MANIFEST="$metadata_overlay_manifest" \
    "$comparison_root/scripts/collect_metadata.py" >"$result_root/metadata.json"
 cp "$comparison_root/workloads.conf" "$result_root/workloads.conf"
 cp "$comparison_root/application-workloads.conf" \

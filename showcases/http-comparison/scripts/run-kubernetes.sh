@@ -38,6 +38,22 @@ case "$local_overlay:$saturation_probe:$overlay_dry_run" in
    *) printf '%s\n' "HTTP_BENCH_LOCAL_OVERLAY, HTTP_BENCH_SATURATION_PROBE, and HTTP_BENCH_OVERLAY_DRY_RUN must be 0 or 1" >&2; exit 2 ;;
 esac
 
+if [ "$local_overlay" -eq 1 ]; then
+   if ! resolved_revision=$(git -C "$project_root" rev-parse \
+      --verify --end-of-options "${revision}^{commit}" 2>/dev/null); then
+      printf '%s\n' \
+        "HTTP_BENCH_GIT_REVISION '$revision' is not a local commit; check it out locally or set HTTP_BENCH_LOCAL_OVERLAY=0" >&2
+      exit 2
+   fi
+   local_head=$(git -C "$project_root" rev-parse --verify 'HEAD^{commit}')
+   if [ "$resolved_revision" != "$local_head" ]; then
+      printf '%s\n' \
+        "HTTP_BENCH_GIT_REVISION '$revision' resolves to $resolved_revision, but the local overlay is based on HEAD $local_head; check out the requested revision or set HTTP_BENCH_LOCAL_OVERLAY=0" >&2
+      exit 2
+   fi
+   revision=$resolved_revision
+fi
+
 overlay_archive=
 overlay_manifest=
 overlay_dirty=0
