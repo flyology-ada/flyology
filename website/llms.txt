@@ -1,0 +1,27 @@
+# Flyology
+
+> Flyology is an experimental GNAT runtime integration that lets explicitly designated Ada tasks run cooperatively as fibers on shared event-loop threads while preserving ordinary Ada task semantics; undesignated tasks remain native OS-thread tasks.
+
+Flyology uses the terms "lightweight task" and "native task." Lightweight scheduling is cooperative, not preemptive. The project does not claim production qualification, universal portability, or hard real-time behavior. Runtime preparation supports only the exact host and GNAT release pairs documented by the project; do not infer support from the broader Alire dependency range.
+
+## Documentation
+
+- [Overview](https://flyology.org/): Project scope, programming model, included building blocks, and important constraints.
+- [Guide](https://flyology.org/guide/): Toolchain requirements, runtime preparation, task designation, stack and memory policy, execution groups, task-aware I/O, resource budgets, observability, verification, and constraints.
+- [Architecture](https://flyology.org/architecture/): GNARL integration, native and lightweight lanes, schedulers, pollers, stackful contexts, memory ownership, and lifecycle boundaries.
+- [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, and wall-clock timer behavior, including backward clock changes.
+- [HTTP applications](https://flyology.org/guide/http/): Optional HTTP routing, middleware, streaming, structured request work, WebSockets, security, and measurement guidance.
+- [API reference](https://flyology.org/api/): Generated reference for Flyology's public Ada packages.
+
+## Project sources
+
+- [README](https://raw.githubusercontent.com/flyology-ada/flyology/main/README.md): Detailed user-facing architecture, configuration, APIs, examples, constraints, and verification commands.
+- [Source repository](https://github.com/flyology-ada/flyology): Ada sources, runtime integration, tests, proof model, scripts, showcases, and website sources.
+- [Supported runtime patch matrix](https://raw.githubusercontent.com/flyology-ada/flyology/main/runtime/patches/README.md): Exact verified host, compiler, and GNAT runtime patch families.
+- [Alire crate manifest](https://raw.githubusercontent.com/flyology-ada/flyology/main/alire.toml): Package metadata and dependency constraints; these constraints are broader than the verified runtime matrix.
+
+## Optional
+
+- [WebSocket conformance reports](https://flyology.org/reports/websocket/): Dated Autobahn framing, compression, limits, TLS, and timing results with per-profile details.
+- [Development journal](https://flyology.org/journal/): Dated implementation notes, measurements, corrections, and operating boundaries.
+- [Flyology Postgres](https://postgres.flyology.org/): A separate ecosystem project exploring PostgreSQL access with Flyology.

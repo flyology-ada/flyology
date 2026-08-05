@@ -24,6 +24,7 @@ touch "$site_output/.nojekyll"
 
 test -f "$site_output/index.html"
 test "$(cat "$site_output/CNAME")" = "flyology.org"
+test -f "$site_output/llms.txt"
 test -f "$site_output/guide/index.html"
 test -f "$site_output/guide/timers/index.html"
 test -f "$site_output/guide/http/index.html"
