@@ -1,5 +1,6 @@
 with Ada.Real_Time;
 with Ada.Strings.Fixed;
+with Flyology.HTTP.Decoded_Path_Policy;
 with Flyology.HTTP.Route_Parameter_Policy;
 with Flyology.IO;
 with Flyology.IO.TLS;
@@ -8,11 +9,14 @@ package body Flyology.HTTP.Server.Routing is
    use type Ada.Real_Time.Time;
 
    package App renames Flyology.HTTP.Server.Applications;
+   package Decoded_Path_Policy renames
+     Flyology.HTTP.Decoded_Path_Policy;
    package Parameter_Policy renames
      Flyology.HTTP.Route_Parameter_Policy;
    use type App.Authentication_Mode;
    use type App.Response_State;
    use type App.Upgrade_Mode;
+   use type Decoded_Path_Policy.Path_Disposition;
 
    function Hex_Value (Value : Character) return Natural is
      (if Value in '0' .. '9' then Character'Pos (Value) - Character'Pos ('0')
@@ -112,28 +116,6 @@ package body Flyology.HTTP.Server.Routing is
         (if Query = 0 then "" else Target (Query .. Target'Last));
    end Raw_Query_Suffix;
 
-   function Has_Dot_Segment (Value : String) return Boolean is
-      First : Natural := Value'First + 1;
-      Slash : Natural;
-   begin
-      while First <= Value'Last loop
-         Slash := Ada.Strings.Fixed.Index (Value (First .. Value'Last), "/");
-         declare
-            Last : constant Natural :=
-              (if Slash = 0 then Value'Last else Slash - 1);
-         begin
-            if Last >= First
-              and then Value (First .. Last) in "." | ".."
-            then
-               return True;
-            end if;
-         end;
-         exit when Slash = 0 or else Slash = Value'Last;
-         First := Slash + 1;
-      end loop;
-      return False;
-   end Has_Dot_Segment;
-
    function Decode_Path (Value : String) return String is
       Result : Unbounded_String;
       Index  : Natural := Value'First;
@@ -177,7 +159,9 @@ package body Flyology.HTTP.Server.Routing is
       begin
          if Ada.Strings.Fixed.Index (Decoded, "//") /= 0 then
             raise Route_Error with "empty HTTP path segment is ambiguous";
-         elsif Has_Dot_Segment (Decoded) then
+         elsif Decoded_Path_Policy.Classify (Decoded) =
+           Decoded_Path_Policy.Reject_Dot_Segment
+         then
             raise Route_Error with "decoded dot segment in HTTP path";
          elsif not Valid_UTF8 (Decoded) then
             raise Route_Error with "HTTP path is not valid UTF-8";

@@ -2,9 +2,9 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #10, #12, #13, #14, #15, #16, #17, #18, and #19 are prevented by
-production-consumed SPARK units. Their assigned targeted subprogram proofs and
-fresh whole-unit widenings passed at level 1.
+Findings #5, #10, #12, #13, #14, #15, #16, #17, #18, #19, and #47 are
+prevented by production-consumed SPARK units. Their assigned targeted
+subprogram proofs and fresh whole-unit widenings passed at level 1.
 Finding #10 proves only that the Ada listener descriptor token is consumed
 after the imported close function returns. It does not model `close(2)`, its
 return semantics, or descriptor reuse; focused fault-enabled coverage exercises
@@ -25,6 +25,11 @@ proved transitions preserve payload phase, frame identity, remaining bytes,
 absolute mask position, and the separate completion and abandonment reset
 boundaries. Focused behavioral coverage exercises the surrounding I/O paths;
 protocol I/O itself remains outside SPARK.
+Finding #47 proves that the classifier consumed by `Decode_Path` rejects
+exactly slash-delimited `.` and `..` segments in its decoded string input. It
+does not prove percent decoding, request-target extraction and query removal,
+UTF-8 validation, or HTTP error mapping; focused routing integration coverage
+exercises those surrounding behaviors.
 Finding #1 has partial prevention coverage. Its targeted proofs and fresh
 whole-unit widening passed at level 1 and mode all, establishing only bounded
 batch budgets and the deterministic Ada file-drain latch and state transitions
@@ -89,6 +94,10 @@ warning, assumption, justified check, or unproved check.
       (level 1, mode all)
   - [x] `Flyology.HTTP.Route_Parameter_Policy.Advance`
   - [x] Whole `Flyology.HTTP.Route_Parameter_Policy` unit widening
+- [x] Finding #47 production-used decoded dot-segment classification
+      (level 1, mode all)
+  - [x] `Flyology.HTTP.Decoded_Path_Policy.Classify`
+  - [x] Whole `Flyology.HTTP.Decoded_Path_Policy` unit widening
 - [x] Finding #13 production-used negotiated encoder-window bound
       (level 1, mode all)
   - [x] `Flyology.WebSocket_Deflate_Policy.Negotiated_Server_Window_Bits`
@@ -110,6 +119,7 @@ warning, assumption, justified check, or unproved check.
 - [x] Finding #19 prevention coverage
 - [x] Finding #15 prevention coverage
 - [x] Finding #17 prevention coverage
+- [x] Finding #47 decoded dot-segment prevention coverage
 - [x] Finding #13 prevention coverage
 - [x] Finding #18 missing-distance prevention coverage
 - [x] Finding #1 deterministic poller-policy boundary
@@ -174,9 +184,24 @@ warning, assumption, justified check, or unproved check.
 - [x] Prove `Flyology.HTTP.Expect_Policy.Classify`, then widen its whole unit
 - [x] Prove `Flyology.HTTP.Route_Parameter_Policy.Advance`, then widen its
       whole unit
+- [x] Prove `Flyology.HTTP.Decoded_Path_Policy.Classify`, then widen its whole
+      unit
 - [x] Production HTTP parser consumes the `Expect_Policy.Classify` action
 - [x] Production `Validate_Pattern` consumes `Route_Parameter_Policy.Advance`
+- [x] Production `Decode_Path` consumes
+      `Decoded_Path_Policy.Classify` after percent decoding
 - [x] Boundary tests cover the Expect truth table and route capacity transition
+- [x] Policy and routing tests cover exact decoded `.` and `..` rejection plus
+      raw, encoded, mixed-case, query, absolute-form, wildcard/remainder, and
+      benign dotted-name behavior
+- [x] Independent read-only review found no proof antipattern, missing
+      integration, overflow issue, or performance regression
+- [x] Re-ran the application and runtime proof suites serially after finding
+      #47 integration
+- [x] Re-ran the full behavioral suite after finding #47 integration for both
+      project defaults
+- [x] Re-ran GNATdoc after finding #47 integration with no undocumented-entity
+      warnings or errors
 - [x] Production `Native_Executors.Submit` consumes `Nonzero_Successor`
 - [x] Production rate-limit middleware consumes `Refilled_Tokens`
 - [x] Production HTTP chunk and SSE paths consume `HTTP_Chunk_Encoding.Encode`
