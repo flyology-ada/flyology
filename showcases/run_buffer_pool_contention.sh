@@ -43,7 +43,7 @@ FLYOLOGY_PLACEMENT=round_robin \
 )
 
 printf '%s\n' \
-  'policy,workload,groups,block_bytes,iterations_per_pair,total_handoffs,seconds,handoffs_per_second'
+  'policy,workload,topology,first_group,last_group,groups,block_bytes,iterations_per_pair,total_handoffs,seconds,handoffs_per_second'
 
 groups=1
 while :; do

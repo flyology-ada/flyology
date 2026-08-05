@@ -167,10 +167,14 @@ and `Configured_Placement` report the compiled policy,
 calling lightweight task was actually placed. `Flyology.Observability.Snapshot` can
 then inspect each created pool group without creating missing ones.
 
-The standard Ada `CPU` aspect is an explicit override and selects that exact
-shared event-loop group without consuming an automatic placement ticket. Tasks
-with the same value share one loop pthread; different values use different loop
-pthreads and can therefore execute in parallel:
+For positive values, the standard Ada `CPU` aspect is an explicit override and
+selects that exact shared event-loop group without consuming an automatic
+placement ticket. Ada reserves value 0 for `Not_A_Specific_CPU`, so `CPU => 0`
+uses automatic placement rather than explicitly selecting group 0. Use
+`Cross_To_Shard (0)` or `Migrate (0)` at a lightweight safe point when group 0
+must be selected explicitly. Tasks with the same positive value share one loop
+pthread; different values use different loop pthreads and can therefore execute
+in parallel:
 
 ```ada
 task Parser with CPU => 1 is
@@ -182,9 +186,10 @@ task Writer with CPU => 2 is
 end Writer;
 ```
 
-Shared group identifiers are `0 .. 127`. Values `128 .. 255` are reserved for
-runtime-created dedicated groups, so applying `CPU => 128` or greater to a
-lightweight task fails activation with `Tasking_Error` rather than selecting a CPU.
+Shared group identifiers are `0 .. 127`; the positive `CPU` encodings can name
+groups `1 .. 127`. Values `128 .. 255` are reserved for runtime-created
+dedicated groups, so applying `CPU => 128` or greater to a lightweight task
+fails activation with `Tasking_Error` rather than selecting a CPU.
 The automatic pool is likewise limited to 128 shared groups. This interpretation
 applies only after event-loop designation: an Ada `CPU` aspect on a native task
 continues through stock GNARL's processor-affinity path.
@@ -2527,8 +2532,9 @@ loops improve elapsed time.
 rows for the existing value-semantic `Unbounded_Bytes` channel and the
 single-owner buffer channel. Each producer constructs the same payload before
 handoff; the consumer either receives a copied value or takes and releases the
-pool block. The script runs both tasks on group 0 and then places the consumer
-on group 1:
+pool block. Each task explicitly crosses to its reported shared group before
+the timing barrier and verifies the observed group. The script first runs both
+tasks on group 0 and then places the consumer on group 1:
 
 ```sh
 ./showcases/run_buffer_handoff.sh
@@ -2554,9 +2560,12 @@ divide the same total slot capacity among one pool per pair:
 The `churn` workload transfers empty 64-byte blocks to emphasize pool and
 channel synchronization. The `touch` workload writes and reads one byte in
 each 4 KiB block, adding page allocation and cache-line movement without a
-full-payload copy. Producer `i` runs on group `i`; its consumer runs on the
-next group, wrapping at the configured group count. Timing excludes pool,
-channel, and task creation but includes initial payload-page faults.
+full-payload copy. Producer `i` runs on shared group `i`; its consumer runs on
+the next shared group, wrapping to group 0 at the configured group count. Every
+task explicitly crosses to and verifies that group before the timing barrier,
+including the single-group case. The CSV records the topology and exact group
+range. Timing excludes pool, channel, and task creation but includes initial
+payload-page faults.
 
 The comparison exposes the tradeoff rather than selecting a pool policy.
 Partitioning can reduce one shared protected-object bottleneck and improve
@@ -2708,8 +2717,9 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   storage on the supported 64-bit targets. Group allocation, dedicated
   reservations, migration, and destruction use a short-held topology lock, so
   topology changes remain globally serialized.
-- Shared `CPU` group ids are limited to `0 .. 127`; `128 .. 255` are the
-  dedicated range and cannot be selected statically with the `CPU` aspect.
+- Shared group ids are limited to `0 .. 127`; `CPU => 0` means automatic
+  placement, positive `CPU` values explicitly select groups `1 .. 127`, and
+  `128 .. 255` are the dedicated range that cannot be selected statically.
 - The environment task always remains on its native pthread-owned initial stack
   and is never registered as a fiber, even when the project default is lightweight.
   It therefore cannot migrate; child lightweight tasks use guarded runtime-owned

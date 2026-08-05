@@ -8,7 +8,8 @@ with Flyology.Buffers;
 with Flyology.Buffers.Channels;
 with Flyology.Bytes;
 with Flyology.Channels.Bounded;
-with System.Multiprocessors;
+with Flyology.Execution_Groups;
+with Flyology.Execution_Groups.Topology;
 
 procedure Buffer_Handoff is
    package CLI renames Ada.Command_Line;
@@ -17,8 +18,11 @@ procedure Buffer_Handoff is
    package Value_Channels is new Flyology.Channels.Bounded
      (Flyology.Bytes.Unbounded_Bytes);
    package Buffer_Channels renames Flyology.Buffers.Channels;
+   package Groups renames Flyology.Execution_Groups;
+   package Topology renames Flyology.Execution_Groups.Topology;
 
    use type RT.Time;
+   use type Groups.Group_Id;
 
    Queue_Capacity : constant Positive := 64;
    type Size_Array is array (Positive range <>) of Positive;
@@ -88,6 +92,8 @@ procedure Buffer_Handoff is
    procedure Report
      (Representation : String;
       Placement      : String;
+      Producer_Group : Topology.Shard_Id;
+      Consumer_Group : Topology.Shard_Id;
       Size           : Positive;
       Iterations     : Positive;
       Elapsed        : Duration)
@@ -98,6 +104,7 @@ procedure Buffer_Handoff is
    begin
       Ada.Text_IO.Put
         (Representation & "," & Placement & ","
+         & Producer_Group'Image & "," & Consumer_Group'Image & ","
          & Size'Image & "," & Iterations'Image & ",");
       Ada.Long_Float_Text_IO.Put
         (Long_Float (Elapsed), Fore => 1, Aft => 6, Exp => 0);
@@ -110,8 +117,8 @@ procedure Buffer_Handoff is
    procedure Run_Value
      (Size         : Positive;
       Iterations   : Positive;
-      Producer_CPU : System.Multiprocessors.CPU_Range;
-      Consumer_CPU : System.Multiprocessors.CPU_Range;
+      Producer_Group : Topology.Shard_Id;
+      Consumer_Group : Topology.Shard_Id;
       Placement    : String)
    is
       Queue   : Value_Channels.Channel (Queue_Capacity);
@@ -122,22 +129,26 @@ procedure Buffer_Handoff is
       Succeeded : Boolean;
 
       task type Producer_Task
-        (Assigned_CPU : System.Multiprocessors.CPU_Range)
-        with CPU => Assigned_CPU
+        (Assigned_Group : Topology.Shard_Id)
       is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Producer_Task;
 
       task type Consumer_Task
-        (Assigned_CPU : System.Multiprocessors.CPU_Range)
-        with CPU => Assigned_CPU
+        (Assigned_Group : Topology.Shard_Id)
       is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Consumer_Task;
 
       task body Producer_Task is
+         Ready_Reported : Boolean := False;
       begin
+         Topology.Cross_To_Shard (Assigned_Group);
+         if Groups.Current /= Assigned_Group then
+            raise Program_Error with "producer entered the wrong group";
+         end if;
          Control.Ready;
+         Ready_Reported := True;
          Control.Start;
          for Index in 1 .. Iterations loop
             declare
@@ -152,6 +163,9 @@ procedure Buffer_Handoff is
       exception
          when others =>
             Control.Fail;
+            if not Ready_Reported then
+               Control.Ready;
+            end if;
             Queue.Close;
             Control.Finished;
       end Producer_Task;
@@ -159,8 +173,14 @@ procedure Buffer_Handoff is
       task body Consumer_Task is
          Value : Flyology.Bytes.Unbounded_Bytes;
          Count : Natural := 0;
+         Ready_Reported : Boolean := False;
       begin
+         Topology.Cross_To_Shard (Assigned_Group);
+         if Groups.Current /= Assigned_Group then
+            raise Program_Error with "consumer entered the wrong group";
+         end if;
          Control.Ready;
+         Ready_Reported := True;
          Control.Start;
          loop
             begin
@@ -177,11 +197,14 @@ procedure Buffer_Handoff is
       exception
          when others =>
             Control.Fail;
+            if not Ready_Reported then
+               Control.Ready;
+            end if;
             Control.Finished;
       end Consumer_Task;
 
-      Producer : Producer_Task (Producer_CPU);
-      Consumer : Consumer_Task (Consumer_CPU);
+      Producer : Producer_Task (Producer_Group);
+      Consumer : Consumer_Task (Consumer_Group);
       pragma Unreferenced (Producer, Consumer);
    begin
       Control.Await_Ready;
@@ -193,15 +216,16 @@ procedure Buffer_Handoff is
          raise Program_Error with "value handoff benchmark failed";
       end if;
       Report
-        ("value-copy", Placement, Size, Iterations,
+        ("value-copy", Placement, Producer_Group, Consumer_Group,
+         Size, Iterations,
          RT.To_Duration (Stopped - Started));
    end Run_Value;
 
    procedure Run_Buffer
      (Size         : Positive;
       Iterations   : Positive;
-      Producer_CPU : System.Multiprocessors.CPU_Range;
-      Consumer_CPU : System.Multiprocessors.CPU_Range;
+      Producer_Group : Topology.Shard_Id;
+      Consumer_Group : Topology.Shard_Id;
       Placement    : String)
    is
       Storage : aliased Flyology.Buffers.Pool
@@ -215,23 +239,27 @@ procedure Buffer_Handoff is
       Succeeded : Boolean;
 
       task type Producer_Task
-        (Assigned_CPU : System.Multiprocessors.CPU_Range)
-        with CPU => Assigned_CPU
+        (Assigned_Group : Topology.Shard_Id)
       is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Producer_Task;
 
       task type Consumer_Task
-        (Assigned_CPU : System.Multiprocessors.CPU_Range)
-        with CPU => Assigned_CPU
+        (Assigned_Group : Topology.Shard_Id)
       is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Consumer_Task;
 
       task body Producer_Task is
          Value : Flyology.Buffers.Unique_Buffer (Storage'Access);
+         Ready_Reported : Boolean := False;
       begin
+         Topology.Cross_To_Shard (Assigned_Group);
+         if Groups.Current /= Assigned_Group then
+            raise Program_Error with "producer entered the wrong group";
+         end if;
          Control.Ready;
+         Ready_Reported := True;
          Control.Start;
          for Index in 1 .. Iterations loop
             Flyology.Buffers.Acquire (Value);
@@ -243,6 +271,9 @@ procedure Buffer_Handoff is
       exception
          when others =>
             Control.Fail;
+            if not Ready_Reported then
+               Control.Ready;
+            end if;
             Queue.Close;
             Control.Finished;
       end Producer_Task;
@@ -250,8 +281,14 @@ procedure Buffer_Handoff is
       task body Consumer_Task is
          Value : Flyology.Buffers.Unique_Buffer (Storage'Access);
          Count : Natural := 0;
+         Ready_Reported : Boolean := False;
       begin
+         Topology.Cross_To_Shard (Assigned_Group);
+         if Groups.Current /= Assigned_Group then
+            raise Program_Error with "consumer entered the wrong group";
+         end if;
          Control.Ready;
+         Ready_Reported := True;
          Control.Start;
          loop
             begin
@@ -269,11 +306,14 @@ procedure Buffer_Handoff is
       exception
          when others =>
             Control.Fail;
+            if not Ready_Reported then
+               Control.Ready;
+            end if;
             Control.Finished;
       end Consumer_Task;
 
-      Producer : Producer_Task (Producer_CPU);
-      Consumer : Consumer_Task (Consumer_CPU);
+      Producer : Producer_Task (Producer_Group);
+      Consumer : Consumer_Task (Consumer_Group);
       pragma Unreferenced (Producer, Consumer);
    begin
       Control.Await_Ready;
@@ -285,29 +325,33 @@ procedure Buffer_Handoff is
          raise Program_Error with "buffer handoff benchmark failed";
       end if;
       Report
-        ("unique-buffer", Placement, Size, Iterations,
+        ("unique-buffer", Placement, Producer_Group, Consumer_Group,
+         Size, Iterations,
          RT.To_Duration (Stopped - Started));
    end Run_Buffer;
 
    Placement : constant String :=
      (if CLI.Argument_Count = 0 then "same" else CLI.Argument (1));
-   Producer_CPU : constant System.Multiprocessors.CPU_Range := 0;
-   Consumer_CPU : constant System.Multiprocessors.CPU_Range :=
+   Producer_Group : constant Topology.Shard_Id := 0;
+   Consumer_Group : constant Topology.Shard_Id :=
      (if Placement = "same" then 0
       elsif Placement = "cross" then 1
       else raise Program_Error with "placement must be same or cross");
 
 begin
    Ada.Text_IO.Put_Line
-     ("representation,placement,bytes,iterations,seconds,mib_per_second");
+     ("representation,topology,producer_group,consumer_group,bytes,"
+      & "iterations,seconds,mib_per_second");
    for Size of Sizes loop
       declare
          Iterations : constant Positive := Iterations_For (Size);
       begin
          Run_Value
-           (Size, Iterations, Producer_CPU, Consumer_CPU, Placement);
+           (Size, Iterations, Producer_Group, Consumer_Group,
+            "shared-" & Placement);
          Run_Buffer
-           (Size, Iterations, Producer_CPU, Consumer_CPU, Placement);
+           (Size, Iterations, Producer_Group, Consumer_Group,
+            "shared-" & Placement);
       end;
    end loop;
 end Buffer_Handoff;

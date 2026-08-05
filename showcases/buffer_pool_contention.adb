@@ -9,7 +9,7 @@ with Flyology;
 with Flyology.Buffers;
 with Flyology.Buffers.Channels;
 with Flyology.Execution_Groups;
-with System.Multiprocessors;
+with Flyology.Execution_Groups.Topology;
 
 procedure Buffer_Pool_Contention is
    package CLI renames Ada.Command_Line;
@@ -17,9 +17,11 @@ procedure Buffer_Pool_Contention is
    package Buffers renames Flyology.Buffers;
    package Buffer_Channels renames Flyology.Buffers.Channels;
    package Groups renames Flyology.Execution_Groups;
+   package Topology renames Flyology.Execution_Groups.Topology;
 
    use type Ada.Streams.Stream_Element;
    use type RT.Time;
+   use type Groups.Group_Id;
 
    Queue_Capacity : constant Positive := 64;
    Pair_Capacity  : constant Positive := Queue_Capacity + 2;
@@ -117,19 +119,19 @@ procedure Buffer_Pool_Contention is
    type Run_Control_Access is access all Run_Control;
 
    task type Producer_Task
-     (Assigned_CPU : System.Multiprocessors.CPU_Range;
+     (Assigned_Group : Topology.Shard_Id;
       Storage      : not null Pool_Access;
       Queue        : not null Channel_Access;
       Control      : not null Run_Control_Access;
       Iterations   : Positive;
       Workload     : Workload_Kind)
-     with CPU => Assigned_CPU
    is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Producer_Task;
 
    task body Producer_Task is
       Value : Buffers.Unique_Buffer (Storage);
+      Ready_Reported : Boolean := False;
 
       procedure Touch_Buffer
         (Data   : in out Ada.Streams.Stream_Element_Array;
@@ -139,7 +141,12 @@ procedure Buffer_Pool_Contention is
          Length := 1;
       end Touch_Buffer;
    begin
+      Topology.Cross_To_Shard (Assigned_Group);
+      if Groups.Current /= Assigned_Group then
+         raise Program_Error with "producer entered the wrong group";
+      end if;
       Control.Ready;
+      Ready_Reported := True;
       Control.Start;
       for Index in 1 .. Iterations loop
          Buffers.Acquire (Value);
@@ -153,18 +160,20 @@ procedure Buffer_Pool_Contention is
    exception
       when others =>
          Control.Fail;
+         if not Ready_Reported then
+            Control.Ready;
+         end if;
          Queue.Close;
          Control.Finished;
    end Producer_Task;
 
    task type Consumer_Task
-     (Assigned_CPU : System.Multiprocessors.CPU_Range;
+     (Assigned_Group : Topology.Shard_Id;
       Storage      : not null Pool_Access;
       Queue        : not null Channel_Access;
       Control      : not null Run_Control_Access;
       Iterations   : Positive;
       Workload     : Workload_Kind)
-     with CPU => Assigned_CPU
    is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Consumer_Task;
@@ -172,6 +181,7 @@ procedure Buffer_Pool_Contention is
    task body Consumer_Task is
       Value : Buffers.Unique_Buffer (Storage);
       Count : Natural := 0;
+      Ready_Reported : Boolean := False;
 
       procedure Check_Buffer
         (Data : Ada.Streams.Stream_Element_Array) is
@@ -181,7 +191,12 @@ procedure Buffer_Pool_Contention is
          end if;
       end Check_Buffer;
    begin
+      Topology.Cross_To_Shard (Assigned_Group);
+      if Groups.Current /= Assigned_Group then
+         raise Program_Error with "consumer entered the wrong group";
+      end if;
       Control.Ready;
+      Ready_Reported := True;
       Control.Start;
       loop
          begin
@@ -202,6 +217,9 @@ procedure Buffer_Pool_Contention is
    exception
       when others =>
          Control.Fail;
+         if not Ready_Reported then
+            Control.Ready;
+         end if;
          Queue.Close;
          Control.Finished;
    end Consumer_Task;
@@ -235,6 +253,8 @@ procedure Buffer_Pool_Contention is
    begin
       Ada.Text_IO.Put
         (Policy_Name (Policy) & "," & Workload_Name (Workload) & ","
+         & (if Group_Count = 1 then "shared-same" else "shared-ring")
+         & ", 0," & Natural'Image (Group_Count - 1) & ","
          & Group_Count'Image & "," & Block_Size'Image & ","
          & Iterations'Image & "," & Total'Image & ",");
       Ada.Long_Float_Text_IO.Put
@@ -283,16 +303,14 @@ procedure Buffer_Pool_Contention is
             Queues (Index) := new Buffer_Channels.Channel
               (Pools (Pool_Index), Queue_Capacity);
             Producers (Index) := new Producer_Task
-              (Assigned_CPU =>
-                 System.Multiprocessors.CPU_Range (Index - 1),
+              (Assigned_Group => Topology.Shard_Id (Index - 1),
                Storage    => Pools (Pool_Index),
                Queue      => Queues (Index),
                Control    => Control,
                Iterations => Iterations,
                Workload   => Workload);
             Consumers (Index) := new Consumer_Task
-              (Assigned_CPU =>
-                 System.Multiprocessors.CPU_Range (Index mod Group_Count),
+              (Assigned_Group => Topology.Shard_Id (Index mod Group_Count),
                Storage    => Pools (Pool_Index),
                Queue      => Queues (Index),
                Control    => Control,

@@ -78,14 +78,17 @@ procedure Topology_Smoke is
          Results.Native_Finished (False);
    end Native_Caller;
 
-   task type Lightweight_Caller with CPU => 0 is
+   task type Lightweight_Caller is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Lightweight_Caller;
 
    task body Lightweight_Caller is
       Outside_Rejected : Boolean := False;
-      OK               : Boolean := Groups.Current = 0;
+      OK               : Boolean := True;
    begin
+      Topology.Cross_To_Shard (0);
+      OK := Groups.Current = 0;
+
       Topology.Cross_To_Shard (Topology.Shard_For_Hash (2));
       OK := OK and Groups.Current = 2;
 
