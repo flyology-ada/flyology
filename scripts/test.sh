@@ -34,6 +34,20 @@ run_gprbuild () {
   "$alr" exec -- env -u GPR_CONFIG gprbuild "$@"
 }
 
+assert_archive_excludes () {
+  archive=$1
+  pattern=$2
+  failure=$3
+  if ! archive_symbols=$(nm -g "$archive"); then
+    printf '%s\n' "failed to inspect production archive: $archive" >&2
+    exit 1
+  fi
+  if printf '%s\n' "$archive_symbols" | grep -Ei "$pattern" >/dev/null; then
+    printf '%s\n' "$failure" >&2
+    exit 1
+  fi
+}
+
 compile_test_mains () {
   test_build_subdir=$1
   test_mains=$2
@@ -77,21 +91,17 @@ link_test_mains () {
 FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
-if nm -g "$project_root/lib/libFlyology.a" | \
-     grep -Ei 'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_' >/dev/null
-then
-  echo "production library exposes test-only symbols" >&2
-  exit 1
-fi
+assert_archive_excludes \
+  "$project_root/lib/libFlyology.a" \
+  'flyology__io__tls__testing|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_' \
+  "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
-if nm -g "$project_root/lib/libFlyology.a" | \
-     grep -Ei 'test_waiting_operations|test_operation_active|test_close_requested' >/dev/null
-then
-  echo "production library exposes connection-controller test symbols" >&2
-  exit 1
-fi
+assert_archive_excludes \
+  "$project_root/lib/libFlyology.a" \
+  'test_waiting_operations|test_operation_active|test_close_requested' \
+  "production library exposes connection-controller test symbols"
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 
