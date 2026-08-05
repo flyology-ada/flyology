@@ -2,7 +2,7 @@
   "generatedFrom": "performance-native-wss",
   "suite": "Autobahn 25.10.1",
   "imageDigest": "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074",
-  "revision": "05f9f4b",
+  "revision": "c4f1dd4",
   "profile": "Performance over WSS, native task",
   "transport": "WSS via OpenSSL 3.6.3 9 Jun 2026",
   "date": "2026-08-04",

@@ -22,7 +22,7 @@ if (outputRoot !== expectedOutput) {
 const suiteVersion = "25.10.1";
 const imageDigest =
   "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074";
-const revision = "05f9f4b";
+const revision = "c4f1dd4";
 const environment = JSON.parse(
   await readFile(join(projectRoot, "tests/autobahn/run-environment.json"), "utf8")
 );
