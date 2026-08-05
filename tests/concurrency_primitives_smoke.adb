@@ -18,15 +18,19 @@ procedure Concurrency_Primitives_Smoke is
    protected Active_Native_Work is
       procedure Reset;
       procedure Mark_Started;
+      procedure Mark_Cancellation_Observed;
       entry Wait_Started;
+      function Cancellation_Observed return Boolean;
    private
-      Started : Boolean := False;
+      Started  : Boolean := False;
+      Observed : Boolean := False;
    end Active_Native_Work;
 
    protected body Active_Native_Work is
       procedure Reset is
       begin
          Started := False;
+         Observed := False;
       end Reset;
 
       procedure Mark_Started is
@@ -34,10 +38,17 @@ procedure Concurrency_Primitives_Smoke is
          Started := True;
       end Mark_Started;
 
+      procedure Mark_Cancellation_Observed is
+      begin
+         Observed := True;
+      end Mark_Cancellation_Observed;
+
       entry Wait_Started when Started is
       begin
          null;
       end Wait_Started;
+
+      function Cancellation_Observed return Boolean is (Observed);
    end Active_Native_Work;
 
    procedure Native_Work
@@ -47,19 +58,36 @@ procedure Concurrency_Primitives_Smoke is
       Result   : out Integer)
    is
       pragma Unreferenced (Deadline);
-      Cancellation_FD : Flyology.IO.Descriptor;
-      Already_Cancelled : Boolean;
    begin
-      Token.Wait_Source (Cancellation_FD, Already_Cancelled);
-      pragma Assert (not Already_Cancelled);
-      pragma Unreferenced (Cancellation_FD);
       if Input = 99 then
-         Active_Native_Work.Mark_Started;
-         while not Token.Requested loop
-            delay 0.001;
-         end loop;
+         declare
+            Cancellation_FD   : Flyology.IO.Descriptor;
+            Already_Cancelled : Boolean;
+         begin
+            --  Borrow the executor-owned token's wake descriptor before the
+            --  shutdown test arms its persistent signaling failure.
+            Token.Wait_Source (Cancellation_FD, Already_Cancelled);
+            pragma Assert (not Already_Cancelled);
+            pragma Unreferenced (Cancellation_FD);
+            Active_Native_Work.Mark_Started;
+            while not Token.Requested loop
+               delay 0.001;
+            end loop;
+            Active_Native_Work.Mark_Cancellation_Observed;
+         end;
          raise Flyology.Cancellation.Operation_Cancelled;
       end if;
+
+      --  Completed-operation abandonment tests also need an existing token
+      --  wake descriptor to exercise their signaling-failure path.
+      declare
+         Cancellation_FD   : Flyology.IO.Descriptor;
+         Already_Cancelled : Boolean;
+      begin
+         Token.Wait_Source (Cancellation_FD, Already_Cancelled);
+         pragma Assert (not Already_Cancelled);
+         pragma Unreferenced (Cancellation_FD);
+      end;
       Result := Input * 2;
    end Native_Work;
 
@@ -428,6 +456,7 @@ procedure Concurrency_Primitives_Smoke is
       pragma Assert
         (Worker_Pool_Test_Control
            .Remaining_Native_Executor_Cancellation_Failures = 99);
+      pragma Assert (Active_Native_Work.Cancellation_Observed);
       Worker_Pool_Test_Control.Reset;
 
       --  The failing owner still publishes terminal completion, so this
