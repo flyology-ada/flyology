@@ -17,12 +17,13 @@ repeated through Flyology's OpenSSL-backed WSS transport:
 | Lightweight task, `ws://` | 247 | 240 | 4 | 3 | 0 |
 | Native task, `ws://` | 247 | 240 | 4 | 3 | 0 |
 | Lightweight task, `wss://` | 247 | 240 | 4 | 3 | 0 |
+| Native task, `wss://` | 247 | 240 | 4 | 3 | 0 |
 
 All close-behavior checks were `OK` except for the same three informational
-cases. The plaintext lightweight, plaintext native, and WSS lightweight results
-were identical. The WSS adapter completed Flyology's nonblocking server
-handshake with OpenSSL 3.6.3 before passing the connection to the same public
-HTTP and WebSocket handler used by the plaintext profiles.
+cases. All four lane/transport results were identical. The WSS adapter completed
+Flyology's nonblocking server handshake with OpenSSL 3.6.3 before passing the
+connection to the same public HTTP and WebSocket handler used by the plaintext
+profiles.
 
 The four `NON-STRICT` results were cases 6.4.1–6.4.4. Flyology rejects invalid
 UTF-8 when the complete fragmented message is available rather than at the
@@ -35,13 +36,13 @@ RFC-defined range. They are not conformance failures.
 
 ## Limits profile
 
-Autobahn's section 9.1–9.6 size and chunking family was run through the
-lightweight lane with `Max_Message` explicitly set to Flyology's supported
-16 MiB maximum:
+Autobahn's section 9.1–9.6 size and chunking family was run through both task
+lanes with `Max_Message` explicitly set to Flyology's supported 16 MiB maximum:
 
-| Cases | OK | Failed |
-| ---: | ---: | ---: |
-| 42 | 42 | 0 |
+| Lane | Cases | OK | Failed |
+| --- | ---: | ---: | ---: |
+| Lightweight task | 42 | 42 | 0 |
+| Native task | 42 | 42 | 0 |
 
 Every text, binary, fragmented, and chopped-delivery case from 64 KiB through
 16 MiB passed. Flyology retains a 1 MiB default for ordinary calls; applications
@@ -87,23 +88,25 @@ coverage-guided fuzzing campaign.
 ## Performance profile
 
 Autobahn's section 9.7–9.8 echo timing family was recorded separately through
-both execution lanes:
+both execution lanes over WS and WSS:
 
-| Lane | Cases | Round trips | OK | Failed | Case-duration range |
+| Lane and transport | Cases | Round trips | OK | Failed | Case-duration range |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Lightweight task | 12 | 12,000 | 12 | 0 | 113–271 ms |
-| Native task | 12 | 12,000 | 12 | 0 | 113–291 ms |
+| Lightweight task, `ws://` | 12 | 12,000 | 12 | 0 | 113–271 ms |
+| Native task, `ws://` | 12 | 12,000 | 12 | 0 | 113–291 ms |
+| Lightweight task, `wss://` | 12 | 12,000 | 12 | 0 | 163–366 ms |
+| Native task, `wss://` | 12 | 12,000 | 12 | 0 | 167–443 ms |
 
 Each case sends 1,000 sequential text or binary messages at one of six payload
 sizes from 0 through 4,096 bytes. The published profile retains Autobahn's total
 case duration and shows derived mean round-trip time and echo rate on a separate
-page for each lane. The runner verifies Alire's generated `release` profile,
-requires its `-O3` switch, explicitly compiles the standalone Autobahn harness
-with `-O3`, and writes that evidence beside the raw results. The publisher
-refuses performance input without this release record. These are single-host
-loopback observations that include
-case setup and close work, not portable performance guarantees, pass/fail
-thresholds, or evidence of a general performance ordering between lanes.
+page for each lane/transport variation. The runner verifies Alire's generated
+`release` profile, requires its `-O3` switch, explicitly compiles the standalone
+Autobahn harness with `-O3`, and writes that evidence beside the raw results.
+The publisher refuses performance input without this release record. These are
+single-host loopback observations that include case setup and close work, not
+portable performance guarantees, pass/fail thresholds, or evidence of a
+general performance ordering between lanes or transports.
 
 The timing observation was recorded on this equipment:
 
@@ -120,20 +123,6 @@ The timing observation was recorded on this equipment:
 This equipment record supports like-for-like regression comparison. It does not
 turn one loopback run into a cross-machine benchmark.
 
-## Source coverage and platform check
-
-GNATcoverage FSF 26.2 consolidated 56 executions of 56 portable behavioral
-programs across three runtime configurations. Across Flyology-owned Ada library
-units, it reported 38% of 7,936 statement obligations covered, 0% partial, and
-61% uncovered; decisions were 17% of 1,661 obligations fully covered, 21%
-partial, and 60% uncovered. These are project-wide figures, not a
-WebSocket-only coverage percentage.
-
-The current tree also passed `./scripts/test-linux-docker.sh` on native
-Linux/AArch64, including both external-consumer project defaults. This checks
-that the pure-Ada codec and its integration are portable across the maintained
-Darwin and Linux implementations; it is not a second performance recording.
-
 ## Scope and boundaries
 
 The core profile includes every non-performance, non-compression server case
@@ -144,7 +133,8 @@ compression profile.
 
 The core run tested `ws://` framing, fragmentation, control frames, close
 handling, masking enforcement, lengths, and UTF-8 behavior, then repeated the
-same cases over `wss://`. The TLS campaign used the repository's deterministic
+same cases over `wss://` in both lanes. The TLS campaign used the repository's
+deterministic
 self-signed fixture and Autobahn's local fuzzing client without hostname
 verification; it exercises secure transport integration and WebSocket behavior,
 not public-key infrastructure policy. Compression was repeated over both
@@ -165,13 +155,17 @@ runs as `linux/amd64`.
 ./scripts/websocket-conformance.sh core lightweight
 ./scripts/websocket-conformance.sh core native
 ./scripts/websocket-conformance.sh core-wss lightweight
+./scripts/websocket-conformance.sh core-wss native
 ./scripts/websocket-conformance.sh limits lightweight
+./scripts/websocket-conformance.sh limits native
 ./scripts/websocket-conformance.sh compression lightweight
 ./scripts/websocket-conformance.sh compression native
 ./scripts/websocket-conformance.sh compression-wss lightweight
 ./scripts/websocket-conformance.sh compression-wss native
 ./scripts/websocket-conformance.sh performance lightweight
 ./scripts/websocket-conformance.sh performance native
+./scripts/websocket-conformance.sh performance-wss lightweight
+./scripts/websocket-conformance.sh performance-wss native
 ```
 
 Each invocation writes Autobahn's HTML and per-case JSON reports under

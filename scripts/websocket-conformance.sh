@@ -23,9 +23,18 @@ case "$profile:$lane" in
     report_name=core-lightweight-wss
     transport=tls
     ;;
+  core-wss:native)
+    spec=fuzzingclient-wss-native.json
+    report_name=core-native-wss
+    transport=tls
+    ;;
   limits:lightweight)
     spec=fuzzingclient-limits.json
     report_name=limits-lightweight
+    ;;
+  limits:native)
+    spec=fuzzingclient-limits-native.json
+    report_name=limits-native
     ;;
   compression:lightweight)
     spec=fuzzingclient-compression.json
@@ -53,9 +62,19 @@ case "$profile:$lane" in
     spec=fuzzingclient-performance-native.json
     report_name=performance-native
     ;;
+  performance-wss:lightweight)
+    spec=fuzzingclient-performance-wss.json
+    report_name=performance-lightweight-wss
+    transport=tls
+    ;;
+  performance-wss:native)
+    spec=fuzzingclient-performance-wss-native.json
+    report_name=performance-native-wss
+    transport=tls
+    ;;
   *)
     printf '%s\n' \
-      "usage: $0 {core lightweight|core native|core-wss lightweight|limits lightweight|compression lightweight|compression native|compression-wss lightweight|compression-wss native|performance lightweight|performance native}" >&2
+      "usage: $0 {core lightweight|core native|core-wss lightweight|core-wss native|limits lightweight|limits native|compression lightweight|compression native|compression-wss lightweight|compression-wss native|performance lightweight|performance native|performance-wss lightweight|performance-wss native}" >&2
     exit 2
     ;;
 esac

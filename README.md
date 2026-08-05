@@ -1332,8 +1332,8 @@ records the tested profiles, limits, RFC 7692 compression, per-lane results,
 the OpenSSL-backed WSS campaign, and the release/-O3 build record attached to
 the timing profiles. A
 [published case browser](https://flyology.org/reports/websocket/) retains the
-individual verdicts, test equipment, and separate per-lane section 9 timing
-observations in the website's visual system.
+individual verdicts, test equipment, and separate section 9 timing observations
+for each lane and transport in the website's visual system.
 
 TLS uses the same HTTP engine after `Flyology.IO.TLS.Take` and `Handshake`.
 `Flyology.HTTP.Server.TLS.Connection_Transport` forwards decrypted reads and

@@ -53,7 +53,7 @@
           <h1>WebSocket framing, case by case.</h1>
         </div>
         <div class="report-hero-copy">
-          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate runs cover configurable boundaries, RFC 7692 compression, and per-lane echo timings.</p>
+          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate runs cover configurable boundaries, RFC 7692 compression, and echo timings by lane and transport.</p>
           <dl class="report-run-meta">
             <div><dt>Suite</dt><dd>Autobahn 25.10.1</dd></div>
             <div><dt>Revision</dt><dd>05f9f4b</dd></div>
@@ -71,6 +71,7 @@
           <div class="report-lane-row"><span>Lightweight / ws</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
           <div class="report-lane-row"><span>Native / ws</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
           <div class="report-lane-row"><span>Lightweight / wss</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
+          <div class="report-lane-row"><span>Native / wss</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
           <div class="report-lane-legend"><span class="report-status report-status-ok"><strong>240</strong> OK</span>
               <span class="report-status report-status-non-strict"><strong>4</strong> Non-strict</span>
               <span class="report-status report-status-informational"><strong>3</strong> Informational</span></div>
@@ -80,89 +81,141 @@
       <section class="report-profiles" aria-labelledby="profiles-title">
         <div class="report-section-heading">
           <p class="report-section-index">02 / PROFILES</p>
-          <h2 id="profiles-title">Inspect every verdict.</h2>
-          <p>Each profile retains case descriptions, expectations, observed results, close codes, and clean-close state. Normalized JSON is available on each page.</p>
+          <h2 id="profiles-title">Four test families.</h2>
+          <p>Choose a lane and transport within each family. Every variation retains its individual verdicts and normalized JSON.</p>
         </div>
-        <a class="report-profile-row" href="core-lightweight/">
-          <span class="report-profile-id">RFC-focused</span>
-          <span class="report-profile-copy">
-            <strong>Core, lightweight task</strong>
-            <span>The framing profile through a lightweight task on a shared event loop. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>247</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="core-native/">
-          <span class="report-profile-id">RFC-focused</span>
-          <span class="report-profile-copy">
-            <strong>Core, native task</strong>
-            <span>The same framing profile through an ordinary native Ada task. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>247</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="core-lightweight-wss/">
-          <span class="report-profile-id">RFC-focused over TLS</span>
-          <span class="report-profile-copy">
-            <strong>Core over WSS, lightweight task</strong>
-            <span>The framing profile after a nonblocking OpenSSL server handshake. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>247</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="limits-lightweight/">
-          <span class="report-profile-id">Section 9.1–9.6 limits</span>
-          <span class="report-profile-copy">
-            <strong>Limits, lightweight task</strong>
-            <span>Boundary probes with the adapter explicitly configured for 16 MiB. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>42</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="compression-lightweight/">
-          <span class="report-profile-id">RFC 7692 sections 12–13</span>
-          <span class="report-profile-copy">
-            <strong>Compression, lightweight task</strong>
-            <span>Compressed messages and extension negotiation through a lightweight task. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>216</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="compression-native/">
-          <span class="report-profile-id">RFC 7692 sections 12–13</span>
-          <span class="report-profile-copy">
-            <strong>Compression, native task</strong>
-            <span>The same compression and negotiation profile through a native task. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>216</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="compression-lightweight-wss/">
-          <span class="report-profile-id">RFC 7692 sections 12–13 over TLS</span>
-          <span class="report-profile-copy">
-            <strong>Compression over WSS, lightweight task</strong>
-            <span>The compression profile after a nonblocking OpenSSL server handshake. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>216</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="compression-native-wss/">
-          <span class="report-profile-id">RFC 7692 sections 12–13 over TLS</span>
-          <span class="report-profile-copy">
-            <strong>Compression over WSS, native task</strong>
-            <span>The same secure compression profile through an ordinary native task. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>216</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="performance-lightweight/">
-          <span class="report-profile-id">Section 9.7–9.8 timing</span>
-          <span class="report-profile-copy">
-            <strong>Performance, lightweight task</strong>
-            <span>Twelve sequential echo timing probes across text and binary payloads. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>12</strong> cases</span>
-        </a>
-        <a class="report-profile-row" href="performance-native/">
-          <span class="report-profile-id">Section 9.7–9.8 timing</span>
-          <span class="report-profile-copy">
-            <strong>Performance, native task</strong>
-            <span>The same twelve sequential echo timing probes through a native task. No failed verdicts in this profile.</span>
-          </span>
-          <span class="report-profile-outcome"><strong>12</strong> cases</span>
-        </a>
+        <section class="report-profile-group" aria-labelledby="profile-group-core">
+          <header>
+            <span class="report-profile-number">01</span>
+            <div>
+              <p>RFC 6455</p>
+              <h3 id="profile-group-core">Core framing</h3>
+              <p>Framing, fragmentation, control frames, close handling, masking, lengths, and UTF-8 behavior.</p>
+            </div>
+          </header>
+          <div class="report-profile-variants">
+            <a class="report-profile-variant" href="core-lightweight/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>240</strong> OK</span><span class="is-non-strict"><strong>4</strong> Non-strict</span><span class="is-informational"><strong>3</strong> Informational</span></span>
+              <span class="report-variant-total">247 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="core-native/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>240</strong> OK</span><span class="is-non-strict"><strong>4</strong> Non-strict</span><span class="is-informational"><strong>3</strong> Informational</span></span>
+              <span class="report-variant-total">247 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="core-lightweight-wss/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WSS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>240</strong> OK</span><span class="is-non-strict"><strong>4</strong> Non-strict</span><span class="is-informational"><strong>3</strong> Informational</span></span>
+              <span class="report-variant-total">247 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="core-native-wss/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WSS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>240</strong> OK</span><span class="is-non-strict"><strong>4</strong> Non-strict</span><span class="is-informational"><strong>3</strong> Informational</span></span>
+              <span class="report-variant-total">247 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </section>
+        <section class="report-profile-group" aria-labelledby="profile-group-limits">
+          <header>
+            <span class="report-profile-number">02</span>
+            <div>
+              <p>Sections 9.1–9.6</p>
+              <h3 id="profile-group-limits">Message limits</h3>
+              <p>Text, binary, fragmentation, and chopped delivery from 64 KiB through the configured 16 MiB maximum.</p>
+            </div>
+          </header>
+          <div class="report-profile-variants">
+            <a class="report-profile-variant" href="limits-lightweight/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>42</strong> OK</span></span>
+              <span class="report-variant-total">42 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="limits-native/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>42</strong> OK</span></span>
+              <span class="report-variant-total">42 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </section>
+        <section class="report-profile-group" aria-labelledby="profile-group-compression">
+          <header>
+            <span class="report-profile-number">03</span>
+            <div>
+              <p>RFC 7692 · Sections 12–13</p>
+              <h3 id="profile-group-compression">Compression</h3>
+              <p>permessage-deflate negotiation and compressed messages across both task lanes and transports.</p>
+            </div>
+          </header>
+          <div class="report-profile-variants">
+            <a class="report-profile-variant" href="compression-lightweight/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>216</strong> OK</span></span>
+              <span class="report-variant-total">216 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="compression-native/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>216</strong> OK</span></span>
+              <span class="report-variant-total">216 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="compression-lightweight-wss/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WSS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>216</strong> OK</span></span>
+              <span class="report-variant-total">216 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="compression-native-wss/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WSS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>216</strong> OK</span></span>
+              <span class="report-variant-total">216 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </section>
+        <section class="report-profile-group" aria-labelledby="profile-group-performance">
+          <header>
+            <span class="report-profile-number">04</span>
+            <div>
+              <p>Sections 9.7–9.8</p>
+              <h3 id="profile-group-performance">Timing observations</h3>
+              <p>Release/-O3 loopback echo observations across six text and binary payload sizes.</p>
+            </div>
+          </header>
+          <div class="report-profile-variants">
+            <a class="report-profile-variant" href="performance-lightweight/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>12</strong> OK</span></span>
+              <span class="report-variant-total">12 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="performance-native/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>12</strong> OK</span></span>
+              <span class="report-variant-total">12 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="performance-lightweight-wss/">
+              <span class="report-variant-name"><strong>Lightweight task</strong><span>WSS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>12</strong> OK</span></span>
+              <span class="report-variant-total">12 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="report-profile-variant" href="performance-native-wss/">
+              <span class="report-variant-name"><strong>Native task</strong><span>WSS</span></span>
+              <span class="report-variant-status"><span class="is-ok"><strong>12</strong> OK</span></span>
+              <span class="report-variant-total">12 cases</span>
+              <span class="report-variant-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </section>
       </section>
 
       <section class="report-compression" aria-labelledby="compression-title">
@@ -184,37 +237,28 @@
       <section class="report-performance" aria-labelledby="performance-title">
         <div>
           <p class="report-section-index">04 / TIMING</p>
-          <h2 id="performance-title">24,000 sequential echoes completed across both lanes.</h2>
+          <h2 id="performance-title">48,000 sequential echoes across lanes and transports.</h2>
         </div>
         <div>
-          <p>All 24 section 9.7–9.8 timing probes passed. Each lane completed 1,000 sequential round trips at every text and binary payload size from a recorded Alire release build with <code>-O3</code>.</p>
+          <p>All 48 section 9.7–9.8 timing probes passed. Every lane and transport variation completed 1,000 sequential round trips at each text and binary payload size from a recorded Alire release build with <code>-O3</code>.</p>
           <p>These loopback observations include case setup and close work. They are recorded for regression comparison, not as a portable throughput or latency claim.</p>
           <nav class="report-performance-links" aria-label="Performance profiles">
-            <a href="performance-lightweight/"><span>Lightweight task</span><strong>113–271 ms</strong></a>
-            <a href="performance-native/"><span>Native task</span><strong>113–291 ms</strong></a>
+            <a href="performance-lightweight/"><span>Lightweight / ws</span><strong>113–271 ms</strong></a>
+            <a href="performance-native/"><span>Native / ws</span><strong>113–291 ms</strong></a>
+            <a href="performance-lightweight-wss/"><span>Lightweight / wss</span><strong>163–366 ms</strong></a>
+            <a href="performance-native-wss/"><span>Native / wss</span><strong>167–443 ms</strong></a>
           </nav>
-        </div>
-      </section>
-
-      <section class="report-boundary" aria-labelledby="coverage-title">
-        <div>
-          <p class="report-section-index">05 / SOURCE COVERAGE</p>
-          <h2 id="coverage-title">38% statements; 17% decisions fully covered.</h2>
-        </div>
-        <div>
-          <p>GNATcoverage FSF 26.2 consolidated 56 executions of 56 portable behavioral programs across 3 runtime configurations.</p>
-          <p>This is project-wide source coverage for Flyology-owned Ada library units across the portable behavioral suite, not a WebSocket-only percentage. Decisions also recorded 21% partial coverage.</p>
         </div>
       </section>
 
       <section class="report-boundary" aria-labelledby="boundary-title">
         <div>
-          <p class="report-section-index">06 / BOUNDARY</p>
+          <p class="report-section-index">05 / BOUNDARY</p>
           <h2 id="boundary-title">The limit is application policy.</h2>
         </div>
         <div>
           <p>All 42 boundary and chunking cases pass from 64 KiB through 16 MiB. The adapter explicitly selects the 16 MiB supported maximum; ordinary calls retain Flyology's 1 MiB default.</p>
-          <p>The core framing and compression profiles were also repeated over <code>wss://</code> in both task lanes. The limits and timing campaigns used loopback <code>ws://</code>.</p>
+          <p>Core framing, compression, and timing were repeated over <code>wss://</code> in both lanes. The message-limit campaign used loopback <code>ws://</code>.</p>
         </div>
       </section>
     </main>

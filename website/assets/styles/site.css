@@ -1792,58 +1792,151 @@ code:not(pre code) {
   color: var(--ink-soft);
 }
 
-.report-profile-row {
+.report-profile-group {
   display: grid;
-  grid-template-columns: 9rem minmax(0, 1fr) 6rem;
-  align-items: center;
-  padding-block: 1.5rem;
+  grid-template-columns: minmax(15rem, 0.72fr) minmax(26rem, 1.28fr);
+  padding-block: clamp(1.8rem, 4vw, 3rem);
   border-top: 1px solid var(--line);
-  gap: clamp(1.2rem, 4vw, 3rem);
-  text-decoration: none;
-  transition: padding-inline 200ms var(--ease-out), background-color 180ms var(--ease-out);
+  gap: clamp(2rem, 7vw, 6rem);
 }
 
-.report-profile-row:last-child {
+.report-profile-group:last-child {
   border-bottom: 1px solid var(--line);
 }
 
-.report-profile-row:hover {
-  padding-inline: 1rem;
-  background: var(--surface);
+.report-profile-group > header {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-content: start;
+  gap: 1rem;
 }
 
-.report-profile-id,
-.report-profile-outcome {
+.report-profile-number,
+.report-profile-group > header p:first-child,
+.report-variant-name > span,
+.report-variant-total {
   color: var(--ink-soft);
   font-family: var(--font-mono);
   font-size: 0.7rem;
 }
 
-.report-profile-copy {
-  display: grid;
-  gap: 0.28rem;
+.report-profile-number {
+  padding-top: 0.2rem;
+  color: var(--violet);
 }
 
-.report-profile-copy strong {
-  font-size: clamp(1.1rem, 2vw, 1.45rem);
+.report-profile-group > header p:first-child {
+  margin-bottom: 0.45rem;
+  letter-spacing: 0.04em;
+}
+
+.report-profile-group h3 {
+  margin-bottom: 0.65rem;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
   font-weight: 590;
   letter-spacing: -0.025em;
 }
 
-.report-profile-copy > span {
-  max-width: 64ch;
+.report-profile-group > header p:last-child {
+  max-width: 42ch;
+  margin-bottom: 0;
   color: var(--ink-soft);
   font-size: 0.86rem;
 }
 
-.report-profile-outcome {
-  text-align: right;
+.report-profile-variants {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  column-gap: clamp(1.5rem, 4vw, 3rem);
 }
 
-.report-profile-outcome strong {
-  display: block;
+.report-profile-variant {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 5.7rem;
+  padding-block: 0.9rem;
+  border-bottom: 1px solid var(--line);
+  gap: 0.3rem 0.8rem;
+  text-decoration: none;
+  transition: padding-inline 180ms var(--ease-out), background-color 180ms var(--ease-out);
+}
+
+.report-profile-variant:nth-child(-n + 2) {
+  border-top: 1px solid var(--line);
+}
+
+.report-profile-variant:hover {
+  padding-inline: 0.7rem;
+  background: var(--surface);
+}
+
+.report-variant-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 0.55rem;
+}
+
+.report-variant-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-variant-name > span {
+  color: var(--violet-deep);
+}
+
+.report-variant-arrow {
+  grid-column: 2;
+  grid-row: 1;
   color: var(--ink);
-  font-size: 1rem;
+  transition: transform 180ms var(--ease-out);
+}
+
+.report-profile-variant:hover .report-variant-arrow {
+  transform: translateX(0.2rem);
+}
+
+.report-variant-status {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1;
+  gap: 0.28rem 0.65rem;
+  font-size: 0.68rem;
+}
+
+.report-variant-status span {
+  color: var(--ink-soft);
+}
+
+.report-variant-status strong {
+  font-family: var(--font-mono);
+  font-weight: 650;
+}
+
+.report-variant-status .is-ok,
+.report-variant-status .is-ok strong {
+  color: var(--teal-deep);
+}
+
+.report-variant-status .is-non-strict,
+.report-variant-status .is-non-strict strong {
+  color: var(--violet-deep);
+}
+
+.report-variant-status .is-failed,
+.report-variant-status .is-failed strong {
+  color: var(--ink);
+}
+
+.report-variant-total {
+  grid-column: 2;
+  grid-row: 2;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .report-boundary > div:last-child p {
@@ -2729,6 +2822,7 @@ code:not(pre code) {
   .report-performance,
   .report-boundary,
   .report-equipment,
+  .report-profile-group,
   .report-section-heading,
   .doc-hero {
     grid-template-columns: 1fr;
@@ -2937,7 +3031,6 @@ code:not(pre code) {
     gap: 0.65rem;
   }
 
-  .report-profile-row,
   .report-case-intro,
   .report-filter-bar,
   .report-equipment dl div,
@@ -2945,10 +3038,16 @@ code:not(pre code) {
     grid-template-columns: 1fr;
   }
 
-  .report-profile-id,
-  .report-profile-outcome,
   .report-filter-bar p {
     text-align: left;
+  }
+
+  .report-profile-variants {
+    grid-template-columns: 1fr;
+  }
+
+  .report-profile-variant:nth-child(2) {
+    border-top: 0;
   }
 
   .report-case-actions {

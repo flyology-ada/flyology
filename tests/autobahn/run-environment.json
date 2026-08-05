@@ -11,20 +11,5 @@
   "buildProfile": "Alire release",
   "optimization": "-O3 for the Flyology library and Autobahn harness",
   "testClient": "Autobahn 25.10.1 linux/amd64 container on the same host",
-  "tlsProvider": "OpenSSL 3.6.3 9 Jun 2026",
-  "sourceCoverage": {
-    "scope": "Flyology-owned Ada library units across the portable behavioral suite",
-    "tool": "GNATcoverage FSF 26.2",
-    "programs": 56,
-    "executions": 56,
-    "configurations": 3,
-    "statementsCovered": 38,
-    "statementsPartial": 0,
-    "statementsUncovered": 61,
-    "statementObligations": 7936,
-    "decisionsCovered": 17,
-    "decisionsPartial": 21,
-    "decisionsUncovered": 60,
-    "decisionObligations": 1661
-  }
+  "tlsProvider": "OpenSSL 3.6.3 9 Jun 2026"
 }
