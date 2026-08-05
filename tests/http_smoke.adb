@@ -2025,6 +2025,31 @@ procedure HTTP_Smoke is
       end;
 
       declare
+         Supported : Routing.Router
+           (Capacity => 1, Slashes => Routing.Strict_Slashes);
+         Excessive : Routing.Router
+           (Capacity => 1, Slashes => Routing.Strict_Slashes);
+         Pattern   : Unbounded_String;
+         Rejected  : Boolean := False;
+      begin
+         for Index in 1 .. Applications.Max_Path_Parameters loop
+            Append
+              (Pattern,
+               "/{p" & Ada.Strings.Fixed.Trim
+                 (Positive'Image (Index), Ada.Strings.Both) & "}");
+         end loop;
+         Supported.Get (To_String (Pattern), Home'Access);
+         Append (Pattern, "/{extra}");
+         begin
+            Excessive.Get (To_String (Pattern), Home'Access);
+         exception
+            when Routing.Route_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
+
+      declare
          Full : Routing.Router
            (Capacity => 1, Slashes => Routing.Strict_Slashes);
          Wire : aliased Memory_Transport;

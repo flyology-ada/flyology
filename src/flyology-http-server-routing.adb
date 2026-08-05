@@ -274,6 +274,9 @@ package body Flyology.HTTP.Server.Routing is
                      raise Route_Error with "duplicate HTTP route parameter";
                   end if;
                end loop;
+               if Count = App.Max_Path_Parameters then
+                  raise Route_Error with "too many HTTP route parameters";
+               end if;
                Count := Count + 1;
                Names (Count) := To_Unbounded_String (Name);
             end if;
