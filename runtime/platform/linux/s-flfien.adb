@@ -337,7 +337,10 @@ package body System.Flyology.File_Engine is
       --  Count every submitted SQE whose CQE has not yet been consumed.
       --  Administrative cancellation SQEs count independently from their
       --  data requests because each produces its own CQE.
-      Uring_In_Flight   : U32 := 0;
+      --  The event-loop thread is the only writer. Final reaping reads this
+      --  while Wait_Batch has dropped the group lock, so the component must
+      --  provide the same coherent single-writer access as Active_Count.
+      Uring_In_Flight   : U32 := 0 with Atomic;
       Test_Backpressure_Observed : Boolean := False;
       Free_Requests     : Native_AIO_Request_Access;
       Active_Requests   : Native_AIO_Request_Access;

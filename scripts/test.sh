@@ -537,6 +537,9 @@ then
   "$project_root/scripts/run-with-timeout.sh" 30 \
     "$test_bin/fault_injection_smoke" \
     file-uring-post-setup-fallback
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-uring-last-fiber
 fi
 
 #  Exercise the Linux batch boundary with a queued file completion, socket
