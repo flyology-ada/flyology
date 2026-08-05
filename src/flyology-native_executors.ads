@@ -137,6 +137,10 @@ private
    type Result_Array is array (Positive range <>) of Result_Type;
    type Token_Access is access all Flyology.Cancellation.Token;
    type Token_Array is array (Positive range <>) of Token_Access;
+   --  Zero remains the invalid-handle sentinel; modular increment keeps a
+   --  heavily reused slot from becoming permanently unavailable.
+   subtype Generation_Number is Interfaces.Unsigned_64;
+   type Generation_Array is array (Positive range <>) of Generation_Number;
    type Wake_Array is array (Positive range <>) of
      Flyology.Wake_Sources.Source;
    type Time_Array is array (Positive range <>) of Ada.Real_Time.Time;
@@ -155,7 +159,7 @@ private
          Token      : Token_Access;
          Deadline   : Ada.Real_Time.Time;
          Slot       : out Positive;
-         Generation : out Natural;
+         Generation : out Generation_Number;
          Replaced_Token : out Token_Access;
          Accepted   : out Boolean);
       entry Next
@@ -170,19 +174,19 @@ private
         (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence);
       procedure Try_Await
         (Slot       : Positive;
-         Generation : Natural;
+         Generation : Generation_Number;
          Result     : out Result_Type;
          Error_Id   : out Ada.Exceptions.Exception_Id;
          Message    : out Ada.Strings.Unbounded.Unbounded_String;
          Ready      : out Boolean);
       procedure Wait_Source
         (Slot       : Positive;
-         Generation : Natural;
+         Generation : Generation_Number;
          FD         : out Flyology.IO.Descriptor;
          Ready      : out Boolean);
       procedure Abandon
         (Slot       : Positive;
-         Generation : Natural);
+         Generation : Generation_Number);
       procedure Shutdown;
       procedure Token_At (Slot : Positive; Token : out Token_Access);
       procedure Set_Expected_Workers (Count : Natural);
@@ -196,7 +200,7 @@ private
       Tokens      : Token_Array (1 .. Capacity) := (others => null);
       Deadlines   : Time_Array (1 .. Capacity) :=
         (others => Ada.Real_Time.Time_Last);
-      Generations : Natural_Array (1 .. Capacity) := (others => 0);
+      Generations : Generation_Array (1 .. Capacity) := (others => 0);
       Status      : Status_Array (1 .. Capacity) := (others => Free);
       Detached    : Boolean_Array (1 .. Capacity) := (others => False);
       Error_Ids   : Exception_Id_Array (1 .. Capacity) :=
@@ -220,7 +224,7 @@ private
    type Handle_Guard is new Ada.Finalization.Limited_Controlled with record
       State      : Shared_State_Access := null;
       Slot       : Positive := 1;
-      Generation : Natural := 0;
+      Generation : Generation_Number := 0;
       Active     : Boolean := False;
    end record;
 

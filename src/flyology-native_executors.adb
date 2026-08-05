@@ -16,7 +16,7 @@ package body Flyology.Native_Executors is
          Token      : Token_Access;
          Deadline   : Ada.Real_Time.Time;
          Slot       : out Positive;
-         Generation : out Natural;
+         Generation : out Generation_Number;
          Replaced_Token : out Token_Access;
          Accepted   : out Boolean)
       is
@@ -47,6 +47,9 @@ package body Flyology.Native_Executors is
          end if;
          Slot := Found;
          Generations (Slot) := Generations (Slot) + 1;
+         if Generations (Slot) = 0 then
+            Generations (Slot) := Generations (Slot) + 1;
+         end if;
          Generation := Generations (Slot);
          Inputs (Slot) := Input;
          Messages (Slot) := Ada.Strings.Unbounded.Null_Unbounded_String;
@@ -156,7 +159,7 @@ package body Flyology.Native_Executors is
 
       procedure Try_Await
         (Slot       : Positive;
-         Generation : Natural;
+         Generation : Generation_Number;
          Result     : out Result_Type;
          Error_Id   : out Ada.Exceptions.Exception_Id;
          Message    : out Ada.Strings.Unbounded.Unbounded_String;
@@ -188,7 +191,7 @@ package body Flyology.Native_Executors is
 
       procedure Wait_Source
         (Slot       : Positive;
-         Generation : Natural;
+         Generation : Generation_Number;
          FD         : out Flyology.IO.Descriptor;
          Ready      : out Boolean)
       is
@@ -210,7 +213,7 @@ package body Flyology.Native_Executors is
 
       procedure Abandon
         (Slot       : Positive;
-         Generation : Natural) is
+         Generation : Generation_Number) is
       begin
          if Generations (Slot) /= Generation or else Generation = 0
            or else Status (Slot) = Free
@@ -432,7 +435,7 @@ package body Flyology.Native_Executors is
       Accepted : out Boolean)
    is
       Slot       : Positive;
-      Generation : Natural;
+      Generation : Generation_Number;
       Token_Value : Token_Access := null;
       Replaced_Token : Token_Access := null;
    begin
