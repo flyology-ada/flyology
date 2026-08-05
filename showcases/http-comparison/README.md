@@ -29,7 +29,10 @@ versions and `Cargo.lock` fixes the complete transitive graph.
 The first two August 2026 HTTP journal entries predate this extension and are
 superseded because their builds linked one event loop while reporting 16. The
 [corrected follow-up](https://flyology.org/journal/2026-08-http-comparison-correction/)
-publishes tier-separated aggregate results from the verified harness.
+publishes tier-separated aggregate results from the verified harness. Its
+historical raw ignored outputs were not retained, so the checked-in aggregates
+cannot be independently regenerated from the published artifacts; its method
+record identifies reachable source equivalents without claiming a rerun.
 
 ## Reproduce it in Docker
 
@@ -240,7 +243,13 @@ single trial. A useful result has all of the following:
 - zero request errors and only HTTP 200 responses;
 - a stable throughput range rather than a single lucky peak;
 - enough duration to reach a steady CPU and memory state;
-- the raw JSON and metadata kept with any published table.
+- the raw JSON and metadata archived with any new published table.
+
+The August 2026 correction journal is a historical exception: only its
+aggregates and method record remain, while the raw JSON and complete metadata
+were left under ignored `build/` output and are unavailable. Do not treat those
+aggregates as independently regenerable. A new final-branch table requires a
+complete rerun with a retained and sanitized raw bundle.
 
 The Docker command uses loopback, so the load generator competes with the
 server for CPU and the container runtime can add noise. It is suitable for

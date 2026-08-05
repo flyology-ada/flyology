@@ -1,16 +1,34 @@
 {
-  "schema": 1,
+  "schema": 2,
   "source_revision": "46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9",
+  "source_revision_reachable_equivalent": "49ef1ca535dced0fde888e291914d7fab9beb61f",
+  "source_revision_equivalence": {
+    "basis": "identical showcases/http-comparison subtree and stable patch-id",
+    "showcase_tree": "2d9f8d5b2af866506b97fa5d41df2e1be7dce8e6",
+    "stable_patch_id": "1bfe43a0b88ecf13dd91bc2bcb9c793e20e1b116"
+  },
   "harness_correction_revision": "b0cfa28b1d31313f022f42a0d79d4e7b84a5719b",
   "measurement_sources": {
     "local": {
       "revision": "d0abaa294e7c650aef3e94c10b757d103ef561ee",
+      "reachable_equivalent_revision": "6110161d0806d504a1802030c6ce74c519c15e7f",
+      "equivalence": {
+        "basis": "identical showcases/http-comparison subtree and stable patch-id",
+        "showcase_tree": "f439cde5aa47d23219abe0d8460cc6c311a11886",
+        "stable_patch_id": "d436bc7585d767a044bc5d44fd1222a5ef28c5f9"
+      },
       "dirty": false
     },
     "kubernetes": {
       "checkout_revision": "7880b4e231e043bf1fb102d34b0b362ac0505fe7",
       "local_overlay": true,
       "overlay_equivalent_revision": "46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9",
+      "overlay_reachable_equivalent_revision": "49ef1ca535dced0fde888e291914d7fab9beb61f",
+      "overlay_equivalence": {
+        "basis": "identical showcases/http-comparison subtree and stable patch-id",
+        "showcase_tree": "2d9f8d5b2af866506b97fa5d41df2e1be7dce8e6",
+        "stable_patch_id": "1bfe43a0b88ecf13dd91bc2bcb9c793e20e1b116"
+      },
       "note": "The overlay commit was created after launch without changing the running overlay bytes."
     }
   },
@@ -143,7 +161,9 @@
     "required_http_success_rate": 1.0,
     "required_timeout_count": 0,
     "timeout_bearing_rows_in_common_rankings": false,
-    "raw_results_location": "ignored build output",
-    "published_data": "valid aggregates, excluded observations, and lifecycle resources as CSV"
+    "raw_results_location": "historical ignored build output; no retained raw bundle is available",
+    "raw_results_available": false,
+    "aggregate_regeneration": "The checked-in aggregates cannot be independently regenerated from the published artifacts.",
+    "published_data": "valid aggregates, excluded observations, lifecycle resources, and method provenance as CSV/JSON"
   }
 }

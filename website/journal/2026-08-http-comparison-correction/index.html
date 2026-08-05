@@ -58,7 +58,7 @@
           <p class="article-summary">A linked-runtime probe found that two earlier campaigns ran one Flyology event loop while reporting 16. With 16 loops observed and every server thread pinned, lightweight and native converge under saturation on local ARM64 and both native Linux architectures; pinned Rust fixtures lead the tier comparisons.</p>
           <dl class="article-meta">
             <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
-            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9/showcases/http-comparison">46a718a</a></dd></div>
+            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/49ef1ca535dced0fde888e291914d7fab9beb61f/showcases/http-comparison">49ef1ca (reachable equivalent)</a></dd></div>
             <div><dt>Platforms</dt><dd>Linux / ARM64 + AMD64</dd></div>
             <div><dt>Common profile</dt><dd>7 trials at concurrency one</dd></div>
           </dl>
@@ -104,6 +104,7 @@
             </dl>
             <p>The Rust side is pinned to Rust 1.97.1, hyper 1.11.0, axum 0.8.9, Actix Web 4.14.0, and Tokio 1.53.1. Direct dependencies use exact versions and <code>Cargo.lock</code> fixes the transitive graph.</p>
             <p>The shared hosts used 16-CPU pod quotas, not exclusive CPU sets. The ARM64 host used Neoverse-N1 with 80 physical cores and 256 GB; the AMD64 host used Intel Xeon Gold 5412U with 24 physical cores, 48 logical CPUs, and 256 GB.</p>
+            <p>The measurement record retains its original hashes. The local run recorded <code>d0abaa29…</code>, whose reachable equivalent is <a href="https://github.com/flyology-ada/flyology/tree/6110161d0806d504a1802030c6ce74c519c15e7f/showcases/http-comparison"><code>6110161d…</code></a>. The report source and Kubernetes overlay recorded <code>46a718a4…</code>, whose reachable equivalent is <a href="https://github.com/flyology-ada/flyology/tree/49ef1ca535dced0fde888e291914d7fab9beb61f/showcases/http-comparison"><code>49ef1ca5…</code></a>. Each pair has an identical <code>showcases/http-comparison</code> Git tree and stable patch ID; <code>b0cfa28…</code> and the Kubernetes base <code>7880b4e…</code> were already reachable and remain unchanged in the method record.</p>
             <div class="data-links" aria-label="Benchmark data downloads">
               <a href="data/summary.csv" download>Throughput and latency CSV</a>
               <a href="data/resources.csv" download>Resource CSV</a>
@@ -112,6 +113,7 @@
               <a href="data/saturation-resources.csv" download>High-concurrency resources</a>
               <a href="data/method.json" download>Method record</a>
             </div>
+            <p>The historical raw oha JSON, logs, and complete metadata bundles remained in ignored <code>build/</code> output and are no longer available. The downloads preserve the published aggregates and provenance record, but they are not sufficient to independently regenerate those aggregates. No measurement was rerun for this provenance correction.</p>
           </section>
 
           <section id="saturation">
@@ -311,7 +313,8 @@
               <figure class="code-panel">
                 <figcaption>One-second c8, c32, and c128 probe</figcaption>
                 <button class="copy-button" type="button" data-copy>Copy</button>
-                <pre><code>HTTP_BENCH_TRIALS=1 \
+                <pre><code>git switch --detach 6110161d0806d504a1802030c6ce74c519c15e7f
+HTTP_BENCH_TRIALS=1 \
 HTTP_BENCH_DURATION=1s \
 HTTP_BENCH_WARMUP=1s \
 HTTP_BENCH_CONCURRENCIES="8 32 128" \
@@ -329,7 +332,10 @@ HTTP_BENCH_SATURATION_PROBE=1 \
               <figure class="code-panel">
                 <figcaption>ARM64 and AMD64 campaign</figcaption>
                 <button class="copy-button" type="button" data-copy>Copy</button>
-                <pre><code>HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
+                <pre><code>git switch --detach 49ef1ca535dced0fde888e291914d7fab9beb61f
+HTTP_BENCH_GIT_REVISION=7880b4e231e043bf1fb102d34b0b362ac0505fe7 \
+HTTP_BENCH_LOCAL_OVERLAY=1 \
+HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
 HTTP_BENCH_AMD64_NODE=&lt;selected-amd64-node&gt; \
 HTTP_BENCH_TRIALS=7 \
 HTTP_BENCH_DURATION=30s \
@@ -348,7 +354,10 @@ HTTP_BENCH_RUST_WORKERS=8 \
               <figure class="code-panel">
                 <figcaption>Three 10-second trials at c8, c32, and c128</figcaption>
                 <button class="copy-button" type="button" data-copy>Copy</button>
-                <pre><code>HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
+                <pre><code>git switch --detach 49ef1ca535dced0fde888e291914d7fab9beb61f
+HTTP_BENCH_GIT_REVISION=7880b4e231e043bf1fb102d34b0b362ac0505fe7 \
+HTTP_BENCH_LOCAL_OVERLAY=1 \
+HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
 HTTP_BENCH_AMD64_NODE=&lt;selected-amd64-node&gt; \
 HTTP_BENCH_TRIALS=3 \
 HTTP_BENCH_DURATION=10s \
@@ -363,7 +372,7 @@ HTTP_BENCH_SATURATION_PROBE=1 \
   ./showcases/http-comparison/scripts/run-kubernetes.sh</code></pre>
               </figure>
             </details>
-            <p>The runner validates response bytes before measurement, rejects any common row with a timeout or non-200 response, preserves raw observations below ignored <code>build/</code>, and verifies deletion of its temporary namespace.</p>
+            <p>The runner validates response bytes before measurement, rejects any common row with a timeout or non-200 response, preserves raw observations below ignored <code>build/</code>, and verifies deletion of its temporary namespace. Retain and sanitize those raw outputs outside the ignored working directory before publishing a new table. A new final-branch benchmark claim requires a complete local and Kubernetes rerun with that retained bundle; these commands are reproduction instructions, not evidence that such a rerun occurred here.</p>
           </section>
         </article>
       </div>
