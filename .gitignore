@@ -16,4 +16,5 @@
 /showcases/http-comparison/servers/*/obj/
 /showcases/http-comparison/servers/rust/target/
 /docs/api/
+/docs/gnatdoc/html/
 /coverage/
