@@ -233,6 +233,25 @@ procedure HTTP_Smoke is
          HTTP_Server.Read_Request (Client, Request, Closed);
          pragma Assert (HTTP_Server.Content (Request) = "x");
       end;
+
+      Wire.Input := To_Unbounded_String
+        ("POST /legacy HTTP/1.0" & CRLF
+         & "Expect: 100-continue" & CRLF
+         & "Content-Length: 5" & CRLF & CRLF
+         & "hello");
+      Wire.Output := Null_Unbounded_String;
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request (Client, Request, Closed);
+         pragma Assert (not Closed);
+         pragma Assert (HTTP_Server.Content (Request) = "hello");
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output), "100 Continue") = 0);
+      end;
    end Check_Chunked_And_Expect;
 
    procedure Check_Streaming_Body is

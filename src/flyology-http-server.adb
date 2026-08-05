@@ -1099,8 +1099,9 @@ package body Flyology.HTTP.Server is
          Expect_Value : constant String := Header (Value, "Expect");
       begin
          if Expect_Count /= 0 then
-            if Value.Version_Value /= HTTP_1_1
-              or else Expect_Count > 1
+            if Value.Version_Value = HTTP_1_0 then
+               null;
+            elsif Expect_Count > 1
               or else Lower (Trim (Expect_Value)) /= "100-continue"
             then
                raise Expectation_Failed with "unsupported HTTP expectation";
