@@ -175,9 +175,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - The crate permits GNAT `>=13 & <17`, but runtime preparation accepts only
   exact verified host/release pairs. Do not broaden support from the dependency
   constraint alone.
-- `./scripts/prepare-rts.sh` defaults to `FLYOLOGY_DEFAULT=native` and produces
-  `build/rts`. Applications must compile with `--RTS=<prepared-runtime>`; the
-  public library intentionally does not link against stock GNARL by itself.
+- `./scripts/prepare-rts.sh` defaults to `FLYOLOGY_DEFAULT=native`, assembles a
+  clean sibling tree, and replaces `build/rts` only after a successful build.
+  Applications must compile with `--RTS=<prepared-runtime>`; the public library
+  intentionally does not link against stock GNARL by itself.
 - Important preparation controls:
   - `FLYOLOGY_RTS_DIR`: generated RTS destination.
   - `FLYOLOGY_DEFAULT`: `native` or `lightweight`.
@@ -190,14 +191,20 @@ scripts remain authoritative for commands, proof totals, and test coverage.
     switches; never enable them in a production runtime.
 - These settings are compiled into the prepared RTS, not read dynamically by
   the application.
+- The Alire dependency action reads persisted settings from the ignored
+  `build/flyology-rts.conf`. Only an explicit `prepare-alire-rts.sh
+  --configure` captures the current `FLYOLOGY_*` settings; ordinary `alr build`
+  ignores ambient settings, and `--reset` restores native defaults. Generated
+  GPR configuration must bind the validated `gnat_native` prefix explicitly.
 - Flyology serializes its own Alire RTS preparation within one dependency
   checkout. Alire may still mutate `alire/build_hash_inputs` before dependency
   actions, so concurrent full `alr build` processes must not share one local
   path pin. Use a separate Flyology checkout per build or externally serialize
   the builds.
 - Treat the Alire RTS input stamp as a transaction commit marker: invalidate it
-  before mutating a stale runtime, atomically publish generated configuration,
-  and publish the replacement stamp last.
+  before rebuilding, assemble and publish a clean replacement tree, atomically
+  publish generated configuration and policy, and publish the replacement
+  stamp last.
 - Do not commit generated `alire`, `config`, `obj`, `lib`, `build`, `docs/api`,
   test binaries, showcase binaries, or copied GNAT runtime sources.
 

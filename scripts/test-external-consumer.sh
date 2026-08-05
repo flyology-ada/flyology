@@ -4,7 +4,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_root="$project_root/tests/external_consumer"
 alr=$("$project_root/scripts/find-alr.sh")
-consumer_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-consumer.XXXXXX")
+consumer_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology consumer.XXXXXX")
 pin_root="$consumer_root/flyology-pin"
 concurrent_root="$consumer_root/concurrent-consumer"
 
@@ -72,6 +72,8 @@ cd "$consumer_root"
 
 runtime_archive="$pin_root/build/alire-rts/adalib/libgnarl.a"
 runtime_object="$pin_root/build/alire-rts/obj/context_switch.o"
+generated_config="$pin_root/build/flyology.cgpr"
+persisted_policy="$pin_root/build/flyology-rts.conf"
 archive_probe="$consumer_root/context_switch.o"
 ar -p "$runtime_archive" context_switch.o >"$archive_probe"
 case "$(uname -m)" in
@@ -100,6 +102,70 @@ case "$(uname -m)" in
 esac
 "$consumer_root/build/bin/external_consumer" native
 "$concurrent_root/build/bin/external_consumer" native
+
+#  Persist an explicit project policy, then prove that a normal build with no
+#  configuration environment retains it instead of reverting to defaults.
+FLYOLOGY_DEFAULT=lightweight \
+  "$alr" exec -- "$pin_root/scripts/prepare-alire-rts.sh" --configure
+if ! grep '^default=lightweight$' "$persisted_policy" >/dev/null; then
+  printf '%s\n' "explicit Alire RTS policy was not persisted" >&2
+  exit 1
+fi
+persistence_sentinel="$consumer_root/persistence-sentinel"
+touch "$persistence_sentinel"
+"$alr" build
+if [ "$runtime_object" -nt "$persistence_sentinel" ]; then
+  printf '%s\n' "plain Alire build replaced the persisted RTS policy" >&2
+  exit 1
+fi
+"$consumer_root/build/bin/external_consumer" lightweight
+
+#  Reset from outside `alr exec` with misleading PATH tools. The generated GPR
+#  configuration must name the validated gnat_native prefix explicitly, and a
+#  clean runtime replacement must not retain an arbitrary stale unit.
+fake_bin="$consumer_root/mismatched compiler/bin"
+mkdir -p "$fake_bin"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'printf "%s\\n" "unexpected PATH gcc invocation" >&2' \
+  'exit 88' >"$fake_bin/gcc"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'printf "%s\\n" "unexpected PATH gprconfig invocation" >&2' \
+  'exit 89' >"$fake_bin/gprconfig"
+chmod +x "$fake_bin/gcc" "$fake_bin/gprconfig"
+stale_runtime_file="$pin_root/build/alire-rts/adainclude/stale-runtime-unit.ads"
+touch "$stale_runtime_file"
+PATH="$fake_bin:$PATH" ALR="$alr" \
+  "$pin_root/scripts/prepare-alire-rts.sh" --reset
+if [ -e "$persisted_policy" ]; then
+  printf '%s\n' "Alire RTS policy reset retained its configuration file" >&2
+  exit 1
+fi
+if [ -e "$stale_runtime_file" ]; then
+  printf '%s\n' "clean RTS replacement retained a stale runtime unit" >&2
+  exit 1
+fi
+compiler_prefix=$(ALR="$alr" "$pin_root/scripts/gnat-native-prefix.sh")
+normalized_config=$(tr '[:upper:]' '[:lower:]' <"$generated_config")
+normalized_prefix=$(printf '%s\n' "$compiler_prefix" |
+  tr '[:upper:]' '[:lower:]')
+case "$normalized_config" in
+  *"$normalized_prefix/bin/gcc"*) ;;
+  *)
+    printf '%s\n' \
+      "GPR configuration did not bind the validated gnat_native compiler" >&2
+    exit 1
+    ;;
+esac
+case "$normalized_config" in
+  *"mismatched compiler"*)
+    printf '%s\n' "GPR configuration selected the compiler from PATH" >&2
+    exit 1
+    ;;
+esac
+"$alr" build
+"$consumer_root/build/bin/external_consumer" native
 
 #  An unchanged build must retain the prepared runtime, while a change to a
 #  path-pinned runtime input must invalidate it without manual preparation.

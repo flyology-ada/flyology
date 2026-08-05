@@ -113,7 +113,7 @@ once for the whole project, then rebuild normally:
 
 ```sh
 alr exec -- sh -c \
-  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh"'
+  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
 alr build
 ```
 
@@ -155,7 +155,7 @@ tickets:
 
 ```sh
 alr exec -- sh -c \
-  'FLYOLOGY_LOOP_POOL_SIZE=4 FLYOLOGY_PLACEMENT=round_robin "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh"'
+  'FLYOLOGY_LOOP_POOL_SIZE=4 FLYOLOGY_PLACEMENT=round_robin "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
 alr build
 ```
 
@@ -1982,23 +1982,48 @@ from the community index.
 
 Alire makes `flyology.gpr` available to the application and exports
 `FLYOLOGY_ROOT` as the dependency root. Every `alr build` runs Flyology's
-pre-build action, prepares a native-default RTS matching the selected compiler
-and current Flyology sources, and exports a GPR configuration that selects it.
+pre-build action, prepares an RTS matching the selected compiler, current
+Flyology sources, and persisted project policy, and exports a GPR configuration
+that selects it. With no explicit policy the default is native. Configure the
+policy once by passing the compiled RTS settings through the environment and
+adding `--configure`:
+
+```sh
+alr exec -- sh -c \
+  'FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=4 "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
+```
+
+The resolved settings, including defaults for variables not supplied to that
+command, are written to the ignored `build/flyology-rts.conf` file in the
+Flyology dependency checkout. Subsequent plain `alr build` commands use that
+file and do not reinterpret ambient `FLYOLOGY_*` variables. Change the policy
+by running `--configure` again with the complete desired settings, or restore
+the native defaults with:
+
+```sh
+alr exec -- sh -c \
+  '"$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --reset'
+```
+
 This also prevents a path-pinned checkout updated in place from retaining an
 older generated runtime. Preparation uses a content stamp covering the
 toolchain, target, compiled configuration, runtime sources, patches, and build
 scripts, so an unchanged build validates and reuses its existing RTS. The
-archive member and AArch64 unwind root are checked before reuse. No
-checkout-relative source paths, manual preparation command, or explicit
-`--RTS` argument is needed.
+generated GPR configuration binds the Ada and C drivers from the exact
+validated Alire `gnat_native` prefix even when preparation is invoked outside
+`alr exec`. The archive member and AArch64 unwind root are checked before
+reuse. No checkout-relative source paths or explicit `--RTS` argument is
+needed.
 
 Concurrent Alire processes that share one path-pinned Flyology checkout
 serialize its RTS preparation with a host advisory lock. The lock is released
 by the kernel if its owner exits, including after a signal, so a stale lockfile
-does not block a later build. A rebuild invalidates its currentness stamp before
-changing runtime artifacts, publishes the generated GPR configuration by
+does not block a later build. A rebuild invalidates its currentness stamp,
+assembles a clean sibling RTS tree, replaces the old tree only after assembly
+succeeds, publishes the generated GPR configuration and persisted policy by
 atomic rename, and publishes a new stamp last. An interrupted preparation is
-therefore rebuilt by the next invocation.
+therefore rebuilt by the next invocation, and units absent from the replacement
+cannot survive from an older runtime.
 
 This lock covers Flyology's preparation action, not Alire's own workspace
 updates. Two complete `alr build` processes that share one local path pin can
@@ -2084,7 +2109,8 @@ node ./scripts/check-site.mjs build/site
 
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,
-selects the project execution default, and builds a static RTS.
+selects the project execution default, and builds a static RTS in a clean
+sibling directory before replacing the requested destination.
 Set `FLYOLOGY_RTS_DIR` to put that generated runtime somewhere other than the
 crate checkout. Relative values are resolved from the caller's current
 directory; the resulting path is canonicalized before patching runtime files.
@@ -2106,10 +2132,11 @@ being silently accepted.
 
 `scripts/test-external-consumer.sh` copies a small consumer into a fresh
 temporary workspace, adds Flyology through an Alire path pin, verifies the
-automatic native-default build, and prepares a separate lightweight-default RTS
-to run the other variant. It also verifies the native default is inert before
-and after an ordinary task and that event machinery appears only for the
-lightweight opt-in.
+automatic native-default build and persisted lightweight policy, and prepares
+a separate lightweight-default RTS to run the other variant. It also covers
+paths containing spaces, exact compiler binding despite a mismatched `PATH`,
+clean replacement of stale runtime files, interrupted-publication recovery,
+native-default inertness, and lazy event machinery for the lightweight opt-in.
 
 Run the complete verification suite with:
 

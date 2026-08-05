@@ -15,7 +15,7 @@ case "$(uname -s)" in
       printf '%s\n' "macOS lockf is required for RTS preparation" >&2
       exit 1
     fi
-    exec /usr/bin/lockf -k -w "$lock_file" "$preparation"
+    exec /usr/bin/lockf -k -w "$lock_file" "$preparation" "$@"
     ;;
   Linux)
     lock_program=$(command -v flock || true)
@@ -23,7 +23,7 @@ case "$(uname -s)" in
       printf '%s\n' "Linux flock is required for RTS preparation" >&2
       exit 1
     fi
-    exec "$lock_program" -x "$lock_file" "$preparation"
+    exec "$lock_program" -x "$lock_file" "$preparation" "$@"
     ;;
   *)
     printf '%s\n' "unsupported RTS preparation host: $(uname -s)" >&2
