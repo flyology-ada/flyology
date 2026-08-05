@@ -229,6 +229,9 @@ required by the changed boundary.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
   Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
   generated traces and reports remain outside version control.
+- `./scripts/http-client-conformance.sh`: build and run the HTTP/1.1 client
+  baseline against a raw scripted peer. It exercises native and lightweight
+  callers, pool lifecycle, valid framing, and the maintained negative matrix.
 - `./scripts/websocket-conformance.sh core lightweight`: pinned Autobahn
   server-side framing profile. Run `core native` for lane parity, `core-wss
   lightweight` and `core-wss native` for the same profile through the

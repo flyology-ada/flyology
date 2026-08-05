@@ -81,6 +81,7 @@ project Runtime_Smoke is
       "flyology-wall_clock_policy-smoke.adb",
       "flyology-wall_clock_waits-smoke.adb",
       "http_smoke.adb",
+      "http_client_smoke.adb",
       "io_smoke.adb",
       "io_starvation_smoke.adb",
       "lazy_event_start_smoke.adb",

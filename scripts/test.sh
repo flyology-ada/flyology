@@ -305,6 +305,7 @@ flyology-websocket_deflate_policy_smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 http_smoke
+http_client_smoke
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke

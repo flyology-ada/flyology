@@ -50,6 +50,7 @@ based on the surviving correspondence.
   - [DNS resolution](#dns-resolution)
   - [Connection lifecycle](#connection-lifecycle)
   - [Structured servers](#structured-servers)
+  - [HTTP client](#http-client)
   - [HTTP server](#http-server)
   - [Timers](#timers)
   - [Regular files](#regular-files)
@@ -715,6 +716,8 @@ Flyology exposes synchronous operations in:
   sockets, shared deadlines, cancellation, and orderly shutdown.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
+- `Flyology.HTTP.Client`: origin-bound HTTP/1.1 requests, streaming response
+  bodies, whole-exchange deadlines, and a hidden bounded connection pool.
 - `Flyology.HTTP.Server`: HTTP/1.1 persistent requests, fixed-length messages,
   server-sent events, WebSocket upgrades and frames, and plain/TLS transports.
 - `Flyology.IO.Files`: open, close, positional read, and positional write.
@@ -1087,10 +1090,82 @@ stack, which crosses the fully instrumented Ada exception-propagation boundary
 called out in [AddressSanitizer builds](#addresssanitizer-builds). Ordinary
 macOS and Linux runs exercise those exception paths in both handler lanes.
 
+### HTTP client
+
+`Flyology.HTTP.Client` is origin-bound and concurrency-safe. A caller declares
+the maximum number of open plus connecting transports on the client object,
+then configures the origin and retention policy once:
+
+```ada
+declare
+   HTTP : aliased Flyology.HTTP.Client.Client (Capacity => 8);
+   Get  : Flyology.HTTP.Client.Request;
+begin
+   Flyology.HTTP.Client.Configure
+     (HTTP,
+      Flyology.HTTP.Parse_Origin ("http://127.0.0.1:8080"),
+      (Max_Idle                    => 4,
+       Idle_Timeout                => 30.0,
+       Max_Connection_Age          => 300.0,
+       Max_Requests_Per_Connection => 1_000));
+   Flyology.HTTP.Client.Set_Target (Get, "/health");
+
+   declare
+      Reply : Flyology.HTTP.Client.Response :=
+        Flyology.HTTP.Client.Execute (HTTP, Get, Timeout => 2.0);
+      Data : constant Flyology.Bytes.Unbounded_Bytes :=
+        Flyology.HTTP.Client.Read_All (Reply, Maximum => 64 * 1_024);
+   begin
+      pragma Assert (Flyology.HTTP.Client.Status (Reply) = 200);
+   end;
+   Flyology.HTTP.Client.Shutdown (HTTP);
+end;
+```
+
+There is no public checkout operation. `Execute` waits for an idle connection
+or a free creation slot under the request deadline. A response owns that lease
+while its body is read. Completing a fixed-length or chunked body returns a
+reusable connection; finalizing an incomplete response closes it. This keeps
+pool ownership out of application code and prevents a partially consumed
+message from contaminating the next exchange.
+
+The same calls work from lightweight and native tasks. One monotonic timeout
+starts before pool admission and continues through DNS, all connection
+attempts, TLS, request transmission, response-head parsing, and later body
+reads. `Shutdown` rejects new admission, interrupts admitted transport work,
+closes idle connections, and waits for active response leases to drain.
+
+Standard methods are constants in `Flyology.HTTP.Methods`; `To_Method` admits
+extension tokens without making applications depend on a closed enumeration.
+Response fields and trailers retain physical order and repeated names. The
+negotiated `Protocol` is opaque so later protocol engines can be added without
+changing request and response signatures. The current engine implements
+HTTP/1.0 response compatibility and HTTP/1.1 requests; it does not yet provide
+redirect policy, content decoding, proxying, streaming request bodies, or an
+HTTP/2 transport.
+
+HTTPS uses the `Configure` overload that receives a provider-neutral TLS
+backend. The backend must outlive the client. The pool never mixes origins or
+TLS provider state because both are fixed before concurrent use.
+
+```ada
+Flyology.IO.TLS.OpenSSL.Initialize_Client (Backend);
+Flyology.HTTP.Client.Configure
+  (HTTP, Flyology.HTTP.Parse_Origin ("https://example.com"), Backend'Access);
+```
+
+The behavioral suite tests the client against a raw scripted peer rather than
+the Flyology server. It runs native and lightweight callers and covers pool
+admission, reuse, abandonment, repeated fields, chunk trailers, informational
+responses, and fixed and chunked bodies. The coverage ledger
+and remaining negative matrix are in
+[`tests/http-client-conformance.md`](tests/http-client-conformance.md).
+Run its deterministic baseline with `./scripts/http-client-conformance.sh`.
+
 ### HTTP server
 
-`Flyology.HTTP` holds protocol concepts that can be shared by a future client
-and the current server. `Flyology.HTTP.Server` is the server-side connection
+`Flyology.HTTP` holds protocol concepts shared by the client and server.
+`Flyology.HTTP.Server` is the server-side connection
 engine. It reads persistent HTTP/1.0 and HTTP/1.1 requests, requires `Host` for
 HTTP/1.1, handles fixed-length and chunked request bodies, emits fixed-length
 responses,
