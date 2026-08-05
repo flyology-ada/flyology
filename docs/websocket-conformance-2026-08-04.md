@@ -4,8 +4,8 @@ Flyology's server-side RFC 6455 implementation was exercised with the official
 [Autobahn Testsuite](https://github.com/crossbario/autobahn-testsuite), release
 25.10.1. The immutable container image digest was
 `sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074`.
-The code under test was repository revision `ae236fa`, plus the implementation
-and test changes recorded with this report, on Darwin/AArch64 with GNAT 16.1.0.
+The implementation and test snapshot is repository revision `05f9f4b`, tested
+on Darwin/AArch64 with GNAT 16.1.0.
 
 ## Result
 

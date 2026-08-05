@@ -2,7 +2,7 @@
   "generatedFrom": "core-native",
   "suite": "Autobahn 25.10.1",
   "imageDigest": "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074",
-  "revision": "ae236fa",
+  "revision": "05f9f4b",
   "profile": "Core, native task",
   "transport": "Plain ws://",
   "date": "2026-08-04",
