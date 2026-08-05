@@ -14,8 +14,11 @@ package Flyology.HTTP.Server is
    Max_Header_Bytes : constant := 16 * 1_024;
    --  Maximum decoded request representation.
    Max_Request_Body : constant := 1_024 * 1_024;
-   --  Maximum accepted frame, reassembled message, or generated frame payload.
-   Max_WebSocket_Frame : constant := 1_024 * 1_024;
+   --  Default maximum retained or reassembled inbound WebSocket message.
+   Default_Max_WebSocket_Message : constant := 1_024 * 1_024;
+   --  Maximum supported inbound or generated WebSocket frame payload. Callers
+   --  may opt into this bound with Receive_WebSocket's Max_Message parameter.
+   Max_WebSocket_Frame : constant := 16 * 1_024 * 1_024;
    --  Process-wide retained-payload budget used by connections that do not
    --  attach a server-specific Ingress_Budget.
    Default_Ingress_Budget_Bytes : constant := 64 * 1_024 * 1_024;
@@ -499,7 +502,8 @@ package Flyology.HTTP.Server is
    --  @param Kind Text or binary message kind
    --  @param Data Message payload
    --  @param Closed True after a valid close frame
-   --  @param Max_Message Application message limit, capped by frame maximum
+   --  @param Max_Message Application message limit, capped by the 16 MiB
+   --  supported frame maximum; the default remains 1 MiB
    --  @param Timeout Transport receive/send wait quantum
    --  @param Message_Timeout Whole-message monotonic deadline
    --  @param Token Optional cancellation source
@@ -509,7 +513,7 @@ package Flyology.HTTP.Server is
       Kind    : out WebSocket_Data_Kind;
       Data    : out Flyology.Bytes.Unbounded_Bytes;
       Closed  : out Boolean;
-      Max_Message : Natural := Max_WebSocket_Frame;
+      Max_Message : Natural := Default_Max_WebSocket_Message;
       Timeout : Duration := 30.0;
       Message_Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
@@ -524,6 +528,21 @@ package Flyology.HTTP.Server is
      (Item    : in out Connection;
       Kind    : WebSocket_Data_Kind;
       Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null);
+
+   --  Send one unmasked, final server data frame directly from owned bytes.
+   --  This overload writes large messages in bounded chunks and does not form
+   --  a contiguous copy on the caller's task stack.
+   --  @param Item Upgraded WebSocket connection
+   --  @param Kind Text or binary message kind
+   --  @param Data Owned frame payload
+   --  @param Timeout Whole-frame transport send deadline
+   --  @param Token Optional cancellation source
+   procedure Send_WebSocket
+     (Item    : in out Connection;
+      Kind    : WebSocket_Data_Kind;
+      Data    : Flyology.Bytes.Unbounded_Bytes;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null);
 

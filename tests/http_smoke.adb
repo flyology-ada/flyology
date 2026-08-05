@@ -561,7 +561,7 @@ procedure HTTP_Smoke is
    procedure Check_WebSocket is
       Wire   : aliased Memory_Transport;
       Budget : aliased HTTP_Server.Ingress_Budget
-        (Limit => HTTP_Server.Max_WebSocket_Frame);
+        (Limit => HTTP_Server.Default_Max_WebSocket_Message);
       function Frame (First : Natural; Payload : String) return String is
          Mask : constant String :=
            Character'Val (16#37#) & Character'Val (16#FA#)

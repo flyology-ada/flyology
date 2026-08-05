@@ -45,6 +45,14 @@ package Flyology.Bytes is
    --  @return Payload length
    function Length (Data : Unbounded_Bytes) return Natural;
 
+   --  Return one retained byte by its one-based position.
+   --  @param Data Owned byte sequence
+   --  @param Index One-based byte position
+   --  @return Byte at Index
+   function Element
+     (Data  : Unbounded_Bytes;
+      Index : Positive) return Ada.Streams.Stream_Element;
+
    --  Append contiguous bytes, growing owned storage as required.
    --  @param Data Destination sequence
    --  @param Value Bytes to append

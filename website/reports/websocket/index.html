@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Dated Autobahn WebSocket conformance results for Flyology over plain WebSocket and OpenSSL-backed WSS.">
+    <meta name="theme-color" content="#17213d">
+    <title>WebSocket conformance · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/reports/websocket/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../../guide/">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/" aria-current="page">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu"><li><a href="https://postgres.flyology.org/">Postgres</a></li></ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+    <main id="main" class="page-shell report-page">
+      <header class="report-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../journal/">Journal</a></li><li aria-current="page">WebSocket conformance</li></ol>
+          <p class="eyebrow">Protocol evidence · August 4, 2026</p>
+          <h1>WebSocket framing, case by case.</h1>
+        </div>
+        <div class="report-hero-copy">
+          <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate section 9 runs keep Flyology's configurable boundary and per-lane echo timings visible.</p>
+          <dl class="report-run-meta">
+            <div><dt>Suite</dt><dd>Autobahn 25.10.1</dd></div>
+            <div><dt>Revision</dt><dd>7880b4e</dd></div>
+            <div><dt>Transport</dt><dd>ws:// + wss://</dd></div>
+          </dl>
+        </div>
+      </header>
+
+      <section class="report-finding" aria-labelledby="finding-title">
+        <div>
+          <p class="report-section-index">01 / RESULT</p>
+          <h2 id="finding-title">No RFC-focused failures in either lane or over TLS.</h2>
+        </div>
+        <div class="report-lane-comparison" aria-label="Core profile comparison">
+          <div class="report-lane-row"><span>Lightweight / ws</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
+          <div class="report-lane-row"><span>Native / ws</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
+          <div class="report-lane-row"><span>Lightweight / wss</span><span class="report-segments" aria-hidden="true"><i class="is-ok" style="--segment: 240"></i><i class="is-non-strict" style="--segment: 4"></i><i class="is-informational" style="--segment: 3"></i></span><strong>247 cases</strong></div>
+          <div class="report-lane-legend"><span class="report-status report-status-ok"><strong>240</strong> OK</span>
+              <span class="report-status report-status-non-strict"><strong>4</strong> Non-strict</span>
+              <span class="report-status report-status-informational"><strong>3</strong> Informational</span></div>
+        </div>
+      </section>
+
+      <section class="report-profiles" aria-labelledby="profiles-title">
+        <div class="report-section-heading">
+          <p class="report-section-index">02 / PROFILES</p>
+          <h2 id="profiles-title">Inspect every verdict.</h2>
+          <p>Each profile retains case descriptions, expectations, observed results, close codes, and clean-close state. Normalized JSON is available on each page.</p>
+        </div>
+        <a class="report-profile-row" href="core-lightweight/">
+          <span class="report-profile-id">RFC-focused</span>
+          <span class="report-profile-copy">
+            <strong>Core, lightweight task</strong>
+            <span>The framing profile through a lightweight task on a shared event loop. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>247</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="core-native/">
+          <span class="report-profile-id">RFC-focused</span>
+          <span class="report-profile-copy">
+            <strong>Core, native task</strong>
+            <span>The same framing profile through an ordinary native Ada task. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>247</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="core-lightweight-wss/">
+          <span class="report-profile-id">RFC-focused over TLS</span>
+          <span class="report-profile-copy">
+            <strong>Core over WSS, lightweight task</strong>
+            <span>The framing profile after a nonblocking OpenSSL server handshake. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>247</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="limits-lightweight/">
+          <span class="report-profile-id">Section 9.1–9.6 limits</span>
+          <span class="report-profile-copy">
+            <strong>Limits, lightweight task</strong>
+            <span>Boundary probes with the adapter explicitly configured for 16 MiB. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>42</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="performance-lightweight/">
+          <span class="report-profile-id">Section 9.7–9.8 timing</span>
+          <span class="report-profile-copy">
+            <strong>Performance, lightweight task</strong>
+            <span>Twelve sequential echo timing probes across text and binary payloads. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>12</strong> cases</span>
+        </a>
+        <a class="report-profile-row" href="performance-native/">
+          <span class="report-profile-id">Section 9.7–9.8 timing</span>
+          <span class="report-profile-copy">
+            <strong>Performance, native task</strong>
+            <span>The same twelve sequential echo timing probes through a native task. No failed verdicts in this profile.</span>
+          </span>
+          <span class="report-profile-outcome"><strong>12</strong> cases</span>
+        </a>
+      </section>
+
+      <section class="report-performance" aria-labelledby="performance-title">
+        <div>
+          <p class="report-section-index">03 / TIMING</p>
+          <h2 id="performance-title">24,000 sequential echoes completed across both lanes.</h2>
+        </div>
+        <div>
+          <p>All 24 section 9.7–9.8 timing probes passed. Each lane completed 1,000 sequential round trips at every text and binary payload size.</p>
+          <p>These loopback observations include case setup and close work. They are recorded for regression comparison, not as a portable throughput or latency claim.</p>
+          <nav class="report-performance-links" aria-label="Performance profiles">
+            <a href="performance-lightweight/"><span>Lightweight task</span><strong>113–350 ms</strong></a>
+            <a href="performance-native/"><span>Native task</span><strong>106–265 ms</strong></a>
+          </nav>
+        </div>
+      </section>
+
+      <section class="report-boundary" aria-labelledby="boundary-title">
+        <div>
+          <p class="report-section-index">04 / BOUNDARY</p>
+          <h2 id="boundary-title">The limit is application policy.</h2>
+        </div>
+        <div>
+          <p>All 42 boundary and chunking cases pass from 64 KiB through 16 MiB. The adapter explicitly selects the 16 MiB supported maximum; ordinary calls retain Flyology's 1 MiB default.</p>
+          <p>RFC 7692 compression cases were excluded because Flyology does not negotiate <code>permessage-deflate</code>. The core framing profile was also repeated over <code>wss://</code>; the section 9 boundary and timing campaigns used loopback <code>ws://</code>.</p>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. This dated report describes one reproducible conformance run.</span>
+        <div class="footer-links"><a href="../../journal/">Journal</a><a href="../../guide/http/">HTTP guide</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

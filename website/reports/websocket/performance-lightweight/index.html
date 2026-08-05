@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Performance, lightweight task: 12 Autobahn WebSocket case results for Flyology.">
+    <meta name="theme-color" content="#17213d">
+    <title>Performance, lightweight task · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/reports/websocket/performance-lightweight/">
+    <link rel="icon" href="../../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../../assets/styles/site.css">
+    <script src="../../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../../" aria-label="Flyology home">
+          <img src="../../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../../">Overview</a></li>
+          <li><a href="../../../guide/">Guide</a></li>
+          <li><a href="../../../architecture/">Architecture</a></li>
+          <li><a href="../../../journal/" aria-current="page">Journal</a></li>
+          <li><a href="../../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu"><li><a href="https://postgres.flyology.org/">Postgres</a></li></ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+    <main id="main" class="page-shell report-page report-profile-page">
+      <header class="report-profile-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../../">Flyology</a></li><li><a href="../">WebSocket conformance</a></li><li aria-current="page">Performance, lightweight task</li></ol>
+          <p class="eyebrow">Section 9.7–9.8 timing · August 4, 2026</p>
+          <h1>Performance, lightweight task.</h1>
+        </div>
+        <div>
+          <p class="article-summary">Every timing probe completed in the suite deadline. The cases record one loopback observation across six payload sizes for text and binary messages. They do not define a performance threshold.</p>
+          <div class="report-status-line"><span class="report-status report-status-ok"><strong>12</strong> OK</span></div>
+        </div>
+      </header>
+
+
+      <section class="report-performance-detail" aria-labelledby="timing-title">
+        <div class="report-case-intro">
+          <div>
+            <p class="report-section-index">TIMING OBSERVATIONS</p>
+            <h2 id="timing-title">12,000 loopback round trips.</h2>
+          </div>
+          <p>Derived means divide Autobahn's complete case duration by 1,000 sequential echoes. They are useful for comparing like-for-like runs on this host, but include setup and close overhead.</p>
+        </div>
+        <div class="report-table-scroll" tabindex="0" aria-label="Autobahn performance observations">
+          <table class="report-performance-table">
+            <thead><tr><th>Case</th><th>Data</th><th>Payload</th><th>Case duration</th><th>Derived mean</th><th>Echo rate</th></tr></thead>
+            <tbody>
+              <tr>
+                <th scope="row">9.7.1</th>
+                <td>text</td>
+                <td>0 B</td>
+                <td><span class="report-duration"><i style="--duration: 100.00%"></i><strong>350 ms</strong></span></td>
+                <td>0.350 ms</td>
+                <td>2,857/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.7.2</th>
+                <td>text</td>
+                <td>16 B</td>
+                <td><span class="report-duration"><i style="--duration: 71.14%"></i><strong>249 ms</strong></span></td>
+                <td>0.249 ms</td>
+                <td>4,016/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.7.3</th>
+                <td>text</td>
+                <td>64 B</td>
+                <td><span class="report-duration"><i style="--duration: 37.43%"></i><strong>131 ms</strong></span></td>
+                <td>0.131 ms</td>
+                <td>7,634/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.7.4</th>
+                <td>text</td>
+                <td>256 B</td>
+                <td><span class="report-duration"><i style="--duration: 58.86%"></i><strong>206 ms</strong></span></td>
+                <td>0.206 ms</td>
+                <td>4,854/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.7.5</th>
+                <td>text</td>
+                <td>1,024 B</td>
+                <td><span class="report-duration"><i style="--duration: 43.14%"></i><strong>151 ms</strong></span></td>
+                <td>0.151 ms</td>
+                <td>6,623/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.7.6</th>
+                <td>text</td>
+                <td>4,096 B</td>
+                <td><span class="report-duration"><i style="--duration: 67.71%"></i><strong>237 ms</strong></span></td>
+                <td>0.237 ms</td>
+                <td>4,219/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.8.1</th>
+                <td>binary</td>
+                <td>0 B</td>
+                <td><span class="report-duration"><i style="--duration: 36.57%"></i><strong>128 ms</strong></span></td>
+                <td>0.128 ms</td>
+                <td>7,813/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.8.2</th>
+                <td>binary</td>
+                <td>16 B</td>
+                <td><span class="report-duration"><i style="--duration: 39.14%"></i><strong>137 ms</strong></span></td>
+                <td>0.137 ms</td>
+                <td>7,299/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.8.3</th>
+                <td>binary</td>
+                <td>64 B</td>
+                <td><span class="report-duration"><i style="--duration: 32.29%"></i><strong>113 ms</strong></span></td>
+                <td>0.113 ms</td>
+                <td>8,850/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.8.4</th>
+                <td>binary</td>
+                <td>256 B</td>
+                <td><span class="report-duration"><i style="--duration: 42.00%"></i><strong>147 ms</strong></span></td>
+                <td>0.147 ms</td>
+                <td>6,803/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.8.5</th>
+                <td>binary</td>
+                <td>1,024 B</td>
+                <td><span class="report-duration"><i style="--duration: 34.86%"></i><strong>122 ms</strong></span></td>
+                <td>0.122 ms</td>
+                <td>8,197/s</td>
+              </tr>
+              <tr>
+                <th scope="row">9.8.6</th>
+                <td>binary</td>
+                <td>4,096 B</td>
+                <td><span class="report-duration"><i style="--duration: 55.71%"></i><strong>195 ms</strong></span></td>
+                <td>0.195 ms</td>
+                <td>5,128/s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="report-equipment" aria-labelledby="equipment-title">
+        <div>
+          <p class="report-section-index">TEST EQUIPMENT</p>
+          <h2 id="equipment-title">One host, recorded with the observation.</h2>
+        </div>
+        <dl>
+          <div><dt>Host</dt><dd>MacBook Pro (Mac15,9)</dd></div>
+          <div><dt>Processor</dt><dd>Apple M3 Max, 16 cores (12 performance, 4 efficiency)</dd></div>
+          <div><dt>Memory</dt><dd>48 GB</dd></div>
+          <div><dt>System</dt><dd>macOS 26.5.2 (25F84), arm64</dd></div>
+          <div><dt>Toolchain</dt><dd>GNAT 16.1.0, Alire 2.1.1</dd></div>
+          <div><dt>Test client</dt><dd>Autobahn 25.10.1 linux/amd64 container on the same host</dd></div>
+        </dl>
+      </section>
+
+      <section class="report-case-browser" data-case-filter>
+        <div class="report-case-intro">
+          <div>
+            <p class="report-section-index">CASE RECORD</p>
+            <h2>12 cases, in suite order.</h2>
+          </div>
+          <div class="report-case-actions">
+            <a href="cases.json" download>Download normalized JSON</a>
+            <a href="../">All profiles</a>
+          </div>
+        </div>
+        <div class="report-filter-bar">
+          <label>Find a case<input type="search" data-case-search placeholder="Case ID or description" autocomplete="off"></label>
+          <label>Verdict<select data-case-status><option value="all">All verdicts</option><option value="ok">OK</option></select></label>
+          <p data-case-count aria-live="polite">Showing all 12 cases</p>
+        </div>
+        <ol class="report-case-list">
+          <li class="report-case" data-case data-status="ok" data-search="9.7.1 ok send 1000 text messages of payload size 0 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed text messages (with payload as sent). timeout case after 60 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.7.1</span>
+                <span class="report-case-title">Send 1000 text messages of payload size 0 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed text messages (with payload as sent). Timeout case after 60 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>350 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.7.2 ok send 1000 text messages of payload size 16 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed text messages (with payload as sent). timeout case after 60 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.7.2</span>
+                <span class="report-case-title">Send 1000 text messages of payload size 16 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed text messages (with payload as sent). Timeout case after 60 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>249 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.7.3 ok send 1000 text messages of payload size 64 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed text messages (with payload as sent). timeout case after 60 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.7.3</span>
+                <span class="report-case-title">Send 1000 text messages of payload size 64 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed text messages (with payload as sent). Timeout case after 60 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>131 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.7.4 ok send 1000 text messages of payload size 256 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed text messages (with payload as sent). timeout case after 120 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.7.4</span>
+                <span class="report-case-title">Send 1000 text messages of payload size 256 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed text messages (with payload as sent). Timeout case after 120 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>206 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.7.5 ok send 1000 text messages of payload size 1024 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed text messages (with payload as sent). timeout case after 240 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.7.5</span>
+                <span class="report-case-title">Send 1000 text messages of payload size 1024 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed text messages (with payload as sent). Timeout case after 240 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>151 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.7.6 ok send 1000 text messages of payload size 4096 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed text messages (with payload as sent). timeout case after 480 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.7.6</span>
+                <span class="report-case-title">Send 1000 text messages of payload size 4096 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed text messages (with payload as sent). Timeout case after 480 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>237 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.8.1 ok send 1000 binary messages of payload size 0 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed binary messages (with payload as sent). timeout case after 60 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.8.1</span>
+                <span class="report-case-title">Send 1000 binary messages of payload size 0 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed binary messages (with payload as sent). Timeout case after 60 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>128 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.8.2 ok send 1000 binary messages of payload size 16 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed binary messages (with payload as sent). timeout case after 60 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.8.2</span>
+                <span class="report-case-title">Send 1000 binary messages of payload size 16 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed binary messages (with payload as sent). Timeout case after 60 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>137 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.8.3 ok send 1000 binary messages of payload size 64 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed binary messages (with payload as sent). timeout case after 60 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.8.3</span>
+                <span class="report-case-title">Send 1000 binary messages of payload size 64 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed binary messages (with payload as sent). Timeout case after 60 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>113 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.8.4 ok send 1000 binary messages of payload size 256 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed binary messages (with payload as sent). timeout case after 120 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.8.4</span>
+                <span class="report-case-title">Send 1000 binary messages of payload size 256 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed binary messages (with payload as sent). Timeout case after 120 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>147 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.8.5 ok send 1000 binary messages of payload size 1024 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed binary messages (with payload as sent). timeout case after 240 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.8.5</span>
+                <span class="report-case-title">Send 1000 binary messages of payload size 1024 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed binary messages (with payload as sent). Timeout case after 240 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>122 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+          <li class="report-case" data-case data-status="ok" data-search="9.8.6 ok send 1000 binary messages of payload size 4096 to measure implementation/network rtt (round trip time) / latency. receive echo&#39;ed binary messages (with payload as sent). timeout case after 480 secs.">
+            <details>
+              <summary>
+                <span class="report-case-id">9.8.6</span>
+                <span class="report-case-title">Send 1000 binary messages of payload size 4096 to measure implementation/network RTT (round trip time) / latency.</span>
+                <span class="report-verdict report-verdict-ok">OK</span>
+                <span class="report-case-toggle" aria-hidden="true">+</span>
+              </summary>
+              <div class="report-case-detail">
+                <div><h3>Expected</h3><p>Receive echo&#39;ed binary messages (with payload as sent). Timeout case after 480 secs.</p></div>
+                <div><h3>Observed</h3><p>Ok, received all echo&#39;ed messages in time.</p><p>Connection was properly closed</p></div>
+                <dl>
+                  <div><dt>Remote close</dt><dd>1000</dd></div>
+                  <div><dt>Local close</dt><dd>1000</dd></div>
+                  <div><dt>Clean close</dt><dd>Yes</dd></div>
+                  <div><dt>Duration</dt><dd>195 ms</dd></div>
+                </dl>
+              </div>
+            </details>
+          </li>
+        </ol>
+        <p class="report-empty" data-case-empty hidden>No cases match this filter.</p>
+      </section>
+
+      <aside class="report-method" aria-label="Report method">
+        <strong>Reproducible input</strong>
+        <p>Autobahn 25.10.1, container <code>sha256:519915fb568b…</code>, Flyology revision <code>7880b4e</code>, Plain ws://. Wire logs remain in local generated output and are not published.</p>
+      </aside>
+    </main>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. This dated report describes one reproducible conformance run.</span>
+        <div class="footer-links"><a href="../../../journal/">Journal</a><a href="../../../guide/http/">HTTP guide</a><a href="../../../architecture/">Architecture</a><a href="../../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

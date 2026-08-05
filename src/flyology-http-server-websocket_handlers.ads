@@ -187,7 +187,7 @@ package Flyology.HTTP.Server.WebSocket_Handlers is
       Protocol       : String := "";
       Origin_Policy  : WebSocket_Origin_Policy := Reject_Browser_Origins;
       Allowed_Origin : String := "";
-      Max_Message    : Natural := Max_WebSocket_Frame;
+      Max_Message    : Natural := Default_Max_WebSocket_Message;
       Receive_Quantum : Duration := 0.05;
       Max_Outgoing_Burst : Positive := 16;
       Metric_Output  : access Metrics.Sink'Class := null);

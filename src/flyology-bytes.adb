@@ -9,6 +9,11 @@ package body Flyology.Bytes is
       return Natural (Data.Value.Length);
    end Length;
 
+   function Element
+     (Data  : Unbounded_Bytes;
+      Index : Positive) return Ada.Streams.Stream_Element is
+     (Data.Value.Element (Index));
+
    procedure Append
      (Data  : in out Unbounded_Bytes;
       Value : Ada.Streams.Stream_Element_Array)

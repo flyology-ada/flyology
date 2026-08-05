@@ -98,7 +98,8 @@ project Runtime_Smoke is
       "tcp_native_smoke.adb",
       "wake_source_state_model.adb",
       "wait_any_smoke.adb",
-      "wall_clock_wait_smoke.adb");
+      "wall_clock_wait_smoke.adb",
+      "websocket_conformance_server.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

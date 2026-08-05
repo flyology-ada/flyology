@@ -442,13 +442,13 @@ package body Flyology.HTTP.Server is
    end Receive_More;
 
    procedure Consume (Item : in out Connection; Count : Natural) is
-      Value : constant String := To_String (Item.Pending);
+      Current : constant Natural := Length (Item.Pending);
    begin
-      if Count >= Value'Length then
+      if Count >= Current then
          Item.Pending := Null_Unbounded_String;
       else
          Item.Pending := To_Unbounded_String
-           (Value (Value'First + Count .. Value'Last));
+           (Slice (Item.Pending, Count + 1, Current));
       end if;
    end Consume;
 
@@ -1995,6 +1995,69 @@ package body Flyology.HTTP.Server is
       return True;
    end Valid_UTF8;
 
+   function Valid_UTF8
+     (Value : Flyology.Bytes.Unbounded_Bytes) return Boolean
+   is
+      Index : Positive := 1;
+      Last  : constant Natural := Flyology.Bytes.Length (Value);
+
+      function Byte (Offset : Natural) return Natural is
+        (Natural (Flyology.Bytes.Element (Value, Index + Offset)));
+
+      function Continuation (Offset : Natural) return Boolean is
+        (Index + Offset <= Last and then Byte (Offset) in 16#80# .. 16#BF#);
+   begin
+      while Index <= Last loop
+         if Byte (0) <= 16#7F# then
+            Index := Index + 1;
+         elsif Byte (0) in 16#C2# .. 16#DF#
+           and then Continuation (1)
+         then
+            Index := Index + 2;
+         elsif Byte (0) = 16#E0#
+           and then Index + 2 <= Last
+           and then Byte (1) in 16#A0# .. 16#BF#
+           and then Continuation (2)
+         then
+            Index := Index + 3;
+         elsif Byte (0) in 16#E1# .. 16#EC# | 16#EE# .. 16#EF#
+           and then Continuation (1)
+           and then Continuation (2)
+         then
+            Index := Index + 3;
+         elsif Byte (0) = 16#ED#
+           and then Index + 2 <= Last
+           and then Byte (1) in 16#80# .. 16#9F#
+           and then Continuation (2)
+         then
+            Index := Index + 3;
+         elsif Byte (0) = 16#F0#
+           and then Index + 3 <= Last
+           and then Byte (1) in 16#90# .. 16#BF#
+           and then Continuation (2)
+           and then Continuation (3)
+         then
+            Index := Index + 4;
+         elsif Byte (0) in 16#F1# .. 16#F3#
+           and then Continuation (1)
+           and then Continuation (2)
+           and then Continuation (3)
+         then
+            Index := Index + 4;
+         elsif Byte (0) = 16#F4#
+           and then Index + 3 <= Last
+           and then Byte (1) in 16#80# .. 16#8F#
+           and then Continuation (2)
+           and then Continuation (3)
+         then
+            Index := Index + 4;
+         else
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Valid_UTF8;
+
    procedure Send_Event
      (Item    : in out Connection;
       Data    : String;
@@ -2468,23 +2531,19 @@ package body Flyology.HTTP.Server is
       end loop;
    end Ensure_Pending;
 
-   procedure Send_Frame
-     (Item    : in out Connection;
-      Opcode  : Natural;
-      Data    : Ada.Streams.Stream_Element_Array;
-      Timeout : Duration;
-      Token   : access Flyology.Cancellation.Token)
+   procedure Build_Frame_Header
+     (Opcode : Natural;
+      Size   : Natural;
+      Header : out Ada.Streams.Stream_Element_Array;
+      Last   : out Ada.Streams.Stream_Element_Offset)
    is
-      Header : Ada.Streams.Stream_Element_Array (1 .. 10);
-      Last   : Ada.Streams.Stream_Element_Offset := Header'First - 1;
-      Size   : constant Natural := Data'Length;
-
       procedure Append_Header (Value : Natural) is
       begin
          Last := Last + 1;
          Header (Last) := Ada.Streams.Stream_Element (Value);
       end Append_Header;
    begin
+      Last := Header'First - 1;
       Append_Header (16#80# + Opcode);
       if Size <= 125 then
          Append_Header (Size);
@@ -2502,6 +2561,20 @@ package body Flyology.HTTP.Server is
                   and 16#FF#));
          end loop;
       end if;
+   end Build_Frame_Header;
+
+   procedure Send_Frame
+     (Item    : in out Connection;
+      Opcode  : Natural;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token)
+   is
+      Header : Ada.Streams.Stream_Element_Array (1 .. 10);
+      Last   : Ada.Streams.Stream_Element_Offset;
+      Size   : constant Natural := Data'Length;
+   begin
+      Build_Frame_Header (Opcode, Size, Header, Last);
       if Size <= WebSocket_Coalesce_Limit then
          declare
             Frame : Ada.Streams.Stream_Element_Array
@@ -2520,6 +2593,57 @@ package body Flyology.HTTP.Server is
    procedure Send_Frame
      (Item    : in out Connection;
       Opcode  : Natural;
+      Data    : Flyology.Bytes.Unbounded_Bytes;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token)
+   is
+      Chunk_Size : constant := 16 * 1_024;
+      Header : Ada.Streams.Stream_Element_Array (1 .. 10);
+      Last   : Ada.Streams.Stream_Element_Offset;
+      Size   : constant Natural := Flyology.Bytes.Length (Data);
+      Chunk  : Ada.Streams.Stream_Element_Array (1 .. Chunk_Size);
+      First  : Positive := 1;
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+
+      function Time_Left return Duration is
+         Elapsed : constant Duration := Ada.Real_Time.To_Duration
+           (Ada.Real_Time.Clock - Started);
+      begin
+         if Timeout < 0.0 then
+            return -1.0;
+         elsif Elapsed >= Timeout then
+            return 0.0;
+         else
+            return Timeout - Elapsed;
+         end if;
+      end Time_Left;
+   begin
+      Build_Frame_Header (Opcode, Size, Header, Last);
+      Write (Item, Header (Header'First .. Last), Timeout, Token);
+      while First <= Size loop
+         declare
+            Count : constant Natural := Natural'Min
+              (Chunk_Size, Size - First + 1);
+         begin
+            for Index in 0 .. Count - 1 loop
+               Chunk
+                 (Chunk'First
+                  + Ada.Streams.Stream_Element_Offset (Index)) :=
+                    Flyology.Bytes.Element (Data, First + Index);
+            end loop;
+            Write
+              (Item,
+               Chunk (Chunk'First .. Chunk'First
+                 + Ada.Streams.Stream_Element_Offset (Count) - 1),
+               Time_Left, Token);
+            First := First + Count;
+         end;
+      end loop;
+   end Send_Frame;
+
+   procedure Send_Frame
+     (Item    : in out Connection;
+      Opcode  : Natural;
       Data    : String;
       Timeout : Duration;
       Token   : access Flyology.Cancellation.Token) is
@@ -2532,7 +2656,7 @@ package body Flyology.HTTP.Server is
       Kind    : out WebSocket_Data_Kind;
       Data    : out Flyology.Bytes.Unbounded_Bytes;
       Closed  : out Boolean;
-      Max_Message : Natural := Max_WebSocket_Frame;
+      Max_Message : Natural := Default_Max_WebSocket_Message;
       Timeout : Duration := 30.0;
       Message_Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null)
@@ -2606,7 +2730,7 @@ package body Flyology.HTTP.Server is
       begin
          if Item.WebSocket_Message_Kind = Text_Frame
            and then not Valid_UTF8
-             (Flyology.Bytes.To_Byte_String (Item.WebSocket_Message))
+             (Item.WebSocket_Message)
          then
             Fail (1_007, "invalid UTF-8 in WebSocket text message");
          end if;
@@ -2723,83 +2847,115 @@ package body Flyology.HTTP.Server is
             Fail (1_009, "WebSocket message is too large");
          end if;
          Ensure_Pending
-           (Item, Header_Size + 4 + Natural (Size),
-            Ada.Real_Time.Clock, Time_Left, Token);
+           (Item, Header_Size + 4, Ada.Real_Time.Clock, Time_Left, Token);
          declare
-            Buffer : constant String := To_String (Item.Pending);
             Mask_First : constant Natural := Header_Size + 1;
-            Payload_First : constant Natural := Header_Size + 5;
-            Payload : Ada.Streams.Stream_Element_Array
-              (1 .. Ada.Streams.Stream_Element_Offset (Size));
+            type Mask_Array is array (Natural range 0 .. 3) of
+              Interfaces.Unsigned_8;
+            Mask : constant Mask_Array :=
+              (0 => Interfaces.Unsigned_8
+                 (Character'Pos (Element (Item.Pending, Mask_First))),
+               1 => Interfaces.Unsigned_8
+                 (Character'Pos (Element (Item.Pending, Mask_First + 1))),
+               2 => Interfaces.Unsigned_8
+                 (Character'Pos (Element (Item.Pending, Mask_First + 2))),
+               3 => Interfaces.Unsigned_8
+                 (Character'Pos (Element (Item.Pending, Mask_First + 3))));
+            Remaining : Natural := Natural (Size);
+            Position  : Natural := 0;
+            Control_Payload : Ada.Streams.Stream_Element_Array (1 .. 125);
          begin
-            for Index in 1 .. Natural (Size) loop
-               Payload (Ada.Streams.Stream_Element_Offset (Index)) :=
-                 Ada.Streams.Stream_Element
-                   (Interfaces.Unsigned_8
-                      (Character'Pos (Buffer (Payload_First + Index - 1)))
-                    xor Interfaces.Unsigned_8
-                      (Character'Pos
-                         (Buffer (Mask_First + ((Index - 1) mod 4)))));
-            end loop;
-            Consume (Item, Header_Size + 4 + Natural (Size));
             case Opcode is
                when 0 =>
                   if not Item.WebSocket_Fragmented then
                      Fail (1_002, "unexpected WebSocket continuation frame");
-                  elsif Payload'Length > Message_Limit
-                    or else Flyology.Bytes.Length (Item.WebSocket_Message) >
-                      Message_Limit - Payload'Length
-                  then
-                     Fail (1_009, "WebSocket message is too large");
-                  end if;
-                  Flyology.Bytes.Append
-                    (Item.WebSocket_Message, Payload);
-                  if Final then
-                     Finish_Message;
-                     return;
                   end if;
                when 1 =>
                   if Item.WebSocket_Fragmented then
                      Fail (1_002, "new data frame inside fragmented message");
                   end if;
                   Item.WebSocket_Message_Kind := Text_Frame;
-                  if Payload'Length > Message_Limit then
-                     Fail (1_009, "WebSocket message is too large");
+               when 2 =>
+                  if Item.WebSocket_Fragmented then
+                     Fail (1_002, "new data frame inside fragmented message");
                   end if;
-                  Item.WebSocket_Message :=
-                    Flyology.Bytes.To_Unbounded_Bytes (Payload);
+                  Item.WebSocket_Message_Kind := Binary_Frame;
+               when others =>
+                  null;
+            end case;
+
+            Consume (Item, Header_Size + 4);
+            while Remaining > 0 loop
+               if Length (Item.Pending) = 0 then
+                  Ensure_Pending
+                    (Item, 1, Ada.Real_Time.Clock, Time_Left, Token);
+               end if;
+               declare
+                  Count : constant Natural := Natural'Min
+                    (Remaining,
+                     Natural'Min (Length (Item.Pending), 16 * 1_024));
+                  Chunk : Ada.Streams.Stream_Element_Array
+                    (1 .. Ada.Streams.Stream_Element_Offset (Count));
+               begin
+                  for Index in 0 .. Count - 1 loop
+                     Chunk
+                       (Chunk'First
+                        + Ada.Streams.Stream_Element_Offset (Index)) :=
+                       Ada.Streams.Stream_Element
+                         (Interfaces.Unsigned_8
+                            (Character'Pos
+                               (Element (Item.Pending, Index + 1)))
+                          xor Mask ((Position + Index) mod 4));
+                  end loop;
+                  Consume (Item, Count);
+                  if Opcode >= 8 then
+                     Control_Payload
+                       (Ada.Streams.Stream_Element_Offset (Position + 1)
+                        .. Ada.Streams.Stream_Element_Offset
+                          (Position + Count)) := Chunk;
+                  else
+                     Flyology.Bytes.Append (Item.WebSocket_Message, Chunk);
+                  end if;
+                  Position := Position + Count;
+                  Remaining := Remaining - Count;
+                  Resize_Buffered
+                    (Item,
+                     Length (Item.Pending)
+                     + Flyology.Bytes.Length (Item.WebSocket_Message));
+               end;
+            end loop;
+
+            case Opcode is
+               when 0 =>
+                  if Final then
+                     Finish_Message;
+                     return;
+                  end if;
+               when 1 =>
                   if Final then
                      Finish_Message;
                      return;
                   end if;
                   Item.WebSocket_Fragmented := True;
                when 2 =>
-                  if Item.WebSocket_Fragmented then
-                     Fail (1_002, "new data frame inside fragmented message");
-                  end if;
-                  Item.WebSocket_Message_Kind := Binary_Frame;
-                  if Payload'Length > Message_Limit then
-                     Fail (1_009, "WebSocket message is too large");
-                  end if;
-                  Item.WebSocket_Message :=
-                    Flyology.Bytes.To_Unbounded_Bytes (Payload);
                   if Final then
                      Finish_Message;
                      return;
                   end if;
                   Item.WebSocket_Fragmented := True;
                when 8 =>
-                  if Payload'Length = 1 then
+                  if Position = 1 then
                      Fail (1_002, "invalid WebSocket close frame");
-                  elsif Payload'Length >= 2 then
+                  elsif Position >= 2 then
                      declare
                         Code : constant Natural :=
-                          Natural (Payload (Payload'First)) * 256
-                          + Natural (Payload (Payload'First + 1));
+                          Natural (Control_Payload (1)) * 256
+                          + Natural (Control_Payload (2));
                         Reason : constant String :=
                           Text
-                            (Payload
-                               (Payload'First + 2 .. Payload'Last));
+                            (Control_Payload
+                               (3 .. Ada.Streams.Stream_Element_Offset
+                                 (Position)));
                      begin
                         if not Valid_Close_Code (Code) then
                            Fail (1_002, "invalid WebSocket close code");
@@ -2810,7 +2966,11 @@ package body Flyology.HTTP.Server is
                   end if;
                   if not Item.WebSocket_Close_Sent then
                      Writing_Control := True;
-                     Send_Frame (Item, 8, Payload, Time_Left, Token);
+                     Send_Frame
+                       (Item, 8,
+                        Control_Payload
+                          (1 .. Ada.Streams.Stream_Element_Offset (Position)),
+                        Time_Left, Token);
                      Writing_Control := False;
                      Item.WebSocket_Close_Sent := True;
                   end if;
@@ -2825,7 +2985,11 @@ package body Flyology.HTTP.Server is
                      Fail (1_008, "too many WebSocket control frames");
                   end if;
                   Writing_Control := True;
-                  Send_Frame (Item, 10, Payload, Time_Left, Token);
+                  Send_Frame
+                    (Item, 10,
+                     Control_Payload
+                       (1 .. Ada.Streams.Stream_Element_Offset (Position)),
+                     Time_Left, Token);
                   Writing_Control := False;
                when 10 =>
                   Item.WebSocket_Control_Count :=
@@ -2895,6 +3059,36 @@ package body Flyology.HTTP.Server is
       elsif Kind = Text_Frame
         and then not Valid_UTF8 (Text (Data))
       then
+         raise Constraint_Error with "WebSocket text must contain valid UTF-8";
+      end if;
+      Send_Frame
+        (Item, (if Kind = Text_Frame then 1 else 2), Data, Timeout, Token);
+   exception
+      when others =>
+         Item.Pending := Null_Unbounded_String;
+         Flyology.Bytes.Clear (Item.WebSocket_Message);
+         Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Receive_Active := False;
+         Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Release_Buffered (Item);
+         Item.Request_Close := True;
+         Item.State := Terminal;
+         raise;
+   end Send_WebSocket;
+
+   procedure Send_WebSocket
+     (Item    : in out Connection;
+      Kind    : WebSocket_Data_Kind;
+      Data    : Flyology.Bytes.Unbounded_Bytes;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null) is
+   begin
+      if Item.State /= WebSocket then
+         raise Program_Error with "WebSocket connection is not active";
+      end if;
+      if Flyology.Bytes.Length (Data) > Max_WebSocket_Frame then
+         raise Constraint_Error with "WebSocket frame is too large";
+      elsif Kind = Text_Frame and then not Valid_UTF8 (Data) then
          raise Constraint_Error with "WebSocket text must contain valid UTF-8";
       end if;
       Send_Frame

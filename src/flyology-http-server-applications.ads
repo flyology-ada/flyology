@@ -399,7 +399,7 @@ package Flyology.HTTP.Server.Applications is
       Kind        : out WebSocket_Data_Kind;
       Data        : out Flyology.Bytes.Unbounded_Bytes;
       Closed      : out Boolean;
-      Max_Message : Natural := Max_WebSocket_Frame;
+      Max_Message : Natural := Default_Max_WebSocket_Message;
       Timeout     : Duration := 30.0;
       Message_Timeout : Duration := 30.0);
 
@@ -411,6 +411,15 @@ package Flyology.HTTP.Server.Applications is
      (Item : in out Exchange;
       Kind : WebSocket_Data_Kind;
       Data : Ada.Streams.Stream_Element_Array);
+
+   --  Send one owned WebSocket message without a contiguous task-stack copy.
+   --  @param Item Upgraded request exchange
+   --  @param Kind Text or binary message kind
+   --  @param Data Owned message payload
+   procedure Send_WebSocket
+     (Item : in out Exchange;
+      Kind : WebSocket_Data_Kind;
+      Data : Flyology.Bytes.Unbounded_Bytes);
 
    --  Send a validated UTF-8 text message from the sole connection owner.
    --  @param Item Upgraded request exchange

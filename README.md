@@ -1307,7 +1307,19 @@ reassembled with interleaved control-frame handling, ping is answered with
 pong, and close is acknowledged. Text and close reasons are validated as
 UTF-8, close codes are checked, and protocol failure makes the connection
 terminal. Frames and reassembled messages are capped at 1 MiB by default and
-their reassembly reserves the configured shared ingress budget.
+their reassembly reserves the configured shared ingress budget. Callers may
+select a larger `Max_Message` through the supported 16 MiB frame maximum; large
+owned messages are received and sent in bounded chunks rather than copied onto
+the calling task's stack.
+
+The server-side framing profile can be reproduced with the pinned Autobahn
+runner in `scripts/websocket-conformance.sh`. The maintained
+[2026-08-04 conformance report](docs/websocket-conformance-2026-08-04.md)
+records the tested profiles, limits, exclusions, per-lane results, and the
+OpenSSL-backed WSS campaign. A
+[published case browser](https://flyology.org/reports/websocket/) retains the
+individual verdicts, test equipment, and separate per-lane section 9 timing
+observations in the website's visual system.
 
 TLS uses the same HTTP engine after `Flyology.IO.TLS.Take` and `Handshake`.
 `Flyology.HTTP.Server.TLS.Connection_Transport` forwards decrypted reads and

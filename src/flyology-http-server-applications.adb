@@ -614,7 +614,7 @@ package body Flyology.HTTP.Server.Applications is
       Kind        : out WebSocket_Data_Kind;
       Data        : out Flyology.Bytes.Unbounded_Bytes;
       Closed      : out Boolean;
-      Max_Message : Natural := Max_WebSocket_Frame;
+      Max_Message : Natural := Default_Max_WebSocket_Message;
       Timeout     : Duration := 30.0;
       Message_Timeout : Duration := 30.0)
    is
@@ -657,6 +657,27 @@ package body Flyology.HTTP.Server.Applications is
         (Item.Connection_Handle.all, Kind, Data, Remaining (Item),
          Item.Token_Handle);
       Item.Response_Length := Item.Response_Length + Data'Length;
+   exception
+      when others =>
+         Item.Response_Value := Failed;
+         raise;
+   end Send_WebSocket;
+
+   procedure Send_WebSocket
+     (Item : in out Exchange;
+      Kind : WebSocket_Data_Kind;
+      Data : Flyology.Bytes.Unbounded_Bytes)
+   is
+   begin
+      Require_Owner (Item);
+      if Item.Response_Value /= Upgraded then
+         raise Program_Error with "HTTP exchange WebSocket is not active";
+      end if;
+      Flyology.HTTP.Server.Send_WebSocket
+        (Item.Connection_Handle.all, Kind, Data, Remaining (Item),
+         Item.Token_Handle);
+      Item.Response_Length :=
+        Item.Response_Length + Flyology.Bytes.Length (Data);
    exception
       when others =>
          Item.Response_Value := Failed;

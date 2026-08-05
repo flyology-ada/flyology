@@ -155,6 +155,40 @@
       });
     });
 
+    document.querySelectorAll("[data-case-filter]").forEach(function (browser) {
+      const search = browser.querySelector("[data-case-search]");
+      const status = browser.querySelector("[data-case-status]");
+      const count = browser.querySelector("[data-case-count]");
+      const empty = browser.querySelector("[data-case-empty]");
+      const cases = Array.from(browser.querySelectorAll("[data-case]"));
+
+      if (!search || !status || !count || !empty || !cases.length) return;
+
+      function applyCaseFilter() {
+        const query = search.value.trim().toLowerCase();
+        const selectedStatus = status.value;
+        let visible = 0;
+
+        cases.forEach(function (item) {
+          const matchesQuery = !query || item.dataset.search.includes(query);
+          const matchesStatus =
+            selectedStatus === "all" || item.dataset.status === selectedStatus;
+          item.hidden = !(matchesQuery && matchesStatus);
+          if (!item.hidden) visible += 1;
+        });
+
+        count.textContent =
+          visible === cases.length
+            ? "Showing all " + cases.length + " cases"
+            : "Showing " + visible + " of " + cases.length + " cases";
+        empty.hidden = visible !== 0;
+      }
+
+      search.addEventListener("input", applyCaseFilter);
+      status.addEventListener("change", applyCaseFilter);
+      applyCaseFilter();
+    });
+
     const tocLinks = Array.from(document.querySelectorAll(".toc a[href^='#']"));
     const sections = tocLinks
       .map(function (link) {
