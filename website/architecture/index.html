@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="How Flyology routes Ada tasks through GNARL, manages runtime-owned memory, and coordinates event-loop schedulers, pollers, and stackful contexts.">
+    <meta name="description" content="How Flyology Runtime routes Ada tasks between native OS-thread and lightweight event-loop execution while preserving ordinary Ada semantics.">
     <meta name="theme-color" content="#17213d">
-    <title>Architecture · Flyology</title>
+    <title>Architecture · Flyology Runtime</title>
     <link rel="canonical" href="https://flyology.org/architecture/">
     <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../assets/styles/site.css">
@@ -16,9 +16,9 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="../" aria-label="Flyology home">
+        <a class="brand" href="../" aria-label="Flyology Runtime home">
           <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology</span>
+          <span>Flyology Runtime</span>
         </a>
         <ul class="nav-links" data-nav-links>
           <li><a href="../">Overview</a></li>
@@ -51,10 +51,10 @@
     <main id="main" class="page-shell">
       <header class="doc-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Architecture</li></ol>
-          <h1>How lightweight tasks fit into GNARL.</h1>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology Runtime</a></li><li aria-current="page">Architecture</li></ol>
+          <h1>How Flyology Runtime extends GNAT tasking.</h1>
         </div>
-        <p class="doc-hero-copy">Flyology changes how a selected task executes without changing its Ada task semantics. Task identity, rendezvous, protected objects, activation, masters, abort, and exception behavior remain within GNARL.</p>
+        <p class="doc-hero-copy">Flyology changes how a selected task executes without changing what an Ada task means. Task identity, rendezvous, protected objects, activation, masters, abort, and exception behavior retain their ordinary semantics.</p>
       </header>
 
       <div class="docs-layout">
@@ -77,11 +77,11 @@
           <section id="routing">
             <span class="step-label">ROUTING</span>
             <h2>Tasks use either native or lightweight execution.</h2>
-            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL's language-level task semantics. Task creation captures the designation once and routes the task either to a guarded fiber stack managed by an execution group or to the stock OS-thread path.</p>
+            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, beneath GNARL, GNAT's tasking runtime layer. Task creation captures the designation once and routes the task either to a guarded fiber stack managed by an execution group or to the native OS-thread path.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 760 410">
                 <title id="routing-title">Flyology task routing</title>
-                <desc id="routing-desc">An Ada task passes through GNARL and task primitives, then follows either the lightweight execution-group lane or the native OS-thread lane.</desc>
+                <desc id="routing-desc">An Ada task passes through the tasking runtime and task primitives, then follows either the lightweight execution-group lane or the native OS-thread lane.</desc>
                 <defs>
                   <marker id="routing-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
                 </defs>
@@ -89,7 +89,7 @@
                 <text x="380" y="55" text-anchor="middle" font-size="16" font-weight="600">Application · ordinary Ada task</text>
                 <path class="diagram-line" d="M380 78v42" marker-end="url(#routing-arrow)"/>
                 <rect class="diagram-box" x="260" y="124" width="240" height="58" rx="12"/>
-                <text x="380" y="159" text-anchor="middle" font-size="16" font-weight="600">GNARL task semantics</text>
+                <text x="380" y="159" text-anchor="middle" font-size="16" font-weight="600">Ada task semantics</text>
                 <path class="diagram-line" d="M380 182v42" marker-end="url(#routing-arrow)"/>
                 <rect class="diagram-box" x="260" y="228" width="240" height="58" rx="12"/>
                 <text x="380" y="253" text-anchor="middle" font-size="15" font-weight="600">Task-primitives routing</text>
@@ -101,7 +101,7 @@
                 <text class="diagram-muted" x="180" y="378" text-anchor="middle">fiber + scheduler + poller</text>
                 <rect class="diagram-teal" x="450" y="334" width="260" height="58" rx="12"/>
                 <text x="580" y="359" text-anchor="middle" font-size="15" font-weight="600">Native task lane</text>
-                <text class="diagram-muted" x="580" y="378" text-anchor="middle">stock GNARL OS-thread path</text>
+                <text class="diagram-muted" x="580" y="378" text-anchor="middle">native OS-thread path</text>
               </svg>
             </figure>
             <p>The environment task is always native. A task cannot change its lightweight or native designation while alive, though a lightweight task can migrate between event-loop groups at an explicit safe point.</p>
@@ -131,7 +131,7 @@
             <ul>
               <li><strong>Ready to running:</strong> the group scheduler dispatches the highest-priority FIFO bucket.</li>
               <li><strong>Running to waiting:</strong> a rendezvous, timer, or I/O operation suspends the fiber.</li>
-              <li><strong>Waiting to ready:</strong> GNARL synchronization, a deadline, or descriptor readiness wakes it.</li>
+              <li><strong>Waiting to ready:</strong> task synchronization, a deadline, or descriptor readiness wakes it.</li>
               <li><strong>Running to migrating:</strong> an explicit safe point hands the fully switched-out fiber to another group.</li>
             </ul>
             <p>Two loops can never restore one fiber concurrently. The source scheduler performs the migration handoff only after the fiber has completely switched away.</p>
@@ -146,7 +146,7 @@
                 <div class="decision-row"><dt>Fiber stacks</dt><dd>Stacks are mapped in guarded arenas of at most 64 slots, targeting 4 MiB before the final guard. A suspended or migrating task retains the same stack, locals, and exception state.</dd></div>
                 <div class="decision-row"><dt>Guarding and reuse</dt><dd>Each usable stack has an inaccessible guard of at least 64 KiB. A released slot is protected before reuse and receives best-effort page-discard advice; a completely empty arena is unmapped.</dd></div>
                 <div class="decision-row"><dt>Kernel operations</dt><dd>A submitted file buffer remains kernel-owned until completion. Cancellation and abort cannot release the buffer or its completion state early.</dd></div>
-                <div class="decision-row"><dt>Runtime teardown</dt><dd>Finished fibers are reaped when their Ada task lifetime permits it. Groups, pollers, queues, and contexts are released only after GNARL task masters and controlled library objects are complete.</dd></div>
+                <div class="decision-row"><dt>Runtime teardown</dt><dd>Finished fibers are reaped when their Ada task lifetime permits it. Groups, pollers, queues, and contexts are released only after Ada task masters and controlled library objects are complete.</dd></div>
               </dl>
             </div>
             <p>Stack-pool allocation is process-wide and briefly serialized only during task activation and final reap; scheduling, polling, I/O, and context switching do not take that mutex. <code class="language-ada">Flyology.Observability.Stack_Pool</code> reports current arena, stack, usable-byte, and reserved-byte counts without starting an execution group.</p>
@@ -220,9 +220,9 @@
             <p>The C and assembly bridge contains Linux syscall numbers, native <code>epoll_event</code> layout, thread placement, virtual-memory operations, test hooks, and ABI register swaps. Scheduler, queue, timeout, backpressure, file-engine, and retry policy remain in Ada.</p>
             <ul>
               <li><strong>Contexts:</strong> AArch64 and x86-64 implementations preserve all ABI-required callee-saved integer, floating-point, stack, frame, and control state.</li>
-              <li><strong>Stacks:</strong> guarded <code>mmap</code> arenas detect overflow through the supported GNARL signal path and surface Ada <code class="language-ada">Storage_Error</code>.</li>
-              <li><strong>Patches:</strong> exact GNAT source-context patch families fail closed instead of weakening a hunk for an unverified compiler.</li>
-              <li><strong>Finalization:</strong> event machinery is one-shot and tears down only after GNARL task masters and controlled library objects are complete.</li>
+              <li><strong>Stacks:</strong> guarded <code>mmap</code> arenas detect overflow through the supported task-runtime signal path and surface Ada <code class="language-ada">Storage_Error</code>.</li>
+              <li><strong>Patches:</strong> exact compiler source-context patch families fail closed instead of weakening a hunk for an unverified compiler.</li>
+              <li><strong>Finalization:</strong> event machinery is one-shot and tears down only after Ada task masters and controlled library objects are complete.</li>
             </ul>
           </section>
 

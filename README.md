@@ -17,12 +17,14 @@
   <a href="https://flyology.org/api/">API reference</a>
 </p>
 
-Flyology adds an explicit lightweight execution lane to ordinary Ada tasking.
-Selected tasks share event-loop pthreads as fibers while keeping Ada rendezvous,
-protected objects, exceptions, task activation, masters, and normal
-synchronous control flow. Undesignated tasks remain native by default, and
-either lane can be selected explicitly. Flyology adds no `async` dialect; the
-closest familiar comparison is an opt-in Ada analogue of Java virtual threads.
+Flyology Runtime is an experimental GNAT runtime extension for ordinary Ada
+tasking. It provides task-aware I/O and two interoperable execution lanes.
+Undesignated tasks remain native on their pthreads; explicitly designated
+lightweight tasks run cooperatively as fibers on shared event-loop threads. Both
+lanes keep Ada rendezvous, protected objects, exceptions, task activation,
+masters, and normal synchronous control flow. Flyology adds no `async` dialect;
+the closest familiar comparison for its lightweight lane is an opt-in Ada
+analogue of Java virtual threads.
 
 The name comes from Ada Lovelace's 1828 study of flight. Her letters from that
 year describe examining bird anatomy, making wings from paper, silk, and
@@ -75,13 +77,14 @@ based on the surviving correspondence.
 
 ## Status
 
-Flyology is experimental. This checkout is verified on macOS/AArch64 with
-Alire `gnat_native` 16.1.0. Linux/AArch64 and Linux/x86-64 backends are present;
-the repository CI configuration includes Linux jobs, while the native Docker
-runner uses Linux/AArch64 by default on an Apple Silicon host. Hosted validation
-status is reported by Actions. Runtime preparation is pinned to the exact host
-and GNAT releases listed under [Build and test](#build-and-test) and fails closed
-for an unverified combination.
+Flyology Runtime is experimental. This checkout is verified on macOS/AArch64
+with Alire `gnat_native` 16.1.0. Linux/AArch64 and Linux/x86-64 backends are
+present; the repository CI configuration includes Linux jobs, while the native
+Docker runner uses Linux/AArch64 by default on an Apple Silicon host.
+Hosted validation status is reported by Actions. Runtime preparation is pinned
+to the exact host and GNAT releases listed under
+[Build and test](#build-and-test) and fails closed for an unverified
+combination.
 
 The current patch family covers exact Alire `gnat_native` releases from 13
 through 16. Linux/AArch64 and Linux/x86-64 support 13.2.2, 14.1.3, 14.2.1,

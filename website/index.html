@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Flyology adds an explicit lightweight execution lane to ordinary Ada tasking without introducing a new async model.">
+    <meta name="description" content="Flyology Runtime adds native and lightweight task execution, task-aware I/O, and ordinary Ada semantics.">
     <meta name="theme-color" content="#17213d">
-    <title>Flyology · Lightweight tasks for Ada</title>
+    <title>Flyology Runtime · Ordinary Ada tasking</title>
     <link rel="canonical" href="https://flyology.org/">
     <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles/site.css">
@@ -16,9 +16,9 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="./" aria-label="Flyology home">
+        <a class="brand" href="./" aria-label="Flyology Runtime home">
           <img src="assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology</span>
+          <span>Flyology Runtime</span>
         </a>
         <ul class="nav-links" data-nav-links>
           <li><a href="./" aria-current="page">Overview</a></li>
@@ -56,10 +56,10 @@
     <main id="main">
       <section class="hero page-shell" aria-labelledby="hero-title">
         <div>
-          <p class="eyebrow">Experimental GNAT runtime integration</p>
-          <h1 id="hero-title">Lightweight tasks for Ada.</h1>
+          <p class="eyebrow">Experimental runtime extension for GNAT</p>
+          <h1 id="hero-title">Flyology Runtime</h1>
           <p class="hero-lede">
-            Flyology adds an explicit lightweight execution lane to ordinary Ada tasking, without introducing a new async model. Selected tasks run cooperatively as fibers on shared event-loop threads. Rendezvous, protected objects, exceptions, and synchronous control flow continue to use Ada task semantics.
+            Flyology Runtime extends ordinary Ada tasking. Tasks can keep their own OS threads or run cooperatively on shared event loops. In either case, task-aware I/O lets application code remain synchronous.
           </p>
           <div class="actions">
             <a class="button button-primary" href="guide/">
@@ -84,7 +84,7 @@
             <button class="model-note model-note-native" type="button" data-preview-sample="native" data-preview-file="native_task.adb" aria-pressed="false" aria-controls="hero-code-preview">
               <strong>Native task</strong>
               <span class="model-direction">Dedicated OS thread</span>
-              Runs on its own OS thread through stock GNARL.
+              Runs on its own OS thread.
             </button>
           </div>
           <div class="code-window" id="hero-code-preview">
@@ -112,7 +112,7 @@ Flyology.IO.Sockets.Receive
         </div>
       </section>
 
-      <div class="status-strip" aria-label="Why use Flyology">
+      <div class="status-strip" aria-label="Why use Flyology Runtime">
         <div class="status-inner">
           <div class="status-item"><strong>Write ordinary Ada</strong>Keep synchronous calls and Ada task semantics.</div>
           <div class="status-item"><strong>Wait without tying up the loop</strong>A suspended lightweight task leaves its shared thread available.</div>
@@ -126,7 +126,7 @@ Flyology.IO.Sockets.Receive
             <p class="eyebrow">Programming model</p>
             <h2 id="lanes-title">Native and lightweight tasks share Ada semantics.</h2>
           </div>
-          <p>An undesignated task stays native. Lightweight execution is explicit, captured at task creation, and integrated within GNARL without replacing Ada task semantics.</p>
+          <p>An undesignated task stays native. Lightweight execution is explicit and captured at task creation. Both lanes remain ordinary Ada tasking.</p>
         </div>
 
         <div class="lane-stage">
@@ -152,10 +152,10 @@ Flyology.IO.Sockets.Receive
               <span class="lane-number">02 / NATIVE</span>
               <h3>Dedicated OS thread</h3>
             </div>
-            <div class="lane-flow" aria-label="A native Ada task uses the stock GNARL OS-thread path">
+            <div class="lane-flow" aria-label="A native Ada task uses its own OS thread">
               <span class="flow-node">Ada task</span>
               <span class="flow-arrow" aria-hidden="true"></span>
-              <span class="flow-node">GNARL</span>
+              <span class="flow-node">task runtime</span>
               <span class="flow-arrow" aria-hidden="true"></span>
               <span class="flow-node flow-node-teal">OS thread</span>
             </div>
@@ -167,7 +167,7 @@ Flyology.IO.Sockets.Receive
         <div class="mechanics-copy">
           <p class="eyebrow">Runtime architecture</p>
           <h2 id="mechanics-title">Each part has a separate responsibility.</h2>
-          <p>The poller reports readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack. GNARL continues to implement Ada task semantics.</p>
+          <p>The poller reports readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack. Existing Ada tasking machinery continues to define task behavior.</p>
           <a href="architecture/">Read the architecture guide</a>
         </div>
         <ol class="mechanic-list">
@@ -185,7 +185,7 @@ Flyology.IO.Sockets.Receive
           </li>
           <li class="mechanic-item">
             <span class="mechanic-index">04</span>
-            <div><h3>Ada task semantics</h3><p>GNARL continues to implement Ada's rules for rendezvous, protected objects, activation, masters, abort, and task identity; Flyology does not define a parallel async language.</p></div>
+            <div><h3>Ada task semantics</h3><p>Flyology changes where a task executes, not what an Ada task means. Rendezvous, protected objects, activation, masters, abort, and task identity retain their ordinary semantics.</p></div>
           </li>
         </ol>
       </section>
@@ -195,7 +195,7 @@ Flyology.IO.Sockets.Receive
           <div class="capability-copy">
             <p class="eyebrow">Included building blocks</p>
             <h2 id="io-title">Ordinary calls, from sockets through HTTP.</h2>
-            <p class="io-intro">Flyology includes task-aware I/O, an HTTP application layer, and bounded ownership-transfer primitives. Deadlines, capacity, and ownership remain explicit at each boundary.</p>
+            <p class="io-intro">Flyology Runtime includes task-aware I/O, an HTTP application layer, and bounded ownership-transfer primitives. Deadlines, capacity, and ownership remain explicit at each boundary.</p>
             <div class="capability-links">
               <a href="guide/#io">I/O guide</a>
               <a href="guide/http/">HTTP guide</a>
@@ -255,7 +255,7 @@ Queue.Send_Move (Value);</code></pre>
         <div class="ecosystem-heading">
           <div>
             <p class="eyebrow">Ecosystem</p>
-            <h2 id="ecosystem-title">Libraries built on Flyology.</h2>
+            <h2 id="ecosystem-title">Libraries built on Flyology Runtime.</h2>
           </div>
           <p>Companion projects use the same synchronous Ada model while adding focused protocol and application layers.</p>
         </div>
@@ -290,7 +290,7 @@ Queue.Send_Move (Value);</code></pre>
         <div class="constraint-lede">
           <p class="eyebrow">Boundaries</p>
           <h2 id="boundaries-title">Experimental, with documented constraints.</h2>
-          <p>Flyology does not claim hard real-time behavior, preemptive lightweight scheduling, or universal compiler portability. Runtime preparation fails closed when a host and GNAT release are not in the verified patch matrix.</p>
+          <p>Flyology does not claim hard real-time behavior, preemptive lightweight scheduling, or universal compiler portability. Runtime preparation fails closed when a host and compiler release are not in the verified patch matrix.</p>
           <a href="guide/#constraints">Review current constraints</a>
         </div>
         <table class="constraint-table">
@@ -299,7 +299,7 @@ Queue.Send_Move (Value);</code></pre>
             <tr><td>Compatibility</td><td>Undesignated tasks remain native; event machinery starts lazily.</td></tr>
             <tr><td>Fairness</td><td>Scheduling within a group is cooperative, with explicit yield points.</td></tr>
             <tr><td>Foreign calls</td><td>Blocking foreign work belongs on a native task or a dedicated group.</td></tr>
-            <tr><td>Compiler support</td><td>Only exact, versioned GNAT patch families are accepted.</td></tr>
+            <tr><td>Compiler support</td><td>Only exact, versioned compiler patch families are accepted.</td></tr>
           </tbody>
         </table>
       </section>
@@ -345,7 +345,7 @@ Queue.Send_Move (Value);</code></pre>
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology is experimental and dual-licensed under MIT or Apache-2.0, with a runtime patch carve-out.</span>
+        <span>Flyology Runtime is experimental and dual-licensed under MIT or Apache-2.0, with a runtime patch carve-out.</span>
         <div class="footer-links">
           <a href="https://github.com/flyology-ada/flyology">Source</a>
           <a href="https://github.com/flyology-ada/flyology/actions">CI</a>

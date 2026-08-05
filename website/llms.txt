@@ -1,14 +1,14 @@
-# Flyology
+# Flyology Runtime
 
-> Flyology is an experimental GNAT runtime integration that lets explicitly designated Ada tasks run cooperatively as fibers on shared event-loop threads while preserving ordinary Ada task semantics; undesignated tasks remain native OS-thread tasks.
+> Flyology Runtime is an experimental GNAT runtime extension for ordinary Ada tasking. It combines interoperable native and lightweight execution lanes with task-aware I/O while preserving ordinary Ada task semantics and synchronous control flow.
 
-Flyology uses the terms "lightweight task" and "native task." Lightweight scheduling is cooperative, not preemptive. The project does not claim production qualification, universal portability, or hard real-time behavior. Runtime preparation supports only the exact host and GNAT release pairs documented by the project; do not infer support from the broader Alire dependency range.
+Flyology uses the terms "lightweight task" and "native task." Lightweight scheduling is cooperative, not preemptive. The project does not claim production qualification, universal portability, or hard real-time behavior. Runtime preparation supports only the exact host and compiler release pairs documented by the project; do not infer support from the broader Alire dependency range.
 
 ## Documentation
 
 - [Overview](https://flyology.org/): Project scope, programming model, included building blocks, and important constraints.
 - [Guide](https://flyology.org/guide/): Toolchain requirements, runtime preparation, task designation, stack and memory policy, execution groups, task-aware I/O, resource budgets, observability, verification, and constraints.
-- [Architecture](https://flyology.org/architecture/): GNARL integration, native and lightweight lanes, schedulers, pollers, stackful contexts, memory ownership, and lifecycle boundaries.
+- [Architecture](https://flyology.org/architecture/): Tasking integration, native and lightweight lanes, schedulers, pollers, stackful contexts, memory ownership, and lifecycle boundaries.
 - [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, and wall-clock timer behavior, including backward clock changes.
 - [HTTP applications](https://flyology.org/guide/http/): Optional HTTP routing, middleware, streaming, structured request work, WebSockets, security, and measurement guidance.
 - [API reference](https://flyology.org/api/): Generated reference for Flyology's public Ada packages.

@@ -1,5 +1,5 @@
 name = "flyology"
-description = "Lightweight tasks with ordinary Ada semantics for the GNAT runtime"
+description = "Experimental GNAT runtime extension for native and lightweight Ada tasks"
 version = "0.1.0-dev"
 
 authors = ["Yurii Rashkovskii"]

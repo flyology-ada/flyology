@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Choose relative, monotonic, or wall-clock timer waits in Flyology, including explicit handling for backward clock changes.">
+    <meta name="description" content="Choose relative, monotonic, or wall-clock timer waits in Flyology Runtime, including explicit handling for backward clock changes.">
     <meta name="theme-color" content="#17213d">
-    <title>Timers and clock changes · Flyology guide</title>
+    <title>Timers and clock changes · Flyology Runtime</title>
     <link rel="canonical" href="https://flyology.org/guide/timers/">
     <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../../assets/styles/site.css">
@@ -16,9 +16,9 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="../../" aria-label="Flyology home">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
           <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology</span>
+          <span>Flyology Runtime</span>
         </a>
         <ul class="nav-links" data-nav-links>
           <li><a href="../../">Overview</a></li>
@@ -51,7 +51,7 @@
     <main id="main" class="page-shell">
       <header class="doc-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Guide</a></li><li aria-current="page">Timers</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Timers</li></ol>
           <h1>Use the clock that matches the promise.</h1>
         </div>
         <p class="doc-hero-copy">Wait for elapsed time, a monotonic deadline, or a civil time on the adjustable wall clock. When the wall clock moves backward, return that fact to the application instead of silently extending its schedule.</p>
@@ -75,7 +75,7 @@
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">i</span>
-            <p>Flyology is experimental. Timer waits preserve ordinary synchronous Ada call semantics in both lanes, but they do not provide hard real-time wakeup guarantees.</p>
+            <p>Flyology Runtime is experimental. Timer waits preserve ordinary synchronous Ada call semantics in both lanes, but they do not provide hard real-time wakeup guarantees.</p>
           </aside>
 
           <section id="choose">
@@ -234,7 +234,7 @@ end case;</code></pre>
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology is experimental. Validate the exact host, GNAT release, and operating constraints for your application.</span>
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
         <div class="footer-links"><a href="../">Guide</a><a href="../http/">HTTP applications</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
       </div>
     </footer>

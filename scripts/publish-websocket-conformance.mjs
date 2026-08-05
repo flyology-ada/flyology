@@ -462,7 +462,7 @@ function documentHead({ title, description, canonical, depth }) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="${escapeHTML(description)}">
     <meta name="theme-color" content="#17213d">
-    <title>${escapeHTML(title)} · Flyology</title>
+    <title>${escapeHTML(title)} · Flyology Runtime</title>
     <link rel="canonical" href="${escapeHTML(canonical)}">
     <link rel="icon" href="${prefix}assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="${prefix}assets/styles/site.css">
@@ -477,9 +477,9 @@ function siteHeader(depth) {
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="${prefix}" aria-label="Flyology home">
+        <a class="brand" href="${prefix}" aria-label="Flyology Runtime home">
           <img src="${prefix}assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology</span>
+          <span>Flyology Runtime</span>
         </a>
         <ul class="nav-links" data-nav-links>
           <li><a href="${prefix}">Overview</a></li>
@@ -512,7 +512,7 @@ function siteFooter(depth) {
   const prefix = "../".repeat(depth);
   return `    <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology is experimental. This dated report bundle records a bounded conformance campaign.</span>
+        <span>Flyology Runtime is experimental. This dated report bundle records a bounded conformance campaign.</span>
         <div class="footer-links"><a href="${prefix}journal/">Journal</a><a href="${prefix}guide/http/">HTTP guide</a><a href="${prefix}architecture/">Architecture</a><a href="${prefix}api/">API reference</a></div>
       </div>
     </footer>
@@ -625,7 +625,7 @@ function overallPage(loaded, provenance) {
   ];
   return `${documentHead({
     title: "WebSocket conformance",
-    description: "Dated Autobahn framing, compression, limits, WSS, and timing results for Flyology WebSockets.",
+    description: "Dated Autobahn framing, compression, limits, WSS, and timing results for Flyology Runtime WebSockets.",
     canonical: "https://flyology.org/reports/websocket/",
     depth: 2,
   })}
@@ -633,7 +633,7 @@ ${siteHeader(2)}
     <main id="main" class="page-shell report-page">
       <header class="report-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../journal/">Journal</a></li><li aria-current="page">WebSocket conformance</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../../journal/">Journal</a></li><li aria-current="page">WebSocket conformance</li></ol>
           <p class="eyebrow">Protocol evidence · ${escapeHTML(date.display)}</p>
           <h1>WebSocket framing, case by case.</h1>
         </div>
@@ -805,7 +805,7 @@ function profilePage(profile, provenance) {
   }[profile.kind] || "Four non-strict cases defer invalid UTF-8 rejection until the fragmented message is complete. Autobahn accepts that timing. Three further cases are informational.";
   return `${documentHead({
     title: profile.title,
-    description: `${profile.title}: ${profile.cases.length} Autobahn WebSocket case results for Flyology.`,
+    description: `${profile.title}: ${profile.cases.length} Autobahn WebSocket case results for Flyology Runtime.`,
     canonical: `https://flyology.org/reports/websocket/${profile.slug}/`,
     depth: 3,
   })}
@@ -813,7 +813,7 @@ ${siteHeader(3)}
     <main id="main" class="page-shell report-page report-profile-page">
       <header class="report-profile-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../../">Flyology</a></li><li><a href="../">WebSocket conformance</a></li><li aria-current="page">${escapeHTML(profile.title)}</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../../">Flyology Runtime</a></li><li><a href="../">WebSocket conformance</a></li><li aria-current="page">${escapeHTML(profile.title)}</li></ol>
           <p class="eyebrow">${escapeHTML(profile.scope)} · ${escapeHTML(profile.date.display)}</p>
           <h1>${escapeHTML(profile.title)}.</h1>
         </div>

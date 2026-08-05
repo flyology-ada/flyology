@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Build, configure, size memory, budget resources, observe, and evaluate Flyology with a prepared GNAT runtime.">
+    <meta name="description" content="Build, configure, size memory, budget resources, observe, and evaluate Flyology Runtime with a version-matched tasking runtime.">
     <meta name="theme-color" content="#17213d">
-    <title>Guide · Flyology</title>
+    <title>Guide · Flyology Runtime</title>
     <link rel="canonical" href="https://flyology.org/guide/">
     <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../assets/styles/site.css">
@@ -16,9 +16,9 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="../" aria-label="Flyology home">
+        <a class="brand" href="../" aria-label="Flyology Runtime home">
           <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology</span>
+          <span>Flyology Runtime</span>
         </a>
         <ul class="nav-links" data-nav-links>
           <li><a href="../">Overview</a></li>
@@ -51,10 +51,10 @@
     <main id="main" class="page-shell">
       <header class="doc-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Guide</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology Runtime</a></li><li aria-current="page">Guide</li></ol>
           <h1>From first task to a measured configuration.</h1>
         </div>
-        <p class="doc-hero-copy">Prepare a version-matched GNAT runtime, opt ordinary Ada tasks into the lightweight lane, then manage their stacks, task-owned memory, concurrency, execution groups, deadlines, and cooperative CPU work.</p>
+        <p class="doc-hero-copy">Prepare a version-matched runtime, opt ordinary Ada tasks into the lightweight lane, then manage their stacks, task-owned memory, concurrency, execution groups, deadlines, and cooperative CPU work.</p>
       </header>
 
       <div class="docs-layout">
@@ -123,7 +123,7 @@ alr with flyology</code></pre>
           <section id="prepare">
             <span class="step-label">STEP 03</span>
             <h2>Build with a version-matched runtime.</h2>
-            <p>The first build runs Flyology's Alire post-fetch action. It copies the active compiler's installed runtime sources into dependency build output, applies the exact patch family, builds the RTS, and exports a GPR configuration that selects it. Stock GNARL is not used for the application link.</p>
+            <p>The first build runs Flyology's Alire post-fetch action. It copies the active compiler's installed runtime sources into dependency build output, applies the exact patch family, builds the RTS, and exports a GPR configuration that selects it. The application links against this prepared RTS rather than the stock tasking runtime.</p>
             <figure class="code-panel">
               <figcaption>build the application</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -187,12 +187,12 @@ task type Worker (Kind : Flyology.Execution_Model) is
    pragma Storage_Size (Worker_Stack_Size);
 end Worker;</code></pre>
             </figure>
-            <p>The requested value is not the task's complete memory footprint or necessarily the final usable mapping size. GNARL adds its conservative alternate-signal-stack allowance, and Flyology rounds a lightweight stack to the host page size. Lightweight stacks are placed in guarded arenas; each slot carries at least 64 KiB of inaccessible guard address space. Native tasks instead retain the host pthread implementation and its platform minimums.</p>
+            <p>The requested value is not the task's complete memory footprint or necessarily the final usable mapping size. The tasking runtime adds its conservative alternate-signal-stack allowance, and Flyology rounds a lightweight stack to the host page size. Lightweight stacks are placed in guarded arenas; each slot carries at least 64 KiB of inaccessible guard address space. Native tasks instead retain the host pthread implementation and its platform minimums.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p><strong>Do not find the minimum by waiting for a guard fault.</strong> A guard improves failure behavior but cannot prove every stack path safe. Exercise worst-case nesting and exception paths, include margin, and repeat the test on every supported compiler and host.</p>
             </aside>
-            <p><code>Flyology.Observability.Stack_Pool</code> reports the effective lightweight result. <code>Live_Usable_Bytes</code> is the aggregate usable size after GNARL adjustment and page rounding; <code>Reserved_Bytes</code> is the exact virtual address space held by live arenas, including guards. Reserved address space is not resident memory, so measure process RSS separately.</p>
+            <p><code>Flyology.Observability.Stack_Pool</code> reports the effective lightweight result. <code>Live_Usable_Bytes</code> is the aggregate usable size after runtime adjustment and page rounding; <code>Reserved_Bytes</code> is the exact virtual address space held by live arenas, including guards. Reserved address space is not resident memory, so measure process RSS separately.</p>
             <figure class="code-panel">
               <figcaption>inspect the lightweight stack pool</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -283,14 +283,14 @@ end Memory_Region_Example;</code></pre>
             <p>The efficiency comes from grouping objects that share a lifetime. The pool replaces repeated general-heap allocation and reclamation with allocation from larger chunks and one collective cleanup boundary.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Task pool</dt><dd>Stores fixed ownership and accounting state plus the Ada subpool controller. Flyology adds no per-pool mutex because only the owning task may use it; GNAT briefly takes its tasking lock when a region is attached to or detached from the controller's subpool list.</dd></div>
-                <div class="decision-row"><dt>Region creation</dt><dd>Allocates one Flyology region descriptor and GNAT allocates one registration node while attaching it to the pool. The first backing chunk is allocated lazily by the first object.</dd></div>
+                <div class="decision-row"><dt>Task pool</dt><dd>Stores fixed ownership and accounting state plus the Ada subpool controller. Flyology adds no per-pool mutex because only the owning task may use it; the tasking runtime briefly takes its lock when a region is attached to or detached from the controller's subpool list.</dd></div>
+                <div class="decision-row"><dt>Region creation</dt><dd>Allocates one Flyology region descriptor and one runtime registration node while attaching it to the pool. The first backing chunk is allocated lazily by the first object.</dd></div>
                 <div class="decision-row"><dt>Common allocation</dt><dd>Checks task ownership, aligns an address, advances the current chunk offset, and updates counters. It takes no region lock and does not call the underlying heap while that chunk has room.</dd></div>
                 <div class="decision-row"><dt>Chunk growth</dt><dd>Allocates and links one new chunk when the current chunk is full. The default payload capacity is 64 KiB; a larger object receives enough capacity for its size and alignment.</dd></div>
-                <div class="decision-row"><dt>Bulk cleanup</dt><dd>Finalizes controlled objects, detaches and frees GNAT's registration node, frees each backing chunk, and frees the region descriptor. Explicit <code>Release</code> does this for one region; task-end pool finalization does it for every region still live.</dd></div>
+                <div class="decision-row"><dt>Bulk cleanup</dt><dd>Finalizes controlled objects, detaches and frees the runtime registration node, frees each backing chunk, and frees the region descriptor. Explicit <code>Release</code> does this for one region; task-end pool finalization does it for every region still live.</dd></div>
               </dl>
             </div>
-            <p>For <code>N</code> object allocations spread across <code>R</code> regions and <code>K</code> chunks, Flyology and the supported GNAT runtime make roughly <code>2R + K</code> underlying management allocations: one descriptor and one registration node per region, plus the chunks. Most of the <code>N</code> object allocations are bump operations inside an existing chunk. Reclamation performs the corresponding management frees, although controlled objects still require individual finalization. This amortization is useful when <code>R + K</code> is much smaller than <code>N</code>.</p>
+            <p>For <code>N</code> object allocations spread across <code>R</code> regions and <code>K</code> chunks, Flyology and the supported runtime make roughly <code>2R + K</code> underlying management allocations: one descriptor and one registration node per region, plus the chunks. Most of the <code>N</code> object allocations are bump operations inside an existing chunk. Reclamation performs the corresponding management frees, although controlled objects still require individual finalization. This amortization is useful when <code>R + K</code> is much smaller than <code>N</code>.</p>
             <p>Reclamation is synchronous rather than background work. Ending a lightweight task with many chunks or expensive finalizers can occupy its event-loop pthread until cleanup finishes. The allocator checks only the current chunk, so unused tails in older chunks remain reserved until release. <code>Reserved_Storage</code> counts chunk payload capacity, not region descriptors, chunk headers, or underlying allocator metadata. Use smaller phase regions and explicit release boundaries when cleanup timing or chunk slack matters.</p>
             <p>The current implementation has no region quota, retained-chunk cache, trimming operation, or automatic connection to dormant-stack advice. It does not redirect ordinary Ada allocation. Set application admission limits around potentially large phases, inspect region statistics before release, and treat every access value into a released region as invalid.</p>
             <aside class="callout callout-teal">
@@ -453,7 +453,7 @@ end loop;</code></pre>
           <section id="constraints">
             <span class="step-label">STEP 12</span>
             <h2>Know when to stay native.</h2>
-            <p>Flyology is experimental. Keep a task native when its correctness depends on kernel real-time scheduling, forced preemption, stock GNARL CPU affinity, unpredictable foreign blocking, or a host and compiler combination outside the verified patch matrix.</p>
+            <p>Flyology Runtime is experimental. Keep a task native when its correctness depends on kernel real-time scheduling, forced preemption, native CPU affinity, unpredictable foreign blocking, or a host and compiler combination outside the verified patch matrix.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Use lightweight</dt><dd>High I/O concurrency with cooperative work, explicit task-aware waits, and ordinary Ada task semantics.</dd></div>
@@ -472,7 +472,7 @@ end loop;</code></pre>
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology is experimental. Validate the exact host, GNAT release, and operating constraints for your application.</span>
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
         <div class="footer-links"><a href="../">Overview</a><a href="../architecture/">Architecture</a><a href="../journal/">Journal</a><a href="../api/">API reference</a></div>
       </div>
     </footer>

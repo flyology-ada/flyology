@@ -1,6 +1,6 @@
 ---
-name: Flyology
-description: A precise, contemporary guide to ordinary Ada tasking with an explicit lightweight execution lane.
+name: Flyology Runtime
+description: A precise, contemporary guide to an experimental GNAT runtime extension for ordinary Ada tasking.
 colors:
   ink: "oklch(27% 0.052 270)"
   ink-soft: "oklch(39% 0.043 270)"
@@ -87,7 +87,7 @@ components:
     padding: "0.75rem 1rem"
 ---
 
-# Design System: Flyology
+# Design System: Flyology Runtime
 
 ## 1. Overview
 

@@ -13,11 +13,12 @@ the entire repository.
 
 ## Product Purpose
 
-Flyology presents an experimental lightweight execution lane for ordinary Ada
-tasks. Selected tasks share event-loop threads as fibers while preserving GNARL
-task semantics. The public site should help a visitor understand what changes,
-what stays ordinary Ada, where the portability and scheduling boundaries lie,
-and how to evaluate or use the project responsibly.
+Flyology Runtime is an experimental GNAT runtime extension for ordinary Ada
+tasking. Its native and lightweight execution lanes share ordinary Ada task
+semantics, synchronous control flow, and task-aware I/O. The public site should
+help a visitor understand the runtime as a whole, what changes between its
+execution lanes, what stays ordinary Ada, where the portability and scheduling
+boundaries lie, and how to evaluate or use the project responsibly.
 
 ## Brand Personality
 
@@ -37,6 +38,8 @@ glassmorphism, and decorative complexity that obscures runtime behavior.
 - Show the execution model before describing it at length.
 - Pair every capability with its operational boundary.
 - Keep ordinary Ada syntax at the center of the story.
+- Use GNAT when the compiler or runtime boundary matters. Reserve GNARL for the
+  exact implementation boundary where naming that subsystem adds information.
 - Let the flight identity add curiosity without turning history into costume.
 - Make the shortest path to a working evaluation obvious.
 
