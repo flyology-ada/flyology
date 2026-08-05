@@ -286,9 +286,11 @@ required by the changed boundary.
   the index, resolves each distinct development manifest's Git remote `HEAD`,
   advances every `*-dev.toml` sharing that origin to the same exact commit, and
   runs `alr index --check`. Run it without options to leave changes for review,
-  with `--commit` to create the standard Problem/Solution commit, or with
-  `--push` to update, commit, and publish in one step. Stable release manifests
-  are intentionally excluded.
+  pass one or more `--crate NAME` options to limit the update to selected
+  origin groups, use `--commit` to create the standard Problem/Solution commit,
+  or use `--push` to update, commit, and publish in one step. Selecting any
+  crate deliberately advances all development manifests that share its source
+  origin; stable release manifests are intentionally excluded.
 - CI in `.github/workflows/ci.yml` is the hosted reference. Do not add
   `continue-on-error` to conceal a backend failure.
 
