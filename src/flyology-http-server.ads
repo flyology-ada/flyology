@@ -512,6 +512,9 @@ package Flyology.HTTP.Server is
    --  Client frames must be masked. Protocol failure makes Item terminal.
    --  Negotiated compression is decoded before return; compressed and
    --  decompressed storage is charged to the shared ingress budget.
+   --  A Timeout expiry may be retried while Item remains active. Expiry of the
+   --  retained whole-message deadline or a control-frame write makes Item
+   --  terminal before raising Timeout_Error.
    --  @param Item Upgraded WebSocket connection
    --  @param Kind Text or binary message kind
    --  @param Data Message payload
@@ -602,6 +605,9 @@ private
 
    type Request_Body_Mode is (No_Body, Fixed_Body, Chunked_Body);
    type Ingress_Budget_Access is access all Ingress_Budget;
+   subtype WebSocket_Mask is Ada.Streams.Stream_Element_Array (0 .. 3);
+   subtype WebSocket_Control_Buffer is
+     Ada.Streams.Stream_Element_Array (1 .. 125);
 
    protected type Ingress_Budget_State (Limit : Positive) is
       procedure Try_Reserve (Bytes : Natural; Granted : out Boolean);
@@ -666,6 +672,13 @@ private
       WebSocket_Message : Flyology.Bytes.Unbounded_Bytes;
       WebSocket_Message_Limit : Natural := 0;
       WebSocket_Control_Count : Natural := 0;
+      WebSocket_Frame_Active : Boolean := False;
+      WebSocket_Frame_Opcode : Natural := 0;
+      WebSocket_Frame_Final : Boolean := False;
+      WebSocket_Frame_Remaining : Natural := 0;
+      WebSocket_Frame_Position : Natural := 0;
+      WebSocket_Frame_Mask : WebSocket_Mask := (others => 0);
+      WebSocket_Control_Payload : WebSocket_Control_Buffer := (others => 0);
       WebSocket_Deflate_Enabled : Boolean := False;
       WebSocket_Message_Compressed : Boolean := False;
    end record;

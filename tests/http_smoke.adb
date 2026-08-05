@@ -3335,16 +3335,146 @@ procedure HTTP_Smoke is
       end;
    end Check_High_Level_WebSocket;
 
+   procedure Check_High_Level_WebSocket_Terminal_Timeout is
+      package Applications renames Flyology.HTTP.Server.Applications;
+      package Routing is new Flyology.HTTP.Server.Routing (Boolean);
+      package WebSockets renames
+        Flyology.HTTP.Server.WebSocket_Handlers;
+
+      Terminal_Timeout : Boolean := False;
+      Deadline_Timeout : Boolean := False;
+
+      function Ping return String is
+         Mask : constant String := "mask";
+         Value : Unbounded_String;
+      begin
+         Append (Value, Character'Val (16#89#));
+         Append (Value, Character'Val (16#81#));
+         Append (Value, Mask);
+         Append
+           (Value,
+            Character'Val
+              (Natural
+                 (Ada.Streams.Stream_Element (Character'Pos ('?'))
+                  xor Ada.Streams.Stream_Element
+                    (Character'Pos (Mask (1))))));
+         return To_String (Value);
+      end Ping;
+
+      procedure Chat
+        (State : in out Boolean;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+         Item : WebSockets.Session
+           (Capacity => 1, Byte_Limit => 1_024, Budget => null,
+            Buffer_Pool => null);
+      begin
+         begin
+            WebSockets.Run (X, Item, Receive_Quantum => 1.0);
+         exception
+            when Error : Program_Error =>
+               Terminal_Timeout :=
+                 Ada.Exceptions.Exception_Message (Error) =
+                   "terminal WebSocket receive timeout";
+         end;
+      end Chat;
+
+      procedure Expire_Message_Deadline
+        (X    : in out Applications.Exchange;
+         Item : in out WebSockets.Session)
+      is
+         pragma Unreferenced (Item);
+      begin
+         X.Narrow_Deadline (Ada.Real_Time.Clock);
+      end Expire_Message_Deadline;
+
+      procedure Deadline_Chat
+        (State : in out Boolean;
+         X     : in out Applications.Exchange)
+      is
+         pragma Unreferenced (State);
+         Item : WebSockets.Session
+           (Capacity => 1, Byte_Limit => 1_024, Budget => null,
+            Buffer_Pool => null);
+      begin
+         begin
+            WebSockets.Run
+              (X, Item, Open => Expire_Message_Deadline'Access,
+               Receive_Quantum => 1.0);
+         exception
+            when Error : Program_Error =>
+               Deadline_Timeout :=
+                 Ada.Exceptions.Exception_Message (Error) =
+                   "terminal WebSocket receive timeout";
+         end;
+      end Deadline_Chat;
+
+      Routes : Routing.Router
+        (Capacity => 2, Slashes => Routing.Strict_Slashes);
+      State  : Boolean := False;
+      Control_Wire : aliased Memory_Transport;
+      Deadline_Wire : aliased Memory_Transport;
+   begin
+      Routing.Get
+        (Routes,
+         "/control", Chat'Access, Name => "control-timeout",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade => Routing.Allow_WebSocket));
+      Routing.Get
+        (Routes,
+         "/deadline", Deadline_Chat'Access, Name => "deadline-timeout",
+         Policy =>
+           (Routing.Default_Route_Policy with delta
+              Upgrade => Routing.Allow_WebSocket));
+      Control_Wire.Input := To_Unbounded_String
+        ("GET /control HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF
+         & Ping);
+      Control_Wire.Timeout_On_Send_Call := 2;
+      declare
+         Client : aliased HTTP_Server.Connection (Control_Wire'Access);
+      begin
+         Routing.Serve (Routes, State, Client, Test_Peer);
+      end;
+      pragma Assert (Terminal_Timeout);
+
+      Deadline_Wire.Input := To_Unbounded_String
+        ("GET /deadline HTTP/1.1" & CRLF
+         & "Host: localhost" & CRLF
+         & "Upgrade: websocket" & CRLF
+         & "Connection: Upgrade" & CRLF
+         & "Sec-WebSocket-Version: 13" & CRLF
+         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF);
+      declare
+         Client : aliased HTTP_Server.Connection (Deadline_Wire'Access);
+      begin
+         Routing.Serve (Routes, State, Client, Test_Peer);
+      end;
+      pragma Assert (Deadline_Timeout);
+   end Check_High_Level_WebSocket_Terminal_Timeout;
+
    procedure Check_Fragmented_WebSocket_Timeout is
       function Frame
-        (Final : Boolean; Opcode : Natural; Payload : String) return String
+        (Final      : Boolean;
+         Opcode     : Natural;
+         Payload    : String;
+         Compressed : Boolean := False) return String
       is
          Mask : constant String := "mask";
          Value : Unbounded_String;
       begin
          Append
            (Value,
-            Character'Val ((if Final then 16#80# else 0) + Opcode));
+            Character'Val
+              ((if Final then 16#80# else 0)
+               + (if Compressed then 16#40# else 0)
+               + Opcode));
          Append (Value, Character'Val (16#80# + Payload'Length));
          Append (Value, Mask);
          for Index in Payload'Range loop
@@ -3367,19 +3497,29 @@ procedure HTTP_Smoke is
         & "Upgrade: websocket" & CRLF
         & "Connection: Upgrade" & CRLF
         & "Sec-WebSocket-Version: 13" & CRLF
+        & "Sec-WebSocket-Extensions: permessage-deflate" & CRLF
         & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & CRLF;
-      First : constant String := Frame (False, 1, "hel");
-      Last  : constant String := Frame (True, 0, "lo");
+      Compressed : constant String :=
+        Character'Val (16#F2#) & Character'Val (16#48#)
+        & Character'Val (16#CD#) & Character'Val (16#C9#)
+        & Character'Val (16#C9#) & Character'Val (16#07#)
+        & Character'Val (16#00#);
+      First : constant String :=
+        Frame (False, 1, Compressed (1 .. 3), Compressed => True);
+      Ping  : constant String := Frame (True, 9, "?");
+      Last  : constant String := Frame (True, 0, Compressed (4 .. 7));
       Wire  : aliased Memory_Transport;
       Value : HTTP_Server.Request;
       Closed : Boolean;
       Timed_Out : Boolean := False;
       Kind : HTTP_Server.WebSocket_Data_Kind;
       Data : Bytes.Unbounded_Bytes;
-      Budget : aliased HTTP_Server.Ingress_Budget (Limit => 100);
+      Budget : aliased HTTP_Server.Ingress_Budget (Limit => 256);
    begin
-      Wire.Input := To_Unbounded_String (Head & First & Last);
-      Wire.First_Receive_Max := Head'Length + First'Length;
+      Wire.Input := To_Unbounded_String (Head & First & Ping & Last);
+      --  Leave the first frame's header, mask, and two payload bytes buffered,
+      --  then force the read for its final payload byte to time out.
+      Wire.First_Receive_Max := Head'Length + 6 + 2;
       Wire.Timeout_On_Call := 2;
       declare
          Client : HTTP_Server.Connection (Wire'Access);
@@ -3388,23 +3528,30 @@ procedure HTTP_Smoke is
          HTTP_Server.Read_Request_Head
            (Client, Value, Closed, Timeout => 1.0);
          pragma Assert (not Closed);
-         HTTP_Server.Accept_WebSocket (Client, Value, Timeout => 1.0);
+         HTTP_Server.Accept_WebSocket
+           (Client, Value, Timeout => 1.0,
+            Compression => HTTP_Server.Permessage_Deflate);
          begin
             HTTP_Server.Receive_WebSocket
-              (Client, Kind, Data, Closed, Timeout => 0.001,
+              (Client, Kind, Data, Closed, Max_Message => 100,
+               Timeout => 0.001,
                Message_Timeout => 1.0);
          exception
             when Flyology.IO.Timeout_Error => Timed_Out := True;
          end;
          pragma Assert (Timed_Out);
-         pragma Assert (HTTP_Server.Current (Budget).Current = 3);
+         pragma Assert (HTTP_Server.Current (Budget).Current = 2);
          HTTP_Server.Receive_WebSocket
-           (Client, Kind, Data, Closed, Timeout => 1.0,
+           (Client, Kind, Data, Closed, Max_Message => 100, Timeout => 1.0,
             Message_Timeout => 1.0);
          pragma Assert (not Closed);
          pragma Assert (Kind = HTTP_Server.Text_Frame);
-         pragma Assert (Bytes.To_Byte_String (Data) = "hello");
+         pragma Assert (Bytes.To_Byte_String (Data) = "Hello");
          pragma Assert (HTTP_Server.Current (Budget).Current = 0);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output),
+               Character'Val (16#8A#) & Character'Val (1) & "?") /= 0);
          HTTP_Server.Close_WebSocket (Client, Timeout => 1.0);
       end;
    end Check_Fragmented_WebSocket_Timeout;
@@ -3740,6 +3887,7 @@ begin
    Check_High_Level_SSE;
    Check_Idle_SSE_Deadline;
    Check_High_Level_WebSocket;
+   Check_High_Level_WebSocket_Terminal_Timeout;
    Check_Fragmented_WebSocket_Timeout;
    Check_Request_Task_Integration;
    Check_Native_Route_Integration;

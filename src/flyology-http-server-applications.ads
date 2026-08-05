@@ -390,6 +390,9 @@ package Flyology.HTTP.Server.Applications is
         No_WebSocket_Compression);
 
    --  Receive one complete WebSocket message through the borrowed connection.
+   --  A retry-quantum expiry raises Timeout_Error while the exchange remains
+   --  active. A whole-message or control-write timeout makes the exchange
+   --  failed and raises Program_Error.
    --  @param Item Upgraded request exchange
    --  @param Kind Text or binary message kind
    --  @param Data Complete message payload

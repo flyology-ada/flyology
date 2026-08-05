@@ -1353,7 +1353,10 @@ a handler indefinitely. Routers may additionally impose a shorter absolute
 header timeout while retaining an explicitly longer complete-request deadline
 for admitted SSE or WebSocket lifecycles; both clocks start before the first
 header byte. WebSocket receive calls use a short retry quantum plus a separate
-monotonic whole-message deadline retained across fragments.
+monotonic whole-message deadline retained across fragments and partial frame
+payloads. High-level handlers may retry a quantum timeout while the connection
+remains active; a message-deadline or control-write timeout is terminal and is
+reported as `Program_Error` instead of being retried.
 Handlers also default to 1,000 requests and five minutes per connection. Peer
 protocol, timeout, socket, TLS, and unmapped application callback failures are
 contained to that connection; an unmapped callback failure receives a safe 500
