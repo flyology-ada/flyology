@@ -36,6 +36,11 @@ package body Flyology.IO.Structured_Servers is
      with Import,
           Convention => C,
           External_Name => "flyology_test_structured_server_barrier_released";
+   function Test_Activation_Failure return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_structured_server_activation_failure";
 
    procedure Test_Barrier (Point : Interfaces.C.int) is
    begin
@@ -45,6 +50,16 @@ package body Flyology.IO.Structured_Servers is
          end loop;
       end if;
    end Test_Barrier;
+
+   function Check_Test_Activation return Boolean is
+   begin
+      Test_Barrier (5);
+      if Test_Activation_Failure /= 0 then
+         raise Program_Error with
+           "injected structured server worker activation failure";
+      end if;
+      return True;
+   end Check_Test_Activation;
 #end if;
 
    overriding procedure Initialize (Item : in out Listener_Close_Guard) is
@@ -409,9 +424,15 @@ package body Flyology.IO.Structured_Servers is
          declare
             task type Worker with CPU => Handler_CPU is
                pragma Task_Info (Handler_Model);
+               entry Start;
             end Worker;
 
             task body Worker is
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+               Activation_Checked : constant Boolean :=
+                 Check_Test_Activation;
+               pragma Unreferenced (Activation_Checked);
+#end if;
                Stop_Worker : Boolean := False;
                Completion_Reported : Boolean := False;
 
@@ -433,6 +454,16 @@ package body Flyology.IO.Structured_Servers is
                   Stop_Accepting;
                end Report;
             begin
+               --  Do not enter admission work until every worker has
+               --  activated and the nested cleanup guard is installed. If a
+               --  sibling activation fails, already-live workers can select
+               --  terminate while the enclosing master completes.
+               select
+                  accept Start;
+               or
+                  terminate;
+               end select;
+
                begin
                   while not Stop_Worker loop
                      declare
@@ -504,14 +535,19 @@ package body Flyology.IO.Structured_Servers is
             end Worker;
 
             Workers : array (1 .. Item.Capacity) of Worker;
-            pragma Unreferenced (Workers);
          begin
+#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
+            Test_Barrier (6);
+#end if;
             declare
                Worker_Cleanup_Armed : aliased Boolean := True;
                Worker_Cleanup : Worker_Cleanup_Guard
                  (Worker_Cleanup_Armed'Access);
                pragma Unreferenced (Worker_Cleanup);
             begin
+               for Index in Workers'Range loop
+                  Workers (Index).Start;
+               end loop;
 #if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
                Test_Barrier (3);
 #end if;

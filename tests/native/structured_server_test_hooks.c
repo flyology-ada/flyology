@@ -1,10 +1,12 @@
 #include <stdatomic.h>
 
-enum { barrier_count = 5 };
+enum { barrier_count = 7 };
 
 static _Atomic int armed[barrier_count];
 static _Atomic int reached[barrier_count];
 static _Atomic int released[barrier_count];
+static _Atomic int activation_failure_ordinal;
+static _Atomic int activation_count;
 
 static int valid_point(int point)
 {
@@ -18,6 +20,24 @@ void flyology_test_structured_server_barrier_reset(void)
       atomic_store_explicit(&reached[point], 0, memory_order_seq_cst);
       atomic_store_explicit(&released[point], 1, memory_order_seq_cst);
    }
+   atomic_store_explicit(&activation_failure_ordinal, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&activation_count, 0, memory_order_seq_cst);
+}
+
+void flyology_test_structured_server_activation_fail_at(int ordinal)
+{
+   atomic_store_explicit(&activation_count, 0, memory_order_seq_cst);
+   atomic_store_explicit(&activation_failure_ordinal, ordinal,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_structured_server_activation_failure(void)
+{
+   int ordinal = atomic_fetch_add_explicit(&activation_count, 1,
+                                           memory_order_seq_cst) + 1;
+   return ordinal == atomic_load_explicit(&activation_failure_ordinal,
+                                          memory_order_seq_cst);
 }
 
 void flyology_test_structured_server_barrier_arm(int point)

@@ -5,7 +5,9 @@ package Structured_Server_Test_Control is
       During_Acquisition,
       After_Acquisition,
       Serving,
-      Listener_Close);
+      Listener_Close,
+      During_Worker_Activation,
+      After_Worker_Activation);
 
    procedure Reset;
 
@@ -14,5 +16,7 @@ package Structured_Server_Test_Control is
    procedure Wait_Reached (Point : Barrier_Point);
 
    procedure Release (Point : Barrier_Point);
+
+   procedure Fail_Activation_At (Ordinal : Positive);
 
 end Structured_Server_Test_Control;

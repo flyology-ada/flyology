@@ -22,6 +22,11 @@ package body Structured_Server_Test_Control is
      with Import,
           Convention => C,
           External_Name => "flyology_test_structured_server_barrier_release";
+   procedure C_Fail_Activation_At (Ordinal : Interfaces.C.int)
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_structured_server_activation_fail_at";
 
    procedure Reset is
    begin
@@ -50,5 +55,10 @@ package body Structured_Server_Test_Control is
    begin
       C_Release (Barrier_Point'Pos (Point));
    end Release;
+
+   procedure Fail_Activation_At (Ordinal : Positive) is
+   begin
+      C_Fail_Activation_At (Interfaces.C.int (Ordinal));
+   end Fail_Activation_At;
 
 end Structured_Server_Test_Control;
