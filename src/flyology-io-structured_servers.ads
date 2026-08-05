@@ -187,7 +187,7 @@ private
       State          : Lifecycle;
       Accept_Stop    : aliased Cancellation_Token;
       Handler_Stop   : aliased Cancellation_Token;
-      Owned_Listener : Flyology.IO.Sockets.Socket_Type;
+      Owned_Listener : aliased Flyology.IO.Sockets.Socket_Type;
    end record;
 
    --  Request shutdown and cancellation if Item is still serving. Retry the

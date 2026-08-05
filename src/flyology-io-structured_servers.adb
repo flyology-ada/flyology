@@ -16,10 +16,21 @@ package body Flyology.IO.Structured_Servers is
      (C, C_Close_Listener, "flyology_structured_listener_close");
 
    type Listener_Close_Guard
-     (Result : not null access Interfaces.C.int)
+     (Source : not null access Sockets.Socket_Type;
+      Result : not null access Interfaces.C.int)
    is new Ada.Finalization.Limited_Controlled with record
       Value : Descriptor := Invalid_Descriptor;
    end record;
+
+   overriding procedure Initialize (Item : in out Listener_Close_Guard);
+   overriding procedure Finalize (Item : in out Listener_Close_Guard);
+
+   overriding procedure Initialize (Item : in out Listener_Close_Guard) is
+   begin
+      --  Controlled initialization is abort-deferred. Transfer both halves of
+      --  socket ownership here so an abort cannot observe duplicate owners.
+      Sockets.Release (Item.Source.all, Item.Value);
+   end Initialize;
 
    overriding procedure Finalize (Item : in out Listener_Close_Guard) is
    begin
@@ -189,12 +200,13 @@ package body Flyology.IO.Structured_Servers is
    begin
       if Sockets.Is_Open (Item.Owned_Listener) then
          declare
-            Guard : Listener_Close_Guard (Result'Access);
+            Guard : Listener_Close_Guard
+              (Item.Owned_Listener'Access, Result'Access);
+            pragma Unreferenced (Guard);
          begin
-            --  Transfer ownership before close(2). Finalization is
-            --  abort-deferred, so an abort cannot retain a consumed descriptor
-            --  or strand the released descriptor before its single close.
-            Sockets.Release (Item.Owned_Listener, Guard.Value);
+            --  Initialization transfers ownership and finalization performs
+            --  the single close; both callbacks are abort-deferred.
+            null;
          end;
          if Result /= 0 then
             raise Sockets.Socket_Error with
