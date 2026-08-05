@@ -10,4 +10,6 @@ package Worker_Pool_Test_Control is
 
    procedure Release_Shutdown_Barrier;
 
+   procedure Fail_Native_Executor_Cancellation_Once;
+
 end Worker_Pool_Test_Control;

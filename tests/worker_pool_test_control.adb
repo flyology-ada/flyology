@@ -26,6 +26,11 @@ package body Worker_Pool_Test_Control is
      with Import,
           Convention => C,
           External_Name => "flyology_test_worker_shutdown_barrier_release";
+   procedure C_Fail_Native_Executor_Cancellation_Once
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_cancellation_fail_once";
 
    procedure Reset is
    begin
@@ -59,5 +64,10 @@ package body Worker_Pool_Test_Control is
    begin
       C_Release_Shutdown_Barrier;
    end Release_Shutdown_Barrier;
+
+   procedure Fail_Native_Executor_Cancellation_Once is
+   begin
+      C_Fail_Native_Executor_Cancellation_Once;
+   end Fail_Native_Executor_Cancellation_Once;
 
 end Worker_Pool_Test_Control;

@@ -5,6 +5,7 @@ static _Atomic int activation_count;
 static _Atomic int shutdown_barrier_armed;
 static _Atomic int shutdown_barrier_reached;
 static _Atomic int shutdown_barrier_released;
+static _Atomic int native_executor_cancellation_failure;
 
 void flyology_test_worker_pool_reset(void)
 {
@@ -15,6 +16,8 @@ void flyology_test_worker_pool_reset(void)
    atomic_store_explicit(&shutdown_barrier_reached, 0,
                          memory_order_seq_cst);
    atomic_store_explicit(&shutdown_barrier_released, 1,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&native_executor_cancellation_failure, 0,
                          memory_order_seq_cst);
 }
 
@@ -71,4 +74,16 @@ void flyology_test_worker_shutdown_barrier_release(void)
                          memory_order_seq_cst);
    atomic_store_explicit(&shutdown_barrier_armed, 0,
                          memory_order_seq_cst);
+}
+
+void flyology_test_worker_native_executor_cancellation_fail_once(void)
+{
+   atomic_store_explicit(&native_executor_cancellation_failure, 1,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_worker_native_executor_cancellation_failure(void)
+{
+   return atomic_exchange_explicit(&native_executor_cancellation_failure, 0,
+                                   memory_order_seq_cst);
 }

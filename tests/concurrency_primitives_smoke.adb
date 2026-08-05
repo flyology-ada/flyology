@@ -1,14 +1,32 @@
+with Ada.Real_Time;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Capacity;
 with Flyology.Channels.Bounded;
+with Flyology.Native_Executors;
 with Flyology.Worker_Pools;
+with Interfaces;
 with System.Multiprocessors;
 with Worker_Pool_Test_Control;
 
 procedure Concurrency_Primitives_Smoke is
+   use type Interfaces.Unsigned_64;
 
    package Integer_Channels is new Flyology.Channels.Bounded (Integer);
+
+   procedure Native_Work
+     (Input    : Integer;
+      Token    : access Flyology.Cancellation.Token;
+      Deadline : Ada.Real_Time.Time;
+      Result   : out Integer)
+   is
+      pragma Unreferenced (Token, Deadline);
+   begin
+      Result := Input * 2;
+   end Native_Work;
+
+   package Native_Executors is new Flyology.Native_Executors
+     (Integer, Integer, Native_Work);
 
    protected type Boolean_Result is
       procedure Set (Value : Boolean);
@@ -243,6 +261,72 @@ procedure Concurrency_Primitives_Smoke is
          Empty.Close;
       end;
    end Exercise_Channel;
+
+   procedure Exercise_Native_Executor_Abandon_Failure is
+      Item     : aliased Native_Executors.Executor
+        (Workers => 1, Capacity => 1);
+      Accepted : Boolean;
+
+      procedure Wait_For_Success (Count : Interfaces.Unsigned_64) is
+      begin
+         for Attempt in 1 .. 100 loop
+            exit when
+              Native_Executors.Statistics (Item).Successful_Executions =
+                Count;
+            delay 0.001;
+         end loop;
+         pragma Assert
+           (Native_Executors.Statistics (Item).Successful_Executions = Count);
+      end Wait_For_Success;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Start (Item);
+      declare
+         Handle : Native_Executors.Operation_Handle (Item'Access);
+         Failed : Boolean := False;
+      begin
+         Native_Executors.Submit
+           (Item, 1, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Wait_For_Success (1);
+         Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
+         begin
+            Native_Executors.Abandon (Item, Handle);
+         exception
+            when Program_Error => Failed := True;
+         end;
+         pragma Assert (Failed);
+         pragma Assert
+           (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      end;
+
+      declare
+         Handle : Native_Executors.Operation_Handle (Item'Access);
+      begin
+         Native_Executors.Submit
+           (Item, 2, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Wait_For_Success (2);
+         Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
+         --  Finalization must consume the handle and release the completed
+         --  slot even though cancellation signalling raises internally.
+      end;
+      pragma Assert
+        (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+
+      declare
+         Handle : Native_Executors.Operation_Handle (Item'Access);
+         Result : Integer;
+      begin
+         Native_Executors.Submit
+           (Item, 3, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Native_Executors.Await (Item, Handle, Result);
+         pragma Assert (Result = 6);
+      end;
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Abandon_Failure;
 
    protected type Totals is
       procedure Add (Value : Integer);
@@ -524,6 +608,7 @@ procedure Concurrency_Primitives_Smoke is
 
 begin
    Exercise_Channel;
+   Exercise_Native_Executor_Abandon_Failure;
    Exercise_Lightweight_Waits;
    Exercise_Native_Waits;
    Exercise_Lightweight_Pool;

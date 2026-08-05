@@ -1,5 +1,8 @@
 with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+with Interfaces.C;
+#end if;
 
 package body Flyology.Native_Executors is
    use type Ada.Real_Time.Time;
@@ -9,6 +12,27 @@ package body Flyology.Native_Executors is
 
    procedure Free_Token is new Ada.Unchecked_Deallocation
      (Flyology.Cancellation.Token, Token_Access);
+
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+   use type Interfaces.C.int;
+
+   function Test_Cancellation_Failure return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_cancellation_failure";
+#end if;
+
+   procedure Request_Owned_Token (Token : Token_Access) is
+   begin
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+      if Test_Cancellation_Failure /= 0 then
+         raise Program_Error with
+           "injected native executor cancellation failure";
+      end if;
+#end if;
+      Token.Request;
+   end Request_Owned_Token;
 
    protected body Shared_State is
       procedure Submit
@@ -220,9 +244,6 @@ package body Flyology.Native_Executors is
          then
             raise Invalid_Handle;
          end if;
-         if Tokens (Slot) /= null then
-            Tokens (Slot).Request;
-         end if;
          Counters.Abandoned_Operations :=
            Counters.Abandoned_Operations + 1;
          if Status (Slot) = Completed then
@@ -237,6 +258,12 @@ package body Flyology.Native_Executors is
               Counters.Outstanding_Operations - 1;
          else
             Detached (Slot) := True;
+         end if;
+         --  Publish the irreversible slot transition before signalling. A
+         --  wake failure may escape, but cannot leave an accepted operation
+         --  attached to a handle that finalization is about to discard.
+         if Tokens (Slot) /= null then
+            Request_Owned_Token (Tokens (Slot));
          end if;
       end Abandon;
 
@@ -275,7 +302,7 @@ package body Flyology.Native_Executors is
       begin
          for Index in Tokens'Range loop
             if Tokens (Index) /= null then
-               Tokens (Index).Request;
+               Request_Owned_Token (Tokens (Index));
             end if;
          end loop;
       end Request_Cancellation;
@@ -597,8 +624,14 @@ package body Flyology.Native_Executors is
       then
          raise Invalid_Handle;
       end if;
-      Item.State.Abandon
-        (Handle.Guard.Slot, Handle.Guard.Generation);
+      begin
+         Item.State.Abandon
+           (Handle.Guard.Slot, Handle.Guard.Generation);
+      exception
+         when others =>
+            Handle.Guard.Active := False;
+            raise;
+      end;
       Handle.Guard.Active := False;
    end Abandon;
 
