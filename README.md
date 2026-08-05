@@ -2197,7 +2197,7 @@ API reference, with:
 
 ```sh
 ./scripts/build-site.sh
-node ./scripts/check-site.mjs build/site
+node ./vendor/website-kit/scripts/check-site.mjs build/site
 ```
 
 The build script detects the exact active compiler release, selects its versioned patch

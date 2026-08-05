@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Check out sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
       - name: Install Alire
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
@@ -42,7 +44,7 @@ jobs:
       - name: Build site
         run: ./scripts/build-site.sh
       - name: Check site links
-        run: node ./scripts/check-site.mjs build/site
+        run: node ./vendor/website-kit/scripts/check-site.mjs build/site
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
