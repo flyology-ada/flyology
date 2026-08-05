@@ -1,13 +1,77 @@
 with Ada.Command_Line;
 with Ada.Exceptions;
+with Ada.Real_Time;
 with Ada.Text_IO;
 with Flyology;
+with Flyology.Cancellation;
 with Flyology.IO;
+with Flyology.IO.Connections;
+with Flyology.IO.Sockets;
+with Flyology.IO.Structured_Servers;
 with Flyology.IO.Timers;
+with Flyology.Native_Executors;
 with Flyology.Observability;
+with Flyology.Worker_Pools;
 
 procedure External_Consumer is
    Marker_Error : exception;
+
+   type Structured_Context is limited null record;
+
+   procedure Handle_Structured_Connection
+     (Context      : in out Structured_Context;
+      Connection   : in out Flyology.IO.Connections.Connection;
+      Peer         : Flyology.IO.Sockets.Endpoint;
+      Cancellation : not null access
+        Flyology.IO.Connections.Cancellation_Token)
+   is
+      pragma Unreferenced (Context, Connection, Peer, Cancellation);
+   begin
+      null;
+   end Handle_Structured_Connection;
+
+   --  The generic body is compiled under this consumer project's switches,
+   --  which deliberately define no Flyology test-hook symbols.
+   package Structured_Consumer is new Flyology.IO.Structured_Servers
+     (Handler_Context => Structured_Context,
+      Handle          => Handle_Structured_Connection);
+   pragma Unreferenced (Structured_Consumer);
+
+   type Worker_Context is limited null record;
+
+   procedure Process_Job
+     (Context  : in out Worker_Context;
+      Job      : Integer;
+      Stopping : not null access Flyology.Cancellation.Token)
+   is
+      pragma Unreferenced (Context, Job, Stopping);
+   begin
+      null;
+   end Process_Job;
+
+   package Worker_Consumer is new Flyology.Worker_Pools
+     (Job_Type       => Integer,
+      Empty_Job      => 0,
+      Worker_Context => Worker_Context,
+      Process        => Process_Job);
+   pragma Unreferenced (Worker_Consumer);
+
+   procedure Execute_Native
+     (Input    : Integer;
+      Token    : access Flyology.Cancellation.Token;
+      Deadline : Ada.Real_Time.Time;
+      Result   : out Integer)
+   is
+      pragma Unreferenced (Token, Deadline);
+   begin
+      Result := Input;
+   end Execute_Native;
+
+   package Native_Consumer is new Flyology.Native_Executors
+     (Input_Type  => Integer,
+      Result_Type => Integer,
+      Execute     => Execute_Native);
+   pragma Unreferenced (Native_Consumer);
 
    Expected_Lightweight : constant Boolean :=
      Ada.Command_Line.Argument_Count = 1

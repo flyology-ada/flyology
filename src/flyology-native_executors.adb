@@ -1,11 +1,11 @@
 with Ada.Unchecked_Deallocation;
 with Flyology.Counter_Policy;
+with Flyology.Worker_Pool_Test_Hooks;
 with System.Address_To_Access_Conversions;
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-with Interfaces.C;
-#end if;
 
 package body Flyology.Native_Executors is
+   package Test_Hooks renames Flyology.Worker_Pool_Test_Hooks;
+
    use type Ada.Real_Time.Time;
    use type Ada.Exceptions.Exception_Id;
    use type Interfaces.Unsigned_64;
@@ -14,72 +14,11 @@ package body Flyology.Native_Executors is
    procedure Free_Token is new Ada.Unchecked_Deallocation
      (Flyology.Cancellation.Token, Token_Access);
 
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-   use type Interfaces.C.int;
-
-   function Test_Consume_Failure return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_worker_native_executor_consume_failure";
-   function Test_Completion_Wake return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_worker_native_executor_completion_wake";
-   function Test_Shutdown_Barrier_Arrive return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_shutdown_barrier_arrive";
-   function Test_Shutdown_Barrier_Released return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_shutdown_barrier_released";
-   function Test_Token_Cleanup_Barrier_Arrive return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_worker_token_cleanup_barrier_arrive";
-   function Test_Token_Cleanup_Barrier_Released return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_worker_token_cleanup_barrier_released";
-   procedure Test_Token_Cleanup_Acquire
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_token_cleanup_acquire";
-   procedure Test_Token_Cleanup_Release
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_worker_token_cleanup_release";
-
-   procedure Test_Shutdown_Barrier is
-   begin
-      if Test_Shutdown_Barrier_Arrive /= 0 then
-         while Test_Shutdown_Barrier_Released = 0 loop
-            delay 0.0;
-         end loop;
-      end if;
-   end Test_Shutdown_Barrier;
-
-   procedure Test_Token_Cleanup_Barrier is
-   begin
-      if Test_Token_Cleanup_Barrier_Arrive /= 0 then
-         while Test_Token_Cleanup_Barrier_Released = 0 loop
-            null;
-         end loop;
-      end if;
-   end Test_Token_Cleanup_Barrier;
-#end if;
-
    overriding procedure Finalize (Owner : in out Token_Owner) is
    begin
       if Owner.Value /= null then
          Free_Token (Owner.Value);
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-         Test_Token_Cleanup_Release;
-#end if;
+         Test_Hooks.Token_Cleanup_Release;
       end if;
    end Finalize;
 
@@ -91,12 +30,10 @@ package body Flyology.Native_Executors is
    procedure Consume_Completion_Wake
      (Wake : in out Flyology.Wake_Sources.Source) is
    begin
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-      if Test_Consume_Failure /= 0 then
+      if Test_Hooks.Consume_Failure then
          raise Program_Error with
            "injected native executor wake consumption failure";
       end if;
-#end if;
       Flyology.Wake_Sources.Consume (Wake);
    end Consume_Completion_Wake;
 
@@ -208,12 +145,10 @@ package body Flyology.Native_Executors is
          else
             Results (Slot) := Result;
             Status (Slot) := Completed;
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-            if Test_Completion_Wake /= 0 then
+            if Test_Hooks.Completion_Wake then
                Flyology.Wake_Sources.Ensure (Wakes (Slot));
                Wake_Armed (Slot) := True;
             end if;
-#end if;
             if Wake_Armed (Slot) then
                Flyology.Wake_Sources.Signal (Wakes (Slot));
                Wake_Pending (Slot) := True;
@@ -417,15 +352,13 @@ package body Flyology.Native_Executors is
       begin
          Owner.Value := Tokens (Slot);
          Tokens (Slot) := null;
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
          if Owner.Value /= null then
-            Test_Token_Cleanup_Acquire;
+            Test_Hooks.Token_Cleanup_Acquire;
             --  This barrier is inside the protected action: abort remains
             --  deferred after State relinquishes ownership until the caller's
             --  controlled holder is already authoritative.
-            Test_Token_Cleanup_Barrier;
+            Test_Hooks.Token_Cleanup_Barrier;
          end if;
-#end if;
       end Take_Token;
 
       procedure Complete_Shutdown is
@@ -650,9 +583,7 @@ package body Flyology.Native_Executors is
          Item.State.Await_Shutdown;
          return;
       end if;
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-      Test_Shutdown_Barrier;
-#end if;
+      Test_Hooks.Shutdown_Barrier;
       Perform_Cleanup;
       if Failed then
          Ada.Exceptions.Reraise_Occurrence (Primary_Error);
