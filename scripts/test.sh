@@ -105,15 +105,26 @@ assert_archive_excludes \
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 
+compile_fail_log="$project_root/build/tests/websocket-pool-lifetime.log"
+mkdir -p "$(dirname -- "$compile_fail_log")"
 if run_gprbuild \
   --RTS="$project_root/build/rts" \
   --subdirs=compile-fail \
   -c -p \
   -P tests/runtime_smoke.gpr \
-  websocket_pool_lifetime_fail.adb >/dev/null 2>&1
+  websocket_pool_lifetime_fail.adb >"$compile_fail_log" 2>&1
 then
   printf '%s\n' \
     "WebSocket session accepted a shorter-lived buffer pool" >&2
+  exit 1
+fi
+if ! grep -E \
+  'websocket_pool_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*(deeper level than allocator type|accessibility)' \
+  "$compile_fail_log" >/dev/null
+then
+  cat "$compile_fail_log" >&2
+  printf '%s\n' \
+    "WebSocket lifetime fixture failed for an unexpected reason" >&2
   exit 1
 fi
 
