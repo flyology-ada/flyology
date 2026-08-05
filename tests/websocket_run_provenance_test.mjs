@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmod,
   lstat,
@@ -263,7 +263,68 @@ function publicationSiblings(output) {
     join(parent, `.${name}.publish-invalid-live`),
     join(parent, `.${name}.publish-transaction.json`),
     join(parent, `.${name}.publish-transaction.tmp`),
+    join(parent, `.${name}.publish-lock`),
   ];
+}
+
+async function waitForPath(path, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await lstat(path).catch(() => null)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  assert.fail(`timed out waiting for ${path}`);
+}
+
+function startPausedPublisher(input, output, point, controlRoot) {
+  const ready = join(controlRoot, `${point}.ready`);
+  const release = join(controlRoot, `${point}.release`);
+  const child = spawn(process.execPath, [publisher, input, output], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      FLYOLOGY_WEBSOCKET_PUBLISH_PAUSE: point,
+      FLYOLOGY_WEBSOCKET_PUBLISH_PAUSE_READY: ready,
+      FLYOLOGY_WEBSOCKET_PUBLISH_PAUSE_RELEASE: release,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const completion = new Promise((resolvePromise, rejectPromise) => {
+    child.once("error", rejectPromise);
+    child.once("close", (status, signal) =>
+      resolvePromise({ status, signal, stdout, stderr })
+    );
+  });
+  return { child, completion, ready, release };
+}
+
+async function assertCompletePublishedBundle(output, revision) {
+  const manifest = JSON.parse(
+    await readFile(join(output, ".publication-manifest.json"), "utf8")
+  );
+  assert.equal(manifest.schema, 1);
+  assert.equal(manifest.revision, revision);
+  assert.deepEqual(manifest.profiles, profiles.map((profile) => profile[0]));
+  const expected = [".publication-manifest.json", "index.html"];
+  for (const [report] of profiles) {
+    expected.push(`${report}/cases.json`, `${report}/index.html`);
+    const cases = JSON.parse(await readFile(join(output, report, "cases.json"), "utf8"));
+    assert.equal(cases.revision, revision, report);
+  }
+  assert.deepEqual(
+    (await snapshotDirectory(output)).map(([path]) => path).sort(),
+    expected.sort()
+  );
 }
 
 test("finalization records sanitized observed environment after recapturing source", async (t) => {
@@ -701,6 +762,209 @@ test("restart atomically quarantines invalid live output before restoring backup
   assert.deepEqual(await snapshotDirectory(output), prior);
   for (const path of publicationSiblings(output)) {
     assert.equal(await lstat(path).catch(() => null), null, `stale sibling: ${path}`);
+  }
+});
+
+test("concurrent publishers serialize every publication boundary", async (t) => {
+  const inputOld = await mkdtemp(join(tmpdir(), "flyology-websocket-race-old-"));
+  const inputA = await mkdtemp(join(tmpdir(), "flyology-websocket-race-a-"));
+  const inputB = await mkdtemp(join(tmpdir(), "flyology-websocket-race-b-"));
+  const controlRoot = await mkdtemp(join(tmpdir(), "flyology-websocket-race-control-"));
+  const oldRevision = "0".repeat(40);
+  const revisionA = "a".repeat(40);
+  const revisionB = "e".repeat(40);
+  await writeFixture(inputOld, (_profile, metadata) => {
+    metadata.source.revision = oldRevision;
+  });
+  await writeFixture(inputA, (_profile, metadata) => {
+    metadata.source.revision = revisionA;
+  });
+  await writeFixture(inputB, (_profile, metadata) => {
+    metadata.source.revision = revisionB;
+  });
+  t.after(async () => {
+    for (const path of [inputOld, inputA, inputB, controlRoot]) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+
+  for (const point of ["after-lock", "after-stage-verify", "after-backup", "after-commit"]) {
+    const output = join(outputBase, `.fixture-race-${point}-${process.pid}`);
+    t.after(async () => {
+      await rm(output, { recursive: true, force: true });
+      for (const path of publicationSiblings(output)) {
+        await rm(path, { recursive: true, force: true });
+      }
+    });
+    const initial = runPublisher(inputOld, output);
+    assert.equal(initial.status, 0, initial.stderr);
+    await assertCompletePublishedBundle(output, oldRevision);
+
+    const paused = startPausedPublisher(inputA, output, point, controlRoot);
+    await waitForPath(paused.ready);
+    const contender = runPublisher(inputB, output);
+    assert.notEqual(contender.status, 0, point);
+    assert.match(contender.stderr, /lock is held by active PID/, point);
+    assert.match(contender.stderr, /Retry after the current publisher exits/, point);
+
+    const [, backup] = publicationSiblings(output);
+    if (point === "after-backup") {
+      assert.equal(await lstat(output).catch(() => null), null);
+      await assertCompletePublishedBundle(backup, oldRevision);
+    } else if (point === "after-commit") {
+      await assertCompletePublishedBundle(output, revisionA);
+    } else {
+      await assertCompletePublishedBundle(output, oldRevision);
+    }
+
+    await writeFile(paused.release, "release\n");
+    const resultA = await paused.completion;
+    assert.equal(resultA.status, 0, `${point}: ${resultA.stderr}`);
+    await assertCompletePublishedBundle(output, revisionA);
+
+    const resultB = runPublisher(inputB, output);
+    assert.equal(resultB.status, 0, `${point}: ${resultB.stderr}`);
+    await assertCompletePublishedBundle(output, revisionB);
+    for (const path of publicationSiblings(output)) {
+      assert.equal(await lstat(path).catch(() => null), null, `${point}: stale ${path}`);
+    }
+  }
+});
+
+test("a crashed lock owner is recovered only after its PID exits", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-crash-"));
+  const control = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-control-"));
+  const output = join(outputBase, `.fixture-lock-crash-${process.pid}`);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(control, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  await writeFixture(input);
+  const paused = startPausedPublisher(input, output, "after-lock", control);
+  await waitForPath(paused.ready);
+  const activeAttempt = runPublisher(input, output);
+  assert.notEqual(activeAttempt.status, 0);
+  assert.match(activeAttempt.stderr, /lock is held by active PID/);
+
+  paused.child.kill("SIGKILL");
+  const killed = await paused.completion;
+  assert.equal(killed.signal, "SIGKILL");
+  const recovered = runPublisher(input, output);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  await assertCompletePublishedBundle(output, "a".repeat(40));
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
+  }
+});
+
+test("an ownership change prevents cleanup of another owner's stage", async (t) => {
+  const oldInput = await mkdtemp(join(tmpdir(), "flyology-websocket-owner-old-"));
+  const newInput = await mkdtemp(join(tmpdir(), "flyology-websocket-owner-new-"));
+  const control = await mkdtemp(join(tmpdir(), "flyology-websocket-owner-control-"));
+  const output = join(outputBase, `.fixture-owner-change-${process.pid}`);
+  const oldRevision = "0".repeat(40);
+  await writeFixture(oldInput, (_profile, metadata) => {
+    metadata.source.revision = oldRevision;
+  });
+  await writeFixture(newInput);
+  t.after(async () => {
+    await rm(oldInput, { recursive: true, force: true });
+    await rm(newInput, { recursive: true, force: true });
+    await rm(control, { recursive: true, force: true });
+    await rm(output, { recursive: true, force: true });
+    for (const path of publicationSiblings(output)) {
+      await rm(path, { recursive: true, force: true });
+    }
+  });
+  assert.equal(runPublisher(oldInput, output).status, 0);
+  const paused = startPausedPublisher(
+    newInput,
+    output,
+    "after-stage-verify",
+    control
+  );
+  await waitForPath(paused.ready);
+  const [stage, , , , , , lock] = publicationSiblings(output);
+  const ownerPath = join(lock, "owner.json");
+  const owner = JSON.parse(await readFile(ownerPath, "utf8"));
+  owner.nonce = "11111111-1111-4111-8111-111111111111";
+  await writeFile(ownerPath, `${JSON.stringify(owner, null, 2)}\n`);
+  await writeFile(paused.release, "release\n");
+  const rejected = await paused.completion;
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /lock ownership changed/);
+  await assertCompletePublishedBundle(output, oldRevision);
+  assert.notEqual(await lstat(stage).catch(() => null), null);
+  assert.notEqual(await lstat(lock).catch(() => null), null);
+
+  const recovered = runPublisher(newInput, output);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  await assertCompletePublishedBundle(output, "a".repeat(40));
+  for (const path of publicationSiblings(output)) {
+    assert.equal(await lstat(path).catch(() => null), null, `stale ${path}`);
+  }
+});
+
+test("malformed, symlinked, and conservatively live locks are never stolen", async (t) => {
+  const input = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-guards-"));
+  const target = await mkdtemp(join(tmpdir(), "flyology-websocket-lock-target-"));
+  await writeFixture(input);
+  t.after(async () => {
+    await rm(input, { recursive: true, force: true });
+    await rm(target, { recursive: true, force: true });
+  });
+
+  const cases = ["malformed", "owner-symlink", "root-symlink", "pid-reuse"];
+  for (const kind of cases) {
+    const output = join(outputBase, `.fixture-lock-${kind}-${process.pid}`);
+    const lock = publicationSiblings(output).at(-1);
+    t.after(async () => {
+      await rm(output, { recursive: true, force: true });
+      for (const path of publicationSiblings(output)) {
+        await rm(path, { recursive: true, force: true });
+      }
+    });
+
+    if (kind === "root-symlink") {
+      await symlink(target, lock);
+    } else {
+      await mkdir(lock);
+      if (kind === "owner-symlink") {
+        const ownerTarget = join(target, `owner-${process.pid}.json`);
+        await writeFile(ownerTarget, "{}\n");
+        await symlink(ownerTarget, join(lock, "owner.json"));
+      } else if (kind === "malformed") {
+        await writeFile(join(lock, "owner.json"), "not json\n");
+      } else {
+        await writeFile(
+          join(lock, "owner.json"),
+          `${JSON.stringify({
+            schema: 1,
+            output: basename(output),
+            pid: process.pid,
+            startedAt: new Date().toISOString(),
+            nonce: "00000000-0000-4000-8000-000000000000",
+            processStartIdentity: "different-process-start",
+          })}\n`
+        );
+      }
+    }
+
+    const result = runPublisher(input, output);
+    if (kind === "pid-reuse" && result.status === 0) {
+      assert.equal(result.status, 0, result.stderr);
+      await assertCompletePublishedBundle(output, "a".repeat(40));
+      assert.equal(await lstat(lock).catch(() => null), null);
+    } else {
+      assert.notEqual(result.status, 0, kind);
+      assert.match(result.stderr, /remove only that lock directory/, kind);
+      assert.notEqual(await lstat(lock).catch(() => null), null, kind);
+      assert.equal(await lstat(output).catch(() => null), null, kind);
+    }
   }
 });
 

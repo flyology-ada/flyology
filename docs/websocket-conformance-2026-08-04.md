@@ -206,11 +206,26 @@ checked-in report bundle. Source, sanitized host facts, toolchain, image, and
 build settings must match across all profiles; profile/config, capture time,
 lane, and transport may differ, while TLS identity must match across WSS
 profiles and is absent from plaintext profiles. Publication renders and checks
-the complete file, JSON, and link set in a guarded sibling staging directory,
-then swaps it into place with backup restoration on failure. The 2026-08-04
-raw outputs predate that metadata schema, so this historical report preserves
-the implementation and complete harness/report snapshots above rather than
-inventing per-run revisions.
+the complete file, JSON, and link set in a guarded sibling staging directory.
+An atomic sibling lock serializes recovery, rendering, commit, and quarantine
+cleanup for one output bundle. Its owner record contains only a schema, output
+basename, PID, UTC start time, random nonce, and process-start identity. A
+second publisher must retry after the live owner exits. A well-formed lock is
+recovered automatically only when its PID is gone or an observable process
+start proves PID reuse; an unobservable live PID is treated as active, while a
+malformed or symlinked lock requires inspection and removal of that exact lock
+directory by an operator.
+
+The verified stage-to-live rename is the publication commit point. Before it,
+rollback restores only a backup matching the transaction fingerprint. After
+it, the publisher re-verifies the renamed live bundle and moves the old bundle
+to a non-rollback quarantine; cleanup failure cannot replace the new live tree
+with a partially deleted backup. The lock remains owned through that cleanup,
+and every shared stage, transaction, backup, and quarantine rename or removal
+checks the same owner nonce first. The 2026-08-04 raw outputs predate the
+metadata schema, so this historical report preserves the implementation and
+complete harness/report snapshots above rather than inventing per-run
+revisions.
 
 The published report is available at
 [flyology.org/reports/websocket](https://flyology.org/reports/websocket/).
