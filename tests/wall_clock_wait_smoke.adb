@@ -1,11 +1,13 @@
 with Ada.Calendar;
 with Ada.Exceptions;
+with Ada.Real_Time;
 with Ada.Text_IO;
 with Flyology;
 with Flyology.IO.Timers;
 
 procedure Wall_Clock_Wait_Smoke is
    use type Ada.Calendar.Time;
+   use type Ada.Real_Time.Time;
    use type Flyology.IO.Timers.Wall_Clock_Wait_Outcome;
 
    protected Results is
@@ -41,12 +43,16 @@ procedure Wall_Clock_Wait_Smoke is
    end Native;
 
    task body Lightweight is
-      Target : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
-      Result : Flyology.IO.Timers.Wall_Clock_Wait_Result;
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
+      Target   : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
+      Result   : Flyology.IO.Timers.Wall_Clock_Wait_Result;
    begin
+      Flyology.IO.Timers.Sleep_Until (Deadline);
       Result := Flyology.IO.Timers.Wait_Until (Target);
       Results.Finished
-        (Result.Outcome = Flyology.IO.Timers.Target_Reached
+        (Ada.Real_Time.Clock >= Deadline
+         and then Result.Outcome = Flyology.IO.Timers.Target_Reached
          and then Result.Observed_Time >= Target
          and then Result.Backward_Adjustment = 0.0);
    exception
@@ -57,13 +63,17 @@ procedure Wall_Clock_Wait_Smoke is
    end Lightweight;
 
    task body Native is
-      Target : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
-      Result : Flyology.IO.Timers.Wall_Clock_Wait_Result;
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
+      Target   : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
+      Result   : Flyology.IO.Timers.Wall_Clock_Wait_Result;
    begin
+      Flyology.IO.Timers.Sleep_Until (Deadline);
       Result := Flyology.IO.Timers.Wait_Until
         (Target, Backstep_Tolerance => 0.010);
       Results.Finished
-        (Result.Outcome = Flyology.IO.Timers.Target_Reached
+        (Ada.Real_Time.Clock >= Deadline
+         and then Result.Outcome = Flyology.IO.Timers.Target_Reached
          and then Result.Observed_Time >= Target
          and then Result.Backward_Adjustment = 0.0);
    exception

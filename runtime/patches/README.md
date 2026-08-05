@@ -29,6 +29,13 @@ reported pthread minimum. GNAT 13 and 14 otherwise request 48 KiB for a 16 KiB
 task on AArch64, where glibc requires 128 KiB. The clamp is a no-op when the
 compiler already requests enough space.
 
+The Darwin monotonic subunit patches replace GNAT's realtime tasking clock with
+Darwin's continuous raw monotonic clock. Native condition waits use Darwin's
+relative wait operation in that same clock domain; adjustable calendar delays
+are translated again at bounded one-second intervals. The narrow C bridge
+performs the nanosecond conversion and rejects samples outside GNAT's signed
+nanosecond `Duration` range.
+
 The common task-stages patch also invokes Flyology's one-shot finalizer after
 GNARL has completed global tasks and controlled library objects. This placement
 is part of the patch-family contract: moving it earlier would race live task

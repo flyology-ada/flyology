@@ -6,7 +6,9 @@
 #include <sys/socket.h>
 #include <pthread.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 
 #if defined(__linux__)
@@ -16,6 +18,56 @@
 #elif defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
+#endif
+
+/* GNAT's supported targets represent Duration as signed nanoseconds.  Keep
+   clock conversion in C so the selected Darwin clock and its unsigned
+   nanosecond result cannot overflow before Ada receives a timespec. */
+int flyology_monotonic_clock(struct timespec *value) {
+#if defined(__APPLE__)
+    uint64_t nanoseconds;
+
+    if (value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    nanoseconds = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
+    if (nanoseconds > (uint64_t)INT64_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    value->tv_sec = (time_t)(nanoseconds / UINT64_C(1000000000));
+    value->tv_nsec = (long)(nanoseconds % UINT64_C(1000000000));
+    return 0;
+#else
+    if (value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    return clock_gettime(CLOCK_MONOTONIC, value);
+#endif
+}
+
+int flyology_monotonic_resolution(struct timespec *value) {
+    if (value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(__APPLE__)
+    return clock_getres(CLOCK_MONOTONIC_RAW, value);
+#else
+    return clock_getres(CLOCK_MONOTONIC, value);
+#endif
+}
+
+#if defined(__APPLE__)
+int flyology_darwin_cond_timedwait_relative(
+    pthread_cond_t *condition,
+    pthread_mutex_t *mutex,
+    const struct timespec *timeout)
+{
+    return pthread_cond_timedwait_relative_np(condition, mutex, timeout);
+}
 #endif
 
 #if defined(__linux__)

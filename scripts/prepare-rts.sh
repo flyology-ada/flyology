@@ -422,6 +422,11 @@ compiler="$compiler_prefix/bin/gcc"
 patch_root="$project_root/runtime/patches/$patch_family"
 
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
+if [ "$platform:$compat_family" = darwin:gnat-16 ]; then
+  monotonic_patch="$patch_root/$platform/s-tpopmo-gnat-16.adb.patch"
+else
+  monotonic_patch="$patch_root/$platform/s-tpopmo.adb.patch"
+fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
 case "$compiler_release" in
@@ -471,6 +476,11 @@ cd "$project_root"
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$tasking_patch"
+if [ -f "$monotonic_patch" ]; then
+  git apply --ignore-space-change --unsafe-paths \
+    --directory="$generated_include" \
+    "$monotonic_patch"
+fi
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$task_state_patch"

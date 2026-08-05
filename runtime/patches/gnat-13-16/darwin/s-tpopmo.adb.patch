@@ -1,0 +1,265 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-tpopmo.adb
++++ b/s-tpopmo.adb
+@@ -34,6 +34,27 @@
+ separate (System.Task_Primitives.Operations)
+ package body Monotonic is
+
++   Calendar_Recheck_Interval : constant Duration := 1.0;
++
++   function Flyology_Monotonic_Clock
++     (Value : System.Address) return Interfaces.C.int;
++   pragma Import
++     (C, Flyology_Monotonic_Clock, "flyology_monotonic_clock");
++
++   function Flyology_Monotonic_Resolution
++     (Value : System.Address) return Interfaces.C.int;
++   pragma Import
++     (C, Flyology_Monotonic_Resolution, "flyology_monotonic_resolution");
++
++   function Flyology_Cond_Timedwait_Relative
++     (Condition : System.Address;
++      Mutex     : System.Address;
++      Timeout   : System.Address) return Interfaces.C.int;
++   pragma Import
++     (C,
++      Flyology_Cond_Timedwait_Relative,
++      "flyology_darwin_cond_timedwait_relative");
++
+    -----------------------
+    -- Local Subprograms --
+    -----------------------
+@@ -46,8 +67,8 @@
+    --  Helper for Timed_Sleep and Timed_Delay: given a deadline specified by
+    --  Time and Mode, compute the current clock reading (Check_Time), and the
+    --  target absolute and relative clock readings (Abs_Time). The
+-   --  epoch for Time depends on Mode; the epoch for Check_Time and Abs_Time
+-   --  is always that of CLOCK_RT_Ada.
++   --  epoch for Time depends on Mode; Check_Time and Abs_Time use Flyology's
++   --  Darwin continuous monotonic clock.
+
+    ---------------------
+    -- Monotonic_Clock --
+@@ -57,8 +78,7 @@
+       TS     : aliased timespec;
+       Result : Interfaces.C.int;
+    begin
+-      Result := clock_gettime
+-        (clock_id => OSC.CLOCK_RT_Ada, tp => TS'Unchecked_Access);
++      Result := Flyology_Monotonic_Clock (TS'Address);
+       pragma Assert (Result = 0);
+
+       return To_Duration (TS);
+@@ -73,7 +93,7 @@
+       Result : Interfaces.C.int;
+
+    begin
+-      Result := clock_getres (OSC.CLOCK_REALTIME, TS'Unchecked_Access);
++      Result := Flyology_Monotonic_Resolution (TS'Address);
+       pragma Assert (Result = 0);
+
+       return To_Duration (TS);
+@@ -97,21 +117,13 @@
+       if Mode = Relative then
+          Abs_Time := Duration'Min (Time, Max_Sensible_Delay) + Check_Time;
+
+-         pragma Warnings (Off);
+-         --  Comparison "OSC.CLOCK_RT_Ada = OSC.CLOCK_REALTIME" is compile
+-         --  time known.
+-
+-      --  Absolute deadline specified using the tasking clock (CLOCK_RT_Ada)
+-
+-      elsif Mode = Absolute_RT
+-        or else OSC.CLOCK_RT_Ada = OSC.CLOCK_REALTIME
+-      then
+-         pragma Warnings (On);
++      --  Absolute deadline specified using the Ada real-time clock
++
++      elsif Mode = Absolute_RT then
+          Abs_Time := Duration'Min (Check_Time + Max_Sensible_Delay, Time);
+
+-      --  Absolute deadline specified using the calendar clock, in the
+-      --  case where it is not the same as the tasking clock: compensate for
+-      --  difference between clock epochs (Base_Time - Base_Cal_Time).
++      --  Absolute deadline specified using the adjustable calendar clock:
++      --  translate it into the current monotonic domain.
+
+       else
+          declare
+@@ -152,7 +164,6 @@
+
+       Request    : aliased timespec;
+       Result     : Interfaces.C.int;
+-      Exit_Outer : Boolean := False;
+
+    begin
+       Timedout := True;
+@@ -173,49 +184,53 @@
+
+          Outer : loop
+
++            if Mode = Absolute_Calendar then
++               Compute_Deadline (Time, Mode, Check_Time, Abs_Time);
++            else
++               Check_Time := Monotonic_Clock;
++            end if;
++            exit Outer
++              when Abs_Time <= Check_Time or else Check_Time < Base_Time;
++
+             pragma Warnings (Off, "condition is always *");
+-            if Max_System_Delay < Max_Sensible_Delay and then
++            if Mode = Absolute_Calendar
++              and then Abs_Time > Check_Time + Calendar_Recheck_Interval
++            then
++               P_Abs_Time := Check_Time + Calendar_Recheck_Interval;
++            elsif Max_System_Delay < Max_Sensible_Delay and then
+                Abs_Time > Check_Time + Max_System_Delay
+             then
+                P_Abs_Time := Check_Time + Max_System_Delay;
+             else
+                P_Abs_Time := Abs_Time;
+-               Exit_Outer := True;
+             end if;
+             pragma Warnings (On);
+
++            P_Abs_Time := P_Abs_Time - Check_Time;
+             Request := To_Timespec (P_Abs_Time);
+
+-            Inner : loop
+-               exit Outer
+-                  when Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
+-
+-               Result :=
+-                 pthread_cond_timedwait
+-                   (cond    => Self_ID.Common.LL.CV'Access,
+-                    mutex   => Self_ID.Common.LL.L'Access,
+-                    abstime => Request'Access);
+-
+-               case Result is
+-                  when 0 | EINTR =>
+-                     --  Somebody may have called Wakeup for us
+-                     Timedout := False;
+-                     exit Outer;
+-
+-                  when ETIMEDOUT =>
+-                     exit Outer when Exit_Outer;
+-                     Check_Time := Monotonic_Clock;
+-                     exit Inner;
+-
+-                  when others =>
+-                     pragma Assert (Standard.False);
++            exit Outer
++              when Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
+
+-               end case;
++            Result :=
++              Flyology_Cond_Timedwait_Relative
++                (Condition => Self_ID.Common.LL.CV'Address,
++                 Mutex     => Self_ID.Common.LL.L'Address,
++                 Timeout   => Request'Address);
++
++            case Result is
++               when 0 | EINTR =>
++                  --  Somebody may have called Wakeup for us
++                  Timedout := False;
++                  exit Outer;
+
+-               exit Outer
+-                 when Abs_Time <= Check_Time or else Check_Time < Base_Time;
++               when ETIMEDOUT =>
++                  null;
+
+-            end loop Inner;
++               when others =>
++                  pragma Assert (Standard.False);
++
++            end case;
+          end loop Outer;
+       end if;
+    end Timed_Sleep;
+@@ -238,8 +253,7 @@
+       P_Abs_Time : Duration;
+       Request    : aliased timespec;
+
+-      Result     : Interfaces.C.int;
+-      Exit_Outer : Boolean := False;
++      Result : Interfaces.C.int;
+
+    begin
+       Write_Lock (Self_ID);
+@@ -260,46 +274,48 @@
+
+          Outer : loop
+
++            if Mode = Absolute_Calendar then
++               Compute_Deadline (Time, Mode, Check_Time, Abs_Time);
++            else
++               Check_Time := Monotonic_Clock;
++            end if;
++            exit Outer
++              when Abs_Time <= Check_Time or else Check_Time < Base_Time;
++
+             pragma Warnings (Off, "condition is always *");
+-            if Max_System_Delay < Max_Sensible_Delay and then
++            if Mode = Absolute_Calendar
++              and then Abs_Time > Check_Time + Calendar_Recheck_Interval
++            then
++               P_Abs_Time := Check_Time + Calendar_Recheck_Interval;
++            elsif Max_System_Delay < Max_Sensible_Delay and then
+               Abs_Time > Check_Time + Max_System_Delay
+             then
+                P_Abs_Time := Check_Time + Max_System_Delay;
+             else
+                P_Abs_Time := Abs_Time;
+-               Exit_Outer := True;
+             end if;
+             pragma Warnings (On);
+
++            P_Abs_Time := P_Abs_Time - Check_Time;
+             Request := To_Timespec (P_Abs_Time);
+
+-            Inner : loop
+-               exit Outer
+-                 when Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
+-
+-               Result :=
+-                 pthread_cond_timedwait
+-                   (cond    => Self_ID.Common.LL.CV'Access,
+-                    mutex   => Self_ID.Common.LL.L'Access,
+-                    abstime => Request'Access);
+-
+-               case Result is
+-                  when ETIMEDOUT =>
+-                     exit Outer when Exit_Outer;
+-                     Check_Time := Monotonic_Clock;
+-                     exit Inner;
+-
+-                  when 0 | EINTR => null;
+-
+-                  when others =>
+-                     pragma Assert (Standard.False);
++            exit Outer
++              when Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
+
+-               end case;
++            Result :=
++              Flyology_Cond_Timedwait_Relative
++                (Condition => Self_ID.Common.LL.CV'Address,
++                 Mutex     => Self_ID.Common.LL.L'Address,
++                 Timeout   => Request'Address);
++
++            case Result is
++               when 0 | EINTR | ETIMEDOUT =>
++                  null;
+
+-               exit Outer
+-                  when Abs_Time <= Check_Time or else Check_Time < Base_Time;
++               when others =>
++                  pragma Assert (Standard.False);
+
+-            end loop Inner;
++            end case;
+          end loop Outer;
+
+          Self_ID.Common.State := Runnable;

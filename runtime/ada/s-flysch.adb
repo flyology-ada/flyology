@@ -9,7 +9,6 @@ with System.Flyology.Placement_Config;
 with System.Flyology.Pool_Config;
 with System.Flyology.Scheduling_Policy;
 with System.Flyology.Time_ABI;
-with System.OS_Constants;
 with System.Storage_Elements;
 
 package body System.Flyology.Scheduler is
@@ -22,7 +21,6 @@ package body System.Flyology.Scheduler is
    package Pool_Config renames System.Flyology.Pool_Config;
    package Scheduling renames System.Flyology.Scheduling_Policy;
    package Time_ABI renames System.Flyology.Time_ABI;
-   package OSC renames System.OS_Constants;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
 
@@ -1679,9 +1677,7 @@ package body System.Flyology.Scheduler is
       Now    : aliased Time_ABI.Timespec;
       Result : C.int;
    begin
-      Result :=
-        OSI.clock_gettime
-          (OSI.clockid_t (OSC.CLOCK_RT_Ada), Now'Access);
+      Result := Time_ABI.Read_Monotonic (Now'Access);
       if Result /= 0 then
          Fatal;
       end if;
