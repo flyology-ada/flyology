@@ -1317,9 +1317,10 @@ explicitly select `Permessage_Deflate` to negotiate RFC 7692 with no context
 takeover in either direction. The bounded pure-Ada codec accepts stored,
 fixed-Huffman, and dynamic-Huffman raw DEFLATE blocks, including fragmented
 compressed messages, and applies `Max_Message` plus the shared ingress budget
-to decompressed bytes. Outbound messages use deterministic fixed-Huffman
-DEFLATE with a bounded LZ77 search; unmatched bytes remain literals, while
-small repetitive messages shrink. To bound event-loop CPU, the
+to decompressed bytes. Outbound messages use a 32 KiB history, so offers that
+require `server_max_window_bits` below 15 are declined. The deterministic
+fixed-Huffman encoder uses a bounded LZ77 search; unmatched bytes remain
+literals, while small repetitive messages shrink. To bound event-loop CPU, the
 server selectively leaves outbound messages larger than 4 KiB uncompressed,
 which RFC 7692 permits on a per-message basis. Compression can expose
 secret-bearing content through message-size side channels, so it remains an

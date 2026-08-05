@@ -241,6 +241,10 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
       is
          Literal_Tree : Huffman_Tree;
          Distance_Tree : Huffman_Tree;
+         --  RFC 1951 permits this form when the block contains no matches.
+         No_Distance_Codes : constant Boolean :=
+           Distance_Lengths'Length = 1
+           and then Distance_Lengths (Distance_Lengths'First) = 0;
          Length_Base : constant array (Natural range 257 .. 285) of Natural :=
            (3, 4, 5, 6, 7, 8, 9, 10,
             11, 13, 15, 17, 19, 23, 27, 31,
@@ -263,7 +267,9 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
             11, 11, 12, 12, 13, 13);
       begin
          Build_Tree (Literal_Lengths, Literal_Tree);
-         Build_Tree (Distance_Lengths, Distance_Tree);
+         if not No_Distance_Codes then
+            Build_Tree (Distance_Lengths, Distance_Tree);
+         end if;
          loop
             declare
                Symbol : constant Natural := Decode (Literal_Tree);
@@ -276,10 +282,14 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
                   declare
                      Count : constant Natural := Length_Base (Symbol)
                        + Read_Bits (Length_Extra (Symbol));
-                     Distance_Symbol : constant Natural :=
-                       Decode (Distance_Tree);
+                     Distance_Symbol : Natural;
                      Distance : Natural;
                   begin
+                     if No_Distance_Codes then
+                        raise Invalid_Data with
+                          "DEFLATE length has no distance code";
+                     end if;
+                     Distance_Symbol := Decode (Distance_Tree);
                      if Distance_Symbol > 29 then
                         raise Invalid_Data with
                           "reserved DEFLATE distance code";

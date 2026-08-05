@@ -469,8 +469,10 @@ package Flyology.HTTP.Server is
    --  WebSocket extension policy selected explicitly at upgrade time.
    --  Permessage_Deflate negotiates RFC 7692 with no context takeover in
    --  both directions so compression state and history do not cross message
-   --  boundaries. Applications must assess compression side channels before
-   --  enabling it for secret-bearing messages.
+   --  boundaries. Outbound compression uses a 32 KiB history, so an offer
+   --  requiring server_max_window_bits below 15 is declined. Applications
+   --  must assess compression side channels before enabling it for
+   --  secret-bearing messages.
    --  @enum No_WebSocket_Compression Decline compression offers
    --  @enum Permessage_Deflate Negotiate bounded per-message raw DEFLATE
    type WebSocket_Compression_Mode is

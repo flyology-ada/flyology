@@ -2535,7 +2535,7 @@ package body Flyology.HTTP.Server is
                            Bits := Window_Bits
                              (Parameter (Equals + 1 .. Parameter'Last),
                               Parsed);
-                           Valid := Parsed;
+                           Valid := Parsed and then Bits = 15;
                            Server_Bits := Bits;
                            Seen_Server_Bits := True;
                         elsif Parameter_Name = "client_max_window_bits"
