@@ -118,9 +118,11 @@ then
     "WebSocket session accepted a shorter-lived buffer pool" >&2
   exit 1
 fi
-if ! grep -E \
-  'websocket_pool_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*(deeper level than allocator type|accessibility)' \
-  "$compile_fail_log" >/dev/null
+compile_fail_errors=$(grep -E ': error:' "$compile_fail_log" || true)
+if [ "$(printf '%s\n' "$compile_fail_errors" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ] || \
+  ! printf '%s\n' "$compile_fail_errors" | grep -E \
+    '^websocket_pool_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*(deeper level than allocator type|accessibility)$' \
+    >/dev/null
 then
   cat "$compile_fail_log" >&2
   printf '%s\n' \
