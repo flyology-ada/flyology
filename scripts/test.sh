@@ -15,6 +15,8 @@ wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 
 cd "$project_root"
 
+"$project_root/scripts/test-run-with-timeout.sh"
+
 #  DNS lifecycle regressions observe the receive-loop boundary. The project
 #  default is false, so normal builds compile the observation calls away.
 FLYOLOGY_DNS_TEST_HOOKS=true

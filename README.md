@@ -2360,9 +2360,13 @@ Its defaults execute 16 fixed seeds, 250 batches per seed, and 64 workers per
 batch. All sizing and seed variables remain overrideable. A failure log's seed,
 batch count, and width are sufficient to replay the exact operation plan.
 
-`scripts/test.sh` verifies both project defaults, then runs the behavioral suite
-with the compatibility-oriented native default and explicit lightweight/native task
-designations. `scripts/showcases.sh` selects the lightweight project default;
+`scripts/test.sh` first checks its portable timeout runner, then verifies both
+project defaults and runs the behavioral suite with the compatibility-oriented
+native default and explicit lightweight/native task designations. The runner
+requires Perl 5's core POSIX support, places each command and its descendants in
+a dedicated process group, terminates that group on timeout or interruption,
+and reports a timeout with status 124.
+`scripts/showcases.sh` selects the lightweight project default;
 `many_lightweight_tasks.adb` deliberately uses `Flyology.Project_Default`, while the
 mixed-lane showcases keep explicit overrides.
 
