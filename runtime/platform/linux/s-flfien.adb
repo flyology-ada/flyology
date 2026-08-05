@@ -538,6 +538,9 @@ package body System.Flyology.File_Engine is
 
    function Retryable_Submit_Error (Error_Code : C.int) return C.int;
 
+   function Signal_Drain_Retry
+     (State : not null Engine_State_Access) return Boolean;
+
    function Has_Overflow_Backlog
      (State : not null Engine_State_Access) return Boolean;
 
@@ -676,6 +679,28 @@ package body System.Flyology.File_Engine is
       Request.Next_Active := null;
    end Unlink_Active_Uring;
 
+   function Signal_Drain_Retry
+     (State : not null Engine_State_Access) return Boolean
+   is
+      Value  : aliased C.unsigned_long_long := 1;
+      Result : C.long;
+   begin
+      loop
+         Result := Write
+           (State.Wake_FD,
+            Value'Address,
+            C.size_t (C.unsigned_long_long'Size / 8));
+         if Result >= 0 then
+            return True;
+         elsif OSI.errno = EAGAIN then
+            --  A saturated eventfd is already readable by epoll.
+            return True;
+         elsif OSI.errno /= OSI.EINTR then
+            return False;
+         end if;
+      end loop;
+   end Signal_Drain_Retry;
+
    function Submit_Uring_Cancel
      (State      : not null Engine_State_Access;
       Request    : not null IO_Uring_Request_Access;
@@ -757,11 +782,15 @@ package body System.Flyology.File_Engine is
         State.Deferred_Admin_Submit_Head;
       Error_Code : C.int;
    begin
-      if Request = null
-        or else
-          (Faults.Enabled
-           and then Faults.Fail (Faults.File_Cancel_Admin_Delay))
+      if Request = null then
+         return;
+      elsif Faults.Enabled
+        and then Faults.Fail (Faults.File_Cancel_Admin_Delay)
       then
+         if not Signal_Drain_Retry (State) then
+            raise Program_Error with
+              "could not signal delayed io_uring cancellation retry";
+         end if;
          return;
       end if;
       State.Deferred_Admin_Submit_Head := Request.Next_Deferred;
@@ -1535,7 +1564,6 @@ package body System.Flyology.File_Engine is
 
          function Overflow_Pending return Boolean;
          function Flush_Overflow return Flush_Disposition;
-         function Signal_Flush_Retry return Boolean;
          procedure Drain_Visible;
 
          function Overflow_Pending return Boolean is
@@ -1583,26 +1611,6 @@ package body System.Flyology.File_Engine is
             end if;
             return Failed;
          end Flush_Overflow;
-
-         function Signal_Flush_Retry return Boolean is
-            Value  : aliased C.unsigned_long_long := 1;
-            Result : C.long;
-         begin
-            loop
-               Result := Write
-                 (State.Wake_FD,
-                  Value'Address,
-                  C.size_t (C.unsigned_long_long'Size / 8));
-               if Result >= 0 then
-                  return True;
-               elsif OSI.errno = EAGAIN then
-                  --  A saturated eventfd is already readable by epoll.
-                  return True;
-               elsif OSI.errno /= OSI.EINTR then
-                  return False;
-               end if;
-            end loop;
-         end Signal_Flush_Retry;
 
          procedure Drain_Visible is
             Head : U32 := Load (State.CQ_Head, AP.Relaxed);
@@ -1681,7 +1689,7 @@ package body System.Flyology.File_Engine is
             --  userspace CQ. Reap that progress, then make another drain
             --  inevitable even if the kernel emitted no new eventfd edge.
             Drain_Visible;
-            if not Signal_Flush_Retry then
+            if not Signal_Drain_Retry (State) then
                return False;
             end if;
          elsif Flush = Flushed and then Count < Values'Length then

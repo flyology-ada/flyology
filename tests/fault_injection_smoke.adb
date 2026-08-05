@@ -1383,6 +1383,7 @@ procedure Fault_Injection_Smoke is
         (Writer, Writer_Access);
       Item : Writer_Access;
    begin
+      Warm_Group;
       if Selected_Linux_Backend /= 1 then
          return;
       end if;
@@ -1393,7 +1394,8 @@ procedure Fault_Injection_Smoke is
         (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
       Fault_Control.Reset;
       Fault_Control.Arm
-        (Fault_Control.Poller_EINTR, Count => 1_000_000_000);
+        (Fault_Control.Poller_File_Drain_Pause,
+         Count => 1_000_000_000);
       --  The first hit defers Cancel; the second keeps it deferred while the
       --  data CQE resumes the only fiber. The idle loop must then submit and
       --  drain the administrative request before becoming quiescent.
@@ -1422,7 +1424,7 @@ procedure Fault_Injection_Smoke is
             end if;
             delay 0.001;
          end loop;
-         Fault_Control.Disarm (Fault_Control.Poller_EINTR);
+         Fault_Control.Disarm (Fault_Control.Poller_File_Drain_Pause);
          while not Item.all'Terminated loop
             if Ada.Real_Time.Clock >= Limit then
                raise Program_Error with "last io_uring fiber did not terminate";
