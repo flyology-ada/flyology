@@ -7,6 +7,9 @@ package body Flyology.IO is
    package C renames Interfaces.C;
 
    use type C.int;
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+   use type C.long_long;
+#end if;
    use type C.short;
 
    POLLIN  : constant C.short := 16#0001#;
@@ -56,24 +59,41 @@ package body Flyology.IO is
    end record
      with Convention => C;
 
-   function Clock_Gettime
-     (Clock_ID : C.int;
-      Value    : access Timespec) return C.int;
-   pragma Import (C, Clock_Gettime, "clock_gettime");
+   function Read_Monotonic (Value : access Timespec) return C.int;
+   pragma Import (C, Read_Monotonic, "flyology_monotonic_clock");
+
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+   function Test_Clock_Adjustment return C.long_long;
+   pragma Import
+     (C, Test_Clock_Adjustment, "flyology_io_test_steady_adjustment");
+
+   function Test_Take_EINTR return C.int;
+   pragma Import (C, Test_Take_EINTR, "flyology_io_test_take_eintr");
+
+   function Test_Clock_Offset return Duration is
+      Nanoseconds : constant C.long_long := Test_Clock_Adjustment;
+   begin
+      return
+        Duration (Nanoseconds / 1_000_000_000)
+        + Duration (Nanoseconds rem 1_000_000_000) / 1_000_000_000;
+   end Test_Clock_Offset;
+#end if;
 
    function Clock return Duration is
       Now    : aliased Timespec;
       Result : C.int;
    begin
-      Result :=
-        Clock_Gettime
-          (C.int (System.OS_Constants.CLOCK_RT_Ada), Now'Access);
+      Result := Read_Monotonic (Now'Access);
       if Result /= 0 then
          raise Device_Error with "monotonic clock failed";
       end if;
       return
         Duration (Now.Seconds)
-        + Duration (Now.Nanoseconds) / 1_000_000_000;
+        + Duration (Now.Nanoseconds) / 1_000_000_000
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+        + Test_Clock_Offset
+#end if;
+        ;
    end Clock;
 
    function Is_Lightweight_Task return Boolean is
@@ -96,7 +116,8 @@ package body Flyology.IO is
       Interrupt_Wait : Boolean) return Natural
    is
       Started : constant Duration := Clock;
-      Result  : C.int;
+      Result     : C.int;
+      Error_Code : C.int := 0;
    begin
       if Requests'Length = 0 then
          return 0;
@@ -217,10 +238,23 @@ package body Flyology.IO is
                Remaining : constant Duration :=
                  Time_Math.Remaining (Timeout, Elapsed);
             begin
-               Result := Poll
-                 (Poll_Items'Address,
-                  C.unsigned (Poll_Items'Length),
-                  Time_Math.To_Milliseconds (Remaining));
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+               if Test_Take_EINTR /= 0 then
+                  Result := -1;
+                  Error_Code := C.int (System.OS_Constants.EINTR);
+               else
+#end if;
+                  Result := Poll
+                    (Poll_Items'Address,
+                     C.unsigned (Poll_Items'Length),
+                     Time_Math.To_Milliseconds (Remaining));
+                  Error_Code :=
+                    (if Result < 0
+                     then C.int (GNAT.OS_Lib.Errno)
+                     else 0);
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+               end if;
+#end if;
             end;
 
             if Result > 0 then
@@ -235,7 +269,7 @@ package body Flyology.IO is
 
             case Wait_Policy.Classify
               (Result,
-               (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0),
+               Error_Code,
                C.int (System.OS_Constants.EINTR))
             is
                when Wait_Policy.Return_Ready =>

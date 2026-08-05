@@ -30,6 +30,13 @@ struct flyology_wall_wait_state {
     FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 static _Atomic int64_t flyology_test_remaining_nanoseconds = -1;
 static _Atomic int64_t flyology_test_last_arm_nanoseconds = -1;
+static _Atomic int flyology_test_consume_eintr = 0;
+static _Atomic int64_t flyology_test_io_requested_steady = 0;
+static _Atomic int64_t flyology_test_io_requested_wall = 0;
+static _Atomic int64_t flyology_test_io_steady_adjustment = 0;
+static _Atomic int64_t flyology_test_io_wall_adjustment = 0;
+static _Atomic int flyology_test_io_retry_pending = 0;
+static _Atomic int flyology_test_io_retry_count = 0;
 
 void flyology_wall_wait_test_set_remaining(int64_t nanoseconds)
 {
@@ -50,6 +57,97 @@ int flyology_wall_wait_test_uses_relative_timer(void)
 #else
     return 0;
 #endif
+}
+
+void flyology_wall_wait_test_set_consume_eintr(int count)
+{
+    atomic_store_explicit(&flyology_test_consume_eintr, count,
+                          memory_order_relaxed);
+}
+
+int flyology_wall_wait_test_consume_eintr_remaining(void)
+{
+    return atomic_load_explicit(&flyology_test_consume_eintr,
+                                memory_order_relaxed);
+}
+
+static bool flyology_wall_wait_test_take_consume_eintr(void)
+{
+    int remaining = atomic_load_explicit(&flyology_test_consume_eintr,
+                                         memory_order_relaxed);
+
+    while (remaining > 0) {
+        if (atomic_compare_exchange_weak_explicit(
+                &flyology_test_consume_eintr, &remaining, remaining - 1,
+                memory_order_relaxed, memory_order_relaxed)) {
+            errno = EINTR;
+            return true;
+        }
+    }
+    return false;
+}
+
+void flyology_io_test_configure_retry(
+    int64_t steady_nanoseconds, int64_t wall_nanoseconds)
+{
+    atomic_store_explicit(&flyology_test_io_requested_steady,
+                          steady_nanoseconds, memory_order_relaxed);
+    atomic_store_explicit(&flyology_test_io_requested_wall,
+                          wall_nanoseconds, memory_order_relaxed);
+    atomic_store_explicit(&flyology_test_io_steady_adjustment, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_test_io_wall_adjustment, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_test_io_retry_count, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_test_io_retry_pending, 1,
+                          memory_order_relaxed);
+}
+
+void flyology_io_test_reset_retry(void)
+{
+    flyology_io_test_configure_retry(0, 0);
+    atomic_store_explicit(&flyology_test_io_retry_pending, 0,
+                          memory_order_relaxed);
+}
+
+int64_t flyology_io_test_steady_adjustment(void)
+{
+    return atomic_load_explicit(&flyology_test_io_steady_adjustment,
+                                memory_order_relaxed);
+}
+
+int64_t flyology_io_test_wall_adjustment(void)
+{
+    return atomic_load_explicit(&flyology_test_io_wall_adjustment,
+                                memory_order_relaxed);
+}
+
+int flyology_io_test_take_eintr(void)
+{
+    if (atomic_exchange_explicit(&flyology_test_io_retry_pending, 0,
+                                 memory_order_relaxed) == 0) {
+        return 0;
+    }
+    atomic_store_explicit(
+        &flyology_test_io_steady_adjustment,
+        atomic_load_explicit(&flyology_test_io_requested_steady,
+                             memory_order_relaxed),
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &flyology_test_io_wall_adjustment,
+        atomic_load_explicit(&flyology_test_io_requested_wall,
+                             memory_order_relaxed),
+        memory_order_relaxed);
+    atomic_fetch_add_explicit(&flyology_test_io_retry_count, 1,
+                              memory_order_relaxed);
+    return 1;
+}
+
+int flyology_io_test_retry_count(void)
+{
+    return atomic_load_explicit(&flyology_test_io_retry_count,
+                                memory_order_relaxed);
 }
 #endif
 
@@ -258,7 +356,19 @@ int flyology_wall_wait_consume(struct flyology_wall_wait_state *state)
 #elif defined(__APPLE__)
     struct kevent event;
     struct timespec zero = {0, 0};
-    int result = kevent(state->wait_fd, NULL, 0, &event, 1, &zero);
+    int result;
+
+    do {
+#if defined(FLYOLOGY_WALL_CLOCK_TEST_HOOKS) && \
+    FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+        if (flyology_wall_wait_test_take_consume_eintr()) {
+            result = -1;
+        } else
+#endif
+        {
+            result = kevent(state->wait_fd, NULL, 0, &event, 1, &zero);
+        }
+    } while (result < 0 && errno == EINTR);
 
     if (result != 1) {
         if (result == 0) {

@@ -1,6 +1,8 @@
 with Ada.Calendar;
 with Ada.Exceptions;
 with Ada.Text_IO;
+with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Wall_Clock_Waits;
 
@@ -127,8 +129,103 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
          Reset_Native_Remaining;
          raise;
    end Check_Relative_Rearm;
+
+   procedure Check_Wide_Sample_Bracket is
+      Target : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
+      Result : Flyology.IO.Timers.Wall_Clock_Wait_Result;
+   begin
+      Set_Offset (0.0);
+      Reset_Samples (Pause_For_Offset => False);
+      Set_Sample_Bracket (0.250);
+      Result := Flyology.IO.Timers.Wait_Until
+        (Target, Backstep_Tolerance => 0.001);
+      if Result.Outcome /= Flyology.IO.Timers.Target_Reached then
+         raise Program_Error with
+           "wide clock bracket manufactured a wall-clock backstep";
+      elsif Sample_Attempts < 3 then
+         raise Program_Error with "wide clock bracket did not retry";
+      end if;
+      Reset_Sample_Bracket;
+   exception
+      when others =>
+         Reset_Sample_Bracket;
+         raise;
+   end Check_Wide_Sample_Bracket;
+
+   procedure Check_IO_Retry_Clock is
+      Left, Right : Flyology.IO.Sockets.Socket_Type;
+      Ready       : Boolean;
+   begin
+      Flyology.IO.Sockets.Create_Socket_Pair (Left, Right);
+      Configure_IO_Retry
+        (Steady_Advance  => 0.005,
+         Wall_Adjustment => -120.0);
+      Ready := Flyology.IO.Wait
+        (Flyology.IO.Sockets.Native_Descriptor (Left),
+         Flyology.IO.For_Read,
+         Timeout => 0.010);
+      if Ready or else IO_Retry_Count /= 1 or else Offset /= -120.0 then
+         raise Program_Error with
+           "native EINTR retry state: ready=" & Boolean'Image (Ready)
+           & " retries=" & Natural'Image (IO_Retry_Count)
+           & " wall=" & Duration'Image (Offset);
+      end if;
+      Reset_IO_Retry;
+      Set_Offset (0.0);
+      Flyology.IO.Sockets.Close_Socket (Left);
+      Flyology.IO.Sockets.Close_Socket (Right);
+   exception
+      when others =>
+         Reset_IO_Retry;
+         Set_Offset (0.0);
+         Flyology.IO.Sockets.Close_Socket (Left);
+         Flyology.IO.Sockets.Close_Socket (Right);
+         raise;
+   end Check_IO_Retry_Clock;
+
+   procedure Check_Consume_EINTR is
+   begin
+      if not Uses_Native_Relative_Timer then
+         return;
+      end if;
+
+      declare
+         Source  : Flyology.Wall_Clock_Waits.Source;
+         Target  : constant Ada.Calendar.Time :=
+           Ada.Calendar.Time_Of (2030, 1, 1, 0.0);
+         Changed : Boolean;
+      begin
+         Flyology.Wall_Clock_Waits.Open (Source);
+         Set_Native_Remaining (0.0);
+         Set_Native_Consume_EINTR (2);
+         Changed := Flyology.Wall_Clock_Waits.Arm
+           (Source, Target, Maximum_Slice => 1.0);
+         if Changed
+           or else not Flyology.IO.Wait
+             (Flyology.Wall_Clock_Waits.Descriptor (Source),
+              Flyology.IO.For_Read,
+              Timeout => 1.0)
+         then
+            raise Program_Error with "wall event did not become ready";
+         end if;
+         Flyology.Wall_Clock_Waits.Consume (Source);
+         if Native_Consume_EINTR_Remaining /= 0 then
+            raise Program_Error with "wall event did not retry EINTR";
+         end if;
+      end;
+      Set_Native_Consume_EINTR (0);
+      Reset_Native_Remaining;
+   exception
+      when others =>
+         Set_Native_Consume_EINTR (0);
+         Reset_Native_Remaining;
+         raise;
+   end Check_Consume_EINTR;
 begin
    Check_Relative_Rearm;
+   Check_Consume_EINTR;
+   Check_Wide_Sample_Bracket;
+   Check_IO_Retry_Clock;
    Check_Backstep (Lightweight => True);
    Check_Backstep (Lightweight => False);
 end Flyology.Wall_Clock_Testing.Smoke;

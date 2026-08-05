@@ -11,30 +11,74 @@ package body Flyology.IO.Timers is
 
    Maximum_Wait_Slice  : constant Duration := 86_400.0;
    Fallback_Wait_Slice : constant Duration := 1.0;
+   Preferred_Sample_Span : constant Ada.Real_Time.Time_Span :=
+     Ada.Real_Time.Milliseconds (1);
+   Maximum_Sample_Span : constant Ada.Real_Time.Time_Span :=
+     Ada.Real_Time.Seconds (1);
+   Maximum_Sample_Attempts : constant Positive := 3;
 
    type Clock_Sample is record
-      Wall   : Ada.Calendar.Time;
-      Steady : Ada.Real_Time.Time;
+      Wall            : Ada.Calendar.Time;
+      Steady_Earliest : Ada.Real_Time.Time;
+      Steady_Latest   : Ada.Real_Time.Time;
    end record;
 
    function Read_Clocks return Clock_Sample;
    function Read_Clocks return Clock_Sample is
-      Before : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Wall   : constant Ada.Calendar.Time :=
-        Ada.Calendar.Clock
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-        + Flyology.Wall_Clock_Testing.Offset
-#end if;
-        ;
-      After  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Before : Ada.Real_Time.Time;
+      Wall   : Ada.Calendar.Time;
+      After  : Ada.Real_Time.Time;
    begin
+      for Attempt in 1 .. Maximum_Sample_Attempts loop
+         Before := Ada.Real_Time.Clock;
+         Wall := Ada.Calendar.Clock
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+           + Flyology.Wall_Clock_Testing.Offset
+#end if;
+           ;
+         After := Ada.Real_Time.Clock;
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+         Flyology.Wall_Clock_Testing.Note_Sample_Attempt;
+         After := After + Ada.Real_Time.To_Time_Span
+           (Flyology.Wall_Clock_Testing.Sample_Bracket);
+#end if;
+         if After < Before then
+            raise Flyology.IO.Device_Error with
+              "monotonic clock moved backward while sampling wall clock";
+         end if;
+         exit when After - Before <= Preferred_Sample_Span
+           or else Attempt = Maximum_Sample_Attempts;
+      end loop;
+
+      if After - Before > Maximum_Sample_Span then
+         raise Flyology.IO.Device_Error with
+           "wall-clock sample bracket exceeded one second";
+      end if;
+
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
       Flyology.Wall_Clock_Testing.Note_Sample;
 #end if;
       return
-        (Wall   => Wall,
-         Steady => Before + (After - Before) / 2);
+        (Wall            => Wall,
+         Steady_Earliest => Before,
+         Steady_Latest   => After);
    end Read_Clocks;
+
+   function Minimum_Steady_Elapsed
+     (Previous : Clock_Sample;
+      Current  : Clock_Sample) return Duration
+   is
+   begin
+      if Current.Steady_Latest < Previous.Steady_Earliest then
+         raise Flyology.IO.Device_Error with
+           "monotonic clock moved backward during wall-clock wait";
+      elsif Current.Steady_Earliest <= Previous.Steady_Latest then
+         return 0.0;
+      else
+         return Ada.Real_Time.To_Duration
+           (Current.Steady_Earliest - Previous.Steady_Latest);
+      end if;
+   end Minimum_Steady_Elapsed;
 
    procedure Sleep_For (Interval : Duration) is
    begin
@@ -69,22 +113,15 @@ package body Flyology.IO.Timers is
         return Flyology.Wall_Clock_Policy.Wait_Action
       is
          Wall_Elapsed : constant Duration := Current.Wall - Previous.Wall;
+         Steady_Elapsed : constant Duration :=
+           Minimum_Steady_Elapsed (Previous, Current);
       begin
-         if Current.Steady < Previous.Steady then
-            raise Flyology.IO.Device_Error with
-              "monotonic clock moved backward during wall-clock wait";
-         end if;
-         declare
-            Steady_Elapsed : constant Duration := Ada.Real_Time.To_Duration
-              (Current.Steady - Previous.Steady);
-         begin
-            return
-              Flyology.Wall_Clock_Policy.Classify
-                (Target_Reached => Current.Wall >= Target,
-                 Wall_Elapsed   => Wall_Elapsed,
-                 Steady_Elapsed => Steady_Elapsed,
-                 Tolerance      => Backstep_Tolerance);
-         end;
+         return
+           Flyology.Wall_Clock_Policy.Classify
+             (Target_Reached => Current.Wall >= Target,
+              Wall_Elapsed   => Wall_Elapsed,
+              Steady_Elapsed => Steady_Elapsed,
+              Tolerance      => Backstep_Tolerance);
       end Classify;
    begin
       if Initial.Wall >= Target then
@@ -135,8 +172,7 @@ package body Flyology.IO.Timers is
                        (Outcome             => Clock_Moved_Backward,
                         Observed_Time       => Current.Wall,
                         Backward_Adjustment =>
-                          Ada.Real_Time.To_Duration
-                            (Current.Steady - Previous.Steady)
+                          Minimum_Steady_Elapsed (Previous, Current)
                           - (Current.Wall - Previous.Wall));
                end case;
 
@@ -164,8 +200,7 @@ package body Flyology.IO.Timers is
                           (Outcome             => Clock_Moved_Backward,
                            Observed_Time       => Current.Wall,
                            Backward_Adjustment =>
-                             Ada.Real_Time.To_Duration
-                               (Current.Steady - Previous.Steady)
+                             Minimum_Steady_Elapsed (Previous, Current)
                              - (Current.Wall - Previous.Wall));
                   end case;
                end if;

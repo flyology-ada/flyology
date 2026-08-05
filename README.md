@@ -1489,17 +1489,23 @@ reproducible benchmark campaign.
 
 A lightweight sleep records a scheduler deadline and suspends the current context.
 A native sleep blocks only its pthread. Timer calls share one public API and use
-monotonic time, so wall-clock changes do not alter elapsed waits.
+monotonic time, so wall-clock changes do not alter elapsed waits. The supported
+Darwin and Linux clocks pause during system sleep, matching their pthread and
+event-poller timeout domains; these waits resume after the machine wakes.
 
 `Flyology.IO.Timers.Wait_Until` is the explicit wall-clock exception to that
 rule. It accepts an `Ada.Calendar.Time`, completes when the adjustable clock
 reaches that target, and reports a backward adjustment larger than the caller's
 tolerance instead of silently extending the wait. The steady sample is
-monotonic and the wall sample remains `Ada.Calendar.Clock`. Linux uses an
-absolute cancel-on-clock-set `timerfd`. Darwin arms a relative monotonic kqueue
-timer from a fresh wall sample, pairs it with the system clock-set notification,
-and re-evaluates the wall deadline at least once per second so a missed
-notification has bounded detection latency apart from task scheduling delay.
+monotonic and the wall sample remains `Ada.Calendar.Clock`. Each wall read is
+bracketed by steady reads; broad brackets are retried, brackets wider than one
+second are rejected, and classification uses the least elapsed time consistent
+with the accepted brackets so descheduling cannot manufacture a backstep. Linux
+uses an absolute cancel-on-clock-set `timerfd`. Darwin arms a relative monotonic
+kqueue timer from a fresh wall sample, pairs it with the system clock-set
+notification, and re-evaluates the wall deadline in at-most-one-second
+active-time slices that continue after resume. A missed notification therefore
+has bounded active-time detection latency apart from task scheduling delay.
 These are ordinary readiness sources, so a lightweight caller suspends only
 its fiber while a native caller blocks only its pthread. A forward clock change
 may complete the wait; a backward change has precedence when both conditions
