@@ -875,9 +875,12 @@ that lookup on an explicitly native task.
 
 `Flyology.IO.Connections.Server` puts a bounded admission gate in front of
 socket ownership. `Take` transfers an existing socket into a limited
-`Connection`; `Accept_Connection` acquires capacity before accepting from the
-listener, so overload remains in the kernel backlog instead of becoming an
-unbounded user-space task or socket queue.
+`Connection` after waiting indefinitely for capacity; its compatibility
+signature has no timeout or token. `Accept_Connection` acquires capacity before
+accepting from the listener, so overload remains in the kernel backlog instead
+of becoming an unbounded user-space task or socket queue. Its one monotonic
+`Timeout` covers both a full-capacity admission wait and the subsequent socket
+accept work, while its token can cancel either phase without polling.
 
 ```ada
 Manager : aliased Flyology.IO.Connections.Server (Capacity => 256);

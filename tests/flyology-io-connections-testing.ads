@@ -8,7 +8,9 @@ package Flyology.IO.Connections.Testing is
       Queued_Operation_Park,
       Receive_Chunk_Boundary,
       Stale_Operation_Registration,
-      TLS_Session_Installed);
+      TLS_Session_Installed,
+      Admission_Acquired,
+      Admission_Wait_Armed);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.

@@ -15,6 +15,10 @@ package body Flyology.Capacity is
            (Stopping, Active_Count, Capacity)
          is
             when Policy.Admit_Permit =>
+               if Active_Count + 1 = Capacity and then Acquire_Signalled then
+                  Wake_Sources.Consume (Acquire_Wake);
+                  Acquire_Signalled := False;
+               end if;
                Active_Count :=
                  Policy.Active_After_Acquire (Active_Count, Capacity);
                Accepted := True;
@@ -31,6 +35,10 @@ package body Flyology.Capacity is
            (Stopping, Active_Count, Capacity)
          is
             when Policy.Admit_Permit =>
+               if Active_Count + 1 = Capacity and then Acquire_Signalled then
+                  Wake_Sources.Consume (Acquire_Wake);
+                  Acquire_Signalled := False;
+               end if;
                Active_Count :=
                  Policy.Active_After_Acquire (Active_Count, Capacity);
                Result := Permit_Acquired;
@@ -47,17 +55,43 @@ package body Flyology.Capacity is
             raise Program_Error with "capacity permit released twice";
          end if;
          Active_Count := Policy.Active_After_Release (Active_Count);
+         if Wake_Sources.Descriptor (Acquire_Wake) >= 0
+           and then not Acquire_Signalled
+         then
+            Wake_Sources.Signal (Acquire_Wake);
+            Acquire_Signalled := True;
+         end if;
       end Release;
 
       procedure Request_Shutdown is
+         Failed : Boolean := False;
       begin
          if not Stopping then
-            --  Avoid allocating an OS descriptor merely to record shutdown.
-            --  Wait_Source observes Stopping under this same protected lock.
-            if Wake_Sources.Descriptor (Wake) >= 0 then
-               Wake_Sources.Signal (Wake);
-            end if;
+            --  Publish terminal state before either fallible wake so all
+            --  protected-entry and state-query callers still observe shutdown.
             Stopping := True;
+            if Wake_Sources.Descriptor (Shutdown_Wake) >= 0 then
+               begin
+                  Wake_Sources.Signal (Shutdown_Wake);
+               exception
+                  when others =>
+                     Failed := True;
+               end;
+            end if;
+            if Wake_Sources.Descriptor (Acquire_Wake) >= 0
+              and then not Acquire_Signalled
+            then
+               begin
+                  Wake_Sources.Signal (Acquire_Wake);
+                  Acquire_Signalled := True;
+               exception
+                  when others =>
+                     Failed := True;
+               end;
+            end if;
+            if Failed then
+               raise Program_Error with "cannot signal capacity shutdown";
+            end if;
          end if;
       end Request_Shutdown;
 
@@ -83,10 +117,25 @@ package body Flyology.Capacity is
          if Stopping then
             FD := -1;
          else
-            Wake_Sources.Ensure (Wake);
-            FD := Wake_Sources.Descriptor (Wake);
+            Wake_Sources.Ensure (Shutdown_Wake);
+            FD := Wake_Sources.Descriptor (Shutdown_Wake);
          end if;
       end Wait_Source;
+
+      procedure Acquire_Wait_Source
+        (FD          : out Interfaces.C.int;
+         Can_Acquire : out Boolean)
+      is
+      begin
+         Can_Acquire :=
+           Policy.Acquire_Entry_Open (Stopping, Active_Count, Capacity);
+         if Can_Acquire then
+            FD := -1;
+         else
+            Wake_Sources.Ensure (Acquire_Wake);
+            FD := Wake_Sources.Descriptor (Acquire_Wake);
+         end if;
+      end Acquire_Wait_Source;
    end Gate;
 
    procedure Timed_Acquire

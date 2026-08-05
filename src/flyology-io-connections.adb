@@ -12,6 +12,7 @@ package body Flyology.IO.Connections is
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Flyology.Capacity.Acquire_Result;
    use type Interfaces.C.int;
    use type TLS.Session_Access;
    use type TLS.Role;
@@ -583,6 +584,76 @@ package body Flyology.IO.Connections is
       Owner := Manager'Unchecked_Access;
    end Reserve;
 
+   procedure Reserve_Interruptibly
+     (Manager : aliased in out Server;
+      Started : Ada.Real_Time.Time;
+      Timeout : Duration;
+      Token   : access Cancellation_Token;
+      Owner   : out Server_Access)
+   is
+      Result      : Flyology.Capacity.Acquire_Result;
+      Acquire_FD  : Descriptor;
+      Token_FD    : Descriptor;
+      Can_Acquire : Boolean;
+      Cancelled   : Boolean;
+      Outcome     : Wait_Outcome;
+      Interrupts  : Interrupt_Set (1 .. 1);
+   begin
+      loop
+         Manager.Try_Acquire (Result);
+         case Result is
+            when Flyology.Capacity.Permit_Acquired =>
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+               Test_Barrier (8);
+#end if;
+               Owner := Manager'Unchecked_Access;
+               return;
+            when Flyology.Capacity.Gate_Closed =>
+               raise Admission_Closed;
+            when Flyology.Capacity.Gate_Full =>
+               null;
+            when Flyology.Capacity.Acquire_Timed_Out =>
+               raise Program_Error with
+                 "nonblocking admission returned a timed result";
+         end case;
+
+         --  Try_Acquire and Acquire_Wait_Source observe the gate under the
+         --  same protected lock. A release in between makes Can_Acquire true;
+         --  a later release leaves persistent readiness for this wait.
+         Manager.Acquire_Wait_Source (Acquire_FD, Can_Acquire);
+         if not Can_Acquire then
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+            Test_Barrier (9);
+#end if;
+            if Token = null then
+               Outcome := Wait_Interruptibly
+                 (Acquire_FD, For_Read, Remaining (Started, Timeout));
+            else
+               Token.Wait_Source (Token_FD, Cancelled);
+               if Cancelled then
+                  raise Operation_Cancelled with
+                    "connection admission was cancelled";
+               end if;
+               Interrupts (1) := Token_FD;
+               Outcome := Wait_Interruptibly
+                 (Acquire_FD, For_Read, Remaining (Started, Timeout),
+                  Interrupts);
+            end if;
+
+            case Outcome is
+               when Ready =>
+                  null;
+               when Timed_Out =>
+                  raise Timeout_Error with
+                    "connection admission timed out";
+               when Interrupted =>
+                  raise Operation_Cancelled with
+                    "connection admission was cancelled";
+            end case;
+         end if;
+      end loop;
+   end Reserve_Interruptibly;
+
    procedure Take
      (Manager : aliased in out Server;
       Socket  : in out Sockets.Socket_Type;
@@ -748,6 +819,7 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
+      Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Owner    : Server_Access;
       Socket   : Sockets.Socket_Type;
       Reserved : Boolean := False;
@@ -758,7 +830,7 @@ package body Flyology.IO.Connections is
       if Is_Open (Item) then
          raise Program_Error with "connection already owns a socket";
       end if;
-      Reserve (Manager, Owner);
+      Reserve_Interruptibly (Manager, Started, Timeout, Token, Owner);
       Reserved := True;
 
       Interrupt_Sources
@@ -766,7 +838,7 @@ package body Flyology.IO.Connections is
 
       begin
          Flyology.IO.Sockets.Accept_Connection
-           (Listener, Socket, Address, Timeout,
+           (Listener, Socket, Address, Remaining (Started, Timeout),
             Interrupts (1 .. Interrupt_Count));
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>

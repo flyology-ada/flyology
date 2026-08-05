@@ -1,6 +1,6 @@
 #include <stdatomic.h>
 
-enum { barrier_count = 8 };
+enum { barrier_count = 10 };
 
 static _Atomic int armed[barrier_count];
 static _Atomic int reached[barrier_count];

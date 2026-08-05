@@ -39,8 +39,10 @@ package Flyology.IO.Connections is
    --  the Connection.
    type Connection is new Ada.Finalization.Limited_Controlled with private;
 
-   --  Transfer Socket and one Manager permit to Item. On success Socket is
-   --  closed and Item is the sole closing owner.
+   --  Wait indefinitely for one Manager permit, then transfer Socket to Item.
+   --  This compatibility operation has no timeout or cancellation token;
+   --  Manager shutdown releases its admission wait with Admission_Closed. On
+   --  success Socket is closed and Item is the sole closing owner.
    --  @param Manager Admission controller that must outlive Item
    --  @param Socket Open socket whose ownership transfers on success
    --  @param Item Closed Connection that receives ownership
@@ -54,10 +56,12 @@ package Flyology.IO.Connections is
    --  Acquire capacity before accepting, so a full Manager backpressures the
    --  listening socket. Transient aborted admissions are retried; descriptor
    --  exhaustion uses interruptible bounded backoff. One Timeout deadline
-   --  spans readiness, retries, and backoff. Negative is unlimited and zero is
-   --  immediate. Cancellation_Quantum must be positive for compatibility but
-   --  is ignored; wake-source readiness notices cancellation without periodic
-   --  polling. Lightweight tasks suspend; native tasks block their threads.
+   --  spans capacity admission, readiness, retries, and backoff. Negative is
+   --  unlimited and zero is immediate. Token cancellation and Manager shutdown
+   --  interrupt a full-capacity admission wait without polling.
+   --  Cancellation_Quantum must be positive for compatibility but is ignored;
+   --  wake-source readiness notices cancellation without periodic polling.
+   --  Lightweight tasks suspend; native tasks block their threads.
    --  @param Manager Admission controller that must outlive Item
    --  @param Listener Open listening socket; ownership is retained
    --  @param Item Closed Connection that receives the accepted socket
@@ -66,8 +70,9 @@ package Flyology.IO.Connections is
    --  @param Cancellation_Quantum Compatibility parameter; value is ignored
    --  @param Token Optional one-shot cancellation source that must outlive
    --     the call
-   --  @exception Admission_Closed Manager has closed admission before reserve
-   --  @exception Operation_Cancelled Shutdown or Token interrupts the accept
+   --  @exception Admission_Closed Manager closes a pending admission
+   --  @exception Operation_Cancelled Token interrupts admission; Manager
+   --     shutdown or Token interrupts the admitted accept
    --  @exception Timeout_Error The accept deadline expires
    --  @exception Device_Error Readiness polling fails
    --  @exception Flyology.IO.Sockets.Socket_Error Accept or setup fails
