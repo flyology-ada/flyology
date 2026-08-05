@@ -279,6 +279,16 @@ required by the changed boundary.
   do not spend hours rebuilding an unrelated RTS.
 - Changes to `alire.toml` require `alr show`; keep Alire tags within its
   15-character tag limit.
+- Development-channel pins in `flyology-ada/alire-index` are
+  remote-authoritative. Update them from a clean, tracking checkout of that
+  repository with `./scripts/update-dev-origins.sh`; do not copy a local source
+  checkout's `HEAD` or pin an unpushed commit. The script first fast-forwards
+  the index, resolves each distinct development manifest's Git remote `HEAD`,
+  advances every `*-dev.toml` sharing that origin to the same exact commit, and
+  runs `alr index --check`. Run it without options to leave changes for review,
+  with `--commit` to create the standard Problem/Solution commit, or with
+  `--push` to update, commit, and publish in one step. Stable release manifests
+  are intentionally excluded.
 - CI in `.github/workflows/ci.yml` is the hosted reference. Do not add
   `continue-on-error` to conceal a backend failure.
 
