@@ -15,6 +15,20 @@ package body Flyology.IO.Structured_Servers is
    pragma Import
      (C, C_Close_Listener, "flyology_structured_listener_close");
 
+   type Listener_Close_Guard
+     (Result : not null access Interfaces.C.int)
+   is new Ada.Finalization.Limited_Controlled with record
+      Value : Descriptor := Invalid_Descriptor;
+   end record;
+
+   overriding procedure Finalize (Item : in out Listener_Close_Guard) is
+   begin
+      if Item.Value /= Invalid_Descriptor then
+         Item.Result.all := C_Close_Listener (Item.Value);
+         Item.Value := Invalid_Descriptor;
+      end if;
+   end Finalize;
+
    protected body Lifecycle is
       procedure Begin_Serve (Expected : Positive) is
       begin
@@ -171,13 +185,17 @@ package body Flyology.IO.Structured_Servers is
      (Item.State.Failure_Information);
 
    procedure Close_Owned_Listener (Item : in out Server) is
-      Result : Interfaces.C.int;
-      Released : Descriptor;
+      Result : aliased Interfaces.C.int := 0;
    begin
       if Sockets.Is_Open (Item.Owned_Listener) then
-         Result := C_Close_Listener
-           (Flyology.IO.Sockets.Native_Descriptor (Item.Owned_Listener));
-         Sockets.Release (Item.Owned_Listener, Released);
+         declare
+            Guard : Listener_Close_Guard (Result'Access);
+         begin
+            --  Transfer ownership before close(2). Finalization is
+            --  abort-deferred, so an abort cannot retain a consumed descriptor
+            --  or strand the released descriptor before its single close.
+            Sockets.Release (Item.Owned_Listener, Guard.Value);
+         end;
          if Result /= 0 then
             raise Sockets.Socket_Error with
               "listener close failed, errno=" & GNAT.OS_Lib.Errno'Image;
