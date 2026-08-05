@@ -168,6 +168,8 @@ loop_placement=${FLYOLOGY_LOOP_PLACEMENT:-none}
 loop_placement_map=${FLYOLOGY_LOOP_PLACEMENT_MAP:-}
 test_faults=${FLYOLOGY_TEST_FAULTS:-0}
 deny_io_uring=${FLYOLOGY_TEST_DENY_IO_URING:-0}
+# The test runner uses this seam only to verify fail-closed patch selection.
+test_missing_monotonic_patch=${FLYOLOGY_TEST_MISSING_MONOTONIC_PATCH:-0}
 sanitizer=${FLYOLOGY_SANITIZER:-none}
 
 for test_switch in \
@@ -321,6 +323,16 @@ case "$deny_io_uring" in
     ;;
 esac
 
+case "$test_missing_monotonic_patch" in
+  0|1) ;;
+  *)
+    printf '%s\n' \
+      "FLYOLOGY_TEST_MISSING_MONOTONIC_PATCH must be '0' or '1', got: $test_missing_monotonic_patch" \
+      >&2
+    exit 1
+    ;;
+esac
+
 case "$sanitizer" in
   none)
     sanitizer_config=disabled
@@ -422,10 +434,26 @@ compiler="$compiler_prefix/bin/gcc"
 patch_root="$project_root/runtime/patches/$patch_family"
 
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
-if [ "$platform:$compat_family" = darwin:gnat-16 ]; then
-  monotonic_patch="$patch_root/$platform/s-tpopmo-gnat-16.adb.patch"
-else
-  monotonic_patch="$patch_root/$platform/s-tpopmo.adb.patch"
+case "$platform:$compat_family" in
+  darwin:gnat-16)
+    monotonic_patch="$patch_root/darwin/s-tpopmo-gnat-16.adb.patch"
+    ;;
+  darwin:*)
+    monotonic_patch="$patch_root/darwin/s-tpopmo.adb.patch"
+    ;;
+  linux:*)
+    monotonic_patch=
+    ;;
+esac
+if [ "$platform" = darwin ]; then
+  if [ "$test_missing_monotonic_patch" = 1 ]; then
+    monotonic_patch="$monotonic_patch.missing-test"
+  fi
+  if [ ! -f "$monotonic_patch" ]; then
+    printf '%s\n' \
+      "required Darwin monotonic patch is missing: $monotonic_patch" >&2
+    exit 1
+  fi
 fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
@@ -476,7 +504,7 @@ cd "$project_root"
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$tasking_patch"
-if [ -f "$monotonic_patch" ]; then
+if [ -n "$monotonic_patch" ]; then
   git apply --ignore-space-change --unsafe-paths \
     --directory="$generated_include" \
     "$monotonic_patch"

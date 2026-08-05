@@ -37,7 +37,7 @@
 -   --  epoch for Time depends on Mode; the epoch for Check_Time and Abs_Time
 -   --  is always that of CLOCK_RT_Ada.
 +   --  epoch for Time depends on Mode; Check_Time and Abs_Time use Flyology's
-+   --  Darwin continuous monotonic clock.
++   --  Darwin Mach absolute clock, matching relative pthread waits.
 
     ---------------------
     -- Monotonic_Clock --

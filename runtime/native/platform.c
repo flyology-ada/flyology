@@ -16,23 +16,32 @@
 #include <sys/epoll.h>
 #include <sys/syscall.h>
 #elif defined(__APPLE__)
+#include <mach/mach_time.h>
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
 #endif
 
-/* GNAT's supported targets represent Duration as signed nanoseconds.  Keep
-   clock conversion in C so the selected Darwin clock and its unsigned
-   nanosecond result cannot overflow before Ada receives a timespec. */
+/* GNAT's supported targets represent Duration as signed nanoseconds. Keep
+   clock conversion in C so the Darwin tick conversion is checked before Ada
+   receives a timespec. Mach absolute time deliberately matches Darwin's
+   relative pthread and kqueue waits: all three pause during system sleep. */
 int flyology_monotonic_clock(struct timespec *value) {
 #if defined(__APPLE__)
-    uint64_t nanoseconds;
+    mach_timebase_info_data_t timebase;
+    __uint128_t nanoseconds;
 
     if (value == NULL) {
         errno = EINVAL;
         return -1;
     }
-    nanoseconds = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
-    if (nanoseconds > (uint64_t)INT64_MAX) {
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+        timebase.denom == 0) {
+        errno = EIO;
+        return -1;
+    }
+    nanoseconds = (__uint128_t)mach_absolute_time() * timebase.numer;
+    nanoseconds /= timebase.denom;
+    if (nanoseconds > INT64_MAX) {
         errno = EOVERFLOW;
         return -1;
     }
@@ -54,7 +63,26 @@ int flyology_monotonic_resolution(struct timespec *value) {
         return -1;
     }
 #if defined(__APPLE__)
-    return clock_getres(CLOCK_MONOTONIC_RAW, value);
+    mach_timebase_info_data_t timebase;
+    __uint128_t nanoseconds;
+
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+        timebase.denom == 0) {
+        errno = EIO;
+        return -1;
+    }
+    nanoseconds = ((__uint128_t)timebase.numer + timebase.denom - 1) /
+        timebase.denom;
+    if (nanoseconds == 0) {
+        nanoseconds = 1;
+    }
+    if (nanoseconds > INT64_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    value->tv_sec = (time_t)(nanoseconds / UINT64_C(1000000000));
+    value->tv_nsec = (long)(nanoseconds % UINT64_C(1000000000));
+    return 0;
 #else
     return clock_getres(CLOCK_MONOTONIC, value);
 #endif

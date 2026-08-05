@@ -203,7 +203,8 @@
 +      Timedout : out Boolean;
 +      Yielded  : out Boolean)
 +   is
-+      Result       : Interfaces.C.int;
++      Deadline           : Duration;
++      Result             : Interfaces.C.int;
 +      Lightweight_Result : aliased Interfaces.C.int;
 +   begin
 +      if not Is_Lightweight_Task (Self_ID) then
@@ -212,21 +213,32 @@
 +         return;
 +      end if;
 +
++      Deadline := Lightweight_Deadline (Time, Mode);
 +      Timedout := True;
 +      Yielded := False;
 +      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
 +         return;
 +      end if;
 +
-+      Result :=
-+        Lightweight_Sleep
-+          (Self_ID.Common.LL.L'Address,
-+           Lightweight_Deadline (Time, Mode),
-+           Lightweight_Result'Access);
-+      if Result /= 0 then
-+         raise Program_Error with "Flyology timed sleep failed";
-+      end if;
-+      Timedout := Lightweight_Result /= 0;
++      loop
++         if Mode = Absolute_Calendar then
++            exit when Time <= OS_Primitives.Clock;
++            Deadline := Lightweight_Deadline (Time, Mode);
++         end if;
++         exit when Deadline <= Monotonic.Monotonic_Clock;
++
++         Result :=
++           Lightweight_Sleep
++             (Self_ID.Common.LL.L'Address,
++              Deadline,
++              Lightweight_Result'Access);
++         if Result /= 0 then
++            raise Program_Error with "Flyology timed sleep failed";
++         end if;
++         Timedout := Lightweight_Result /= 0;
++         exit when not Timedout or else Mode /= Absolute_Calendar;
++         exit when Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
++      end loop;
 +   end Timed_Sleep;
 @@ -526,10 +680,74 @@
 -   procedure Timed_Delay
@@ -250,11 +262,16 @@
 +      Write_Lock (Self_ID);
 +      Deadline := Lightweight_Deadline (Time, Mode);
 +
-+      if Deadline > Monotonic.Monotonic_Clock
-+        and then Self_ID.Pending_ATC_Level >= Self_ID.ATC_Nesting_Level
++      if Self_ID.Pending_ATC_Level >= Self_ID.ATC_Nesting_Level
 +      then
 +         Self_ID.Common.State := Delay_Sleep;
 +         loop
++            if Mode = Absolute_Calendar then
++               exit when Time <= OS_Primitives.Clock;
++               Deadline := Lightweight_Deadline (Time, Mode);
++            end if;
++            exit when Deadline <= Monotonic.Monotonic_Clock;
++
 +            Result :=
 +              Lightweight_Sleep
 +                (Self_ID.Common.LL.L'Address,
@@ -263,8 +280,9 @@
 +            if Result /= 0 then
 +               raise Program_Error with "Flyology timed delay failed";
 +            end if;
++            exit when Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
 +            exit when Lightweight_Result /= 0
-+              or else Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
++              and then Mode /= Absolute_Calendar;
 +         end loop;
 +         Self_ID.Common.State := Runnable;
 +      end if;
@@ -279,20 +297,23 @@
 +   function Lightweight_Deadline
 +     (Time : Duration; Mode : ST.Delay_Modes) return Duration
 +   is
-+      Now : constant Duration := Monotonic.Monotonic_Clock;
++      Now      : constant Duration := Monotonic.Monotonic_Clock;
++      Wall_Now : Duration;
 +   begin
++      pragma Assert (OSC.CLOCK_RT_Ada = OSC.CLOCK_REALTIME);
 +      if Mode = Relative then
 +         return Duration'Min (Time, Max_Sensible_Delay) + Now;
-+         pragma Warnings (Off);
-+      elsif Mode = Absolute_RT
-+        or else OSC.CLOCK_RT_Ada = OSC.CLOCK_REALTIME
-+      then
-+         pragma Warnings (On);
++      elsif Mode = Absolute_RT then
 +         return Duration'Min (Now + Max_Sensible_Delay, Time);
 +      else
++         Wall_Now := OS_Primitives.Clock;
++         if Time <= Wall_Now then
++            return Now;
++         end if;
 +         return Duration'Min
-+           (Now + Max_Sensible_Delay,
-+            Time + Now - OS_Primitives.Clock);
++           (Now + 1.0,
++            Duration'Min
++              (Now + Max_Sensible_Delay, Time + Now - Wall_Now));
 +      end if;
 +   end Lightweight_Deadline;
 @@ -547,11 +765,15 @@

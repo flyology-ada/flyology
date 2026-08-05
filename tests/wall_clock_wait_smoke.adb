@@ -19,6 +19,19 @@ procedure Wall_Clock_Wait_Smoke is
       All_OK : Boolean := True;
    end Results;
 
+   protected Closed_Gate is
+      entry Wait;
+   private
+      Is_Open : Boolean := False;
+   end Closed_Gate;
+
+   protected body Closed_Gate is
+      entry Wait when Is_Open is
+      begin
+         null;
+      end Wait;
+   end Closed_Gate;
+
    protected body Results is
       procedure Finished (Passed : Boolean) is
       begin
@@ -45,13 +58,26 @@ procedure Wall_Clock_Wait_Smoke is
    task body Lightweight is
       Deadline : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
-      Target   : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
-      Result   : Flyology.IO.Timers.Wall_Clock_Wait_Result;
+      Calendar_Delay : constant Ada.Calendar.Time :=
+        Ada.Calendar.Clock + 0.010;
+      Calendar_Select : Ada.Calendar.Time;
+      Target          : Ada.Calendar.Time;
+      Result          : Flyology.IO.Timers.Wall_Clock_Wait_Result;
    begin
       Flyology.IO.Timers.Sleep_Until (Deadline);
+      delay until Calendar_Delay;
+      Calendar_Select := Ada.Calendar.Clock + 0.010;
+      select
+         Closed_Gate.Wait;
+      or
+         delay until Calendar_Select;
+      end select;
+      Target := Ada.Calendar.Clock + 0.020;
       Result := Flyology.IO.Timers.Wait_Until (Target);
       Results.Finished
         (Ada.Real_Time.Clock >= Deadline
+         and then Ada.Calendar.Clock >= Calendar_Delay
+         and then Ada.Calendar.Clock >= Calendar_Select
          and then Result.Outcome = Flyology.IO.Timers.Target_Reached
          and then Result.Observed_Time >= Target
          and then Result.Backward_Adjustment = 0.0);

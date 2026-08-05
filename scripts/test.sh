@@ -154,6 +154,22 @@ then
   printf '%s\n' "unknown io_uring test denial setting was accepted" >&2
   exit 1
 fi
+if [ "$(uname -s)" = Darwin ]; then
+  if missing_patch_error=$(FLYOLOGY_TEST_MISSING_MONOTONIC_PATCH=1 \
+    "$project_root/scripts/prepare-rts.sh" 2>&1)
+  then
+    printf '%s\n' "missing Darwin monotonic patch was accepted" >&2
+    exit 1
+  fi
+  case "$missing_patch_error" in
+    *"required Darwin monotonic patch is missing"*) ;;
+    *)
+      printf '%s\n' \
+        "missing Darwin monotonic patch had no clear diagnostic" >&2
+      exit 1
+      ;;
+  esac
+fi
 if FLYOLOGY_LOOP_PLACEMENT=unknown \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
@@ -228,6 +244,14 @@ if [ "$(uname -s)" = Linux ]; then
     -pthread \
     -o "$project_root/build/tests/linux_syscall_probe"
   "$project_root/build/tests/linux_syscall_probe"
+elif [ "$(uname -s)" = Darwin ]; then
+  mkdir -p "$project_root/build/tests"
+  cc -std=c11 -Wall -Wextra -Werror \
+    "$project_root/tests/probes/darwin_monotonic_probe.c" \
+    "$project_root/runtime/native/platform.c" \
+    -pthread \
+    -o "$project_root/build/tests/darwin_monotonic_probe"
+  "$project_root/build/tests/darwin_monotonic_probe"
 fi
 
 ordinary_mains='cancellation_wake_smoke

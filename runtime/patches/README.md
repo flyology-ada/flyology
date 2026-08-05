@@ -30,11 +30,16 @@ task on AArch64, where glibc requires 128 KiB. The clamp is a no-op when the
 compiler already requests enough space.
 
 The Darwin monotonic subunit patches replace GNAT's realtime tasking clock with
-Darwin's continuous raw monotonic clock. Native condition waits use Darwin's
-relative wait operation in that same clock domain; adjustable calendar delays
-are translated again at bounded one-second intervals. The narrow C bridge
-performs the nanosecond conversion and rejects samples outside GNAT's signed
-nanosecond `Duration` range.
+Mach absolute time. Native condition waits and kqueue timeouts use that same
+sleep-pausing clock domain; adjustable calendar delays are translated again at
+bounded one-second intervals after the machine resumes. The narrow C bridge
+uses a widened intermediate for the tick-to-nanosecond conversion and rejects
+samples outside GNAT's signed nanosecond `Duration` range.
+The Darwin task-primitives patch applies the same bounded calendar translation
+to lightweight timed sleeps and delay statements rather than passing a calendar
+epoch directly to the scheduler's monotonic deadline heap. Runtime preparation
+requires the exact Darwin monotonic patch selected for the compiler family;
+Linux has no corresponding monotonic patch.
 
 The common task-stages patch also invokes Flyology's one-shot finalizer after
 GNARL has completed global tasks and controlled library objects. This placement
