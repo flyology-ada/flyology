@@ -2,13 +2,14 @@
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
-Findings #5, #14, #16, and #19 are prevented by production-consumed SPARK
-units. Targeted subprogram proofs and fresh whole-unit widenings passed at
-level 1. The chunk encoder proof includes complete hexadecimal-digit
-consumption through `Natural'Last`, so the historical seven-digit capacity
-cannot prove. The WebSocket timeout classifier treats failed-or-terminal state
-as an input and does not prove that the I/O core sets that state, so behavioral
-integration coverage remains required.
+Findings #5, #14, #15, #16, #17, and #19 are prevented by
+production-consumed SPARK units. Their assigned targeted subprogram proofs and
+fresh whole-unit widenings passed at level 1.
+The chunk encoder proof includes complete hexadecimal-digit consumption through
+`Natural'Last`, so the historical seven-digit capacity cannot prove.
+The WebSocket timeout classifier treats failed-or-terminal state as an input
+and does not prove that the I/O core sets that state, so behavioral integration
+coverage remains required.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -35,6 +36,14 @@ integration coverage remains required.
       (level 1, mode all)
   - [x] `Flyology.WebSocket_Policy.Classify_Timeout`
   - [x] Whole `Flyology.WebSocket_Policy` unit widening
+- [x] Finding #15 production-used HTTP Expect/version classification
+      (level 1, mode all)
+  - [x] `Flyology.HTTP.Expect_Policy.Classify`
+  - [x] Whole `Flyology.HTTP.Expect_Policy` unit widening
+- [x] Finding #17 production-used route-parameter capacity transition
+      (level 1, mode all)
+  - [x] `Flyology.HTTP.Route_Parameter_Policy.Advance`
+  - [x] Whole `Flyology.HTTP.Route_Parameter_Policy` unit widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -44,6 +53,8 @@ integration coverage remains required.
 - [x] Finding #14 prevention coverage
 - [x] Finding #16 prevention coverage
 - [x] Finding #19 prevention coverage
+- [x] Finding #15 prevention coverage
+- [x] Finding #17 prevention coverage
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -62,6 +73,12 @@ integration coverage remains required.
 ## Discovered Obligations
 
 - [ ] Re-run the application and runtime proof suites serially after integration
+- [x] Prove `Flyology.HTTP.Expect_Policy.Classify`, then widen its whole unit
+- [x] Prove `Flyology.HTTP.Route_Parameter_Policy.Advance`, then widen its
+      whole unit
+- [x] Production HTTP parser consumes the `Expect_Policy.Classify` action
+- [x] Production `Validate_Pattern` consumes `Route_Parameter_Policy.Advance`
+- [x] Boundary tests cover the Expect truth table and route capacity transition
 - [x] Production `Native_Executors.Submit` consumes `Nonzero_Successor`
 - [x] Production rate-limit middleware consumes `Refilled_Tokens`
 - [x] Production HTTP chunk and SSE paths consume `HTTP_Chunk_Encoding.Encode`

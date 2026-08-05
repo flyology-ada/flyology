@@ -192,6 +192,30 @@ procedure HTTP_Smoke is
 
    procedure Check_Chunked_And_Expect is
       Wire : aliased Memory_Transport;
+
+      procedure Check_Rejected (Expect_Fields : String) is
+         Rejection_Wire : aliased Memory_Transport;
+         Rejected       : Boolean := False;
+      begin
+         Rejection_Wire.Input := To_Unbounded_String
+           ("POST /expect HTTP/1.1" & CRLF
+            & "Host: localhost" & CRLF
+            & Expect_Fields
+            & "Content-Length: 0" & CRLF & CRLF);
+         declare
+            Client  : HTTP_Server.Connection (Rejection_Wire'Access);
+            Request : HTTP_Server.Request;
+            Closed  : Boolean;
+         begin
+            begin
+               HTTP_Server.Read_Request (Client, Request, Closed);
+            exception
+               when HTTP_Server.Expectation_Failed =>
+                  Rejected := True;
+            end;
+         end;
+         pragma Assert (Rejected);
+      end Check_Rejected;
    begin
       Wire.Input := To_Unbounded_String
         ("POST /chunks HTTP/1.1" & CRLF
@@ -252,6 +276,30 @@ procedure HTTP_Smoke is
            (Ada.Strings.Fixed.Index
               (To_String (Wire.Output), "100 Continue") = 0);
       end;
+
+      Wire.Input := To_Unbounded_String
+        ("POST /legacy-unsupported HTTP/1.0" & CRLF
+         & "Expect: unsupported" & CRLF
+         & "Content-Length: 5" & CRLF & CRLF
+         & "hello");
+      Wire.Output := Null_Unbounded_String;
+      declare
+         Client  : HTTP_Server.Connection (Wire'Access);
+         Request : HTTP_Server.Request;
+         Closed  : Boolean;
+      begin
+         HTTP_Server.Read_Request (Client, Request, Closed);
+         pragma Assert (not Closed);
+         pragma Assert (HTTP_Server.Content (Request) = "hello");
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Wire.Output), "100 Continue") = 0);
+      end;
+
+      Check_Rejected ("Expect: unsupported" & CRLF);
+      Check_Rejected
+        ("Expect: 100-continue" & CRLF
+         & "Expect: 100-continue" & CRLF);
    end Check_Chunked_And_Expect;
 
    procedure Check_Streaming_Body is
@@ -2310,6 +2358,7 @@ procedure HTTP_Smoke is
                Rejected := True;
          end;
          pragma Assert (Rejected);
+         pragma Assert (Excessive.Route_Count = 0);
       end;
 
       declare

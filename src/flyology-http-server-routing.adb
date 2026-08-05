@@ -1,5 +1,6 @@
 with Ada.Real_Time;
 with Ada.Strings.Fixed;
+with Flyology.HTTP.Route_Parameter_Policy;
 with Flyology.IO;
 with Flyology.IO.TLS;
 
@@ -7,6 +8,8 @@ package body Flyology.HTTP.Server.Routing is
    use type Ada.Real_Time.Time;
 
    package App renames Flyology.HTTP.Server.Applications;
+   package Parameter_Policy renames
+     Flyology.HTTP.Route_Parameter_Policy;
    use type App.Authentication_Mode;
    use type App.Response_State;
    use type App.Upgrade_Mode;
@@ -239,8 +242,9 @@ package body Flyology.HTTP.Server.Routing is
       Static_Only : Boolean := False)
    is
       Segments : Segment_List;
-      Names    : Segment_Array := (others => Null_Unbounded_String);
-      Count    : Natural := 0;
+      Names    : array (Parameter_Policy.Parameter_Index) of
+        Unbounded_String := (others => Null_Unbounded_String);
+      Count    : Parameter_Policy.Parameter_Count := 0;
    begin
       if Pattern'Length = 0 or else Pattern (Pattern'First) /= '/'
         or else Ada.Strings.Fixed.Index (Pattern, "?") /= 0
@@ -274,11 +278,17 @@ package body Flyology.HTTP.Server.Routing is
                      raise Route_Error with "duplicate HTTP route parameter";
                   end if;
                end loop;
-               if Count = App.Max_Path_Parameters then
-                  raise Route_Error with "too many HTTP route parameters";
-               end if;
-               Count := Count + 1;
-               Names (Count) := To_Unbounded_String (Name);
+               declare
+                  Transition : constant Parameter_Policy.Capacity_Transition :=
+                    Parameter_Policy.Advance (Count);
+               begin
+                  if not Transition.Accepted then
+                     raise Route_Error with
+                       "too many HTTP route parameters";
+                  end if;
+                  Count := Transition.Next_Count;
+                  Names (Count) := To_Unbounded_String (Name);
+               end;
             end if;
          end;
       end loop;

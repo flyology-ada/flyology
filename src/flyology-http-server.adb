@@ -4,6 +4,7 @@ with Ada.Calendar.Formatting;
 with Ada.Strings.Fixed;
 with Interfaces;
 with Flyology.HTTP_Chunk_Encoding;
+with Flyology.HTTP.Expect_Policy;
 with Flyology.HTTP.Server.WebSocket_Deflate;
 with Flyology.IO;
 with GNAT.Sockets;
@@ -16,6 +17,7 @@ package body Flyology.HTTP.Server is
    use type Interfaces.Unsigned_64;
 
    package Chunk_Encoding renames Flyology.HTTP_Chunk_Encoding;
+   package Expect_Policy renames Flyology.HTTP.Expect_Policy;
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    WebSocket_Peer_EOF : exception;
@@ -1101,18 +1103,22 @@ package body Flyology.HTTP.Server is
            Header_Field_Count (Value, "Expect");
          Expect_Value : constant String := Header (Value, "Expect");
       begin
-         if Expect_Count /= 0 then
-            if Value.Version_Value = HTTP_1_0 then
+         case Expect_Policy.Classify
+           (Version         => Value.Version_Value,
+            Field_Count     => Expect_Count,
+            Value_Supported =>
+              Lower (Trim (Expect_Value)) = "100-continue")
+         is
+            when Expect_Policy.Ignore =>
                null;
-            elsif Expect_Count > 1
-              or else Lower (Trim (Expect_Value)) /= "100-continue"
-            then
+            when Expect_Policy.Reject =>
                raise Expectation_Failed with "unsupported HTTP expectation";
-            elsif Chunked or else Body_Size > 0 then
-               Item.Continue_Pending := True;
-               Item.Body_Accepted := False;
-            end if;
-         end if;
+            when Expect_Policy.Proceed =>
+               if Chunked or else Body_Size > 0 then
+                  Item.Continue_Pending := True;
+                  Item.Body_Accepted := False;
+               end if;
+         end case;
       end;
 
       Consume (Item, Header_End + 3);
