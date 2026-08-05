@@ -46,6 +46,7 @@ else
 fi
 "$showcase_root/prepare-alire.sh" "$profile" >/dev/null
 FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE="$loops" \
+  FLYOLOGY_RTS_DIR="$project_root/build/rts" \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 cd "$showcase_root"
 FLYOLOGY_SHOWCASE_PROFILE="$profile" "$alr" exec -- env -u GPR_CONFIG gprbuild \
