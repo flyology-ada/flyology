@@ -703,7 +703,8 @@ deliberately implements only single-owner transfer.
 
 Flyology exposes synchronous operations in:
 
-- `Flyology.IO.Timers`: relative and absolute sleeps.
+- `Flyology.IO.Timers`: relative and absolute sleeps plus bounded monotonic
+  timer sets.
 - `Flyology.IO.Sockets`: connect, accept, partial/exact receive, and partial/all
   send operations.
 - `Flyology.IO.Connections`: bounded admission, single-owner sockets,
@@ -1524,6 +1525,62 @@ A native sleep blocks only its pthread. Timer calls share one public API and use
 monotonic time, so wall-clock changes do not alter elapsed waits. The supported
 Darwin and Linux clocks pause during system sleep, matching their pthread and
 event-poller timeout domains; these waits resume after the machine wakes.
+
+`Flyology.IO.Timers.Timer_Set` lets one task own many one-shot monotonic
+deadlines without creating one Ada task per deadline. The set has a fixed
+capacity, allocates no storage after declaration, and uses caller-selected ids:
+
+```ada
+use type Ada.Real_Time.Time;
+
+declare
+   package Timers renames Flyology.IO.Timers;
+   Schedule  : Timers.Timer_Set (3);
+   Activated : Timers.Activation_Batch (3);
+   Deadlines : constant Timers.Deadline_Array (1 .. 3) :=
+     (1 => Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (10),
+      2 => Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (20),
+      3 => Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (30));
+begin
+   Timers.Replace (Schedule, Deadlines);
+   while Timers.Armed_Count (Schedule) > 0 loop
+      Timers.Wait_Next (Schedule, Activated);
+      for Position in 1 .. Activated.Count loop
+         Handle (Activated.Ids (Position));
+      end loop;
+   end loop;
+end;
+```
+
+`Wait_Next` samples the monotonic clock and disarms every timer due at that
+sample. Callers must not depend on the order of ids in a batch. A timer that
+passes while the caller processes the returned batch remains armed; the next
+call classifies it before attempting another sleep. Each arm is therefore
+returned once unless the caller explicitly cancels or replaces it. `Arm` also
+reschedules one slot,
+and `Replace` maps a complete one-based deadline array to ids. The object is
+caller-owned rather than task safe, so one task must serialize its operations.
+
+The timed overload bounds one wait without cancelling later timers:
+
+```ada
+case Timers.Wait_Next (Schedule, Activated, Timeout => 0.050) is
+   when Timers.Timers_Activated =>
+      Process (Activated);
+   when Timers.Wait_Timed_Out =>
+      Run_Maintenance;
+end case;
+```
+
+A zero timeout polls once. Timers due at that terminal monotonic-clock sample
+win over timeout; otherwise the returned batch is empty and every arm remains
+pending for the next call.
+
+The set keeps an indexed binary min-heap. Arm, reschedule, cancellation, and
+each extracted activation are `O(log n)`; the next deadline is available in
+`O(1)`. Only that earliest deadline is registered through the calling task's
+normal delay path, so the scheduler still stores one deadline for the waiting
+fiber rather than one fiber per application timer.
 
 `Flyology.IO.Timers.Wait_Until` is the explicit wall-clock exception to that
 rule. It accepts an `Ada.Calendar.Time`, completes when the adjustable clock

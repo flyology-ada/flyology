@@ -47,6 +47,11 @@ those behaviors. The widening continued with partial representation data after
 the non-code-generating root package spec `s-flyolo.ads` produced no
 representation information; the poller-policy unit itself was analyzed with no
 warning, assumption, justified check, or unproved check.
+The production-used bounded timer-set policy proves indexed-heap validity,
+exact arm/cancel/clear transitions, root-minimum selection, and complete unique
+extraction of every id armed and due at the supplied monotonic-clock sample.
+Task suspension and clock sampling remain outside SPARK and require behavioral
+lane-parity coverage.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -57,6 +62,12 @@ warning, assumption, justified check, or unproved check.
 
 - [x] Pre-change application policy suite (level 1, mode all)
 - [x] Pre-change runtime scheduling policy suite (level 1, mode all)
+- [x] Production-used bounded timer-set policy (level 1, mode all)
+  - [x] Indexed heap mapping, order, repair, insertion, and removal
+  - [x] Exact arm, cancellation, clearing, and earliest-deadline contracts
+  - [x] Complete unique due-batch extraction with survivor framing
+  - [x] Whole `Flyology.Timer_Set_Policy` unit widening
+  - [x] Application and runtime policy suite widening
 - [x] Finding #8 production-used bounded-channel dequeue transition
       (level 1, mode all)
   - [x] `Flyology.Channel_Policy.Next_Dequeue`
@@ -137,6 +148,23 @@ warning, assumption, justified check, or unproved check.
 - [x] Finding #18 missing-distance prevention coverage
 - [x] Finding #1 deterministic poller-policy boundary
 - [x] Finding #10 listener close-attempt ownership boundary
+- [x] `Flyology.Timer_Set_Policy.Precedes` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Armed_Count` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Mapping_Valid` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Heap_Ordered` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Is_Valid` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Swap` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Up_Ready` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Sift_Up` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Down_Ready` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Sift_Down` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Remove_At` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Cancel` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Clear` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Arm` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Lemma_Root_Minimum` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Earliest_Deadline` (level 1, mode all)
+- [x] `Flyology.Timer_Set_Policy.Collect_Due` (level 1, mode all)
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -153,6 +181,33 @@ warning, assumption, justified check, or unproved check.
 
 ## Discovered Obligations
 
+- [x] Strengthen `Down_Ready` so every direct child of a nonroot position is
+      ordered after that position's parent
+- [x] Re-verify callers of the strengthened `Down_Ready` predicate
+- [x] Prove `Down_Ready` immediately after each `Sift_Down` swap
+- [x] Prove `Sift_Down` loop-invariant initialization and preservation plus
+      its increasing-current variant
+- [x] Prove `Sift_Up` loop-invariant initialization and preservation plus its
+      decreasing-current variant
+- [x] Re-verify both `Arm` policy callers supply room for a new id while
+      allowing a full-set reschedule
+- [x] Prove root-minimum lifting from local parent-child heap order
+- [x] Prove `Clear` processed-entry loop-invariant initialization and
+      preservation
+- [x] Require explicit capacity for an unarmed `Arm` target and prove the
+      insertion arithmetic and index checks
+- [x] Prove a root-minimum heap lemma by induction over parent positions for
+      `Earliest_Deadline`
+- [x] Re-verify callers after adding the `Remove_At` semantic/frame contract
+- [x] Re-verify callers after adding the `Precedes` indexed-heap preconditions
+      and other helper frame postconditions
+- [x] Prove the complete due-set extraction contract, including uniqueness,
+      preservation of later arms, and removal of every due arm
+- [x] Prove `Collect_Due` old-minus-current membership, output, frame, and
+      count loop invariants
+- [x] Fresh whole-unit widening of `Flyology.Timer_Set_Policy` at level 1 and
+      mode all
+- [x] Re-run the application proof suite after adding the production policy
 - [x] Prove finding #8 old-head dequeue action at targeted subprogram scope
 - [x] Prove finding #8 scalar dequeue commit at targeted subprogram scope
 - [x] Record that the controlled generic slot assignment is outside SPARK;

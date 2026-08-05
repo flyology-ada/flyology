@@ -118,6 +118,7 @@ project Runtime_Smoke is
       "structured_server_reuse_smoke.adb",
       "thread_affinity_smoke.adb",
       "timer_heap_smoke.adb",
+      "timer_set_smoke.adb",
       "topology_smoke.adb",
       "tls_smoke.adb",
       "tls_state_model.adb",

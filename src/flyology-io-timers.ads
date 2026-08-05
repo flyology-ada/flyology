@@ -1,5 +1,6 @@
 with Ada.Calendar;
 with Ada.Real_Time;
+private with Flyology.Timer_Set_Policy;
 
 --  Exposes lane-neutral timer waits through standard Ada delay semantics.
 --
@@ -7,6 +8,40 @@ with Ada.Real_Time;
 --
 --     Flyology.IO.Timers.Sleep_For (0.010);
 package Flyology.IO.Timers is
+
+   --  Stable caller-selected identity for one slot in a Timer_Set.
+   subtype Timer_Id is Positive;
+
+   --  Caller-indexed monotonic deadlines used to replace a complete timer
+   --  set. Array indexes become the timer ids reported after activation.
+   type Deadline_Array is array (Timer_Id range <>) of Ada.Real_Time.Time;
+
+   --  Bounded list of timer ids activated by one Wait_Next call.
+   type Timer_Id_Array is array (Positive range <>) of Timer_Id;
+
+   --  Every timer activated by one monotonic-clock sample. Only Ids
+   --  (1 .. Count) are defined; callers must not depend on their order.
+   --  @field Capacity Maximum number of ids in this batch
+   --  @field Count Number of defined entries in Ids
+   --  @field Ids Activated timer identities
+   type Activation_Batch (Capacity : Positive) is record
+      Count : Natural := 0;
+      Ids   : Timer_Id_Array (1 .. Capacity) := (others => Timer_Id'First);
+   end record;
+
+   --  Terminal reason for a bounded Timer_Set wait.
+   --  @enum Timers_Activated Activated contains every timer due at the
+   --     operation's terminal monotonic-clock sample
+   --  @enum Wait_Timed_Out No timer was due by the timeout deadline
+   type Timer_Wait_Outcome is (Timers_Activated, Wait_Timed_Out);
+
+   --  Bounded, caller-owned collection of monotonic timers. The object is not
+   --  task safe: one task must serialize Arm, Replace, Cancel, and Wait_Next.
+   --  Each arm is one-shot and Wait_Next disarms it when reported. The object
+   --  allocates no storage after declaration and registers only its earliest
+   --  pending deadline with the calling task's normal timer path.
+   --  @field Capacity Maximum number of caller-selected timer ids
+   type Timer_Set (Capacity : Positive) is limited private;
 
    --  Default amount by which wall-clock progress may lag monotonic progress
    --  without being reported as a backward adjustment.
@@ -41,6 +76,92 @@ package Flyology.IO.Timers is
    --  @param Deadline Absolute Ada.Real_Time deadline
    procedure Sleep_Until (Deadline : Ada.Real_Time.Time);
 
+   --  Arm or reschedule one slot. A deadline at or before the next clock
+   --  sample is returned by the next Wait_Next without an additional sleep.
+   --  Re-arming an already armed id replaces its pending deadline.
+   --  @param Timers Timer collection to update
+   --  @param Id Caller-selected slot in 1 .. Timers.Capacity
+   --  @param Deadline Absolute monotonic deadline
+   procedure Arm
+     (Timers   : in out Timer_Set;
+      Id       : Timer_Id;
+      Deadline : Ada.Real_Time.Time)
+   with Pre => Id <= Timers.Capacity;
+
+   --  Replace the complete collection with the supplied deadline array.
+   --  Existing arms are cancelled first. Deadlines must use a one-based range
+   --  no longer than Timers.Capacity; each array index becomes its timer id.
+   --  An empty array leaves the collection empty.
+   --  @param Timers Timer collection to replace
+   --  @param Deadlines New one-shot monotonic deadlines
+   procedure Replace
+     (Timers    : in out Timer_Set;
+      Deadlines : Deadline_Array)
+   with Pre =>
+     Deadlines'First = 1 and then Deadlines'Length <= Timers.Capacity;
+
+   --  Idempotently disarm one slot.
+   --  @param Timers Timer collection to update
+   --  @param Id Caller-selected slot in 1 .. Timers.Capacity
+   procedure Cancel
+     (Timers : in out Timer_Set;
+      Id     : Timer_Id)
+   with Pre => Id <= Timers.Capacity;
+
+   --  Report whether one slot is currently armed.
+   --  @param Timers Timer collection to inspect
+   --  @param Id Caller-selected slot in 1 .. Timers.Capacity
+   --  @return True until cancellation, replacement, or activation delivery
+   function Is_Armed
+     (Timers : Timer_Set;
+      Id     : Timer_Id) return Boolean
+   with Pre => Id <= Timers.Capacity;
+
+   --  Return the number of currently armed timers.
+   --  @param Timers Timer collection to inspect
+   --  @return Armed slot count
+   function Armed_Count (Timers : Timer_Set) return Natural;
+
+   --  Wait for and consume the next nonempty activation batch. All timers due
+   --  at one monotonic-clock sample are returned and disarmed together. A
+   --  timer that passes after that sample remains armed, so the next call
+   --  returns it before sleeping; processing one batch therefore cannot lose
+   --  later expirations. Activated.Capacity must equal Timers.Capacity.
+   --  A lightweight caller suspends only its fiber; a native caller blocks
+   --  only its pthread. The wait and clock pause during system sleep.
+   --  @param Timers Nonempty timer collection to wait on and update
+   --  @param Activated Complete set of ids due at the operation's clock sample
+   procedure Wait_Next
+     (Timers    : in out Timer_Set;
+      Activated : out Activation_Batch)
+   with Pre =>
+     Armed_Count (Timers) > 0
+     and then Activated.Capacity = Timers.Capacity,
+        Post => Activated.Count in 1 .. Activated.Capacity;
+
+   --  Wait for the next activation batch for at most Timeout active monotonic
+   --  seconds. A zero timeout performs one clock sample without sleeping.
+   --  Timers due at the terminal sample take precedence over timeout and are
+   --  returned normally. On Wait_Timed_Out, Activated.Count is zero and every
+   --  timer remains armed for a later call. The timeout pauses during system
+   --  sleep, matching the timer deadlines and both task lanes.
+   --  @param Timers Nonempty timer collection to wait on and update
+   --  @param Activated Complete due set, or an empty batch on timeout
+   --  @param Timeout Maximum active monotonic wait in seconds
+   --  @return Whether timers activated or the bounded wait expired
+   function Wait_Next
+     (Timers    : in out Timer_Set;
+      Activated : out Activation_Batch;
+      Timeout   : Duration) return Timer_Wait_Outcome
+   with Pre =>
+     Armed_Count (Timers) > 0
+     and then Activated.Capacity = Timers.Capacity
+     and then Timeout >= 0.0,
+        Post =>
+          (if Wait_Next'Result = Timers_Activated then
+              Activated.Count in 1 .. Activated.Capacity
+           else Activated.Count = 0);
+
    --  Wait until the adjustable wall clock reaches Target. A forward clock
    --  change may complete the wait early. A backward change larger than
    --  Backstep_Tolerance returns Clock_Moved_Backward so that the caller can
@@ -68,5 +189,10 @@ package Flyology.IO.Timers is
       Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
       return Wall_Clock_Wait_Result
    with Pre => Backstep_Tolerance >= 0.0;
+
+private
+   type Timer_Set (Capacity : Positive) is limited record
+      State : Flyology.Timer_Set_Policy.Timer_State (Capacity);
+   end record;
 
 end Flyology.IO.Timers;

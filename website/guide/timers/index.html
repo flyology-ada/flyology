@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Choose relative, monotonic, or wall-clock timer waits in Flyology Runtime, including explicit handling for backward clock changes.">
+    <meta name="description" content="Choose relative, monotonic, multi-deadline, or wall-clock timer waits in Flyology Runtime, including complete timer-set batches and explicit handling for backward clock changes.">
     <meta name="theme-color" content="#17213d">
     <title>Timers and clock changes · Flyology Runtime</title>
     <link rel="canonical" href="https://flyology.org/guide/timers/">
@@ -54,7 +54,7 @@
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Timers</li></ol>
           <h1>Use the clock that matches the promise.</h1>
         </div>
-        <p class="doc-hero-copy">Wait for elapsed time, a monotonic deadline, or a civil time on the adjustable wall clock. When the wall clock moves backward, return that fact to the application instead of silently extending its schedule.</p>
+        <p class="doc-hero-copy">Wait for elapsed time, one or many monotonic deadlines, or a civil time on the adjustable wall clock. Batch deadlines without creating one task per timer, and return backward wall-clock movement to the application instead of silently extending its schedule.</p>
       </header>
 
       <div class="docs-layout">
@@ -64,6 +64,7 @@
             <li><a href="#choose">Choose a clock</a></li>
             <li><a href="#relative">Relative waits</a></li>
             <li><a href="#monotonic">Monotonic deadlines</a></li>
+            <li><a href="#timer-sets">Many monotonic deadlines</a></li>
             <li><a href="#wall-clock">Wall-clock targets</a></li>
             <li><a href="#backsteps">Jitter and backsteps</a></li>
             <li><a href="#lanes">Lanes and platforms</a></li>
@@ -86,6 +87,7 @@
               <dl>
                 <div class="decision-row"><dt><code>Sleep_For</code></dt><dd>Wait for an elapsed duration. Use it for simple pacing and short pauses where no reusable absolute deadline is needed.</dd></div>
                 <div class="decision-row"><dt><code>Sleep_Until</code></dt><dd>Wait for an <code>Ada.Real_Time</code> deadline. Use it for timeouts, retry budgets, and periodic work that must not follow civil-clock corrections.</dd></div>
+                <div class="decision-row"><dt><code>Timer_Set</code></dt><dd>Wait for many one-shot <code>Ada.Real_Time</code> deadlines from one task. Use it when one loop should receive complete due batches without creating one task per deadline.</dd></div>
                 <div class="decision-row"><dt><code>Wait_Until</code></dt><dd>Wait for an <code>Ada.Calendar</code> target. Use it when the requested time is a point on the adjustable wall clock and the application must react to a backward correction.</dd></div>
               </dl>
             </div>
@@ -131,8 +133,66 @@ Flyology.IO.Timers.Sleep_Until (Deadline);</code></pre>
             <p>Changes to the system's civil time do not move an <code>Ada.Real_Time</code> deadline. This makes it the default clock for elapsed-time guarantees.</p>
           </section>
 
-          <section id="wall-clock">
+          <section id="timer-sets">
             <span class="step-label">TIMER 04</span>
+            <h2>Wait for many deadlines from one task.</h2>
+            <p><code>Timer_Set</code> is a bounded, caller-owned collection of one-shot monotonic timers. Declare its capacity and a matching <code>Activation_Batch</code>, then arm individual ids or replace the complete set from a one-based deadline array. The set allocates no storage after declaration.</p>
+            <figure class="code-panel">
+              <figcaption>three deadlines, one waiting task</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Ada.Real_Time;
+with Flyology.IO.Timers;
+
+procedure Wait_For_Timers is
+   use Ada.Real_Time;
+   package Timers renames Flyology.IO.Timers;
+
+   Schedule  : Timers.Timer_Set (3);
+   Activated : Timers.Activation_Batch (3);
+   Deadlines : constant Timers.Deadline_Array (1 .. 3) :=
+     (1 =&gt; Clock + Milliseconds (10),
+      2 =&gt; Clock + Milliseconds (20),
+      3 =&gt; Clock + Milliseconds (30));
+begin
+   Timers.Replace (Schedule, Deadlines);
+   while Timers.Armed_Count (Schedule) &gt; 0 loop
+      Timers.Wait_Next (Schedule, Activated);
+      for Position in 1 .. Activated.Count loop
+         Handle (Activated.Ids (Position));
+      end loop;
+   end loop;
+end Wait_For_Timers;</code></pre>
+            </figure>
+            <p><code>Wait_Next</code> takes one monotonic-clock sample and returns every timer due at that sample. The ids are disarmed before the call returns, and callers must not depend on their batch order. Re-arm an id after handling it when the application wants another occurrence.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>A deadline may pass after the batch's clock sample while the caller processes earlier activations. It remains armed. The next <code>Wait_Next</code> checks all now-due timers before sleeping, so that deadline appears in the next batch rather than being forgotten.</p>
+            </aside>
+            <p>The timed overload bounds one wait while preserving later arms. It returns <code>Timers_Activated</code> with a nonempty batch or <code>Wait_Timed_Out</code> with an empty batch. A zero timeout polls once; timers due at that terminal sample take precedence over timeout.</p>
+            <figure class="code-panel">
+              <figcaption>bounded wait</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">case Timers.Wait_Next
+  (Schedule, Activated, Timeout =&gt; 0.050)
+is
+   when Timers.Timers_Activated =&gt;
+      Process (Activated);
+   when Timers.Wait_Timed_Out =&gt;
+      Run_Maintenance;
+end case;</code></pre>
+            </figure>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>One scheduler wait</dt><dd>The set keeps an indexed min-heap and registers only its earliest deadline through the calling task's normal delay path.</dd></div>
+                <div class="decision-row"><dt>One-shot delivery</dt><dd>Each arm is returned once unless <code>Cancel</code> or <code>Replace</code> removes it first. <code>Arm</code> replaces the deadline of an already armed id.</dd></div>
+                <div class="decision-row"><dt>Caller ownership</dt><dd>The object is not task safe. One task must serialize arming, cancellation, replacement, inspection, and waiting.</dd></div>
+                <div class="decision-row"><dt>Empty collection</dt><dd>Call <code>Wait_Next</code> only while <code>Armed_Count</code> is positive; there is no event that could wake a wait on a task-confined empty set.</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section id="wall-clock">
+            <span class="step-label">TIMER 05</span>
             <h2>Wait for a time that hits the clock.</h2>
             <p><code>Wait_Until</code> accepts an absolute <code>Ada.Calendar.Time</code>. A forward clock change may make the target immediately due. A backward change beyond the selected tolerance returns <code>Clock_Moved_Backward</code>, giving the application a chance to recompute or confirm its civil schedule.</p>
             <figure class="code-panel">
@@ -161,7 +221,7 @@ end case;</code></pre>
           </section>
 
           <section id="backsteps">
-            <span class="step-label">TIMER 05</span>
+            <span class="step-label">TIMER 06</span>
             <h2>Separate clock jitter from a schedule change.</h2>
             <p>The default backstep tolerance is 1 ms. Smaller lost-progress observations are treated as jitter and the wait is rearmed. A larger loss returns to the caller rather than waiting longer without notice. Set a nonnegative application-specific tolerance when the default is not appropriate.</p>
             <figure class="code-panel">
@@ -182,7 +242,7 @@ end case;</code></pre>
           </section>
 
           <section id="lanes">
-            <span class="step-label">TIMER 06</span>
+            <span class="step-label">TIMER 07</span>
             <h2>Keep the same call in either lane.</h2>
             <p>The public call and outcome are lane-neutral. The waiting mechanism follows the current task designation.</p>
             <div class="decision-list">
@@ -197,7 +257,7 @@ end case;</code></pre>
           </section>
 
           <section id="patterns">
-            <span class="step-label">TIMER 07</span>
+            <span class="step-label">TIMER 08</span>
             <h2>Match common schedules to one policy.</h2>
             <div class="decision-list">
               <dl>
@@ -214,7 +274,7 @@ end case;</code></pre>
           </section>
 
           <section id="limits">
-            <span class="step-label">TIMER 08</span>
+            <span class="step-label">TIMER 09</span>
             <h2>Account for what a timer cannot promise.</h2>
             <ul>
               <li>A timer becomes eligible at its deadline; ordinary OS and Flyology scheduling delay may move actual execution later.</li>

@@ -9,6 +9,8 @@ package body Flyology.IO.Timers is
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
 
+   package Timer_Policy renames Flyology.Timer_Set_Policy;
+
    Maximum_Wait_Slice  : constant Duration := 86_400.0;
    Fallback_Wait_Slice : constant Duration := 1.0;
    Preferred_Sample_Span : constant Ada.Real_Time.Time_Span :=
@@ -93,6 +95,120 @@ package body Flyology.IO.Timers is
    begin
       delay until Deadline;
    end Sleep_Until;
+
+   procedure Arm
+     (Timers   : in out Timer_Set;
+      Id       : Timer_Id;
+      Deadline : Ada.Real_Time.Time)
+   is
+   begin
+      Timer_Policy.Arm (Timers.State, Id, Deadline);
+   end Arm;
+
+   procedure Replace
+     (Timers    : in out Timer_Set;
+      Deadlines : Deadline_Array)
+   is
+   begin
+      Timer_Policy.Clear (Timers.State);
+      for Id in Deadlines'Range loop
+         Timer_Policy.Arm (Timers.State, Id, Deadlines (Id));
+      end loop;
+   end Replace;
+
+   procedure Cancel
+     (Timers : in out Timer_Set;
+      Id     : Timer_Id)
+   is
+   begin
+      Timer_Policy.Cancel (Timers.State, Id);
+   end Cancel;
+
+   function Is_Armed
+     (Timers : Timer_Set;
+      Id     : Timer_Id) return Boolean
+   is
+     (Timer_Policy.Is_Armed (Timers.State, Id));
+
+   function Armed_Count (Timers : Timer_Set) return Natural is
+     (Timer_Policy.Armed_Count (Timers.State));
+
+   procedure Publish
+     (Due       : Timer_Policy.Due_Batch;
+      Activated : out Activation_Batch)
+   is
+   begin
+      Activated.Count := Due.Count;
+      Activated.Ids := (others => Timer_Id'First);
+      for Position in 1 .. Due.Count loop
+         Activated.Ids (Position) := Due.Ids (Position);
+      end loop;
+   end Publish;
+
+   function Saturating_Deadline
+     (Started : Ada.Real_Time.Time;
+      Timeout : Duration) return Ada.Real_Time.Time
+   is
+      Span : constant Ada.Real_Time.Time_Span :=
+        Ada.Real_Time.To_Time_Span (Timeout);
+   begin
+      if Span >= Ada.Real_Time.Time_Last - Started then
+         return Ada.Real_Time.Time_Last;
+      else
+         return Started + Span;
+      end if;
+   end Saturating_Deadline;
+
+   procedure Wait_Next
+     (Timers    : in out Timer_Set;
+      Activated : out Activation_Batch)
+   is
+      Due      : Timer_Policy.Due_Batch (Timers.Capacity);
+      Observed : Ada.Real_Time.Time;
+   begin
+      loop
+         Observed := Ada.Real_Time.Clock;
+         Timer_Policy.Collect_Due (Timers.State, Observed, Due);
+         if Due.Count > 0 then
+            Publish (Due, Activated);
+            return;
+         end if;
+
+         Sleep_Until (Timer_Policy.Earliest_Deadline (Timers.State));
+      end loop;
+   end Wait_Next;
+
+   function Wait_Next
+     (Timers    : in out Timer_Set;
+      Activated : out Activation_Batch;
+      Timeout   : Duration) return Timer_Wait_Outcome
+   is
+      Started    : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Timeout_At : constant Ada.Real_Time.Time :=
+        Saturating_Deadline (Started, Timeout);
+      Due        : Timer_Policy.Due_Batch (Timers.Capacity);
+      Observed   : Ada.Real_Time.Time;
+      Wake_At    : Ada.Real_Time.Time;
+   begin
+      loop
+         Observed := Ada.Real_Time.Clock;
+         Timer_Policy.Collect_Due (Timers.State, Observed, Due);
+         if Due.Count > 0 then
+            Publish (Due, Activated);
+            return Timers_Activated;
+         elsif Observed >= Timeout_At then
+            Activated.Count := 0;
+            Activated.Ids := (others => Timer_Id'First);
+            return Wait_Timed_Out;
+         end if;
+
+         Wake_At := Timer_Policy.Earliest_Deadline (Timers.State);
+         if Timeout_At < Wake_At then
+            Wake_At := Timeout_At;
+         end if;
+         Sleep_Until (Wake_At);
+      end loop;
+   end Wait_Next;
 
    function Wait_Until
      (Target             : Ada.Calendar.Time;
