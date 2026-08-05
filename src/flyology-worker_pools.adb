@@ -52,10 +52,17 @@ package body Flyology.Worker_Pools is
             raise Program_Error with "worker pool is one-shot";
          end if;
          Begun := True;
-         Is_Running := True;
          Expected := Expected_Workers;
          Workers_Done := 0;
       end Begin_Run;
+
+      procedure Mark_Running is
+      begin
+         if not Begun or else Is_Running or else Expected = 0 then
+            raise Program_Error with "worker pool cannot start";
+         end if;
+         Is_Running := True;
+      end Mark_Running;
 
       procedure Request_Stop is
       begin
@@ -288,9 +295,7 @@ package body Flyology.Worker_Pools is
          end;
 
          begin
-            if Item.State.Read_Snapshot.Running then
-               Item.State.Abandon_Run;
-            end if;
+            Item.State.Abandon_Run;
          exception
             when others =>
                null;
@@ -312,8 +317,11 @@ package body Flyology.Worker_Pools is
          end;
       end Stop_After_Failure;
    begin
-      Item.State.Begin_Run (Item.Worker_Count);
+      --  Arm cleanup before publishing any lifecycle state. The guard's
+      --  finalization is abort-deferred, so an abort cannot leave a prepared
+      --  or running pool unterminated.
       Cleanup_Armed := True;
+      Item.State.Begin_Run (Item.Worker_Count);
 
       declare
          task type Worker with CPU => Worker_CPU is
@@ -392,6 +400,10 @@ package body Flyology.Worker_Pools is
 
          Workers : array (1 .. Item.Worker_Count) of Worker;
       begin
+         --  Task activation completes before this first statement. Publish
+         --  Running only now, so a caller that observes it may safely abort
+         --  Run without unwinding across GNARL's activation lock.
+         Item.State.Mark_Running;
          for Index in Workers'Range loop
             Workers (Index).Start;
          end loop;

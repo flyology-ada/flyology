@@ -142,6 +142,7 @@ private
 
    protected type Lifecycle is
       procedure Begin_Run (Expected_Workers : Positive);
+      procedure Mark_Running;
       procedure Request_Stop;
       procedure Job_Started;
       procedure Job_Completed (Cancelled, Failed : Boolean);
