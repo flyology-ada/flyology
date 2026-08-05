@@ -2,13 +2,72 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-build_root=${FLYOLOGY_RTS_DIR:-"$project_root/build/rts"}
-case "$build_root" in
+requested_build_root=${FLYOLOGY_RTS_DIR:-"$project_root/build/rts"}
+case "$requested_build_root" in
   /*) ;;
-  *) build_root="$(pwd)/$build_root" ;;
+  *) requested_build_root="$(pwd)/$requested_build_root" ;;
 esac
-mkdir -p "$build_root"
-build_root=$(CDPATH= cd -- "$build_root" && pwd -P)
+case "$requested_build_root" in
+  /)
+    printf '%s\n' "FLYOLOGY_RTS_DIR must name a dedicated runtime directory" >&2
+    exit 1
+    ;;
+esac
+if [ -d "$requested_build_root" ]; then
+  requested_build_root=$(CDPATH= cd -- "$requested_build_root" && pwd -P)
+fi
+
+build_parent=$(dirname -- "$requested_build_root")
+build_name=$(basename -- "$requested_build_root")
+case "$build_name" in
+  ''|.|..)
+    printf '%s\n' "FLYOLOGY_RTS_DIR must name a dedicated runtime directory" >&2
+    exit 1
+    ;;
+esac
+mkdir -p "$build_parent"
+build_parent=$(CDPATH= cd -- "$build_parent" && pwd -P)
+destination_root="$build_parent/$build_name"
+if [ -e "$destination_root" ] && [ ! -d "$destination_root" ]; then
+  printf '%s\n' "FLYOLOGY_RTS_DIR is not a directory: $destination_root" >&2
+  exit 1
+fi
+
+#  Assemble a complete runtime beside its destination. Publishing only the
+#  finished tree prevents files from an older compiler or configuration from
+#  surviving a rebuild and leaves the previous tree usable if assembly fails.
+build_root=$(mktemp -d "$build_parent/.${build_name}.flyology-build.XXXXXX")
+backup_root=
+replacement_state=building
+cleanup_build () {
+  status=$?
+  trap - EXIT
+
+  case "$replacement_state" in
+    displaced|installing)
+      if [ "$replacement_state" = installing ] && [ -e "$destination_root" ]; then
+        rm -rf -- "$destination_root"
+      fi
+      if [ -n "$backup_root" ] && [ -e "$backup_root" ]; then
+        mv "$backup_root" "$destination_root"
+        backup_root=
+      fi
+      ;;
+  esac
+
+  if [ -n "$backup_root" ] && [ -e "$backup_root" ]; then
+    rm -rf -- "$backup_root"
+  fi
+  if [ -n "$build_root" ] && [ -e "$build_root" ]; then
+    rm -rf -- "$build_root"
+  fi
+  exit "$status"
+}
+trap cleanup_build EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 generated_include="$build_root/adainclude"
 generated_lib="$build_root/adalib"
 alr=$("$project_root/scripts/find-alr.sh")
@@ -389,4 +448,19 @@ if [ "$platform" = linux ]; then
 fi
 ranlib "$generated_lib/libgnarl.a"
 
-printf '%s\n' "$build_root"
+if [ -e "$destination_root" ]; then
+  backup_root=$(mktemp -d "$build_parent/.${build_name}.flyology-old.XXXXXX")
+  rmdir "$backup_root"
+  mv "$destination_root" "$backup_root"
+  replacement_state=displaced
+fi
+replacement_state=installing
+mv "$build_root" "$destination_root"
+build_root=
+replacement_state=published
+if [ -n "$backup_root" ]; then
+  rm -rf -- "$backup_root"
+  backup_root=
+fi
+
+printf '%s\n' "$destination_root"
