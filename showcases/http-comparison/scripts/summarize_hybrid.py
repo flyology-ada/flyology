@@ -321,7 +321,7 @@ with (root / "summary.md").open("w") as output:
     if stats_groups:
         output.write("\n## Executor admission and lifecycle\n\n")
         output.write(
-            "Counts are summed across all seven server instances for a "
+            "Counts are summed across the recorded server instances for a "
             "configuration; peak is the maximum outstanding operation count.\n\n"
         )
         output.write(
