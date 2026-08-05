@@ -126,7 +126,7 @@ Flyology.IO.Sockets.Receive
             <p class="eyebrow">Programming model</p>
             <h2 id="lanes-title">Native and lightweight tasks share Ada semantics.</h2>
           </div>
-          <p>An undesignated task stays native. Lightweight execution is explicit, captured at task creation, and integrated below GNARL task semantics.</p>
+          <p>An undesignated task stays native. Lightweight execution is explicit, captured at task creation, and integrated within GNARL without replacing Ada task semantics.</p>
         </div>
 
         <div class="lane-stage">
@@ -167,7 +167,7 @@ Flyology.IO.Sockets.Receive
         <div class="mechanics-copy">
           <p class="eyebrow">Runtime architecture</p>
           <h2 id="mechanics-title">Each part has a separate responsibility.</h2>
-          <p>The poller reports readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack. GNARL continues to provide Ada task semantics.</p>
+          <p>The poller reports readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack. GNARL continues to implement Ada task semantics.</p>
           <a href="architecture/">Read the architecture guide</a>
         </div>
         <ol class="mechanic-list">
@@ -185,7 +185,7 @@ Flyology.IO.Sockets.Receive
           </li>
           <li class="mechanic-item">
             <span class="mechanic-index">04</span>
-            <div><h3>GNARL semantics</h3><p>Rendezvous, protected objects, activation, masters, abort, and task identity remain within the existing runtime rather than a parallel async language.</p></div>
+            <div><h3>Ada task semantics</h3><p>GNARL continues to implement Ada's rules for rendezvous, protected objects, activation, masters, abort, and task identity; Flyology does not define a parallel async language.</p></div>
           </li>
         </ol>
       </section>
