@@ -28,6 +28,9 @@ package body Flyology.IO.Timers is
         ;
       After  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+      Flyology.Wall_Clock_Testing.Note_Sample;
+#end if;
       return
         (Wall   => Wall,
          Steady => Before + (After - Before) / 2);
