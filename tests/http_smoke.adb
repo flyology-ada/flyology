@@ -888,6 +888,14 @@ procedure HTTP_Smoke is
            (Accepted, "server_max_window_bits=15") /= 0);
       pragma Assert
         (Ada.Strings.Fixed.Index
+           (Upgrade ("permessage-deflate; server_max_window_bits=""15"""),
+            "server_max_window_bits=15") /= 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index
+           (Upgrade ("permessage-deflate; server_max_window_bits=""1\5"""),
+            "server_max_window_bits=15") /= 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index
            (Upgrade ("permessage-deflate; server_max_window_bits=8"),
             "Sec-WebSocket-Extensions:") = 0);
       pragma Assert
@@ -914,6 +922,14 @@ procedure HTTP_Smoke is
         & Character'Val (16#20#) & Character'Val (16#B6#)
         & Character'Val (16#FD#) & Character'Val (16#A5#)
         & Character'Val (16#4E#) & Character'Val (16#00#);
+      --  Literal and distance alphabets each have one length-1 symbol.
+      Single_Symbol_Trees : constant String :=
+        Character'Val (16#04#) & Character'Val (16#C0#)
+        & Character'Val (16#81#) & Character'Val (16#08#)
+        & Character'Val (16#00#) & Character'Val (16#00#)
+        & Character'Val (16#00#) & Character'Val (16#00#)
+        & Character'Val (16#20#) & Character'Val (16#7F#)
+        & Character'Val (16#EB#) & Character'Val (16#07#);
       --  The same empty distance tree followed by length symbol 257.
       Missing_Distance : constant String :=
         Character'Val (16#0C#) & Character'Val (16#C0#)
@@ -923,6 +939,28 @@ procedure HTTP_Smoke is
         & Character'Val (16#A0#) & Character'Val (16#6D#)
         & Character'Val (16#FE#) & Character'Val (16#3F#)
         & Character'Val (16#55#) & Character'Val (16#18#);
+      --  Code-length alphabet has two length-2 symbols and is incomplete.
+      Incomplete_Code_Length_Tree : constant String :=
+        Character'Val (16#04#) & Character'Val (16#00#)
+        & Character'Val (16#00#) & Character'Val (16#09#);
+      --  Literal alphabet has two length-2 symbols and is incomplete.
+      Incomplete_Literal_Tree : constant String :=
+        Character'Val (16#04#) & Character'Val (16#C0#)
+        & Character'Val (16#01#) & Character'Val (16#09#)
+        & Character'Val (16#00#) & Character'Val (16#00#)
+        & Character'Val (16#00#) & Character'Val (16#80#)
+        & Character'Val (16#A0#) & Character'Val (16#6D#)
+        & Character'Val (16#FD#) & Character'Val (16#3F#)
+        & Character'Val (16#95#) & Character'Val (16#00#);
+      --  Distance alphabet has two length-2 symbols and is incomplete.
+      Incomplete_Distance_Tree : constant String :=
+        Character'Val (16#04#) & Character'Val (16#C1#)
+        & Character'Val (16#01#) & Character'Val (16#09#)
+        & Character'Val (16#00#) & Character'Val (16#00#)
+        & Character'Val (16#00#) & Character'Val (16#80#)
+        & Character'Val (16#A0#) & Character'Val (16#6D#)
+        & Character'Val (16#FE#) & Character'Val (16#3F#)
+        & Character'Val (16#65#) & Character'Val (16#01#);
 
       function Frame (Data : String) return String is
          Mask   : constant String := "mask";
@@ -955,31 +993,35 @@ procedure HTTP_Smoke is
          & "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
          & CRLF & CRLF);
 
-      Wire : aliased Memory_Transport;
-   begin
-      Wire.Input := To_Unbounded_String (Request_Head & Frame (All_Literal));
-      declare
-         Client  : HTTP_Server.Connection (Wire'Access);
-         Request : HTTP_Server.Request;
-         Message : Bytes.Unbounded_Bytes;
-         Kind    : HTTP_Server.WebSocket_Data_Kind;
-         Closed  : Boolean;
+      procedure Assert_Accepted (Payload : String; Expected : String) is
+         Good_Wire : aliased Memory_Transport;
       begin
-         HTTP_Server.Read_Request (Client, Request, Closed);
-         HTTP_Server.Accept_WebSocket
-           (Client, Request, Compression => HTTP_Server.Permessage_Deflate);
-         HTTP_Server.Receive_WebSocket (Client, Kind, Message, Closed);
-         pragma Assert (not Closed);
-         pragma Assert (Kind = HTTP_Server.Binary_Frame);
-         pragma Assert (Bytes.To_Byte_String (Message) = "A");
-      end;
+         Good_Wire.Input := To_Unbounded_String
+           (Request_Head & Frame (Payload));
+         declare
+            Client  : HTTP_Server.Connection (Good_Wire'Access);
+            Request : HTTP_Server.Request;
+            Message : Bytes.Unbounded_Bytes;
+            Kind    : HTTP_Server.WebSocket_Data_Kind;
+            Closed  : Boolean;
+         begin
+            HTTP_Server.Read_Request (Client, Request, Closed);
+            HTTP_Server.Accept_WebSocket
+              (Client, Request,
+               Compression => HTTP_Server.Permessage_Deflate);
+            HTTP_Server.Receive_WebSocket (Client, Kind, Message, Closed);
+            pragma Assert (not Closed);
+            pragma Assert (Kind = HTTP_Server.Binary_Frame);
+            pragma Assert (Bytes.To_Byte_String (Message) = Expected);
+         end;
+      end Assert_Accepted;
 
-      declare
+      procedure Assert_Rejected (Payload : String) is
          Rejected : Boolean := False;
          Bad_Wire : aliased Memory_Transport;
       begin
          Bad_Wire.Input := To_Unbounded_String
-           (Request_Head & Frame (Missing_Distance));
+           (Request_Head & Frame (Payload));
          declare
             Client  : HTTP_Server.Connection (Bad_Wire'Access);
             Request : HTTP_Server.Request;
@@ -1005,7 +1047,15 @@ procedure HTTP_Smoke is
               (To_String (Bad_Wire.Output),
                Character'Val (16#88#) & Character'Val (2)
                & Character'Val (3) & Character'Val (16#EF#)) /= 0);
-      end;
+      end Assert_Rejected;
+
+   begin
+      Assert_Accepted (All_Literal, "A");
+      Assert_Accepted (Single_Symbol_Trees, "");
+      Assert_Rejected (Missing_Distance);
+      Assert_Rejected (Incomplete_Code_Length_Tree);
+      Assert_Rejected (Incomplete_Literal_Tree);
+      Assert_Rejected (Incomplete_Distance_Tree);
    end Check_WebSocket_Deflate_Empty_Distance_Tree;
 
    procedure Check_WebSocket_Deflate_Reduction is

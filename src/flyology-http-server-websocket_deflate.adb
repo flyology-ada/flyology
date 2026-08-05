@@ -16,6 +16,8 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
      (Ada.Streams.Stream_Element_Array, Byte_Array_Access);
 
    type Code_Length_Array is array (Natural range <>) of Natural;
+   type Huffman_Tree_Class is
+     (Code_Length_Codes, Literal_Length_Codes, Distance_Codes);
    type Branch_Array is array (Natural range 0 .. 1) of Natural;
    type Huffman_Node is record
       Branch : Branch_Array := (others => 0);
@@ -30,6 +32,7 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
 
    procedure Build_Tree
      (Lengths : Code_Length_Array;
+      Class   : Huffman_Tree_Class;
       Tree    : out Huffman_Tree)
    is
       Counts : array (Natural range 0 .. Max_Code_Bits) of Natural :=
@@ -38,6 +41,7 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
         (others => 0);
       Code : Natural := 0;
       Left : Integer := 1;
+      Maximum_Length : Natural := 0;
    begin
       Tree.Nodes := (others => (Branch => (others => 0), Symbol => -1));
       Tree.Last := 1;
@@ -46,6 +50,7 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
             raise Invalid_Data with "DEFLATE code length exceeds 15 bits";
          end if;
          Counts (Length) := Counts (Length) + 1;
+         Maximum_Length := Natural'Max (Maximum_Length, Length);
       end loop;
       if Counts (0) = Lengths'Length then
          raise Invalid_Data with "empty DEFLATE Huffman tree";
@@ -58,6 +63,14 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
          Code := (Code + Counts (Bits - 1)) * 2;
          Next_Code (Bits) := Code;
       end loop;
+      --  Code-length trees must be complete.  Data trees retain the RFC 1951
+      --  exception for one symbol encoded with one bit.
+      if Left > 0
+        and then
+          (Class = Code_Length_Codes or else Maximum_Length /= 1)
+      then
+         raise Invalid_Data with "incomplete DEFLATE Huffman tree";
+      end if;
 
       for Symbol in Lengths'Range loop
          declare
@@ -266,9 +279,10 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
             7, 7, 8, 8, 9, 9, 10, 10,
             11, 11, 12, 12, 13, 13);
       begin
-         Build_Tree (Literal_Lengths, Literal_Tree);
+         Build_Tree
+           (Literal_Lengths, Literal_Length_Codes, Literal_Tree);
          if not No_Distance_Codes then
-            Build_Tree (Distance_Lengths, Distance_Tree);
+            Build_Tree (Distance_Lengths, Distance_Codes, Distance_Tree);
          end if;
          loop
             declare
@@ -333,7 +347,7 @@ package body Flyology.HTTP.Server.WebSocket_Deflate is
          for Position in 0 .. Code_Count - 1 loop
             Code_Lengths (Code_Order (Position)) := Read_Bits (3);
          end loop;
-         Build_Tree (Code_Lengths, Code_Tree);
+         Build_Tree (Code_Lengths, Code_Length_Codes, Code_Tree);
          while Index < All_Lengths'Length loop
             declare
                Symbol : constant Natural := Decode (Code_Tree);

@@ -2429,10 +2429,51 @@ package body Flyology.HTTP.Server is
            and then Item (Item'First) = '"'
            and then Item (Item'Last) = '"'
          then
-            Valid := True;
-            return Item (Item'First + 1 .. Item'Last - 1);
+            declare
+               Result  : Unbounded_String;
+               Escaped : Boolean := False;
+            begin
+               for Index in Item'First + 1 .. Item'Last - 1 loop
+                  declare
+                     Value : constant Character := Item (Index);
+                  begin
+                     if Escaped then
+                        Append (Result, Value);
+                        Escaped := False;
+                     elsif Value = '\' then
+                        Escaped := True;
+                     elsif Value = '"'
+                       or else Character'Pos (Value) < 32
+                       or else Character'Pos (Value) = 127
+                     then
+                        Valid := False;
+                        return "";
+                     else
+                        Append (Result, Value);
+                     end if;
+                  end;
+               end loop;
+               Valid := not Escaped and then Length (Result) > 0;
+               if Valid then
+                  for Value of To_String (Result) loop
+                     if not Is_Token_Character (Value) then
+                        Valid := False;
+                        exit;
+                     end if;
+                  end loop;
+               end if;
+               return To_String (Result);
+            end;
          end if;
          Valid := Item'Length > 0;
+         if Valid then
+            for Value of Item loop
+               if not Is_Token_Character (Value) then
+                  Valid := False;
+                  exit;
+               end if;
+            end loop;
+         end if;
          return Item;
       end Parameter_Value;
 
