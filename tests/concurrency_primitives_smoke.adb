@@ -13,7 +13,7 @@ with Worker_Pool_Test_Control;
 procedure Concurrency_Primitives_Smoke is
    use type Interfaces.Unsigned_64;
 
-   package Integer_Channels is new Flyology.Channels.Bounded (Integer);
+   package Integer_Channels is new Flyology.Channels.Bounded (Integer, 0);
 
    protected Active_Native_Work is
       procedure Reset;
@@ -584,6 +584,7 @@ procedure Concurrency_Primitives_Smoke is
 
       package Pools is new Flyology.Worker_Pools
         (Job_Type       => Integer,
+         Empty_Job      => 0,
          Worker_Context => Totals,
          Process        => Process,
          Worker_Model   => Model,

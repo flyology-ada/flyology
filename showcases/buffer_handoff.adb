@@ -16,7 +16,7 @@ procedure Buffer_Handoff is
    package RT renames Ada.Real_Time;
 
    package Value_Channels is new Flyology.Channels.Bounded
-     (Flyology.Bytes.Unbounded_Bytes);
+     (Flyology.Bytes.Unbounded_Bytes, Flyology.Bytes.Empty);
    package Buffer_Channels renames Flyology.Buffers.Channels;
    package Groups renames Flyology.Execution_Groups;
    package Topology renames Flyology.Execution_Groups.Topology;

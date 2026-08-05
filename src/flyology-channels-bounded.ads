@@ -4,10 +4,22 @@
 --  Multiple producers and consumers may call it concurrently. Blocking uses
 --  protected entries, preserving the same synchronous API for lightweight and
 --  native tasks.
+--
+--  Element assignment and finalization execute as part of channel protected
+--  operations. Element_Type operations must therefore not block, reenter the
+--  same Channel, or propagate exceptions. If a prohibited finalization raises
+--  after delivery, the dequeue remains committed and the value cannot be
+--  delivered again.
 --  @formal Element_Type Definite value transferred by copy through the channel
+--  @formal Empty_Value Resource-empty value copied into unoccupied slots
 generic
    --  Definite value transferred by copy through the channel.
    type Element_Type is private;
+
+   --  Resource-empty value used to initialize storage and clear each slot
+   --  immediately after delivery. Copying and finalizing this value must obey
+   --  the Element_Type protected-operation requirements above.
+   Empty_Value : Element_Type;
 package Flyology.Channels.Bounded is
 
    --  Raised when Send observes a closed channel, or Receive observes a closed
@@ -86,7 +98,8 @@ package Flyology.Channels.Bounded is
       --  @return Current close, buffer, and waiter counts
       function Current return Snapshot;
    private
-      Buffer : Element_Array (1 .. Capacity);  --  Circular FIFO storage
+      Buffer : Element_Array (1 .. Capacity) :=
+        (others => Empty_Value);  --  Circular FIFO storage
       Head   : Positive := 1;  --  Next element to receive
       Tail   : Positive := 1;  --  Next slot to send into
       Count  : Natural := 0;  --  Occupied slots

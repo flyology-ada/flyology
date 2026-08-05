@@ -9,6 +9,7 @@ with System.Multiprocessors;
 --  concurrently with Run. Request_Shutdown closes admission, requests the
 --  shared stopping token, and drains jobs accepted before closure.
 --  @formal Job_Type Definite value transferred by copy to one worker
+--  @formal Empty_Job Resource-empty value used for unoccupied queue slots
 --  @formal Worker_Context Shared callback state with caller-defined safety
 --  @formal Process Per-job callback invoked by a worker task
 --  @formal Worker_Model Fixed lightweight or native worker designation
@@ -16,6 +17,11 @@ with System.Multiprocessors;
 generic
    --  Definite value transferred by copy to one worker.
    type Job_Type is private;
+
+   --  Resource-empty value used to clear jobs from the internal bounded FIFO.
+   --  Its assignment and finalization must not block, reenter the same pool,
+   --  or propagate exceptions.
+   Empty_Job : Job_Type;
 
    --  State shared by concurrent Process calls. Mutable state must provide
    --  its own synchronization.
@@ -138,7 +144,9 @@ package Flyology.Worker_Pools is
    function First_Failure_Information (Item : Pool) return String;
 
 private
-   package Job_Channels is new Flyology.Channels.Bounded (Job_Type);
+   package Job_Channels is new Flyology.Channels.Bounded
+     (Element_Type => Job_Type,
+      Empty_Value  => Empty_Job);
 
    protected type Lifecycle is
       procedure Begin_Run (Expected_Workers : Positive);

@@ -24,12 +24,19 @@ package body Flyology.Channels.Bounded is
       entry Receive (Value : out Element_Type)
         when Policy.Receive_Entry_Open (Stopped, Count)
       is
+         Position : Positive;
       begin
          case Policy.Classify_Receive (Stopped, Count) is
             when Policy.Accept_Receive =>
-               Value := Buffer (Head);
+               Position := Head;
+               Value := Buffer (Position);
                Head := Policy.Advance (Head, Capacity);
                Count := Policy.Count_After_Receive (Count);
+               --  Commit logical removal before clearing controlled storage.
+               --  Element operations are required not to raise, but this
+               --  ordering prevents a violating finalizer from making the
+               --  already-copied item deliverable twice.
+               Buffer (Position) := Empty_Value;
             when Policy.Reject_Receive =>
                raise Channel_Closed with "receive from drained channel";
             when Policy.Wait_To_Receive =>
@@ -60,12 +67,15 @@ package body Flyology.Channels.Bounded is
         (Value  : in out Element_Type;
          Result : out Try_Receive_Result)
       is
+         Position : Positive;
       begin
          case Policy.Classify_Receive (Stopped, Count) is
             when Policy.Accept_Receive =>
-               Value := Buffer (Head);
+               Position := Head;
+               Value := Buffer (Position);
                Head := Policy.Advance (Head, Capacity);
                Count := Policy.Count_After_Receive (Count);
+               Buffer (Position) := Empty_Value;
                Result := Item_Received;
             when Policy.Wait_To_Receive =>
                Result := Channel_Empty;

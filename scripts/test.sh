@@ -273,6 +273,8 @@ fi
 
 ordinary_mains='cancellation_wake_smoke
 buffers_smoke
+channel_reentrancy_child
+channel_retention_smoke
 connection_admission_smoke
 connection_lifecycle_smoke
 connection_state_model
@@ -457,6 +459,12 @@ for test_main in $ordinary_mains; do
       ;;
   esac
   case "$test_main" in
+    channel_reentrancy_child)
+      for model in lightweight native; do
+        "$project_root/scripts/expect-blocked.sh" 1 \
+          "$current_test_bin/$test_main" "$model"
+      done
+      ;;
     dns_smoke)
       "$project_root/scripts/run-with-timeout.sh" 20 \
         "$current_test_bin/$test_main"

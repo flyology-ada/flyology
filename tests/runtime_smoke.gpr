@@ -48,6 +48,8 @@ project Runtime_Smoke is
      ("accept_transient_smoke.adb",
       "buffers_smoke.adb",
       "cancellation_wake_smoke.adb",
+      "channel_reentrancy_child.adb",
+      "channel_retention_smoke.adb",
       "connection_admission_smoke.adb",
       "connection_lifecycle_smoke.adb",
       "connection_state_model.adb",

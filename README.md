@@ -591,15 +591,23 @@ source-compatible subtype of this general gate, so connection admission and
 application capacity control share the same implementation. The caller remains
 responsible for pairing every successful acquisition with `Release`.
 
-`Flyology.Channels.Bounded` is generic over a definite element type. Each
-channel is a fixed-storage MPMC FIFO with blocking and nonblocking operations,
-relative-deadline wrappers, current-state snapshots, and terminal close-and-
-drain behavior. Closing rejects queued and later senders but preserves FIFO
-delivery of values already accepted. The channel owns no task and performs no
-allocation after elaboration.
+`Flyology.Channels.Bounded` is generic over a definite element type and a
+resource-empty value for unoccupied slots. Each channel is a fixed-storage MPMC
+FIFO with blocking and nonblocking operations, relative-deadline wrappers,
+current-state snapshots, and terminal close-and-drain behavior. Closing rejects
+queued and later senders but preserves FIFO delivery of values already
+accepted. The channel owns no task and performs no allocation after
+elaboration. A dequeue clears its occupied slot immediately, so controlled
+components and reference-bearing values are not retained until a later send
+reuses the slot. Element assignment and finalization run under the channel's
+protected lock and must not block, reenter the same channel, or propagate an
+exception. Dequeue state is committed before slot clearing, so a raising
+finalizer cannot make an already copied value available a second time.
 
 ```ada
-package Jobs is new Flyology.Channels.Bounded (Job);
+package Jobs is new Flyology.Channels.Bounded
+  (Element_Type => Job,
+   Empty_Value  => Empty_Job);
 
 Queue : Jobs.Channel (Capacity => 256);
 
@@ -609,13 +617,14 @@ Queue.Await_Drained;
 ```
 
 `Flyology.Worker_Pools` builds a one-shot structured worker scope on that
-channel. Its generic parameters fix the worker callback, lightweight/native
-designation, and CPU or execution-group selection. `Run` creates exactly the
-configured worker count and does not return until shutdown closes the queue,
-accepted jobs drain, and every dependent task joins. Callback failures close
-admission, request the shared cancellation token, retain the first exception,
-and are reported as `Pool_Failed` after the workers join. The shared context
-must provide its own synchronization when workers can execute concurrently.
+channel. Its generic parameters provide a resource-empty job value and fix the
+worker callback, lightweight/native designation, and CPU or execution-group
+selection. `Run` creates exactly the configured worker count and does not return
+until shutdown closes the queue, accepted jobs drain, and every dependent task
+joins. Callback failures close admission, request the shared cancellation
+token, retain the first exception, and are reported as `Pool_Failed` after the
+workers join. The shared context must provide its own synchronization when
+workers can execute concurrently.
 
 `Flyology.Cancellation.Token.Await_Request` provides a protected-entry wait for
 task-only coordination. Descriptor-backed wakeup remains available through
