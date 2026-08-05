@@ -1702,7 +1702,7 @@ package body Flyology.HTTP.Server is
 
    function Hex (Value : Natural) return String is
       Hex_Digits : constant String := "0123456789ABCDEF";
-      Buffer : String (1 .. 2 * Natural'Size / 8);
+      Buffer : String (1 .. (Natural'Size + 3) / 4);
       Cursor : Natural := Buffer'Last;
       Rest   : Natural := Value;
    begin
