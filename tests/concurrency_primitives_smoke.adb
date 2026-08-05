@@ -328,6 +328,73 @@ procedure Concurrency_Primitives_Smoke is
       Native_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Abandon_Failure;
 
+   procedure Exercise_Native_Executor_Shutdown_Failure is
+      Item     : aliased Native_Executors.Executor
+        (Workers => 1, Capacity => 1);
+      Handle   : Native_Executors.Operation_Handle (Item'Access);
+      Accepted : Boolean;
+      Failed   : Boolean := False;
+      Result   : Integer;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Start (Item);
+      Native_Executors.Submit
+        (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+      pragma Assert (Accepted);
+      for Attempt in 1 .. 100 loop
+         exit when
+           Native_Executors.Statistics (Item).Successful_Executions = 1;
+         delay 0.001;
+      end loop;
+      pragma Assert
+        (Native_Executors.Statistics (Item).Successful_Executions = 1);
+
+      Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
+      begin
+         Native_Executors.Shutdown (Item);
+      exception
+         when Program_Error => Failed := True;
+      end;
+      pragma Assert (Failed);
+      Worker_Pool_Test_Control.Reset;
+
+      --  The failing owner still publishes terminal completion, so this
+      --  idempotent call must return rather than waiting forever.
+      Native_Executors.Shutdown (Item);
+      Native_Executors.Await (Item, Handle, Result);
+      pragma Assert (Result = 8);
+      pragma Assert
+        (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+   end Exercise_Native_Executor_Shutdown_Failure;
+
+   procedure Exercise_Native_Executor_Shutdown_Abort is
+      Item : aliased Native_Executors.Executor
+        (Workers => 1, Capacity => 1);
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Start (Item);
+      Worker_Pool_Test_Control.Arm_Shutdown_Barrier;
+      declare
+         task Stopper is
+            pragma Task_Info (Flyology.Native_Task);
+         end Stopper;
+
+         task body Stopper is
+         begin
+            Native_Executors.Shutdown (Item);
+         end Stopper;
+      begin
+         Worker_Pool_Test_Control.Wait_Shutdown_Barrier;
+         abort Stopper;
+         Worker_Pool_Test_Control.Release_Shutdown_Barrier;
+      end;
+      Worker_Pool_Test_Control.Reset;
+
+      --  Abort-deferred cleanup joins and releases the pool, then publishes
+      --  completion so an idempotent caller does not wait on the lost owner.
+      Native_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Shutdown_Abort;
+
    protected type Totals is
       procedure Add (Value : Integer);
       function Count return Natural;
@@ -609,6 +676,8 @@ procedure Concurrency_Primitives_Smoke is
 begin
    Exercise_Channel;
    Exercise_Native_Executor_Abandon_Failure;
+   Exercise_Native_Executor_Shutdown_Failure;
+   Exercise_Native_Executor_Shutdown_Abort;
    Exercise_Lightweight_Waits;
    Exercise_Native_Waits;
    Exercise_Lightweight_Pool;

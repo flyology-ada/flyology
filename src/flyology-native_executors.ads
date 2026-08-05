@@ -189,7 +189,8 @@ private
          Generation : Generation_Number);
       --  Elect one cleanup owner; later callers wait for Complete_Shutdown.
       procedure Begin_Shutdown (Owner : out Boolean);
-      procedure Request_Cancellation;
+      procedure Signal_Shutdown_Completion (Slot : Positive);
+      procedure Request_Cancellation (Slot : Positive);
       procedure Set_Expected_Workers (Count : Natural);
       procedure Worker_Stopped;
       entry Await_Stopped;

@@ -21,6 +21,23 @@ package body Flyology.Native_Executors is
           Convention => C,
           External_Name =>
             "flyology_test_worker_native_executor_cancellation_failure";
+   function Test_Shutdown_Barrier_Arrive return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_shutdown_barrier_arrive";
+   function Test_Shutdown_Barrier_Released return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_shutdown_barrier_released";
+
+   procedure Test_Shutdown_Barrier is
+   begin
+      if Test_Shutdown_Barrier_Arrive /= 0 then
+         while Test_Shutdown_Barrier_Released = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Shutdown_Barrier;
 #end if;
 
    procedure Request_Owned_Token (Token : Token_Access) is
@@ -288,23 +305,28 @@ package body Flyology.Native_Executors is
                   Status (Index) := Completed;
                   Error_Ids (Index) :=
                     Flyology.Cancellation.Operation_Cancelled'Identity;
-                  if Wake_Armed (Index) then
-                     Flyology.Wake_Sources.Signal (Wakes (Index));
-                     Wake_Pending (Index) := True;
-                  end if;
                end if;
             end if;
          end loop;
          Queue_Count := 0;
       end Begin_Shutdown;
 
-      procedure Request_Cancellation is
+      procedure Signal_Shutdown_Completion (Slot : Positive) is
       begin
-         for Index in Tokens'Range loop
-            if Tokens (Index) /= null then
-               Request_Owned_Token (Tokens (Index));
-            end if;
-         end loop;
+         if Status (Slot) = Completed
+           and then Wake_Armed (Slot)
+           and then not Wake_Pending (Slot)
+         then
+            Flyology.Wake_Sources.Signal (Wakes (Slot));
+            Wake_Pending (Slot) := True;
+         end if;
+      end Signal_Shutdown_Completion;
+
+      procedure Request_Cancellation (Slot : Positive) is
+      begin
+         if Tokens (Slot) /= null then
+            Request_Owned_Token (Tokens (Slot));
+         end if;
       end Request_Cancellation;
 
       procedure Set_Expected_Workers (Count : Natural) is
@@ -425,42 +447,135 @@ package body Flyology.Native_Executors is
    procedure Shutdown (Item : in out Executor) is
       procedure Free is new Ada.Unchecked_Deallocation
         (Worker_Array, Worker_Array_Access);
-      Owner : Boolean;
+      Owner          : Boolean := False;
+      Failed         : Boolean := False;
+      Workers_Joined : Boolean := False;
+      Cleanup_Done   : Boolean := False;
+      Primary_Error  : Ada.Exceptions.Exception_Occurrence;
+
+      procedure Record_Failure
+        (Error : Ada.Exceptions.Exception_Occurrence) is
+      begin
+         if not Failed then
+            Ada.Exceptions.Save_Occurrence (Primary_Error, Error);
+            Failed := True;
+         end if;
+      end Record_Failure;
+
+      procedure Perform_Cleanup is
+      begin
+         if Cleanup_Done then
+            return;
+         end if;
+         for Index in 1 .. Item.Capacity loop
+            begin
+               Item.State.Signal_Shutdown_Completion (Index);
+            exception
+               when Error : others =>
+                  Record_Failure (Error);
+            end;
+         end loop;
+         if Item.Started then
+            for Index in 1 .. Item.Capacity loop
+               begin
+                  Item.State.Request_Cancellation (Index);
+               exception
+                  when Error : others =>
+                     Record_Failure (Error);
+               end;
+            end loop;
+            if Item.Pool /= null then
+               for Index in Item.Activated_Workers + 1 .. Item.Workers loop
+                  begin
+                     Item.Pool (Index).Stop;
+                  exception
+                     when Tasking_Error => null;
+                  end;
+               end loop;
+            end if;
+            begin
+               Item.State.Set_Expected_Workers (Item.Activated_Workers);
+               Item.State.Await_Stopped;
+               Workers_Joined := True;
+            exception
+               when Error : others =>
+                  Record_Failure (Error);
+            end;
+            if Workers_Joined then
+               if Item.Pool /= null then
+                  begin
+                     Free (Item.Pool);
+                  exception
+                     when Error : others =>
+                        Record_Failure (Error);
+                  end;
+               end if;
+               for Index in 1 .. Item.Capacity loop
+                  declare
+                     Token : Token_Access := null;
+                  begin
+                     begin
+                        Item.State.Take_Token (Index, Token);
+                        if Token /= null then
+                           Free_Token (Token);
+                        end if;
+                     exception
+                        when Error : others =>
+                           Record_Failure (Error);
+                     end;
+                  end;
+               end loop;
+            end if;
+            --  Keep Started immutable once activation succeeds. Stopping is
+            --  the serialized admission gate, so concurrent Submit calls can
+            --  safely observe terminal rejection without racing a lifecycle
+            --  write.
+         end if;
+         Cleanup_Done := not Item.Started or else Workers_Joined;
+      end Perform_Cleanup;
+
+      type Completion_Guard is
+        new Ada.Finalization.Limited_Controlled with null record;
+
+      overriding procedure Finalize (Guard : in out Completion_Guard);
+
+      overriding procedure Finalize (Guard : in out Completion_Guard) is
+         pragma Unreferenced (Guard);
+      begin
+         if Owner then
+            --  Finalization is abort-deferred. Publish the terminal state on
+            --  normal return, exception propagation, or owner abort so later
+            --  idempotent Shutdown callers cannot remain queued forever.
+            if not Cleanup_Done then
+               begin
+                  Perform_Cleanup;
+               exception
+                  when others => null;
+               end;
+            end if;
+            begin
+               Item.State.Complete_Shutdown;
+            exception
+               when others => null;
+            end;
+         end if;
+      end Finalize;
+
+      Completion : Completion_Guard;
+      pragma Unreferenced (Completion);
    begin
       Item.State.Begin_Shutdown (Owner);
       if not Owner then
          Item.State.Await_Shutdown;
          return;
       end if;
-      if Item.Started then
-         Item.State.Request_Cancellation;
-         if Item.Pool /= null then
-            for Index in Item.Activated_Workers + 1 .. Item.Workers loop
-               begin
-                  Item.Pool (Index).Stop;
-               exception
-                  when Tasking_Error => null;
-               end;
-            end loop;
-         end if;
-         Item.State.Set_Expected_Workers (Item.Activated_Workers);
-         Item.State.Await_Stopped;
-         Free (Item.Pool);
-         for Index in 1 .. Item.Capacity loop
-            declare
-               Token : Token_Access;
-            begin
-               Item.State.Take_Token (Index, Token);
-               if Token /= null then
-                  Free_Token (Token);
-               end if;
-            end;
-         end loop;
-         --  Keep Started immutable once activation succeeds. Stopping is the
-         --  serialized admission gate, so concurrent Submit calls can safely
-         --  observe terminal rejection without racing a lifecycle write.
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+      Test_Shutdown_Barrier;
+#end if;
+      Perform_Cleanup;
+      if Failed then
+         Ada.Exceptions.Reraise_Occurrence (Primary_Error);
       end if;
-      Item.State.Complete_Shutdown;
    end Shutdown;
 
    overriding procedure Finalize (Item : in out Executor) is
