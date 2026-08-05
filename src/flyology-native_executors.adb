@@ -240,8 +240,13 @@ package body Flyology.Native_Executors is
          end if;
       end Abandon;
 
-      procedure Shutdown is
+      procedure Begin_Shutdown (Owner : out Boolean) is
       begin
+         if Stopping then
+            Owner := False;
+            return;
+         end if;
+         Owner := True;
          Stopping := True;
          for Index in Status'Range loop
             if Status (Index) = Queued then
@@ -264,12 +269,16 @@ package body Flyology.Native_Executors is
             end if;
          end loop;
          Queue_Count := 0;
-      end Shutdown;
+      end Begin_Shutdown;
 
-      procedure Token_At (Slot : Positive; Token : out Token_Access) is
+      procedure Request_Cancellation is
       begin
-         Token := Tokens (Slot);
-      end Token_At;
+         for Index in Tokens'Range loop
+            if Tokens (Index) /= null then
+               Tokens (Index).Request;
+            end if;
+         end loop;
+      end Request_Cancellation;
 
       procedure Set_Expected_Workers (Count : Natural) is
       begin
@@ -294,6 +303,18 @@ package body Flyology.Native_Executors is
          Token := Tokens (Slot);
          Tokens (Slot) := null;
       end Take_Token;
+
+      procedure Complete_Shutdown is
+      begin
+         Shutdown_Complete := True;
+      end Complete_Shutdown;
+
+      entry Await_Shutdown when Shutdown_Complete is
+      begin
+         null;
+      end Await_Shutdown;
+
+      function Shutdown_Started return Boolean is (Stopping);
 
       function Statistics return Executor_Statistics is (Counters);
    end Shared_State;
@@ -362,7 +383,7 @@ package body Flyology.Native_Executors is
 
    procedure Start (Item : aliased in out Executor) is
    begin
-      if Item.Shutdown_Complete then
+      if Item.State.Shutdown_Started then
          raise Program_Error with "native executor has been shut down";
       elsif not Item.Started then
          Item.Pool := new Worker_Array (1 .. Item.Workers);
@@ -377,23 +398,15 @@ package body Flyology.Native_Executors is
    procedure Shutdown (Item : in out Executor) is
       procedure Free is new Ada.Unchecked_Deallocation
         (Worker_Array, Worker_Array_Access);
+      Owner : Boolean;
    begin
-      if Item.Shutdown_Complete then
+      Item.State.Begin_Shutdown (Owner);
+      if not Owner then
+         Item.State.Await_Shutdown;
          return;
       end if;
-      Item.Shutdown_Complete := True;
-      Item.State.Shutdown;
       if Item.Started then
-         for Index in 1 .. Item.Capacity loop
-            declare
-               Token : Token_Access;
-            begin
-               Item.State.Token_At (Index, Token);
-               if Token /= null and then not Token.Requested then
-                  Token.Request;
-               end if;
-            end;
-         end loop;
+         Item.State.Request_Cancellation;
          if Item.Pool /= null then
             for Index in Item.Activated_Workers + 1 .. Item.Workers loop
                begin
@@ -416,9 +429,11 @@ package body Flyology.Native_Executors is
                end if;
             end;
          end loop;
-         Item.Started := False;
-         Item.Activated_Workers := 0;
+         --  Keep Started immutable once activation succeeds. Stopping is the
+         --  serialized admission gate, so concurrent Submit calls can safely
+         --  observe terminal rejection without racing a lifecycle write.
       end if;
+      Item.State.Complete_Shutdown;
    end Shutdown;
 
    overriding procedure Finalize (Item : in out Executor) is

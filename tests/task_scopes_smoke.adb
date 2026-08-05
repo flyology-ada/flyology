@@ -341,12 +341,70 @@ procedure Task_Scopes_Smoke is
       Accepted : Boolean;
       Value : Work_Result;
       Cancelled : Boolean := False;
+
+      type Atomic_Boolean is new Boolean with Atomic;
+      First_Failed  : aliased Atomic_Boolean := False;
+      Second_Failed : aliased Atomic_Boolean := False;
+
+      protected type Start_Gate is
+         procedure Arrive;
+         entry Wait;
+      private
+         Arrivals : Natural := 0;
+      end Start_Gate;
+
+      protected body Start_Gate is
+         procedure Arrive is
+         begin
+            Arrivals := Arrivals + 1;
+         end Arrive;
+
+         entry Wait when Arrivals = 2 is
+         begin
+            null;
+         end Wait;
+      end Start_Gate;
+
+      task type Shutdown_Caller
+        (Target : not null access Native_Executor.Executor;
+         Gate   : not null access Start_Gate;
+         Failed : not null access Atomic_Boolean)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Shutdown_Caller;
+
+      task body Shutdown_Caller is
+      begin
+         Gate.Arrive;
+         Gate.Wait;
+         begin
+            Native_Executor.Shutdown (Target.all);
+         exception
+            when others => Failed.all := True;
+         end;
+      end Shutdown_Caller;
    begin
       Native_Executor.Start (Item);
       Native_Executor.Submit
         (Item, 0, null, Ada.Real_Time.Time_Last, Waiting, Accepted);
       pragma Assert (Accepted);
-      Native_Executor.Shutdown (Item);
+      for Attempt in 1 .. 100 loop
+         exit when
+           Native_Executor.Statistics (Item).Running_Operations = 1;
+         delay 0.001;
+      end loop;
+      pragma Assert
+        (Native_Executor.Statistics (Item).Running_Operations = 1);
+      declare
+         Gate : aliased Start_Gate;
+         First : Shutdown_Caller
+           (Item'Access, Gate'Access, First_Failed'Access);
+         Second : Shutdown_Caller
+           (Item'Access, Gate'Access, Second_Failed'Access);
+      begin
+         null;
+      end;
+      pragma Assert (not First_Failed and not Second_Failed);
       begin
          Native_Executor.Await (Item, Waiting, Value);
       exception
@@ -355,6 +413,23 @@ procedure Task_Scopes_Smoke is
       end;
       pragma Assert (Cancelled);
       Native_Executor.Shutdown (Item);
+      declare
+         Rejected : Native_Executor.Operation_Handle (Item'Access);
+      begin
+         Native_Executor.Submit
+           (Item, 1, null, Ada.Real_Time.Time_Last, Rejected, Accepted);
+         pragma Assert (not Accepted);
+      end;
+      declare
+         Restart_Rejected : Boolean := False;
+      begin
+         begin
+            Native_Executor.Start (Item);
+         exception
+            when Program_Error => Restart_Rejected := True;
+         end;
+         pragma Assert (Restart_Rejected);
+      end;
    end Check_Native_Shutdown_With_Active_Work;
 
    procedure Check_Failure_Cancels_Sibling is

@@ -187,12 +187,16 @@ private
       procedure Abandon
         (Slot       : Positive;
          Generation : Generation_Number);
-      procedure Shutdown;
-      procedure Token_At (Slot : Positive; Token : out Token_Access);
+      --  Elect one cleanup owner; later callers wait for Complete_Shutdown.
+      procedure Begin_Shutdown (Owner : out Boolean);
+      procedure Request_Cancellation;
       procedure Set_Expected_Workers (Count : Natural);
       procedure Worker_Stopped;
       entry Await_Stopped;
       procedure Take_Token (Slot : Positive; Token : out Token_Access);
+      procedure Complete_Shutdown;
+      entry Await_Shutdown;
+      function Shutdown_Started return Boolean;
       function Statistics return Executor_Statistics;
    private
       Inputs      : Input_Array (1 .. Capacity);
@@ -217,6 +221,7 @@ private
       Stopped_Workers : Natural := 0;
       Expected_Workers : Natural := 0;
       Expected_Workers_Set : Boolean := False;
+      Shutdown_Complete : Boolean := False;
       Counters : Executor_Statistics;
    end Shared_State;
 
@@ -252,7 +257,6 @@ private
       State : aliased Shared_State (Capacity);
       Pool  : Worker_Array_Access;
       Started : Boolean := False;
-      Shutdown_Complete : Boolean := False;
       Activated_Workers : Natural := 0;
    end record;
 
