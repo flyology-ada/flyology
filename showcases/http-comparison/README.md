@@ -14,9 +14,9 @@ measurement. TLS is deliberately absent: it would primarily compare provider
 configuration and crypto rather than HTTP dispatch. The default workload uses
 persistent connections; optional connection churn is recorded separately.
 
-The Rust fixtures are an aspirational extension to the maintained harness; no
-Rust comparison result is published by this repository. hyper is kept in the
-plain tier because its project describes it as a low-level HTTP building block.
+The Rust fixtures are an aspirational extension to the maintained harness.
+hyper is kept in the plain tier because its project describes it as a low-level
+HTTP building block.
 axum and Actix Web stay in the application tier because both exercise framework
 routing before returning the body. The selected versions were current releases
 on 2026-08-04 according to the projects' release records and crates.io:
@@ -26,8 +26,10 @@ on 2026-08-04 according to the projects' release records and crates.io:
 Rust 1.97.1 is fixed by `rust-toolchain.toml`; direct dependencies use exact
 versions and `Cargo.lock` fixes the complete transitive graph.
 
-The website's August 2026 journal entries predate this extension and remain
-Ada-only historical snapshots. Do not read their tables as Rust comparisons.
+The first two August 2026 HTTP journal entries predate this extension and are
+superseded because their builds linked one event loop while reporting 16. The
+[corrected follow-up](https://flyology.org/journal/2026-08-http-comparison-correction/)
+publishes tier-separated aggregate results from the verified harness.
 
 ## Reproduce it in Docker
 

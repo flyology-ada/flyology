@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="A short, reproducible Linux/AArch64 Docker comparison of Flyology, AWS, EWS, and ServletAda HTTP server fixtures, with resource costs and limits.">
+    <meta name="description" content="Superseded: this historical HTTP comparison linked one Flyology event loop while reporting 16. Use the corrected follow-up for current evidence.">
     <meta name="theme-color" content="#17213d">
-    <title>A preliminary Ada HTTP server comparison · Flyology Journal</title>
+    <title>Superseded: A preliminary Ada HTTP server comparison · Flyology Journal</title>
     <link rel="canonical" href="https://flyology.org/journal/2026-08-http-comparison/">
     <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../../assets/styles/site.css">
@@ -55,7 +55,7 @@
           <h1>A preliminary Ada HTTP server comparison.</h1>
         </div>
         <div>
-          <p class="article-summary">Flyology lightweight led the tested AWS and EWS fixtures in three short Docker trials. That is encouraging. The environment, workload, and resource tradeoffs are part of the result.</p>
+          <p class="article-summary">Superseded: the benchmark linked one Flyology event loop while reporting 16 and did not verify every server thread's CPU affinity. The measurements remain only as a historical record.</p>
           <dl class="article-meta">
             <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
             <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/48fdb2365977e6f30a8db3cfb59df886367c8e66/showcases/http-comparison">48fdb23</a></dd></div>
@@ -84,8 +84,8 @@
         <article class="prose">
           <section id="boundary">
             <div class="snapshot-boundary">
-              <strong>Development snapshot</strong>
-              <p>This is a short loopback campaign inside Docker under OrbStack on an Apple M3 Max MacBook Pro. It is useful evidence about these exact fixtures on this host, not a general ranking of Ada web servers.</p>
+              <strong>Superseded measurement</strong>
+              <p>A later linked-runtime check found that this campaign used one Flyology event loop while its metadata reported 16, and it did not verify every server thread's CPU affinity. Keep the files as a historical record, but do not use these tables as current performance evidence. See the <a href="../2026-08-http-comparison-correction/">corrected comparison</a>.</p>
             </div>
             <p>A <a href="../2026-08-http-comparison-follow-up/">longer Linux follow-up</a> now records seven 30-second trials on ARM64 and AMD64, and explains why its common comparison stops at concurrency one.</p>
             <p>The physical host was a MacBook Pro (Mac15,9) with an Apple M3 Max, 16 CPU cores (12 performance and 4 efficiency), and 48 GB of memory. The container exposed all 16 cores; server and client processes used separate CPU sets.</p>

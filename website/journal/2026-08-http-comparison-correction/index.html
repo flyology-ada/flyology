@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A verified 16-loop Flyology HTTP campaign corrects two earlier snapshots and adds pinned hyper, axum, and Actix Web reference fixtures on local ARM64 and shared ARM64/AMD64 Linux hosts.">
+    <meta name="theme-color" content="#17213d">
+    <title>A corrected HTTP harness changes the comparison · Flyology Journal</title>
+    <link rel="canonical" href="https://flyology.org/journal/2026-08-http-comparison-correction/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../../guide/">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../" aria-current="page">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="article-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Journal</a></li><li aria-current="page">HTTP correction</li></ol>
+          <h1>A corrected HTTP harness changes the comparison.</h1>
+        </div>
+        <div>
+          <p class="article-summary">A linked-runtime probe found that two earlier campaigns ran one Flyology event loop while reporting 16. With 16 loops observed and every server thread pinned, lightweight and native converge under local saturation; pinned Rust fixtures lead several concurrency-one rows.</p>
+          <dl class="article-meta">
+            <div><dt>Published</dt><dd><time datetime="2026-08-04">2026-08-04</time></dd></div>
+            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/46a718a4fd87c3ec7f18d3ddd7e7bd9aedbe78e9/showcases/http-comparison">46a718a</a></dd></div>
+            <div><dt>Platforms</dt><dd>Linux / ARM64 + AMD64</dd></div>
+            <div><dt>Common profile</dt><dd>7 trials at concurrency one</dd></div>
+          </dl>
+        </div>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#correction">What was wrong</a></li>
+            <li><a href="#method">Verified method</a></li>
+            <li><a href="#saturation">Local saturation gate</a></li>
+            <li><a href="#throughput">Common throughput</a></li>
+            <li><a href="#resources">Efficiency and tails</a></li>
+            <li><a href="#limits">Validity boundary</a></li>
+            <li><a href="#reproduce">Reproduce it</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="correction">
+            <div class="snapshot-boundary">
+              <strong>Correction</strong>
+              <p>This entry supersedes the <a href="../2026-08-http-comparison/">preliminary snapshot</a> and its <a href="../2026-08-http-comparison-follow-up/">longer Ada-only follow-up</a>. Their metadata claimed 16 loops, but an Alire-generated build setting overrode the prepared runtime and linked one. They also pinned only the process leader, allowing worker threads to escape the intended server CPU set.</p>
+            </div>
+            <p>The corrected build removes the overriding setting, links and runs a probe that must report the requested loop count, records requested and observed values separately, and fails if any live server thread has the wrong CPU mask after startup or warmup. Every run here reports 16 requested and 16 observed loops.</p>
+            <p>The old downloads remain available to preserve the record. Their throughput, lane ordering, CPU, and thread conclusions are not current evidence.</p>
+          </section>
+
+          <section id="method">
+            <span class="step-label">METHOD</span>
+            <h2>Plain engines and routed applications remain separate.</h2>
+            <p>The plain tier compares Flyology's raw handler, hyper's HTTP/1 connection service, and the AWS and EWS callback APIs. The application tier compares Flyology routing, axum, Actix Web, and one identical ServletAda servlet over AWS or EWS. A framework result never enters the plain-engine ranking.</p>
+            <dl class="decision-list">
+              <div class="decision-row"><dt>Transport</dt><dd>HTTP/1.1 cleartext loopback with persistent connections.</dd></div>
+              <div class="decision-row"><dt>Responses</dt><dd>Exact 13-byte and 1 KiB plain bodies; exact 13-byte body after one routed GET.</dd></div>
+              <div class="decision-row"><dt>Placement</dt><dd>Server CPUs 0–7, client CPUs 8–15, 16 verified Flyology loops, and eight configured Rust workers.</dd></div>
+              <div class="decision-row"><dt>Local common run</dt><dd>Seven 10-second trials, two-second warmups and cooldowns, concurrency one.</dd></div>
+              <div class="decision-row"><dt>Shared-host common run</dt><dd>Seven 30-second trials, five-second warmups, 20-second cooldowns, concurrency one, on native ARM64 and AMD64.</dd></div>
+              <div class="decision-row"><dt>Validity</dt><dd>Only exact responses with 100% HTTP 200 success and zero timeouts enter common tables.</dd></div>
+            </dl>
+            <p>The Rust side is pinned to Rust 1.97.1, hyper 1.11.0, axum 0.8.9, Actix Web 4.14.0, and Tokio 1.53.1. Direct dependencies use exact versions and <code>Cargo.lock</code> fixes the transitive graph.</p>
+            <p>The shared hosts used 16-CPU pod quotas, not exclusive CPU sets. Their sanitized profiles are Neoverse-N1 with 80 physical cores and 256 GB, and Intel Xeon Gold 5412U with 24 physical cores, 48 logical CPUs, and 256 GB. Host and orchestration identities are intentionally absent.</p>
+            <div class="data-links" aria-label="Benchmark data downloads">
+              <a href="data/summary.csv" download>Throughput and latency CSV</a>
+              <a href="data/resources.csv" download>Resource CSV</a>
+              <a href="data/saturation.csv" download>Local saturation probe CSV</a>
+              <a href="data/method.json" download>Sanitized method record</a>
+            </div>
+          </section>
+
+          <section id="saturation">
+            <span class="step-label">LOCAL GATE</span>
+            <h2>At c128, lightweight was on par with or ahead of native.</h2>
+            <p>The user-set gate for proceeding was more than 100k requests per second from both Flyology lanes at concurrency 128. All three corrected local rows cleared it with 100% success and no timeouts. These are one-second probes, not publishable rankings.</p>
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Local ARM64 c128 saturation probe: one trial</caption>
+                <thead><tr><th>Workload</th><th>Lightweight req/s</th><th>Native req/s</th><th>LW vs native</th><th>LW p99</th><th>Native p99</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Plain, 13 B</th><td class="flyology-result">530.2k</td><td>505.4k</td><td>+4.9%</td><td>3.442 ms</td><td>0.609 ms</td></tr>
+                  <tr><th scope="row">Plain, 1 KiB</th><td class="flyology-result">491.8k</td><td>490.4k</td><td>+0.3%</td><td>3.888 ms</td><td>0.605 ms</td></tr>
+                  <tr><th scope="row">Routed GET</th><td class="flyology-result">445.4k</td><td>429.7k</td><td>+3.7%</td><td>3.737 ms</td><td>0.673 ms</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>The throughput result supports lightweight parity at this loop count. The latency result adds an important boundary: lightweight's c128 p99 was 5.6–6.4 times native's. Throughput leadership is not tail-latency leadership.</p>
+          </section>
+
+          <section id="throughput">
+            <span class="step-label">COMMON PROFILE</span>
+            <h2>Concurrency one favors different implementations than saturation.</h2>
+            <p>These medians compare the same c1 contract in each environment. Cross-machine values are not processor rankings; each row is a separate loopback system.</p>
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Plain HTTP, 13-byte body: median requests per second</caption>
+                <thead><tr><th>Environment</th><th>Flyology LW</th><th>Flyology native</th><th>hyper</th><th>AWS</th><th>EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Local ARM64</th><td>21.7k</td><td>22.9k</td><td>32.6k</td><td>16.5k</td><td>16.7k</td></tr>
+                  <tr><th scope="row">Shared ARM64</th><td>13.7k</td><td>14.6k</td><td>22.6k</td><td>8.1k</td><td>7.1k</td></tr>
+                  <tr><th scope="row">Shared AMD64</th><td>23.8k</td><td>27.5k</td><td>38.1k</td><td>18.0k</td><td>10.8k</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Routed application GET: median requests per second</caption>
+                <thead><tr><th>Environment</th><th>Flyology LW</th><th>Flyology native</th><th>axum</th><th>Actix Web</th><th>ServletAda/AWS</th><th>ServletAda/EWS</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Local ARM64</th><td>20.6k</td><td>21.6k</td><td>32.2k</td><td>31.8k</td><td>10.4k</td><td>15.5k</td></tr>
+                  <tr><th scope="row">Shared ARM64</th><td>12.0k</td><td>13.2k</td><td>21.2k</td><td>21.8k</td><td>3.6k</td><td>6.2k</td></tr>
+                  <tr><th scope="row">Shared AMD64</th><td>20.9k</td><td>24.0k</td><td>37.2k</td><td>37.5k</td><td>9.9k</td><td>10.2k</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>hyper led both plain workloads in all three environments. axum led the local routed row; Actix Web narrowly led the two shared-host routed rows. Flyology native was the fastest Ada fixture everywhere, but the corrected result does not support overall throughput leadership. The downloadable CSV gives all ranges and shows that every included row retained 100% success with zero timeouts.</p>
+          </section>
+
+          <section id="resources">
+            <span class="step-label">EFFICIENCY</span>
+            <h2>Thread economy remains lightweight's clearest advantage.</h2>
+            <p>With 16 loops, every lightweight server reached 17 threads: the main thread plus the loop pool. Native remained at 257 because the fixture capacity is 256. CPU seconds cover one server lifecycle, so compare lanes within an environment and tier; the local and shared-host lifecycles have different durations.</p>
+            <div class="benchmark-table-wrap">
+              <table class="benchmark-table">
+                <caption>Flyology process resources: median CPU/RSS and maximum threads</caption>
+                <thead><tr><th>Environment</th><th>Tier</th><th>Lane</th><th>CPU seconds</th><th>RSS MiB</th><th>Threads</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row" rowspan="4">Local ARM64</th><td>Plain</td><td>Lightweight</td><td>36.38</td><td>12.7</td><td>17</td></tr>
+                  <tr><td>Plain</td><td>Native</td><td>36.76</td><td>12.8</td><td>257</td></tr>
+                  <tr><td>Application</td><td>Lightweight</td><td>19.50</td><td>12.8</td><td>17</td></tr>
+                  <tr><td>Application</td><td>Native</td><td>19.03</td><td>13.6</td><td>257</td></tr>
+                  <tr><th scope="row" rowspan="4">Shared ARM64</th><td>Plain</td><td>Lightweight</td><td>120.48</td><td>8.1</td><td>17</td></tr>
+                  <tr><td>Plain</td><td>Native</td><td>114.46</td><td>9.4</td><td>257</td></tr>
+                  <tr><td>Application</td><td>Lightweight</td><td>61.23</td><td>8.1</td><td>17</td></tr>
+                  <tr><td>Application</td><td>Native</td><td>58.01</td><td>9.4</td><td>257</td></tr>
+                  <tr><th scope="row" rowspan="4">Shared AMD64</th><td>Plain</td><td>Lightweight</td><td>122.53</td><td>12.3</td><td>17</td></tr>
+                  <tr><td>Plain</td><td>Native</td><td>120.43</td><td>13.4</td><td>257</td></tr>
+                  <tr><td>Application</td><td>Lightweight</td><td>62.46</td><td>11.6</td><td>17</td></tr>
+                  <tr><td>Application</td><td>Native</td><td>61.44</td><td>13.2</td><td>257</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>Lightweight's thread reduction did not become a CPU win here: CPU time was nearly equal locally and native used 2–5% less on the shared hosts. Lightweight did keep a modest RSS advantage. The Rust throughput leaders also used fewer CPU seconds, less RSS, and nine or ten threads in these c1 fixtures. Complete CPU, RSS, thread, throughput-range, p50, p99, p99.9, success, and timeout values for every fixture are in the CSV downloads.</p>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">LIMITS</span>
+            <h2>The result stops at HTTP dispatch.</h2>
+            <p>These endpoints do almost no application work. They do not use TLS, rotate connections, query a database, call a remote service, serialize a meaningful object, or exercise backpressure under external I/O. Do not extrapolate the ordering to those systems.</p>
+            <p>The shared hosts were lightly loaded when selected, but they were not dedicated. Kubernetes applied a CPU quota rather than an exclusive static CPU set. The process masks separated server and client CPUs, but unrelated host work could still run there. The local ARM64 run also crosses a macOS virtualization boundary and heterogeneous host cores.</p>
+            <p>Architecture and concurrency change the lane gap: native led lightweight by 5–6% locally at c1, 6–9% on shared ARM64, and 15–18% on shared AMD64. The local c128 probe reversed that ordering, with lightweight ahead by 0.3–4.9%. At c1 native generally had the lower p99, while lightweight generally had the lower p99.9; no single lane owns every latency tail.</p>
+            <div class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>The corrected evidence is narrower than the superseded claim. With 16 verified loops, lightweight offers a 17-thread server and reaches native-like saturation throughput, but native is faster at c1 and has a much lower c128 p99. hyper, axum, and Actix Web establish higher throughput and efficiency reference points for these exact fixtures. None of this predicts a database-backed or external-I/O service.</p>
+            </div>
+          </section>
+
+          <section id="reproduce">
+            <span class="step-label">REPRODUCE</span>
+            <h2>Verify topology before accepting a number.</h2>
+            <figure class="code-panel">
+              <figcaption>Local ARM64 saturation probe</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>HTTP_BENCH_TRIALS=1 \
+HTTP_BENCH_DURATION=1s \
+HTTP_BENCH_WARMUP=1s \
+HTTP_BENCH_CONCURRENCIES="8 32 128" \
+HTTP_BENCH_COOLDOWN=0 \
+HTTP_BENCH_LOOPS=16 \
+HTTP_BENCH_SERVER_CPUSET=0-7 \
+HTTP_BENCH_CLIENT_CPUSET=8-15 \
+HTTP_BENCH_RUST_WORKERS=8 \
+HTTP_BENCH_SATURATION_PROBE=1 \
+  ./showcases/http-comparison/scripts/run-linux-docker.sh</code></pre>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>Seven-trial native Linux campaign</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>HTTP_BENCH_ARM64_NODE=&lt;selected-arm64-node&gt; \
+HTTP_BENCH_AMD64_NODE=&lt;selected-amd64-node&gt; \
+HTTP_BENCH_TRIALS=7 \
+HTTP_BENCH_DURATION=30s \
+HTTP_BENCH_WARMUP=5s \
+HTTP_BENCH_COOLDOWN=20 \
+HTTP_BENCH_CONCURRENCIES=1 \
+HTTP_BENCH_LOOPS=16 \
+HTTP_BENCH_SERVER_CPUSET=0-7 \
+HTTP_BENCH_CLIENT_CPUSET=8-15 \
+HTTP_BENCH_RUST_WORKERS=8 \
+  ./showcases/http-comparison/scripts/run-kubernetes.sh</code></pre>
+            </figure>
+            <p>The runner validates response bytes before measurement, rejects any common row with a timeout or non-200 response, preserves raw observations only below ignored <code>build/</code>, privacy-scans copied cluster artifacts, and verifies deletion of its temporary namespace.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. This article reports dated development observations, not portable performance guarantees.</span>
+        <div class="footer-links"><a href="../">Journal</a><a href="../../guide/">Guide</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

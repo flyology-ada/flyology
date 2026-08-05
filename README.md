@@ -1454,36 +1454,22 @@ raw HTTP-engine and routed application-server costs in distinct tiers. It runs
 the same verified response contracts against Flyology lightweight/native, the
 maintained Ada fixtures, hyper, axum, and Actix Web, preserves raw `oha` JSON
 and process resource samples, and includes a pinned Linux Docker build. The Rust
-extension is aspirational and has no published performance result:
+extension is aspirational and keeps its results within the same reproducible,
+tier-separated boundary:
 
 ```sh
 ./showcases/http-comparison/scripts/run-linux-docker.sh
 ```
 
-A dated Ada-only [preliminary development snapshot](https://flyology.org/journal/2026-08-http-comparison/)
-records three three-second Linux/AArch64 Docker trials on an Apple M3 Max
-MacBook Pro with 48 GB of memory, from commit `48fdb23`.
-At concurrency 32, the median results were:
-
-| Tier | Flyology lightweight | AWS-based peer | EWS-based peer |
-| --- | ---: | ---: | ---: |
-| Plain HTTP, 13-byte body | 68.5k req/s | 30.6k req/s | 28.8k req/s |
-| Routed application GET | 52.6k req/s | 17.5k req/s | 24.7k req/s |
-
-Flyology lightweight used two server threads in both tiers. These short
-loopback measurements are development evidence for the exact fixtures and
-recorded host, not a general ranking or a substitute for a longer native-Linux
-campaign. The journal entry publishes the latency tails, CPU/RSS/thread costs,
-metadata, raw observations, and reproduction command alongside the table.
-
-A longer Ada-only [Linux follow-up](https://flyology.org/journal/2026-08-http-comparison-follow-up/)
-records seven 30-second trials on ARM64 and AMD64 shared hosts. At concurrency
-one, Flyology led every valid peer row in both tiers. Lightweight retained the
-smaller CPU and thread footprint, while native was faster on ARM64. The exact
-EWS fixture did not pass the strict 100% success threshold at concurrency eight,
-so the common higher-concurrency table is excluded rather than treated as a
-ranking. The article publishes sanitized aggregate data without private host or
-orchestration metadata.
+The [corrected comparison](https://flyology.org/journal/2026-08-http-comparison-correction/)
+records a linked-runtime loop-count check, all-thread affinity enforcement, a
+short local saturation probe, and longer concurrency-one trials on local ARM64
+and shared ARM64/AMD64 Linux hosts. It also adds pinned hyper, axum, and Actix
+Web fixtures in their respective plain and application tiers. The two earlier
+HTTP journal entries remain available as historical snapshots, but their
+performance conclusions are superseded: those campaigns linked one Flyology
+event loop while reporting 16 and did not verify every server thread's CPU
+mask.
 
 The website's [HTTP application guide](https://flyology.org/guide/http/)
 progresses from the raw connection through routing, body policy, middleware,
