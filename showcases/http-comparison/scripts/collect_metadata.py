@@ -33,6 +33,30 @@ try:
     observed_loops: int | None = int(observed_loops_text)
 except ValueError:
     observed_loops = None
+overlay_manifest_path = os.environ.get("HTTP_BENCH_OVERLAY_MANIFEST", "")
+source_overlay: dict[str, object] = {"applied": False}
+if overlay_manifest_path:
+    try:
+        overlay_manifest = json.loads(Path(overlay_manifest_path).read_text())
+        if (
+            overlay_manifest.get("schema") != 1
+            or overlay_manifest.get("kind")
+            != "flyology-http-comparison-source-overlay"
+        ):
+            raise ValueError("unknown source overlay schema")
+        source_overlay = {
+            "applied": True,
+            "schema": overlay_manifest["schema"],
+            "kind": overlay_manifest["kind"],
+            "base_revision": overlay_manifest["base_revision"],
+            "source_dirty": overlay_manifest["source_dirty"],
+            "file_count": overlay_manifest["file_count"],
+            "deleted_paths": overlay_manifest["deleted_paths"],
+            "content_sha256": overlay_manifest["content_sha256"],
+            "archive_sha256": overlay_manifest["archive_sha256"],
+        }
+    except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit(f"invalid HTTP_BENCH_OVERLAY_MANIFEST: {error}") from error
 metadata = {
     "schema": 1,
     "mode": os.environ.get("HTTP_BENCH_MODE", "local"),
@@ -51,6 +75,7 @@ metadata = {
         git_dirty_env == "1" if git_dirty_env is not None
         else git_status not in ("", "unavailable")
     ),
+    "source_overlay": source_overlay,
     "oha_version": command("oha", "--version"),
     "alire_version": command("alr", "--version").splitlines()[0],
     "gnat_version": os.environ.get("HTTP_BENCH_GNAT_VERSION", "15.3.1"),

@@ -4,6 +4,7 @@ set -eu
 comparison_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 project_root=$(CDPATH= cd -- "$comparison_root/../.." && pwd)
 bootstrap="$comparison_root/scripts/run-kubernetes-container.sh"
+overlay_tool="$comparison_root/scripts/kubernetes_overlay.py"
 revision=${HTTP_BENCH_GIT_REVISION:-$(git -C "$project_root" rev-parse HEAD)}
 repository=${HTTP_BENCH_GIT_REPOSITORY:-https://github.com/flyology-ada/flyology.git}
 arm_node=${HTTP_BENCH_ARM64_NODE:-}
@@ -25,20 +26,77 @@ memory_limit=${HTTP_BENCH_POD_MEMORY:-8Gi}
 rust_workers=${HTTP_BENCH_RUST_WORKERS:-8}
 saturation_probe=${HTTP_BENCH_SATURATION_PROBE:-0}
 local_overlay=${HTTP_BENCH_LOCAL_OVERLAY:-1}
+overlay_dry_run=${HTTP_BENCH_OVERLAY_DRY_RUN:-0}
 deadline=${HTTP_BENCH_JOB_DEADLINE_SECONDS:-14400}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 namespace_timestamp=$(printf '%s' "$timestamp" | tr '[:upper:]' '[:lower:]')
 namespace=${HTTP_BENCH_NAMESPACE:-flyology-http-bench-$namespace_timestamp}
 output_root=${HTTP_BENCH_OUTPUT_ROOT:-"$project_root/build/http-comparison/kubernetes-results/$timestamp"}
 
-case "$local_overlay:$saturation_probe" in
-   0:0|0:1|1:0|1:1) ;;
-   *) printf '%s\n' "HTTP_BENCH_LOCAL_OVERLAY and HTTP_BENCH_SATURATION_PROBE must be 0 or 1" >&2; exit 2 ;;
+case "$local_overlay:$saturation_probe:$overlay_dry_run" in
+   0:0:0|0:0:1|0:1:0|0:1:1|1:0:0|1:0:1|1:1:0|1:1:1) ;;
+   *) printf '%s\n' "HTTP_BENCH_LOCAL_OVERLAY, HTTP_BENCH_SATURATION_PROBE, and HTTP_BENCH_OVERLAY_DRY_RUN must be 0 or 1" >&2; exit 2 ;;
 esac
+
+overlay_archive=
+overlay_manifest=
+overlay_dirty=0
+overlay_manifest_container=
+overlay_limit=900000
+
+remove_overlay () {
+   if [ -n "$overlay_archive" ]; then
+      rm -f "$overlay_archive"
+   fi
+   if [ -n "$overlay_manifest" ]; then
+      rm -f "$overlay_manifest"
+   fi
+}
+trap remove_overlay EXIT
+trap 'exit 1' HUP INT TERM
+
+if [ "$local_overlay" -eq 1 ]; then
+   overlay_archive=$(mktemp /tmp/flyology-http-overlay.XXXXXX.tar.gz)
+   overlay_manifest=$(mktemp /tmp/flyology-http-overlay.XXXXXX.json)
+   python3 "$overlay_tool" create \
+      --project-root "$project_root" \
+      --archive "$overlay_archive" \
+      --manifest "$overlay_manifest"
+   python3 "$overlay_tool" verify \
+      --archive "$overlay_archive" \
+      --manifest "$overlay_manifest" \
+      --source-root "$project_root"
+   overlay_dirty=$(python3 -c \
+      'import json,sys; print(int(json.load(open(sys.argv[1]))["source_dirty"]))' \
+      "$overlay_manifest")
+   overlay_manifest_container=/bootstrap/overlay-manifest.json
+   overlay_size=$((
+      $(wc -c <"$overlay_archive")
+      + $(wc -c <"$overlay_manifest")
+      + $(wc -c <"$overlay_tool")
+      + $(wc -c <"$bootstrap")
+   ))
+   if [ "$overlay_size" -gt "$overlay_limit" ]; then
+      remove_overlay
+      printf '%s\n' \
+        "local overlay is $overlay_size bytes; ConfigMap limit is $overlay_limit" >&2
+      exit 1
+   fi
+fi
+
+if [ "$overlay_dry_run" -eq 1 ]; then
+   if [ "$local_overlay" -ne 1 ]; then
+      printf '%s\n' "HTTP_BENCH_OVERLAY_DRY_RUN requires HTTP_BENCH_LOCAL_OVERLAY=1" >&2
+      exit 2
+   fi
+   printf '%s\n' "Kubernetes local overlay dry run passed ($overlay_size ConfigMap bytes)"
+   exit 0
+fi
 
 for command_name in jq kubectl; do
    if ! command -v "$command_name" >/dev/null 2>&1; then
       printf '%s\n' "$command_name is required" >&2
+      remove_overlay
       exit 1
    fi
 done
@@ -47,30 +105,11 @@ mkdir -p "$output_root/logs"
 created_namespace=0
 artifacts_collected=0
 privacy_scanned=0
-overlay_archive=
-overlay_dirty=0
 private_context=$(kubectl config current-context 2>/dev/null || true)
 private_cluster=$(kubectl config view --minify \
    --output jsonpath='{.contexts[0].context.cluster}' 2>/dev/null || true)
 private_server=$(kubectl config view --minify \
    --output jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
-
-if [ "$local_overlay" -eq 1 ]; then
-   overlay_archive=$(mktemp /tmp/flyology-http-overlay.XXXXXX.tar.gz)
-   tar -czf "$overlay_archive" -C "$project_root" \
-      --exclude='showcases/http-comparison/servers/*/alire' \
-      --exclude='showcases/http-comparison/servers/aws_plain/bin' \
-      --exclude='showcases/http-comparison/servers/ews_plain/bin' \
-      --exclude='showcases/http-comparison/servers/servletada_aws_app/bin' \
-      --exclude='showcases/http-comparison/servers/servletada_ews_app/bin' \
-      --exclude='showcases/http-comparison/servers/*/config' \
-      --exclude='showcases/http-comparison/servers/*/obj' \
-      --exclude='showcases/http-comparison/servers/rust/target' \
-      showcases/http-comparison \
-      showcases/http_benchmark_runtime_probe.adb \
-      showcases/showcases.gpr
-   overlay_dirty=1
-fi
 
 collect_artifacts () {
    [ "$created_namespace" -eq 1 ] || return 0
@@ -120,9 +159,7 @@ cleanup () {
    fi
    printf '{"schema":1,"temporary_namespace_deleted":%s}\n' \
       "$namespace_deleted" >"$output_root/cleanup.json"
-   if [ -n "$overlay_archive" ]; then
-      rm -f "$overlay_archive"
-   fi
+   remove_overlay
    exit "$status"
 }
 trap cleanup EXIT HUP INT TERM
@@ -163,6 +200,8 @@ kubectl label namespace "$namespace" \
 if [ -n "$overlay_archive" ]; then
    kubectl create configmap benchmark-bootstrap --namespace "$namespace" \
       --from-file=bootstrap.sh="$bootstrap" \
+      --from-file=overlay-tool.py="$overlay_tool" \
+      --from-file=overlay-manifest.json="$overlay_manifest" \
       --from-file=overlay.tar.gz="$overlay_archive" >/dev/null
 else
    kubectl create configmap benchmark-bootstrap --namespace "$namespace" \
@@ -199,6 +238,7 @@ create_job () {
          --arg rust_workers "$rust_workers" \
          --arg saturation_probe "$saturation_probe" \
          --arg git_dirty "$overlay_dirty" \
+         --arg overlay_manifest "$overlay_manifest_container" \
          --argjson deadline "$deadline" \
          '.spec.backoffLimit = 0
           | .spec.activeDeadlineSeconds = $deadline
@@ -223,7 +263,8 @@ create_job () {
               {name:"HTTP_BENCH_OUTPUT_ROOT",value:"/results"},
               {name:"HTTP_BENCH_RUST_WORKERS",value:$rust_workers},
               {name:"HTTP_BENCH_SATURATION_PROBE",value:$saturation_probe},
-              {name:"HTTP_BENCH_GIT_DIRTY",value:$git_dirty}
+              {name:"HTTP_BENCH_GIT_DIRTY",value:$git_dirty},
+              {name:"HTTP_BENCH_OVERLAY_MANIFEST",value:$overlay_manifest}
             ]
           | .spec.template.spec.containers[0].resources = {
               requests:{cpu:$cpu_limit,memory:$memory_limit},

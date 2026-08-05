@@ -58,7 +58,13 @@ chmod +x /usr/local/bin/oha
 git clone --filter=blob:none --no-checkout "$repository" "$workspace"
 git -C "$workspace" checkout --detach "$revision"
 if [ -f /bootstrap/overlay.tar.gz ]; then
-   tar -xzf /bootstrap/overlay.tar.gz -C "$workspace"
+   python3 /bootstrap/overlay-tool.py verify \
+      --archive /bootstrap/overlay.tar.gz \
+      --manifest /bootstrap/overlay-manifest.json \
+      --extract "$workspace" \
+      --source-root "$workspace"
+   mkdir -p "$output_root"
+   cp /bootstrap/overlay-manifest.json "$output_root/overlay-manifest.json"
 fi
 
 export ALR=/usr/local/bin/alr

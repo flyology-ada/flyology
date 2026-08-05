@@ -124,10 +124,24 @@ HTTP_BENCH_RUST_WORKERS=8 \
 The selected `HTTP_BENCH_GIT_REVISION` defaults to local `HEAD` and must be
 reachable from `HTTP_BENCH_GIT_REPOSITORY`; the repository defaults to the
 public Flyology remote and may be changed for a fork. By default the runner also
-packages the local `showcases/http-comparison/` tree as a temporary ConfigMap
-overlay. This permits measuring reviewed, uncommitted fixture work without
-pushing it. Set `HTTP_BENCH_LOCAL_OVERLAY=0` to measure the repository revision
-alone. Generated build directories are excluded from the overlay.
+packages all Git-tracked and unignored local files needed from the root project,
+`src/`, `runtime/`, `scripts/`, and `showcases/` as a temporary ConfigMap
+overlay. This applies uncommitted Flyology server/runtime work symmetrically
+with competitor fixture changes without pushing it. A manifest records every
+file checksum, deletion, base revision, dirty path, content checksum, and archive
+checksum. The runner verifies that manifest against the working tree before
+contacting the cluster, and the pod verifies it again before building. Symlinks,
+non-regular files, unsafe archive paths, stale sources, and oversized ConfigMaps
+are rejected. Set `HTTP_BENCH_LOCAL_OVERLAY=0` to measure the repository
+revision alone. Git-ignored generated build directories are excluded.
+
+Validate overlay completeness locally without cluster credentials:
+
+```sh
+HTTP_BENCH_OVERLAY_DRY_RUN=1 \
+  ./showcases/http-comparison/scripts/run-kubernetes.sh
+python3 showcases/http-comparison/scripts/test_kubernetes_overlay.py
+```
 
 Use `HTTP_BENCH_ARM64_CONCURRENCIES` or
 `HTTP_BENCH_AMD64_CONCURRENCIES` when one architecture has a lower verified
@@ -160,9 +174,11 @@ the run, and test higher levels in separate invocations.
 Results are written below `build/http-comparison/`. Each timestamped directory
 contains:
 
-- `metadata.json`: host, kernel, architecture, revision, dirty state, tools,
-  pinned server versions, requested and observed loop counts, and campaign
-  settings;
+- `metadata.json`: host, kernel, architecture, revision, dirty state, source
+  overlay checksums, tools, pinned server versions, requested and observed loop
+  counts, and campaign settings;
+- `overlay-manifest.json`: every overlaid or deleted source path and its content
+  checksum for Kubernetes runs using the local overlay;
 - `runs/*.json`: unmodified oha observations;
 - `resources/*.json`: sampled process CPU time, high-water RSS, thread count,
   and context-switch totals;
