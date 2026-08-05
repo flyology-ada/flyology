@@ -31,6 +31,17 @@ package body Worker_Pool_Test_Control is
           Convention => C,
           External_Name =>
             "flyology_test_worker_native_executor_cancellation_fail_once";
+   procedure C_Fail_Native_Executor_Cancellations (Count : Interfaces.C.int)
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_cancellation_failures";
+   function C_Remaining_Native_Executor_Cancellation_Failures
+     return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_cancellation_failures_remaining";
    procedure C_Fail_Native_Executor_Consume_Once
      with Import,
           Convention => C,
@@ -99,6 +110,14 @@ package body Worker_Pool_Test_Control is
    begin
       C_Fail_Native_Executor_Cancellation_Once;
    end Fail_Native_Executor_Cancellation_Once;
+
+   procedure Fail_Native_Executor_Cancellations (Count : Positive) is
+   begin
+      C_Fail_Native_Executor_Cancellations (Interfaces.C.int (Count));
+   end Fail_Native_Executor_Cancellations;
+
+   function Remaining_Native_Executor_Cancellation_Failures return Natural is
+     (Natural (C_Remaining_Native_Executor_Cancellation_Failures));
 
    procedure Fail_Native_Executor_Consume_Once is
    begin

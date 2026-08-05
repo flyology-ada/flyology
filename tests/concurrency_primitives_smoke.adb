@@ -3,6 +3,7 @@ with Flyology;
 with Flyology.Cancellation;
 with Flyology.Capacity;
 with Flyology.Channels.Bounded;
+with Flyology.IO;
 with Flyology.Native_Executors;
 with Flyology.Worker_Pools;
 with Interfaces;
@@ -46,7 +47,12 @@ procedure Concurrency_Primitives_Smoke is
       Result   : out Integer)
    is
       pragma Unreferenced (Deadline);
+      Cancellation_FD : Flyology.IO.Descriptor;
+      Already_Cancelled : Boolean;
    begin
+      Token.Wait_Source (Cancellation_FD, Already_Cancelled);
+      pragma Assert (not Already_Cancelled);
+      pragma Unreferenced (Cancellation_FD);
       if Input = 99 then
          Active_Native_Work.Mark_Started;
          while not Token.Requested loop
@@ -409,13 +415,19 @@ procedure Concurrency_Primitives_Smoke is
       pragma Assert (Accepted);
       Active_Native_Work.Wait_Started;
 
-      Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
+      Worker_Pool_Test_Control.Fail_Native_Executor_Cancellations (100);
       begin
          Native_Executors.Shutdown (Item);
       exception
          when Program_Error => Failed := True;
       end;
       pragma Assert (Failed);
+      --  A persistent signaling fault is observed once, not retried in an
+      --  abort-deferred cleanup loop. Logical cancellation still lets the
+      --  active worker terminate before the original failure is re-raised.
+      pragma Assert
+        (Worker_Pool_Test_Control
+           .Remaining_Native_Executor_Cancellation_Failures = 99);
       Worker_Pool_Test_Control.Reset;
 
       --  The failing owner still publishes terminal completion, so this

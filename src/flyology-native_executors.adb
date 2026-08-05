@@ -16,11 +16,6 @@ package body Flyology.Native_Executors is
 #if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
    use type Interfaces.C.int;
 
-   function Test_Cancellation_Failure return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_worker_native_executor_cancellation_failure";
    function Test_Consume_Failure return Interfaces.C.int
      with Import,
           Convention => C,
@@ -71,20 +66,24 @@ package body Flyology.Native_Executors is
    begin
       if Test_Token_Cleanup_Barrier_Arrive /= 0 then
          while Test_Token_Cleanup_Barrier_Released = 0 loop
-            delay 0.0;
+            null;
          end loop;
       end if;
    end Test_Token_Cleanup_Barrier;
 #end if;
 
+   overriding procedure Finalize (Owner : in out Token_Owner) is
+   begin
+      if Owner.Value /= null then
+         Free_Token (Owner.Value);
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+         Test_Token_Cleanup_Release;
+#end if;
+      end if;
+   end Finalize;
+
    procedure Request_Owned_Token (Token : Token_Access) is
    begin
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-      if Test_Cancellation_Failure /= 0 then
-         raise Program_Error with
-           "injected native executor cancellation failure";
-      end if;
-#end if;
       Token.Request;
    end Request_Owned_Token;
 
@@ -414,10 +413,20 @@ package body Flyology.Native_Executors is
          null;
       end Await_Stopped;
 
-      procedure Take_Token (Slot : Positive; Token : out Token_Access) is
+      procedure Take_Token
+        (Slot : Positive; Owner : not null access Token_Owner) is
       begin
-         Token := Tokens (Slot);
+         Owner.Value := Tokens (Slot);
          Tokens (Slot) := null;
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+         if Owner.Value /= null then
+            Test_Token_Cleanup_Acquire;
+            --  This barrier is inside the protected action: abort remains
+            --  deferred after State relinquishes ownership until the caller's
+            --  controlled holder is already authoritative.
+            Test_Token_Cleanup_Barrier;
+         end if;
+#end if;
       end Take_Token;
 
       procedure Complete_Shutdown is
@@ -529,39 +538,18 @@ package body Flyology.Native_Executors is
          end if;
       end Record_Failure;
 
-      type Token_Owner is
-        new Ada.Finalization.Limited_Controlled with record
-           Value : Token_Access := null;
-        end record;
-
-      overriding procedure Finalize (Owner : in out Token_Owner);
-
-      overriding procedure Finalize (Owner : in out Token_Owner) is
-      begin
-         if Owner.Value /= null then
-            Free_Token (Owner.Value);
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-            Test_Token_Cleanup_Release;
-#end if;
-         end if;
-      end Finalize;
-
       procedure Request_Cancellation (Index : Positive) is
       begin
-         loop
-            begin
-               Item.State.Request_Cancellation (Index);
-               exit;
-            exception
-               when Error : others =>
-                  --  Joining is only safe after every active operation has
-                  --  observed a successful cancellation request. Preserve
-                  --  the first failure for the caller while retrying a
-                  --  transient signalling failure to completion.
-                  Record_Failure (Error);
-                  delay 0.0;
-            end;
-         end loop;
+         begin
+            Item.State.Request_Cancellation (Index);
+         exception
+            when Error : others =>
+               --  Token.Request publishes terminal cancellation before its
+               --  fallible descriptor wake. Preserve that wake failure for
+               --  the caller, but continue cleanup without retrying a
+               --  documented persistent error forever.
+               Record_Failure (Error);
+         end;
       end Request_Cancellation;
 
       procedure Perform_Cleanup is
@@ -609,16 +597,10 @@ package body Flyology.Native_Executors is
                end if;
                for Index in 1 .. Item.Capacity loop
                   declare
-                     Token : Token_Owner;
+                     Token : aliased Token_Owner;
                   begin
                      begin
-                        Item.State.Take_Token (Index, Token.Value);
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-                        if Token.Value /= null then
-                           Test_Token_Cleanup_Acquire;
-                        end if;
-                        Test_Token_Cleanup_Barrier;
-#end if;
+                        Item.State.Take_Token (Index, Token'Access);
                      exception
                         when Error : others =>
                            Record_Failure (Error);

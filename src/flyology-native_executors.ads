@@ -80,7 +80,11 @@ package Flyology.Native_Executors is
    --  token or deadline for this call to remain bounded. Call Shutdown before
    --  leaving an Ada task master that contains a started executor; controlled
    --  finalization performs the same operation only as a fallback.
+   --  If cancellation wake signaling fails, terminal cancellation remains
+   --  recorded; cleanup completes before Shutdown propagates Program_Error.
    --  @param Item Application-owned executor
+   --  @exception Program_Error An executor-owned cancellation wake could not
+   --  be signaled
    procedure Shutdown (Item : in out Executor);
 
    --  Submit without waiting. Accepted is false when bounded storage is full
@@ -137,6 +141,13 @@ private
    type Result_Array is array (Positive range <>) of Result_Type;
    type Token_Access is access all Flyology.Cancellation.Token;
    type Token_Array is array (Positive range <>) of Token_Access;
+   type Token_Owner is
+     new Ada.Finalization.Limited_Controlled with record
+        Value : Token_Access := null;
+   end record;
+   --  @exclude
+   --  @param Owner Token holder being finalized
+   overriding procedure Finalize (Owner : in out Token_Owner);
    --  Zero remains the invalid-handle sentinel; modular increment keeps a
    --  heavily reused slot from becoming permanently unavailable.
    subtype Generation_Number is Interfaces.Unsigned_64;
@@ -194,7 +205,8 @@ private
       procedure Set_Expected_Workers (Count : Natural);
       procedure Worker_Stopped;
       entry Await_Stopped;
-      procedure Take_Token (Slot : Positive; Token : out Token_Access);
+      procedure Take_Token
+        (Slot : Positive; Owner : not null access Token_Owner);
       procedure Complete_Shutdown;
       entry Await_Shutdown;
       function Shutdown_Started return Boolean;

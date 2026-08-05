@@ -100,10 +100,29 @@ void flyology_test_worker_native_executor_cancellation_fail_once(void)
                          memory_order_seq_cst);
 }
 
+void flyology_test_worker_native_executor_cancellation_failures(int count)
+{
+   atomic_store_explicit(&native_executor_cancellation_failure, count,
+                         memory_order_seq_cst);
+}
+
 int flyology_test_worker_native_executor_cancellation_failure(void)
 {
-   return atomic_exchange_explicit(&native_executor_cancellation_failure, 0,
-                                   memory_order_seq_cst);
+   int remaining = atomic_load_explicit(&native_executor_cancellation_failure,
+                                        memory_order_seq_cst);
+   while (remaining > 0) {
+      if (atomic_compare_exchange_weak_explicit(
+             &native_executor_cancellation_failure, &remaining, remaining - 1,
+             memory_order_seq_cst, memory_order_seq_cst))
+         return 1;
+   }
+   return 0;
+}
+
+int flyology_test_worker_native_executor_cancellation_failures_remaining(void)
+{
+   return atomic_load_explicit(&native_executor_cancellation_failure,
+                               memory_order_seq_cst);
 }
 
 void flyology_test_worker_native_executor_consume_fail_once(void)

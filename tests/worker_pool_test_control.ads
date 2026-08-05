@@ -12,6 +12,10 @@ package Worker_Pool_Test_Control is
 
    procedure Fail_Native_Executor_Cancellation_Once;
 
+   procedure Fail_Native_Executor_Cancellations (Count : Positive);
+
+   function Remaining_Native_Executor_Cancellation_Failures return Natural;
+
    procedure Fail_Native_Executor_Consume_Once;
 
    procedure Arm_Native_Executor_Completion_Wake;
