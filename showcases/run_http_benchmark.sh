@@ -48,11 +48,19 @@ fi
 FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE="$loops" \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 cd "$showcase_root"
-FLYOLOGY_SHOWCASE_PROFILE="$profile" "$alr" exec -- gprbuild \
+FLYOLOGY_SHOWCASE_PROFILE="$profile" "$alr" exec -- env -u GPR_CONFIG gprbuild \
   --RTS="$project_root/build/rts" \
   -f \
   -P showcases.gpr \
-  http_benchmark_server.adb
+  http_benchmark_server.adb \
+  http_benchmark_runtime_probe.adb
+
+observed_loops=$("$showcase_root/bin/http_benchmark_runtime_probe")
+if [ "$observed_loops" -ne "$loops" ]; then
+  printf '%s\n' \
+    "linked runtime has $observed_loops event loops; expected $loops" >&2
+  exit 1
+fi
 
 mkdir -p "$project_root/build"
 dd if=/dev/zero of="$upload_body" bs=1024 count=32 2>/dev/null

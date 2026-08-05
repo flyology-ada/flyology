@@ -56,7 +56,7 @@ jobs:
         working-directory: showcases
         run: |
           ./prepare-alire.sh
-          alr exec -- gprbuild \
+          alr exec -- env -u GPR_CONFIG gprbuild \
             --RTS="$GITHUB_WORKSPACE/build/rts" \
             -f \
             -P showcases.gpr \

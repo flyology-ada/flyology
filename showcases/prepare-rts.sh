@@ -19,5 +19,6 @@ else
   fi
 fi
 
+FLYOLOGY_RTS_DIR="$project_root/build/rts" \
 FLYOLOGY_LOOP_POOL_SIZE=$loop_pool_size \
   "$project_root/scripts/prepare-rts.sh"
