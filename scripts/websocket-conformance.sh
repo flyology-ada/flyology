@@ -174,8 +174,13 @@ behavior_counts=$(sed -n \
 close_counts=$(sed -n \
   's/^   "behaviorClose": "\([^"]*\)",/\1/p' \
   "$report_dir"/*_case_*.json | sort | uniq -c)
-unexpected=$(sed -n \
+unexpected_behavior=$(sed -n \
   's/^   "behavior": "\([^"]*\)",/\1/p' \
+  "$report_dir"/*_case_*.json | \
+  awk '$1 != "OK" && $1 != "NON-STRICT" && $1 != "INFORMATIONAL" {n++}
+       END {print n + 0}')
+unexpected_close=$(sed -n \
+  's/^   "behaviorClose": "\([^"]*\)",/\1/p' \
   "$report_dir"/*_case_*.json | \
   awk '$1 != "OK" && $1 != "NON-STRICT" && $1 != "INFORMATIONAL" {n++}
        END {print n + 0}')
@@ -186,6 +191,6 @@ printf '%s\n' "Autobahn close verdicts ($profile, $lane):"
 printf '%s\n' "$close_counts"
 printf '%s\n' "HTML report: $report_dir/index.html"
 
-if [ "$unexpected" -ne 0 ]; then
+if [ "$unexpected_behavior" -ne 0 ] || [ "$unexpected_close" -ne 0 ]; then
   exit 1
 fi
