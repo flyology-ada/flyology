@@ -5,6 +5,8 @@
 Findings #5, #12, #13, #14, #15, #16, #17, #18, and #19 are prevented by
 production-consumed SPARK units. Their assigned targeted subprogram proofs and
 fresh whole-unit widenings passed at level 1.
+The finding #6 fix consumes the pre-existing proved
+`Flyology.Time_Math.To_Nanoseconds`; this follow-up required no new policy unit.
 The chunk encoder proof includes complete hexadecimal-digit consumption through
 `Natural'Last`, so the historical seven-digit capacity cannot prove.
 Finding #13 proves the negotiated encoder-window bound. Finding #18 proves only
@@ -108,15 +110,14 @@ warning, assumption, justified check, or unproved check.
 <!-- A subagent executes the Tactical Loop for the subprogram below.
      It should update this section as it works. -->
 
-- None.
+- [ ] Finding #10 listener descriptor ownership after a close attempt
 
 ## Not Started
 <!-- Whenever a subprogram is added (due to refactoring) or discovered
      during assessment (Strategic Loop Steps 1-2), list it here so it
      is not forgotten. -->
 
-- [ ] Protocol parser and state-transition candidates
-- [ ] Runtime ownership and scheduling-policy candidates
+- None.
 
 ## Discovered Obligations
 
@@ -141,7 +142,7 @@ warning, assumption, justified check, or unproved check.
       quantum timeouts with fragmented data and an interleaved control frame
 - [x] Re-ran the focused production build and WebSocket smoke tests after the
       final cursor contracts
-- [ ] Re-run the application and runtime proof suites serially after integration
+- [x] Re-ran the application and runtime proof suites serially after integration
 - [x] Prove finding #1 `Poller_Policy.Plan_Batch` at targeted subprogram scope
 - [x] Prove finding #1 `Poller_Policy.After_Wake` at targeted subprogram scope
 - [x] Prove finding #1 `Poller_Policy.Remaining_Budget` at targeted subprogram
@@ -183,3 +184,10 @@ warning, assumption, justified check, or unproved check.
 - [x] Focused policy tests cover supported and unsupported window offers, the
       exact one-zero-code `No_Tree` shape, missing-distance enforcement, and
       the separate 286/287 reserved-symbol boundary
+- [x] Full behavioral suite passed after integration for both project defaults
+- [x] Deterministic stress and fault campaign passed after integration
+- [x] Native Linux/AArch64 Docker validation passed, including the optimized
+      poller-policy inlining guard
+- [x] GNATdoc completed with no undocumented-entity warnings or errors
+- [ ] GNATcoverage was not run because the required `gnatcov_bin` tool crate
+      is not installed in the available Alire tool environment

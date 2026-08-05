@@ -145,6 +145,7 @@ project Flyology is
             "flyology-http-server-sse_handlers.ads",
             "flyology-http-server-websocket_handlers.ads",
             "flyology-http-server-tls.ads",
+            "flyology-websocket_policy.ads",
             "flyology-io.ads",
             "flyology-io-connections.ads",
             "flyology-io-connections-tls.ads",

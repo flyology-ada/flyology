@@ -6,9 +6,20 @@ private package Flyology.WebSocket_Policy
   with Preelaborate,
        SPARK_Mode => On
 is
+   --  @exclude Internal proof policy, not part of the public API.
 
+   --  Timeout handling selected by the proved receive policy.
+   --  @enum Retry_Receive Retry the bounded receive operation.
+   --  @enum Propagate_Timeout Propagate the timeout to the caller.
    type Timeout_Action is (Retry_Receive, Propagate_Timeout);
 
+   --  Normalized opcodes retained by the persistent frame cursor.
+   --  @enum Continuation_Opcode Continuation frame.
+   --  @enum Text_Opcode Text data frame.
+   --  @enum Binary_Opcode Binary data frame.
+   --  @enum Close_Opcode Close control frame.
+   --  @enum Ping_Opcode Ping control frame.
+   --  @enum Pong_Opcode Pong control frame.
    type Frame_Opcode is
      (Continuation_Opcode,
       Text_Opcode,
@@ -17,16 +28,38 @@ is
       Ping_Opcode,
       Pong_Opcode);
 
+   --  Report whether an opcode denotes a control frame.
+   --  @param Opcode Opcode to classify.
+   --  @return True for close, ping, and pong opcodes.
    function Is_Control (Opcode : Frame_Opcode) return Boolean is
      (Opcode in Close_Opcode | Ping_Opcode | Pong_Opcode);
 
+   --  Maximum payload length retained by the frame cursor.
    Max_Frame_Length : constant := 16 * 1_024 * 1_024;
+
+   --  Payload length accepted by the frame cursor.
    subtype Frame_Length is Natural range 0 .. Max_Frame_Length;
+
+   --  Index into the four-byte WebSocket masking key.
    subtype Mask_Index is Natural range 0 .. 3;
+
+   --  Four-byte WebSocket masking key.
    type Mask_Key is array (Mask_Index) of Ada.Streams.Stream_Element;
 
+   --  Persistent receive phase for one connection.
+   --  @enum Awaiting_Header No frame header has been retained.
+   --  @enum Reading_Payload A validated frame header and payload cursor are
+   --  retained.
    type Cursor_Phase is (Awaiting_Header, Reading_Payload);
 
+   --  Persistent state for incrementally receiving one WebSocket frame.
+   --  @field Phase Current receive phase.
+   --  @field Opcode Retained opcode for the current frame.
+   --  @field Final Whether the current frame has the FIN bit set.
+   --  @field Total Total payload length of the current frame.
+   --  @field Remaining Payload bytes not yet committed.
+   --  @field Position Payload bytes already committed.
+   --  @field Mask Retained payload masking key.
    type Frame_Cursor (Phase : Cursor_Phase := Awaiting_Header) is record
       case Phase is
          when Awaiting_Header =>
@@ -54,6 +87,11 @@ is
 
    --  Enter payload-reading state only after production has validated and
    --  retained a complete frame header and mask.
+   --  @param Cursor Connection cursor to initialize.
+   --  @param Opcode Validated frame opcode.
+   --  @param Final Whether the validated frame has the FIN bit set.
+   --  @param Length Validated payload length.
+   --  @param Mask Retained payload masking key.
    procedure Begin_Frame
      (Cursor  : in out Frame_Cursor;
       Opcode  : Frame_Opcode;
@@ -78,6 +116,9 @@ is
 
    --  Select the mask byte for a relative byte in the next payload chunk.
    --  The absolute masking position advances across receive calls.
+   --  @param Cursor Active payload cursor.
+   --  @param Relative Byte offset within the next payload chunk.
+   --  @return Index of the corresponding byte in the masking key.
    function Mask_Offset
      (Cursor   : Frame_Cursor;
       Relative : Natural) return Mask_Index
@@ -94,6 +135,8 @@ is
    --  in their destination. Reading_Payload remains active even when the
    --  frame becomes complete; only an explicit completion or abandonment
    --  transition permits another header parse.
+   --  @param Cursor Active payload cursor to advance.
+   --  @param Count Number of committed payload bytes.
    procedure Advance
      (Cursor : in out Frame_Cursor;
       Count  : Natural)
@@ -113,6 +156,7 @@ is
 
    --  Mark a fully consumed frame complete. Header parsing is legal again
    --  only after this explicit semantic boundary.
+   --  @param Cursor Fully consumed payload cursor to reset.
    procedure Complete_Frame (Cursor : in out Frame_Cursor)
    with
      Global => null,
@@ -123,6 +167,7 @@ is
      Post   => Cursor.Phase = Awaiting_Header;
 
    --  Discard any partial cursor during initialization or terminal cleanup.
+   --  @param Cursor Connection cursor to reset.
    procedure Abandon_Frame (Cursor : in out Frame_Cursor)
    with
      Global => null,
@@ -132,6 +177,9 @@ is
    --  Retry a receive-quantum timeout only while the connection remains
    --  active and the enclosing request still has retry budget. A negative
    --  remaining value denotes the existing unlimited-deadline sentinel.
+   --  @param Failed_Or_Terminal Whether the connection cannot retry.
+   --  @param Remaining Remaining request-level retry budget.
+   --  @return Retry or propagation action for the timeout.
    function Classify_Timeout
      (Failed_Or_Terminal : Boolean;
       Remaining          : Duration) return Timeout_Action
