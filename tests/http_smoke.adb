@@ -889,6 +889,8 @@ procedure HTTP_Smoke is
       Fallback : constant String := Upgrade
         ("permessage-deflate; server_max_window_bits=14, "
          & "permessage-deflate");
+      Empty_Members : constant String := Upgrade
+        (", , permessage-deflate");
    begin
       pragma Assert
         (Ada.Strings.Fixed.Index
@@ -905,6 +907,8 @@ procedure HTTP_Smoke is
         ("permessage-deflate; server_max_window_bits=8");
       Assert_Declined
         ("permessage-deflate; server_max_window_bits=14");
+      Assert_Declined ("permessage-deflate;");
+      Assert_Declined ("permessage-deflate;   ");
       Assert_Declined
         ("permessage-deflate; server_max_window_bits=""14, "
          & "permessage-deflate, x""");
@@ -958,6 +962,10 @@ procedure HTTP_Smoke is
       pragma Assert
         (Ada.Strings.Fixed.Index
            (Fallback, "server_max_window_bits=") = 0);
+      pragma Assert
+        (Ada.Strings.Fixed.Index
+           (Empty_Members,
+            "Sec-WebSocket-Extensions: permessage-deflate;") /= 0);
    end Check_WebSocket_Deflate_Negotiation;
 
    procedure Check_WebSocket_Deflate_Empty_Distance_Tree is

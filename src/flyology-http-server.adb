@@ -2564,13 +2564,18 @@ package body Flyology.HTTP.Server is
          begin
             if not Comma_Valid
               or else not Semicolon_Valid
-              or else not Is_Token (Name)
             then
+               return;
+            elsif Offer'Length = 0 then
+               null;
+            elsif not Is_Token (Name) then
                return;
             elsif Lower (Name) = "permessage-deflate"
             then
                declare
-                  Valid : Boolean := True;
+                  Valid : Boolean :=
+                    First_Semicolon = 0
+                    or else First_Semicolon < Offer'Last;
                   Position : Natural :=
                     (if First_Semicolon = 0 then Offer'Last + 1
                      else First_Semicolon + 1);
@@ -2642,6 +2647,9 @@ package body Flyology.HTTP.Server is
                            end if;
                            Seen_Client_Bits := True;
                         else
+                           Valid := False;
+                        end if;
+                        if Relative_End = Offer'Last then
                            Valid := False;
                         end if;
                         Position := Parameter_Last + 2;
