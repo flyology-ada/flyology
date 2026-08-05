@@ -1142,7 +1142,10 @@ attempts, TLS, request transmission, response-head parsing, and later body
 reads. `Shutdown` rejects new admission, interrupts admitted transport work,
 closes idle connections, and waits for active response leases to drain.
 Ada accessibility rejects a response that would escape the aliased client
-object. A cancellation token supplied to `Execute` must outlive its response.
+object. Cancellation tokens are call-scoped: the token passed to `Execute`
+covers work through the final response head, while `Read_Body` and `Read_All`
+accept a token for their own body-reading call. A response never retains an
+application token.
 
 Standard methods are constants in `Flyology.HTTP.Methods`; `To_Method` admits
 extension tokens without making applications depend on a closed enumeration.
@@ -1150,12 +1153,19 @@ Response fields and trailers retain physical order and repeated names. The
 negotiated `Protocol` is opaque so later protocol engines can be added without
 changing request and response signatures. The current engine implements
 HTTP/1.0 response compatibility and HTTP/1.1 requests; it does not yet provide
-redirect policy, content decoding, proxying, streaming request bodies, or an
-HTTP/2 transport.
+redirect policy, content decoding, proxying, or an HTTP/2 transport.
+
+For request streaming, implement the limited `Request_Body_Source` interface
+and pass the source directly to `Execute`. `Known_Length (Bytes)` generates
+`Content-Length`; `Unknown_Length` uses HTTP/1.1 chunked framing. Each source
+read receives the remaining whole-exchange timeout and the call's cancellation
+token. Sources are borrowed only during `Execute`, and streamed bodies are not
+automatically replayed because the interface does not assume rewindability.
 
 HTTPS uses the `Configure` overload that receives a provider-neutral TLS
-backend. The backend must outlive the client. The pool never mixes origins or
-TLS provider state because both are fixed before concurrent use.
+backend. Configure retains independently owned provider state, so the original
+backend object may be finalized afterward. The pool never mixes origins or TLS
+provider state because both are fixed before concurrent use.
 
 ```ada
 Flyology.IO.TLS.OpenSSL.Initialize_Client (Backend);

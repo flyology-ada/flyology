@@ -74,6 +74,8 @@ package TLS_Test_Provider is
 
    overriding function Name (Item : Provider) return String;
    overriding function Is_Available (Item : Provider) return Boolean;
+   overriding function Retain
+     (Item : in out Provider) return Flyology.IO.TLS.Provider_Access;
    overriding function Create_Session
      (Item        : in out Provider;
       FD          : Flyology.IO.Descriptor;

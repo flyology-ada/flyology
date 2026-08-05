@@ -5,6 +5,14 @@ with Flyology.TLS_Policy;
 with Interfaces.C;
 
 package body Flyology.IO.TLS is
+
+   procedure Free_Provider is new Ada.Unchecked_Deallocation
+     (Provider'Class, Provider_Access);
+
+   procedure Release (Item : in out Provider_Access) is
+   begin
+      Free_Provider (Item);
+   end Release;
    package Sockets renames Flyology.IO.Sockets;
    package Policy renames Flyology.TLS_Policy;
 

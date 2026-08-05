@@ -107,15 +107,11 @@ procedure HTTP_Client_TLS_Smoke is
    procedure Run_Success;
 
    procedure Run_Success is
-      Client_Backend : aliased OpenSSL.OpenSSL_Provider;
       Server_Backend : OpenSSL.OpenSSL_Provider;
       Listener       : Sockets.Socket_Type;
       Address        : Sockets.Endpoint;
       Result         : Outcome (2);
    begin
-      OpenSSL.Initialize_Client
-        (Client_Backend, CA_File => Certificate,
-         Library_Directory => Library_Directory);
       OpenSSL.Initialize_Server
         (Server_Backend, Certificate, Private_Key,
          Library_Directory => Library_Directory);
@@ -212,11 +208,19 @@ procedure HTTP_Client_TLS_Smoke is
             Item  : aliased Client.Client (Capacity => 1);
             Value : Client.Request;
          begin
-            Client.Configure
-              (Item,
-               Flyology.HTTP.Parse_Origin
-                 ("https://localhost:" & Decimal (Natural (Address.Port))),
-               Client_Backend'Access);
+            declare
+               Client_Backend : aliased OpenSSL.OpenSSL_Provider;
+            begin
+               OpenSSL.Initialize_Client
+                 (Client_Backend, CA_File => Certificate,
+                  Library_Directory => Library_Directory);
+               Client.Configure
+                 (Item,
+                  Flyology.HTTP.Parse_Origin
+                    ("https://localhost:" &
+                     Decimal (Natural (Address.Port))),
+                  Client_Backend'Access);
+            end;
             Client.Set_Target (Value, "/secure");
             declare
                Reply : Client.Response := Client.Execute (Item, Value);

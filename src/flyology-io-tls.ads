@@ -109,6 +109,22 @@ package Flyology.IO.TLS is
    --  operations begin only through the step functions after Take succeeds.
    type Provider is limited interface;
 
+   --  Owning provider reference. Retain creates an independent reference that
+   --  remains usable after the original provider object is finalized. Release
+   --  finalizes and deallocates it.
+   type Provider_Access is access all Provider'Class;
+
+   --  Retain independently owned provider configuration and code state.
+   --  @param Item Initialized provider to retain
+   --  @return Owning provider reference
+   --  @exception TLS_Error Provider is unavailable or cannot be retained
+   function Retain (Item : in out Provider) return Provider_Access is abstract;
+
+   --  Finalize and clear an owning provider reference. A null reference is
+   --  accepted.
+   --  @param Item Owning reference to release
+   procedure Release (Item : in out Provider_Access);
+
    --  Return a short stable provider name for diagnostics.
    --  @param Item Provider to identify
    --  @return Provider name

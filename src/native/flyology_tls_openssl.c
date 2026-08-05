@@ -438,6 +438,13 @@ static int provider_retain(struct fly_provider *provider)
    return 0;
 }
 
+void *flyology_tls_openssl_provider_retain(void *handle)
+{
+   struct fly_provider *provider = handle;
+   if (provider == NULL || !provider_retain(provider)) return NULL;
+   return provider;
+}
+
 void flyology_tls_openssl_provider_release(void *handle)
 {
    if (handle != NULL) provider_release(handle);

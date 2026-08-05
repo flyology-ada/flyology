@@ -327,7 +327,10 @@ flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 http_smoke
 http_client_smoke
+http_client_boundaries_smoke
+http_client_streaming_smoke
 http_client_parser_matrix
+http_client_parser_randomized
 http_client_pool_model
 http_client_tls_smoke
 io_smoke

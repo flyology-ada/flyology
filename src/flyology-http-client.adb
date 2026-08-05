@@ -21,6 +21,7 @@ package body Flyology.HTTP.Client is
 
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    Receive_Buffer_Size : constant Positive := 8 * 1_024;
+   Request_Buffer_Size : constant Positive := 8 * 1_024;
    Max_Informational_Responses : constant Positive := 8;
    Max_Request_Target_Bytes : constant Positive := 8 * 1_024;
 
@@ -128,435 +129,15 @@ package body Flyology.HTTP.Client is
       Responses   : Natural := 0;
    end State_Lifetime;
 
-   protected body Pool_Controller is
-      procedure Configure (Value : Pool_Configuration) is
-      begin
-         if Is_Configured then
-            raise Program_Error with "HTTP client pool is already configured";
-         end if;
-         Policy := Value;
-         Policy.Max_Idle := Natural'Min (Value.Max_Idle, Capacity);
-         Is_Configured := True;
-      end Configure;
+   protected body Pool_Controller is separate;
 
-      procedure Try_Checkout
-        (Now        : Ada.Real_Time.Time;
-         Result     : out Checkout_Result;
-         Slot_Index : out Natural;
-         Connection : out Pooled_Connection_Access)
-      is
-         Available_After : Boolean := False;
-      begin
-         Slot_Index := 0;
-         Connection := null;
-         if Stopping then
-            Result := Checkout_Closed;
-            return;
-         end if;
-
-         for Index in Slots'Range loop
-            if Slots (Index).Phase = Idle then
-               declare
-                  Idle_Age : constant Duration := Ada.Real_Time.To_Duration
-                    (Now - Slots (Index).Last_Used);
-                  Total_Age : constant Duration := Ada.Real_Time.To_Duration
-                    (Now - Slots (Index).Born);
-                  Expired : constant Boolean :=
-                    (Policy.Idle_Timeout >= 0.0
-                       and then Idle_Age >= Policy.Idle_Timeout)
-                    or else
-                    (Policy.Max_Connection_Age >= 0.0
-                       and then Total_Age >= Policy.Max_Connection_Age)
-                    or else
-                    (Policy.Max_Requests_Per_Connection > 0
-                       and then Slots (Index).Request_Count >=
-                         Policy.Max_Requests_Per_Connection);
-               begin
-                  Slot_Index := Index;
-                  Connection := Slots (Index).Connection;
-                  Idle_Count := Idle_Count - 1;
-                  if Expired then
-                     Slots (Index).Phase := Closing;
-                     Closing_Count := Closing_Count + 1;
-                     Result := Checkout_Discard;
-                  else
-                     Slots (Index).Phase := Leased;
-                     Slots (Index).Request_Count :=
-                       Slots (Index).Request_Count + 1;
-                     Leased_Count := Leased_Count + 1;
-                     Reused_Count := Reused_Count + 1;
-                     Result := Checkout_Idle;
-                  end if;
-                  exit;
-               end;
-            end if;
-         end loop;
-
-         if Slot_Index = 0 then
-            for Index in Slots'Range loop
-               if Slots (Index).Phase = Empty then
-                  Slots (Index).Phase := Connecting;
-                  Connecting_Count := Connecting_Count + 1;
-                  Slot_Index := Index;
-                  Result := Checkout_Create;
-                  exit;
-               end if;
-            end loop;
-         end if;
-
-         if Slot_Index = 0 then
-            Result := Checkout_Busy;
-         end if;
-
-         for Item of Slots loop
-            if Item.Phase in Empty | Idle then
-               Available_After := True;
-               exit;
-            end if;
-         end loop;
-         if Checkout_Signalled and then not Available_After then
-            Flyology.Wake_Sources.Consume (Checkout_Wake);
-            Checkout_Signalled := False;
-         end if;
-      end Try_Checkout;
-
-      procedure Install
-        (Slot_Index : Positive;
-         Connection : Pooled_Connection_Access;
-         Now        : Ada.Real_Time.Time) is
-      begin
-         if Slot_Index > Capacity
-           or else Slots (Slot_Index).Phase /= Connecting
-           or else Connection = null
-         then
-            raise Program_Error with "invalid HTTP pool connection install";
-         elsif Stopping then
-            raise Client_Closed;
-         end if;
-         Slots (Slot_Index) :=
-           (Phase         => Leased,
-            Connection    => Connection,
-            Born          => Now,
-            Last_Used     => Now,
-            Request_Count => 1,
-            Interrupting  => False,
-            Interrupt_Sent => False,
-            Owner_Done    => False);
-         Connecting_Count := Connecting_Count - 1;
-         Leased_Count := Leased_Count + 1;
-         Created_Count := Created_Count + 1;
-      end Install;
-
-      procedure Publish_Connecting
-        (Slot_Index : Positive; Connection : Pooled_Connection_Access) is
-      begin
-         if Slot_Index > Capacity
-           or else Slots (Slot_Index).Phase /= Connecting
-           or else Connection = null
-         then
-            raise Program_Error with
-              "invalid HTTP pool connecting transport publication";
-         elsif Stopping then
-            raise Client_Closed;
-         end if;
-         Slots (Slot_Index).Connection := Connection;
-      end Publish_Connecting;
-
-      procedure Creation_Failed
-        (Slot_Index : Positive; Result : out Failure_Result) is
-      begin
-         if Slot_Index > Capacity
-           or else Slots (Slot_Index).Phase /= Connecting
-         then
-            raise Program_Error with "invalid HTTP pool creation failure";
-         end if;
-         Connecting_Count := Connecting_Count - 1;
-         if Slots (Slot_Index).Interrupting then
-            Slots (Slot_Index).Phase := Closing;
-            Slots (Slot_Index).Owner_Done := True;
-            Closing_Count := Closing_Count + 1;
-            Result := Failure_Free_Deferred;
-         else
-            Slots (Slot_Index) := (others => <>);
-            Result := Failure_Free;
-            if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
-              and then not Checkout_Signalled
-            then
-               Flyology.Wake_Sources.Signal (Checkout_Wake);
-               Checkout_Signalled := True;
-            end if;
-         end if;
-      end Creation_Failed;
-
-      procedure Return_Lease
-        (Slot_Index : Positive;
-         Reusable   : Boolean;
-         Now        : Ada.Real_Time.Time;
-         Result     : out Return_Result;
-         Connection : out Pooled_Connection_Access)
-      is
-         Total_Age : Duration;
-      begin
-         if Slot_Index > Capacity
-           or else Slots (Slot_Index).Phase /= Leased
-         then
-            raise Program_Error with "invalid HTTP pool lease return";
-         end if;
-         Connection := Slots (Slot_Index).Connection;
-         Total_Age := Ada.Real_Time.To_Duration
-           (Now - Slots (Slot_Index).Born);
-         Leased_Count := Leased_Count - 1;
-         if Reusable and then not Stopping
-           and then Idle_Count < Policy.Max_Idle
-           and then
-             (Policy.Max_Connection_Age < 0.0
-                or else Total_Age < Policy.Max_Connection_Age)
-           and then
-             (Policy.Max_Requests_Per_Connection = 0
-                or else Slots (Slot_Index).Request_Count <
-                  Policy.Max_Requests_Per_Connection)
-         then
-            Slots (Slot_Index).Phase := Idle;
-            Slots (Slot_Index).Last_Used := Now;
-            Idle_Count := Idle_Count + 1;
-            Result := Returned_Idle;
-         elsif Slots (Slot_Index).Interrupting then
-            Slots (Slot_Index).Phase := Closing;
-            Slots (Slot_Index).Owner_Done := True;
-            Closing_Count := Closing_Count + 1;
-            Result := Return_Close_Deferred;
-         else
-            Slots (Slot_Index).Phase := Closing;
-            Slots (Slot_Index).Owner_Done := True;
-            Closing_Count := Closing_Count + 1;
-            Result := Return_Close;
-         end if;
-         if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
-           and then not Checkout_Signalled
-         then
-            Flyology.Wake_Sources.Signal (Checkout_Wake);
-            Checkout_Signalled := True;
-         end if;
-      end Return_Lease;
-
-      procedure Finish_Close (Slot_Index : Positive) is
-      begin
-         if Slot_Index > Capacity
-           or else Slots (Slot_Index).Phase /= Closing
-         then
-            raise Program_Error with "invalid HTTP pool close completion";
-         end if;
-         Slots (Slot_Index) := (others => <>);
-         Closing_Count := Closing_Count - 1;
-         Closed_Count := Closed_Count + 1;
-         if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
-           and then not Checkout_Signalled
-         then
-            Flyology.Wake_Sources.Signal (Checkout_Wake);
-            Checkout_Signalled := True;
-         end if;
-      end Finish_Close;
-
-      procedure Take_Idle
-        (Found      : out Boolean;
-         Slot_Index : out Natural;
-         Connection : out Pooled_Connection_Access) is
-      begin
-         Found := False;
-         Slot_Index := 0;
-         Connection := null;
-         for Index in Slots'Range loop
-            if Slots (Index).Phase = Idle then
-               Slots (Index).Phase := Closing;
-               Idle_Count := Idle_Count - 1;
-               Closing_Count := Closing_Count + 1;
-               Found := True;
-               Slot_Index := Index;
-               Connection := Slots (Index).Connection;
-               exit;
-            end if;
-         end loop;
-      end Take_Idle;
-
-      procedure Request_Shutdown is
-      begin
-         if not Stopping then
-            Stopping := True;
-            Flyology.Wake_Sources.Ensure (Shutdown_Wake);
-            Flyology.Wake_Sources.Signal (Shutdown_Wake);
-            if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
-              and then not Checkout_Signalled
-            then
-               Flyology.Wake_Sources.Signal (Checkout_Wake);
-               Checkout_Signalled := True;
-            end if;
-         end if;
-      end Request_Shutdown;
-
-      procedure Take_Active_For_Interrupt
-        (Found      : out Boolean;
-         Slot_Index : out Natural;
-         Connection : out Pooled_Connection_Access) is
-      begin
-         Found := False;
-         Slot_Index := 0;
-         Connection := null;
-         for Index in Slots'Range loop
-            if Slots (Index).Phase in Connecting | Leased
-              and then Slots (Index).Connection /= null
-              and then not Slots (Index).Interrupt_Sent
-            then
-               Slots (Index).Interrupting := True;
-               Slots (Index).Interrupt_Sent := True;
-               Found := True;
-               Slot_Index := Index;
-               Connection := Slots (Index).Connection;
-               exit;
-            end if;
-         end loop;
-      end Take_Active_For_Interrupt;
-
-      procedure Finish_Interrupt
-        (Slot_Index : Positive;
-         Release_Ownership : out Boolean;
-         Connection : out Pooled_Connection_Access) is
-      begin
-         if Slot_Index > Capacity
-           or else not Slots (Slot_Index).Interrupting
-         then
-            raise Program_Error with "invalid HTTP pool interrupt completion";
-         end if;
-         Slots (Slot_Index).Interrupting := False;
-         Release_Ownership :=
-           Slots (Slot_Index).Phase = Closing
-             and then Slots (Slot_Index).Owner_Done;
-         if Release_Ownership then
-            Connection := Slots (Slot_Index).Connection;
-            Slots (Slot_Index) := (others => <>);
-            Closing_Count := Closing_Count - 1;
-            Closed_Count := Closed_Count + 1;
-            if Flyology.Wake_Sources.Descriptor (Checkout_Wake) >= 0
-              and then not Checkout_Signalled
-            then
-               Flyology.Wake_Sources.Signal (Checkout_Wake);
-               Checkout_Signalled := True;
-            end if;
-         else
-            Connection := null;
-         end if;
-      end Finish_Interrupt;
-
-      entry Await_Drained
-        when Connecting_Count + Leased_Count + Idle_Count + Closing_Count = 0
-      is
-      begin
-         null;
-      end Await_Drained;
-
-      procedure Wait_Source
-        (FD : out Flyology.IO.Descriptor; Can_Checkout : out Boolean)
-      is
-      begin
-         Can_Checkout := Stopping;
-         if not Can_Checkout then
-            for Item of Slots loop
-               if Item.Phase in Empty | Idle then
-                  Can_Checkout := True;
-                  exit;
-               end if;
-            end loop;
-         end if;
-         if Can_Checkout then
-            FD := Flyology.IO.Invalid_Descriptor;
-         else
-            Flyology.Wake_Sources.Ensure (Checkout_Wake);
-            FD := Flyology.Wake_Sources.Descriptor (Checkout_Wake);
-         end if;
-      end Wait_Source;
-
-      procedure Shutdown_Source
-        (FD : out Flyology.IO.Descriptor; Requested : out Boolean) is
-      begin
-         Requested := Stopping;
-         if Stopping then
-            FD := Flyology.IO.Invalid_Descriptor;
-         else
-            Flyology.Wake_Sources.Ensure (Shutdown_Wake);
-            FD := Flyology.Wake_Sources.Descriptor (Shutdown_Wake);
-         end if;
-      end Shutdown_Source;
-
-      procedure Register_Waiter is
-      begin
-         Waiter_Count := Waiter_Count + 1;
-      end Register_Waiter;
-
-      procedure Unregister_Waiter is
-      begin
-         if Waiter_Count = 0 then
-            raise Program_Error with "HTTP pool waiter released twice";
-         end if;
-         Waiter_Count := Waiter_Count - 1;
-      end Unregister_Waiter;
-
-      procedure Record_Admission_Timeout is
-      begin
-         Timeout_Count := Timeout_Count + 1;
-      end Record_Admission_Timeout;
-
-      procedure Record_Stale_Retry is
-      begin
-         Stale_Retry_Count := Stale_Retry_Count + 1;
-      end Record_Stale_Retry;
-
-      function Snapshot return Client_Diagnostics is
-        (Transport_Capacity => Capacity,
-         Pending_Transports => Connecting_Count,
-         Active_Exchanges   => Leased_Count,
-         Reusable_Transports => Idle_Count,
-         Closing_Transports => Closing_Count,
-         Admission_Waiters  => Waiter_Count,
-         Transports_Created => Created_Count,
-         Transport_Reuses   => Reused_Count,
-         Transports_Closed  => Closed_Count,
-         Stale_Retries      => Stale_Retry_Count,
-         Admission_Timeouts => Timeout_Count);
-
-      function Is_Stopping return Boolean is (Stopping);
-   end Pool_Controller;
-
-   protected body State_Lifetime is
-      procedure Retain_Response is
-      begin
-         if not Client_Live then
-            raise Program_Error with "HTTP client is finalizing";
-         end if;
-         Responses := Responses + 1;
-      end Retain_Response;
-
-      procedure Release_Response (Final_Reference : out Boolean) is
-      begin
-         if Responses = 0 then
-            raise Program_Error with "HTTP response state released twice";
-         end if;
-         Responses := Responses - 1;
-         Final_Reference := not Client_Live and then Responses = 0;
-      end Release_Response;
-
-      procedure Release_Client (Final_Reference : out Boolean) is
-      begin
-         if not Client_Live then
-            raise Program_Error with "HTTP client state released twice";
-         end if;
-         Client_Live := False;
-         Final_Reference := Responses = 0;
-      end Release_Client;
-   end State_Lifetime;
+   protected body State_Lifetime is separate;
 
    type Client_State (Capacity : Positive) is limited record
       Manager       : aliased Connections.Server (Capacity => Capacity);
       Pool          : Pool_Controller (Capacity);
       Lifetime      : State_Lifetime;
+      Backend       : Flyology.IO.TLS.Provider_Access := null;
       Origin_Value  : Origin;
       Is_Configured : Boolean := False;
    end record;
@@ -585,13 +166,20 @@ package body Flyology.HTTP.Client is
       Retains_Owner  : Boolean := False;
       Started        : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout        : Duration := 0.0;
-      Token          : access Flyology.Cancellation.Token := null;
    end record;
 
    procedure Free_State is new Ada.Unchecked_Deallocation
      (Client_State, Client_State_Access);
    procedure Free_Response_Data is new Ada.Unchecked_Deallocation
      (Response_Data, Response_Data_Access);
+
+   procedure Release_State (Item : in out Client_State_Access) is
+   begin
+      if Item /= null then
+         Flyology.IO.TLS.Release (Item.Backend);
+         Free_State (Item);
+      end if;
+   end Release_State;
 
    function Remaining
      (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration is
@@ -639,6 +227,27 @@ package body Flyology.HTTP.Client is
    begin
       return Text (Text'First + 1 .. Text'Last);
    end Decimal;
+
+   function Decimal (Value : Body_Size) return String is
+      Text : constant String := Body_Size'Image (Value);
+   begin
+      return Text (Text'First + 1 .. Text'Last);
+   end Decimal;
+
+   function Hexadecimal (Value : Natural) return String is
+      Hex_Digits : constant String := "0123456789abcdef";
+      Buffer : String (1 .. (Natural'Size + 3) / 4);
+      Cursor : Natural := Buffer'Last;
+      Rest   : Natural := Value;
+   begin
+      loop
+         Buffer (Cursor) := Hex_Digits (Rest mod 16 + 1);
+         Rest := Rest / 16;
+         exit when Rest = 0;
+         Cursor := Cursor - 1;
+      end loop;
+      return Buffer (Cursor .. Buffer'Last);
+   end Hexadecimal;
 
    function Is_Default_Port (Value : Origin) return Boolean is
      ((Scheme (Value) = Plain_HTTP and then Port (Value) = 80)
@@ -775,6 +384,9 @@ package body Flyology.HTTP.Client is
       Item.Body_Value := Flyology.Bytes.To_Unbounded_Bytes (Value);
    end Set_Body;
 
+   function Known_Length (Bytes : Body_Size) return Body_Length is
+     (Is_Known => True, Bytes => Bytes);
+
    procedure Configure
      (Item         : in out Client;
       Origin_Value : Origin;
@@ -794,7 +406,7 @@ package body Flyology.HTTP.Client is
          if Item.Control.State /= null
            and then not Item.Control.State.Is_Configured
          then
-            Free_State (Item.Control.State);
+            Release_State (Item.Control.State);
          end if;
          raise;
    end Configure;
@@ -805,328 +417,47 @@ package body Flyology.HTTP.Client is
       Backend      : not null access Flyology.IO.TLS.Provider'Class;
       Pool         : Pool_Configuration := Default_Pool_Configuration)
    is
+      Retained : Flyology.IO.TLS.Provider_Access := null;
    begin
       if Item.Control.State /= null then
          raise Program_Error with "HTTP client is already configured";
       end if;
-      --  Anonymous access parameters do not carry the caller's accessibility
-      --  level into a stored access component. Configure's documented
-      --  lifetime contract requires Backend to outlive Item.
-      Item.TLS_Backend := Backend.all'Unchecked_Access;
+      Retained := Flyology.IO.TLS.Retain (Backend.all);
       Item.Control.State := new Client_State (Item.Capacity);
+      Item.Control.State.Backend := Retained;
+      Retained := null;
       Item.Control.State.Origin_Value := Origin_Value;
       Item.Control.State.Pool.Configure (Pool);
       Item.Control.State.Is_Configured := True;
    exception
       when others =>
+         Flyology.IO.TLS.Release (Retained);
          if Item.Control.State /= null
            and then not Item.Control.State.Is_Configured
          then
-            Free_State (Item.Control.State);
+            Release_State (Item.Control.State);
          end if;
-         Item.TLS_Backend := null;
          raise;
    end Configure;
 
-   procedure Interrupt_Sources
-     (State   : not null Client_State_Access;
-      Token   : access Flyology.Cancellation.Token;
-      Sources : out Flyology.IO.Interrupt_Set;
-      Count   : out Natural)
-   is
-      FD        : Flyology.IO.Descriptor;
-      Requested : Boolean;
-   begin
-      Count := 0;
-      State.Pool.Shutdown_Source (FD, Requested);
-      if Requested then
-         raise Client_Closed;
-      end if;
-      Count := Count + 1;
-      Sources (Sources'First + Count - 1) := FD;
-      if Token /= null then
-         Token.Wait_Source (FD, Requested);
-         if Requested then
-            raise Flyology.Cancellation.Operation_Cancelled;
-         end if;
-         Count := Count + 1;
-         Sources (Sources'First + Count - 1) := FD;
-      end if;
-   end Interrupt_Sources;
+   package Exchange_Internals is
+      procedure Translate_Interruption
+        (State : not null Client_State_Access;
+         Token : access Flyology.Cancellation.Token)
+        with No_Return;
 
-   procedure Translate_Interruption
-     (State : not null Client_State_Access;
-      Token : access Flyology.Cancellation.Token)
-     with No_Return
-   is
-      FD : Flyology.IO.Descriptor;
-      Requested : Boolean;
-   begin
-      State.Pool.Shutdown_Source (FD, Requested);
-      if Requested then
-         raise Client_Closed;
-      elsif Token /= null and then Token.Requested then
-         raise Flyology.Cancellation.Operation_Cancelled;
-      else
-         raise Flyology.Cancellation.Operation_Cancelled;
-      end if;
-   end Translate_Interruption;
+      procedure Checkout
+        (Item       : in out Client;
+         Connection : out Pooled_Connection_Access;
+         Slot_Index : out Positive;
+         Was_Reused : out Boolean;
+         Started    : Ada.Real_Time.Time;
+         Timeout    : Duration;
+         Token      : access Flyology.Cancellation.Token);
+   end Exchange_Internals;
 
-   procedure Establish
-     (Item       : in out Client;
-      State      : not null Client_State_Access;
-      Slot_Index : Positive;
-      Connection : in out Pooled_Connection_Access;
-      Started    : Ada.Real_Time.Time;
-      Timeout    : Duration;
-      Token      : access Flyology.Cancellation.Token)
-   is
-      Socket    : Sockets.Socket_Type;
-      Connected : Boolean := False;
-
-      procedure Cleanup is
-      begin
-         if Sockets.Is_Open (Socket) then
-            begin
-               Sockets.Close_Socket (Socket);
-            exception
-               when others => null;
-            end;
-         end if;
-         if Connection /= null then
-            begin
-               Connections.Close (Connection.Channel);
-            exception
-               when others => null;
-            end;
-         end if;
-      end Cleanup;
-   begin
-      declare
-         Sources : Flyology.IO.Interrupt_Set (1 .. 2);
-         Count   : Natural;
-      begin
-         Interrupt_Sources (State, Token, Sources, Count);
-         declare
-            Addresses : constant Flyology.IO.DNS.Address_Array :=
-              Flyology.IO.DNS.Resolve
-                (Host (State.Origin_Value),
-                 Timeout => Remaining (Started, Timeout),
-                 Interrupts => Sources (1 .. Count));
-         begin
-            for Address of Addresses loop
-               begin
-                  Sockets.Create_Socket (Socket, Address.Family);
-                  Interrupt_Sources (State, Token, Sources, Count);
-                  Sockets.Connect
-                    (Socket,
-                     Sockets.Network_Endpoint
-                       (Address, Sockets.Port (Port (State.Origin_Value))),
-                     Remaining (Started, Timeout), Sources (1 .. Count));
-                  Connected := True;
-               exception
-                  when Sockets.Operation_Interrupted =>
-                     if Sockets.Is_Open (Socket) then
-                        Sockets.Close_Socket (Socket);
-                     end if;
-                     Translate_Interruption (State, Token);
-                  when Flyology.IO.Timeout_Error =>
-                     if Sockets.Is_Open (Socket) then
-                        Sockets.Close_Socket (Socket);
-                     end if;
-                     raise;
-                  when Sockets.Socket_Error | Flyology.IO.Device_Error =>
-                     if Sockets.Is_Open (Socket) then
-                        begin
-                           Sockets.Close_Socket (Socket);
-                        exception
-                           when others => null;
-                        end;
-                     end if;
-               end;
-               exit when Connected;
-            end loop;
-         end;
-      end;
-
-      if not Connected then
-         raise Connection_Error with "all resolved HTTP endpoints failed";
-      end if;
-
-      Connection := new Pooled_Connection;
-      Connections.Take (State.Manager, Socket, Connection.Channel);
-      State.Pool.Publish_Connecting (Slot_Index, Connection);
-      if Scheme (State.Origin_Value) = Secure_HTTPS then
-         Flyology.IO.Connections.TLS.Upgrade
-           (Connection.Channel, Item.TLS_Backend.all,
-            Flyology.IO.TLS.Client, Host (State.Origin_Value),
-            Remaining (Started, Timeout), Token);
-      end if;
-   exception
-      when Flyology.IO.DNS.Operation_Cancelled =>
-         Cleanup;
-         Translate_Interruption (State, Token);
-      when Flyology.IO.DNS.Name_Not_Found |
-           Flyology.IO.DNS.Resolution_Failed |
-           Flyology.IO.DNS.Malformed_Response =>
-         Cleanup;
-         raise Connection_Error with "HTTP origin resolution failed";
-      when Connections.Admission_Closed =>
-         Cleanup;
-         raise Client_Closed;
-      when Flyology.Cancellation.Operation_Cancelled =>
-         Cleanup;
-         Translate_Interruption (State, Token);
-      when others =>
-         Cleanup;
-         raise;
-   end Establish;
-
-   procedure Wait_For_Pool
-     (State   : not null Client_State_Access;
-      Started : Ada.Real_Time.Time;
-      Timeout : Duration;
-      Token   : access Flyology.Cancellation.Token)
-   is
-      Pool_FD   : Flyology.IO.Descriptor;
-      Token_FD  : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
-      Ready_Now : Boolean;
-      Cancelled : Boolean := False;
-      Index     : Natural;
-   begin
-      State.Pool.Wait_Source (Pool_FD, Ready_Now);
-      if Ready_Now then
-         return;
-      end if;
-      if Token /= null then
-         Token.Wait_Source (Token_FD, Cancelled);
-         if Cancelled then
-            raise Flyology.Cancellation.Operation_Cancelled;
-         end if;
-      end if;
-      if Token = null then
-         declare
-            Sources : Flyology.IO.Wait_Request_Array (1 .. 1);
-         begin
-            Sources (1) :=
-              (FD => Pool_FD, Condition => Flyology.IO.For_Read);
-            Index := Flyology.IO.Wait_Any
-              (Sources, Remaining (Started, Timeout));
-         end;
-      else
-         declare
-            Sources : Flyology.IO.Wait_Request_Array (1 .. 2);
-         begin
-            Sources (1) :=
-              (FD => Pool_FD, Condition => Flyology.IO.For_Read);
-            Sources (2) :=
-              (FD => Token_FD, Condition => Flyology.IO.For_Read);
-            Index := Flyology.IO.Wait_Any
-              (Sources, Remaining (Started, Timeout));
-         end;
-      end if;
-      if Index = 0 then
-         State.Pool.Record_Admission_Timeout;
-         raise Flyology.IO.Timeout_Error;
-      elsif Index = 2 then
-         raise Flyology.Cancellation.Operation_Cancelled;
-      end if;
-   end Wait_For_Pool;
-
-   procedure Checkout
-     (Item       : in out Client;
-      Connection : out Pooled_Connection_Access;
-      Slot_Index : out Positive;
-      Was_Reused : out Boolean;
-      Started    : Ada.Real_Time.Time;
-      Timeout    : Duration;
-      Token      : access Flyology.Cancellation.Token)
-   is
-      Result : Checkout_Result;
-      Index  : Natural;
-      Value  : Pooled_Connection_Access;
-      Waiting : Boolean := False;
-   begin
-      if Item.Control.State = null
-        or else not Item.Control.State.Is_Configured
-      then
-         raise Program_Error with "HTTP client is not configured";
-      end if;
-      Was_Reused := False;
-      loop
-         Item.Control.State.Pool.Try_Checkout
-           (Ada.Real_Time.Clock, Result, Index, Value);
-         case Result is
-            when Checkout_Idle =>
-               if Waiting then
-                  Item.Control.State.Pool.Unregister_Waiter;
-                  Waiting := False;
-               end if;
-               Connection := Value;
-               Slot_Index := Positive (Index);
-               Was_Reused := True;
-               return;
-            when Checkout_Create =>
-               begin
-                  Establish
-                    (Item, Item.Control.State, Positive (Index), Value,
-                     Started, Timeout, Token);
-                  Item.Control.State.Pool.Install
-                    (Positive (Index), Value, Ada.Real_Time.Clock);
-               exception
-                  when others =>
-                     declare
-                        Failure : Failure_Result;
-                     begin
-                        Item.Control.State.Pool.Creation_Failed
-                          (Positive (Index), Failure);
-                        if Failure = Failure_Free and then Value /= null then
-                           Free_Connection (Value);
-                        end if;
-                     end;
-                     if Waiting then
-                        Item.Control.State.Pool.Unregister_Waiter;
-                        Waiting := False;
-                     end if;
-                     raise;
-               end;
-               if Waiting then
-                  Item.Control.State.Pool.Unregister_Waiter;
-                  Waiting := False;
-               end if;
-               Connection := Value;
-               Slot_Index := Positive (Index);
-               Was_Reused := False;
-               return;
-            when Checkout_Discard =>
-               Close_And_Finish
-                 (Item.Control.State, Positive (Index), Value);
-            when Checkout_Busy =>
-               if not Waiting then
-                  Item.Control.State.Pool.Register_Waiter;
-                  Waiting := True;
-               end if;
-               Wait_For_Pool
-                 (Item.Control.State, Started, Timeout, Token);
-            when Checkout_Closed =>
-               if Waiting then
-                  Item.Control.State.Pool.Unregister_Waiter;
-                  Waiting := False;
-               end if;
-               raise Client_Closed;
-         end case;
-      end loop;
-   exception
-      when others =>
-         if Waiting then
-            begin
-               Item.Control.State.Pool.Unregister_Waiter;
-            exception
-               when others => null;
-            end;
-         end if;
-         raise;
-   end Checkout;
+   package body Exchange_Internals is separate;
+   use Exchange_Internals;
 
    procedure Validate_Request (Value : Request) is
       Body_Length : constant Natural :=
@@ -1143,505 +474,53 @@ package body Flyology.HTTP.Client is
       end if;
    end Validate_Request;
 
-   function Request_Head
-     (State : Client_State; Value : Request) return String
-   is
-      Result : Unbounded_String;
-      Body_Length : constant Natural :=
-        Flyology.Bytes.Length (Value.Body_Value);
-   begin
-      Validate_Request (Value);
-      Append
-        (Result, Image (Value.Method_Value) & " " &
-         To_String (Value.Target_Value) & " HTTP/1.1" & CRLF);
-      Append (Result, "Host: " & Host_Field (State.Origin_Value) & CRLF);
-      for Index in 1 .. Flyology.HTTP.Headers.Count (Value.Fields) loop
-         Append
-           (Result, Flyology.HTTP.Headers.Name (Value.Fields, Index) & ": " &
-            Flyology.HTTP.Headers.Value (Value.Fields, Index) & CRLF);
-      end loop;
-      if Body_Length > 0 then
-         Append (Result, "Content-Length: " & Decimal (Body_Length) & CRLF);
-      end if;
-      Append (Result, CRLF);
-      return To_String (Result);
-   end Request_Head;
+   package HTTP_1_Internals is
+      function Request_Head
+        (State         : Client_State;
+         Value         : Request;
+         Streaming     : Boolean;
+         Stream_Length : Body_Length) return String;
 
-   procedure Receive_More
-     (Data : in out Response_Data; Peer_Closed : out Boolean)
-   is
-      Buffer : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Receive_Buffer_Size));
-      Last   : Ada.Streams.Stream_Element_Offset;
-   begin
-      Connections.Receive
-        (Data.Connection.Channel, Buffer, Last,
-         Remaining (Data.Started, Data.Timeout), Token => Data.Token);
-      Peer_Closed := Last < Buffer'First;
-      if not Peer_Closed then
-         Data.Saw_Response_Bytes := True;
-         Append (Data.Pending, Byte_String (Buffer (Buffer'First .. Last)));
-      end if;
-   end Receive_More;
+      procedure Send_Streaming_Body
+        (Data   : in out Response_Data;
+         Source : in out Request_Body_Source'Class;
+         Length : Body_Length;
+         Token  : access Flyology.Cancellation.Token);
 
-   procedure Reset_Attempt (Data : in out Response_Data) is
-   begin
-      Flyology.HTTP.Headers.Clear (Data.Fields);
-      Flyology.HTTP.Headers.Clear (Data.Trailers);
-      Data.Connection := null;
-      Data.Slot_Index := 0;
-      Data.Status_Value := 200;
-      Data.Reason_Value := Null_Unbounded_String;
-      Data.Protocol_Value := HTTP_1_1_Protocol;
-      Data.Version_Value := HTTP_1_1;
-      Data.Pending := Null_Unbounded_String;
-      Data.Mode := No_Body;
-      Data.Remaining_Body := 0;
-      Data.Chunk_Remaining := 0;
-      Data.Need_Chunk_CRLF := False;
-      Data.Reading_Trailers := False;
-      Data.Complete := False;
-      Data.Reusable := False;
-      Data.Saw_Response_Bytes := False;
-   end Reset_Attempt;
+      procedure Reset_Attempt (Data : in out Response_Data);
 
-   function Trim_OWS (Value : String) return String is
-      First : Natural := Value'First;
-      Last  : Natural := Value'Last;
-   begin
-      while First <= Last
-        and then Value (First) in ' ' | Character'Val (9)
-      loop
-         First := First + 1;
-      end loop;
-      while Last >= First and then Value (Last) in ' ' | Character'Val (9) loop
-         Last := Last - 1;
-      end loop;
-      return Value (First .. Last);
-   end Trim_OWS;
+      procedure Read_Final_Head
+        (Data  : in out Response_Data;
+         Token : access Flyology.Cancellation.Token);
 
-   function Header_Has_Token
-     (Fields : Flyology.HTTP.Headers.List; Name : String; Token : String)
-      return Boolean
-   is
-      use Ada.Characters.Handling;
-   begin
-      for Occurrence in 1 .. Flyology.HTTP.Headers.Count (Fields, Name) loop
-         declare
-            Text  : constant String :=
-              Flyology.HTTP.Headers.Value (Fields, Name, Occurrence);
-            First : Natural := Text'First;
-         begin
-            while First <= Text'Last loop
-               declare
-                  Comma : constant Natural := Ada.Strings.Fixed.Index
-                    (Text (First .. Text'Last), ",");
-                  Last : constant Natural :=
-                    (if Comma = 0 then Text'Last else Comma - 1);
-               begin
-                  if To_Lower (Trim_OWS (Text (First .. Last))) =
-                    To_Lower (Token)
-                  then
-                     return True;
-                  end if;
-                  exit when Comma = 0;
-                  First := Comma + 1;
-               end;
-            end loop;
-         end;
-      end loop;
-      return False;
-   end Header_Has_Token;
+      procedure Select_Body_Mode
+        (Data : in out Response_Data; Request_Method : Method);
 
-   function Parse_Natural (Value : String) return Natural is
-      Result : Natural := 0;
-   begin
-      if Value = "" then
-         raise Protocol_Error with "empty HTTP decimal value";
-      end if;
-      for Item of Value loop
-         if Item not in '0' .. '9'
-           or else Result >
-             (Natural'Last - (Character'Pos (Item) - Character'Pos ('0'))) / 10
-         then
-            raise Protocol_Error with
-              "invalid or overflowing HTTP decimal value";
-         end if;
-         Result := Result * 10 + Character'Pos (Item) - Character'Pos ('0');
-      end loop;
-      return Result;
-   end Parse_Natural;
+      procedure Validate_Response
+        (Value : Ada.Streams.Stream_Element_Array);
 
-   function Content_Length
-     (Fields  : Flyology.HTTP.Headers.List;
-      Present : out Boolean) return Natural
-   is
-      Expected : Natural := 0;
-      Have     : Boolean := False;
-   begin
-      for Occurrence in 1 .. Flyology.HTTP.Headers.Count
-        (Fields, "Content-Length")
-      loop
-         declare
-            Text  : constant String := Flyology.HTTP.Headers.Value
-              (Fields, "Content-Length", Occurrence);
-            First : Natural := Text'First;
-         begin
-            loop
-               declare
-                  Comma : constant Natural := Ada.Strings.Fixed.Index
-                    (Text (First .. Text'Last), ",");
-                  Last : constant Natural :=
-                    (if Comma = 0 then Text'Last else Comma - 1);
-                  Parsed : constant Natural :=
-                    Parse_Natural (Trim_OWS (Text (First .. Last)));
-               begin
-                  if Have and then Parsed /= Expected then
-                     raise Protocol_Error with "conflicting Content-Length";
-                  end if;
-                  Expected := Parsed;
-                  Have := True;
-                  exit when Comma = 0;
-                  First := Comma + 1;
-               end;
-            end loop;
-         end;
-      end loop;
-      Present := Have;
-      return Expected;
-   end Content_Length;
+      procedure Read_Response_Body
+        (Item     : in out Response;
+         Data     : out Ada.Streams.Stream_Element_Array;
+         Last     : out Ada.Streams.Stream_Element_Offset;
+         Finished : out Boolean;
+         Token    : access Flyology.Cancellation.Token);
+   end HTTP_1_Internals;
 
-   procedure Parse_Response_Head
-     (Data : in out Response_Data; Head : String)
-   is
-      First_CRLF : constant Natural := Ada.Strings.Fixed.Index (Head, CRLF);
-      Cursor     : Natural;
-      Status_Line : constant String :=
-        (if First_CRLF = 0 then Head else Head (Head'First .. First_CRLF - 1));
-   begin
-      Flyology.HTTP.Headers.Clear (Data.Fields);
-      if Status_Line'Length < 12
-        or else Status_Line (Status_Line'First + 8) /= ' '
-      then
-         raise Protocol_Error with "malformed HTTP response status line";
-      elsif Status_Line
-        (Status_Line'First .. Status_Line'First + 7) = "HTTP/1.1"
-      then
-         Data.Version_Value := HTTP_1_1;
-      elsif Status_Line
-        (Status_Line'First .. Status_Line'First + 7) = "HTTP/1.0"
-      then
-         Data.Version_Value := HTTP_1_0;
-      else
-         raise Protocol_Error with "unsupported HTTP response version";
-      end if;
-      declare
-         Start : constant Natural := Status_Line'First + 9;
-         Parsed : Natural;
-      begin
-         if Status_Line'Last < Start + 2
-           or else (for some Index in Start .. Start + 2 =>
-                      Status_Line (Index) not in '0' .. '9')
-           or else
-             (Status_Line'Last > Start + 2
-                and then Status_Line (Start + 3) /= ' ')
-         then
-            raise Protocol_Error with "malformed HTTP response status";
-         end if;
-         Parsed :=
-           (Character'Pos (Status_Line (Start)) - Character'Pos ('0')) * 100
-           + (Character'Pos (Status_Line (Start + 1))
-              - Character'Pos ('0')) * 10
-           + Character'Pos (Status_Line (Start + 2)) - Character'Pos ('0');
-         if Parsed not in Status_Code then
-            raise Protocol_Error with "invalid HTTP response status";
-         end if;
-         if Status_Line'Last > Start + 3
-           and then
-             (for some Index in Start + 4 .. Status_Line'Last =>
-                (Character'Pos (Status_Line (Index)) < 32
-                   and then Status_Line (Index) /= Character'Val (9))
-                  or else Character'Pos (Status_Line (Index)) = 127)
-         then
-            raise Protocol_Error with "invalid HTTP response reason phrase";
-         end if;
-         Data.Status_Value := Status_Code (Parsed);
-         Data.Reason_Value :=
-           (if Status_Line'Last > Start + 3
-            then To_Unbounded_String
-              (Status_Line (Start + 4 .. Status_Line'Last))
-            else Null_Unbounded_String);
-      end;
-
-      Cursor := First_CRLF + CRLF'Length;
-      while Cursor <= Head'Last loop
-         declare
-            Mark : constant Natural := Ada.Strings.Fixed.Index
-              (Head (Cursor .. Head'Last), CRLF);
-            Line_Last : constant Natural :=
-              (if Mark = 0 then Head'Last else Mark - 1);
-            Colon : Natural;
-         begin
-            exit when Line_Last < Cursor;
-            if Head (Cursor) in ' ' | Character'Val (9) then
-               raise Protocol_Error with "obsolete folded HTTP response field";
-            end if;
-            Colon := Ada.Strings.Fixed.Index (Head (Cursor .. Line_Last), ":");
-            if Colon = 0 or else Colon = Cursor then
-               raise Protocol_Error with "malformed HTTP response field";
-            end if;
-            begin
-               Flyology.HTTP.Headers.Add
-                 (Data.Fields, Head (Cursor .. Colon - 1),
-                  Trim_OWS (Head (Colon + 1 .. Line_Last)));
-            exception
-               when Flyology.HTTP.Headers.Headers_Too_Large =>
-                  raise Response_Too_Large;
-               when Constraint_Error =>
-                  raise Protocol_Error with "invalid HTTP response field";
-            end;
-            exit when Mark = 0;
-            Cursor := Mark + CRLF'Length;
-         end;
-      end loop;
-   end Parse_Response_Head;
-
-   procedure Read_Final_Head (Data : in out Response_Data) is
-      Closed : Boolean;
-      Informational : Natural := 0;
-   begin
-      loop
-         loop
-            declare
-               Text : constant String := To_String (Data.Pending);
-               Mark : constant Natural := Ada.Strings.Fixed.Index
-                 (Text, CRLF & CRLF);
-            begin
-               if Mark /= 0 then
-                  declare
-                     Head_Last : constant Natural := Mark + CRLF'Length - 1;
-                  begin
-                     if Head_Last - Text'First + 1 >
-                       Flyology.HTTP.Headers.Default_Max_Bytes
-                     then
-                        raise Response_Too_Large;
-                     end if;
-                     Parse_Response_Head
-                       (Data, Text (Text'First .. Head_Last));
-                     Data.Pending :=
-                       (if Head_Last = Text'Last
-                        then Null_Unbounded_String
-                        else To_Unbounded_String
-                          (Text (Head_Last + CRLF'Length + 1 .. Text'Last)));
-                  end;
-                  exit;
-               elsif Text'Length >=
-                 Flyology.HTTP.Headers.Default_Max_Bytes
-               then
-                  raise Response_Too_Large;
-               end if;
-            end;
-            Receive_More (Data, Closed);
-            if Closed then
-               raise Protocol_Error with
-                 "peer closed during HTTP response head";
-            end if;
-         end loop;
-
-         exit when Data.Status_Value not in 100 .. 199;
-         if Data.Status_Value = 101 then
-            raise Protocol_Error with "HTTP protocol upgrade is unsupported";
-         elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
-           or else Flyology.HTTP.Headers.Count
-             (Data.Fields, "Transfer-Encoding") > 0
-         then
-            raise Protocol_Error with
-              "informational HTTP response contains body framing";
-         end if;
-         Informational := Informational + 1;
-         if Informational > Max_Informational_Responses then
-            raise Protocol_Error with "too many informational HTTP responses";
-         end if;
-      end loop;
-   end Read_Final_Head;
-
-   procedure Select_Body_Mode
-     (Data : in out Response_Data; Request_Method : Method)
-   is
-      Length_Present : Boolean;
-      Length_Value   : constant Natural := Content_Length
-        (Data.Fields, Length_Present);
-      Transfer_Count : constant Natural := Flyology.HTTP.Headers.Count
-        (Data.Fields, "Transfer-Encoding");
-      Close_Token : constant Boolean := Header_Has_Token
-        (Data.Fields, "Connection", "close");
-      Keep_Token : constant Boolean := Header_Has_Token
-        (Data.Fields, "Connection", "keep-alive");
-   begin
-      Data.Reusable :=
-        (if Data.Version_Value = HTTP_1_1
-         then not Close_Token else Keep_Token);
-      if Data.Status_Value = 204
-        and then (Length_Present or else Transfer_Count > 0)
-      then
-         raise Protocol_Error with "204 response contains body framing";
-      elsif Data.Status_Value = 205
-        and then (Transfer_Count > 0
-                    or else (Length_Present and then Length_Value /= 0))
-      then
-         raise Protocol_Error with "205 response contains a nonempty body";
-      elsif Data.Version_Value = HTTP_1_0 and then Transfer_Count > 0 then
-         raise Protocol_Error with
-           "HTTP/1.0 response contains Transfer-Encoding";
-      end if;
-      if Image (Request_Method) = "HEAD"
-        or else Data.Status_Value in 100 .. 199 | 204 | 205 | 304
-      then
-         Data.Mode := No_Body;
-      elsif Transfer_Count > 0 then
-         if Length_Present then
-            raise Protocol_Error with
-              "HTTP response has both Transfer-Encoding and Content-Length";
-         elsif Transfer_Count /= 1
-           or else Ada.Characters.Handling.To_Lower
-             (Trim_OWS
-                (Flyology.HTTP.Headers.Value
-                   (Data.Fields, "Transfer-Encoding"))) /= "chunked"
-         then
-            raise Protocol_Error with
-              "unsupported HTTP response transfer coding";
-         end if;
-         Data.Mode := Chunked_Body;
-      elsif Length_Present then
-         Data.Mode := (if Length_Value = 0 then No_Body else Fixed_Body);
-         Data.Remaining_Body := Length_Value;
-      else
-         Data.Mode := Until_Close_Body;
-         Data.Reusable := False;
-      end if;
-      if Data.Mode = No_Body then
-         if Length (Data.Pending) > 0 then
-            --  Bytes following a bodyless response may only be a response to a
-            --  pipelined request, which this client never sends.
-            Data.Reusable := False;
-         end if;
-         Release_Lease (Data, Data.Reusable);
-      end if;
-   end Select_Body_Mode;
-
-   procedure Remove_Pending_Prefix
-     (Data : in out Response_Data; Count : Natural);
-   function Chunk_Size (Line : String) return Natural;
-   procedure Add_Trailer (Data : in out Response_Data; Line : String);
+   package body HTTP_1_Internals is separate;
+   use HTTP_1_Internals;
 
    procedure Validate_Response_Bytes_For_Testing
-     (Value : Ada.Streams.Stream_Element_Array)
-   is
-      Data          : Response_Data;
-      Informational : Natural := 0;
-
-      procedure Take_Line (Line : out Unbounded_String) is
-         Text : constant String := To_String (Data.Pending);
-         Mark : constant Natural := Ada.Strings.Fixed.Index (Text, CRLF);
-      begin
-         if Mark = 0 then
-            raise Protocol_Error with "incomplete HTTP framing line";
-         end if;
-         Line := To_Unbounded_String (Text (Text'First .. Mark - 1));
-         Remove_Pending_Prefix (Data, Mark - Text'First + CRLF'Length);
-      end Take_Line;
+     (Value : Ada.Streams.Stream_Element_Array) is
    begin
-      Data.Pending := To_Unbounded_String (Byte_String (Value));
-      loop
-         declare
-            Text : constant String := To_String (Data.Pending);
-            Mark : constant Natural := Ada.Strings.Fixed.Index
-              (Text, CRLF & CRLF);
-         begin
-            if Mark = 0 then
-               if Text'Length >= Flyology.HTTP.Headers.Default_Max_Bytes then
-                  raise Response_Too_Large;
-               end if;
-               raise Protocol_Error with "incomplete HTTP response head";
-            end if;
-            declare
-               Head_Last : constant Natural := Mark + CRLF'Length - 1;
-            begin
-               if Head_Last - Text'First + 1 >
-                 Flyology.HTTP.Headers.Default_Max_Bytes
-               then
-                  raise Response_Too_Large;
-               end if;
-               Parse_Response_Head (Data, Text (Text'First .. Head_Last));
-               Data.Pending :=
-                 (if Head_Last + CRLF'Length >= Text'Last
-                  then Null_Unbounded_String
-                  else To_Unbounded_String
-                    (Text (Head_Last + CRLF'Length + 1 .. Text'Last)));
-            end;
-         end;
-         exit when Data.Status_Value not in 100 .. 199;
-         if Data.Status_Value = 101 then
-            raise Protocol_Error with "HTTP protocol upgrade is unsupported";
-         elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
-           or else Flyology.HTTP.Headers.Count
-             (Data.Fields, "Transfer-Encoding") > 0
-         then
-            raise Protocol_Error with
-              "informational HTTP response contains body framing";
-         end if;
-         Informational := Informational + 1;
-         if Informational > Max_Informational_Responses then
-            raise Protocol_Error with "too many informational HTTP responses";
-         end if;
-      end loop;
-
-      Select_Body_Mode (Data, To_Method ("GET"));
-      case Data.Mode is
-         when No_Body | Until_Close_Body =>
-            null;
-         when Fixed_Body =>
-            if Length (Data.Pending) < Data.Remaining_Body then
-               raise Protocol_Error with
-                 "peer closed before Content-Length was received";
-            end if;
-         when Chunked_Body =>
-            loop
-               declare
-                  Line : Unbounded_String;
-                  Size : Natural;
-               begin
-                  Take_Line (Line);
-                  Size := Chunk_Size (To_String (Line));
-                  if Size = 0 then
-                     loop
-                        Take_Line (Line);
-                        exit when Length (Line) = 0;
-                        Add_Trailer (Data, To_String (Line));
-                     end loop;
-                     exit;
-                  end if;
-                  if Length (Data.Pending) < Size + CRLF'Length then
-                     raise Protocol_Error with "incomplete HTTP chunk data";
-                  end if;
-                  declare
-                     Text : constant String := To_String (Data.Pending);
-                     CRLF_First : constant Natural := Text'First + Size;
-                  begin
-                     if Text (CRLF_First .. CRLF_First + 1) /= CRLF then
-                        raise Protocol_Error with
-                          "missing CRLF after HTTP chunk data";
-                     end if;
-                  end;
-                  Remove_Pending_Prefix (Data, Size + CRLF'Length);
-               end;
-            end loop;
-      end case;
+      HTTP_1_Internals.Validate_Response (Value);
    end Validate_Response_Bytes_For_Testing;
 
-   function Execute
+   function Execute_Internal
      (Item    : aliased in out Client;
       Value   : Request;
+      Source  : access Request_Body_Source'Class;
+      Length  : Body_Length;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response
    is
@@ -1654,6 +533,11 @@ package body Flyology.HTTP.Client is
         or else not Item.Control.State.Is_Configured
       then
          raise Program_Error with "HTTP client is not configured";
+      elsif Source /= null
+        and then Flyology.Bytes.Length (Value.Body_Value) > 0
+      then
+         raise Constraint_Error with
+           "streaming request cannot also contain a retained body";
       end if;
       Validate_Request (Value);
       return Result : Response do
@@ -1663,15 +547,12 @@ package body Flyology.HTTP.Client is
          Result.Data.Retains_Owner := True;
          Result.Data.Started := Started;
          Result.Data.Timeout := Timeout;
-         if Token /= null then
-            --  Token's documented contract requires it to outlive Result.
-            Result.Data.Token := Token.all'Unchecked_Access;
-         end if;
          declare
             Retried : Boolean := False;
 
             function Can_Retry return Boolean is
-              (Was_Reused
+              (Source = null
+                 and then Was_Reused
                  and then not Retried
                  and then Is_Idempotent (Value.Method_Value)
                  and then not Result.Data.Saw_Response_Bytes
@@ -1694,7 +575,9 @@ package body Flyology.HTTP.Client is
                begin
                   declare
                      Head : constant String := Request_Head
-                       (Item.Control.State.all, Value);
+                       (Item.Control.State.all, Value,
+                        Streaming => Source /= null,
+                        Stream_Length => Length);
                   begin
                      Connections.Send_All
                        (Result.Data.Connection.Channel, Byte_Array (Head),
@@ -1705,8 +588,11 @@ package body Flyology.HTTP.Client is
                        (Result.Data.Connection.Channel,
                         Flyology.Bytes.To_Array (Value.Body_Value),
                         Remaining (Started, Timeout), Token => Token);
+                  elsif Source /= null then
+                     Send_Streaming_Body
+                       (Result.Data.all, Source.all, Length, Token);
                   end if;
-                  Read_Final_Head (Result.Data.all);
+                  Read_Final_Head (Result.Data.all, Token);
                   Select_Body_Mode (Result.Data.all, Value.Method_Value);
                   exit;
                exception
@@ -1738,65 +624,83 @@ package body Flyology.HTTP.Client is
             raise Client_Closed;
          end if;
          raise;
-   end Execute;
+   end Execute_Internal;
 
-   function Status (Item : Response) return Status_Code is
+   function Execute
+     (Item    : aliased in out Client;
+      Value   : Request;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null) return Response is
+     (Execute_Internal
+        (Item, Value, Source => null, Length => Unknown_Length,
+         Timeout => Timeout, Token => Token));
+
+   function Execute
+     (Item    : aliased in out Client;
+      Value   : Request;
+      Source  : in out Request_Body_Source'Class;
+      Length  : Body_Length := Unknown_Length;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null) return Response is
+     (Execute_Internal
+        (Item, Value, Source => Source'Access, Length => Length,
+         Timeout => Timeout, Token => Token));
+
+   procedure Require_Response (Item : Response) is
    begin
       if Item.Data = null then
          raise Program_Error with "HTTP response is not initialized";
       end if;
+   end Require_Response;
+
+   procedure Require_Trailers (Item : Response) is
+   begin
+      Require_Response (Item);
+      if not Item.Data.Complete then
+         raise Program_Error with
+           "HTTP response trailers are unavailable before body completion";
+      end if;
+   end Require_Trailers;
+
+   function Status (Item : Response) return Status_Code is
+   begin
+      Require_Response (Item);
       return Item.Data.Status_Value;
    end Status;
 
    function Reason_Phrase (Item : Response) return String is
    begin
-      if Item.Data = null then
-         return "";
-      end if;
+      Require_Response (Item);
       return To_String (Item.Data.Reason_Value);
    end Reason_Phrase;
 
    function Negotiated_Protocol (Item : Response) return Protocol is
    begin
-      if Item.Data = null then
-         raise Program_Error with "HTTP response is not initialized";
-      end if;
+      Require_Response (Item);
       return Item.Data.Protocol_Value;
    end Negotiated_Protocol;
 
    function Header_Count (Item : Response; Name : String) return Natural is
    begin
-      if Item.Data = null then
-         return 0;
-      end if;
+      Require_Response (Item);
       return Flyology.HTTP.Headers.Count (Item.Data.Fields, Name);
    end Header_Count;
 
    function Header_Count (Item : Response) return Natural is
    begin
-      if Item.Data = null then
-         return 0;
-      end if;
+      Require_Response (Item);
       return Flyology.HTTP.Headers.Count (Item.Data.Fields);
    end Header_Count;
 
    function Header_Name (Item : Response; Index : Positive) return String is
    begin
-      if Item.Data = null
-        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Fields)
-      then
-         return "";
-      end if;
+      Require_Response (Item);
       return Flyology.HTTP.Headers.Name (Item.Data.Fields, Index);
    end Header_Name;
 
    function Header_Value (Item : Response; Index : Positive) return String is
    begin
-      if Item.Data = null
-        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Fields)
-      then
-         return "";
-      end if;
+      Require_Response (Item);
       return Flyology.HTTP.Headers.Value (Item.Data.Fields, Index);
    end Header_Value;
 
@@ -1804,45 +708,31 @@ package body Flyology.HTTP.Client is
      (Item : Response; Name : String; Occurrence : Positive := 1) return String
    is
    begin
-      if Item.Data = null then
-         return "";
-      end if;
+      Require_Response (Item);
       return Flyology.HTTP.Headers.Value (Item.Data.Fields, Name, Occurrence);
    end Header;
 
    function Trailer_Count (Item : Response; Name : String) return Natural is
    begin
-      if Item.Data = null then
-         return 0;
-      end if;
+      Require_Trailers (Item);
       return Flyology.HTTP.Headers.Count (Item.Data.Trailers, Name);
    end Trailer_Count;
 
    function Trailer_Count (Item : Response) return Natural is
    begin
-      if Item.Data = null then
-         return 0;
-      end if;
+      Require_Trailers (Item);
       return Flyology.HTTP.Headers.Count (Item.Data.Trailers);
    end Trailer_Count;
 
    function Trailer_Name (Item : Response; Index : Positive) return String is
    begin
-      if Item.Data = null
-        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Trailers)
-      then
-         return "";
-      end if;
+      Require_Trailers (Item);
       return Flyology.HTTP.Headers.Name (Item.Data.Trailers, Index);
    end Trailer_Name;
 
    function Trailer_Value (Item : Response; Index : Positive) return String is
    begin
-      if Item.Data = null
-        or else Index > Flyology.HTTP.Headers.Count (Item.Data.Trailers)
-      then
-         return "";
-      end if;
+      Require_Trailers (Item);
       return Flyology.HTTP.Headers.Value (Item.Data.Trailers, Index);
    end Trailer_Value;
 
@@ -1850,329 +740,34 @@ package body Flyology.HTTP.Client is
      (Item : Response; Name : String; Occurrence : Positive := 1) return String
    is
    begin
-      if Item.Data = null then
-         return "";
-      end if;
+      Require_Trailers (Item);
       return Flyology.HTTP.Headers.Value
         (Item.Data.Trailers, Name, Occurrence);
    end Trailer;
-
-   procedure Remove_Pending_Prefix
-     (Data : in out Response_Data; Count : Natural)
-   is
-      Text : constant String := To_String (Data.Pending);
-   begin
-      if Count = 0 then
-         return;
-      elsif Count >= Text'Length then
-         Data.Pending := Null_Unbounded_String;
-      else
-         Data.Pending := To_Unbounded_String
-           (Text (Text'First + Count .. Text'Last));
-      end if;
-   end Remove_Pending_Prefix;
-
-   procedure Copy_Pending
-     (Source : in out Response_Data;
-      Target : in out Ada.Streams.Stream_Element_Array;
-      Used   : in out Natural;
-      Limit  : Natural)
-   is
-      Text      : constant String := To_String (Source.Pending);
-      Available : constant Natural := Text'Length;
-      Room      : constant Natural := Natural (Target'Length) - Used;
-      Count     : constant Natural := Natural'Min
-        (Available, Natural'Min (Room, Limit));
-   begin
-      if Count = 0 then
-         return;
-      end if;
-      for Offset in 0 .. Count - 1 loop
-         Target
-           (Target'First
-              + Ada.Streams.Stream_Element_Offset (Used + Offset)) :=
-             Ada.Streams.Stream_Element
-               (Character'Pos (Text (Text'First + Offset)));
-      end loop;
-      Used := Used + Count;
-      Remove_Pending_Prefix (Source, Count);
-   end Copy_Pending;
-
-   procedure Ensure_Pending
-     (Data : in out Response_Data; Minimum : Positive)
-   is
-      Closed : Boolean;
-   begin
-      while Length (Data.Pending) < Minimum loop
-         Receive_More (Data, Closed);
-         if Closed then
-            raise Protocol_Error with
-              "peer closed during HTTP response framing";
-         end if;
-      end loop;
-   end Ensure_Pending;
-
-   function Chunk_Size (Line : String) return Natural is
-      Semicolon : constant Natural := Ada.Strings.Fixed.Index (Line, ";");
-      Last      : constant Natural :=
-        (if Semicolon = 0 then Line'Last else Semicolon - 1);
-      Result    : Natural := 0;
-      Digit     : Natural;
-   begin
-      if Line'Length = 0 or else Last < Line'First then
-         raise Protocol_Error with "empty HTTP chunk size";
-      end if;
-      for Index in Line'Range loop
-         if Character'Pos (Line (Index)) < 32
-           or else Character'Pos (Line (Index)) = 127
-         then
-            raise Protocol_Error with "invalid HTTP chunk extension";
-         end if;
-      end loop;
-      for Index in Line'First .. Last loop
-         case Line (Index) is
-            when '0' .. '9' =>
-               Digit := Character'Pos (Line (Index)) - Character'Pos ('0');
-            when 'a' .. 'f' =>
-               Digit := Character'Pos (Line (Index))
-                 - Character'Pos ('a') + 10;
-            when 'A' .. 'F' =>
-               Digit := Character'Pos (Line (Index))
-                 - Character'Pos ('A') + 10;
-            when others =>
-               raise Protocol_Error with "invalid HTTP chunk size";
-         end case;
-         if Result > (Natural'Last - Digit) / 16 then
-            raise Protocol_Error with "overflowing HTTP chunk size";
-         end if;
-         Result := Result * 16 + Digit;
-      end loop;
-      return Result;
-   end Chunk_Size;
-
-   procedure Read_Chunk_Line
-     (Data : in out Response_Data; Line : out Unbounded_String)
-   is
-      Closed : Boolean;
-   begin
-      loop
-         declare
-            Text : constant String := To_String (Data.Pending);
-            Mark : constant Natural := Ada.Strings.Fixed.Index (Text, CRLF);
-         begin
-            if Mark /= 0 then
-               Line := To_Unbounded_String (Text (Text'First .. Mark - 1));
-               Remove_Pending_Prefix (Data, Mark - Text'First + CRLF'Length);
-               return;
-            elsif Text'Length >= Flyology.HTTP.Headers.Default_Max_Bytes then
-               raise Protocol_Error with
-                 "HTTP chunk line exceeds framing bound";
-            end if;
-         end;
-         Receive_More (Data, Closed);
-         if Closed then
-            raise Protocol_Error with "peer closed during HTTP chunk framing";
-         end if;
-      end loop;
-   end Read_Chunk_Line;
-
-   procedure Add_Trailer (Data : in out Response_Data; Line : String) is
-      Colon : constant Natural := Ada.Strings.Fixed.Index (Line, ":");
-      Lower : constant String :=
-        (if Colon = 0 then ""
-         else Ada.Characters.Handling.To_Lower
-           (Line (Line'First .. Colon - 1)));
-   begin
-      if Colon = 0 or else Colon = Line'First
-        or else Line (Line'First) in ' ' | Character'Val (9)
-      then
-         raise Protocol_Error with "malformed HTTP trailer field";
-      elsif Lower in
-        "connection" | "content-length" | "host" | "trailer" |
-        "transfer-encoding"
-      then
-         raise Protocol_Error with "forbidden HTTP trailer field";
-      end if;
-      begin
-         Flyology.HTTP.Headers.Add
-           (Data.Trailers, Line (Line'First .. Colon - 1),
-            Trim_OWS (Line (Colon + 1 .. Line'Last)));
-      exception
-         when Constraint_Error | Flyology.HTTP.Headers.Headers_Too_Large =>
-            raise Protocol_Error with "invalid HTTP trailer field";
-      end;
-   end Add_Trailer;
 
    procedure Read_Body
      (Item     : in out Response;
       Data     : out Ada.Streams.Stream_Element_Array;
       Last     : out Ada.Streams.Stream_Element_Offset;
-      Finished : out Boolean)
-   is
-      Used   : Natural := 0;
-      Closed : Boolean;
+      Finished : out Boolean;
+      Token    : access Flyology.Cancellation.Token := null) is
    begin
-      for Element of Data loop
-         Element := 0;
-      end loop;
-      Last := Data'First - 1;
-      if Item.Data = null or else Item.Data.Complete then
-         Finished := True;
-         return;
-      elsif Data'Length = 0 then
-         Finished := False;
-         return;
-      end if;
-
-      declare
-         FD        : Flyology.IO.Descriptor;
-         Requested : Boolean;
-      begin
-         Item.Data.Owner.Pool.Shutdown_Source (FD, Requested);
-         if Requested then
-            raise Client_Closed;
-         end if;
-      end;
-
-      case Item.Data.Mode is
-         when No_Body =>
-            Release_Lease (Item.Data.all, Item.Data.Reusable);
-
-         when Fixed_Body =>
-            while Used < Natural (Data'Length)
-              and then Item.Data.Remaining_Body > 0
-            loop
-               if Length (Item.Data.Pending) = 0 then
-                  Receive_More (Item.Data.all, Closed);
-                  if Closed then
-                     raise Protocol_Error with
-                       "peer closed before Content-Length was received";
-                  end if;
-               end if;
-               declare
-                  Before : constant Natural := Used;
-               begin
-                  Copy_Pending
-                    (Item.Data.all, Data, Used, Item.Data.Remaining_Body);
-                  Item.Data.Remaining_Body := Item.Data.Remaining_Body -
-                    (Used - Before);
-               end;
-            end loop;
-            if Item.Data.Remaining_Body = 0 then
-               if Length (Item.Data.Pending) > 0 then
-                  Item.Data.Reusable := False;
-               end if;
-               Release_Lease (Item.Data.all, Item.Data.Reusable);
-            end if;
-
-         when Until_Close_Body =>
-            while Used < Natural (Data'Length) loop
-               if Length (Item.Data.Pending) = 0 then
-                  Receive_More (Item.Data.all, Closed);
-                  if Closed then
-                     Release_Lease (Item.Data.all, False);
-                     exit;
-                  end if;
-               end if;
-               Copy_Pending (Item.Data.all, Data, Used, Natural'Last);
-            end loop;
-
-         when Chunked_Body =>
-            while Used < Natural (Data'Length) and then not Item.Data.Complete
-            loop
-               if Item.Data.Chunk_Remaining > 0 then
-                  if Length (Item.Data.Pending) = 0 then
-                     Receive_More (Item.Data.all, Closed);
-                     if Closed then
-                        raise Protocol_Error with
-                          "peer closed during HTTP chunk data";
-                     end if;
-                  end if;
-                  declare
-                     Before : constant Natural := Used;
-                  begin
-                     Copy_Pending
-                       (Item.Data.all, Data, Used,
-                        Item.Data.Chunk_Remaining);
-                     Item.Data.Chunk_Remaining := Item.Data.Chunk_Remaining -
-                       (Used - Before);
-                  end;
-                  if Item.Data.Chunk_Remaining = 0 then
-                     Item.Data.Need_Chunk_CRLF := True;
-                  end if;
-
-               elsif Item.Data.Need_Chunk_CRLF then
-                  Ensure_Pending (Item.Data.all, CRLF'Length);
-                  declare
-                     Text : constant String := To_String (Item.Data.Pending);
-                  begin
-                     if Text (Text'First .. Text'First + 1) /= CRLF then
-                        raise Protocol_Error with
-                          "missing CRLF after HTTP chunk data";
-                     end if;
-                  end;
-                  Remove_Pending_Prefix (Item.Data.all, CRLF'Length);
-                  Item.Data.Need_Chunk_CRLF := False;
-
-               elsif Item.Data.Reading_Trailers then
-                  declare
-                     Line : Unbounded_String;
-                  begin
-                     Read_Chunk_Line (Item.Data.all, Line);
-                     if Length (Line) = 0 then
-                        if Length (Item.Data.Pending) > 0 then
-                           Item.Data.Reusable := False;
-                        end if;
-                        Release_Lease (Item.Data.all, Item.Data.Reusable);
-                     else
-                        Add_Trailer (Item.Data.all, To_String (Line));
-                     end if;
-                  end;
-
-               else
-                  declare
-                     Line : Unbounded_String;
-                  begin
-                     Read_Chunk_Line (Item.Data.all, Line);
-                     Item.Data.Chunk_Remaining := Chunk_Size
-                       (To_String (Line));
-                     if Item.Data.Chunk_Remaining = 0 then
-                        Item.Data.Reading_Trailers := True;
-                     end if;
-                  end;
-               end if;
-            end loop;
-      end case;
-
-      if Used > 0 then
-         Last := Data'First + Ada.Streams.Stream_Element_Offset (Used) - 1;
-      end if;
-      Finished := Item.Data.Complete;
-   exception
-      when Flyology.Cancellation.Operation_Cancelled =>
-         if Item.Data /= null and then Item.Data.Connection /= null then
-            Release_Lease (Item.Data.all, False);
-         end if;
-         Translate_Interruption (Item.Data.Owner, Item.Data.Token);
-      when others =>
-         if Item.Data /= null and then Item.Data.Connection /= null then
-            Release_Lease (Item.Data.all, False);
-         end if;
-         if Item.Data /= null
-           and then Item.Data.Owner /= null
-           and then Item.Data.Owner.Pool.Is_Stopping
-         then
-            raise Client_Closed;
-         end if;
-         raise;
+      Require_Response (Item);
+      HTTP_1_Internals.Read_Response_Body
+        (Item, Data, Last, Finished, Token);
    end Read_Body;
 
    function Body_Complete (Item : Response) return Boolean is
-     (Item.Data = null or else Item.Data.Complete);
+   begin
+      Require_Response (Item);
+      return Item.Data.Complete;
+   end Body_Complete;
 
    function Read_All
      (Item : in out Response;
-      Maximum : Natural := 1_024 * 1_024) return Flyology.Bytes.Unbounded_Bytes
+      Maximum : Natural := 1_024 * 1_024;
+      Token : access Flyology.Cancellation.Token := null)
+      return Flyology.Bytes.Unbounded_Bytes
    is
       Result   : Flyology.Bytes.Unbounded_Bytes;
       Buffer   : Ada.Streams.Stream_Element_Array
@@ -2181,7 +776,7 @@ package body Flyology.HTTP.Client is
       Finished : Boolean;
    begin
       loop
-         Read_Body (Item, Buffer, Last, Finished);
+         Read_Body (Item, Buffer, Last, Finished, Token);
          if Last >= Buffer'First then
             declare
                Count : constant Natural :=
@@ -2280,7 +875,7 @@ package body Flyology.HTTP.Client is
       end;
       Item.State.Lifetime.Release_Client (Final_Reference);
       if Final_Reference then
-         Free_State (Item.State);
+         Release_State (Item.State);
       end if;
    end Finalize;
 
@@ -2301,7 +896,7 @@ package body Flyology.HTTP.Client is
       end if;
       Free_Response_Data (Item.Data);
       if Final_Reference then
-         Free_State (Owner);
+         Release_State (Owner);
       end if;
    exception
       when others =>
@@ -2317,7 +912,7 @@ package body Flyology.HTTP.Client is
          end if;
          Free_Response_Data (Item.Data);
          if Final_Reference and then Owner /= null then
-            Free_State (Owner);
+            Release_State (Owner);
          end if;
    end Finalize;
 

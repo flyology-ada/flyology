@@ -8,19 +8,22 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs four independent programs
-plus one compile-fail lifetime fixture:
+`scripts/http-client-conformance.sh` builds and runs seven independent programs
+plus one compile-fail client/response lifetime fixture:
 
 | Boundary | Cases |
 | --- | --- |
 | Shared vocabulary | extensible method tokens, standard method constants, safe/idempotent classification, normalized origins |
 | Request wire form | origin-form target, generated Host, ordered repeated fields |
+| Request streaming | known-length Content-Length, unknown-length chunked coding, source progress and early-end rejection, source exception cleanup, retained-body conflict, and native/lightweight parity |
 | Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, coherent exchange/transport counters, descriptor restoration |
-| Response head | repeated fields and an informational response before the final response |
+| Response head | repeated fields, an informational response before the final response, and byte-at-a-time status/header delivery |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
 | Parser matrix | exact and over-limit heads, field-count exhaustion, invalid names and values, equal and conflicting lengths, decimal/chunk overflow, coding chains, missing delimiters, forbidden/incomplete trailers, and bodyless status rules |
-| Task lanes | the same successful exchange sequence from a native caller and an explicitly lightweight caller |
-| HTTPS | OpenSSL certificate and hostname verification, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
+| Parser mutation | 10,000 fixed-seed random and near-valid mutated inputs through the same production parser oracle used by GNATfuzz |
+| Deadlines and cancellation | pool admission and response-head deadlines, fixed-body deadline continuity, and call-scoped chunked-body cancellation |
+| Task lanes | the same successful, streaming, and boundary exchange sequences from native and explicitly lightweight callers |
+| HTTPS | OpenSSL certificate and hostname verification, retained provider state after the original provider finalizes, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
 | Lifetime | the compiler rejects a response that would escape the aliased client object; runtime shutdown closes and drains active exchanges |
 
 The scripted peer sends literal bytes and does not use `Flyology.HTTP.Server`,
@@ -31,11 +34,11 @@ HTTP/1.1 conformant:
 
 | Area | Required additions |
 | --- | --- |
-| Fragmentation | force every response-head delimiter and chunk/trailer boundary across separate kernel reads rather than relying on TCP segmentation |
-| Length rules | dedicated HEAD cases and the remaining RFC 9110 status/method combinations with misleading framing fields |
+| Fragmentation | add an instrumented receive cap to prove each delimiter crosses distinct client receive calls; the raw peer already writes every response and chunk/trailer byte separately |
+| Length rules | remaining RFC 9110 status/method combinations with misleading framing fields beyond the dedicated HEAD case |
 | Persistence | shutdown during DNS/connect and pool admission, plus simultaneous shutdown/return races |
-| Deadlines | timeout at DNS, connect, send, head, fixed body, chunk data, and close-delimited body without restarting the clock |
-| Cancellation | the same remaining boundaries as deadlines, plus abort and cancellation/shutdown races at every lease transition |
+| Deadlines | timeout at DNS, connect, send, chunk data, and close-delimited body; head and fixed-body continuity are covered |
+| Cancellation | the remaining DNS/connect/send/fixed/close-delimited boundaries, plus abort and cancellation/shutdown races at every lease transition |
 | Addressing | DNS fallback, IPv4/IPv6 literals, bracketed IPv6 Host, default and explicit ports, all-address failure |
 | TLS | trust-chain rejection distinct from hostname mismatch, clean/abrupt closure while streaming each body mode, and shutdown during provider setup |
 | Resource behavior | descriptor counts after every remaining failure class and abort at each lease transition |

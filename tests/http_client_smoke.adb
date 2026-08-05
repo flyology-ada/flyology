@@ -94,6 +94,23 @@ procedure HTTP_Client_Smoke is
          pragma Assert (Client.Header_Name (Response, 2) = "X-Repeat");
          pragma Assert (Client.Header_Value (Response, 3) = "second");
          pragma Assert (Client.Header (Response, "X-Repeat", 2) = "second");
+         declare
+            Raised : Boolean := False;
+         begin
+            begin
+               declare
+                  Unexpected : constant String := Client.Header_Name
+                    (Response, Client.Header_Count (Response) + 1);
+                  pragma Unreferenced (Unexpected);
+               begin
+                  null;
+               end;
+            exception
+               when Constraint_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+         end;
          begin
             declare
                Unexpected : Client.Response :=
@@ -116,6 +133,23 @@ procedure HTTP_Client_Smoke is
       declare
          Response : Client.Response := Client.Execute (Item, Value);
       begin
+         declare
+            Raised : Boolean := False;
+         begin
+            begin
+               declare
+                  Unexpected : constant Natural :=
+                    Client.Trailer_Count (Response);
+                  pragma Unreferenced (Unexpected);
+               begin
+                  null;
+               end;
+            exception
+               when Program_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+         end;
          pragma Assert
            (Flyology.Bytes.To_Byte_String (Client.Read_All (Response)) =
               "Wikipedia");
@@ -467,6 +501,24 @@ procedure HTTP_Client_Smoke is
    Port      : Sockets.Port;
    Server_OK : Boolean;
 begin
+   declare
+      Empty  : Client.Response;
+      Raised : Boolean := False;
+   begin
+      begin
+         declare
+            Unexpected : constant Boolean := Client.Body_Complete (Empty);
+            pragma Unreferenced (Unexpected);
+         begin
+            null;
+         end;
+      exception
+         when Program_Error =>
+            Raised := True;
+      end;
+      pragma Assert (Raised);
+   end;
+
    pragma Assert (Flyology.HTTP.Methods.GET = Flyology.HTTP.To_Method ("GET"));
    pragma Assert (Flyology.HTTP.Is_Safe (Flyology.HTTP.Methods.GET));
    pragma Assert (Flyology.HTTP.Is_Idempotent (Flyology.HTTP.Methods.PUT));

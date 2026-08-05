@@ -306,6 +306,24 @@ package body TLS_Test_Provider is
       return Item.Available;
    end Is_Available;
 
+   overriding function Retain
+     (Item : in out Provider) return TLS.Provider_Access is
+   begin
+      if not Item.Available then
+         raise TLS.TLS_Error with "test provider is unavailable";
+      end if;
+      return new Provider'
+        (Fail_Finalize  => Item.Fail_Finalize,
+         Available      => Item.Available,
+         Create_Mode    => Item.Create_Mode,
+         Create_Delay   => Item.Create_Delay,
+         Block_Handshake => Item.Block_Handshake,
+         Behavior       => Item.Behavior,
+         Send_Mode      => Item.Send_Mode,
+         Peer_Close     => Item.Peer_Close,
+         Scripts        => Item.Scripts);
+   end Retain;
+
    overriding function Create_Session
      (Item        : in out Provider;
       FD          : Flyology.IO.Descriptor;

@@ -21,6 +21,9 @@ package Flyology.HTTP.Client is
    --  Raised when retained response metadata or a Read_All body exceeds its
    --  bound.
    Response_Too_Large : exception;
+   --  Raised when a streaming request body violates the source contract or
+   --  ends before its declared length has been produced.
+   Request_Body_Error : exception;
 
    --  Pool reuse and retention policy. Capacity remains the Client
    --  discriminant and bounds open plus connecting slots.
@@ -94,6 +97,10 @@ package Flyology.HTTP.Client is
    --  @param Item Request to change
    --  @param Name Field name
    --  @param Value Field value
+   --  @exception Constraint_Error Name, Value, or a client-controlled field
+   --     is invalid
+   --  @exception Flyology.HTTP.Headers.Headers_Too_Large Request field storage
+   --     is exhausted
    procedure Add_Header
      (Item : in out Request; Name : String; Value : String);
 
@@ -108,18 +115,55 @@ package Flyology.HTTP.Client is
    procedure Set_Body
      (Item : in out Request; Value : Ada.Streams.Stream_Element_Array);
 
+   --  Maximum representable request body byte count.
+   subtype Body_Size is Long_Long_Integer range 0 .. Long_Long_Integer'Last;
+
+   --  Known or unknown streaming request body length. Unknown bodies use the
+   --  active protocol's streaming framing; HTTP/1.1 uses chunked coding.
+   type Body_Length is private;
+
+   --  Unknown streaming request body length.
+   Unknown_Length : constant Body_Length;
+
+   --  Construct a known streaming request body length.
+   --  @param Bytes Exact number of source bytes to transmit
+   --  @return Known body length
+   function Known_Length (Bytes : Body_Size) return Body_Length;
+
+   --  Pull source for a streaming request body. Execute calls Read serially
+   --  and never retains the source after returning. Implementations must
+   --  honor the remaining whole-exchange timeout and cancellation token when
+   --  they perform blocking work. A call must either produce at least one
+   --  byte or set Finished. Last is Data'First - 1 when no bytes are produced.
+   type Request_Body_Source is limited interface;
+
+   --  Produce the next request body bytes.
+   --  @param Item Source state to advance
+   --  @param Data Client-owned destination buffer
+   --  @param Last Last produced byte, or Data'First - 1
+   --  @param Finished Whether the source has no bytes after this call
+   --  @param Timeout Remaining whole-exchange deadline interval
+   --  @param Token Optional cancellation source from Execute
+   procedure Read
+     (Item     : in out Request_Body_Source;
+      Data     : out Ada.Streams.Stream_Element_Array;
+      Last     : out Ada.Streams.Stream_Element_Offset;
+      Finished : out Boolean;
+      Timeout  : Duration;
+      Token    : access Flyology.Cancellation.Token) is abstract;
+
    --  Origin-bound client. Capacity is the maximum number of open plus
    --  connecting transports. Configure must complete before concurrent use.
    --  Finalize requests shutdown and closes transports. Execute's aliased
    --  controlling parameter lets Ada accessibility reject a response that
    --  would escape Item's lifetime. Internal retention also protects cleanup
-   --  during abort and finalization races. Application TLS providers and
-   --  cancellation tokens must satisfy their separately documented lifetimes.
+   --  during abort and finalization races.
+   --  @field Capacity Maximum open plus connecting transport count
    type Client (Capacity : Positive := 4) is limited private;
 
    --  Bind a new client to one origin and immutable pool policy. The call does
    --  no DNS, socket, TLS, task, or event-loop work. Reconfiguration and an
-   --  HTTPS origin without a backend are rejected.
+   --  HTTPS origin without a retained TLS backend is rejected.
    --  @param Item Unconfigured client
    --  @param Origin_Value Normalized origin
    --  @param Pool Pool retention policy
@@ -129,14 +173,16 @@ package Flyology.HTTP.Client is
       Origin_Value : Origin;
       Pool         : Pool_Configuration := Default_Pool_Configuration);
 
-   --  Bind a new client to one origin using an explicit TLS provider. Backend
-   --  must outlive Item. This overload is required for HTTPS and is also
-   --  accepted for HTTP so callers may share configuration code.
+   --  Bind a new client to one origin using an explicit TLS provider. The
+   --  client retains independently owned provider state, so Backend may be
+   --  finalized after Configure returns. This overload is required for HTTPS
+   --  and accepted for HTTP so callers may share configuration code.
    --  @param Item Unconfigured client
    --  @param Origin_Value Normalized origin
-   --  @param Backend TLS provider retained by Item
+   --  @param Backend Initialized TLS provider retained by Item
    --  @param Pool Pool retention policy
    --  @exception Program_Error Item is configured or arguments are invalid
+   --  @exception Flyology.IO.TLS.TLS_Error Backend cannot be retained
    procedure Configure
      (Item         : in out Client;
       Origin_Value : Origin;
@@ -151,7 +197,8 @@ package Flyology.HTTP.Client is
    --  Execute one request. One monotonic Timeout starts before pool admission
    --  and covers admission, DNS, all address attempts, TLS, request send, the
    --  response head, and later body reads. Negative is unlimited and zero is
-   --  immediate. Token must outlive the returned Response when nonnull.
+   --  immediate. Token is borrowed only until the final response head is
+   --  returned; body reads receive their own optional cancellation token.
    --  @param Item Shared configured client that outlives the result
    --  @param Value Request to execute
    --  @param Timeout Whole-exchange deadline interval
@@ -168,6 +215,9 @@ package Flyology.HTTP.Client is
    --  @exception Protocol_Error Response framing is malformed or unsupported
    --  @exception Response_Too_Large Response head exceeds its bound
    --  @exception Flyology.IO.Timeout_Error Whole-exchange deadline expires
+   --  @exception Flyology.IO.Device_Error Established transport I/O fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Socket transmission fails
+   --  @exception Flyology.IO.TLS.TLS_Error TLS setup or transmission fails
    --  @exception Flyology.Cancellation.Operation_Cancelled Token is requested
    function Execute
      (Item    : aliased in out Client;
@@ -175,43 +225,85 @@ package Flyology.HTTP.Client is
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response;
 
+   --  Execute one request while pulling its body from Source. Length controls
+   --  protocol framing: a known length sends exactly that many bytes, while
+   --  Unknown_Length selects streaming framing. Source is not retained and
+   --  is never replayed automatically, including for idempotent methods. Its
+   --  exceptions propagate after the leased transport is discarded.
+   --  @param Item Shared configured client that outlives the result
+   --  @param Value Request metadata; a retained body is rejected
+   --  @param Source Request body producer used only during this call
+   --  @param Length Known byte count or Unknown_Length
+   --  @param Timeout Whole-exchange deadline interval
+   --  @param Token Optional cancellation source
+   --  @return Response head with a streaming response body lease
+   --  @exception Client_Closed Client is stopping
+   --  @exception Connection_Error Resolution or all address attempts fail
+   --  @exception Constraint_Error Request metadata is unsupported or already
+   --     contains a retained body
+   --  @exception Request_Body_Error Source violates its progress contract or
+   --     ends before a known length is complete
+   --  @exception Protocol_Error Response framing is malformed or unsupported
+   --  @exception Response_Too_Large Response head exceeds its bound
+   --  @exception Flyology.IO.Timeout_Error Whole-exchange deadline expires
+   --  @exception Flyology.IO.Device_Error Established transport I/O fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Socket transmission fails
+   --  @exception Flyology.IO.TLS.TLS_Error TLS setup or transmission fails
+   --  @exception Flyology.Cancellation.Operation_Cancelled Token is requested
+   function Execute
+     (Item    : aliased in out Client;
+      Value   : Request;
+      Source  : in out Request_Body_Source'Class;
+      Length  : Body_Length := Unknown_Length;
+      Timeout : Duration := 30.0;
+      Token   : access Flyology.Cancellation.Token := null) return Response;
+
    --  Return the final response status.
    --  @param Item Response to inspect
    --  @return Three-digit status
+   --  @exception Program_Error Item is not initialized by Execute
    function Status (Item : Response) return Status_Code;
 
    --  Return the final response reason phrase. HTTP/2 and later protocols may
    --  return an empty string because they do not carry one.
    --  @param Item Response to inspect
    --  @return Preserved HTTP/1.x reason phrase after its status separator
+   --  @exception Program_Error Item is not initialized by Execute
    function Reason_Phrase (Item : Response) return String;
 
    --  Return the negotiated protocol.
    --  @param Item Response to inspect
    --  @return HTTP_1_1_Protocol in the initial implementation
+   --  @exception Program_Error Item is not initialized by Execute
    function Negotiated_Protocol (Item : Response) return Protocol;
 
    --  Count physical response fields with a case-insensitive name.
    --  @param Item Response to inspect
    --  @param Name Field name
    --  @return Physical occurrence count
+   --  @exception Program_Error Item is not initialized by Execute
    function Header_Count (Item : Response; Name : String) return Natural;
 
    --  Return the number of physical response fields.
    --  @param Item Response to inspect
    --  @return Field count
+   --  @exception Program_Error Item is not initialized by Execute
    function Header_Count (Item : Response) return Natural;
 
    --  Return one response field name by wire order.
    --  @param Item Response to inspect
    --  @param Index One-based physical field index
-   --  @return Preserved field name, or empty when absent
+   --  @return Preserved field name
+   --  @exception Program_Error Item is not initialized by Execute
+   --  @exception Constraint_Error Index exceeds Header_Count
    function Header_Name (Item : Response; Index : Positive) return String;
 
    --  Return one response field value by wire order.
    --  @param Item Response to inspect
    --  @param Index One-based physical field index
-   --  @return Preserved field value, or empty when absent
+   --  @return Preserved field value
+   --  @exception Program_Error Item is not initialized by Execute
+   --  @exception Constraint_Error Index exceeds Header_Count
    function Header_Value (Item : Response; Index : Positive) return String;
 
    --  Return one physical response field occurrence.
@@ -219,6 +311,7 @@ package Flyology.HTTP.Client is
    --  @param Name Field name
    --  @param Occurrence One-based occurrence
    --  @return Field value or empty when absent
+   --  @exception Program_Error Item is not initialized by Execute
    function Header
      (Item : Response; Name : String; Occurrence : Positive := 1)
       return String;
@@ -227,24 +320,30 @@ package Flyology.HTTP.Client is
    --  @param Item Response whose body has completed
    --  @param Name Trailer name
    --  @return Physical occurrence count
+   --  @exception Program_Error Item is uninitialized or its body is incomplete
    function Trailer_Count (Item : Response; Name : String) return Natural;
 
    --  Return the number of physical trailer fields available after body
    --  completion.
    --  @param Item Response to inspect
    --  @return Trailer field count
+   --  @exception Program_Error Item is uninitialized or its body is incomplete
    function Trailer_Count (Item : Response) return Natural;
 
    --  Return one trailer field name by wire order.
    --  @param Item Response to inspect
    --  @param Index One-based physical field index
-   --  @return Preserved trailer name, or empty when absent
+   --  @return Preserved trailer name
+   --  @exception Program_Error Item is uninitialized or its body is incomplete
+   --  @exception Constraint_Error Index exceeds Trailer_Count
    function Trailer_Name (Item : Response; Index : Positive) return String;
 
    --  Return one trailer field value by wire order.
    --  @param Item Response to inspect
    --  @param Index One-based physical field index
-   --  @return Preserved trailer value, or empty when absent
+   --  @return Preserved trailer value
+   --  @exception Program_Error Item is uninitialized or its body is incomplete
+   --  @exception Constraint_Error Index exceeds Trailer_Count
    function Trailer_Value (Item : Response; Index : Positive) return String;
 
    --  Return one completed chunked trailer occurrence.
@@ -252,6 +351,7 @@ package Flyology.HTTP.Client is
    --  @param Name Trailer name
    --  @param Occurrence One-based occurrence
    --  @return Trailer value or empty when absent
+   --  @exception Program_Error Item is uninitialized or its body is incomplete
    function Trailer
      (Item : Response; Name : String; Occurrence : Positive := 1)
       return String;
@@ -265,15 +365,26 @@ package Flyology.HTTP.Client is
    --  @param Data Caller-owned destination
    --  @param Last Last decoded byte, or Data'First - 1
    --  @param Finished Whether response framing is complete
+   --  @param Token Optional cancellation source borrowed for this call
+   --  @exception Program_Error Item is not initialized by Execute
+   --  @exception Client_Closed Client shutdown interrupts the exchange
+   --  @exception Protocol_Error Response body framing is malformed
+   --  @exception Flyology.IO.Timeout_Error Whole-exchange deadline expires
+   --  @exception Flyology.IO.Device_Error Established transport I/O fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Socket reception fails
+   --  @exception Flyology.IO.TLS.TLS_Error TLS reception fails
+   --  @exception Flyology.Cancellation.Operation_Cancelled Token is requested
    procedure Read_Body
      (Item     : in out Response;
       Data     : out Ada.Streams.Stream_Element_Array;
       Last     : out Ada.Streams.Stream_Element_Offset;
-      Finished : out Boolean);
+      Finished : out Boolean;
+      Token    : access Flyology.Cancellation.Token := null);
 
    --  Report whether body framing is complete and no connection lease remains.
    --  @param Item Response to inspect
    --  @return True after complete body consumption
+   --  @exception Program_Error Item is not initialized by Execute
    function Body_Complete (Item : Response) return Boolean;
 
    --  Read the complete remaining body into owned storage under the original
@@ -281,11 +392,21 @@ package Flyology.HTTP.Client is
    --  operation.
    --  @param Item Active response
    --  @param Maximum Maximum decoded bytes
+   --  @param Token Optional cancellation source borrowed for this call
    --  @return Complete retained body
+   --  @exception Program_Error Item is not initialized by Execute
    --  @exception Response_Too_Large Maximum would be exceeded
+   --  @exception Client_Closed Client shutdown interrupts the exchange
+   --  @exception Protocol_Error Response body framing is malformed
+   --  @exception Flyology.IO.Timeout_Error Whole-exchange deadline expires
+   --  @exception Flyology.IO.Device_Error Established transport I/O fails
+   --  @exception Flyology.IO.Sockets.Socket_Error Socket reception fails
+   --  @exception Flyology.IO.TLS.TLS_Error TLS reception fails
+   --  @exception Flyology.Cancellation.Operation_Cancelled Token is requested
    function Read_All
      (Item    : in out Response;
-      Maximum : Natural := 1_024 * 1_024)
+      Maximum : Natural := 1_024 * 1_024;
+      Token   : access Flyology.Cancellation.Token := null)
       return Flyology.Bytes.Unbounded_Bytes;
 
    --  Return coherent exchange and transport diagnostics without starting I/O.
@@ -306,12 +427,14 @@ package Flyology.HTTP.Client is
    procedure Shutdown (Item : in out Client; Timeout : Duration := 5.0);
 
 private
-   --  Implementation declarations are kept in the private child so the public
-   --  response abstraction can later represent a multiplexed protocol stream.
+   --  Implementation declarations are shared with separate pool, exchange,
+   --  and HTTP/1 subunits. The public response abstraction can later represent
+   --  a multiplexed protocol stream.
    type Client_State (Capacity : Positive);
    type Client_State_Access is access Client_State;
 
    --  @exclude
+   --  @param Value Complete response bytes for the parser test oracle
    procedure Validate_Response_Bytes_For_Testing
      (Value : Ada.Streams.Stream_Element_Array);
 
@@ -327,11 +450,20 @@ private
       Body_Value   : Flyology.Bytes.Unbounded_Bytes;
    end record;
 
-   type Client (Capacity : Positive := 4) is limited record
-      Control     : Client_Control;
-      TLS_Backend : access Flyology.IO.TLS.Provider'Class := null;
+   type Body_Length is record
+      Is_Known : Boolean := False;
+      Bytes    : Body_Size := 0;
    end record;
 
+   Unknown_Length : constant Body_Length :=
+     (Is_Known => False, Bytes => 0);
+
+   type Client (Capacity : Positive := 4) is limited record
+      Control : Client_Control;
+   end record;
+
+   --  @exclude
+   --  @param Item Controlled client state to release
    overriding procedure Finalize (Item : in out Client_Control);
 
    type Response_Data;
@@ -341,6 +473,8 @@ private
       Data : Response_Data_Access := null;
    end record;
 
+   --  @exclude
+   --  @param Item Controlled response lease to release
    overriding procedure Finalize (Item : in out Response);
 
 end Flyology.HTTP.Client;

@@ -28,11 +28,16 @@ run_gprbuild \
   --RTS="$project_root/build/alire-rts" \
   --subdirs="$test_subdir" \
   -f -p -P tests/runtime_smoke.gpr \
-  http_client_smoke.adb http_client_parser_matrix.adb \
+  http_client_smoke.adb http_client_boundaries_smoke.adb \
+  http_client_streaming_smoke.adb \
+  http_client_parser_matrix.adb http_client_parser_randomized.adb \
   http_client_pool_model.adb http_client_tls_smoke.adb
 
 "$project_root/tests/bin/$test_subdir/http_client_smoke"
+"$project_root/tests/bin/$test_subdir/http_client_boundaries_smoke"
+"$project_root/tests/bin/$test_subdir/http_client_streaming_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_parser_matrix"
+"$project_root/tests/bin/$test_subdir/http_client_parser_randomized"
 "$project_root/tests/bin/$test_subdir/http_client_pool_model"
 "$project_root/tests/bin/$test_subdir/http_client_tls_smoke"
 

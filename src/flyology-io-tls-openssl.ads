@@ -73,6 +73,12 @@ package Flyology.IO.TLS.OpenSSL is
    --  @return True after successful initialization and before finalization
    overriding function Is_Available
      (Item : OpenSSL_Provider) return Boolean;
+   --  Retain the refcounted OpenSSL module and configured context.
+   --  @param Item Initialized provider to retain
+   --  @return Independently owned provider reference
+   --  @exception TLS_Error Item is unavailable
+   overriding function Retain
+     (Item : in out OpenSSL_Provider) return Provider_Access;
    --  Allocate a nonblocking OpenSSL session borrowing FD. Side must match the
    --  provider configuration; clients apply Server_Name to SNI and hostname
    --  verification.
@@ -111,6 +117,10 @@ private
          Error       : System.Address;
          Error_Size  : Interfaces.C.size_t;
          Value       : out System.Address);
+      --  Retain the C provider handle while finalization is excluded.
+      procedure Retain
+        (Value : out System.Address;
+         Side  : out Role);
    private
       Handle : System.Address := System.Null_Address;
       Side   : Role := Client;

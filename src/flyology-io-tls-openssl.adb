@@ -26,6 +26,11 @@ package body Flyology.IO.TLS.OpenSSL is
    pragma Import
      (C, C_Provider_Release, "flyology_tls_openssl_provider_release");
 
+   function C_Provider_Retain
+     (Handle : System.Address) return System.Address;
+   pragma Import
+     (C, C_Provider_Retain, "flyology_tls_openssl_provider_retain");
+
    procedure C_Provider_Version
      (Handle : System.Address;
       Buffer : System.Address;
@@ -153,6 +158,17 @@ package body Flyology.IO.TLS.OpenSSL is
            (Handle, FD, (if Side = Client then 0 else 1), Server_Name,
             Error, Error_Size);
       end Create_Session;
+
+      procedure Retain
+        (Value : out System.Address;
+         Side  : out Role) is
+      begin
+         Value := C_Provider_Retain (Handle);
+         Side := Provider_State.Side;
+         if Value = System.Null_Address then
+            raise TLS_Error with "OpenSSL provider is not initialized";
+         end if;
+      end Retain;
    end Provider_State;
 
    procedure Initialize
@@ -248,6 +264,27 @@ package body Flyology.IO.TLS.OpenSSL is
    overriding function Is_Available
      (Item : OpenSSL_Provider) return Boolean is
      (Item.State.Is_Available);
+
+   overriding function Retain
+     (Item : in out OpenSSL_Provider) return Provider_Access
+   is
+      Result : Provider_Access := null;
+      Handle : System.Address := System.Null_Address;
+      Side   : Role;
+   begin
+      Item.State.Retain (Handle, Side);
+      Result := new OpenSSL_Provider;
+      OpenSSL_Provider (Result.all).State.Install (Handle, Side);
+      Handle := System.Null_Address;
+      return Result;
+   exception
+      when others =>
+         if Handle /= System.Null_Address then
+            C_Provider_Release (Handle);
+         end if;
+         Flyology.IO.TLS.Release (Result);
+         raise;
+   end Retain;
 
    overriding function Create_Session
      (Item        : in out OpenSSL_Provider;
