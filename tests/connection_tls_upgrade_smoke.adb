@@ -609,6 +609,16 @@ procedure Connection_TLS_Upgrade_Smoke is
             delay 2.0;
             raise Program_Error with "concurrent TLS close did not finish";
          end select;
+      exception
+         when others =>
+            --  Do not let a failed assertion or an unexpected operation
+            --  exception disappear into dependent-task master completion.
+            --  Releasing the provider lets an in-flight handshake leave its
+            --  deterministic test barrier before both tasks are aborted.
+            Provider.Release_Handshake;
+            abort Upgrader;
+            abort Closer;
+            raise;
       end;
 
       pragma Assert (Upgrade_Result.Passed);
