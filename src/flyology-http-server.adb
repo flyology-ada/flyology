@@ -2573,6 +2573,17 @@ package body Flyology.HTTP.Server is
       end loop;
    end Negotiate_WebSocket_Deflate;
 
+   procedure Reset_WebSocket_Frame (Item : in out Connection) is
+   begin
+      Item.WebSocket_Frame_Active := False;
+      Item.WebSocket_Frame_Opcode := 0;
+      Item.WebSocket_Frame_Final := False;
+      Item.WebSocket_Frame_Remaining := 0;
+      Item.WebSocket_Frame_Position := 0;
+      Item.WebSocket_Frame_Mask := (others => 0);
+      Item.WebSocket_Control_Payload := (others => 0);
+   end Reset_WebSocket_Frame;
+
    procedure Accept_WebSocket
      (Item     : in out Connection;
       Value    : Request;
@@ -2655,11 +2666,7 @@ package body Flyology.HTTP.Server is
       Item.WebSocket_Close_Sent := False;
       Flyology.Bytes.Clear (Item.WebSocket_Message);
       Item.WebSocket_Control_Count := 0;
-      Item.WebSocket_Frame_Active := False;
-      Item.WebSocket_Frame_Opcode := 0;
-      Item.WebSocket_Frame_Final := False;
-      Item.WebSocket_Frame_Remaining := 0;
-      Item.WebSocket_Frame_Position := 0;
+      Reset_WebSocket_Frame (Item);
       Item.WebSocket_Deflate_Enabled := Deflate_Enabled;
       Item.WebSocket_Message_Compressed := False;
       begin
@@ -2963,11 +2970,7 @@ package body Flyology.HTTP.Server is
 
       procedure Finish_Frame is
       begin
-         Item.WebSocket_Frame_Active := False;
-         Item.WebSocket_Frame_Opcode := 0;
-         Item.WebSocket_Frame_Final := False;
-         Item.WebSocket_Frame_Remaining := 0;
-         Item.WebSocket_Frame_Position := 0;
+         Reset_WebSocket_Frame (Item);
       end Finish_Frame;
 
       procedure Abandon_Message is
@@ -3339,8 +3342,13 @@ package body Flyology.HTTP.Server is
          Item.Pending := Null_Unbounded_String;
          Flyology.Bytes.Clear (Item.WebSocket_Message);
          Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Reserved := False;
          Item.WebSocket_Receive_Active := False;
          Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Item.WebSocket_Message_Limit := 0;
+         Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Message_Compressed := False;
+         Reset_WebSocket_Frame (Item);
          Release_Buffered (Item);
          Item.Request_Close := True;
          Item.State := Terminal;
@@ -3388,8 +3396,13 @@ package body Flyology.HTTP.Server is
          Item.Pending := Null_Unbounded_String;
          Flyology.Bytes.Clear (Item.WebSocket_Message);
          Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Reserved := False;
          Item.WebSocket_Receive_Active := False;
          Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
+         Item.WebSocket_Message_Limit := 0;
+         Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Message_Compressed := False;
+         Reset_WebSocket_Frame (Item);
          Release_Buffered (Item);
          Item.Request_Close := True;
          Item.State := Terminal;
@@ -3443,12 +3456,6 @@ package body Flyology.HTTP.Server is
       then
          raise Constraint_Error with "invalid WebSocket close payload";
       end if;
-      Flyology.Bytes.Clear (Item.WebSocket_Message);
-      Item.WebSocket_Fragmented := False;
-      Item.WebSocket_Receive_Active := False;
-      Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
-      Item.WebSocket_Message_Limit := 0;
-      Resize_Buffered (Item, Length (Item.Pending));
       Send_Frame
         (Item, 8,
          Character'Val (Code / 256) & Character'Val (Code mod 256) & Reason,
@@ -3467,6 +3474,10 @@ package body Flyology.HTTP.Server is
             end if;
             Receive_WebSocket
               (Item, Kind, Data, Closed,
+               Max_Message =>
+                 (if Item.WebSocket_Receive_Active
+                  then Item.WebSocket_Message_Limit
+                  else Default_Max_WebSocket_Message),
                Timeout => Left, Message_Timeout => Left, Token => Token);
             exit when Closed;
          end;
@@ -3475,11 +3486,16 @@ package body Flyology.HTTP.Server is
    exception
       when others =>
          Item.State := Terminal;
+         Item.Pending := Null_Unbounded_String;
          Flyology.Bytes.Clear (Item.WebSocket_Message);
          Item.WebSocket_Fragmented := False;
+         Item.WebSocket_Reserved := False;
          Item.WebSocket_Receive_Active := False;
          Item.WebSocket_Message_Deadline := Ada.Real_Time.Time_Last;
          Item.WebSocket_Message_Limit := 0;
+         Item.WebSocket_Control_Count := 0;
+         Item.WebSocket_Message_Compressed := False;
+         Reset_WebSocket_Frame (Item);
          Release_Buffered (Item);
          raise;
    end Close_WebSocket;

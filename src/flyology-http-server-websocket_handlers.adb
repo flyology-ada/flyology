@@ -7,6 +7,7 @@ with Flyology.IO;
 
 package body Flyology.HTTP.Server.WebSocket_Handlers is
    use type Ada.Real_Time.Time;
+   use type Applications.Response_State;
    use type Buffer_Channels.Transfer_Metadata;
    use type Buffer_Channels.Try_Receive_Result;
    use type Buffer_Channels.Try_Send_Result;
@@ -545,7 +546,9 @@ package body Flyology.HTTP.Server.WebSocket_Handlers is
                end if;
             exception
                when Flyology.IO.Timeout_Error =>
-                  if X.Remaining = 0.0 then
+                  if X.Response = Applications.Failed
+                    or else X.Remaining = 0.0
+                  then
                      raise;
                   end if;
                   Outgoing_Burst := 0;

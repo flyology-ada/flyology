@@ -647,7 +647,6 @@ package body Flyology.HTTP.Server.Applications is
       when Flyology.IO.Timeout_Error =>
          if Item.Connection_Handle.all.State = Terminal then
             Item.Response_Value := Failed;
-            raise Program_Error with "terminal WebSocket receive timeout";
          end if;
          raise;
       when others =>
