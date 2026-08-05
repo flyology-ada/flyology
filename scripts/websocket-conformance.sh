@@ -91,6 +91,17 @@ suite_log="$report_dir/autobahn.log"
 server="$project_root/tests/bin/autobahn/websocket_conformance_server"
 server_pid=
 
+mkdir -p "$report_dir"
+find "$report_dir" -type f -delete
+node "$project_root/scripts/websocket-run-provenance.mjs" capture \
+  "$report_dir/run-metadata.json" \
+  "$profile" \
+  "$lane" \
+  "$report_name" \
+  "tests/autobahn/$spec" \
+  "$transport" \
+  "$image"
+
 cleanup () {
   if [ -n "$server_pid" ]; then
     kill "$server_pid" 2>/dev/null || true
@@ -119,17 +130,6 @@ FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=1 \
   websocket_conformance_server.adb \
   -cargs:Ada -O3
 
-mkdir -p "$report_dir"
-find "$report_dir" -type f -delete
-{
-  printf '%s\n' '{'
-  printf '%s\n' '  "buildProfile": "release",'
-  printf '%s\n' '  "libraryProfileSource": "Alire --release",'
-  printf '%s\n' '  "adaOptimization": "-O3",'
-  printf '  "profile": "%s",\n' "$profile"
-  printf '  "lane": "%s"\n' "$lane"
-  printf '%s\n' '}'
-} >"$report_dir/run-metadata.json"
 "$server" "$lane" "$port" 32 "$transport" \
   "$project_root/tests/fixtures/tls/server-cert.pem" \
   "$project_root/tests/fixtures/tls/server-key.pem" \

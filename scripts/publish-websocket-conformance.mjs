@@ -3,6 +3,10 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  requireConsistentRunMetadata,
+  validateRunMetadata,
+} from "./websocket-run-provenance.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const inputRoot = resolve(process.argv[2] || join(projectRoot, "build/autobahn"));
@@ -20,10 +24,6 @@ if (
   process.exit(2);
 }
 
-const suiteVersion = "25.10.1";
-const imageDigest =
-  "sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074";
-const revision = "c4f1dd4";
 const environment = JSON.parse(
   await readFile(join(projectRoot, "tests/autobahn/run-environment.json"), "utf8")
 );
@@ -35,6 +35,10 @@ const profiles = [
     lane: "Lightweight task",
     comparisonLabel: "Lightweight / ws",
     kind: "core",
+    invocationProfile: "core",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient.json",
+    transportMode: "plain",
     transport: "Plain ws://",
     scope: "RFC-focused",
     summary:
@@ -46,6 +50,10 @@ const profiles = [
     lane: "Native task",
     comparisonLabel: "Native / ws",
     kind: "core",
+    invocationProfile: "core",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-native.json",
+    transportMode: "plain",
     transport: "Plain ws://",
     scope: "RFC-focused",
     summary:
@@ -57,6 +65,10 @@ const profiles = [
     lane: "Lightweight task",
     comparisonLabel: "Lightweight / wss",
     kind: "core-tls",
+    invocationProfile: "core-wss",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient-wss.json",
+    transportMode: "tls",
     transport: `WSS via ${environment.tlsProvider}`,
     scope: "RFC-focused over TLS",
     summary:
@@ -68,6 +80,10 @@ const profiles = [
     lane: "Native task",
     comparisonLabel: "Native / wss",
     kind: "core-tls",
+    invocationProfile: "core-wss",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-wss-native.json",
+    transportMode: "tls",
     transport: `WSS via ${environment.tlsProvider}`,
     scope: "RFC-focused over TLS",
     summary:
@@ -78,6 +94,10 @@ const profiles = [
     title: "Limits, lightweight task",
     lane: "Lightweight task",
     kind: "limits",
+    invocationProfile: "limits",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient-limits.json",
+    transportMode: "plain",
     transport: "Plain ws://",
     scope: "Section 9.1–9.6 limits",
     summary:
@@ -88,6 +108,10 @@ const profiles = [
     title: "Limits, native task",
     lane: "Native task",
     kind: "limits",
+    invocationProfile: "limits",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-limits-native.json",
+    transportMode: "plain",
     transport: "Plain ws://",
     scope: "Section 9.1–9.6 limits",
     summary:
@@ -99,6 +123,10 @@ const profiles = [
     lane: "Lightweight task",
     comparisonLabel: "Lightweight / deflate",
     kind: "compression",
+    invocationProfile: "compression",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient-compression.json",
+    transportMode: "plain",
     transport: "Plain ws:// with permessage-deflate",
     scope: "RFC 7692 sections 12–13",
     summary:
@@ -110,6 +138,10 @@ const profiles = [
     lane: "Native task",
     comparisonLabel: "Native / deflate",
     kind: "compression",
+    invocationProfile: "compression",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-compression-native.json",
+    transportMode: "plain",
     transport: "Plain ws:// with permessage-deflate",
     scope: "RFC 7692 sections 12–13",
     summary:
@@ -121,6 +153,10 @@ const profiles = [
     lane: "Lightweight task",
     comparisonLabel: "Lightweight / wss",
     kind: "compression",
+    invocationProfile: "compression-wss",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient-compression-wss.json",
+    transportMode: "tls",
     transport: `WSS via ${environment.tlsProvider} with permessage-deflate`,
     scope: "RFC 7692 sections 12–13 over TLS",
     summary:
@@ -132,6 +168,10 @@ const profiles = [
     lane: "Native task",
     comparisonLabel: "Native / wss",
     kind: "compression",
+    invocationProfile: "compression-wss",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-compression-wss-native.json",
+    transportMode: "tls",
     transport: `WSS via ${environment.tlsProvider} with permessage-deflate`,
     scope: "RFC 7692 sections 12–13 over TLS",
     summary:
@@ -143,6 +183,10 @@ const profiles = [
     lane: "Lightweight task",
     comparisonLabel: "Lightweight / ws",
     kind: "performance",
+    invocationProfile: "performance",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient-performance.json",
+    transportMode: "plain",
     transport: "Plain ws://",
     scope: "Section 9.7–9.8 timing",
     summary:
@@ -154,6 +198,10 @@ const profiles = [
     lane: "Native task",
     comparisonLabel: "Native / ws",
     kind: "performance",
+    invocationProfile: "performance",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-performance-native.json",
+    transportMode: "plain",
     transport: "Plain ws://",
     scope: "Section 9.7–9.8 timing",
     summary:
@@ -165,6 +213,10 @@ const profiles = [
     lane: "Lightweight task",
     comparisonLabel: "Lightweight / wss",
     kind: "performance",
+    invocationProfile: "performance-wss",
+    invocationLane: "lightweight",
+    config: "tests/autobahn/fuzzingclient-performance-wss.json",
+    transportMode: "tls",
     transport: `WSS via ${environment.tlsProvider}`,
     scope: "Section 9.7–9.8 timing over TLS",
     summary:
@@ -176,6 +228,10 @@ const profiles = [
     lane: "Native task",
     comparisonLabel: "Native / wss",
     kind: "performance",
+    invocationProfile: "performance-wss",
+    invocationLane: "native",
+    config: "tests/autobahn/fuzzingclient-performance-wss-native.json",
+    transportMode: "tls",
     transport: `WSS via ${environment.tlsProvider}`,
     scope: "Section 9.7–9.8 timing over TLS",
     summary:
@@ -299,11 +355,12 @@ function closeCode(value) {
   return value === null || value === undefined ? "Not recorded" : String(value);
 }
 
-function reportDate(cases) {
-  if (environment.captured) {
-    const captured = new Date(`${environment.captured}T00:00:00Z`);
+function reportDate(cases, runMetadata) {
+  const capturedAt = runMetadata?.capturedAt;
+  if (capturedAt) {
+    const captured = new Date(capturedAt);
     return {
-      iso: environment.captured,
+      iso: capturedAt.slice(0, 10),
       display: new Intl.DateTimeFormat("en", {
         day: "numeric",
         month: "long",
@@ -328,6 +385,27 @@ function reportDate(cases) {
 
 async function loadProfile(profile) {
   const directory = join(inputRoot, profile.slug);
+  let runMetadata;
+  try {
+    runMetadata = JSON.parse(
+      await readFile(join(directory, "run-metadata.json"), "utf8")
+    );
+  } catch (error) {
+    throw new Error(
+      `${profile.slug} lacks readable run-metadata.json: ${error.message}`
+    );
+  }
+  validateRunMetadata(
+    runMetadata,
+    {
+      name: profile.invocationProfile,
+      lane: profile.invocationLane,
+      report: profile.slug,
+      config: profile.config,
+      transport: profile.transportMode,
+    },
+    `${profile.slug} run metadata`
+  );
   const files = (await readdir(directory)).filter((file) => /_case_.*\.json$/.test(file));
   const cases = [];
   for (const file of files) {
@@ -342,24 +420,13 @@ async function loadProfile(profile) {
     ...profile,
     cases,
     counts: countStatuses(cases),
-    date: reportDate(cases),
+    date: reportDate(cases, runMetadata),
+    runMetadata,
   };
   if (profile.kind !== "performance") return loaded;
-  const runMetadata = JSON.parse(
-    await readFile(join(directory, "run-metadata.json"), "utf8")
-  );
-  if (
-    runMetadata.buildProfile !== "release" ||
-    runMetadata.adaOptimization !== "-O3"
-  ) {
-    throw new Error(
-      `${profile.slug} is not a recorded release/-O3 execution`
-    );
-  }
   return {
     ...loaded,
     performance: performanceData(loaded),
-    runMetadata,
   };
 }
 
@@ -477,7 +544,7 @@ ${group.profiles.map(profileVariant).join("\n")}
         </section>`;
 }
 
-function overallPage(loaded) {
+function overallPage(loaded, provenance) {
   const date = loaded[0].date;
   const limits = loaded.find((profile) => profile.kind === "limits");
   const performanceProfiles = loaded.filter((profile) => profile.kind === "performance");
@@ -550,8 +617,8 @@ ${siteHeader(2)}
         <div class="report-hero-copy">
           <p>Autobahn exercised the same public server API through both task lanes and through the OpenSSL-backed WSS transport. Separate runs cover configurable boundaries, RFC 7692 compression, and echo timings by lane and transport.</p>
           <dl class="report-run-meta">
-            <div><dt>Suite</dt><dd>Autobahn ${suiteVersion}</dd></div>
-            <div><dt>Revision</dt><dd>${revision}</dd></div>
+            <div><dt>Suite</dt><dd>Autobahn ${escapeHTML(provenance.autobahn.suiteVersion)}</dd></div>
+            <div><dt>Revision</dt><dd>${escapeHTML(provenance.source.revision.slice(0, 12))}</dd></div>
             <div><dt>Transport</dt><dd>ws:// + wss://</dd></div>
           </dl>
         </div>
@@ -696,7 +763,7 @@ ${rows}
       </section>`;
 }
 
-function profilePage(profile) {
+function profilePage(profile, provenance) {
   const resultHeading = {
     limits: "Every configured boundary probe passes.",
     compression: "Every compression and negotiation probe passes.",
@@ -756,7 +823,7 @@ ${profile.cases.map(caseRow).join("\n")}
 
       <aside class="report-method" aria-label="Report method">
         <strong>Reproducible input</strong>
-        <p>Autobahn ${suiteVersion}, container <code>${imageDigest.slice(0, 19)}…</code>, Flyology revision <code>${revision}</code>, ${escapeHTML(profile.transport)}.${profile.kind === "performance" ? ` Recorded from the ${escapeHTML(profile.runMetadata.libraryProfileSource)} configuration with ${escapeHTML(profile.runMetadata.adaOptimization)}.` : ""} Wire logs remain in local generated output and are not published.</p>
+        <p>Autobahn ${escapeHTML(provenance.autobahn.suiteVersion)}, container <code>${escapeHTML(provenance.autobahn.imageDigest.slice(0, 19))}…</code>, Flyology revision <code>${escapeHTML(provenance.source.revision)}</code>, ${escapeHTML(profile.transport)}. Recorded from the ${escapeHTML(profile.runMetadata.build.libraryProfileSource)} configuration with ${escapeHTML(profile.runMetadata.build.libraryOptimization)} for the library and ${escapeHTML(profile.runMetadata.build.harnessOptimization)} for the harness. Wire logs remain in local generated output and are not published.</p>
       </aside>
     </main>
 ${siteFooter(3)}`;
@@ -791,27 +858,33 @@ function normalizedCases(profile) {
 
 const loaded = [];
 for (const profile of profiles) loaded.push(await loadProfile(profile));
+const provenance = requireConsistentRunMetadata(
+  loaded.map((profile) => ({
+    report: profile.slug,
+    metadata: profile.runMetadata,
+  }))
+);
 
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
-await writeFile(join(outputRoot, "index.html"), overallPage(loaded));
+await writeFile(join(outputRoot, "index.html"), overallPage(loaded, provenance));
 
 for (const profile of loaded) {
   const directory = join(outputRoot, profile.slug);
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "index.html"), profilePage(profile));
+  await writeFile(join(directory, "index.html"), profilePage(profile, provenance));
   await writeFile(
     join(directory, "cases.json"),
     JSON.stringify(
       {
         generatedFrom: basename(join(inputRoot, profile.slug)),
-        suite: `Autobahn ${suiteVersion}`,
-        imageDigest,
-        revision,
+        suite: `Autobahn ${provenance.autobahn.suiteVersion}`,
+        imageDigest: provenance.autobahn.imageDigest,
+        revision: provenance.source.revision,
         profile: profile.title,
         transport: profile.transport,
         date: profile.date.iso,
-        ...(profile.runMetadata ? { runMetadata: profile.runMetadata } : {}),
+        runMetadata: profile.runMetadata,
         cases: normalizedCases(profile),
       },
       null,

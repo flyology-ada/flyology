@@ -4,8 +4,18 @@ Flyology's server-side RFC 6455 implementation was exercised with the official
 [Autobahn Testsuite](https://github.com/crossbario/autobahn-testsuite), release
 25.10.1. The immutable container image digest was
 `sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074`.
-The implementation and test snapshot is repository revision `c4f1dd4`, tested
-on Darwin/AArch64 with GNAT 16.1.0.
+The implementation under test is repository revision `c4f1dd4`, tested on
+Darwin/AArch64 with GNAT 16.1.0. The complete 14-profile harness and published
+report first exist together at revision `9428106`. That later snapshot added
+the native limits profile, native Core over WSS, and the lightweight and native
+WSS timing profiles. The two revisions have byte-identical `src/` and
+`runtime/` trees and the same `websocket_conformance_server` source blob.
+
+The runner did not record a checkout revision for each historical invocation,
+so neither revision is presented as a recovered per-run SHA. `c4f1dd4`
+identifies the implementation bytes exercised by the campaign; `9428106`
+identifies the first complete harness/report snapshot that retains all 14
+published profiles.
 
 ## Result
 
@@ -169,7 +179,10 @@ runs as `linux/amd64`.
 ```
 
 Each invocation writes Autobahn's HTML and per-case JSON reports under
-`build/autobahn/`. Generated reports remain outside version control.
+`build/autobahn/`. It also writes `run-metadata.json` with the full Git HEAD,
+tree and dirty state, exact profile/config identity and config hash, pinned
+Autobahn image digest and platform, transport, and release/-O3 build settings.
+Generated reports remain outside version control.
 
 To regenerate the compact, restyled pages committed under `website/reports`,
 run:
@@ -177,6 +190,12 @@ run:
 ```sh
 node scripts/publish-websocket-conformance.mjs
 ```
+
+The publisher requires valid metadata for every profile and rejects dirty,
+profile-mismatched, or cross-run-inconsistent inputs before replacing the
+checked-in report bundle. The 2026-08-04 raw outputs predate that metadata
+schema, so this historical report preserves the implementation and complete
+harness/report snapshots above rather than inventing per-run revisions.
 
 The published report is available at
 [flyology.org/reports/websocket](https://flyology.org/reports/websocket/).
