@@ -14,14 +14,46 @@ procedure Concurrency_Primitives_Smoke is
 
    package Integer_Channels is new Flyology.Channels.Bounded (Integer);
 
+   protected Active_Native_Work is
+      procedure Reset;
+      procedure Mark_Started;
+      entry Wait_Started;
+   private
+      Started : Boolean := False;
+   end Active_Native_Work;
+
+   protected body Active_Native_Work is
+      procedure Reset is
+      begin
+         Started := False;
+      end Reset;
+
+      procedure Mark_Started is
+      begin
+         Started := True;
+      end Mark_Started;
+
+      entry Wait_Started when Started is
+      begin
+         null;
+      end Wait_Started;
+   end Active_Native_Work;
+
    procedure Native_Work
      (Input    : Integer;
       Token    : access Flyology.Cancellation.Token;
       Deadline : Ada.Real_Time.Time;
       Result   : out Integer)
    is
-      pragma Unreferenced (Token, Deadline);
+      pragma Unreferenced (Deadline);
    begin
+      if Input = 99 then
+         Active_Native_Work.Mark_Started;
+         while not Token.Requested loop
+            delay 0.001;
+         end loop;
+         raise Flyology.Cancellation.Operation_Cancelled;
+      end if;
       Result := Input * 2;
    end Native_Work;
 
@@ -324,6 +356,39 @@ procedure Concurrency_Primitives_Smoke is
          Native_Executors.Await (Item, Handle, Result);
          pragma Assert (Result = 6);
       end;
+
+      declare
+         Handle : Native_Executors.Operation_Handle (Item'Access);
+         Failed : Boolean := False;
+      begin
+         Worker_Pool_Test_Control.Arm_Native_Executor_Completion_Wake;
+         Native_Executors.Submit
+           (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Wait_For_Success (4);
+         Worker_Pool_Test_Control.Fail_Native_Executor_Consume_Once;
+         begin
+            Native_Executors.Abandon (Item, Handle);
+         exception
+            when Program_Error => Failed := True;
+         end;
+         pragma Assert (Failed);
+         pragma Assert
+           (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      end;
+
+      --  A failed wake consumption must not retain capacity or leave the
+      --  recycled completion descriptor spuriously readable.
+      declare
+         Handle : Native_Executors.Operation_Handle (Item'Access);
+         Result : Integer;
+      begin
+         Native_Executors.Submit
+           (Item, 5, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Native_Executors.Await (Item, Handle, Result);
+         pragma Assert (Result = 10);
+      end;
       Worker_Pool_Test_Control.Reset;
       Native_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Abandon_Failure;
@@ -337,17 +402,12 @@ procedure Concurrency_Primitives_Smoke is
       Result   : Integer;
    begin
       Worker_Pool_Test_Control.Reset;
+      Active_Native_Work.Reset;
       Native_Executors.Start (Item);
       Native_Executors.Submit
-        (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+        (Item, 99, null, Ada.Real_Time.Time_Last, Handle, Accepted);
       pragma Assert (Accepted);
-      for Attempt in 1 .. 100 loop
-         exit when
-           Native_Executors.Statistics (Item).Successful_Executions = 1;
-         delay 0.001;
-      end loop;
-      pragma Assert
-        (Native_Executors.Statistics (Item).Successful_Executions = 1);
+      Active_Native_Work.Wait_Started;
 
       Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
       begin
@@ -361,11 +421,58 @@ procedure Concurrency_Primitives_Smoke is
       --  The failing owner still publishes terminal completion, so this
       --  idempotent call must return rather than waiting forever.
       Native_Executors.Shutdown (Item);
-      Native_Executors.Await (Item, Handle, Result);
-      pragma Assert (Result = 8);
+      begin
+         Native_Executors.Await (Item, Handle, Result);
+         pragma Assert (False);
+      exception
+         when Flyology.Cancellation.Operation_Cancelled => null;
+      end;
       pragma Assert
         (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
    end Exercise_Native_Executor_Shutdown_Failure;
+
+   procedure Exercise_Native_Executor_Token_Cleanup_Abort is
+      Item     : aliased Native_Executors.Executor
+        (Workers => 1, Capacity => 1);
+      Handle   : Native_Executors.Operation_Handle (Item'Access);
+      Accepted : Boolean;
+      Result   : Integer;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Start (Item);
+      Native_Executors.Submit
+        (Item, 6, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+      pragma Assert (Accepted);
+      for Attempt in 1 .. 100 loop
+         exit when
+           Native_Executors.Statistics (Item).Successful_Executions = 1;
+         delay 0.001;
+      end loop;
+      pragma Assert
+        (Native_Executors.Statistics (Item).Successful_Executions = 1);
+
+      Worker_Pool_Test_Control.Arm_Token_Cleanup_Barrier;
+      declare
+         task Stopper is
+            pragma Task_Info (Flyology.Native_Task);
+         end Stopper;
+
+         task body Stopper is
+         begin
+            Native_Executors.Shutdown (Item);
+         end Stopper;
+      begin
+         Worker_Pool_Test_Control.Wait_Token_Cleanup_Barrier;
+         abort Stopper;
+         Worker_Pool_Test_Control.Release_Token_Cleanup_Barrier;
+      end;
+
+      Native_Executors.Shutdown (Item);
+      pragma Assert
+        (Worker_Pool_Test_Control.Outstanding_Cleanup_Tokens = 0);
+      Native_Executors.Await (Item, Handle, Result);
+      pragma Assert (Result = 12);
+   end Exercise_Native_Executor_Token_Cleanup_Abort;
 
    procedure Exercise_Native_Executor_Shutdown_Abort is
       Item : aliased Native_Executors.Executor
@@ -678,6 +785,7 @@ begin
    Exercise_Native_Executor_Abandon_Failure;
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;
+   Exercise_Native_Executor_Token_Cleanup_Abort;
    Exercise_Lightweight_Waits;
    Exercise_Native_Waits;
    Exercise_Lightweight_Pool;

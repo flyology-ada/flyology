@@ -21,6 +21,16 @@ package body Flyology.Native_Executors is
           Convention => C,
           External_Name =>
             "flyology_test_worker_native_executor_cancellation_failure";
+   function Test_Consume_Failure return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_consume_failure";
+   function Test_Completion_Wake return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_completion_wake";
    function Test_Shutdown_Barrier_Arrive return Interfaces.C.int
      with Import,
           Convention => C,
@@ -29,6 +39,24 @@ package body Flyology.Native_Executors is
      with Import,
           Convention => C,
           External_Name => "flyology_test_worker_shutdown_barrier_released";
+   function Test_Token_Cleanup_Barrier_Arrive return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_token_cleanup_barrier_arrive";
+   function Test_Token_Cleanup_Barrier_Released return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_token_cleanup_barrier_released";
+   procedure Test_Token_Cleanup_Acquire
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_token_cleanup_acquire";
+   procedure Test_Token_Cleanup_Release
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_token_cleanup_release";
 
    procedure Test_Shutdown_Barrier is
    begin
@@ -38,6 +66,15 @@ package body Flyology.Native_Executors is
          end loop;
       end if;
    end Test_Shutdown_Barrier;
+
+   procedure Test_Token_Cleanup_Barrier is
+   begin
+      if Test_Token_Cleanup_Barrier_Arrive /= 0 then
+         while Test_Token_Cleanup_Barrier_Released = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Token_Cleanup_Barrier;
 #end if;
 
    procedure Request_Owned_Token (Token : Token_Access) is
@@ -50,6 +87,18 @@ package body Flyology.Native_Executors is
 #end if;
       Token.Request;
    end Request_Owned_Token;
+
+   procedure Consume_Completion_Wake
+     (Wake : in out Flyology.Wake_Sources.Source) is
+   begin
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+      if Test_Consume_Failure /= 0 then
+         raise Program_Error with
+           "injected native executor wake consumption failure";
+      end if;
+#end if;
+      Flyology.Wake_Sources.Consume (Wake);
+   end Consume_Completion_Wake;
 
    protected body Shared_State is
       procedure Submit
@@ -161,6 +210,12 @@ package body Flyology.Native_Executors is
          else
             Results (Slot) := Result;
             Status (Slot) := Completed;
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+            if Test_Completion_Wake /= 0 then
+               Flyology.Wake_Sources.Ensure (Wakes (Slot));
+               Wake_Armed (Slot) := True;
+            end if;
+#end if;
             if Wake_Armed (Slot) then
                Flyology.Wake_Sources.Signal (Wakes (Slot));
                Wake_Pending (Slot) := True;
@@ -217,7 +272,7 @@ package body Flyology.Native_Executors is
          end if;
          Ready := True;
          if Wake_Pending (Slot) then
-            Flyology.Wake_Sources.Consume (Wakes (Slot));
+            Consume_Completion_Wake (Wakes (Slot));
             Wake_Pending (Slot) := False;
          end if;
          Wake_Armed (Slot) := False;
@@ -254,7 +309,9 @@ package body Flyology.Native_Executors is
 
       procedure Abandon
         (Slot       : Positive;
-         Generation : Generation_Number) is
+         Generation : Generation_Number)
+      is
+         Consume_Wake : Boolean := False;
       begin
          if Generations (Slot) /= Generation or else Generation = 0
            or else Status (Slot) = Free
@@ -264,10 +321,8 @@ package body Flyology.Native_Executors is
          Counters.Abandoned_Operations :=
            Counters.Abandoned_Operations + 1;
          if Status (Slot) = Completed then
-            if Wake_Pending (Slot) then
-               Flyology.Wake_Sources.Consume (Wakes (Slot));
-               Wake_Pending (Slot) := False;
-            end if;
+            Consume_Wake := Wake_Pending (Slot);
+            Wake_Pending (Slot) := False;
             Wake_Armed (Slot) := False;
             Status (Slot) := Free;
             Detached (Slot) := False;
@@ -275,6 +330,18 @@ package body Flyology.Native_Executors is
               Counters.Outstanding_Operations - 1;
          else
             Detached (Slot) := True;
+         end if;
+         --  Release the slot before fallible wake cleanup. If consumption
+         --  fails, discard the descriptor generation so a later occupant
+         --  cannot inherit a stale readable signal.
+         if Consume_Wake then
+            begin
+               Consume_Completion_Wake (Wakes (Slot));
+            exception
+               when others =>
+                  Flyology.Wake_Sources.Release (Wakes (Slot));
+                  raise;
+            end;
          end if;
          --  Publish the irreversible slot transition before signalling. A
          --  wake failure may escape, but cannot leave an accepted operation
@@ -462,6 +529,41 @@ package body Flyology.Native_Executors is
          end if;
       end Record_Failure;
 
+      type Token_Owner is
+        new Ada.Finalization.Limited_Controlled with record
+           Value : Token_Access := null;
+        end record;
+
+      overriding procedure Finalize (Owner : in out Token_Owner);
+
+      overriding procedure Finalize (Owner : in out Token_Owner) is
+      begin
+         if Owner.Value /= null then
+            Free_Token (Owner.Value);
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+            Test_Token_Cleanup_Release;
+#end if;
+         end if;
+      end Finalize;
+
+      procedure Request_Cancellation (Index : Positive) is
+      begin
+         loop
+            begin
+               Item.State.Request_Cancellation (Index);
+               exit;
+            exception
+               when Error : others =>
+                  --  Joining is only safe after every active operation has
+                  --  observed a successful cancellation request. Preserve
+                  --  the first failure for the caller while retrying a
+                  --  transient signalling failure to completion.
+                  Record_Failure (Error);
+                  delay 0.0;
+            end;
+         end loop;
+      end Request_Cancellation;
+
       procedure Perform_Cleanup is
       begin
          if Cleanup_Done then
@@ -477,12 +579,7 @@ package body Flyology.Native_Executors is
          end loop;
          if Item.Started then
             for Index in 1 .. Item.Capacity loop
-               begin
-                  Item.State.Request_Cancellation (Index);
-               exception
-                  when Error : others =>
-                     Record_Failure (Error);
-               end;
+               Request_Cancellation (Index);
             end loop;
             if Item.Pool /= null then
                for Index in Item.Activated_Workers + 1 .. Item.Workers loop
@@ -512,13 +609,16 @@ package body Flyology.Native_Executors is
                end if;
                for Index in 1 .. Item.Capacity loop
                   declare
-                     Token : Token_Access := null;
+                     Token : Token_Owner;
                   begin
                      begin
-                        Item.State.Take_Token (Index, Token);
-                        if Token /= null then
-                           Free_Token (Token);
+                        Item.State.Take_Token (Index, Token.Value);
+#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
+                        if Token.Value /= null then
+                           Test_Token_Cleanup_Acquire;
                         end if;
+                        Test_Token_Cleanup_Barrier;
+#end if;
                      exception
                         when Error : others =>
                            Record_Failure (Error);

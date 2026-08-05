@@ -6,6 +6,12 @@ static _Atomic int shutdown_barrier_armed;
 static _Atomic int shutdown_barrier_reached;
 static _Atomic int shutdown_barrier_released;
 static _Atomic int native_executor_cancellation_failure;
+static _Atomic int native_executor_consume_failure;
+static _Atomic int native_executor_completion_wake;
+static _Atomic int token_cleanup_barrier_armed;
+static _Atomic int token_cleanup_barrier_reached;
+static _Atomic int token_cleanup_barrier_released;
+static _Atomic int token_cleanup_outstanding;
 
 void flyology_test_worker_pool_reset(void)
 {
@@ -18,6 +24,18 @@ void flyology_test_worker_pool_reset(void)
    atomic_store_explicit(&shutdown_barrier_released, 1,
                          memory_order_seq_cst);
    atomic_store_explicit(&native_executor_cancellation_failure, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&native_executor_consume_failure, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&native_executor_completion_wake, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_barrier_armed, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_barrier_reached, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_barrier_released, 1,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_outstanding, 0,
                          memory_order_seq_cst);
 }
 
@@ -86,4 +104,86 @@ int flyology_test_worker_native_executor_cancellation_failure(void)
 {
    return atomic_exchange_explicit(&native_executor_cancellation_failure, 0,
                                    memory_order_seq_cst);
+}
+
+void flyology_test_worker_native_executor_consume_fail_once(void)
+{
+   atomic_store_explicit(&native_executor_consume_failure, 1,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_worker_native_executor_consume_failure(void)
+{
+   return atomic_exchange_explicit(&native_executor_consume_failure, 0,
+                                   memory_order_seq_cst);
+}
+
+void flyology_test_worker_native_executor_completion_wake_once(void)
+{
+   atomic_store_explicit(&native_executor_completion_wake, 1,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_worker_native_executor_completion_wake(void)
+{
+   return atomic_exchange_explicit(&native_executor_completion_wake, 0,
+                                   memory_order_seq_cst);
+}
+
+void flyology_test_worker_token_cleanup_barrier_arm(void)
+{
+   atomic_store_explicit(&token_cleanup_barrier_reached, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_barrier_released, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_barrier_armed, 1,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_worker_token_cleanup_barrier_arrive(void)
+{
+   if (atomic_exchange_explicit(&token_cleanup_barrier_armed, 0,
+                                memory_order_seq_cst) == 0)
+      return 0;
+   atomic_store_explicit(&token_cleanup_barrier_reached, 1,
+                         memory_order_seq_cst);
+   return 1;
+}
+
+int flyology_test_worker_token_cleanup_barrier_reached(void)
+{
+   return atomic_load_explicit(&token_cleanup_barrier_reached,
+                               memory_order_seq_cst);
+}
+
+int flyology_test_worker_token_cleanup_barrier_released(void)
+{
+   return atomic_load_explicit(&token_cleanup_barrier_released,
+                               memory_order_seq_cst);
+}
+
+void flyology_test_worker_token_cleanup_barrier_release(void)
+{
+   atomic_store_explicit(&token_cleanup_barrier_released, 1,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&token_cleanup_barrier_armed, 0,
+                         memory_order_seq_cst);
+}
+
+void flyology_test_worker_token_cleanup_acquire(void)
+{
+   atomic_fetch_add_explicit(&token_cleanup_outstanding, 1,
+                             memory_order_seq_cst);
+}
+
+void flyology_test_worker_token_cleanup_release(void)
+{
+   atomic_fetch_sub_explicit(&token_cleanup_outstanding, 1,
+                             memory_order_seq_cst);
+}
+
+int flyology_test_worker_token_cleanup_outstanding(void)
+{
+   return atomic_load_explicit(&token_cleanup_outstanding,
+                               memory_order_seq_cst);
 }

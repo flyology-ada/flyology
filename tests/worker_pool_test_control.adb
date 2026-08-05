@@ -31,6 +31,36 @@ package body Worker_Pool_Test_Control is
           Convention => C,
           External_Name =>
             "flyology_test_worker_native_executor_cancellation_fail_once";
+   procedure C_Fail_Native_Executor_Consume_Once
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_consume_fail_once";
+   procedure C_Arm_Native_Executor_Completion_Wake
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_native_executor_completion_wake_once";
+   procedure C_Arm_Token_Cleanup_Barrier
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_token_cleanup_barrier_arm";
+   function C_Token_Cleanup_Barrier_Reached return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_token_cleanup_barrier_reached";
+   procedure C_Release_Token_Cleanup_Barrier
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_token_cleanup_barrier_release";
+   function C_Outstanding_Cleanup_Tokens return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_token_cleanup_outstanding";
 
    procedure Reset is
    begin
@@ -69,5 +99,41 @@ package body Worker_Pool_Test_Control is
    begin
       C_Fail_Native_Executor_Cancellation_Once;
    end Fail_Native_Executor_Cancellation_Once;
+
+   procedure Fail_Native_Executor_Consume_Once is
+   begin
+      C_Fail_Native_Executor_Consume_Once;
+   end Fail_Native_Executor_Consume_Once;
+
+   procedure Arm_Native_Executor_Completion_Wake is
+   begin
+      C_Arm_Native_Executor_Completion_Wake;
+   end Arm_Native_Executor_Completion_Wake;
+
+   procedure Arm_Token_Cleanup_Barrier is
+   begin
+      C_Arm_Token_Cleanup_Barrier;
+   end Arm_Token_Cleanup_Barrier;
+
+   procedure Wait_Token_Cleanup_Barrier is
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   begin
+      while C_Token_Cleanup_Barrier_Reached = 0 loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error with
+              "native executor token cleanup barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_Token_Cleanup_Barrier;
+
+   procedure Release_Token_Cleanup_Barrier is
+   begin
+      C_Release_Token_Cleanup_Barrier;
+   end Release_Token_Cleanup_Barrier;
+
+   function Outstanding_Cleanup_Tokens return Natural is
+     (Natural (C_Outstanding_Cleanup_Tokens));
 
 end Worker_Pool_Test_Control;
