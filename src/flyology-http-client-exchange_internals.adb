@@ -2,6 +2,36 @@ separate (Flyology.HTTP.Client)
 --  Owns admission, DNS, connect, TLS establishment, and shutdown/cancellation
 --  translation. Protocol serialization and parsing remain in HTTP_1_Internals.
 package body Exchange_Internals is
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+   function Test_Barrier_Arrive
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_arrive";
+   function Test_Barrier_Released
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_released";
+
+   procedure Test_Barrier (Point : Interfaces.C.int) is
+   begin
+      if Test_Barrier_Arrive (Point) /= 0 then
+         while Test_Barrier_Released (Point) = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Barrier;
+#end if;
+
+   procedure Check_Deadline
+     (Started : Ada.Real_Time.Time; Timeout : Duration) is
+   begin
+      if Timeout >= 0.0 and then Remaining (Started, Timeout) <= 0.0 then
+         raise Flyology.IO.Timeout_Error;
+      end if;
+   end Check_Deadline;
+
    procedure Interrupt_Sources
      (State   : not null Client_State_Access;
       Token   : access Flyology.Cancellation.Token;
@@ -78,7 +108,11 @@ package body Exchange_Internals is
          Sources : Flyology.IO.Interrupt_Set (1 .. 2);
          Count   : Natural;
       begin
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         Test_Barrier (15);
+#end if;
          Interrupt_Sources (State, Token, Sources, Count);
+         Check_Deadline (Started, Timeout);
          declare
             Addresses : constant Flyology.IO.DNS.Address_Array :=
               Flyology.IO.DNS.Resolve
@@ -89,7 +123,11 @@ package body Exchange_Internals is
             for Address of Addresses loop
                begin
                   Sockets.Create_Socket (Socket, Address.Family);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+                  Test_Barrier (16);
+#end if;
                   Interrupt_Sources (State, Token, Sources, Count);
+                  Check_Deadline (Started, Timeout);
                   Sockets.Connect
                     (Socket,
                      Sockets.Network_Endpoint

@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs eleven independent programs
+`scripts/http-client-conformance.sh` builds and runs twelve independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -24,7 +24,7 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | RFC response corpus | 42 named accepted and rejected examples covering status syntax, field folding and whitespace, length precedence, informational and bodyless responses, transfer codings, chunk extensions, trailers, and incomplete messages |
 | Parser matrix | exact and over-limit heads, field-count exhaustion, invalid names and values, equal and conflicting lengths, decimal/chunk overflow, coding chains, missing delimiters, forbidden/incomplete trailers, and bodyless status rules |
 | Parser mutation | 10,000 fixed-seed random and near-valid inputs, rotating all 42 RFC seeds through zero to eight byte mutations and the same production parser oracle used by GNATfuzz |
-| Deadlines and cancellation | pool admission and response-head deadlines, fixed-body deadline continuity, and call-scoped chunked-body cancellation |
+| Deadlines and cancellation | forced timeout and active call-scoped cancellation at DNS, connect, request send, response head, fixed-length body, chunked body, and close-delimited body boundaries, plus pool-admission timeout |
 | Task lanes | the same successful, streaming, and boundary exchange sequences from native and explicitly lightweight callers |
 | HTTPS | OpenSSL certificate and hostname verification, retained provider state after the original provider finalizes, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
 | Lifetime | the compiler rejects a response that would escape the aliased client and an adapter that would escape its borrowed payload; runtime shutdown closes and drains active exchanges |
@@ -40,8 +40,7 @@ HTTP/1.1 conformant:
 | Fragmentation | add an instrumented receive cap to prove each delimiter crosses distinct client receive calls; the raw peer already writes every response and chunk/trailer byte separately |
 | Length rules | remaining RFC 9110 status/method combinations with misleading framing fields beyond the dedicated HEAD case |
 | Persistence | shutdown during DNS/connect; admitted waiter/held-return, active return/abort, and idle prune/checkout races are covered |
-| Deadlines | timeout at DNS, connect, send, chunk data, and close-delimited body; head and fixed-body continuity are covered |
-| Cancellation | the remaining DNS/connect/send/fixed/close-delimited boundaries, plus abort and cancellation/shutdown races at every lease transition |
+| Cancellation races | abort and simultaneous cancellation/shutdown at every lease transition |
 | Addressing | DNS fallback, IPv4/IPv6 literals, bracketed IPv6 Host, default and explicit ports, all-address failure |
 | TLS | trust-chain rejection distinct from hostname mismatch, clean/abrupt closure while streaming each body mode, and shutdown during provider setup |
 | Resource behavior | descriptor counts after every remaining failure class and abort at each lease transition |
@@ -89,8 +88,10 @@ the process descriptor baseline. `http_client_pool_races.adb` uses test-only
 connection barriers to force active return and abort against shutdown, holds a
 lease while an admitted waiter is interrupted, races idle pruning against
 checkout, and checks both the drained counter state and process descriptor
-baseline. Internal-only slot phases remain deliberately outside the public
-API.
+baseline. `http_client_deadline_matrix.adb` uses the same compiled-out hooks to
+hold every DNS-through-body phase until its deadline expires or an active
+cancellation is requested, in both task lanes. Internal-only slot phases remain
+deliberately outside the public API.
 
 `Flyology.HTTP.Client.Testing.Fuzz_Response` is a stateless wrapper around the
 production status, header, length, chunk, and trailer validators. It accepts a

@@ -10,6 +10,9 @@ with Flyology.IO.DNS;
 with Flyology.IO.Sockets;
 with Flyology.Time_Math;
 with Flyology.Wake_Sources;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+with Interfaces.C;
+#end if;
 
 package body Flyology.HTTP.Client is
    use Ada.Strings.Unbounded;

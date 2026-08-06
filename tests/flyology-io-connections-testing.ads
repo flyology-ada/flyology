@@ -15,7 +15,9 @@ package Flyology.IO.Connections.Testing is
       Accept_Adopted,
       Take_Adopted,
       Raw_Accept_Returned,
-      Accept_Socket_Owned);
+      Accept_Socket_Owned,
+      Before_HTTP_Client_DNS,
+      Before_HTTP_Client_Connect);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.

@@ -51,10 +51,12 @@ FLYOLOGY_CONNECTION_TEST_HOOKS=true
 export FLYOLOGY_CONNECTION_TEST_HOOKS
 run_gprbuild \
   --RTS="$project_root/build/alire-rts" \
-  --subdirs=http-client-pool-races \
-  -f -p -P tests/runtime_smoke.gpr http_client_pool_races.adb
+  --subdirs=http-client-connection-hooks \
+  -f -p -P tests/runtime_smoke.gpr \
+  http_client_pool_races.adb http_client_deadline_matrix.adb
 unset FLYOLOGY_CONNECTION_TEST_HOOKS
-"$project_root/tests/bin/http-client-pool-races/http_client_pool_races"
+"$project_root/tests/bin/http-client-connection-hooks/http_client_pool_races"
+"$project_root/tests/bin/http-client-connection-hooks/http_client_deadline_matrix"
 
 lifetime_log="$project_root/build/tests/http-client-response-lifetime.log"
 mkdir -p "$(dirname -- "$lifetime_log")"
