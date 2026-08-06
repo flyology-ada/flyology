@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs thirteen independent programs
+`scripts/http-client-conformance.sh` builds and runs fourteen independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -19,7 +19,7 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | Request body adapters | borrowed arrays with nondefault bounds and explicit rewind, byte strings, owned bytes, unique-buffer ownership retention, positional file ranges, generated channel bodies with known or chunked framing, file timeout, channel timeout/cancellation, backpressure, and lane parity |
 | Upload controls | Expect/continue after informational responses, final-response body suppression, one-time 417 fallback without Expect, bounded continue fallback, request trailer declaration and emission, prohibited and duplicate trailer rejection, exact known-length completion, one idempotent rewindable-source stale retry, one-shot non-retry, and lane parity |
 | Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, deterministic active-return and abort races, held-lease admission shutdown, idle prune/checkout races, coherent exchange/transport counters, and descriptor restoration |
-| Response head | repeated fields, an informational response before the final response, and byte-at-a-time status/header delivery |
+| Response fragmentation | a one-byte connection receive cap with an exact call count, forcing status-line, header, chunk, data, terminal-chunk, and trailer delimiters across distinct client receive calls in both task lanes |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
 | RFC response corpus | 42 named accepted and rejected examples covering status syntax, field folding and whitespace, length precedence, informational and bodyless responses, transfer codings, chunk extensions, trailers, and incomplete messages |
 | Parser matrix | exact and over-limit heads, field-count exhaustion, invalid names and values, equal and conflicting lengths, decimal/chunk overflow, coding chains, missing delimiters, forbidden/incomplete trailers, and bodyless status rules |
@@ -37,7 +37,6 @@ HTTP/1.1 conformant:
 
 | Area | Required additions |
 | --- | --- |
-| Fragmentation | add an instrumented receive cap to prove each delimiter crosses distinct client receive calls; the raw peer already writes every response and chunk/trailer byte separately |
 | Length rules | remaining RFC 9110 status/method combinations with misleading framing fields beyond the dedicated HEAD case |
 | Persistence | shutdown during DNS/connect; admitted waiter/held-return, active return/abort, and idle prune/checkout races are covered |
 | Cancellation races | abort and simultaneous cancellation/shutdown at every lease transition |
@@ -91,7 +90,9 @@ checkout, and checks both the drained counter state and process descriptor
 baseline. `http_client_deadline_matrix.adb` uses the same compiled-out hooks to
 hold every DNS-through-body phase until its deadline expires or an active
 cancellation is requested, in both task lanes. Internal-only slot phases remain
-deliberately outside the public API.
+deliberately outside the public API. `http_client_fragmentation.adb` caps every
+connection receive at one byte and asserts the exact response-wire-length call
+count, so TCP write coalescing cannot weaken its delimiter-boundary claim.
 
 `Flyology.HTTP.Client.Testing.Fuzz_Response` is a stateless wrapper around the
 production status, header, length, chunk, and trailer validators. It accepts a

@@ -27,6 +27,14 @@ package body Flyology.IO.Connections.Testing is
           Convention => C,
           External_Name =>
             "flyology_test_connection_arm_capacity_release_wake_failure";
+   procedure C_Set_Receive_Cap (Maximum : Interfaces.C.int)
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_set_receive_cap";
+   function C_Receive_Calls return Interfaces.C.unsigned
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_receive_calls";
 
    function Waiting_Operations (Item : Connection) return Natural is
      (Item.Controller.Waiting_Count);
@@ -68,5 +76,13 @@ package body Flyology.IO.Connections.Testing is
    begin
       C_Fail_Next_Release_Wake;
    end Fail_Next_Release_Wake;
+
+   procedure Set_Receive_Cap (Maximum : Natural) is
+   begin
+      C_Set_Receive_Cap (Interfaces.C.int (Maximum));
+   end Set_Receive_Cap;
+
+   function Receive_Calls return Natural is
+     (Natural (C_Receive_Calls));
 
 end Flyology.IO.Connections.Testing;

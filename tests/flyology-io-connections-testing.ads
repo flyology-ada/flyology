@@ -37,4 +37,11 @@ package Flyology.IO.Connections.Testing is
 
    procedure Fail_Next_Release_Wake;
 
+   --  Restrict each connection receive to at most Maximum bytes and reset the
+   --  observed receive-call count. Zero removes the test-only restriction.
+   procedure Set_Receive_Cap (Maximum : Natural);
+
+   --  Return connection receive calls since Set_Receive_Cap.
+   function Receive_Calls return Natural;
+
 end Flyology.IO.Connections.Testing;

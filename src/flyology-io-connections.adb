@@ -81,6 +81,11 @@ package body Flyology.IO.Connections is
      with Import,
           Convention => C,
           External_Name => "flyology_test_connection_barrier_arrive_once";
+   function Test_Receive_Limit
+     (Requested : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_receive_limit";
 
    procedure Test_Barrier (Point : Interfaces.C.int) is
    begin
@@ -991,8 +996,23 @@ package body Flyology.IO.Connections is
          if Item.TLS_Session = null then
             raise Program_Error with "TLS transport has no provider session";
          end if;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         declare
+            Limit : constant Interfaces.C.int :=
+              Test_Receive_Limit (Interfaces.C.int (Data'Length));
+         begin
+            TLS_Driver.Receive
+              (Item.TLS_Session.all,
+               Data
+                 (Data'First ..
+                    Data'First +
+                      Ada.Streams.Stream_Element_Offset (Limit) - 1),
+               Last, Check'Access, Await'Access);
+         end;
+#else
          TLS_Driver.Receive
            (Item.TLS_Session.all, Data, Last, Check'Access, Await'Access);
+#end if;
          return;
       elsif Transport /= Plain_Transport then
          raise Operation_Cancelled;
@@ -1003,9 +1023,25 @@ package body Flyology.IO.Connections is
       Test_Barrier (3);
 #end if;
       begin
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         declare
+            Limit : constant Interfaces.C.int :=
+              Test_Receive_Limit (Interfaces.C.int (Data'Length));
+         begin
+            Flyology.IO.Sockets.Receive
+              (Guard.Socket,
+               Data
+                 (Data'First ..
+                    Data'First +
+                      Ada.Streams.Stream_Element_Offset (Limit) - 1),
+               Last, Remaining (Started, Timeout),
+               Interrupts (1 .. Interrupt_Count + 1));
+         end;
+#else
          Flyology.IO.Sockets.Receive
            (Guard.Socket, Data, Last, Remaining (Started, Timeout),
             Interrupts (1 .. Interrupt_Count + 1));
+#end if;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;

@@ -10,6 +10,8 @@ static _Atomic int armed[barrier_count];
 static _Atomic int reached[barrier_count];
 static _Atomic int released[barrier_count];
 static _Atomic int fail_next_capacity_release_wake;
+static _Atomic int receive_cap;
+static _Atomic unsigned receive_calls;
 static pthread_mutex_t raw_accept_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t raw_accept_condition = PTHREAD_COND_INITIALIZER;
 
@@ -27,6 +29,26 @@ void flyology_test_connection_barrier_reset(void)
       atomic_store_explicit(&reached[point], 0, memory_order_seq_cst);
       atomic_store_explicit(&released[point], 1, memory_order_seq_cst);
    }
+}
+
+void flyology_test_connection_set_receive_cap(int maximum)
+{
+   atomic_store_explicit(&receive_calls, 0, memory_order_seq_cst);
+   atomic_store_explicit(
+     &receive_cap, maximum > 0 ? maximum : 0, memory_order_seq_cst);
+}
+
+int flyology_test_connection_receive_limit(int requested)
+{
+   int maximum = atomic_load_explicit(&receive_cap, memory_order_seq_cst);
+
+   atomic_fetch_add_explicit(&receive_calls, 1, memory_order_seq_cst);
+   return maximum > 0 && maximum < requested ? maximum : requested;
+}
+
+unsigned flyology_test_connection_receive_calls(void)
+{
+   return atomic_load_explicit(&receive_calls, memory_order_seq_cst);
 }
 
 void flyology_test_connection_barrier_arm(int point)
