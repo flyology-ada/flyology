@@ -15,4 +15,5 @@ case "$profile" in
 esac
 
 cd "$showcase_root"
+"$http_root/scripts/prepare-test-tls.sh"
 "$alr" build "--$profile" --stop-after=generation

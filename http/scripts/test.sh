@@ -5,6 +5,16 @@ http_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$http_root/scripts/find-alr.sh")
 test_rts="$http_root/build/rts"
 
+if [ -z "${FLYOLOGY_ROOT:-}" ] \
+  && [ ! -f "$http_root/../scripts/prepare-rts.sh" ] \
+  && [ -z "${FLYOLOGY_HTTP_TEST_IN_ALIRE:-}" ]
+then
+  exec "$alr" exec -- env FLYOLOGY_HTTP_TEST_IN_ALIRE=1 "$0" "$@"
+fi
+
+FLYOLOGY_TLS_TEST_HOOKS=true
+export FLYOLOGY_TLS_TEST_HOOKS
+
 if [ -n "${FLYOLOGY_ROOT:-}" ]; then
   flyology_root=$FLYOLOGY_ROOT
 elif [ -f "$http_root/../scripts/prepare-rts.sh" ]; then
@@ -15,6 +25,21 @@ else
 fi
 
 run_gprbuild () {
+  if [ -n "${FLYOLOGY_HTTP_TEST_IN_ALIRE:-}" ]; then
+    if [ "$(uname -s)" = Darwin ]; then
+      compiler_sysroot=$(gcc -print-sysroot)
+      if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
+        current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
+        env -u GPR_CONFIG gprbuild "$@" \
+          -largs "-Wl,-syslibroot,$current_sysroot" -nodefaultrpaths
+        return
+      fi
+      env -u GPR_CONFIG gprbuild "$@" -largs -nodefaultrpaths
+      return
+    fi
+    env -u GPR_CONFIG gprbuild "$@"
+    return
+  fi
   if [ "$(uname -s)" = Darwin ]; then
     compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)
     if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
@@ -49,9 +74,10 @@ compile_and_link () {
 }
 
 cd "$http_root"
-FLYOLOGY_TLS_TEST_HOOKS=true
-export FLYOLOGY_TLS_TEST_HOOKS
-"$alr" build
+"$http_root/scripts/prepare-test-tls.sh"
+if [ -z "${FLYOLOGY_HTTP_TEST_IN_ALIRE:-}" ]; then
+  "$alr" build
+fi
 FLYOLOGY_RTS_DIR="$test_rts" \
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=1 \

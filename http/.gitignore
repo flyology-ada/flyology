@@ -9,6 +9,8 @@
 /docs/api/
 /tests/bin/
 /tests/obj/
+/tests/fixtures/tls/server-cert.pem
+/tests/fixtures/tls/server-key.pem
 /showcases/alire/
 /showcases/bin/
 /showcases/config/

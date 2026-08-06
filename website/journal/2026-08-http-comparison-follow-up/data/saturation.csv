@@ -1,3 +1,0 @@
-architecture,server,workload,concurrency,status_200,timeouts,success_rate,outcome
-arm64,ews,plaintext,8,387117,20,0.9999483,excluded
-amd64,ews,plaintext,8,454993,23,0.99994945,excluded

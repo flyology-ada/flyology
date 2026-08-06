@@ -1,0 +1,16 @@
+[req]
+distinguished_name = subject
+prompt = no
+x509_extensions = test_certificate
+
+[subject]
+CN = localhost
+
+[test_certificate]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,digitalSignature,keyEncipherment,keyCertSign
+extendedKeyUsage = serverAuth
+subjectAltName = @names
+
+[names]
+DNS.1 = localhost

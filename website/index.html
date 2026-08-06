@@ -30,6 +30,7 @@
             <details class="nav-dropdown" data-nav-dropdown>
               <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
               <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
                 <li><a href="https://postgres.flyology.org/">Postgres</a></li>
               </ul>
             </details>
@@ -194,12 +195,11 @@ Flyology.IO.Sockets.Receive
         <div class="io-inner">
           <div class="capability-copy">
             <p class="eyebrow">Included building blocks</p>
-            <h2 id="io-title">Ordinary calls, from sockets through HTTP.</h2>
-            <p class="io-intro">Flyology Runtime includes task-aware I/O, an HTTP application layer, and bounded ownership-transfer primitives. Deadlines, capacity, and ownership remain explicit at each boundary.</p>
+            <h2 id="io-title">Ordinary calls around task-aware waits.</h2>
+            <p class="io-intro">Flyology Runtime includes task-aware sockets, files, timers, DNS, and TLS alongside bounded ownership-transfer primitives. Deadlines, capacity, and ownership remain explicit at each boundary.</p>
             <div class="capability-links">
               <a href="guide/#io">I/O guide</a>
-              <a href="guide/http/">HTTP guide</a>
-              <a href="reports/websocket/">WebSocket conformance</a>
+              <a href="https://http.flyology.org/">HTTP library</a>
               <a href="api/">API reference</a>
             </div>
           </div>
@@ -208,10 +208,6 @@ Flyology.IO.Sockets.Receive
               <button class="capability-plaque" type="button" data-preview-sample="io" data-preview-file="task_aware_io.adb" aria-pressed="true" aria-controls="capability-code-preview">
                 <strong>Task-aware I/O</strong>
                 <span>Sockets · files · timers · DNS · TLS</span>
-              </button>
-              <button class="capability-plaque" type="button" data-preview-sample="http" data-preview-file="routes.adb" aria-pressed="false" aria-controls="capability-code-preview">
-                <strong>HTTP server</strong>
-                <span>Routing · middleware · streams · WebSockets</span>
               </button>
               <button class="capability-plaque" type="button" data-preview-sample="buffers" data-preview-file="buffer_channel.adb" aria-pressed="false" aria-controls="capability-code-preview">
                 <strong>Buffers &amp; channels</strong>
@@ -230,14 +226,6 @@ Flyology.IO.Sockets.Receive
 
 Flyology.IO.Files.Read_At
   (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
-              <pre class="capability-code-sample" data-preview-code="http" hidden><code class="language-ada">State.Routes.Get
-  ("/", Home'Access, Name =&gt; "home");
-State.Routes.Get
-  ("/users/{id}", Show_User'Access,
-   Name =&gt; "users.show");
-
-State.Routes.Mount
-  ("/admin", Admin_Routes, Name_Prefix =&gt; "admin.");</code></pre>
               <pre class="capability-code-sample" data-preview-code="buffers" hidden><code class="language-ada">Pool  : aliased Flyology.Buffers.Pool
   (Block_Size =&gt; 64 * 1_024, Capacity =&gt; 258);
 Queue : Flyology.Buffers.Channels.Channel
@@ -259,9 +247,22 @@ Queue.Send_Move (Value);</code></pre>
           </div>
           <p>Companion projects use the same synchronous Ada model while adding focused protocol and application layers.</p>
         </div>
-        <a class="ecosystem-card" href="https://postgres.flyology.org/">
+        <a class="ecosystem-card" href="https://http.flyology.org/">
           <span class="ecosystem-card-mark" aria-hidden="true">
             <span>01</span>
+            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 22h35"/><path d="m36 14 8 8-8 8"/><path d="M56 42H21"/><path d="m28 34-8 8 8 8"/><rect x="6" y="8" width="52" height="48" rx="8"/></svg>
+          </span>
+          <span class="ecosystem-card-copy">
+            <span class="ecosystem-card-type">Application protocol library · native Ada</span>
+            <strong>HTTP</strong>
+            <span class="ecosystem-card-description">Origin-bound HTTP/1.1 clients and application-server building blocks over Flyology task-aware I/O.</span>
+            <span class="ecosystem-card-tags" aria-label="HTTP library capabilities"><span>Client</span><span>Server</span><span>Streaming</span><span>WebSockets</span></span>
+          </span>
+          <span class="ecosystem-card-action">http.flyology.org <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
+        </a>
+        <a class="ecosystem-card" href="https://postgres.flyology.org/">
+          <span class="ecosystem-card-mark" aria-hidden="true">
+            <span>02</span>
             <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
               <ellipse cx="32" cy="15" rx="20" ry="8"/>
               <path d="M12 15v17c0 4.4 9 8 20 8s20-3.6 20-8V15"/>

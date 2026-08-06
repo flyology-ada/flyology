@@ -119,6 +119,7 @@ cleanup () {
 trap cleanup EXIT HUP INT TERM
 
 cd "$project_root"
+"$project_root/scripts/prepare-test-tls.sh"
 "$alr" build --release
 release_config="$project_root/config/flyology_config.gpr"
 if ! grep -Eq 'Build_Profile[^:]*:[^=]*=[[:space:]]*"release"' "$release_config" ||
