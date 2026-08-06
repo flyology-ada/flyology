@@ -5,6 +5,8 @@ with Interfaces;
 --  Supplies fixed-storage byte buffers with explicit single-owner transfer.
 --  A buffer payload is mutable only through its current Unique_Buffer owner.
 --  Moving a buffer transfers a slot token and never copies payload bytes.
+--  Pool acquisition and accounting are task-safe. One task must exclusively
+--  own each Unique_Buffer handle and every payload borrow through that handle.
 package Flyology.Buffers is
    use type Ada.Streams.Stream_Element_Offset;
 
@@ -14,7 +16,8 @@ package Flyology.Buffers is
    --  Fixed-block storage pool. Pool must outlive every buffer obtained from
    --  it; an access discriminant enforces that relationship for ordinary Ada
    --  objects. Storage is allocated once during initialization and never
-   --  grows.
+   --  grows. Finalizing a Pool with an outstanding buffer or channel token
+   --  raises Program_Error rather than invalidating live ownership.
    type Pool
      (Block_Size : Positive;  --  Payload capacity of each buffer
       Capacity   : Positive)  --  Number of independently ownable buffers
@@ -36,8 +39,11 @@ package Flyology.Buffers is
    is
      limited new Ada.Finalization.Limited_Controlled with private;
 
-   --  Wait until a pool slot is available and attach it to vacant Item.
+   --  Wait until a pool slot is available and attach it to vacant Item. The
+   --  protected entry suspends a lightweight caller cooperatively and blocks
+   --  only a native caller's tasking thread.
    --  @param Item Vacant buffer that receives sole ownership
+   --  @exception Program_Error Item already owns a slot
    procedure Acquire (Item : in out Unique_Buffer)
      with Pre => not Has_Buffer (Item),
           Post => Has_Buffer (Item) and then Length (Item) = 0;
@@ -45,6 +51,7 @@ package Flyology.Buffers is
    --  Attempt to acquire without waiting.
    --  @param Item Vacant buffer that receives ownership on success
    --  @param Acquired True only when a slot was attached
+   --  @exception Program_Error Item already owns a slot
    procedure Try_Acquire
      (Item     : in out Unique_Buffer;
       Acquired : out Boolean)
@@ -56,6 +63,7 @@ package Flyology.Buffers is
    --  @param Item Vacant buffer that receives ownership on success
    --  @param Timeout Maximum monotonic wait in seconds
    --  @exception Timeout_Error No slot becomes available before the deadline
+   --  @exception Program_Error Item already owns a slot
    procedure Acquire_For
      (Item    : in out Unique_Buffer;
       Timeout : Duration)
@@ -72,6 +80,8 @@ package Flyology.Buffers is
    --  must belong to the same pool.
    --  @param Source Acquired buffer whose ownership transfers
    --  @param Target Vacant buffer that receives the slot
+   --  @exception Program_Error The handles belong to different pools, Source
+   --     is vacant, or Target already owns a slot
    procedure Move
      (Source : in out Unique_Buffer;
       Target : in out Unique_Buffer)
@@ -97,6 +107,7 @@ package Flyology.Buffers is
    --  transfer but is not part of the payload.
    --  @param Item Acquired buffer to update
    --  @param Value Application-defined scalar
+   --  @exception Program_Error Item is vacant
    procedure Set_Tag
      (Item  : in out Unique_Buffer;
       Value : Interfaces.Unsigned_64)
@@ -107,10 +118,13 @@ package Flyology.Buffers is
    --  @return Application-defined scalar
    function Tag (Item : Unique_Buffer) return Interfaces.Unsigned_64;
 
-   --  Borrow Item's initialized payload for the duration of Process. Process
-   --  must not retain an address into Data after it returns.
+   --  Borrow Item's initialized payload for the duration of Process. Empty
+   --  payloads are passed as a null array. Process executes synchronously and
+   --  any exception it raises propagates. It must not retain an address into
+   --  Data after it returns.
    --  @param Item Acquired buffer to inspect
    --  @param Process Synchronous payload consumer
+   --  @exception Program_Error Item is vacant
    procedure With_Readable_Data
      (Item    : Unique_Buffer;
       Process : not null access procedure
@@ -120,9 +134,13 @@ package Flyology.Buffers is
    --  Borrow Item's full writable block for the duration of Process. Length
    --  initially contains the current readable length and is committed only
    --  when Process returns normally with a value no greater than capacity.
-   --  Process must not retain an address into Data after it returns.
+   --  An exception leaves the prior readable length unchanged, although
+   --  payload bytes already mutated by Process remain changed. Process must
+   --  not retain an address into Data after it returns.
    --  @param Item Acquired buffer to modify
    --  @param Process Synchronous payload producer
+   --  @exception Program_Error Item is vacant
+   --  @exception Constraint_Error Process returns Length greater than capacity
    procedure With_Writable_Data
      (Item    : in out Unique_Buffer;
       Process : not null access procedure
@@ -135,6 +153,8 @@ package Flyology.Buffers is
    --  borrowed block.
    --  @param Item Acquired destination buffer
    --  @param Data Source bytes
+   --  @exception Program_Error Item is vacant
+   --  @exception Constraint_Error Data is larger than Item's capacity
    procedure Copy_From
      (Item : in out Unique_Buffer;
       Data : Ada.Streams.Stream_Element_Array)
@@ -142,7 +162,8 @@ package Flyology.Buffers is
        and then Data'Length <= Buffer_Capacity (Item),
           Post => Length (Item) = Data'Length;
 
-   --  Read the pool's coherent availability counters.
+   --  Read the pool's coherent availability counters. This task-safe snapshot
+   --  does not wait for all outstanding owners to drain.
    --  @param Item Pool to inspect
    --  @return Current slot accounting
    function Current (Item : Pool) return Pool_Snapshot;

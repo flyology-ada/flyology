@@ -92,7 +92,8 @@ package Flyology.IO.TLS.ALPN is
    --  @param Protocols Ordered client offer or an empty list
    --  @param Item Closed connection that receives the socket and session
    --  @exception TLS_Error Provider setup fails or returns a non-ALPN session
-   --  @exception Flyology.IO.Sockets.Socket_Error Preparing socket mode fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     preparing socket mode fails
    --  @exception Program_Error Core Take arguments are invalid
    procedure Take
      (Backend     : in out Provider'Class;

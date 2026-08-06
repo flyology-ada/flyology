@@ -15,6 +15,11 @@ with System;
 --  worker. Execute must therefore honor its token/deadline when it can block;
 --  foreign calls that cannot be interrupted require process isolation for a
 --  bounded application shutdown.
+--
+--  An Operation_Handle is declared for one aliased Executor and may be reused
+--  only after Await or Abandon consumes its accepted operation. Await keeps
+--  ordinary synchronous Ada semantics: lightweight callers suspend on the
+--  completion descriptor while native callers block only their pthread.
 --  @formal Input_Type Immutable operation input
 --  @formal Result_Type Operation result
 --  @formal Execute Native operation implementation
@@ -64,14 +69,19 @@ package Flyology.Native_Executors is
    end record;
 
    --  Single-use identity for one accepted operation. The access discriminant
-   --  makes Ada reject a handle whose lifetime could exceed its executor.
+   --  makes Ada reject a handle whose lifetime could exceed its executor. An
+   --  inactive handle may be reused for another Submit to the same executor.
    --  @field Owner Borrowed executor that must outlive the handle
    type Operation_Handle
      (Owner : not null access Executor) is limited private;
 
    --  Activate the fixed worker pool before concurrent submissions. Start is
-   --  idempotent and must be called by the owning application during setup.
+   --  idempotent while the executor remains open and must be called by the
+   --  owning application during setup.
    --  @param Item Application-owned executor
+   --  @exception Program_Error Shutdown has started
+   --  @exception Storage_Error Worker storage allocation fails
+   --  @exception Tasking_Error Native worker activation fails
    procedure Start (Item : aliased in out Executor);
 
    --  Stop admission, request cancellation for every outstanding operation,
@@ -88,15 +98,22 @@ package Flyology.Native_Executors is
    procedure Shutdown (Item : in out Executor);
 
    --  Submit without waiting. Accepted is false when bounded storage is full
-   --  or shutdown has begun. The executor samples Token at submission and
-   --  gives Execute an executor-owned cancellation token; it never retains the
-   --  caller's token. An accepted handle must not outlive Item.
+   --  or shutdown has begun; Handle then remains inactive and reusable. The
+   --  executor samples Token at submission and gives Execute an executor-owned
+   --  cancellation token; it never retains the caller's token. Deadline is an
+   --  absolute monotonic deadline passed to Execute. A worker converts a token
+   --  already requested before dispatch to Operation_Cancelled and an already
+   --  expired deadline to Flyology.IO.Timeout_Error. An accepted handle must
+   --  not outlive Item.
    --  @param Item Application-owned executor
    --  @param Input Operation input copied into bounded storage
    --  @param Token Optional borrowed cancellation token
    --  @param Deadline Absolute monotonic deadline
    --  @param Handle Single-use result handle when accepted
    --  @param Accepted Whether bounded admission succeeded
+   --  @exception Program_Error Start has not completed
+   --  @exception Invalid_Handle Handle belongs to another executor or already
+   --     identifies an accepted operation
    procedure Submit
      (Item     : aliased in out Executor;
       Input    : Input_Type;
@@ -106,14 +123,27 @@ package Flyology.Native_Executors is
       Accepted : out Boolean);
 
    --  Wait for one accepted operation, return its result, or re-raise its
-   --  captured exception. Cancellation or deadline expiry abandons the result
-   --  and requests the executor-owned operation token. Each handle is consumed
+   --  captured exception with the original exception identity and retained
+   --  message. Deadline bounds only this wait; the operation receives the
+   --  separate deadline supplied to Submit. Ada.Real_Time.Time_Last means no
+   --  wait deadline. Cancellation or deadline expiry abandons the result and
+   --  requests the executor-owned operation token. Each handle is consumed
    --  exactly once; finalizing an unconsumed handle performs the same abandon.
    --  @param Item Application-owned executor
    --  @param Handle Previously accepted single-use handle
    --  @param Result Completed result
    --  @param Token Optional cancellation source for the waiting caller
    --  @param Deadline Absolute deadline for the waiting caller
+   --  @exception Invalid_Handle Handle is inactive, stale, or belongs to
+   --     another executor
+   --  @exception Operation_Cancelled
+   --     Flyology.Cancellation.Operation_Cancelled is raised when Token is
+   --     requested before the result is consumed
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when
+   --     Deadline expires before the result is consumed
+   --  @exception Device_Error Flyology.IO.Device_Error is raised when
+   --     completion readiness polling fails
+   --  @exception Program_Error A completion or cancellation wake source fails
    procedure Await
      (Item   : aliased in out Executor;
       Handle : in out Operation_Handle;
@@ -126,6 +156,10 @@ package Flyology.Native_Executors is
    --  reclaimed automatically at completion.
    --  @param Item Owning executor
    --  @param Handle Accepted operation handle
+   --  @exception Invalid_Handle Handle is inactive, stale, or belongs to
+   --     another executor
+   --  @exception Program_Error The operation's cancellation wake cannot be
+   --     signalled; the handle is still consumed
    procedure Abandon
      (Item : aliased in out Executor; Handle : in out Operation_Handle);
 

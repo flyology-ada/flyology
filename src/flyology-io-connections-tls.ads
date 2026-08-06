@@ -25,11 +25,14 @@ package Flyology.IO.Connections.TLS is
    --  @param Token Optional one-shot token that must outlive the call
    --  @exception Operation_Cancelled Shutdown, Token, or concurrent Close
    --     interrupts the upgrade
-   --  @exception Flyology.IO.Timeout_Error The shared deadline expires
-   --  @exception Flyology.IO.Device_Error Readiness polling fails
-   --  @exception Flyology.IO.TLS.TLS_Error Provider setup or handshake fails
-   --  @exception Flyology.IO.Sockets.Socket_Error Socket preparation or close
-   --     fails
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when the
+   --     shared deadline expires
+   --  @exception Device_Error Flyology.IO.Device_Error is raised when
+   --     readiness polling fails
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when provider
+   --     setup or the handshake fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     socket preparation or close fails
    --  @exception Program_Error Item is closed, already uses TLS, or arguments
    --     do not match Side
    procedure Upgrade
@@ -53,11 +56,14 @@ package Flyology.IO.Connections.TLS is
    --  @param Token Optional one-shot token that must outlive the call
    --  @exception Operation_Cancelled Shutdown, Token, or concurrent Close
    --     interrupts the upgrade
-   --  @exception Flyology.IO.Timeout_Error The shared deadline expires
-   --  @exception Flyology.IO.Device_Error Readiness polling fails
-   --  @exception Flyology.IO.TLS.TLS_Error Provider setup or handshake fails
-   --  @exception Flyology.IO.Sockets.Socket_Error Socket preparation or close
-   --     fails
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when the
+   --     shared deadline expires
+   --  @exception Device_Error Flyology.IO.Device_Error is raised when
+   --     readiness polling fails
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when provider
+   --     setup or the handshake fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     socket preparation or close fails
    --  @exception Program_Error Item is closed, already uses TLS, or arguments
    --     do not match Side
    procedure Upgrade
@@ -75,7 +81,8 @@ package Flyology.IO.Connections.TLS is
    --  @param Item Open ALPN-upgraded connection
    --  @return Selected opaque protocol identifier or an empty String
    --  @exception Operation_Cancelled Concurrent Close interrupts the query
-   --  @exception Flyology.IO.TLS.TLS_Error Session lacks the ALPN capability
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when the
+   --     session lacks the ALPN capability
    --  @exception Program_Error Item is closed or still plaintext
    function Selected_Protocol (Item : in out Connection) return String;
 
@@ -87,9 +94,12 @@ package Flyology.IO.Connections.TLS is
    --  @param Token Optional one-shot token that must outlive the call
    --  @exception Operation_Cancelled Shutdown, Token, or concurrent Close
    --     interrupts the operation
-   --  @exception Flyology.IO.Timeout_Error The shared deadline expires
-   --  @exception Flyology.IO.Device_Error Readiness polling fails
-   --  @exception Flyology.IO.TLS.TLS_Error Provider or peer fails shutdown
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when the
+   --     shared deadline expires
+   --  @exception Device_Error Flyology.IO.Device_Error is raised when
+   --     readiness polling fails
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when the
+   --     provider or peer fails shutdown
    --  @exception Program_Error Item is closed or still plaintext
    procedure Shutdown
      (Item    : in out Connection;

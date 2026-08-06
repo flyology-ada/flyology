@@ -51,7 +51,8 @@ package Flyology.IO.DNS is
    --  @exception Operation_Cancelled An interrupt descriptor is readable
    --  @exception Timeout_Error The overall deadline expires
    --  @exception Device_Error Descriptor polling or transport setup fails
-   --  @exception Flyology.IO.Sockets.Socket_Error A socket operation fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     a socket operation fails
    function Resolve
      (Name        : String;
       Family      : Family_Preference := Any_Family;
@@ -79,7 +80,8 @@ package Flyology.IO.DNS is
    --  @exception Operation_Cancelled An interrupt descriptor is readable
    --  @exception Timeout_Error The overall deadline expires
    --  @exception Device_Error Descriptor polling or transport setup fails
-   --  @exception Flyology.IO.Sockets.Socket_Error A socket operation fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     a socket operation fails
    function Resolve_Using
      (Name         : String;
       Name_Servers : Name_Server_Array;

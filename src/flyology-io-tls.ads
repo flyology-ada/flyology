@@ -175,7 +175,8 @@ package Flyology.IO.TLS is
    --  @param Server_Name DNS name verified by a client; empty for a server
    --  @param Item Closed connection that receives the socket and session
    --  @exception TLS_Error Provider setup fails or Backend is unavailable
-   --  @exception Flyology.IO.Sockets.Socket_Error Preparing socket mode fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     preparing socket mode fails
    --  @exception Program_Error Item is open, Socket is invalid, or arguments
    --     do not match Side
    procedure Take
@@ -280,7 +281,8 @@ package Flyology.IO.TLS is
    --  Provider state is destroyed before the descriptor. Concurrent callers
    --  wait for the same close. Closing a closed Item is harmless.
    --  @param Item Connection whose ownership is released
-   --  @exception Flyology.IO.Sockets.Socket_Error The descriptor close fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     the descriptor close fails
    --  @exception TLS_Error A downstream session violates the non-raising
    --     finalization contract; descriptor cleanup still completes
    --  @exception Program_Error Internal controller cleanup fails after the

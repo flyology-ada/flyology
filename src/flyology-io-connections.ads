@@ -87,7 +87,8 @@ package Flyology.IO.Connections is
    --     shutdown or Token interrupts the admitted accept
    --  @exception Timeout_Error The accept deadline expires
    --  @exception Device_Error Readiness polling fails
-   --  @exception Flyology.IO.Sockets.Socket_Error Accept or setup fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     accept or setup fails
    --  @exception Program_Error Item is open, a wake source cannot be created,
    --     or cleanup releases its permit but cannot signal admission readiness
    procedure Accept_Connection
@@ -105,11 +106,11 @@ package Flyology.IO.Connections is
    --  Concurrent Close callers wait for the same close. Closing a closed Item
    --  is harmless.
    --  @param Item Connection whose ownership is released
-   --  @exception Flyology.IO.Sockets.Socket_Error The underlying close reports
-   --     failure
-   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider session
-   --     violates its non-raising finalization contract; cleanup still
-   --     completes
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     the underlying close reports failure
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when an
+   --     upgraded provider session violates its non-raising finalization
+   --     contract; cleanup still completes
    --  @exception Program_Error The Server permit is released but admission
    --     readiness cannot be signalled
    procedure Close (Item : in out Connection);
@@ -131,9 +132,10 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The deadline expires
    --  @exception Device_Error Readiness polling fails
-   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider fails or
-   --     returns invalid progress
-   --  @exception Flyology.IO.Sockets.Socket_Error Receive or setup fails
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when an
+   --     upgraded provider fails or returns invalid progress
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     receive or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
    procedure Receive
@@ -156,9 +158,10 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or the peer closes early
-   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider fails, closes
-   --     early, or returns invalid progress
-   --  @exception Flyology.IO.Sockets.Socket_Error Receive or setup fails
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when an
+   --     upgraded provider fails, closes early, or returns invalid progress
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     receive or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
    procedure Receive_Exactly
@@ -180,9 +183,11 @@ package Flyology.IO.Connections is
    --     call that started while Item was open
    --  @exception Timeout_Error The shared deadline expires
    --  @exception Device_Error Polling fails or no forward progress is made
-   --  @exception Flyology.IO.TLS.TLS_Error An upgraded provider or peer fails,
-   --     or the provider returns invalid progress
-   --  @exception Flyology.IO.Sockets.Socket_Error Socket send or setup fails
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when an
+   --     upgraded provider or peer fails, or the provider returns invalid
+   --     progress
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     socket send or setup fails
    --  @exception Program_Error Item is already closed when the call starts,
    --     or a wake source cannot be used
    procedure Send_All

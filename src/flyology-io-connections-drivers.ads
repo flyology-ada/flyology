@@ -71,10 +71,12 @@ package Flyology.IO.Connections.Drivers is
    --  @param Result Progress, required readiness, or orderly peer closure
    --  @exception Operation_Cancelled Shutdown, token cancellation, or Close
    --     interrupts the driver
-   --  @exception Flyology.IO.Timeout_Error Run's deadline expires
-   --  @exception Flyology.IO.TLS.TLS_Error The TLS provider fails or reports
-   --     invalid progress
-   --  @exception Flyology.IO.Sockets.Socket_Error Plaintext receive fails
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when Run's
+   --     deadline expires
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when the TLS
+   --     provider fails or reports invalid progress
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     plaintext receive fails
    procedure Receive
      (Item   : in out Capability;
       Data   : out Ada.Streams.Stream_Element_Array;
@@ -91,10 +93,12 @@ package Flyology.IO.Connections.Drivers is
    --  @param Result Progress, required readiness, or peer closure
    --  @exception Operation_Cancelled Shutdown, token cancellation, or Close
    --     interrupts the driver
-   --  @exception Flyology.IO.Timeout_Error Run's deadline expires
-   --  @exception Flyology.IO.TLS.TLS_Error The TLS provider fails or reports
-   --     invalid progress
-   --  @exception Flyology.IO.Sockets.Socket_Error Plaintext send fails
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when Run's
+   --     deadline expires
+   --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when the TLS
+   --     provider fails or reports invalid progress
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     plaintext send fails
    procedure Send
      (Item   : in out Capability;
       Data   : Ada.Streams.Stream_Element_Array;
@@ -114,8 +118,10 @@ package Flyology.IO.Connections.Drivers is
    --  @param Result Transport, protocol, or per-wait timeout result
    --  @exception Operation_Cancelled Shutdown, token cancellation, or Close
    --     interrupts the driver
-   --  @exception Flyology.IO.Timeout_Error Run's shared deadline expires
-   --  @exception Flyology.IO.Device_Error Readiness polling fails
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when Run's
+   --     shared deadline expires
+   --  @exception Device_Error Flyology.IO.Device_Error is raised when
+   --     readiness polling fails
    --  @exception Program_Error Wake descriptor creation or consumption fails
    procedure Wait
      (Item     : in out Capability;
@@ -139,8 +145,10 @@ package Flyology.IO.Connections.Drivers is
    --  @param Token Optional one-shot token that must outlive Run
    --  @exception Operation_Cancelled Shutdown, token cancellation, or Close
    --     interrupts lease acquisition or the driver
-   --  @exception Flyology.IO.Timeout_Error The shared deadline expires
-   --  @exception Flyology.IO.Sockets.Socket_Error Socket preparation fails
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when the
+   --     shared deadline expires
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     socket preparation fails
    --  @exception Program_Error Item is closed or transport state is invalid
    procedure Run
      (Item    : in out Connection;

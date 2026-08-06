@@ -28,7 +28,8 @@ package Flyology.IO.DNS.Testing is
    --  @param Expected_ID Expected transaction identifier
    --  @param Expected_Name Expected canonical question name
    --  @param For_IPv6 Parse an AAAA response when True, otherwise A
-   --  @exception Flyology.IO.DNS.Malformed_Response Packet validation fails
+   --  @exception Malformed_Response Flyology.IO.DNS.Malformed_Response is
+   --     raised when packet validation fails
    procedure Validate_Response
      (Packet        : Ada.Streams.Stream_Element_Array;
       Expected_ID   : Natural;

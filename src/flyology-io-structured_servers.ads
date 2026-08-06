@@ -111,7 +111,8 @@ package Flyology.IO.Structured_Servers is
    --  @param Drain_Timeout Grace period before forced cancellation
    --  @exception Program_Error Listener, lifecycle, or wake source is invalid
    --  @exception Server_Failed A handler or admission failure was recorded
-   --  @exception Flyology.IO.Sockets.Socket_Error Listener close fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     listener close fails
    --  @exception Tasking_Error Handler task activation fails
    procedure Serve
      (Item          : aliased in out Server;

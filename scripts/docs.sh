@@ -35,6 +35,17 @@ export FLYOLOGY_DOCUMENTATION=true
   -P flyology.gpr \
   -O docs/api
 
+#  GNATdoc accepts a qualified @exception name without a warning, but this
+#  version renders only the first selector as the exception name and moves the
+#  remaining selectors into a description beginning with a dot.
+if grep -E -q \
+  '<dt data-search-kind=Exception>[^<]+<dd><p>\.' docs/api/*.html
+then
+   printf '%s\n' \
+     "malformed qualified exception annotation in generated API docs" >&2
+   exit 1
+fi
+
 mkdir -p docs/api/fonts
 cp "$website_kit/assets/fonts/geologica-latin-variable.woff2" docs/api/fonts/
 cp assets/brand/flyology-mark-transparent.svg docs/api/flyology-mark.svg

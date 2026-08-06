@@ -1,5 +1,12 @@
 --  Supplies fixed-capacity closeable channels with ordinary Ada entry
---  semantics. A blocked sender or receiver resumes when the channel closes.
+--  semantics. The channel allocates no storage after elaboration and owns no
+--  task. Multiple producers and consumers may call it concurrently. A blocked
+--  sender or receiver resumes when the channel closes; terminal outcomes are
+--  reported through Boolean parameters rather than exceptions.
+--
+--  Element assignment and finalization run inside protected operations.
+--  Element_Type and Empty_Value operations must not block, reenter the same
+--  Channel, or propagate exceptions.
 --  @formal Element_Type Value transferred by the channel
 --  @formal Empty_Value Value assigned after dequeue to release slot storage
 generic
@@ -7,12 +14,14 @@ generic
    Empty_Value : Element_Type;
 package Flyology.Bounded_Channels is
 
-   --  Fixed-capacity multi-producer, multi-consumer channel.
+   --  Fixed-capacity multi-producer, multi-consumer FIFO. Values accepted
+   --  before Close remain receivable in order until the channel drains.
    --  @field Capacity Maximum queued values
    type Channel (Capacity : Positive) is tagged limited private;
 
    --  Wait for space and enqueue Value, or return Accepted false after
-   --  Close. The entry provides natural lightweight-task backpressure.
+   --  Close. The protected entry suspends lightweight callers cooperatively
+   --  and provides bounded backpressure without blocking an event-loop thread.
    --  @param Item Channel
    --  @param Value Value to enqueue
    --  @param Accepted False only when closed
@@ -22,7 +31,8 @@ package Flyology.Bounded_Channels is
       Accepted : out Boolean);
 
    --  Wait for a value. Values queued before Close remain receivable;
-   --  Available is false once the closed channel is empty.
+   --  Available is false once the closed channel is empty. Value is defined
+   --  only when Available is true.
    --  @param Item Channel
    --  @param Value Received value when Available
    --  @param Available Whether a value was returned
@@ -32,8 +42,10 @@ package Flyology.Bounded_Channels is
       Available : out Boolean);
 
    --  Wait for a value for at most Timeout seconds. A negative timeout waits
-   --  without a deadline. Timed_Out distinguishes an open empty channel from
-   --  a closed and drained channel.
+   --  without a deadline; zero is an immediate attempt. Timed_Out
+   --  distinguishes an open empty channel from a closed and drained channel.
+   --  On timeout, Value is Empty_Value and Available is false. On closure,
+   --  Value is defined only when Available is true.
    --  @param Item Channel
    --  @param Value Received value when Available
    --  @param Available Whether a value was returned
@@ -56,8 +68,9 @@ package Flyology.Bounded_Channels is
       Accepted : out Boolean);
 
    --  Wait for space for at most Timeout seconds. A negative timeout waits
-   --  without a deadline. Closing the channel returns Accepted false without
-   --  setting Timed_Out.
+   --  without a deadline; zero is an immediate attempt. Closing the channel
+   --  returns Accepted false without setting Timed_Out. Timeout leaves the
+   --  channel unchanged and returns Accepted false with Timed_Out true.
    --  @param Item Channel
    --  @param Value Value to enqueue
    --  @param Accepted Whether the value was queued
@@ -70,7 +83,8 @@ package Flyology.Bounded_Channels is
       Timeout   : Duration;
       Timed_Out : out Boolean);
 
-   --  Attempt to receive without waiting.
+   --  Attempt to receive without waiting. Value is defined only when Available
+   --  is true.
    --  @param Item Channel
    --  @param Value Received value when Available
    --  @param Available True only when a queued value was available
@@ -88,7 +102,7 @@ package Flyology.Bounded_Channels is
    --  @return True after closure
    function Is_Closed (Item : Channel) return Boolean;
 
-   --  Return queued value count.
+   --  Return a thread-safe snapshot of the queued value count.
    --  @param Item Channel
    --  @return Current queue depth
    function Length (Item : Channel) return Natural;

@@ -64,6 +64,7 @@ package Flyology.Buffers.Channels is
    --  @param Value Acquired buffer from Item's pool
    --  @param Metadata Scalar metadata transferred with Value
    --  @exception Channel_Closed Close occurs before acceptance
+   --  @exception Program_Error Value is vacant or belongs to another pool
    procedure Send_Move
      (Item  : in out Channel;
       Value : in out Unique_Buffer;
@@ -76,6 +77,7 @@ package Flyology.Buffers.Channels is
    --  @param Item Channel yielding ownership
    --  @param Target Vacant buffer that receives the oldest payload
    --  @exception Channel_Closed Closed channel has fully drained
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Receive_Move
      (Item   : in out Channel;
       Target : in out Unique_Buffer)
@@ -87,6 +89,7 @@ package Flyology.Buffers.Channels is
    --  @param Target Vacant buffer that receives the oldest payload
    --  @param Metadata Metadata supplied by the sender
    --  @exception Channel_Closed Closed channel has fully drained
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Receive_Move
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;
@@ -100,6 +103,7 @@ package Flyology.Buffers.Channels is
    --  @param Value Acquired buffer from Item's pool
    --  @param Result Send outcome
    --  @param Metadata Scalar metadata transferred with Value
+   --  @exception Program_Error Value is vacant or belongs to another pool
    procedure Try_Send_Move
      (Item   : in out Channel;
       Value  : in out Unique_Buffer;
@@ -113,6 +117,7 @@ package Flyology.Buffers.Channels is
    --  @param Item Channel yielding ownership
    --  @param Target Vacant buffer that receives ownership on success
    --  @param Result Receive outcome
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Try_Receive_Move
      (Item   : in out Channel;
       Target : in out Unique_Buffer;
@@ -127,6 +132,7 @@ package Flyology.Buffers.Channels is
    --  @param Result Receive outcome
    --  @param Metadata Sender metadata, or No_Metadata when no buffer is
    --    received; No_Metadata is not a presence indicator
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Try_Receive_Move
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;
@@ -144,6 +150,7 @@ package Flyology.Buffers.Channels is
    --  @param Metadata Scalar metadata transferred with Value
    --  @exception Channel_Closed Close occurs before acceptance
    --  @exception Timeout_Error Capacity remains unavailable until the deadline
+   --  @exception Program_Error Value is vacant or belongs to another pool
    procedure Timed_Send_Move
      (Item    : in out Channel;
       Value   : in out Unique_Buffer;
@@ -159,6 +166,7 @@ package Flyology.Buffers.Channels is
    --  @param Timeout Maximum monotonic wait in seconds
    --  @exception Channel_Closed Closed channel has fully drained
    --  @exception Timeout_Error No buffer arrives before the deadline
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Timed_Receive_Move
      (Item    : in out Channel;
       Target  : in out Unique_Buffer;
@@ -175,6 +183,7 @@ package Flyology.Buffers.Channels is
    --  @exception Channel_Closed Closed channel has fully drained
    --  @exception Timeout_Error No buffer arrives before the deadline
    --  @exception Operation_Cancelled Token is requested before delivery
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Timed_Receive_Move
      (Item    : in out Channel;
       Target  : in out Unique_Buffer;
@@ -190,6 +199,7 @@ package Flyology.Buffers.Channels is
    --  @param Metadata Metadata supplied by the sender
    --  @exception Channel_Closed Closed channel has fully drained
    --  @exception Timeout_Error No buffer arrives before the deadline
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Timed_Receive_Move
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;
@@ -208,6 +218,7 @@ package Flyology.Buffers.Channels is
    --  @exception Channel_Closed Closed channel has fully drained
    --  @exception Timeout_Error No buffer arrives before the deadline
    --  @exception Operation_Cancelled Token is requested before delivery
+   --  @exception Program_Error Target is occupied or belongs to another pool
    procedure Timed_Receive_Move
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;

@@ -7,7 +7,10 @@ with Interfaces;
 with System;
 
 --  Runs a bounded homogeneous group of child operations with structured Ada
---  task lifetime. Scope exit cancels and joins unfinished children.
+--  task lifetime. Configure creates Capacity lightweight worker tasks; Spawn
+--  copies operations into fixed scope storage and may start them immediately.
+--  Join or scope finalization closes admission and joins every worker, so
+--  Execute must observe its token and deadline when it can block indefinitely.
 --  @formal Input_Type Immutable operation input
 --  @formal Result_Type Operation result
 --  @formal Execute Child operation implementation
@@ -28,39 +31,60 @@ package Flyology.Task_Scopes is
    --  originating scope and are rejected by every other scope.
    type Operation_Handle is private;
 
-   --  Bounded one-shot structured task group. Capacity bounds both child Ada
-   --  tasks and total operations. Join closes admission. Finalization requests
-   --  cancellation, closes admission, and joins when Join was omitted.
+   --  Bounded one-shot structured task group. Capacity is both the number of
+   --  lightweight worker tasks created by Configure and the total number of
+   --  operations accepted during the scope lifetime. The Parent token is
+   --  borrowed and may be null; when present, cancellation is linked downward
+   --  to the scope-owned token. Join closes admission. Finalization requests
+   --  local cancellation, closes admission, and joins when Join was omitted.
    type Scope
      (Capacity : Positive;
       Parent   : access Flyology.Cancellation.Token) is
      limited new Ada.Finalization.Limited_Controlled with private;
 
-   --  Install inherited cancellation and absolute deadline before Spawn.
-   --  Children always receive a scope-owned token. Parent cancellation is
-   --  linked downward while failure and finalization cancel only this scope.
+   --  Install inherited cancellation and an absolute monotonic deadline before
+   --  Spawn. Ada.Real_Time.Time_Last means no deadline. Children always
+   --  receive a scope-owned token. Parent cancellation is linked downward
+   --  asynchronously, while failure and finalization cancel only this scope.
+   --  The call allocates and activates Capacity lightweight workers; it is the
+   --  only operation that may configure Item.
    --  Parent is the scope's access discriminant, so Ada enforces that the
    --  borrowed token outlives Item.
    --  @param Item Task scope
    --  @param Deadline Inherited absolute monotonic deadline
    --  @param Cancel_Siblings_On_Failure Whether one failure cancels siblings
+   --  @exception Program_Error Item was already configured or its identity
+   --     space is exhausted
+   --  @exception Storage_Error Worker or cancellation-monitor allocation fails
+   --  @exception Tasking_Error Worker or cancellation-monitor activation fails
    procedure Configure
      (Item       : in out Scope;
       Deadline   : Ada.Real_Time.Time;
       Cancel_Siblings_On_Failure : Boolean := True);
 
-   --  Submit one operation without exceeding Capacity.
+   --  Submit one operation without exceeding Capacity. Input is copied before
+   --  admission is committed; an exception from that copy propagates without
+   --  consuming a slot or defining Handle. A worker may begin Execute before
+   --  Spawn returns. Before invoking Execute, the worker records an already
+   --  requested scope token as Operation_Cancelled and an expired deadline as
+   --  Flyology.IO.Timeout_Error.
    --  @param Item Configured task scope
    --  @param Input Operation input copied into scope storage
    --  @param Handle Stable result handle
+   --  @exception Program_Error Item is not configured or admission was closed
+   --  @exception Constraint_Error Capacity operations were already accepted
    procedure Spawn
      (Item   : in out Scope;
       Input  : Input_Type;
       Handle : out Operation_Handle);
 
-   --  Close admission and wait for every submitted operation. Exceptions are
-   --  retained per operation and re-raised by Result.
+   --  Close admission and wait for every submitted operation and worker.
+   --  Exceptions are retained per operation and re-raised by Result. A second
+   --  call after a successful Join is harmless. The caller waits through
+   --  ordinary Ada tasking: a lightweight caller suspends cooperatively and a
+   --  native caller blocks only its task's pthread.
    --  @param Item Configured task scope
+   --  @exception Program_Error Item was not configured
    procedure Join (Item : in out Scope);
 
    --  Report whether an operation completed without exception.
@@ -68,15 +92,22 @@ package Flyology.Task_Scopes is
    --  @param Item Joined task scope
    --  @param Handle Operation handle
    --  @return True when Execute returned normally
+   --  @exception Program_Error Join has not completed
+   --  @exception Invalid_Handle Handle belongs to another scope or does not
+   --     identify a submitted operation
    function Succeeded
      (Item   : Scope;
       Handle : Operation_Handle) return Boolean;
 
-   --  Return an operation result or re-raise its captured exception.
-   --  Join must have completed.
+   --  Return an operation result or re-raise its captured exception with the
+   --  original exception identity and retained message. Join must have
+   --  completed.
    --  @param Item Joined task scope
    --  @param Handle Operation handle
    --  @return Operation result
+   --  @exception Program_Error Join has not completed
+   --  @exception Invalid_Handle Handle belongs to another scope or does not
+   --     identify a submitted operation
    function Result
      (Item   : Scope;
       Handle : Operation_Handle) return Result_Type;

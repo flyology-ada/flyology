@@ -183,8 +183,8 @@ package Flyology.IO.Timers is
    --  @param Target Absolute Ada.Calendar wall-clock target
    --  @param Backstep_Tolerance Permitted lost wall-clock progress in seconds
    --  @return Terminal outcome, observation, and estimated backward adjustment
-   --  @exception Flyology.IO.Device_Error Clock sampling, timer setup, or
-   --     waiting fails
+   --  @exception Device_Error Flyology.IO.Device_Error is raised when clock
+   --     sampling, timer setup, or waiting fails
    function Wait_Until
      (Target             : Ada.Calendar.Time;
       Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
