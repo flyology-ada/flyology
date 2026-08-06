@@ -154,6 +154,52 @@ among `mprotect`, `madvise`, and `munmap`. This identifies GNARL's global task
 list as the remaining large-scale limit. Changing that list would broaden the
 versioned GNARL patch and ATCB boundary, so it was not attempted here.
 
+## Creation follow-up experiments
+
+Creation was investigated separately after retaining the reap improvement. A
+fresh seven-run, one-group baseline at 10,000 lightweight tasks placed serial
+cold creation at a 0.129 s median and serial warm creation at 0.112 s. Four
+prestarted creators produced 0.101 s cold and 0.0861 s warm medians. The
+four-creator result shows available parallelism, but its wider ranges require
+paired comparisons rather than conclusions from independently built runs.
+
+A one-second sample during 100,000 bounded warm tasks attributed 82
+main-thread samples below `Contexts.Create` to `mprotect`, 70 below
+`Poller.Wake` to `kevent64`, and only a small number to Flyology `Fiber` and
+`Context` allocation. This made stack protection and poller notification the
+leading mechanisms and rejected metadata combination as the first experiment.
+
+The following controlled changes were tested and reverted:
+
+- **Creation wake only on an empty-to-nonempty ready transition.** Initial
+  10,000-task runs suggested a 3–7% warm or contended improvement, but cold
+  serial results were mixed. At 100,000 warm tasks, four-creator medians were
+  0.867 s before, 0.801 s with the change, and 0.728 s after reverting and
+  rebuilding the baseline. The reversal outperformed the candidate, so the
+  apparent win was host-phase noise rather than retained evidence.
+- **Intrusive free-slot chain inside a stack arena.** Removing the bitmap slot
+  scan changed warm medians by roughly 2–4%, with overlapping ranges, while
+  the cold serial median regressed. The scan is not a demonstrated bottleneck
+  at the maintained stack size and arena capacity.
+- **Automatic-placement topology ticket.** Nine interleaved
+  automatic-versus-explicit pairs found explicit placement 3–5% faster in warm
+  cases but 1–3% slower in cold cases. The direction changed with mode, so an
+  already-created-group fast path was not justified.
+- **Protect a reserved existing-arena slot outside the pool lock.** An
+  independently built candidate initially appeared 10% faster serially and
+  25% faster with four creators. A decisive comparison preserved baseline and
+  candidate executables and alternated eleven 100,000-task runs per creator
+  count. The candidate's serial median was 1.138 s versus 1.124 s baseline and
+  it won 4 of 11 pairs. With four creators its median was 0.916 s versus 0.964
+  s, but it won only 6 of 11 pairs and its mean paired wall-time delta was 4.2%
+  worse because of latency outliers. Reservation rollback and atomic success
+  accounting therefore added complexity without a consistent scalability win.
+
+No creation change was retained. Per-task guarded-stack protection and the
+ordinary GNARL allocation/activation path remain real costs, but these
+experiments do not support weakening guards, adding a parallel lifecycle, or
+accepting a contention-only tradeoff with unstable latency.
+
 ## Safety of the retained change
 
 The retained field is an intrusive previous pointer inside Flyology's private
