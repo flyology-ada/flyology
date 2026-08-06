@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <sys/socket.h>
 
 #include "flyology_tls_signal.h"
