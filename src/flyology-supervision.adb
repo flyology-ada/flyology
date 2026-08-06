@@ -71,7 +71,20 @@ package body Flyology.Supervision is
             raise Program_Error with "escalation incident is inactive";
          end if;
          Generation_Control_State.Incident := Incident;
+         Escalated := True;
       end Publish_Escalation;
+
+      procedure Close_Incident is
+      begin
+         if not Opened then
+            raise Program_Error with "generation control is inactive";
+         elsif not Ready then
+            raise Program_Error with
+              "recovery incident cannot close before readiness";
+         elsif not Escalated then
+            Incident := No_Incident;
+         end if;
+      end Close_Incident;
 
       function Current_Handle return Child_Handle is
       begin
@@ -201,6 +214,12 @@ package body Flyology.Supervision is
          Number    => Context.Number + 1,
          Deadline  => Context.Deadline);
    end Next_Attempt;
+
+   procedure Close_Recovery_Incident
+     (Control : in out Generation_Control) is
+   begin
+      Control.State.Close_Incident;
+   end Close_Recovery_Incident;
 
    procedure Request_Stop
      (Control  : in out Generation_Control;

@@ -6,6 +6,7 @@ with Interfaces;
 
 procedure Flyology.Supervision.Families_Smoke is
    use type Ada.Real_Time.Time;
+   use type Ada.Real_Time.Time_Span;
    use type Interfaces.Unsigned_64;
 
    Test_Failure : exception;
@@ -152,9 +153,9 @@ begin
    First := Families.Latest (Item, Flyology.Supervision.Child (First));
 
    pragma Assert (State.Started.Value (1) = 2);
-   Families.Stop (Item, Second);
+   Families.Stop (Item, First);
    loop
-      exit when Families.Current (Item, Second).State =
+      exit when Families.Current (Item, First).State =
         Flyology.Supervision.Joined;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
@@ -180,13 +181,17 @@ begin
    end loop;
    pragma Assert
      (Flyology.Supervision.Child (Reused) =
-        Flyology.Supervision.Child (Second));
+        Flyology.Supervision.Child (First));
    pragma Assert
-     (Flyology.Supervision.Current_Generation (Reused) = 2);
+     (Flyology.Supervision.Current_Generation (Reused) = 3);
+   pragma Assert (Families.Current (Item, Reused).Attempts = 0);
+   pragma Assert
+     (Families.Current (Item, Reused).Backoff =
+        Ada.Real_Time.Time_Span_Zero);
    begin
       declare
          Ignored : constant Flyology.Supervision.Child_Snapshot :=
-           Families.Current (Item, Second);
+           Families.Current (Item, First);
       begin
          pragma Unreferenced (Ignored);
          raise Program_Error with "stale family handle was accepted";
@@ -204,6 +209,7 @@ begin
       end if;
       delay 0.001;
    end loop;
+   pragma Assert (Families.Current (Item, Reused).Attempts = 0);
 
    Families.Request_Shutdown (Item);
    Owner.Join;

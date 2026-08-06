@@ -221,7 +221,7 @@ package Metrics_Supervision is new Flyology.Supervision.Static
           <section id="families">
             <span class="step-label">FAMILIES</span>
             <h2>Scale homogeneous children with fixed linear storage.</h2>
-            <p>A family reserves a slot under its protected state, copies the typed request outside that lock, then commits admission. It allocates one persistent manager lazily for each slot that is ever used. Managers are bounded by <code>Maximum_Children</code>, are reused with their slots, and finish at the family scope's join boundary. Their task-object storage is reclaimed only after termination is observable.</p>
+            <p>A family reserves a slot under its protected state, copies the typed request outside that lock, then commits admission. Shutdown waits for every outstanding reservation to commit or roll back; a commit that loses the race with shutdown is rejected and rolled back. Reusing a free slot advances its generation and starts fresh recovery accounting. The family allocates one persistent manager lazily for each slot that is ever used. Managers are bounded by <code>Maximum_Children</code>, are reused with their slots, and finish at the family scope's join boundary. Their task-object storage is reclaimed only after termination is observable.</p>
             <figure class="code-panel">
               <figcaption>a bounded connection-like family</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -256,7 +256,7 @@ Latest := Sessions.Latest
                 <div class="decision-row"><dt>Burst and window</dt><dd>Reject another attempt after the fixed count within a monotonic window.</dd></div>
                 <div class="decision-row"><dt>Total attempts</dt><dd>Bound all attempts in the incident even when windows roll over.</dd></div>
                 <div class="decision-row"><dt>Backoff</dt><dd>Double the delay after each consecutive attempt and cap it at <code>Maximum_Backoff</code>.</dd></div>
-                <div class="decision-row"><dt>Stability reset</dt><dd>Reset consecutive and incident accounting only after a replacement remains ready for the declared interval.</dd></div>
+                <div class="decision-row"><dt>Stability reset</dt><dd>After a replacement remains ready for the child and subtree intervals, close the inherited incident. A later failure starts at attempt 1 with a fresh absolute deadline; a nested escalation reported during the generation is retained.</dd></div>
                 <div class="decision-row"><dt>Recovery deadline</dt><dd>Reject a delay that cannot finish before the inherited absolute deadline.</dd></div>
               </dl>
             </div>

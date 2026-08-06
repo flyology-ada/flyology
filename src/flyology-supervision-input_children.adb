@@ -5,10 +5,12 @@ with Flyology.Cancellation;
 package body Flyology.Supervision.Input_Children is
 
    function Base_Summary
-     (Kind : Termination_Kind) return Termination_Summary is
+     (Kind    : Termination_Kind;
+      Task_Id : Ada.Task_Identification.Task_Id :=
+        Ada.Task_Identification.Current_Task) return Termination_Summary is
      ((Kind           => Kind,
        Exception_Id   => Ada.Exceptions.Null_Id,
-       Task_Id        => Ada.Task_Identification.Current_Task,
+       Task_Id        => Task_Id,
        Message_Length => 0,
        Message        => (others => ' ')));
 
@@ -91,7 +93,7 @@ package body Flyology.Supervision.Input_Children is
          delay 0.001;
       end loop;
       if not Done then
-         Summary := Base_Summary (Abnormal_Completion);
+         Summary := Base_Summary (Abnormal_Completion, Subject'Identity);
       end if;
       Result :=
         (Termination    => Summary,
@@ -100,7 +102,8 @@ package body Flyology.Supervision.Input_Children is
    exception
       when others =>
          if not Done then
-            Summary := Base_Summary (Abnormal_Completion);
+            Summary := Base_Summary
+              (Abnormal_Completion, Subject'Identity);
          end if;
          Result :=
            (Termination    => Summary,

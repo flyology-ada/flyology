@@ -155,12 +155,25 @@ package body Flyology.Supervision.Families is
             Has_Generation (Selected) := True;
          end if;
          Slots (Selected) := Reserved;
+         Reserved_Children := Reserved_Children + 1;
          Stop_Requested (Selected) := False;
          Snapshots (Selected).State := Flyology.Supervision.Configured;
          Snapshots (Selected).Ready := False;
          Snapshots (Selected).Live := False;
          Snapshots (Selected).Escalated := False;
          Snapshots (Selected).Termination := Empty_Summary (No_Termination);
+         Snapshots (Selected).Attempts := 0;
+         Snapshots (Selected).Backoff := Ada.Real_Time.Time_Span_Zero;
+         Total_Used (Selected) := 0;
+         Window_Used (Selected) := 0;
+         Consecutive (Selected) := 0;
+         Incident_Since (Selected) := Ada.Real_Time.Time_First;
+         Window_Since (Selected) := Ada.Real_Time.Time_First;
+         Ready_Since (Selected) := Ada.Real_Time.Time_First;
+         Last_Incident (Selected) := Incident_Id'First;
+         Last_Attempt (Selected) := Incident_Attempt'First;
+         Has_Incident (Selected) := False;
+         Active_Incidents (Selected) := No_Incident;
          Slot := Selected;
          Handle :=
            (Id         => Logical_Id (Selected),
@@ -176,7 +189,10 @@ package body Flyology.Supervision.Families is
               Snapshots (Slot).Generation)
          then
             raise Program_Error with "family reservation is stale";
+         elsif not Admission_Open then
+            raise Program_Error with "family admission closed during copy";
          end if;
+         Reserved_Children := Reserved_Children - 1;
          Slots (Slot) := Queued;
          Queue (Queue_Tail) := Slot;
          Queue_Tail :=
@@ -194,6 +210,7 @@ package body Flyology.Supervision.Families is
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
+            Reserved_Children := Reserved_Children - 1;
             Slots (Slot) := Free;
          end if;
       end Rollback;
@@ -416,7 +433,7 @@ package body Flyology.Supervision.Families is
               (Child_Stuck,
                Slot,
                Snapshots (Slot).Termination,
-               No_Incident);
+               Active_Incidents (Slot));
          end if;
       end Publish_Stuck;
 
@@ -482,10 +499,12 @@ package body Flyology.Supervision.Families is
             return;
          end if;
 
-         if Has_Incident (Slot)
-           and then Last_Incident (Slot) =
-             Flyology.Supervision.Incident (Cascade)
-           and then Last_Attempt (Slot) = Attempt (Cascade)
+         if Flyology.Supervision_Policy.Same_Incident_Attempt
+           (Has_Incident (Slot),
+            Last_Incident (Slot),
+            Last_Attempt (Slot),
+            Flyology.Supervision.Incident (Cascade),
+            Attempt (Cascade))
          then
             begin
                Cascade := Flyology.Supervision.Next_Attempt (Cascade);
@@ -493,7 +512,10 @@ package body Flyology.Supervision.Families is
                when Program_Error =>
                   Snapshots (Slot).Termination.Kind := Policy_Exhaustion;
                   Begin_Terminal
-                    (Recovery_Exhausted, Slot, Termination, Incident);
+                    (Recovery_Exhausted,
+                     Slot,
+                     Snapshots (Slot).Termination,
+                     Incident);
                   return;
             end;
          end if;
@@ -526,7 +548,10 @@ package body Flyology.Supervision.Families is
          then
             Snapshots (Slot).Termination.Kind := Policy_Exhaustion;
             Begin_Terminal
-              (Recovery_Exhausted, Slot, Termination, Incident);
+              (Recovery_Exhausted,
+               Slot,
+               Snapshots (Slot).Termination,
+               Cascade);
             return;
          end if;
 
@@ -548,7 +573,10 @@ package body Flyology.Supervision.Families is
          then
             Snapshots (Slot).Termination.Kind := Policy_Exhaustion;
             Begin_Terminal
-              (Recovery_Exhausted, Slot, Termination, Incident);
+              (Recovery_Exhausted,
+               Slot,
+               Snapshots (Slot).Termination,
+               Cascade);
             return;
          end if;
 
@@ -576,6 +604,22 @@ package body Flyology.Supervision.Families is
             Generation => Snapshots (Slot).Generation + 1);
          Restart := True;
       end Publish_Termination;
+
+      function Incident_Can_Close
+        (Slot   : Slot_Index;
+         Handle : Child_Handle;
+         Now    : Ada.Real_Time.Time) return Boolean
+      is
+        (Slots (Slot) = Managed
+         and then Is_Current
+           (Handle,
+            Snapshots (Slot).Id,
+            Snapshots (Slot).Generation)
+         and then Snapshots (Slot).Live
+         and then Snapshots (Slot).Ready
+         and then Ready_Since (Slot) /= Ada.Real_Time.Time_First
+         and then Now - Ready_Since (Slot) >=
+           Policy.Recovery.Stability_Reset);
 
       procedure Manager_Done (Slot : Slot_Index; Handle : Child_Handle) is
       begin
@@ -653,9 +697,12 @@ package body Flyology.Supervision.Families is
       end Request_Stop;
 
       function Is_Finished return Boolean is
-        ((Shutdown or else Terminal)
-         and then Live_Managers = 0
-         and then Queue_Length = 0);
+        (Flyology.Supervision_Policy.Family_Finished
+           (Shutdown,
+            Terminal,
+            Reserved_Children,
+            Queue_Length,
+            Live_Managers));
 
       function Admission_Is_Open return Boolean is (Admission_Open);
 
@@ -836,12 +883,12 @@ package body Flyology.Supervision.Families is
       Item.State.Reserve (Slot, Handle);
       begin
          Item.Inputs (Slot) := Input;
+         Item.State.Commit (Slot, Handle);
       exception
          when others =>
             Item.State.Rollback (Slot, Handle);
             raise;
       end;
-      Item.State.Commit (Slot, Handle);
    end Start;
 
    procedure Stop
@@ -1044,6 +1091,7 @@ package body Flyology.Supervision.Families is
                   Stop_Published : Boolean := False;
                   Abort_Published : Boolean := False;
                   Stuck_Published : Boolean := False;
+                  Incident_Closed : Boolean := not Active (Incident);
                   Stop_Now : Boolean;
                   Shutdown : Boolean;
                   Override : Termination_Kind := No_Termination;
@@ -1056,6 +1104,13 @@ package body Flyology.Supervision.Families is
                         Ready := True;
                         Item.State.Publish_Ready
                           (Managed_Slot, Current, Now);
+                     end if;
+                     if not Incident_Closed
+                       and then Item.State.Incident_Can_Close
+                         (Managed_Slot, Current, Now)
+                     then
+                        Close_Recovery_Incident (Control);
+                        Incident_Closed := True;
                      end if;
                      exit when Done;
                      Item.State.Stop_Status
@@ -1094,6 +1149,7 @@ package body Flyology.Supervision.Families is
                      end if;
                      delay 0.001;
                   end loop;
+                  Generation_Value.Incident := Recovery_Incident (Control);
                   if Generation_Value.Termination.Kind = No_Termination then
                      Generation_Value.Termination :=
                        Empty_Summary (Abnormal_Completion);

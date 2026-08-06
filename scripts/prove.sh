@@ -3,12 +3,38 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
+library_log=$(mktemp "${TMPDIR:-/tmp}/flyology-library-proof.XXXXXX")
+runtime_log=$(mktemp "${TMPDIR:-/tmp}/flyology-runtime-proof.XXXXXX")
+
+cleanup_logs()
+{
+  rm -f "$library_log" "$runtime_log"
+}
+
+trap cleanup_logs EXIT
+trap 'exit 1' HUP INT TERM
+
+run_gnatprove()
+{
+  log=$1
+  shift
+  if ! "$alr" gnatprove "$@" >"$log" 2>&1; then
+    cat "$log"
+    return 1
+  fi
+  cat "$log"
+  if grep -Eq ':[[:space:]]+(low|medium|high|warning):' "$log"; then
+    printf '%s\n' \
+      "GNATprove reported an unproved check or warning" >&2
+    return 1
+  fi
+}
 
 cd "$project_root"
 "$alr" build --stop-after=generation
 
 cd "$project_root/proof"
-"$alr" gnatprove \
+run_gnatprove "$library_log" \
   -P "$project_root/flyology.gpr" \
   --mode=all \
   --level=1 \
@@ -40,7 +66,7 @@ cd "$project_root/proof"
   flyology-socket_policy.adb \
   flyology-wait_policy.adb
 
-"$alr" gnatprove \
+run_gnatprove "$runtime_log" \
   -P "$project_root/proof/runtime_policy.gpr" \
   --mode=all \
   --level=1 \

@@ -11,8 +11,7 @@ with Interfaces;
 package Flyology.Supervision is
 
    --  Stable nonzero logical identity of one configured child. Capacity is a
-   --  separate property of each supervisor instance; this type does not cap a
-   --  topology at 65,535 children.
+   --  separate property of each supervisor instance.
    subtype Child_Id is Interfaces.Unsigned_64 range
      1 .. Interfaces.Unsigned_64'Last;
 
@@ -465,6 +464,7 @@ private
       procedure Publish_Stop (Shutdown : Boolean);
       procedure Publish_Abort;
       procedure Publish_Escalation (Incident : Incident_Context);
+      procedure Close_Incident;
       function Current_Handle return Child_Handle;
       function Is_Ready return Boolean;
       function Is_Stopping return Boolean;
@@ -478,6 +478,7 @@ private
       Stopping        : Boolean := False;
       Shutdown_Stop   : Boolean := False;
       Abort_Requested : Boolean := False;
+      Escalated       : Boolean := False;
       Incident        : Incident_Context := No_Incident;
    end Generation_Control_State;
 
@@ -509,6 +510,12 @@ private
    --  @exception Program_Error Context is inactive or exhausted
    function Next_Attempt
      (Context : Incident_Context) return Incident_Context;
+
+   --  @exclude
+   --  @param Control Internal generation control whose inherited recovery
+   --  incident reached its stability boundary
+   procedure Close_Recovery_Incident
+     (Control : in out Generation_Control);
 
    --  @exclude
    --  @param Control Internal generation control

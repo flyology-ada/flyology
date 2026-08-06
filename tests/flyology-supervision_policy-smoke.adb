@@ -156,4 +156,17 @@ begin
    pragma Assert (Generation = Public.Generation'First);
 
    pragma Assert (Next_Incident (Incident_Id'Last) = Incident_Id'First);
+
+   pragma Assert
+     (Same_Incident_Attempt (True, 7, 3, 7, 3));
+   pragma Assert
+     (not Same_Incident_Attempt (False, 7, 3, 7, 3));
+   pragma Assert
+     (not Same_Incident_Attempt (True, 7, 3, 8, 3));
+
+   pragma Assert (Family_Finished (True, False, 0, 0, 0));
+   pragma Assert (Family_Finished (False, True, 0, 0, 0));
+   pragma Assert (not Family_Finished (True, False, 1, 0, 0));
+   pragma Assert (not Family_Finished (True, False, 0, 1, 0));
+   pragma Assert (not Family_Finished (True, False, 0, 0, 1));
 end Flyology.Supervision_Policy.Smoke;

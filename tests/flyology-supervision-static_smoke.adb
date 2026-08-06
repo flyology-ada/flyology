@@ -15,6 +15,8 @@ procedure Flyology.Supervision.Static_Smoke is
       procedure Begin_Generation
         (Attempt : out Positive;
          Identity : Ada.Task_Identification.Task_Id);
+      procedure Request_Failure;
+      procedure Take_Failure (Requested : out Boolean);
       function Attempts return Natural;
       function First_Task return Ada.Task_Identification.Task_Id;
       function Second_Task return Ada.Task_Identification.Task_Id;
@@ -24,6 +26,7 @@ procedure Flyology.Supervision.Static_Smoke is
         Ada.Task_Identification.Null_Task_Id;
       Second : Ada.Task_Identification.Task_Id :=
         Ada.Task_Identification.Null_Task_Id;
+      Failure_Pending : Boolean := False;
    end Restart_State;
 
    protected body Restart_State is
@@ -40,6 +43,17 @@ procedure Flyology.Supervision.Static_Smoke is
          end if;
       end Begin_Generation;
 
+      procedure Request_Failure is
+      begin
+         Failure_Pending := True;
+      end Request_Failure;
+
+      procedure Take_Failure (Requested : out Boolean) is
+      begin
+         Requested := Failure_Pending;
+         Failure_Pending := False;
+      end Take_Failure;
+
       function Attempts return Natural is (Count);
       function First_Task return Ada.Task_Identification.Task_Id is (First);
       function Second_Task return Ada.Task_Identification.Task_Id is (Second);
@@ -54,14 +68,19 @@ procedure Flyology.Supervision.Static_Smoke is
       Control : not null access Flyology.Supervision.Generation_Control)
    is
       Attempt : Positive;
+      Fail    : Boolean;
    begin
       Context.State.Begin_Generation
         (Attempt, Ada.Task_Identification.Current_Task);
       Flyology.Supervision.Mark_Ready (Control.all);
-      if Attempt = 1 then
-         raise Test_Failure with "first generation fails";
+      if Attempt <= 2 then
+         raise Test_Failure with "replacement generation fails";
       end if;
       loop
+         Context.State.Take_Failure (Fail);
+         if Fail then
+            raise Test_Failure with "stable generation fails";
+         end if;
          if Flyology.Supervision.Stopping (Control.all).Requested then
             raise Flyology.Cancellation.Operation_Cancelled;
          end if;
@@ -76,6 +95,15 @@ procedure Flyology.Supervision.Static_Smoke is
 
    type Restart_Kind is (Service);
 
+   Restart_Recovery : constant Flyology.Supervision.Recovery_Limits :=
+     (Burst_Attempts    => 3,
+      Window            => Ada.Real_Time.Seconds (1),
+      Total_Attempts    => 3,
+      Initial_Backoff   => Ada.Real_Time.Milliseconds (1),
+      Maximum_Backoff   => Ada.Real_Time.Milliseconds (2),
+      Stability_Reset   => Ada.Real_Time.Milliseconds (50),
+      Recovery_Deadline => Ada.Real_Time.Milliseconds (100));
+
    function Restart_Id
      (Child : Restart_Kind) return Flyology.Supervision.Child_Id is
      (case Child is when Service => 4_294_967_297);
@@ -89,14 +117,7 @@ procedure Flyology.Supervision.Static_Smoke is
       return
         (Restart           => Flyology.Supervision.On_Failure,
          Impact            => Flyology.Supervision.Isolate_Child,
-         Recovery          =>
-           (Burst_Attempts    => 2,
-            Window            => Ada.Real_Time.Seconds (1),
-            Total_Attempts    => 2,
-            Initial_Backoff   => Ada.Real_Time.Milliseconds (1),
-            Maximum_Backoff   => Ada.Real_Time.Milliseconds (2),
-            Stability_Reset   => Ada.Real_Time.Seconds (1),
-            Recovery_Deadline => Ada.Real_Time.Seconds (2)),
+         Recovery          => Restart_Recovery,
          Stopping          =>
            (Grace             => Ada.Real_Time.Seconds (1),
             Request_Abort     => False,
@@ -143,7 +164,39 @@ procedure Flyology.Supervision.Static_Smoke is
       Specification      => Restart_Specification,
       Depends_On         => No_Restart_Dependency,
       Cohort_Member      => Restart_Cohort,
-      Run_One_Generation => Run_Restart_Generation);
+      Run_One_Generation => Run_Restart_Generation,
+      Subtree_Recovery   => Restart_Recovery);
+
+   Exhausted_Recovery : constant Flyology.Supervision.Recovery_Limits :=
+     (Burst_Attempts    => 1,
+      Window            => Ada.Real_Time.Seconds (1),
+      Total_Attempts    => 1,
+      Initial_Backoff   => Ada.Real_Time.Milliseconds (1),
+      Maximum_Backoff   => Ada.Real_Time.Milliseconds (1),
+      Stability_Reset   => Ada.Real_Time.Seconds (1),
+      Recovery_Deadline => Ada.Real_Time.Seconds (1));
+
+   function Exhausted_Specification
+     (Child : Restart_Kind)
+      return Flyology.Supervision.Child_Specification
+   is
+      pragma Unreferenced (Child);
+      Value : Flyology.Supervision.Child_Specification :=
+        Restart_Specification (Service);
+   begin
+      Value.Recovery := Exhausted_Recovery;
+      return Value;
+   end Exhausted_Specification;
+
+   package Exhausted_Supervisors is new Flyology.Supervision.Static
+     (Child_Kind          => Restart_Kind,
+      Application_Context => Restart_Context,
+      Logical_Id          => Restart_Id,
+      Specification       => Exhausted_Specification,
+      Depends_On          => No_Restart_Dependency,
+      Cohort_Member       => Restart_Cohort,
+      Run_One_Generation  => Run_Restart_Generation,
+      Subtree_Recovery    => Exhausted_Recovery);
 
    type Event_Array is array (Positive range 1 .. 16) of Positive;
 
@@ -611,25 +664,73 @@ begin
 
       Deadline : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Events  : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor  : Flyology.Supervision.Event_Sequence := 0;
+      Count   : Natural;
+      Dropped : Flyology.Supervision.Event_Sequence;
+      Admitted : Natural := 0;
+      Recovery_Incident : Flyology.Supervision.Incident_Id :=
+        Flyology.Supervision.Incident_Id'First;
    begin
       Owner.Start;
       loop
          exit when Restart_Supervisors.Current (Item, Service).Ready
            and then
-             Restart_Supervisors.Current (Item, Service).Generation = 2;
+             Restart_Supervisors.Current (Item, Service).Generation = 3;
          if Ada.Real_Time.Clock >= Deadline then
             Restart_Supervisors.Request_Shutdown (Item);
             Owner.Join;
             raise Program_Error with
-              "restart supervisor did not publish generation two";
+              "restart supervisor did not publish generation three";
          end if;
          delay 0.001;
       end loop;
+      delay 0.150;
+      Context.State.Request_Failure;
+      loop
+         exit when Restart_Supervisors.Current (Item, Service).Ready
+           and then
+             Restart_Supervisors.Current (Item, Service).Generation = 4;
+         if Ada.Real_Time.Clock >= Deadline then
+            Restart_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error with
+              "stable failure did not start a fresh incident";
+         end if;
+         delay 0.001;
+      end loop;
+      Restart_Supervisors.Read_Events
+        (Item, Cursor, Events, Count, Dropped);
+      pragma Assert (Dropped = 0);
+      for Index in 1 .. Count loop
+         if Events (Index).Kind = Flyology.Supervision.Restart_Admitted then
+            Admitted := Admitted + 1;
+            if Admitted = 1 then
+               Recovery_Incident :=
+                 Flyology.Supervision.Incident (Events (Index).Incident);
+               pragma Assert
+                 (Flyology.Supervision.Attempt (Events (Index).Incident) = 1);
+            elsif Admitted = 2 then
+               pragma Assert
+                 (Flyology.Supervision.Incident (Events (Index).Incident) =
+                    Recovery_Incident);
+               pragma Assert
+                 (Flyology.Supervision.Attempt (Events (Index).Incident) = 2);
+            elsif Admitted = 3 then
+               pragma Assert
+                 (Flyology.Supervision.Incident (Events (Index).Incident) /=
+                    Recovery_Incident);
+               pragma Assert
+                 (Flyology.Supervision.Attempt (Events (Index).Incident) = 1);
+            end if;
+         end if;
+      end loop;
+      pragma Assert (Admitted = 3);
       Restart_Supervisors.Request_Shutdown (Item);
       Owner.Join;
       pragma Assert
         (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
-      pragma Assert (Context.State.Attempts = 2);
+      pragma Assert (Context.State.Attempts = 4);
       pragma Assert
         (Context.State.First_Task /= Ada.Task_Identification.Null_Task_Id);
       pragma Assert
@@ -637,6 +738,28 @@ begin
       pragma Assert
         (Restart_Supervisors.Current (Item, Service).State =
            Flyology.Supervision.Joined);
+   end;
+
+   declare
+      Context : aliased Restart_Context;
+      Item    : aliased Exhausted_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+      Current : Flyology.Supervision.Child_Snapshot;
+   begin
+      Exhausted_Supervisors.Run (Item, Context, Result);
+      Current := Exhausted_Supervisors.Current (Item, Service);
+      pragma Assert
+        (Result.Outcome = Flyology.Supervision.Recovery_Exhausted);
+      pragma Assert
+        (Result.Termination.Kind = Flyology.Supervision.Policy_Exhaustion);
+      pragma Assert (Flyology.Supervision.Active (Result.Incident));
+      pragma Assert
+        (Flyology.Supervision.Attempt (Result.Incident) = 2);
+      pragma Assert (Context.State.Attempts = 2);
+      pragma Assert
+        (Current.State = Flyology.Supervision.Joined
+         and then Current.Termination.Kind =
+           Flyology.Supervision.Policy_Exhaustion);
    end;
 
    declare

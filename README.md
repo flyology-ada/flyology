@@ -1819,13 +1819,18 @@ and terminal-state decisions. Resource destruction, task activation,
 protected-object mutual exclusion, and provider calls remain outside SPARK.
 
 The supervision policy kernel proves run-time safety and its contracts for
-bounded state transitions, deterministic order bounds, affected-set framing,
+bounded state transitions, deterministic order bounds, affected-set
+classification,
 restart classification and accounting, capped backoff, stability reset,
-incident observation, and nonzero generation matching. Its model smoke test
-supplies the stronger graph, ordering, incident, and stale-generation examples
+incident observation, nonzero generation matching, repeated-incident
+classification, and dynamic-family join admission. Production controllers use
+the last two decisions to prevent one replacement failure from reusing an
+already charged attempt and to keep a family open until every typed-input
+reservation has committed or rolled back. The model smoke test supplies the
+stronger graph, ordering, incident, stale-generation, and admission examples
 described in the design document. Task construction, readiness, stopping, and
 resource reclamation are implemented by the non-SPARK structured controller
-and covered by a live semantic smoke test.
+and covered by live semantic smoke tests.
 
 Structured listener cleanup also consumes a proved descriptor-token transition
 after the imported close function returns: the token becomes invalid before a

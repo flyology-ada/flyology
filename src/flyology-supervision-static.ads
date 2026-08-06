@@ -188,8 +188,15 @@ private
          Termination : Termination_Summary;
          Incident    : Incident_Context;
          Now         : Ada.Real_Time.Time);
+      function Incident_Can_Close
+        (Child : Child_Kind;
+         Value : Child_Handle;
+         Now   : Ada.Real_Time.Time) return Boolean;
       procedure Request_Stop;
       function Manager_Should_Exit return Boolean;
+      procedure Manager_Failed
+        (Child       : Child_Kind;
+         Termination : Termination_Summary);
       procedure Manager_Finished;
       entry Await_Finished;
       entry Await_Managers;

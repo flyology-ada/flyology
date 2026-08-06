@@ -42,7 +42,13 @@ is
    with Global => null,
         Pre    => Start.Valid,
         Post   => Stop.Valid
-          and then Stop.Length = Start.Length;
+          and then Stop.Length = Start.Length
+          and then
+            (for all Position in Child_Id =>
+               (if Position <= Stop.Length then
+                   Stop.Items (Position) =
+                     Start.Items
+                       (Child_Id (Start.Length - Position + 1))));
 
    --  Compute the logical children affected by one explicit impact. For
    --  Restart_Dependents, dependency edges are followed transitively from the
@@ -57,9 +63,18 @@ is
    with Global => null,
         Pre    => Failed <= Count,
         Post   =>
-          (if Impact = Public.Escalate then
-              (for all Id in Child_Id => not Affected (Id))
-           else Affected (Failed));
+          (case Impact is
+                when Public.Escalate =>
+                   (for all Id in Child_Id => not Affected (Id)),
+                when Public.Isolate_Child =>
+                   (for all Id in Child_Id =>
+                      Affected (Id) = (Id = Failed)),
+                when Public.Restart_Cohort =>
+                   (for all Id in Child_Id =>
+                      Affected (Id) =
+                        (Id = Failed
+                         or else (Id <= Count and then Cohort (Id)))),
+                when Public.Restart_Dependents => True);
 
    --  Decide whether a lifecycle transition is legal in the scalar model.
    function Transition_Allowed
@@ -90,7 +105,7 @@ is
 
    --  Fixed monotonic time representation supplied by the controller.
    type Tick is range 0 .. Long_Long_Integer'Last;
-   subtype Attempt_Count is Natural range 0 .. 65_535;
+   subtype Attempt_Count is Natural;
 
    type Restart_Limits is record
       Burst_Limit    : Attempt_Count range 1 .. Attempt_Count'Last;
@@ -121,7 +136,9 @@ is
       Maximum_Delay : Tick) return Tick
    with Global => null,
         Pre    => Attempt > 0 and then Initial_Delay <= Maximum_Delay,
-        Post   => Backoff_For'Result <= Maximum_Delay;
+        Post   => Backoff_For'Result in Initial_Delay .. Maximum_Delay
+          and then
+            (if Attempt = 1 then Backoff_For'Result = Initial_Delay);
 
    --  Classify one possible attempt without mutating its accounting state.
    procedure Classify_Attempt
@@ -138,7 +155,12 @@ is
           and then Account.Consecutive < Attempt_Count'Last
           and then Account.Window_Started <= Now
           and then Now <= Recovery_Deadline,
-        Post   => Backoff <= Limits.Maximum_Delay;
+        Post   => Backoff =
+          Backoff_For
+            (Account.Consecutive + 1,
+             Limits.Initial_Delay,
+             Limits.Maximum_Delay)
+          and then Backoff <= Limits.Maximum_Delay;
 
    --  Commit exactly one previously admitted restart attempt.
    procedure Record_Attempt
@@ -153,7 +175,14 @@ is
             (if Now - Account.Window_Started < Limits.Window then
                 Account.Window_Used < Limits.Burst_Limit),
         Post   => Account.Total_Used = Account.Total_Used'Old + 1
-          and then Account.Consecutive = Account.Consecutive'Old + 1;
+          and then Account.Consecutive = Account.Consecutive'Old + 1
+          and then
+            (if Now - Account.Window_Started'Old >= Limits.Window then
+                Account.Window_Started = Now
+                and then Account.Window_Used = 1
+             else Account.Window_Started = Account.Window_Started'Old
+                and then Account.Window_Used =
+                  Account.Window_Used'Old + 1);
 
    --  Close a recovery incident after a generation remains ready long enough.
    procedure Reset_If_Stable
@@ -194,6 +223,7 @@ is
         Pre    => not Incident.Attempt_Active
           and then Incident.Attempt < Attempt_Count'Last,
         Post   => Incident.Attempt_Active
+          and then Incident.Id = Incident.Id'Old
           and then Incident.Attempt = Incident.Attempt'Old + 1;
 
    --  Finish one tree-wide recovery attempt.
@@ -213,18 +243,65 @@ is
         Pre    => Incident.Attempt_Active
           and then Observation.Count < Attempt_Count'Last,
         Post   =>
-          (if Was_New then
-              Observation.Count = Observation.Count'Old + 1
-           else Observation = Observation'Old);
+          Was_New =
+            (not Observation.Seen'Old
+             or else Observation.Last_Id'Old /= Incident.Id
+             or else Observation.Last_Attempt'Old /= Incident.Attempt)
+          and then
+            (if Was_New then
+                Observation.Seen
+                and then Observation.Last_Id = Incident.Id
+                and then Observation.Last_Attempt = Incident.Attempt
+                and then Observation.Count = Observation.Count'Old + 1
+             else Observation = Observation'Old);
+
+   --  Report whether a controller has already accounted the exact public
+   --  incident attempt. Static and dynamic controllers use this proved
+   --  predicate before advancing a replacement failure to the next attempt.
+   function Same_Incident_Attempt
+     (Seen             : Boolean;
+      Previous_Id      : Public.Incident_Id;
+      Previous_Attempt : Public.Incident_Attempt;
+      Current_Id       : Public.Incident_Id;
+      Current_Attempt  : Public.Incident_Attempt) return Boolean
+   with Global => null,
+        Post   => Same_Incident_Attempt'Result =
+          (Seen
+           and then Previous_Id = Current_Id
+           and then Previous_Attempt = Current_Attempt);
+
+   --  Report whether a dynamic family has reached its structured join
+   --  boundary. Outstanding reservations are included so Run cannot return
+   --  while a concurrent Start is copying or finalizing typed input.
+   function Family_Finished
+     (Shutdown          : Boolean;
+      Terminal          : Boolean;
+      Reserved_Children : Natural;
+      Queued_Children   : Natural;
+      Live_Managers     : Natural) return Boolean
+   with Global => null,
+        Post   => Family_Finished'Result =
+          ((Shutdown or else Terminal)
+           and then Reserved_Children = 0
+           and then Queued_Children = 0
+           and then Live_Managers = 0);
 
    --  Advance an incident id while reserving zero as invalid.
    function Next_Incident (Value : Incident_Id) return Incident_Id
-   with Global => null;
+   with Global => null,
+        Post   =>
+          (if Value = Incident_Id'Last then
+              Next_Incident'Result = Incident_Id'First
+           else Next_Incident'Result = Value + 1);
 
    --  Advance a child generation while reserving zero as invalid.
    function Next_Generation
      (Value : Public.Generation) return Public.Generation
-   with Global => null;
+   with Global => null,
+        Post   =>
+          (if Value = Public.Generation'Last then
+              Next_Generation'Result = Public.Generation'First
+           else Next_Generation'Result = Value + 1);
 
    --  Reject stale generation-qualified observations or commands.
    function Generation_Matches

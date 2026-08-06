@@ -465,6 +465,7 @@ package body Flyology.Supervision.Static is
          Next_Attempt : Natural;
          Subtree_Next : Natural;
          Elapsed      : Ada.Real_Time.Time_Span;
+         Subtree_Elapsed : Ada.Real_Time.Time_Span;
          Subtree_Backoff : Ada.Real_Time.Time_Span;
 
          procedure Double_To_Attempt
@@ -557,6 +558,7 @@ package body Flyology.Supervision.Static is
          end if;
 
          Elapsed := Now - Incident_Since (Child);
+         Subtree_Elapsed := Now - Subtree_Incident_Since;
          Admitted :=
            Total_Used (Child) < Limits.Total_Attempts
            and then Window_Used (Child) < Limits.Burst_Attempts
@@ -564,6 +566,10 @@ package body Flyology.Supervision.Static is
            and then Subtree_Window_Used < Subtree_Recovery.Burst_Attempts
            and then Elapsed <= Limits.Recovery_Deadline
            and then Backoff <= Limits.Recovery_Deadline - Elapsed
+           and then Subtree_Elapsed <=
+             Subtree_Recovery.Recovery_Deadline
+           and then Backoff <=
+             Subtree_Recovery.Recovery_Deadline - Subtree_Elapsed
            and then Now <= Recovery_Deadline (Incident)
            and then Backoff <= Recovery_Deadline (Incident) - Now;
       end Classify_Restart;
@@ -578,10 +584,12 @@ package body Flyology.Supervision.Static is
          Total_Used (Child) := Total_Used (Child) + 1;
          Window_Used (Child) := Window_Used (Child) + 1;
          Consecutive (Child) := Consecutive (Child) + 1;
-         if not Has_Observed_Attempt
-           or else Observed_Incident /=
-             Flyology.Supervision.Incident (Incident)
-           or else Observed_Attempt /= Attempt (Incident)
+         if not Policy.Same_Incident_Attempt
+           (Has_Observed_Attempt,
+            Observed_Incident,
+            Observed_Attempt,
+            Flyology.Supervision.Incident (Incident),
+            Attempt (Incident))
          then
             Subtree_Total_Used := Subtree_Total_Used + 1;
             Subtree_Window_Used := Subtree_Window_Used + 1;
@@ -618,7 +626,9 @@ package body Flyology.Supervision.Static is
          if not Admitted then
             Snapshots (Trigger).Termination.Kind := Policy_Exhaustion;
             Begin_Terminal_Stop
-              (Recovery_Exhausted, Trigger, Termination);
+              (Recovery_Exhausted,
+               Trigger,
+               Snapshots (Trigger).Termination);
             return;
          end if;
 
@@ -661,6 +671,29 @@ package body Flyology.Supervision.Static is
            Snapshots (Child).Termination.Kind = Stuck;
          Before : Child_State;
          Retry_Incident : Incident_Context := Incident;
+
+         procedure Advance_Repeated_Attempt
+           (Context   : in out Incident_Context;
+            Exhausted : out Boolean)
+         is
+         begin
+            Exhausted := False;
+            if Policy.Same_Incident_Attempt
+              (Has_Observed_Attempt,
+               Observed_Incident,
+               Observed_Attempt,
+               Flyology.Supervision.Incident (Context),
+               Attempt (Context))
+            then
+               begin
+                  Context := Next_Attempt (Context);
+               exception
+                  when Program_Error => Exhausted := True;
+               end;
+            end if;
+         end Advance_Repeated_Attempt;
+
+         Attempts_Exhausted : Boolean;
       begin
          if not Is_Current
            (Value, Child_Ids (Child), Snapshots (Child).Generation)
@@ -710,8 +743,23 @@ package body Flyology.Supervision.Static is
                   Child,
                   Snapshots (Child).Termination);
             else
-               Begin_Recovery
-                 (Child, Snapshots (Child).Termination, Incident, Now);
+               Advance_Repeated_Attempt
+                 (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop
+                    (Recovery_Exhausted,
+                     Child,
+                     Snapshots (Child).Termination);
+               else
+                  Active_Incident := Retry_Incident;
+                  Begin_Recovery
+                    (Child,
+                     Snapshots (Child).Termination,
+                     Retry_Incident,
+                     Now);
+               end if;
             end if;
          elsif Phase = Recovery_Starting then
             if not Recovery_Affected (Child)
@@ -723,24 +771,42 @@ package body Flyology.Supervision.Static is
                Begin_Terminal_Stop
                  (Failure_Escalated, Child, Snapshots (Child).Termination);
             else
-               begin
-                  Retry_Incident := Next_Attempt (Incident);
+               Advance_Repeated_Attempt
+                 (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop
+                    (Recovery_Exhausted,
+                     Child,
+                     Snapshots (Child).Termination);
+               else
                   Begin_Recovery
                     (Child,
                      Snapshots (Child).Termination,
                      Retry_Incident,
                      Now);
-               exception
-                  when Program_Error =>
-                     Active_Incident := Incident;
-                     Begin_Terminal_Stop
-                       (Recovery_Exhausted,
-                        Child,
-                        Snapshots (Child).Termination);
-               end;
+               end if;
             end if;
          end if;
       end Publish_Termination;
+
+      function Incident_Can_Close
+        (Child : Child_Kind;
+         Value : Child_Handle;
+         Now   : Ada.Real_Time.Time) return Boolean
+      is
+        (Phase = Running_Children
+         and then Is_Current
+           (Value, Child_Ids (Child), Snapshots (Child).Generation)
+         and then Snapshots (Child).Live
+         and then Snapshots (Child).Ready
+         and then Ready_Since (Child) /= Ada.Real_Time.Time_First
+         and then Subtree_Ready_Since /= Ada.Real_Time.Time_First
+         and then Now - Ready_Since (Child) >=
+           Child_Specs (Child).Recovery.Stability_Reset
+         and then Now - Subtree_Ready_Since >=
+           Subtree_Recovery.Stability_Reset);
 
       procedure Publish_Stuck
         (Child : Child_Kind;
@@ -801,6 +867,24 @@ package body Flyology.Supervision.Static is
       end Request_Stop;
 
       function Manager_Should_Exit return Boolean is (Phase = Finished);
+
+      procedure Manager_Failed
+        (Child       : Child_Kind;
+         Termination : Termination_Summary)
+      is
+      begin
+         if Phase /= Finished then
+            Snapshots (Child).Live := False;
+            Snapshots (Child).Ready := False;
+            Snapshots (Child).Termination := Termination;
+            if Phase = Stopping_Children then
+               Advance_Stop_Order;
+            else
+               Begin_Terminal_Stop
+                 (Failure_Escalated, Child, Termination);
+            end if;
+         end if;
+      end Manager_Failed;
 
       procedure Manager_Finished is
       begin
@@ -1182,6 +1266,7 @@ package body Flyology.Supervision.Static is
                   Stop_Published   : Boolean := False;
                   Abort_Published  : Boolean := False;
                   Stuck_Published  : Boolean := False;
+                  Incident_Closed  : Boolean := not Active (Incident);
                   Stop_Now         : Boolean;
                   Shutdown_Stop    : Boolean;
                   Stop_Config      : Stop_Policy;
@@ -1196,6 +1281,13 @@ package body Flyology.Supervision.Static is
                         Item.State.Publish_Ready
                           (Managed_Child, Value, Now);
                         Ready_Published := True;
+                     end if;
+                     if not Incident_Closed
+                       and then Item.State.Incident_Can_Close
+                         (Managed_Child, Value, Now)
+                     then
+                        Close_Recovery_Incident (Control);
+                        Incident_Closed := True;
                      end if;
                      exit when Done;
 
@@ -1255,6 +1347,7 @@ package body Flyology.Supervision.Static is
                      delay 0.001;
                   end loop;
 
+                  Result_Value.Incident := Recovery_Incident (Control);
                   if Result_Value.Termination.Kind = No_Termination then
                      Result_Value.Termination :=
                        Empty_Summary (Abnormal_Completion);
@@ -1374,8 +1467,9 @@ package body Flyology.Supervision.Static is
             end loop;
             Item.State.Manager_Finished;
          exception
-            when others =>
-               Item.State.Request_Stop;
+            when Occurrence : others =>
+               Item.State.Manager_Failed
+                 (Managed_Child, Failure_Summary (Occurrence));
                Item.State.Manager_Finished;
          end Manager;
 

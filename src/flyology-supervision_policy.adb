@@ -64,34 +64,6 @@ is
       end loop;
    end Plan_Stop_Order;
 
-   procedure Add_Dependent_Closure
-     (Count        : Child_Count;
-      Dependencies : Dependency_Matrix;
-      Affected     : in out Child_Set)
-   with Global => null;
-
-   procedure Add_Dependent_Closure
-     (Count        : Child_Count;
-      Dependencies : Dependency_Matrix;
-      Affected     : in out Child_Set)
-   is
-   begin
-      for Pass in 1 .. Count loop
-         for Id in Child_Id loop
-            if Id <= Count and then not Affected (Id) then
-               for Prerequisite in Child_Id loop
-                  if Prerequisite <= Count
-                    and then Dependencies (Id, Prerequisite)
-                    and then Affected (Prerequisite)
-                  then
-                     Affected (Id) := True;
-                  end if;
-               end loop;
-            end if;
-         end loop;
-      end loop;
-   end Add_Dependent_Closure;
-
    procedure Affected_Children
      (Count        : Child_Count;
       Failed       : Child_Id;
@@ -118,8 +90,26 @@ is
             end loop;
          when Public.Restart_Dependents =>
             Affected (Failed) := True;
-            Add_Dependent_Closure (Count, Dependencies, Affected);
+            for Pass in 1 .. Count loop
+               for Id in Child_Id loop
+                  if Id <= Count and then not Affected (Id) then
+                     for Prerequisite in Child_Id loop
+                        if Prerequisite <= Count
+                          and then Dependencies (Id, Prerequisite)
+                          and then Affected (Prerequisite)
+                        then
+                           Affected (Id) := True;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+            end loop;
       end case;
+      for Id in Child_Id loop
+         if Id > Count then
+            Affected (Id) := False;
+         end if;
+      end loop;
       --  The failed child is always in a local recovery set. Assigning this at
       --  the common exit also makes the public postcondition independent of
       --  the closure algorithm's internal loop proof.
@@ -186,6 +176,7 @@ is
    begin
       for Index in 2 .. Attempt loop
          pragma Loop_Invariant (Result <= Maximum_Delay);
+         pragma Loop_Invariant (Result >= Initial_Delay);
          exit when Result = Maximum_Delay;
          if Result > Maximum_Delay / 2 then
             Result := Maximum_Delay;
@@ -283,6 +274,29 @@ is
          Observation.Count := Observation.Count + 1;
       end if;
    end Observe_Incident;
+
+   function Same_Incident_Attempt
+     (Seen             : Boolean;
+      Previous_Id      : Public.Incident_Id;
+      Previous_Attempt : Public.Incident_Attempt;
+      Current_Id       : Public.Incident_Id;
+      Current_Attempt  : Public.Incident_Attempt) return Boolean
+   is
+     (Seen
+      and then Previous_Id = Current_Id
+      and then Previous_Attempt = Current_Attempt);
+
+   function Family_Finished
+     (Shutdown          : Boolean;
+      Terminal          : Boolean;
+      Reserved_Children : Natural;
+      Queued_Children   : Natural;
+      Live_Managers     : Natural) return Boolean
+   is
+     ((Shutdown or else Terminal)
+      and then Reserved_Children = 0
+      and then Queued_Children = 0
+      and then Live_Managers = 0);
 
    function Next_Incident (Value : Incident_Id) return Incident_Id is
      (Incident_Id

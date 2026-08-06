@@ -210,7 +210,11 @@ end Flyology.Supervision.Families;
 ```
 
 The family has fixed slot and event capacity. Input is copied before admission
-is committed, following `Task_Scopes.Spawn`. Slot reuse advances the generation;
+is committed, following `Task_Scopes.Spawn`. An outstanding reservation counts
+against the structured join condition. If shutdown closes admission during the
+copy, commit fails and the caller rolls the slot back before `Run` may return.
+Slot reuse advances the generation and clears the prior occupant's restart
+account, backoff, readiness timestamps, termination, and incident observation;
 all commands and completions require an exact `(Child_Id, Generation)` match.
 Its common policy accepts `Isolate_Child` or `Escalate`. Cohort and dependency
 relations describe heterogeneous topology and therefore belong to a containing
@@ -258,9 +262,9 @@ return from failed startup until every terminable generation joins.
 
 ## Identity and lifecycle
 
-`Child_Id` is a nonzero 64-bit logical identity and does not impose a 65,535
-child ceiling. The application enumeration fixes actual static storage and
-manager count for each instantiation, so capacity remains explicit and bounded.
+`Child_Id` is a nonzero 64-bit logical identity. The application enumeration
+fixes actual static storage and manager count for each instantiation, so
+capacity remains explicit and bounded.
 `Generation` is a nonzero process-local counter advanced for each construction
 attempt. `Ada.Task_Identification.Task_Id` identifies the actual task object
 while the implementation retains that identity and is diagnostic only; an Ada
@@ -374,6 +378,11 @@ once; escalation forwards it while still active and cannot turn it into a new
 attempt. A later retry ends the old attempt and begins the next ordinal under
 the same incident. Thus a hierarchy may impose stricter local limits, but it
 cannot multiply an attempt allowance merely by crossing supervisor levels.
+After the child and subtree stability intervals both elapse, the generation
+control closes its inherited incident. A later failure therefore receives a
+fresh id, attempt 1, and absolute deadline. If a nested supervisor reports an
+escalation during that generation, the reported context is retained instead
+of being cleared by the outer stability observation.
 
 The decision order is deterministic: total limit, current-window limit,
 deadline fit for the computed delay, then admission. Exhaustion records the
@@ -452,7 +461,13 @@ the exact overwritten sequence gap as `Dropped`. Protected actions only copy
 fixed data. They do not log or invoke callbacks; an observer formats copied
 events later. The pure policy kernel independently models transition legality,
 ordering, affected sets, restart accounting, hierarchical incident
-observation, and generation matching.
+observation, generation matching, repeated-attempt classification, and the
+dynamic-family join condition. Contracts prove exact isolate and cohort sets;
+the bounded transitive-dependent closure remains an executable model assertion
+because its quantified theorem does not discharge within the project's normal
+proof budget. The production controllers consume the repeated-attempt and join
+decisions; task construction, protected state, and resource reclamation remain
+outside SPARK.
 
 ## Worked example: independent restartable service
 
@@ -580,10 +595,11 @@ The checked-in live static-supervisor smoke test additionally covers:
 - an uncooperative child observed as `Stuck` before it later returns and joins.
 
 The dynamic-family smoke test covers a logical id above 32 bits, typed
-admission, automatic restart, native-task cancellation, fixed-slot reuse,
-stale-handle rejection, explicit shutdown, and bounded event overwrite
-reporting. The child-runner tests also exercise the completion rendezvous that
-prevents local synchronization state from finalizing before Ada task teardown.
+admission, automatic restart, native-task cancellation, fixed-slot reuse with
+fresh recovery accounting, stale-handle rejection, explicit shutdown, and
+bounded event overwrite reporting. The child-runner tests also exercise the
+completion rendezvous that prevents local synchronization state from
+finalizing before Ada task teardown.
 
 Additional semantic tests are still needed in both task lanes for:
 

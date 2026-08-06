@@ -205,6 +205,10 @@ private
          Backoff     : out Ada.Real_Time.Time_Span;
          Next        : out Child_Handle;
          Recovery    : out Incident_Context);
+      function Incident_Can_Close
+        (Slot   : Slot_Index;
+         Handle : Child_Handle;
+         Now    : Ada.Real_Time.Time) return Boolean;
       procedure Manager_Done (Slot : Slot_Index; Handle : Child_Handle);
       procedure Manager_Failed
         (Slot        : Slot_Index;
@@ -257,6 +261,7 @@ private
       Queue_Head : Slot_Index := Slot_Index'First;
       Queue_Tail : Slot_Index := Slot_Index'First;
       Queue_Length : Natural := 0;
+      Reserved_Children : Natural := 0;
       Live_Managers : Natural := 0;
       Total_Used : Natural_Array := (others => 0);
       Window_Used : Natural_Array := (others => 0);
