@@ -70,6 +70,7 @@ based on the surviving correspondence.
   - [Buffer-handoff showcase](#buffer-handoff-showcase)
   - [Buffer-pool contention showcase](#buffer-pool-contention-showcase)
   - [Connection-density showcase](#connection-density-showcase)
+  - [Task-lifecycle showcase](#task-lifecycle-showcase)
   - [Cancellation-density showcase](#cancellation-density-showcase)
 - [Performance snapshot](#performance-snapshot)
 - [Current constraints](#current-constraints)
@@ -2282,6 +2283,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_buffer_handoff.sh
 ./showcases/run_buffer_pool_contention.sh 32 20000
 ./showcases/run_connection_density.sh
+./showcases/run_task_lifecycle.sh
 ./showcases/run_dormant_stack_pressure.sh 128 64
 ./showcases/run_http_benchmark.sh
 ```
@@ -2456,6 +2458,38 @@ deployment host.
 The process holds both ends of each socket pair to provide a self-contained load
 generator, so it reports twice as many file descriptors as server-side
 connections. Results vary with the OS, compiler, allocator, and resource limits.
+
+### Task-lifecycle showcase
+
+`run_task_lifecycle.sh` isolates Ada task creation and activation from socket or
+file setup. It runs 1,000- and 10,000-task cold bursts and bounded warm churn,
+using the same requested 16 KiB task stack as the connection-density showcase.
+The warm case keeps one live stack in a 32-task window so released slots can be
+reused without retaining an empty arena. One- and four-group runtimes cover
+automatic and explicit placement. Four prestarted native harness tasks also
+issue lightweight creation and deallocation concurrently; their setup and
+teardown are outside the measured phases.
+
+Each row separately reports creation through body start, released body
+completion, task-object deallocation/finalization, and any remaining delay
+until the stack-pool snapshot returns to its baseline. The phase barriers check
+that every body ran exactly once. Resource fields include RSS, virtual memory,
+thread count, stack and arena peaks, mappings, unmappings, slot reuse, and page
+discard counts. Timing values are measurements only; semantic and resource
+invariants determine pass or failure.
+
+The default runs each case five times and writes CSV outside the repository:
+
+```sh
+./showcases/run_task_lifecycle.sh 5 /tmp/flyology-task-lifecycle.csv
+```
+
+The toolchain, platform, architecture, compiled runtime default, configured
+group count, placement policy, task count, creator count, mode, and requested
+stack size are recorded with every CSV row. A bounded 1,000-task native run is
+included as a reference; the scale and contention cases remain lightweight.
+The investigation and retained-change measurements are recorded in
+[`docs/task-lifecycle-performance.md`](docs/task-lifecycle-performance.md).
 
 ### Dormant-stack pressure showcase
 

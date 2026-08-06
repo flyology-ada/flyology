@@ -43,6 +43,7 @@ project Showcases is
       "runtime_observability.adb",
       "stall_watchdog.adb",
       "synchronization_benchmark.adb",
+      "task_lifecycle.adb",
       "thread_per_core.adb");
    for Create_Missing_Dirs use "True";
 

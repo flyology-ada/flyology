@@ -48,5 +48,11 @@ printf '\n== buffer_pool_contention ==\n'
 printf '\n== connection_density ==\n'
 "$project_root/showcases/run_connection_density.sh"
 
+printf '\n== task_lifecycle ==\n'
+FLYOLOGY_LIFECYCLE_SMALL=100 \
+FLYOLOGY_LIFECYCLE_LARGE=1000 \
+FLYOLOGY_LIFECYCLE_NATIVE=100 \
+  "$project_root/showcases/run_task_lifecycle.sh" 1
+
 printf '\n== dormant_stack_pressure ==\n'
 "$project_root/showcases/run_dormant_stack_pressure.sh"

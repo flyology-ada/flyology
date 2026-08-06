@@ -230,6 +230,7 @@ package body System.Flyology.Scheduler is
       Reserved_Group : Loop_Group_Access;
       Previous_Ready : Fiber_Access;
       Next_Ready : Fiber_Access;
+      Previous_Group : Fiber_Access;
       Next_Group : Fiber_Access;
       Next_File  : Fiber_Access;
       Next_File_Cancel : Fiber_Access;
@@ -485,6 +486,12 @@ package body System.Flyology.Scheduler is
    function Dequeue
      (Group : not null Loop_Group_Access) return Fiber_Access;
    procedure Reap_Locked (Item : not null Fiber_Access);
+   procedure Link_Group_Head_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access);
+   procedure Unlink_Group_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access);
    procedure Reap_From_Scheduler
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
@@ -1532,9 +1539,50 @@ package body System.Flyology.Scheduler is
       return Item;
    end Dequeue;
 
+   procedure Link_Group_Head_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access)
+   is
+   begin
+      if Item.Previous_Group /= null or else Item.Next_Group /= null then
+         Fatal;
+      end if;
+      Item.Next_Group := Group.Fibers;
+      if Group.Fibers /= null then
+         Group.Fibers.Previous_Group := Item;
+      end if;
+      Group.Fibers := Item;
+   end Link_Group_Head_Locked;
+
+   procedure Unlink_Group_Locked
+     (Group : not null Loop_Group_Access;
+      Item  : not null Fiber_Access)
+   is
+      Previous : constant Fiber_Access := Item.Previous_Group;
+      Next     : constant Fiber_Access := Item.Next_Group;
+   begin
+      if Previous = null then
+         if Group.Fibers /= Item then
+            Fatal;
+         end if;
+         Group.Fibers := Next;
+      else
+         if Previous.Next_Group /= Item then
+            Fatal;
+         end if;
+         Previous.Next_Group := Next;
+      end if;
+      if Next /= null then
+         if Next.Previous_Group /= Item then
+            Fatal;
+         end if;
+         Next.Previous_Group := Previous;
+      end if;
+      Item.Previous_Group := null;
+      Item.Next_Group := null;
+   end Unlink_Group_Locked;
+
    procedure Reap_Locked (Item : not null Fiber_Access) is
-      Position_Group  : Fiber_Access;
-      Previous_Group  : Fiber_Access;
       Victim           : Fiber_Access := Item;
       Group            : constant Loop_Group_Access := Item.Group;
    begin
@@ -1552,18 +1600,7 @@ package body System.Flyology.Scheduler is
 
       Unregister_Locked (Item);
 
-      Position_Group := Group.Fibers;
-      while Position_Group /= null and then Position_Group /= Item loop
-         Previous_Group := Position_Group;
-         Position_Group := Position_Group.Next_Group;
-      end loop;
-      if Position_Group = null then
-         Fatal;
-      elsif Previous_Group = null then
-         Group.Fibers := Item.Next_Group;
-      else
-         Previous_Group.Next_Group := Item.Next_Group;
-      end if;
+      Unlink_Group_Locked (Group, Item);
 
       if Group.Current_Fiber = Item then
          Group.Current_Fiber := null;
@@ -1609,8 +1646,6 @@ package body System.Flyology.Scheduler is
    is
       Target : constant Loop_Group_Access := Item.Migration_Target;
       Shard : constant Registry_Shard_Index := Item.Registry_Shard;
-      Position : Fiber_Access := Source.Fibers;
-      Previous : Fiber_Access;
       Wake_Target : Boolean := True;
    begin
       if Target = null or else Item.Group /= Source then
@@ -1622,18 +1657,7 @@ package body System.Flyology.Scheduler is
       --  only to yielding on the current loop and must not cross groups.
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
-      while Position /= null and then Position /= Item loop
-         Previous := Position;
-         Position := Position.Next_Group;
-      end loop;
-      if Position = null then
-         Fatal;
-      elsif Previous = null then
-         Source.Fibers := Item.Next_Group;
-      else
-         Previous.Next_Group := Item.Next_Group;
-      end if;
-      Item.Next_Group := null;
+      Unlink_Group_Locked (Source, Item);
       Source.Current_Fiber := null;
       Source.Member_Count := Source.Member_Count - 1;
       Source.Migrations_Out := Source.Migrations_Out + 1;
@@ -1650,8 +1674,7 @@ package body System.Flyology.Scheduler is
       Target.Migrations_In := Target.Migrations_In + 1;
       Item.Group := Target;
       Item.Migration_Target := null;
-      Item.Next_Group := Target.Fibers;
-      Target.Fibers := Item;
+      Link_Group_Head_Locked (Target, Item);
       if Item.Destroy_Requested then
          Item.Enqueue_At_Head := False;
          Item.State := Finished;
@@ -2053,8 +2076,7 @@ package body System.Flyology.Scheduler is
       end if;
       Lock_Group (Target);
       Register_Locked (Item);
-      Item.Next_Group := Target.Fibers;
-      Target.Fibers := Item;
+      Link_Group_Head_Locked (Target, Item);
       Target.Member_Count := Target.Member_Count + 1;
       Enqueue (Target, Item);
       Event_Runtime_Active := 1;
