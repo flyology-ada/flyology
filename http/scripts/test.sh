@@ -9,6 +9,7 @@ if [ -z "${FLYOLOGY_ROOT:-}" ] \
   && [ ! -f "$http_root/../scripts/prepare-rts.sh" ] \
   && [ -z "${FLYOLOGY_HTTP_TEST_IN_ALIRE:-}" ]
 then
+  "$alr" build
   exec "$alr" exec -- env FLYOLOGY_HTTP_TEST_IN_ALIRE=1 "$0" "$@"
 fi
 
@@ -78,10 +79,17 @@ cd "$http_root"
 if [ -z "${FLYOLOGY_HTTP_TEST_IN_ALIRE:-}" ]; then
   "$alr" build
 fi
-FLYOLOGY_RTS_DIR="$test_rts" \
-FLYOLOGY_DEFAULT=native \
-FLYOLOGY_LOOP_POOL_SIZE=1 \
-  "$flyology_root/scripts/prepare-rts.sh" >/dev/null
+if [ -x "$flyology_root/scripts/prepare-rts.sh" ]; then
+  FLYOLOGY_RTS_DIR="$test_rts" \
+  FLYOLOGY_DEFAULT=native \
+  FLYOLOGY_LOOP_POOL_SIZE=1 \
+    "$flyology_root/scripts/prepare-rts.sh" >/dev/null
+elif [ -d "$flyology_root/build/rts" ]; then
+  test_rts="$flyology_root/build/rts"
+else
+  printf '%s\n' "Flyology's prepared RTS is unavailable; run alr build first" >&2
+  exit 2
+fi
 
 ordinary_mains='flyology-rate_limit_policy_smoke
 flyology-http_chunk_encoding-smoke
