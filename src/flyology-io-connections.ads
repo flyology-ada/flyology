@@ -4,6 +4,7 @@ with Flyology.Capacity;
 with Flyology.Cancellation;
 with Flyology.IO.Sockets;
 with Flyology.Wake_Sources;
+private with Ada.Real_Time;
 private with Flyology.IO.TLS;
 
 --  Adds ownership, admission control, and cancellation to socket connections.
@@ -286,6 +287,75 @@ private
       TLS_Session           : Flyology.IO.TLS.Session_Access := null;
       TLS_Shutdown_Complete : Boolean := False;
    end record;
+
+   --  @exclude
+   type Connection_Access is access all Connection;
+
+   --  @exclude
+   --  Scope guard for one generation-checked descriptor operation. Descendant
+   --  packages use this to add ownership-preserving capabilities without
+   --  exposing the socket or controller publicly.
+   type Operation_Guard (Item : not null access Connection) is
+     new Ada.Finalization.Limited_Controlled with record
+      Generation : aliased Descriptor_Generation := 0;
+      State      : aliased Operation_State := Unregistered;
+      Socket     : Flyology.IO.Sockets.Socket_Type;
+   end record;
+
+   --  @exclude
+   --  @param Guard Active lease cleanup scope
+   overriding procedure Finalize (Guard : in out Operation_Guard);
+
+   --  @exclude
+   --  @param Item Connection whose lease is acquired
+   --  @param Started Shared deadline start
+   --  @param Timeout Shared deadline interval
+   --  @param Token Optional cancellation source
+   --  @param FD Borrowed active descriptor
+   --  @param Guard Scope guard that receives the lease
+   --  @param Close_Source Borrowed close wake descriptor
+   --  @param Owner Admission owner that must outlive the operation
+   --  @param Transport Active plaintext or TLS transport kind
+   procedure Acquire_Operation
+     (Item          : not null Connection_Access;
+      Started       : Ada.Real_Time.Time;
+      Timeout       : Duration;
+      Token         : access Cancellation_Token;
+      FD            : out Flyology.IO.Descriptor;
+      Guard         : in out Operation_Guard;
+      Close_Source  : out Flyology.IO.Descriptor;
+      Owner         : out Server_Access;
+      Transport     : out Transport_Kind);
+
+   --  @exclude
+   --  @param Item Connection whose generation remains active
+   --  @param Generation Expected active generation
+   --  @param Owner Admission owner whose shutdown state is checked
+   --  @param Token Optional cancellation source
+   procedure Check_TLS_Operation
+     (Item       : in out Connection;
+      Generation : Descriptor_Generation;
+      Owner      : not null Server_Access;
+      Token      : access Cancellation_Token);
+
+   --  @exclude
+   --  @param Started Shared deadline start
+   --  @param Timeout Shared deadline interval
+   --  @return Remaining deadline interval
+   function Remaining
+     (Started : Ada.Real_Time.Time;
+      Timeout : Duration) return Duration;
+
+   --  @exclude
+   --  @param Owner Admission owner supplying shutdown readiness
+   --  @param Token Optional cancellation source
+   --  @param Sources Borrowed interrupt descriptors
+   --  @param Count Number of initialized descriptors
+   procedure Interrupt_Sources
+     (Owner   : not null Server_Access;
+      Token   : access Cancellation_Token;
+      Sources : out Flyology.IO.Interrupt_Set;
+      Count   : out Natural);
 
    --  @exclude
    --  Private implementation entry point exported only through the TLS child;

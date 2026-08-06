@@ -253,6 +253,8 @@ buffers_smoke
 channel_reentrancy_child
 channel_retention_smoke
 connection_admission_smoke
+connection_driver_smoke
+connection_driver_tls_smoke
 connection_lifecycle_smoke
 connection_state_model
 connection_tls_upgrade_smoke
