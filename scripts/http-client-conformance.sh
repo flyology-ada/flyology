@@ -29,6 +29,7 @@ run_gprbuild \
   --subdirs="$test_subdir" \
   -f -p -P tests/runtime_smoke.gpr \
   http_client_smoke.adb http_client_addressing.adb \
+  http_client_authentication.adb \
   http_client_boundaries_smoke.adb \
   http_client_body_adapters_smoke.adb \
   http_client_upload_controls_smoke.adb \
@@ -41,6 +42,7 @@ run_gprbuild \
 
 "$project_root/tests/bin/$test_subdir/http_client_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_addressing"
+"$project_root/tests/bin/$test_subdir/http_client_authentication"
 "$project_root/tests/bin/$test_subdir/http_client_boundaries_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_body_adapters_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_upload_controls_smoke"

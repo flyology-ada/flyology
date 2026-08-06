@@ -55,6 +55,7 @@
             <li><a href="#client-bodies">Stream request bodies</a></li>
             <li><a href="#client-response">Consume a response</a></li>
             <li><a href="#client-redirects">Follow redirects</a></li>
+            <li><a href="#client-authentication">Add credentials</a></li>
             <li><a href="#client-pool">Pool and shutdown</a></li>
             <li><a href="#client-tls">HTTPS and limits</a></li>
             <li><a href="#start">Start the server</a></li>
@@ -240,7 +241,20 @@ end;</code></pre></figure>
             <p>A retained body is directly replayable. A streamed body on a method-preserving redirect must implement <code>Rewindable_Request_Body_Source</code>; a one-shot source raises <code>Redirect_Error</code>. The same exception reports invalid or duplicate locations, cycles, and exhausted hop limits. Intermediate bodies are drained before their transport is reused, and one monotonic <code>Execute</code> deadline covers the complete chain.</p>
           </section>
 
-          <section id="client-pool"><span class="step-label">CLIENT 06</span><h2>Observe and stop the pool explicitly.</h2>
+          <section id="client-authentication"><span class="step-label">CLIENT 06</span><h2>Add explicit Basic or Bearer credentials.</h2>
+            <p><code>Flyology.HTTP.Client.Authentication</code> contains preemptive request helpers. <code>Set_Bearer</code> validates the RFC 6750 token form. <code>Set_Basic</code> rejects controls and a colon in the user-id, joins <code>user-id ":" password</code>, and applies Base64 as specified by RFC 7617. Its string inputs are already-encoded octets; supply normalized UTF-8 bytes when honoring a UTF-8 challenge.</p>
+            <figure class="code-panel"><figcaption>replace request credentials</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">with Flyology.HTTP.Client.Authentication;
+
+package Client_Auth renames Flyology.HTTP.Client.Authentication;
+
+Client_Auth.Set_Bearer (Request, Access_Token);
+--  Or: Client_Auth.Set_Basic (Request, User_Id, Password);
+--  Later: Client_Auth.Clear (Request);</code></pre></figure>
+            <p>Each setter atomically replaces every existing <code>Authorization</code> field; <code>Clear</code> removes them while preserving all other request fields and their order. The request retains the generated authorization value. These helpers do not discover protection spaces, parse challenges, refresh tokens, retry 401 responses, or prevent application code from logging secrets. Custom schemes remain available through <code>Add_Header</code>.</p>
+            <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p><strong>Send Basic and Bearer credentials only over authenticated TLS or equivalent protection.</strong> Basic encodes rather than encrypts the password, and possession of a Bearer token grants its authority. Same-origin redirects retain the field. A cross-origin redirect is returned without contacting the other authority, so the credential is not forwarded. See <a href="https://www.rfc-editor.org/rfc/rfc7617.html#section-2">RFC 7617 section 2</a> and <a href="https://www.rfc-editor.org/rfc/rfc6750.html#section-2.1">RFC 6750 section 2.1</a>.</p></aside>
+          </section>
+
+          <section id="client-pool"><span class="step-label">CLIENT 07</span><h2>Observe and stop the pool explicitly.</h2>
             <p><code>Execute</code> waits for an idle transport or a free creation slot inside the request deadline. An idempotent request may be retried once when a reused transport fails before any response byte arrives; the retry stays inside the same deadline. Empty and retained bodies can be replayed directly. A streamed body is eligible only through <code>Rewindable_Request_Body_Source</code>, whose nonblocking <code>Rewind</code> must restore exactly the same bytes and declared length. Non-idempotent and one-shot streamed requests are never replayed automatically.</p>
             <p><code>Diagnostics</code> returns one coherent snapshot. Current counts distinguish pending transports, active exchanges, reusable and closing transports, and admission waiters. Cumulative counts report creations, reuses, closes, stale retries, and admission timeouts. Exchange and transport counts are intentionally separate so the vocabulary can survive a later multiplexed protocol.</p>
             <figure class="code-panel"><figcaption>maintenance and terminal shutdown</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Snapshot : constant Client.Client_Diagnostics := Client.Diagnostics (HTTP);
@@ -250,7 +264,7 @@ Client.Shutdown (HTTP, 5.0);    -- reject admission and drain leases</code></pre
             <p><code>Prune_Idle</code> closes currently idle connections without disturbing active leases. <code>Shutdown</code> is terminal: it rejects new admission, interrupts admitted transport operations, closes idle transports, and waits for connecting slots and response leases to drain. A shutdown timeout leaves the client stopping and may be retried. Finalization also requests shutdown, but an application should call <code>Shutdown</code> where a bounded, observable drain matters.</p>
           </section>
 
-          <section id="client-tls"><span class="step-label">CLIENT 07</span><h2>Configure authenticated HTTPS and handle explicit limits.</h2>
+          <section id="client-tls"><span class="step-label">CLIENT 08</span><h2>Configure authenticated HTTPS and handle explicit limits.</h2>
             <p>An HTTPS origin requires the <code>Configure</code> overload that receives an initialized provider-neutral TLS backend. The client retains independently owned provider state, so the original backend object may be finalized after configuration. With the optional OpenSSL provider, normal client initialization performs certificate-chain and hostname verification; the maintained command-line client deliberately exposes no insecure bypass.</p>
             <figure class="code-panel"><figcaption>authenticated OpenSSL client</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Flyology.IO.TLS.OpenSSL.Initialize_Client (Backend);
 Client.Configure
@@ -259,7 +273,7 @@ Client.Configure
    Backend'Access,
    Client.Default_Pool_Configuration);</code></pre></figure>
             <p>Callers can distinguish pool shutdown (<code>Client_Closed</code>), resolution or address exhaustion (<code>Connection_Error</code>), source-contract failure (<code>Request_Body_Error</code>), oversized retained response data (<code>Response_Too_Large</code>), malformed protocol input (<code>Protocol_Error</code>), timeout, cancellation, established I/O failure, socket failure, and TLS failure. Source-defined exceptions propagate after the leased transport is discarded.</p>
-            <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p><strong>The current transport engine sends HTTP/1.1 requests.</strong> It accepts compatible HTTP/1.0 responses, fixed-length, chunked, no-body, and close-delimited response framing. Content decoding, proxying, authentication helpers, and HTTP/2 are not yet implemented. <code>Protocol</code> remains opaque so later engines can grow without turning application code into an exhaustive case statement.</p></aside>
+            <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p><strong>The current transport engine sends HTTP/1.1 requests.</strong> It accepts compatible HTTP/1.0 responses, fixed-length, chunked, no-body, and close-delimited response framing. Content decoding, proxying, challenge-driven authentication, and HTTP/2 are not yet implemented. <code>Protocol</code> remains opaque so later engines can grow without turning application code into an exhaustive case statement.</p></aside>
             <p>The same API and outcome contracts are tested from native and lightweight tasks. Run <code>./scripts/http-client-conformance.sh</code> for deterministic request, response, parser, pooling, lifetime, cancellation, timeout, TLS, adapter, and lane-parity coverage. Address cases cover IPv4 and bracketed IPv6 literals, default and explicit ports, IPv6-to-IPv4 resolution fallback, and all-address exhaustion under one deadline. A test-only one-byte receive cap forces every response and chunk/trailer delimiter across distinct client receive calls; TLS cases distinguish an orderly <code>close_notify</code> from transport truncation while streaming fixed-length, chunked, and close-delimited bodies. The parser campaign includes 42 named RFC 9110/9112 response seeds plus 10,000 fixed-seed random or corpus-derived mutated inputs through the production parser oracle. For interactive use, <code>./showcases/run_http_client_cli.sh -v https://example.com/</code> builds and runs the maintained curl-like example with complete outbound and inbound headers on standard error.</p>
           </section>
 

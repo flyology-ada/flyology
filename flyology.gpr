@@ -119,6 +119,7 @@ project Flyology is
             "flyology-fairness.ads",
             "flyology-http.ads",
             "flyology-http-client.ads",
+            "flyology-http-client-authentication.ads",
             "flyology-http-client-request_bodies.ads",
             "flyology-http-client-request_bodies-channels.ads",
             "flyology-http-client-request_bodies-files.ads",

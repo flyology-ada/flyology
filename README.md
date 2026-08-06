@@ -259,6 +259,33 @@ begin
 end;
 ```
 
+`Flyology.HTTP.Client.Authentication` provides preemptive Basic and Bearer
+request helpers. `Set_Bearer` validates the RFC 6750 `b64token` form;
+`Set_Basic` rejects controls and a colon in the user-id, constructs
+`user-id ":" password`, and applies RFC 4648 Base64 as specified by RFC 7617.
+The Basic inputs are already-encoded octet strings: an application honoring a
+UTF-8 challenge supplies normalized UTF-8 bytes. Both setters atomically
+replace every existing `Authorization` field, and `Clear` removes credentials
+while preserving the other request fields and their order.
+
+```ada
+with Flyology.HTTP.Client.Authentication;
+
+Flyology.HTTP.Client.Authentication.Set_Bearer (Request, Access_Token);
+--  Or:
+Flyology.HTTP.Client.Authentication.Set_Basic
+  (Request, User_Id, Password);
+```
+
+These are request-construction helpers, not a credential cache or challenge
+handler: they do not discover protection spaces, refresh tokens, retry 401
+responses, or hide secrets from application logs. The request retains the
+generated authorization value. Send Basic and Bearer credentials only through
+authenticated TLS or equivalent protection. Same-origin redirects retain the
+field; the client returns cross-origin redirects without contacting the other
+authority. Custom authentication schemes remain available through
+`Add_Header`.
+
 Migration returns on the destination pthread without changing Ada task
 identity, its stack, locals, exception state, master, or rendezvous semantics.
 The source scheduler performs the actual handoff only after the fiber has fully
@@ -1297,10 +1324,11 @@ Verbose mode writes the complete generated request line and headers, followed
 by the final response status line, physical headers, trailers, and transport
 summary, to standard error. Response body bytes remain on standard output.
 
-It deliberately has no insecure TLS switch. Redirects, proxies, content
-decoding, and authentication helpers await library policies rather than being
-reimplemented in the example. The CLI currently accepts inline request data;
-it does not expose the library's streaming body adapters or request trailers.
+It deliberately has no insecure TLS switch. The CLI leaves automatic
+redirects, proxies, content decoding, and credential-specific flags out; a
+caller can still provide an explicit `Authorization` field with `-H`. The CLI
+currently accepts inline request data; it does not expose the library's
+streaming body adapters or request trailers.
 
 ### HTTP server
 
