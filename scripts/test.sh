@@ -338,6 +338,7 @@ http_client_parser_matrix
 http_client_parser_randomized
 http_client_pool_model
 http_client_pool_races
+http_client_tls_closure
 http_client_tls_smoke
 io_smoke
 io_starvation_smoke

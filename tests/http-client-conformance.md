@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs twelve independent programs
+`scripts/http-client-conformance.sh` builds and runs thirteen independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -26,7 +26,7 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | Parser mutation | 10,000 fixed-seed random and near-valid inputs, rotating all 42 RFC seeds through zero to eight byte mutations and the same production parser oracle used by GNATfuzz |
 | Deadlines and cancellation | forced timeout and active call-scoped cancellation at DNS, connect, request send, response head, fixed-length body, chunked body, and close-delimited body boundaries, plus pool-admission timeout |
 | Task lanes | the same successful, streaming, and boundary exchange sequences from native and explicitly lightweight callers |
-| HTTPS | OpenSSL certificate and hostname verification, retained provider state after the original provider finalizes, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
+| HTTPS | OpenSSL certificate and hostname verification, retained provider state after the original provider finalizes, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, orderly and truncating closure during every response body mode, and descriptor restoration |
 | Lifetime | the compiler rejects a response that would escape the aliased client and an adapter that would escape its borrowed payload; runtime shutdown closes and drains active exchanges |
 
 The scripted peer sends literal bytes and does not use `Flyology.HTTP.Server`,
@@ -42,7 +42,7 @@ HTTP/1.1 conformant:
 | Persistence | shutdown during DNS/connect; admitted waiter/held-return, active return/abort, and idle prune/checkout races are covered |
 | Cancellation races | abort and simultaneous cancellation/shutdown at every lease transition |
 | Addressing | DNS fallback, IPv4/IPv6 literals, bracketed IPv6 Host, default and explicit ports, all-address failure |
-| TLS | trust-chain rejection distinct from hostname mismatch, clean/abrupt closure while streaming each body mode, and shutdown during provider setup |
+| TLS | trust-chain rejection distinct from hostname mismatch and shutdown during provider setup |
 | Resource behavior | descriptor counts after every remaining failure class and abort at each lease transition |
 
 Each deterministic case should assert both the caller-visible outcome and the
