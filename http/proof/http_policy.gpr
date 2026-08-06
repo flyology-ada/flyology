@@ -1,0 +1,6 @@
+with "../flyology_http.gpr";
+project HTTP_Policy is
+   for Source_Dirs use ();
+   for Object_Dir use "obj";
+   for Create_Missing_Dirs use "True";
+end HTTP_Policy;

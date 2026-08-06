@@ -27,7 +27,6 @@ for showcase in \
   hybrid_blocking_bridge \
   many_lightweight_tasks \
   priority_scheduling \
-  structured_http \
   lightweight_vs_native
 do
   printf '\n== %s ==\n' "$showcase"
@@ -51,16 +50,3 @@ printf '\n== connection_density ==\n'
 
 printf '\n== dormant_stack_pressure ==\n'
 "$project_root/showcases/run_dormant_stack_pressure.sh"
-
-#  Leave the kitchen-sink HTTP executable in its host-sized configuration even
-#  though topology-specific demonstrations above rebuild smaller runtimes.
-FLYOLOGY_DEFAULT=lightweight \
-  "$project_root/showcases/prepare-rts.sh" >/dev/null
-(
-  cd "$project_root/showcases"
-  "$alr" exec -- env -u GPR_CONFIG gprbuild \
-    --RTS="$project_root/build/rts" \
-    -f \
-    -P showcases.gpr \
-    http_application_server.adb
-)

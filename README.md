@@ -729,6 +729,11 @@ deliberately implements only single-owner transfer.
 
 ## Task-aware I/O
 
+HTTP is now built as the separate `flyology_http` crate under [`http`](http).
+It depends on Flyology's task-aware I/O and preserves the same synchronous call
+semantics in native and lightweight tasks. The HTTP sections below document
+that companion crate during the in-repository extraction period.
+
 Flyology exposes synchronous operations in:
 
 - `Flyology.IO.Timers`: relative and absolute sleeps plus bounded monotonic
@@ -743,9 +748,9 @@ Flyology exposes synchronous operations in:
   sockets, shared deadlines, cancellation, and orderly shutdown.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
-- `Flyology.HTTP.Client`: origin-bound HTTP/1.1 requests, streaming response
+- The `flyology_http` crate's `Flyology.HTTP.Client`: origin-bound HTTP/1.1 requests, streaming response
   bodies, whole-exchange deadlines, and a hidden bounded connection pool.
-- `Flyology.HTTP.Server`: HTTP/1.1 persistent requests, fixed-length messages,
+- The `flyology_http` crate's `Flyology.HTTP.Server`: HTTP/1.1 persistent requests, fixed-length messages,
   server-sent events, WebSocket upgrades and frames, and plain/TLS transports.
 - `Flyology.IO.Files`: open, close, positional read, and positional write.
 - `Flyology.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
@@ -2354,6 +2359,8 @@ rather than hidden behind a claim of universal portability.
   task-primitives integration and its tested-release manifest.
 - [`src`](src): public task-aware I/O packages and the optional dynamic TLS
   provider bridge.
+- [`http`](http): the separate `flyology_http` library, tests, proof runner,
+  maintained HTTP showcases, and comparison fixtures.
 - [`tests`](tests): behavioral and semantic-parity programs covering tasking,
   I/O, lifecycle, stress, fault injection, sanitizers, and observability; the
   detailed scope is listed under [CI and releases](#ci-and-releases).

@@ -124,52 +124,6 @@ if [ "$(uname -s)" = Linux ]; then
     "$poller_object_dir/s-flypol.o"
 fi
 
-compile_fail_log="$project_root/build/tests/websocket-pool-lifetime.log"
-mkdir -p "$(dirname -- "$compile_fail_log")"
-if run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  --subdirs=compile-fail \
-  -c -p \
-  -P tests/runtime_smoke.gpr \
-  websocket_pool_lifetime_fail.adb >"$compile_fail_log" 2>&1
-then
-  printf '%s\n' \
-    "WebSocket session accepted a shorter-lived buffer pool" >&2
-  exit 1
-fi
-compile_fail_errors=$(grep -E ': error:' "$compile_fail_log" || true)
-if [ "$(printf '%s\n' "$compile_fail_errors" | sed '/^$/d' | wc -l | tr -d ' ')" -ne 1 ] || \
-  ! printf '%s\n' "$compile_fail_errors" | grep -E \
-    '^websocket_pool_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*(deeper level than allocator type|accessibility)$' \
-    >/dev/null
-then
-  cat "$compile_fail_log" >&2
-  printf '%s\n' \
-    "WebSocket lifetime fixture failed for an unexpected reason" >&2
-  exit 1
-fi
-
-http_client_lifetime_log="$project_root/build/tests/http-client-response-lifetime.log"
-if run_gprbuild \
-  --RTS="$project_root/build/rts" \
-  --subdirs=compile-fail-http-client \
-  -c -p \
-  -P tests/runtime_smoke.gpr \
-  http_client_response_lifetime_fail.adb \
-  >"$http_client_lifetime_log" 2>&1
-then
-  printf '%s\n' "HTTP response escaped its client's lifetime" >&2
-  exit 1
-fi
-if ! grep -E \
-  '^http_client_response_lifetime_fail\.adb:[0-9]+:[0-9]+: error: .*accessibility.*return' \
-  "$http_client_lifetime_log" >/dev/null
-then
-  cat "$http_client_lifetime_log" >&2
-  printf '%s\n' "HTTP response lifetime fixture failed unexpectedly" >&2
-  exit 1
-fi
-
 if FLYOLOGY_LOOP_POOL_SIZE=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
 then
@@ -315,35 +269,9 @@ fairness_smoke
 file_cancellation_smoke
 files_smoke
 flyology-counter_policy_smoke
-flyology-rate_limit_policy_smoke
-flyology-http_chunk_encoding-smoke
-flyology-websocket_policy-smoke
-flyology-http-decoded_path_policy-smoke
-flyology-http-expect_policy-smoke
-flyology-http-client_policy-smoke
-flyology-http-route_parameter_policy-smoke
 flyology-structured_server_policy-smoke
-flyology-websocket_deflate_policy_smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
-http_smoke
-http_client_smoke
-http_client_addressing
-http_client_authentication
-http_client_boundaries_smoke
-http_client_deadline_matrix
-http_client_fragmentation
-http_client_body_adapters_smoke
-http_client_upload_controls_smoke
-http_client_streaming_smoke
-http_client_rfc_corpus
-http_client_parser_matrix
-http_client_parser_randomized
-http_client_pool_model
-http_client_pool_races
-http_client_redirects
-http_client_tls_closure
-http_client_tls_smoke
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke
@@ -391,10 +319,7 @@ structured_server_reuse_smoke'
 connection_hook_mains='connection_admission_smoke
 connection_state_model
 connection_tls_upgrade_smoke
-descriptor_ownership_smoke
-http_client_pool_races
-http_client_deadline_matrix
-http_client_fragmentation'
+descriptor_ownership_smoke'
 
 worker_pool_hook_mains=concurrency_primitives_smoke
 
@@ -405,7 +330,7 @@ wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|http_client_pool_races|http_client_deadline_matrix|http_client_fragmentation|concurrency_primitives_smoke)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -494,7 +419,7 @@ unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|http_client_pool_races|http_client_deadline_matrix|http_client_fragmentation)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke)
       current_test_bin=$connection_test_bin
       ;;
     concurrency_primitives_smoke)
@@ -523,7 +448,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
       ;;
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|http_client_pool_races|http_client_deadline_matrix|http_client_fragmentation)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
       ;;

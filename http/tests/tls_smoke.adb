@@ -6,6 +6,8 @@ with Ada.Text_IO;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Fairness;
+with Flyology.HTTP.Server;
+with Flyology.HTTP.Server.TLS;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Connections.TLS;
@@ -17,6 +19,7 @@ with Interfaces.C;
 with TLS_Test_Provider;
 
 procedure TLS_Smoke is
+   package HTTP_Server renames Flyology.HTTP.Server;
    package Connections renames Flyology.IO.Connections;
    package Connection_TLS renames Flyology.IO.Connections.TLS;
    package TLS renames Flyology.IO.TLS;
@@ -349,6 +352,126 @@ procedure TLS_Smoke is
       Connections.Close (Client);
       pragma Assert (Manager.Active = 0);
    end Run_Client_Connection_Upgrade_Exchange;
+
+   procedure Run_HTTP_Exchange (Model : Flyology.Execution_Model) is
+      CRLF : constant String := Character'Val (13) & Character'Val (10);
+      Request_Text : constant String :=
+        "GET /secure HTTP/1.1" & CRLF
+        & "Host: localhost" & CRLF
+        & "Connection: close" & CRLF & CRLF;
+      function Bytes (Value : String) return Stream_Element_Array is
+         Result : Stream_Element_Array
+           (1 .. Stream_Element_Offset (Value'Length));
+      begin
+         for Index in Value'Range loop
+            Result (Stream_Element_Offset (Index - Value'First + 1)) :=
+              Stream_Element (Character'Pos (Value (Index)));
+         end loop;
+         return Result;
+      end Bytes;
+
+      function Text
+        (Value : Stream_Element_Array) return String
+      is
+         Result : String (1 .. Integer (Value'Length));
+      begin
+         for Index in Value'Range loop
+            Result (Integer (Index - Value'First + 1)) :=
+              Character'Val (Value (Index));
+         end loop;
+         return Result;
+      end Text;
+
+      Client_Socket : Sockets.Socket_Type;
+      Server_Socket : Sockets.Socket_Type;
+      Client        : TLS.Connection;
+      Server        : aliased TLS.Connection;
+      Result        : Outcome;
+   begin
+      Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
+      TLS.Take
+        (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
+      TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
+
+      declare
+         task Client_Task is
+            pragma Task_Info (Model);
+         end Client_Task;
+
+         task Server_Task is
+            pragma Task_Info (Model);
+         end Server_Task;
+
+         task body Client_Task is
+            Response : Stream_Element_Array (1 .. 512);
+            First    : Stream_Element_Offset := Response'First;
+            Last     : Stream_Element_Offset;
+         begin
+            TLS.Handshake (Client, Timeout => 5.0);
+            TLS.Send_All (Client, Bytes (Request_Text), Timeout => 5.0);
+            loop
+               TLS.Receive
+                 (Client, Response (First .. Response'Last), Last,
+                  Timeout => 5.0);
+               exit when Last < First;
+               First := Last + 1;
+               if First > Response'Last then
+                  raise Program_Error with "test HTTP response is too large";
+               end if;
+            end loop;
+            TLS.Shutdown (Client, Timeout => 5.0);
+            declare
+               Value : constant String :=
+                 Text (Response (Response'First .. First - 1));
+            begin
+               Result.Report
+                 (Ada.Strings.Fixed.Index
+                    (Value, "HTTP/1.1 200 OK" & CRLF & "Date: ") = 1
+                  and then Ada.Strings.Fixed.Index
+                    (Value, CRLF & "Content-Length: 6" & CRLF) /= 0
+                  and then Ada.Strings.Fixed.Index
+                    (Value, CRLF & "Content-Type: text/plain" & CRLF) /= 0
+                  and then Ada.Strings.Fixed.Index
+                    (Value, CRLF & "Connection: close" & CRLF & CRLF
+                     & "secure") /= 0);
+            end;
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Client_Task;
+
+         task body Server_Task is
+            Channel : aliased HTTP_Server.TLS.Connection_Transport
+              (Server'Access);
+            HTTP_Connection : HTTP_Server.Connection (Channel'Access);
+            Request : HTTP_Server.Request;
+            Closed  : Boolean;
+         begin
+            TLS.Handshake (Server, Timeout => 5.0);
+            HTTP_Server.Read_Request
+              (HTTP_Connection, Request, Closed, Timeout => 5.0);
+            HTTP_Server.Respond
+              (HTTP_Connection, 200, "text/plain", "secure", Timeout => 5.0);
+            TLS.Shutdown (Server, Timeout => 5.0);
+            Result.Report
+              (not Closed
+               and then HTTP_Server.Target (Request) = "/secure");
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Exceptions.Exception_Information (Error));
+               Result.Report (False);
+         end Server_Task;
+      begin
+         Result.Wait;
+      end;
+
+      pragma Assert (Result.Passed);
+      TLS.Close (Client);
+      TLS.Close (Server);
+   end Run_HTTP_Exchange;
 
    procedure Run_Timeout (Model : Flyology.Execution_Model) is
       Client_Socket : Sockets.Socket_Type;
@@ -1602,6 +1725,8 @@ begin
    Run_Connection_Upgrade_Exchange (Flyology.Native_Task);
    Run_Client_Connection_Upgrade_Exchange (Flyology.Lightweight_Task);
    Run_Client_Connection_Upgrade_Exchange (Flyology.Native_Task);
+   Run_HTTP_Exchange (Flyology.Lightweight_Task);
+   Run_HTTP_Exchange (Flyology.Native_Task);
    Run_Timeout (Flyology.Lightweight_Task);
    Run_Timeout (Flyology.Native_Task);
    Run_Cancellation (Flyology.Lightweight_Task);

@@ -3,6 +3,9 @@ with Ada.Streams;
 with Flyology;
 with Flyology.Buffers;
 with Flyology.Buffers.Channels;
+with Flyology.Bytes;
+with Flyology.HTTP.Server;
+with Flyology.HTTP.Server.WebSocket_Handlers;
 with Flyology.IO.Files;
 with Flyology.IO.Sockets;
 with Interfaces;
@@ -12,7 +15,9 @@ procedure Buffers_Smoke is
    package Buffers renames Flyology.Buffers;
    package Channels renames Flyology.Buffers.Channels;
    package Files renames Flyology.IO.Files;
+   package HTTP renames Flyology.HTTP.Server;
    package Sockets renames Flyology.IO.Sockets;
+   package WebSockets renames Flyology.HTTP.Server.WebSocket_Handlers;
 
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
@@ -346,6 +351,80 @@ procedure Buffers_Smoke is
          "aborted buffer send leaked or duplicated a slot");
    end Run_Abort_Safety;
 
+   procedure Run_WebSocket_Outbox is
+      Storage : aliased Buffers.Pool (Block_Size => 16, Capacity => 2);
+      First   : Buffers.Unique_Buffer (Storage'Access);
+      Second  : Buffers.Unique_Buffer (Storage'Access);
+      Accepted : Boolean;
+      Timed_Out : Boolean;
+      Legacy_Rejected : Boolean := False;
+   begin
+      Buffers.Acquire (First);
+      Buffers.Copy_From (First, [1, 2, 3, 4]);
+      declare
+         Session : WebSockets.Session
+           (Capacity    => 1,
+            Byte_Limit  => 16,
+            Budget      => null,
+            Buffer_Pool => Storage'Access);
+
+         task Closer is
+            entry Start;
+         end Closer;
+
+         task body Closer is
+         begin
+            accept Start;
+            delay 0.02;
+            WebSockets.Close (Session);
+         end Closer;
+      begin
+         begin
+            WebSockets.Try_Publish
+              (Session,
+               (Kind => HTTP.Binary_Frame,
+                Data => Flyology.Bytes.To_Unbounded_Bytes ([1])),
+               Accepted);
+         exception
+            when Program_Error => Legacy_Rejected := True;
+         end;
+         Assert
+           (Legacy_Rejected,
+            "configured WebSocket session accepted value publishing");
+         WebSockets.Try_Publish_Move
+           (Session, HTTP.Binary_Frame, First, Accepted);
+         Assert
+           (Accepted and then not Buffers.Has_Buffer (First),
+            "WebSocket outbox did not accept moved payload");
+         Buffers.Acquire (Second);
+         Buffers.Copy_From (Second, [5, 6]);
+         Buffers.Set_Tag (Second, 777);
+         WebSockets.Try_Publish_Move
+           (Session, HTTP.Binary_Frame, Second, Accepted);
+         Assert
+           (not Accepted and then Buffers.Has_Buffer (Second),
+            "full WebSocket outbox consumed a payload");
+         Assert
+           (Buffers.Tag (Second) = 777,
+            "rejected WebSocket publish changed the application tag");
+         Closer.Start;
+         WebSockets.Publish_Move_For
+           (Session, HTTP.Binary_Frame, Second, Accepted,
+            Timeout => -1.0, Timed_Out => Timed_Out);
+         Assert
+           (not Accepted and then not Timed_Out,
+            "WebSocket close was reported as a timeout");
+         Assert
+           (Buffers.Has_Buffer (Second) and then Buffers.Tag (Second) = 777,
+            "closed WebSocket publish changed buffer ownership or tag");
+      end;
+      Buffers.Release (Second);
+      Assert
+        (Buffers.Current (Storage) =
+           (Available => 2, Outstanding => 0),
+         "WebSocket outbox finalization did not release moved payload");
+   end Run_WebSocket_Outbox;
+
    procedure Run_IO is
       Storage : aliased Buffers.Pool (Block_Size => 16, Capacity => 2);
       Outgoing : Buffers.Unique_Buffer (Storage'Access);
@@ -401,5 +480,6 @@ begin
    Run_Channel_Semantics;
    Run_Concurrent_Handoff;
    Run_Abort_Safety;
+   Run_WebSocket_Outbox;
    Run_IO;
 end Buffers_Smoke;

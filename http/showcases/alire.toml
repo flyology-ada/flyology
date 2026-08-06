@@ -1,0 +1,19 @@
+name = "flyology_http_showcases"
+description = "Optional dependencies for Flyology HTTP showcases"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "http", "showcase"]
+project-files = ["showcases.gpr"]
+
+[[depends-on]]
+flyology_http = "*"
+
+[[pins]]
+flyology_http = { path = ".." }
+
+[[depends-on]]
+uuids = "^1.0.0"

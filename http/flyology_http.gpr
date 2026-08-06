@@ -1,0 +1,98 @@
+with "../flyology.gpr";
+with "config/flyology_http_config.gpr";
+project Flyology_HTTP is
+
+   type Connection_Test_Hooks_Type is ("false", "true");
+   Connection_Test_Hooks : Connection_Test_Hooks_Type :=
+     external ("FLYOLOGY_CONNECTION_TEST_HOOKS", "false");
+   Connection_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False";
+   case Connection_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Connection_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
+   end case;
+
+   for Languages use ("Ada");
+   for Library_Name use "Flyology_HTTP";
+   for Library_Version use
+     Project'Library_Name & ".so." & Flyology_HTTP_Config.Crate_Version;
+   for Source_Dirs use ("src/", "config/");
+
+   type Documentation_Mode_Type is ("false", "true");
+   Documentation_Mode : Documentation_Mode_Type :=
+     external ("FLYOLOGY_HTTP_DOCUMENTATION", "false");
+   case Documentation_Mode is
+      when "false" =>
+         null;
+      when "true" =>
+         --  The public client and server packages are documented separately
+         --  from Flyology's runtime and task-aware I/O packages.
+         for Source_Files use
+           ("flyology-http.ads",
+            "flyology-http-client.ads",
+            "flyology-http-client-authentication.ads",
+            "flyology-http-client-request_bodies.ads",
+            "flyology-http-client-request_bodies-channels.ads",
+            "flyology-http-client-request_bodies-files.ads",
+            "flyology-http-headers.ads",
+            "flyology-http-methods.ads",
+            "flyology-http-server.ads",
+            "flyology-http-server-applications.ads",
+            "flyology-http-server-connection_handlers.ads",
+            "flyology-http-server-connections.ads",
+            "flyology-http-server-compression.ads",
+            "flyology-http-server-cors.ads",
+            "flyology-http-server-logging.ads",
+            "flyology-http-server-metrics.ads",
+            "flyology-http-server-middleware.ads",
+            "flyology-http-server-middleware_authentication.ads",
+            "flyology-http-server-middleware_bulkheads.ads",
+            "flyology-http-server-middleware_cors.ads",
+            "flyology-http-server-middleware_deadlines.ads",
+            "flyology-http-server-middleware_errors.ads",
+            "flyology-http-server-middleware_logging.ads",
+            "flyology-http-server-middleware_metrics.ads",
+            "flyology-http-server-middleware_rate_limits.ads",
+            "flyology-http-server-middleware_request_ids.ads",
+            "flyology-http-server-middleware_security_headers.ads",
+            "flyology-http-server-native_routes.ads",
+            "flyology-http-server-requests.ads",
+            "flyology-http-server-request_tasks.ads",
+            "flyology-http-server-responses.ads",
+            "flyology-http-server-routing.ads",
+            "flyology-http-server-sse_handlers.ads",
+            "flyology-http-server-tls.ads",
+            "flyology-http-server-websocket_deflate.ads",
+            "flyology-http-server-websocket_handlers.ads");
+   end case;
+
+   for Object_Dir use "obj/" & Flyology_HTTP_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Library_Dir use "lib";
+
+   type Library_Type_Type is ("relocatable", "static", "static-pic");
+   Library_Type : Library_Type_Type :=
+     external ("FLYOLOGY_HTTP_LIBRARY_TYPE",
+               external ("LIBRARY_TYPE", "static"));
+   for Library_Kind use Library_Type;
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_HTTP_Config.Ada_Compiler_Switches
+        & ("-gnatwJ", Connection_Test_Hook_Switch);
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Documentation is
+      for Excluded_Project_Files use
+        (external ("FLYOLOGY_ROOT", "..") & "/flyology.gpr");
+      for Resources_Dir ("html") use "docs/gnatdoc/html";
+   end Documentation;
+
+end Flyology_HTTP;

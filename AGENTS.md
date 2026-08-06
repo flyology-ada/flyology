@@ -150,6 +150,8 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 ## Repository map
 
 - `src/`: public Flyology packages and platform-neutral API policy.
+- `http/`: the separately built `flyology_http` crate, including its source,
+  tests, proof runner, maintained showcases, and HTTP comparison fixtures.
 - `src/platform/{darwin,linux}/`: public-package platform bodies.
 - `runtime/ada/`: scheduler, contexts, poller interfaces, and runtime policy.
 - `runtime/platform/{darwin,linux}/`: poller and Ada file-engine bodies.
@@ -229,14 +231,14 @@ required by the changed boundary.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
   Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
   generated traces and reports remain outside version control.
-- `./scripts/http-client-conformance.sh`: build and run the HTTP/1.1 client
+- `./http/scripts/http-client-conformance.sh`: build and run the HTTP/1.1 client
   deterministic campaign: raw peer, parser boundaries, pool model, lifetime
   compile failure, and OpenSSL parity in both task lanes.
-- `./scripts/http-client-fuzz.sh prepare`: analyze the stateless production
+- `./http/scripts/http-client-fuzz.sh prepare`: analyze the stateless production
   parser wrapper, generate an isolated GNATfuzz harness, build it in
   `afl_plain` mode, and seed its ignored corpus. Run the `fuzz` action for a
   campaign when AdaCore GNATfuzz is installed.
-- `./scripts/websocket-conformance.sh core lightweight`: pinned Autobahn
+- `./http/scripts/websocket-conformance.sh core lightweight`: pinned Autobahn
   server-side framing profile. Run `core native` for lane parity, `core-wss
   lightweight` and `core-wss native` for the same profile through the
   OpenSSL-backed TLS transport,
@@ -251,9 +253,9 @@ required by the changed boundary.
   per-transport section 9 RTT/echo timing probes. Generated HTML and per-case
   JSON remain under ignored
   `build/autobahn` output. Run `node
-  scripts/publish-websocket-conformance.mjs` to restyle every completed profile
+  http/scripts/publish-websocket-conformance.mjs` to restyle every completed profile
   into the checked-in website report bundle.
-- `node scripts/publish-websocket-conformance.mjs`: transform all fourteen local
+- `node http/scripts/publish-websocket-conformance.mjs`: transform all fourteen local
   Autobahn profiles into compact Flyology-styled pages and normalized JSON
   under `website/reports/websocket`. Every profile must have finalized, clean,
   matching source/environment/toolchain/image/build provenance; WSS profiles
@@ -262,7 +264,7 @@ required by the changed boundary.
   replacing report data.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
   benchmark before changing a performance table or claim.
-- `showcases/http-comparison/scripts/run-linux-docker-hybrid.sh`: calibrated
+- `http/showcases/http-comparison/scripts/run-linux-docker-hybrid.sh`: calibrated
   routed inline/native-pool/fully-native CPU and mixed-load comparison. Preserve
   its raw oha, resource, executor, calibration, and metadata outputs with claims.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.

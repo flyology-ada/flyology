@@ -1,5 +1,4 @@
 with "../flyology.gpr";
-with "uuids";
 with "config/flyology_showcases_config.gpr";
 
 project Showcases is
@@ -38,22 +37,11 @@ project Showcases is
       "lightweight_pipeline.adb",
       "lightweight_vs_native.adb",
       "hybrid_blocking_bridge.adb",
-      "http_server.adb",
-      "http_application_benchmark_server.adb",
-      "http_plain_benchmark_server.adb",
-      "http_benchmark_server.adb",
-      "http_benchmark_runtime_probe.adb",
-      "http_cpu_calibrator.adb",
-      "http_hybrid_benchmark_server.adb",
-      "http_client_cli.adb",
-      "http_application_server.adb",
-      "https_server.adb",
       "loop_thread_placement.adb",
       "many_lightweight_tasks.adb",
       "priority_scheduling.adb",
       "runtime_observability.adb",
       "stall_watchdog.adb",
-      "structured_http.adb",
       "synchronization_benchmark.adb",
       "thread_per_core.adb");
    for Create_Missing_Dirs use "True";

@@ -1,0 +1,17 @@
+name = "flyology_http_proof"
+description = "Development-only SPARK proof harness for Flyology HTTP"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "http", "spark", "proof"]
+project-files = ["http_policy.gpr"]
+
+[[depends-on]]
+flyology_http = "*"
+gnatprove = "^16.1.0"
+
+[[pins]]
+flyology_http = { path = ".." }

@@ -29,15 +29,7 @@ cd "$project_root/proof"
   flyology-structured_server_policy.adb \
   flyology-worker_pool_policy.adb \
   flyology-file_open_policy.adb \
-  flyology-rate_limit_policy.adb \
   flyology-timer_set_policy.adb \
-  flyology-http_chunk_encoding.adb \
-  flyology-websocket_policy.adb \
-  flyology-http-decoded_path_policy.adb \
-  flyology-http-expect_policy.adb \
-  flyology-http-client_policy.adb \
-  flyology-http-route_parameter_policy.adb \
-  flyology-websocket_deflate_policy.adb \
   flyology-socket_policy.adb \
   flyology-wait_policy.adb
 

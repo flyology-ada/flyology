@@ -1,0 +1,62 @@
+with "../flyology_http.gpr";
+
+project HTTP_Tests is
+   type Connection_Test_Hooks_Type is ("false", "true");
+   Connection_Test_Hooks : Connection_Test_Hooks_Type :=
+     external ("FLYOLOGY_CONNECTION_TEST_HOOKS", "false");
+   Connection_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False";
+   case Connection_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Connection_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
+   end case;
+
+   for Languages use ("Ada", "C");
+   for Source_Dirs use (".", "native", "compile_fail");
+   for Object_Dir use "obj/http_tests";
+   for Exec_Dir use "bin";
+   for Main use
+     ("flyology-rate_limit_policy_smoke.adb",
+      "flyology-http_chunk_encoding-smoke.adb",
+      "flyology-websocket_policy-smoke.adb",
+      "flyology-http-decoded_path_policy-smoke.adb",
+      "flyology-http-expect_policy-smoke.adb",
+      "flyology-http-client_policy-smoke.adb",
+      "flyology-http-route_parameter_policy-smoke.adb",
+      "flyology-websocket_deflate_policy_smoke.adb",
+      "http_smoke.adb",
+      "http_client_smoke.adb",
+      "http_client_addressing.adb",
+      "http_client_authentication.adb",
+      "http_client_boundaries_smoke.adb",
+      "http_client_deadline_matrix.adb",
+      "http_client_fragmentation.adb",
+      "http_client_body_adapters_smoke.adb",
+      "http_client_upload_controls_smoke.adb",
+      "http_client_streaming_smoke.adb",
+      "http_client_rfc_corpus.adb",
+      "http_client_parser_matrix.adb",
+      "http_client_parser_randomized.adb",
+      "http_client_pool_model.adb",
+      "http_client_pool_races.adb",
+      "http_client_redirects.adb",
+      "http_client_tls_closure.adb",
+      "http_client_tls_smoke.adb",
+      "websocket_conformance_server.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
+         Connection_Test_Hook_Switch);
+      for Default_Switches ("C") use
+        ("-std=c11", "-Wall", "-Wextra");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+end HTTP_Tests;

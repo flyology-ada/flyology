@@ -6,7 +6,7 @@ authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
 maintainers-logins = ["yrashk"]
 licenses = "MIT OR Apache-2.0"
-tags = ["ada", "http", "showcase"]
+tags = ["ada", "runtime", "showcase"]
 project-files = ["showcases.gpr"]
 
 [[depends-on]]
@@ -14,9 +14,6 @@ flyology = "*"
 
 [[pins]]
 flyology = { path='..' }
-
-[[depends-on]]
-uuids = "^1.0.0"
 
 [[actions]]
 type = "pre-build"

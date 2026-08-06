@@ -1,0 +1,21 @@
+name = "flyology_http"
+description = "HTTP client and server library for Flyology tasks"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+website = "https://http.flyology.org/"
+tags = ["ada", "http", "client", "server", "websocket", "sse"]
+project-files = ["flyology_http.gpr"]
+
+[[depends-on]]
+flyology = "~0.1.0-dev"
+
+[[pins]]
+flyology = { path = ".." }
+
+[[actions]]
+type = "test"
+command = ["./scripts/test.sh"]
