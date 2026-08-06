@@ -52,6 +52,14 @@ exact arm/cancel/clear transitions, root-minimum selection, and complete unique
 extraction of every id armed and due at the supplied monotonic-clock sample.
 Task suspension and clock sampling remain outside SPARK and require behavioral
 lane-parity coverage.
+The HTTP client upload-policy review adds a production-consumed SPARK boundary
+for request/source compatibility, exact known-length pull completion,
+informational-response accounting, stale-connection replay eligibility, and
+the one-attempt `417 Expectation Failed` fallback. It does not prove request or
+response I/O, response-head extraction, source callback behavior, rewind byte
+identity, trailer-field definition rules, or the connection-lifecycle actions
+selected by those classifications. Exhaustive policy matrices and focused
+wire, adapter, ownership, and retry tests cover that integration boundary.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -130,6 +138,14 @@ lane-parity coverage.
   - [x] `Flyology.WebSocket_Deflate_Policy.Select_Distance_Tree`
   - [x] `Flyology.WebSocket_Deflate_Policy.Distance_Requirement_Is_Satisfied`
   - [x] Whole `Flyology.WebSocket_Deflate_Policy` unit widening
+- [x] Production HTTP client upload policy (level 1, mode all)
+  - [x] `Flyology.HTTP.Client_Policy.Validate_Upload`
+  - [x] `Flyology.HTTP.Client_Policy.Classify_Pull`
+  - [x] `Flyology.HTTP.Client_Policy.Classify_Stale_Retry`
+  - [x] `Flyology.HTTP.Client_Policy.Classify_Informational`
+  - [x] `Flyology.HTTP.Client_Policy.Next_Informational_Count`
+  - [x] `Flyology.HTTP.Client_Policy.Classify_Expectation_Response`
+  - [x] Whole `Flyology.HTTP.Client_Policy` unit widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -165,6 +181,7 @@ lane-parity coverage.
 - [x] `Flyology.Timer_Set_Policy.Lemma_Root_Minimum` (level 1, mode all)
 - [x] `Flyology.Timer_Set_Policy.Earliest_Deadline` (level 1, mode all)
 - [x] `Flyology.Timer_Set_Policy.Collect_Due` (level 1, mode all)
+- [x] HTTP client upload-policy proof and integration boundary
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -317,5 +334,19 @@ lane-parity coverage.
 - [x] Native Linux/AArch64 Docker validation passed, including the optimized
       poller-policy inlining guard
 - [x] GNATdoc completed with no undocumented-entity warnings or errors
+- [x] Prove upload validation and exact known-length source completion
+- [x] Prove bounded informational-response classification and count advance
+- [x] Prove stale-connection replay and one-attempt 417 fallback eligibility
+- [x] Confirm production request, upload, response, and retry paths consume the
+      proved classifications
+- [x] Exhaustively cover the policy truth tables and integer boundaries
+- [x] Cover exact-length source completion, channel overrun ownership, duplicate
+      trailers, early final responses, 417 retry, and stale rewind behavior
+- [x] Full behavioral suite and deterministic HTTP client conformance campaign
+      passed after upload-policy integration
+- [x] Correct the pool model's concurrent descriptor-baseline fixture and
+      repeat its leak check after the conformance campaign exposed the race
+- [x] Record socket I/O, parser extraction, source callbacks, rewind fidelity,
+      trailer-field semantics, and connection disposal outside the SPARK model
 - [ ] GNATcoverage was not run because the required `gnatcov_bin` tool crate
       is not installed in the available Alire tool environment

@@ -370,6 +370,41 @@ procedure HTTP_Client_Body_Adapters_Smoke is
          Pool  : aliased Buffers.Pool (Block_Size => 8, Capacity => 1);
          Queue : aliased Buffer_Channels.Channel
            (Owner => Pool'Access, Capacity => 1);
+         Item  : Buffers.Unique_Buffer (Pool'Access);
+      begin
+         Buffers.Acquire (Item);
+         Buffers.Copy_From (Item, Bytes ("too-long"));
+         Buffer_Channels.Send_Move (Queue, Item);
+         declare
+            Source : Channel_Bodies.Channel_Source
+              (Pool'Access, Queue'Access);
+            Data     : Stream_Element_Array (1 .. 8);
+            Last     : Stream_Element_Offset;
+            Finished : Boolean;
+            Raised   : Boolean := False;
+         begin
+            Channel_Bodies.Set_Declared_Length
+              (Source, Client.Known_Length (5));
+            begin
+               Channel_Bodies.Read
+                 (Source, Data, Last, Finished, 1.0, null);
+            exception
+               when Client.Request_Body_Error =>
+                  Raised := True;
+            end;
+            pragma Assert (Raised);
+         end;
+         Buffer_Channels.Close (Queue);
+         Buffer_Channels.Await_Drained (Queue);
+         pragma Assert
+           (Buffers.Current (Pool) =
+              (Available => 1, Outstanding => 0));
+      end;
+
+      declare
+         Pool  : aliased Buffers.Pool (Block_Size => 8, Capacity => 1);
+         Queue : aliased Buffer_Channels.Channel
+           (Owner => Pool'Access, Capacity => 1);
          Item   : Buffers.Unique_Buffer (Pool'Access);
          Source : Channel_Bodies.Channel_Source
            (Pool'Access, Queue'Access);

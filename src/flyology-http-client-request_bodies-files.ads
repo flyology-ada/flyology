@@ -17,8 +17,9 @@ package Flyology.HTTP.Client.Request_Bodies.Files is
       Count  : Body_Size)
    is limited new Rewindable_Request_Body_Source with private;
 
-   --  Rewind a file range for an explicit later Execute call. The descriptor
-   --  remains borrowed and the HTTP client never rewinds automatically.
+   --  Rewind a file range for an explicit later Execute call. Execute can
+   --  also invoke this operation for its guarded stale-transport retry; the
+   --  descriptor remains borrowed.
    --  @param Item Source whose next read returns to Offset
    overriding procedure Rewind (Item : in out Range_Source);
 

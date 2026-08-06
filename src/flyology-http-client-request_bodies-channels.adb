@@ -43,9 +43,17 @@ package body Flyology.HTTP.Client.Request_Bodies.Channels is
       is
          Available : constant Natural :=
            Flyology.Buffers.Length (Item.Current) - Item.Position;
-         Count : constant Natural := Natural'Min
-           (Natural (Data'Length) - Used, Available);
+         Count : Natural;
       begin
+         if Item.Framing.Is_Known
+           and then Body_Size (Available) >
+             Item.Framing.Bytes - Item.Produced
+         then
+            raise Request_Body_Error with
+              "request body channel exceeded its declared length";
+         end if;
+         Count := Natural'Min
+           (Natural (Data'Length) - Used, Available);
          if Count > 0 then
             for Offset in 0 .. Count - 1 loop
                Data
@@ -64,7 +72,11 @@ package body Flyology.HTTP.Client.Request_Bodies.Channels is
       Validate_Pool (Item);
       Item.Started := True;
       Last := Data'First - 1;
-      if Item.Ended then
+      if Item.Ended
+        or else
+          (Item.Framing.Is_Known
+             and then Item.Produced = Item.Framing.Bytes)
+      then
          Finished := True;
          return;
       end if;
@@ -100,8 +112,12 @@ package body Flyology.HTTP.Client.Request_Bodies.Channels is
       if Used > 0 then
          Last := Data'First
            + Ada.Streams.Stream_Element_Offset (Used) - 1;
+         Item.Produced := Item.Produced + Body_Size (Used);
       end if;
-      Finished := Item.Ended;
+      Finished := Item.Ended
+        or else
+          (Item.Framing.Is_Known
+             and then Item.Produced = Item.Framing.Bytes);
    end Read;
 
 end Flyology.HTTP.Client.Request_Bodies.Channels;

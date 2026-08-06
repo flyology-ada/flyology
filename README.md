@@ -1161,24 +1161,32 @@ redirect policy, content decoding, proxying, or an HTTP/2 transport.
 `Set_Expect_Continue` opts a nonempty retained or streamed request into
 `Expect: 100-continue`. The client sends the head first, accepts bounded
 informational responses, and transmits the body after `100 Continue`. A final
-response suppresses the body entirely. If no response byte arrives within the
-continue-specific wait, the client falls back to sending under the original
-whole-exchange deadline; a partial response head is completed instead of being
-interleaved with request bytes.
+response suppresses the body entirely. A `417 Expectation Failed` received
+before body transmission consumes the single automatic-retry budget and is
+retried on a fresh transport without `Expect`. If no response byte arrives
+within the continue-specific wait, the client falls back to sending under the
+original whole-exchange deadline; a partial response head is completed instead
+of being interleaved with request bytes.
 
 `Add_Trailer` retains request trailer fields and generates their `Trailer`
 declaration. Trailers require an unknown-length source because HTTP/1.1 sends
 them after the terminating chunk. Fields affecting framing, routing,
 authentication, request semantics, or payload interpretation are rejected.
-Trailer values are fixed request metadata; a generator that needs a computed
-digest must finish that value before calling `Execute`.
+Repeated trailer names are rejected because arbitrary extension fields are not
+necessarily list-valued. The caller remains responsible for using a field whose
+definition permits trailers. Trailer values are fixed request metadata; a
+generator that needs a computed digest must finish that value before calling
+`Execute`.
 
 For request streaming, pass a limited `Request_Body_Source` directly to
 `Execute`. Its `Declared_Length` generates `Content-Length` when known and
 selects HTTP/1.1 chunked framing otherwise. Each source read receives the
 remaining whole-exchange timeout and the call's cancellation token. Sources
-are borrowed only during `Execute`. A plain source is one-shot; only the
-explicit rewindable interface opts into the idempotent stale-transport retry.
+are borrowed only during `Execute`. A positive known-length source must set
+`Finished` on the read that reaches its exact declared count; ending early,
+exceeding the count, or reaching it without `Finished` raises
+`Request_Body_Error`. A plain source is one-shot; only the explicit rewindable
+interface opts into the idempotent stale-transport retry.
 
 `Flyology.HTTP.Client.Request_Bodies` supplies borrowed array, byte-string,
 `Unbounded_Bytes`, and unique-buffer sources. Its `Files` child streams an
@@ -1188,7 +1196,9 @@ borrowed bytes to remain unchanged through `Execute`. The `Channels` child
 consumes bounded `Unique_Buffer` channels for generated bodies with producer
 backpressure; it is deliberately one-shot. Memory and file sources declare
 their length automatically. Channel sources default to unknown length and may
-be given a known total before `Execute`.
+be given a known total before `Execute`; a known channel source finishes at
+that total without requiring the producer to close the channel and rejects a
+received buffer that would cross it.
 
 ```ada
 Payload : aliased constant Ada.Streams.Stream_Element_Array := ...;

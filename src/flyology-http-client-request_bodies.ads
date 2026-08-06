@@ -15,8 +15,8 @@ package Flyology.HTTP.Client.Request_Bodies is
      (Data : not null access constant Ada.Streams.Stream_Element_Array)
    is limited new Rewindable_Request_Body_Source with private;
 
-   --  Rewind an array source for an explicit later Execute call. The HTTP
-   --  client never invokes this automatically.
+   --  Rewind an array source for an explicit later Execute call. Execute can
+   --  also invoke this operation for its guarded stale-transport retry.
    --  @param Item Source whose cursor returns to its first byte
    overriding procedure Rewind (Item : in out Array_Source);
 

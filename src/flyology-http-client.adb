@@ -2,6 +2,7 @@ with Ada.Characters.Handling;
 with Ada.Real_Time;
 with Ada.Strings.Fixed;
 with Ada.Unchecked_Deallocation;
+with Flyology.HTTP.Client_Policy;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Connections.TLS;
@@ -12,6 +13,7 @@ with Flyology.Wake_Sources;
 
 package body Flyology.HTTP.Client is
    use Ada.Strings.Unbounded;
+   use Flyology.HTTP.Client_Policy;
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Flyology.IO.Descriptor;
@@ -22,7 +24,6 @@ package body Flyology.HTTP.Client is
    CRLF : constant String := Character'Val (13) & Character'Val (10);
    Receive_Buffer_Size : constant Positive := 8 * 1_024;
    Request_Buffer_Size : constant Positive := 8 * 1_024;
-   Max_Informational_Responses : constant Positive := 8;
    Max_Request_Target_Bytes : constant Positive := 8 * 1_024;
 
    type Pooled_Connection is limited record
@@ -164,7 +165,7 @@ package body Flyology.HTTP.Client is
       Reusable       : Boolean := False;
       Saw_Response_Bytes : Boolean := False;
       Source_Failed      : Boolean := False;
-      Informational_Count : Natural := 0;
+      Informational_Count : Client_Policy.Informational_Count := 0;
       Retains_Owner  : Boolean := False;
       Started        : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout        : Duration := 0.0;
@@ -400,6 +401,9 @@ package body Flyology.HTTP.Client is
       then
          raise Constraint_Error with
            "field is prohibited in HTTP request trailers";
+      elsif Flyology.HTTP.Headers.Count (Item.Trailer_Fields, Name) > 0 then
+         raise Constraint_Error with
+           "duplicate HTTP request trailer field";
       end if;
       Flyology.HTTP.Headers.Add (Item.Trailer_Fields, Name, Value);
    end Add_Trailer;
@@ -510,7 +514,8 @@ package body Flyology.HTTP.Client is
         (State         : Client_State;
          Value         : Request;
          Streaming     : Boolean;
-         Stream_Length : Body_Length) return String;
+         Stream_Length : Body_Length;
+         Use_Expectation : Boolean) return String;
 
       procedure Send_Streaming_Body
         (Data   : in out Response_Data;
@@ -578,20 +583,28 @@ package body Flyology.HTTP.Client is
         or else not Item.Control.State.Is_Configured
       then
          raise Program_Error with "HTTP client is not configured";
-      elsif Source /= null
-        and then Retained_Length > 0
-      then
-         raise Constraint_Error with
-           "streaming request cannot also contain a retained body";
-      elsif Flyology.HTTP.Headers.Count (Value.Trailer_Fields) > 0
-        and then (Source = null or else Length.Is_Known)
-      then
-         raise Constraint_Error with
-           "request trailers require an unknown-length streaming body";
-      elsif Value.Expect_Continue and then not Has_Request_Body then
-         raise Constraint_Error with
-           "Expect: 100-continue requires a nonempty request body";
       end if;
+      case Validate_Upload
+        (Has_Retained_Content => Retained_Length > 0,
+         Has_Source           => Source /= null,
+         Source_Length_Known  => Length.Is_Known,
+         Source_Has_Content   => Has_Stream_Body,
+         Has_Trailers         =>
+           Flyology.HTTP.Headers.Count (Value.Trailer_Fields) > 0,
+         Expect_Continue      => Value.Expect_Continue)
+      is
+         when Reject_Mixed_Body =>
+            raise Constraint_Error with
+              "streaming request cannot also contain a retained body";
+         when Reject_Trailer_Framing =>
+            raise Constraint_Error with
+              "request trailers require an unknown-length streaming body";
+         when Reject_Empty_Expectation =>
+            raise Constraint_Error with
+              "Expect: 100-continue requires a nonempty request body";
+         when Accept_Upload =>
+            null;
+      end case;
       Validate_Request (Value);
       return Result : Response do
          Result.Data := new Response_Data;
@@ -601,25 +614,32 @@ package body Flyology.HTTP.Client is
          Result.Data.Started := Started;
          Result.Data.Timeout := Timeout;
          declare
-            Retried : Boolean := False;
+            Retried        : Boolean := False;
+            Use_Expectation : Boolean := Value.Expect_Continue;
 
-            function Can_Retry return Boolean is
-              ((Source = null
-                  or else Source.all in
-                    Rewindable_Request_Body_Source'Class)
-                 and then Was_Reused
-                 and then not Retried
-                 and then Is_Idempotent (Value.Method_Value)
-                 and then not Result.Data.Saw_Response_Bytes
-                 and then not Result.Data.Source_Failed
-                 and then
-                   (Timeout < 0.0 or else Remaining (Started, Timeout) > 0.0));
+            function Replay return Replay_Kind is
+              (if Source = null then Direct_Replay
+               elsif Source.all in Rewindable_Request_Body_Source'Class
+               then Rewindable_Stream
+               else One_Shot_Stream);
 
-            procedure Retry_Stale is
+            function Retry_Decision return Stale_Retry_Action is
+              (Classify_Stale_Retry
+                 (Replay          => Replay,
+                  Was_Reused      => Was_Reused,
+                  Already_Retried => Retried,
+                  Idempotent      => Is_Idempotent (Value.Method_Value),
+                  Saw_Response    => Result.Data.Saw_Response_Bytes,
+                  Source_Failed   => Result.Data.Source_Failed,
+                  Time_Remains    =>
+                    Timeout < 0.0
+                      or else Remaining (Started, Timeout) > 0.0));
+
+            procedure Retry_Stale (Action : Retry_Attempt_Action) is
             begin
                Release_Lease (Result.Data.all, False);
                Reset_Attempt (Result.Data.all);
-               if Source /= null then
+               if Action = Rewind_And_Retry then
                   if Token /= null and then Token.Requested then
                      raise Flyology.Cancellation.Operation_Cancelled;
                   elsif Timeout >= 0.0
@@ -644,7 +664,8 @@ package body Flyology.HTTP.Client is
                      Head : constant String := Request_Head
                        (Item.Control.State.all, Value,
                         Streaming => Source /= null,
-                        Stream_Length => Length);
+                        Stream_Length => Length,
+                        Use_Expectation => Use_Expectation);
                   begin
                      Connections.Send_All
                        (Result.Data.Connection.Channel, Byte_Array (Head),
@@ -652,8 +673,9 @@ package body Flyology.HTTP.Client is
                   end;
                   declare
                      Final_Ready : Boolean := False;
+                     Body_Sent   : Boolean := False;
                   begin
-                     if Value.Expect_Continue and then Has_Request_Body then
+                     if Use_Expectation and then Has_Request_Body then
                         Await_Continue
                           (Result.Data.all, Value.Continue_Wait, Token,
                            Final_Ready);
@@ -669,26 +691,57 @@ package body Flyology.HTTP.Client is
                              (Result.Data.all, Source.all, Length,
                               Value.Trailer_Fields, Token);
                         end if;
+                        Body_Sent := Has_Request_Body;
                         Read_Final_Head (Result.Data.all, Token);
                      end if;
+                     if Classify_Expectation_Response
+                       (Expectation_Sent => Use_Expectation,
+                        Body_Sent        => Body_Sent,
+                        Already_Retried  => Retried,
+                        Status           => Result.Data.Status_Value,
+                        Attempt_Allowed  =>
+                          (Token = null or else not Token.Requested)
+                            and then
+                              (Timeout < 0.0
+                                 or else
+                                   Remaining (Started, Timeout) > 0.0)) =
+                       Retry_Without_Expectation
+                     then
+                        Release_Lease (Result.Data.all, False);
+                        Reset_Attempt (Result.Data.all);
+                        Use_Expectation := False;
+                        Retried := True;
+                     else
+                        Select_Body_Mode
+                          (Result.Data.all, Value.Method_Value);
+                        exit;
+                     end if;
                   end;
-                  Select_Body_Mode (Result.Data.all, Value.Method_Value);
-                  exit;
                exception
                   when Protocol_Error =>
-                     if Can_Retry then
-                        Retry_Stale;
-                     else
-                        raise;
-                     end if;
+                     declare
+                        Action : constant Stale_Retry_Action :=
+                          Retry_Decision;
+                     begin
+                        if Action /= Propagate_Failure then
+                           Retry_Stale (Retry_Attempt_Action (Action));
+                        else
+                           raise;
+                        end if;
+                     end;
                   when Flyology.IO.Device_Error |
                        Flyology.IO.Sockets.Socket_Error |
                        Flyology.IO.TLS.TLS_Error =>
-                     if Can_Retry then
-                        Retry_Stale;
-                     else
-                        raise;
-                     end if;
+                     declare
+                        Action : constant Stale_Retry_Action :=
+                          Retry_Decision;
+                     begin
+                        if Action /= Propagate_Failure then
+                           Retry_Stale (Retry_Attempt_Action (Action));
+                        else
+                           raise;
+                        end if;
+                     end;
                end;
             end loop;
          end;

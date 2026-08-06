@@ -43,27 +43,37 @@ procedure HTTP_Client_Pool_Model is
    end Decimal;
 
    protected Coordination is
-      procedure Publish (Value : Sockets.Port);
-      entry Wait_Ready (Value : out Sockets.Port);
+      procedure Publish
+        (Value : Sockets.Port; Initial_FD_Count : Interfaces.C.int);
+      entry Wait_Ready
+        (Value : out Sockets.Port; Initial_FD_Count : out Interfaces.C.int);
       procedure Finish (Passed : Boolean);
       entry Wait_Done (Passed : out Boolean);
    private
       Port_Value : Sockets.Port := Sockets.Any_Port;
+      Initial_FD_Count_Value : Interfaces.C.int := -1;
       Ready      : Boolean := False;
       Done       : Boolean := False;
       OK         : Boolean := True;
    end Coordination;
 
    protected body Coordination is
-      procedure Publish (Value : Sockets.Port) is
+      procedure Publish
+        (Value : Sockets.Port; Initial_FD_Count : Interfaces.C.int)
+      is
       begin
          Port_Value := Value;
+         Initial_FD_Count_Value := Initial_FD_Count;
          Ready := True;
       end Publish;
 
-      entry Wait_Ready (Value : out Sockets.Port) when Ready is
+      entry Wait_Ready
+        (Value : out Sockets.Port; Initial_FD_Count : out Interfaces.C.int)
+        when Ready
+      is
       begin
          Value := Port_Value;
+         Initial_FD_Count := Initial_FD_Count_Value;
       end Wait_Ready;
 
       procedure Finish (Passed : Boolean) is
@@ -85,6 +95,7 @@ procedure HTTP_Client_Pool_Model is
       Peer     : Sockets.Socket_Type;
       Address  : Sockets.Endpoint;
       Status   : Sockets.Selector_Status;
+      Initial_FD_Count : constant Interfaces.C.int := Open_FD_Count;
 
       procedure Accept_Peer is
       begin
@@ -138,7 +149,8 @@ procedure HTTP_Client_Pool_Model is
          Sockets.Network_Endpoint
            (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener);
-      Coordination.Publish (Sockets.Get_Socket_Name (Listener).Port);
+      Coordination.Publish
+        (Sockets.Get_Socket_Name (Listener).Port, Initial_FD_Count);
 
       Accept_Peer;
       Expect ("/stale-prime");
@@ -230,8 +242,7 @@ procedure HTTP_Client_Pool_Model is
    Server_OK  : Boolean;
    Baseline   : Interfaces.C.int;
 begin
-   Baseline := Open_FD_Count;
-   Coordination.Wait_Ready (Port);
+   Coordination.Wait_Ready (Port, Baseline);
    declare
       Origin : constant Flyology.HTTP.Origin := Flyology.HTTP.Parse_Origin
         ("http://127.0.0.1:" & Decimal (Natural (Port)));

@@ -21,8 +21,8 @@ package Flyology.HTTP.Client is
    --  Raised when retained response metadata or a Read_All body exceeds its
    --  bound.
    Response_Too_Large : exception;
-   --  Raised when a streaming request body violates the source contract or
-   --  ends before its declared length has been produced.
+   --  Raised when a streaming request body violates the progress contract or
+   --  does not finish on exactly its positive declared length.
    Request_Body_Error : exception;
 
    --  Pool reuse and retention policy. Capacity remains the Client
@@ -110,7 +110,10 @@ package Flyology.HTTP.Client is
    --  A positive wait expiry with no partial response sends the body; a
    --  negative value waits within the whole exchange deadline and zero sends
    --  immediately after the head. A final response suppresses body reads and
-   --  transmission. The whole exchange deadline is never extended.
+   --  transmission. A 417 final response received before body transmission
+   --  is retried once on a fresh transport without the expectation, within
+   --  the same deadline and shared automatic-retry budget. The whole exchange
+   --  deadline is never extended.
    --  @param Item Request to change
    --  @param Enabled Whether to generate Expect: 100-continue
    --  @param Wait_Timeout Maximum continue-specific wait in seconds
@@ -122,13 +125,15 @@ package Flyology.HTTP.Client is
    --  Append one request trailer field. The client generates the Trailer
    --  declaration and sends retained trailer values after an unknown-length
    --  chunked source finishes. Trailers are rejected for retained or
-   --  known-length bodies. Fields affecting framing, routing, authentication,
-   --  request semantics, or payload interpretation are prohibited.
+   --  known-length bodies. Known fields affecting framing, routing,
+   --  authentication, request semantics, or payload interpretation are
+   --  prohibited, and repeated names are rejected. The caller must know that
+   --  the field definition permits use in trailers.
    --  @param Item Request to change
    --  @param Name Trailer field name
    --  @param Value Trailer field value retained by Item
-   --  @exception Constraint_Error Name is prohibited in request trailers or
-   --     Name or Value has invalid HTTP field syntax
+   --  @exception Constraint_Error Name is prohibited or repeated in request
+   --     trailers, or Name or Value has invalid HTTP field syntax
    --  @exception Flyology.HTTP.Headers.Headers_Too_Large Trailer storage is
    --     exhausted
    procedure Add_Trailer

@@ -262,6 +262,16 @@ procedure HTTP_Client_Streaming_Smoke is
          begin
             pragma Assert
               (Ada.Strings.Fixed.Index
+                 (Request, "POST /long HTTP/1.1" & CRLF) /= 0);
+         end;
+         Expect_Close;
+
+         Accept_Peer;
+         declare
+            Request : constant String := Receive_Until (CRLF & CRLF);
+         begin
+            pragma Assert
+              (Ada.Strings.Fixed.Index
                  (Request, "POST /stalled HTTP/1.1" & CRLF) /= 0);
          end;
          Expect_Close;
@@ -345,6 +355,30 @@ procedure HTTP_Client_Streaming_Smoke is
            (Value      => To_Unbounded_String ("abc"),
             Next       => 1,
             Chunk_Size => 3,
+            Length     => Client.Known_Length (5));
+         Raised : Boolean := False;
+      begin
+         begin
+            declare
+               Unexpected : Client.Response := Client.Execute
+                 (HTTP, Request, Source);
+               pragma Unreferenced (Unexpected);
+            begin
+               null;
+            end;
+         exception
+            when Client.Request_Body_Error =>
+               Raised := True;
+         end;
+         pragma Assert (Raised);
+      end;
+
+      Client.Set_Target (Request, "/long");
+      declare
+         Source : String_Source :=
+           (Value      => To_Unbounded_String ("abcdef"),
+            Next       => 1,
+            Chunk_Size => 5,
             Length     => Client.Known_Length (5));
          Raised : Boolean := False;
       begin

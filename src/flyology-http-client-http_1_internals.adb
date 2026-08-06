@@ -6,12 +6,12 @@ package body HTTP_1_Internals is
      (State         : Client_State;
       Value         : Request;
       Streaming     : Boolean;
-      Stream_Length : Body_Length) return String
+      Stream_Length : Body_Length;
+      Use_Expectation : Boolean) return String
    is
       Result : Unbounded_String;
       Body_Length : constant Natural :=
         Flyology.Bytes.Length (Value.Body_Value);
-      First_Trailer : Boolean := True;
    begin
       Validate_Request (Value);
       Append
@@ -23,7 +23,7 @@ package body HTTP_1_Internals is
            (Result, Flyology.HTTP.Headers.Name (Value.Fields, Index) & ": " &
             Flyology.HTTP.Headers.Value (Value.Fields, Index) & CRLF);
       end loop;
-      if Value.Expect_Continue
+      if Use_Expectation
         and then
           (Body_Length > 0
              or else
@@ -51,29 +51,12 @@ package body HTTP_1_Internals is
          for Index in 1 .. Flyology.HTTP.Headers.Count
            (Value.Trailer_Fields)
          loop
-            declare
-               Name  : constant String := Flyology.HTTP.Headers.Name
-                 (Value.Trailer_Fields, Index);
-               First : Boolean := True;
-            begin
-               for Earlier in 1 .. Index - 1 loop
-                  if Ada.Characters.Handling.To_Lower
-                    (Flyology.HTTP.Headers.Name
-                       (Value.Trailer_Fields, Earlier)) =
-                     Ada.Characters.Handling.To_Lower (Name)
-                  then
-                     First := False;
-                     exit;
-                  end if;
-               end loop;
-               if First then
-                  if not First_Trailer then
-                     Append (Result, ", ");
-                  end if;
-                  Append (Result, Name);
-                  First_Trailer := False;
-               end if;
-            end;
+            if Index > 1 then
+               Append (Result, ", ");
+            end if;
+            Append
+              (Result,
+               Flyology.HTTP.Headers.Name (Value.Trailer_Fields, Index));
          end loop;
          Append (Result, CRLF);
       end if;
@@ -116,11 +99,34 @@ package body HTTP_1_Internals is
                Data.Source_Failed := True;
                raise;
          end;
-         if Produced = 0 and then not Finished then
-            raise Request_Body_Error with
-              "request body source made no progress";
-         end if;
       end Pull;
+
+      procedure Validate_Pull
+        (Length_Known : Boolean; Remaining : Body_Size)
+      is
+         Action : constant Pull_Action := Classify_Pull
+           (Length_Known => Length_Known,
+            Produced     => Body_Byte_Count (Produced),
+            Remaining    => Body_Byte_Count (Remaining),
+            Finished     => Finished);
+      begin
+         case Action is
+            when Accept_Pull =>
+               null;
+            when Reject_No_Progress =>
+               raise Request_Body_Error with
+                 "request body source made no progress";
+            when Reject_Too_Long =>
+               raise Request_Body_Error with
+                 "request body source exceeded its declared length";
+            when Reject_Too_Short =>
+               raise Request_Body_Error with
+                 "request body source ended before its declared length";
+            when Reject_Not_Finished =>
+               raise Request_Body_Error with
+                 "request body source did not finish at its declared length";
+         end case;
+      end Validate_Pull;
 
       procedure Send_Data (Count : Natural) is
       begin
@@ -141,13 +147,7 @@ package body HTTP_1_Internals is
             declare
                Count : constant Natural := Produced;
             begin
-               if Body_Size (Count) > Remaining_Bytes then
-                  raise Request_Body_Error with
-                    "request body source exceeded its declared length";
-               elsif Finished and then Body_Size (Count) < Remaining_Bytes then
-                  raise Request_Body_Error with
-                    "request body source ended before its declared length";
-               end if;
+               Validate_Pull (True, Remaining_Bytes);
                Send_Data (Count);
                Remaining_Bytes := Remaining_Bytes - Body_Size (Count);
             end;
@@ -155,6 +155,7 @@ package body HTTP_1_Internals is
       else
          loop
             Pull;
+            Validate_Pull (False, 0);
             declare
                Count : constant Natural := Produced;
             begin
@@ -498,20 +499,27 @@ package body HTTP_1_Internals is
    end Read_Next_Head;
 
    procedure Accept_Informational (Data : in out Response_Data) is
+      Action : constant Informational_Action := Classify_Informational
+        (Status           => Data.Status_Value,
+         Has_Body_Framing =>
+           Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
+             or else Flyology.HTTP.Headers.Count
+               (Data.Fields, "Transfer-Encoding") > 0,
+         Accepted         => Data.Informational_Count);
    begin
-      if Data.Status_Value = 101 then
-         raise Protocol_Error with "HTTP protocol upgrade is unsupported";
-      elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
-        or else Flyology.HTTP.Headers.Count
-          (Data.Fields, "Transfer-Encoding") > 0
-      then
-         raise Protocol_Error with
-           "informational HTTP response contains body framing";
-      end if;
-      Data.Informational_Count := Data.Informational_Count + 1;
-      if Data.Informational_Count > Max_Informational_Responses then
-         raise Protocol_Error with "too many informational HTTP responses";
-      end if;
+      case Action is
+         when Accept_Continue | Accept_Other_Informational =>
+            Data.Informational_Count :=
+              Next_Informational_Count (Data.Informational_Count);
+         when Reject_Upgrade =>
+            raise Protocol_Error with "HTTP protocol upgrade is unsupported";
+         when Reject_Informational_Framing =>
+            raise Protocol_Error with
+              "informational HTTP response contains body framing";
+         when Reject_Informational_Excess =>
+            raise Protocol_Error with
+              "too many informational HTTP responses";
+      end case;
    end Accept_Informational;
 
    procedure Read_Final_Head
@@ -661,7 +669,7 @@ package body HTTP_1_Internals is
      (Value : Ada.Streams.Stream_Element_Array)
    is
       Data          : Response_Data;
-      Informational : Natural := 0;
+      Informational : Informational_Count := 0;
 
       procedure Take_Line (Line : out Unbounded_String) is
          Text : constant String := To_String (Data.Pending);
@@ -704,19 +712,26 @@ package body HTTP_1_Internals is
             end;
          end;
          exit when Data.Status_Value not in 100 .. 199;
-         if Data.Status_Value = 101 then
-            raise Protocol_Error with "HTTP protocol upgrade is unsupported";
-         elsif Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
-           or else Flyology.HTTP.Headers.Count
-             (Data.Fields, "Transfer-Encoding") > 0
-         then
-            raise Protocol_Error with
-              "informational HTTP response contains body framing";
-         end if;
-         Informational := Informational + 1;
-         if Informational > Max_Informational_Responses then
-            raise Protocol_Error with "too many informational HTTP responses";
-         end if;
+         case Classify_Informational
+           (Status           => Data.Status_Value,
+            Has_Body_Framing =>
+              Flyology.HTTP.Headers.Count (Data.Fields, "Content-Length") > 0
+                or else Flyology.HTTP.Headers.Count
+                  (Data.Fields, "Transfer-Encoding") > 0,
+            Accepted         => Informational)
+         is
+            when Accept_Continue | Accept_Other_Informational =>
+               Informational := Next_Informational_Count (Informational);
+            when Reject_Upgrade =>
+               raise Protocol_Error with
+                 "HTTP protocol upgrade is unsupported";
+            when Reject_Informational_Framing =>
+               raise Protocol_Error with
+                 "informational HTTP response contains body framing";
+            when Reject_Informational_Excess =>
+               raise Protocol_Error with
+                 "too many informational HTTP responses";
+         end case;
       end loop;
 
       Select_Body_Mode (Data, To_Method ("GET"));

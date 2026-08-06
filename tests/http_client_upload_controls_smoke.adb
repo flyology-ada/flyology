@@ -269,13 +269,38 @@ procedure HTTP_Client_Upload_Controls_Smoke is
          Send_Empty;
 
          Expect_Head_Only ("/reject", Head);
-         Send_Empty ("417 Expectation Failed");
+         Send_Empty ("401 Unauthorized");
 
          Expect_Head_Only ("/fallback", Head);
          declare
             Payload : constant String := Receive_Until ("fallback-body");
          begin
             pragma Assert (Payload = "fallback-body");
+         end;
+         Send_Empty;
+
+         Expect_Head_Only ("/unsupported-expect", Head);
+         pragma Assert
+           (Ada.Strings.Fixed.Index
+              (To_String (Head), "Expect: 100-continue" & CRLF) /= 0);
+         Send_Empty ("417 Expectation Failed");
+         Expect_Close;
+
+         Accept_Peer;
+         declare
+            Retried : constant String := Receive_Until
+              (CRLF & CRLF & "expect-retry-body");
+         begin
+            pragma Assert
+              (Ada.Strings.Fixed.Index
+                 (Retried,
+                  "POST /unsupported-expect HTTP/1.1" & CRLF) = 1);
+            pragma Assert
+              (Ada.Strings.Fixed.Index
+                 (Retried, "Expect: 100-continue" & CRLF) = 0);
+            pragma Assert
+              (Ada.Strings.Fixed.Index
+                 (Retried, "Content-Length: 17" & CRLF) /= 0);
          end;
          Send_Empty;
 
@@ -431,7 +456,7 @@ procedure HTTP_Client_Upload_Controls_Smoke is
             Reply : constant Client.Response :=
               Client.Execute (HTTP, Request, Source);
          begin
-            pragma Assert (Client.Status (Reply) = 417);
+            pragma Assert (Client.Status (Reply) = 401);
             pragma Assert (Client.Body_Complete (Reply));
          end;
          pragma Assert (Source.Reads = 0 and then Source.Position = 0);
@@ -451,6 +476,22 @@ procedure HTTP_Client_Upload_Controls_Smoke is
          Client.Set_Expect_Continue (Request, Wait_Timeout => 0.02);
          Require_Empty (Client.Execute (HTTP, Request, Source));
          pragma Assert (Source.Reads = 1 and then Source.Position = 13);
+      end;
+
+      declare
+         Request : Client.Request;
+         Source  : One_Shot_Source :=
+           (Value      => To_Unbounded_String ("expect-retry-body"),
+            Position   => 0,
+            Chunk_Size => 17,
+            Length     => Client.Known_Length (17),
+            Reads      => 0);
+      begin
+         Client.Set_Method (Request, Flyology.HTTP.Methods.POST);
+         Client.Set_Target (Request, "/unsupported-expect");
+         Client.Set_Expect_Continue (Request, Wait_Timeout => 1.0);
+         Require_Empty (Client.Execute (HTTP, Request, Source));
+         pragma Assert (Source.Reads = 1 and then Source.Position = 17);
       end;
 
       declare
@@ -530,6 +571,19 @@ procedure HTTP_Client_Upload_Controls_Smoke is
       begin
          begin
             Client.Add_Trailer (Request, "Content-Length", "1");
+         exception
+            when Constraint_Error => Raised := True;
+         end;
+         pragma Assert (Raised);
+      end;
+
+      declare
+         Request : Client.Request;
+         Raised  : Boolean := False;
+      begin
+         Client.Add_Trailer (Request, "X-Once", "first");
+         begin
+            Client.Add_Trailer (Request, "x-once", "second");
          exception
             when Constraint_Error => Raised := True;
          end;

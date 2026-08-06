@@ -74,6 +74,7 @@ project Runtime_Smoke is
       "flyology-websocket_policy-smoke.adb",
       "flyology-http-decoded_path_policy-smoke.adb",
       "flyology-http-expect_policy-smoke.adb",
+      "flyology-http-client_policy-smoke.adb",
       "flyology-http-route_parameter_policy-smoke.adb",
       "flyology-structured_server_policy-smoke.adb",
       "flyology-websocket_deflate_policy_smoke.adb",

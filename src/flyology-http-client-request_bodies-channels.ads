@@ -18,8 +18,10 @@ package Flyology.HTTP.Client.Request_Bodies.Channels is
 
    --  Set the framing length before Execute. Unknown_Length, the default,
    --  sends HTTP/1.1 chunked coding until Input closes and drains. A known
-   --  length makes the client consume exactly that many bytes and validate an
-   --  early channel close. The length cannot change after reading starts.
+   --  length makes the client consume exactly that many bytes without waiting
+   --  for Input to close. An early close or a received buffer that would cross
+   --  the declared total raises Request_Body_Error. The length cannot change
+   --  after reading starts.
    --  @param Item Channel source to configure
    --  @param Length Known total byte count or Unknown_Length
    --  @exception Program_Error Reading has already started
@@ -36,7 +38,8 @@ package Flyology.HTTP.Client.Request_Bodies.Channels is
    --  @param Item Channel source to advance
    --  @param Data Client staging array
    --  @param Last Last produced byte
-   --  @param Finished Whether the channel is closed and drained
+   --  @param Finished Whether the unknown channel is drained or the known
+   --     byte count is complete
    --  @param Timeout Remaining exchange timeout
    --  @param Token Exchange cancellation token
    overriding procedure Read
@@ -55,6 +58,7 @@ private
       Current  : Flyology.Buffers.Unique_Buffer (Pool);
       Position : Natural := 0;
       Framing  : Body_Length := Unknown_Length;
+      Produced : Body_Size := 0;
       Started  : Boolean := False;
       Ended    : Boolean := False;
    end record;
