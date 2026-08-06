@@ -336,6 +336,7 @@ http_client_rfc_corpus
 http_client_parser_matrix
 http_client_parser_randomized
 http_client_pool_model
+http_client_pool_races
 http_client_tls_smoke
 io_smoke
 io_starvation_smoke
@@ -384,7 +385,8 @@ structured_server_reuse_smoke'
 connection_hook_mains='connection_admission_smoke
 connection_state_model
 connection_tls_upgrade_smoke
-descriptor_ownership_smoke'
+descriptor_ownership_smoke
+http_client_pool_races'
 
 worker_pool_hook_mains=concurrency_primitives_smoke
 
@@ -395,7 +397,7 @@ wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|http_client_pool_races|concurrency_primitives_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -484,7 +486,7 @@ unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|http_client_pool_races)
       current_test_bin=$connection_test_bin
       ;;
     concurrency_primitives_smoke)
@@ -513,7 +515,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
       ;;
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|http_client_pool_races)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
       ;;

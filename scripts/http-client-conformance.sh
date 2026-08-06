@@ -47,6 +47,15 @@ run_gprbuild \
 "$project_root/tests/bin/$test_subdir/http_client_pool_model"
 "$project_root/tests/bin/$test_subdir/http_client_tls_smoke"
 
+FLYOLOGY_CONNECTION_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS
+run_gprbuild \
+  --RTS="$project_root/build/alire-rts" \
+  --subdirs=http-client-pool-races \
+  -f -p -P tests/runtime_smoke.gpr http_client_pool_races.adb
+unset FLYOLOGY_CONNECTION_TEST_HOOKS
+"$project_root/tests/bin/http-client-pool-races/http_client_pool_races"
+
 lifetime_log="$project_root/build/tests/http-client-response-lifetime.log"
 mkdir -p "$(dirname -- "$lifetime_log")"
 if run_gprbuild \

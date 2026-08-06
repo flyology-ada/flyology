@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs ten independent programs
+`scripts/http-client-conformance.sh` builds and runs eleven independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -18,7 +18,7 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | Request streaming | known-length Content-Length, unknown-length chunked coding, source progress and early-end rejection, source exception cleanup, retained-body conflict, and native/lightweight parity |
 | Request body adapters | borrowed arrays with nondefault bounds and explicit rewind, byte strings, owned bytes, unique-buffer ownership retention, positional file ranges, generated channel bodies with known or chunked framing, file timeout, channel timeout/cancellation, backpressure, and lane parity |
 | Upload controls | Expect/continue after informational responses, final-response body suppression, one-time 417 fallback without Expect, bounded continue fallback, request trailer declaration and emission, prohibited and duplicate trailer rejection, exact known-length completion, one idempotent rewindable-source stale retry, one-shot non-retry, and lane parity |
-| Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, coherent exchange/transport counters, descriptor restoration |
+| Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, deterministic active-return and abort races, held-lease admission shutdown, idle prune/checkout races, coherent exchange/transport counters, and descriptor restoration |
 | Response head | repeated fields, an informational response before the final response, and byte-at-a-time status/header delivery |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
 | RFC response corpus | 42 named accepted and rejected examples covering status syntax, field folding and whitespace, length precedence, informational and bodyless responses, transfer codings, chunk extensions, trailers, and incomplete messages |
@@ -39,7 +39,7 @@ HTTP/1.1 conformant:
 | --- | --- |
 | Fragmentation | add an instrumented receive cap to prove each delimiter crosses distinct client receive calls; the raw peer already writes every response and chunk/trailer byte separately |
 | Length rules | remaining RFC 9110 status/method combinations with misleading framing fields beyond the dedicated HEAD case |
-| Persistence | shutdown during DNS/connect and pool admission, plus simultaneous shutdown/return races |
+| Persistence | shutdown during DNS/connect; admitted waiter/held-return, active return/abort, and idle prune/checkout races are covered |
 | Deadlines | timeout at DNS, connect, send, chunk data, and close-delimited body; head and fixed-body continuity are covered |
 | Cancellation | the remaining DNS/connect/send/fixed/close-delimited boundaries, plus abort and cancellation/shutdown races at every lease transition |
 | Addressing | DNS fallback, IPv4/IPv6 literals, bracketed IPv6 Host, default and explicit ports, all-address failure |
@@ -85,9 +85,12 @@ scenario sources for Flyology's raw peer and parser model.
 successful creation, stale failure, one-time retry, return, request-count
 discard, prune, active-read shutdown, and final drain. It compares every
 observable exchange/transport counter with its transition table and restores
-the process descriptor baseline. Internal-only slot phases are not exposed as
-public API; forced abort and simultaneous transition races remain in the table
-above.
+the process descriptor baseline. `http_client_pool_races.adb` uses test-only
+connection barriers to force active return and abort against shutdown, holds a
+lease while an admitted waiter is interrupted, races idle pruning against
+checkout, and checks both the drained counter state and process descriptor
+baseline. Internal-only slot phases remain deliberately outside the public
+API.
 
 `Flyology.HTTP.Client.Testing.Fuzz_Response` is a stateless wrapper around the
 production status, header, length, chunk, and trailer validators. It accepts a
