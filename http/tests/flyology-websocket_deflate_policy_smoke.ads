@@ -1,1 +1,0 @@
-private procedure Flyology.WebSocket_Deflate_Policy_Smoke;

@@ -728,7 +728,7 @@ deliberately implements only single-owner transfer.
 
 ## Task-aware I/O
 
-HTTP is published as the separate [`flyology_http`](https://github.com/flyology-ada/flyology-http) crate. It depends on Flyology.s task-aware I/O and preserves the same synchronous call semantics in native and lightweight tasks.
+HTTP is published as the separate [`flyology_http`](https://github.com/flyology-ada/flyology-http) crate. It depends on Flyology's task-aware I/O and preserves the same synchronous call semantics in native and lightweight tasks.
 
 Flyology exposes synchronous operations in:
 
@@ -1722,8 +1722,9 @@ rather than hidden behind a claim of universal portability.
   task-primitives integration and its tested-release manifest.
 - [`src`](src): public task-aware I/O packages and the optional dynamic TLS
   provider bridge.
-- [`http`](http): the separate `flyology_http` library, tests, proof runner,
-  maintained HTTP showcases, and comparison fixtures.
+- [`flyology_http`](https://github.com/flyology-ada/flyology-http): the separate
+  HTTP library, tests, documentation, maintained showcases, and comparison
+  fixtures built on Flyology.
 - [`tests`](tests): behavioral and semantic-parity programs covering tasking,
   I/O, lifecycle, stress, fault injection, sanitizers, and observability; the
   detailed scope is listed under [CI and releases](#ci-and-releases).
