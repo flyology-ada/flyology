@@ -47,6 +47,12 @@ is part of the patch-family contract: moving it earlier would race live task
 stacks, while omitting it leaves internal scheduler pthreads and pollers for the
 operating system to reclaim at process exit.
 
+The same common patch publishes a fixed task-owned exit result at GNARL's outer
+task wrapper boundary, after the compiler-generated body has unwound and
+completed its dependent-task master but before user termination handlers run.
+It attaches the storage before activation and detaches it during ATCB reap; no
+ATCB field, global result registry, or post-allocation registration is added.
+
 When a future GNAT release changes the affected GNARL sources, add a new
 versioned family rather than weakening patch validation. A family may span
 multiple majors only while the same patch is built and behaviorally tested on

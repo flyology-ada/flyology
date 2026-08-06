@@ -1437,9 +1437,48 @@ turn raw file descriptors into generation-tagged connection owners.
 
 ## Runtime observability
 
-`Flyology.Observability` exposes a stable, read-only snapshot for each event
-group. Calling `Snapshot` for a group that has never existed returns `False`
-and does not create a pthread, poller, scheduler context, or any other event
+`Flyology.Task_Results` gives each successfully created Ada task in either lane
+a persistent terminal result. `Observe (Task_Id)` copies it without waiting;
+`Wait` waits indefinitely or for a relative timeout. Results distinguish normal
+return, an unhandled exception, and abnormal completion such as abort. An
+exception result copies at most 96 characters of fully qualified exception name
+and 128 characters of message, with separate truncation flags; it does not
+retain an exception occurrence or runtime-owned address.
+
+```ada
+declare
+   use type Flyology.Task_Results.Observation_Status;
+   Observation : constant Flyology.Task_Results.Task_Observation :=
+     Flyology.Task_Results.Wait (Worker'Identity, Timeout => 0.250);
+begin
+   if Observation.Status = Flyology.Task_Results.Terminal then
+      Put_Line (Observation.Result.Cause'Image);
+   else
+      Put_Line ("worker is still running");
+   end if;
+end;
+```
+
+`Worker` may be a declared task object or an allocator-created task. Its result
+remains available while the task object is alive. The caller must not retain a
+`Task_Id` after a declared task leaves scope or after its access object is
+deallocated. `Wait` uses the same Ada-level operation from either lane: a native
+caller blocks through GNARL's native tasking path, while a lightweight caller
+suspends its fiber.
+
+The task-owned result is attached to the ATCB before activation, so a task may
+terminate before its allocator returns without creating a registration race.
+If activation fails, Ada propagates `Tasking_Error`; an allocator that fails
+does not return a `Task_Id`, so there is no result object to query. Observation
+does not catch or resume the old task and does not define supervisor or restart
+policy. The exact wrapper point, identity lifetime, storage cost, and remaining
+environment-task limit are described in
+[`docs/task-exit-results.md`](docs/task-exit-results.md).
+
+`Flyology.Observability` separately exposes a stable, read-only scheduler and
+stack snapshot for each event group. Calling `Snapshot` for a group that has
+never existed returns `False` and does not create a pthread, poller, scheduler
+context, or any other event
 runtime resource. A native-only application can therefore link and query the
 package without losing lazy-start inertness.
 
@@ -2227,6 +2266,11 @@ Current smoke coverage includes:
   sibling activation failure with abort cleanup, abort during an active
   rendezvous, nested asynchronous transfer of control, all three
   `Ada.Task_Termination` causes, and an explicit cross-group entry-family call;
+- automatic task-result retention in both lanes for fast normal return,
+  unhandled named exceptions and bounded messages, abort, task-body activation
+  exceptions, lightweight execution-lane creation failure, finalization order,
+  declared and allocator-created tasks, timeoutable native and lightweight
+  waiters, concurrent wakeup, and abortable waits;
 - lightweight/native socket-pair transfer, simultaneous read/write watches on one
   descriptor, bounded multi-descriptor waits, lowest-index simultaneous
   readiness, partial-registration rollback, abort cleanup, descriptor reuse,

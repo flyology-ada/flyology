@@ -138,6 +138,7 @@ project Flyology is
              "flyology-native_executors.ads",
              "flyology-process_lifecycle.ads",
              "flyology-task_scopes.ads",
+             "flyology-task_results.ads",
              "flyology-wake_sources.ads",
              "flyology-worker_pools.ads");
    end case;

@@ -297,6 +297,7 @@ stack_pool_smoke
 stack_size_parity_smoke
 suspension_object_smoke
 task_scopes_smoke
+task_results_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
 structured_server_smoke

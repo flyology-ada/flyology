@@ -60,6 +60,12 @@ response I/O, response-head extraction, source callback behavior, rewind byte
 identity, trailer-field definition rules, or the connection-lifecycle actions
 selected by those classifications. Exhaustive policy matrices and focused
 wire, adapter, ownership, and retry tests cover that integration boundary.
+The production task-result lifecycle policy proves the permitted transition
+classes and their resulting running or terminal phase. The runtime consumes
+those transitions for its atomic phase stores. It does not prove GNARL task
+creation/reap locking, release/acquire synchronization, protected-entry wakeup,
+or exception rendering; focused lane-parity and lifecycle tests cover those
+integration boundaries.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -70,6 +76,11 @@ wire, adapter, ownership, and retry tests cover that integration boundary.
 
 - [x] Pre-change application policy suite (level 1, mode all)
 - [x] Pre-change runtime scheduling policy suite (level 1, mode all)
+- [x] Production-used task-result lifecycle policy (level 1, mode all)
+  - [x] Completion transition from running to terminal
+  - [x] Normal, exceptional, and abnormal cause encoding
+  - [x] Whole `System.Flyology.Task_Result_Policy` unit widening
+  - [x] Application and runtime policy suite widening
 - [x] Production-used bounded timer-set policy (level 1, mode all)
   - [x] Indexed heap mapping, order, repair, insertion, and removal
   - [x] Exact arm, cancellation, clearing, and earliest-deadline contracts
@@ -182,6 +193,7 @@ wire, adapter, ownership, and retry tests cover that integration boundary.
 - [x] `Flyology.Timer_Set_Policy.Earliest_Deadline` (level 1, mode all)
 - [x] `Flyology.Timer_Set_Policy.Collect_Due` (level 1, mode all)
 - [x] HTTP client upload-policy proof and integration boundary
+- [x] Task-result lifecycle policy and runtime integration boundary
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.

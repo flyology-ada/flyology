@@ -2,12 +2,20 @@
 # Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
 --- a/s-tassta.adb
 +++ b/s-tassta.adb
-@@ -43,0 +44 @@
+@@ -43,0 +44,2 @@
 +with System.Flyology.Scheduler;
-@@ -473,0 +475,2 @@
++with System.Flyology.Task_Results;
+@@ -468,6 +493,9 @@
+       T, P          : Task_Id;
+       Self_ID       : constant Task_Id := STPO.Self;
+       Success       : Boolean;
++      Result_Storage : System.Address := System.Null_Address;
+       Base_Priority : System.Any_Priority;
+       Len           : Natural;
+       Base_CPU      : System.Multiprocessors.CPU_Range;
 +      Is_Lightweight : constant Boolean :=
 +        System.Flyology.Is_Lightweight_Designation (Task_Info);
-@@ -511,5 +515,4 @@
+@@ -511,5 +538,4 @@
 -      --  Legal values of CPU are the special Unspecified_CPU value which is
 -      --  inserted by the compiler for tasks without CPU aspect, and those in
 -      --  the range of CPU_Range but no greater than Number_Of_CPUs. Otherwise
@@ -17,7 +25,7 @@
 +      --  lightweight task, the CPU aspect selects an execution group instead
 +      --  of a native processor, so values through CPU_Range'Last remain legal.
 +      --  Other values make task creation fail as required by RM D.16(14/3).
-@@ -516,3 +520,5 @@
+@@ -516,3 +543,5 @@
 -        and then (CPU < Integer (System.Multiprocessors.CPU_Range'First)
 -                    or else
 -                  CPU > Integer (System.Multiprocessors.Number_Of_CPUs))
@@ -27,21 +35,91 @@
 +           or else
 +             (not Is_Lightweight
 +              and then CPU > Integer (System.Multiprocessors.Number_Of_CPUs)))
-@@ -653,1 +659,2 @@
+@@ -557,7 +592,17 @@
+       begin
+          T := New_ATCB (Num_Entries);
+       exception
+          when others =>
+             Initialization.Undefer_Abort_Nestable (Self_ID);
+             raise Storage_Error with "Cannot allocate task";
+       end;
++
++      begin
++         Result_Storage :=
++           System.Flyology.Task_Results.Allocate_Task_Result;
++      exception
++         when others =>
++            Free (T);
++            Initialization.Undefer_Abort_Nestable (Self_ID);
++            raise Storage_Error with "Cannot allocate task result";
++      end;
+@@ -575,9 +620,10 @@
+       if not Self_ID.Callable then
+          pragma Assert (Self_ID.Pending_ATC_Level = Level_Completed_Task);
+          pragma Assert (Self_ID.Pending_Action);
+          pragma Assert
+            (Chain.T_ID = null or else Chain.T_ID.Common.State = Unactivated);
+
+          Unlock (Self_ID);
+          Unlock_RTS;
++         System.Flyology.Task_Results.Release_Task_Result (Result_Storage);
+          Initialization.Undefer_Abort_Nestable (Self_ID);
+@@ -595,7 +641,11 @@
+       if not Success then
+          Free (T);
+          Unlock (Self_ID);
+          Unlock_RTS;
++         System.Flyology.Task_Results.Release_Task_Result (Result_Storage);
+          Initialization.Undefer_Abort_Nestable (Self_ID);
+          raise Storage_Error with "Failed to initialize task";
+       end if;
++
++      System.Flyology.Task_Results.Attach_Task_Result (T, Result_Storage);
++      Result_Storage := System.Null_Address;
+@@ -653,1 +682,2 @@
 -      if Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
 +      if not Is_Lightweight
 +        and then Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
-@@ -669,1 +676,2 @@
+@@ -669,1 +699,2 @@
 -      if Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
 +      if not Is_Lightweight
 +        and then Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
-@@ -893,0 +895,5 @@
+@@ -886,2 +935,7 @@
+       SSL.Task_Termination_Handler.all (Ada.Exceptions.Null_Occurrence);
+
 +      --  GNARL has completed global tasks and library objects. Flyology may
 +      --  now join quiescent event-loop threads; if an unexpected fiber is
 +      --  still live, the scheduler records deferred cleanup and leaves the
 +      --  resources to process exit instead of racing that task.
 +      System.Flyology.Scheduler.Finalize;
-@@ -1008,8 +1009,13 @@
++
+@@ -916,18 +972,22 @@
+    procedure Free_Task (T : Task_Id) is
+-      Self_Id : constant Task_Id := Self;
++      Self_Id        : constant Task_Id := Self;
++      Result_Storage : System.Address := System.Null_Address;
+
+    begin
+       Initialization.Task_Lock (Self_Id);
+
+       if T.Common.State = Terminated then
+
+          --  It is not safe to call Abort_Defer or Write_Lock at this stage
+
+          Lock_RTS;
++         Result_Storage :=
++           System.Flyology.Task_Results.Detach_Task_Result (T);
+          Initialization.Finalize_Attributes (T);
+          Initialization.Remove_From_All_Tasks_List (T);
+          Unlock_RTS;
+
+          Initialization.Task_Unlock (Self_Id);
+
++         System.Flyology.Task_Results.Release_Task_Result (Result_Storage);
+          System.Task_Primitives.Operations.Finalize_TCB (T);
+
+       else
+@@ -1008,8 +1032,13 @@
 -      Task_Alternate_Stack :
 -        aliased SSE.Storage_Array (1 .. Alternate_Stack_Size);
 +      Is_Lightweight : constant Boolean :=
@@ -50,8 +128,42 @@
 +      Task_Alternate_Stack : aliased SSE.Storage_Array
 +        (1 .. (if Is_Lightweight then 0 else Alternate_Stack_Size));
        --  The alternate signal stack for this task, if any
- 
+
 -      Use_Alternate_Stack : constant Boolean := Alternate_Stack_Size /= 0;
 +      Use_Alternate_Stack : constant Boolean :=
 +        Alternate_Stack_Size /= 0 and then not Is_Lightweight;
        --  Whether to use above alternate signal stack for stack overflows
+@@ -1279,5 +1310,15 @@
+             if Global_Task_Debug_Event_Set then
+                Debug.Signal_Debug_Event
+                  (Debug.Debug_Event_Exception_Terminated, Self_ID);
+             end if;
+       end;
+-
++
++      --  The compiler-generated task body has unwound its local objects and
++      --  Complete_Task has joined the task's dependent-task master before it
++      --  returns to this wrapper. Publish the fixed result before any user
++      --  termination handler runs and without holding an ATCB or RTS lock.
++      begin
++         System.Flyology.Task_Results.Publish (Cause, Self_ID, EO);
++      exception
++         when others =>
++            null;
++      end;
++
+@@ -1963,10 +2036,14 @@
+    procedure Vulnerable_Free_Task (T : Task_Id) is
++      Result_Storage : System.Address;
+    begin
+       pragma Debug (Debug.Trace (Self, "Vulnerable_Free_Task", 'C', T));
+
+       Write_Lock (T);
++      Result_Storage :=
++        System.Flyology.Task_Results.Detach_Task_Result (T);
+       Initialization.Finalize_Attributes (T);
+       Unlock (T);
+
++      System.Flyology.Task_Results.Release_Task_Result (Result_Storage);
+       System.Task_Primitives.Operations.Finalize_TCB (T);
+    end Vulnerable_Free_Task;

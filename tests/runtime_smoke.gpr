@@ -105,6 +105,7 @@ project Runtime_Smoke is
       "stack_pool_smoke.adb",
       "suspension_object_smoke.adb",
       "task_scopes_smoke.adb",
+      "task_results_smoke.adb",
       "stall_watchdog_native_smoke.adb",
       "stall_watchdog_smoke.adb",
       "structured_server_smoke.adb",
