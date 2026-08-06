@@ -1156,7 +1156,42 @@ Response fields and trailers retain physical order and repeated names. The
 negotiated `Protocol` is opaque so later protocol engines can be added without
 changing request and response signatures. The current engine implements
 HTTP/1.0 response compatibility and HTTP/1.1 requests; it does not yet provide
-redirect policy, content decoding, proxying, or an HTTP/2 transport.
+content decoding, proxying, or an HTTP/2 transport.
+
+Redirect following is per request and disabled by default. Opt in with
+`Set_Redirects (Request, Default_Same_Origin_Redirects)`, or supply a
+`Redirect_Configuration` with a smaller `Maximum_Hops`. The client follows
+301, 302, 303, 307, and 308 only when the resolved `Location` retains the
+configured scheme, host, and port. A cross-origin response is returned
+unchanged, so an origin-bound client never forwards request credentials to a
+different authority. Relative references, query references, fragments, dot
+segments, scheme-relative references, and absolute HTTP(S) references are
+resolved before the origin check.
+
+For 301 and 302, POST becomes GET; 303 becomes GET except that HEAD remains
+HEAD; 307 and 308 preserve the method and body. A method rewrite removes the
+body, request trailers, `Expect`, and content-specific request fields. Retained
+bodies can be replayed when the method is preserved. A streamed body must
+implement `Rewindable_Request_Body_Source`; otherwise the enabled redirect
+raises `Redirect_Error` instead of silently sending an empty or partial body.
+Cycles, duplicate `Location` fields, invalid targets, and exhausted hop limits
+also raise `Redirect_Error`. Every intermediate body is drained before reuse,
+and the original monotonic `Execute` deadline covers the entire chain.
+
+```ada
+Flyology.HTTP.Client.Set_Redirects
+  (Request,
+   (Mode          => Flyology.HTTP.Client.Follow_Same_Origin,
+    Maximum_Hops  => 3));
+
+declare
+   Reply : Flyology.HTTP.Client.Response :=
+     Flyology.HTTP.Client.Execute (HTTP, Request, Timeout => 5.0);
+begin
+   --  Reply is either final or a cross-origin redirect.
+   null;
+end;
+```
 
 `Set_Expect_Continue` opts a nonempty retained or streamed request into
 `Expect: 100-continue`. The client sends the head first, accepts bounded

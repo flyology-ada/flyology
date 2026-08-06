@@ -187,4 +187,31 @@ is
         others =>
           Classify_Expectation_Response'Result = Return_Response);
 
+   type Redirect_Action is
+     (Return_Redirect_Response,
+      Follow_Preserving_Method,
+      Follow_As_Get,
+      Follow_As_Head);
+
+   function Classify_Redirect
+     (Enabled         : Boolean;
+      Has_Location    : Boolean;
+      Status          : Status_Code;
+      Method_Is_Post  : Boolean;
+      Method_Is_Head  : Boolean) return Redirect_Action
+   with
+     Global => null,
+     Post =>
+       Classify_Redirect'Result =
+         (if not Enabled
+            or else not Has_Location
+            or else Status not in 301 | 302 | 303 | 307 | 308
+          then Return_Redirect_Response
+          elsif Status = 303 and then Method_Is_Head
+          then Follow_As_Head
+          elsif Status = 303
+            or else (Status in 301 | 302 and then Method_Is_Post)
+          then Follow_As_Get
+          else Follow_Preserving_Method);
+
 end Flyology.HTTP.Client_Policy;

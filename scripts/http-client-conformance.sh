@@ -35,7 +35,8 @@ run_gprbuild \
   http_client_streaming_smoke.adb \
   http_client_rfc_corpus.adb \
   http_client_parser_matrix.adb http_client_parser_randomized.adb \
-  http_client_pool_model.adb http_client_tls_smoke.adb \
+  http_client_pool_model.adb http_client_redirects.adb \
+  http_client_tls_smoke.adb \
   http_client_tls_closure.adb
 
 "$project_root/tests/bin/$test_subdir/http_client_smoke"
@@ -48,6 +49,7 @@ run_gprbuild \
 "$project_root/tests/bin/$test_subdir/http_client_parser_matrix"
 "$project_root/tests/bin/$test_subdir/http_client_parser_randomized"
 "$project_root/tests/bin/$test_subdir/http_client_pool_model"
+"$project_root/tests/bin/$test_subdir/http_client_redirects"
 "$project_root/tests/bin/$test_subdir/http_client_tls_smoke"
 "$project_root/tests/bin/$test_subdir/http_client_tls_closure"
 

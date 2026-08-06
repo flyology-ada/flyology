@@ -163,10 +163,44 @@ procedure Flyology.HTTP.Client_Policy.Smoke is
       end loop;
    end Check_Expectation_Responses;
 
+   procedure Check_Redirects is
+   begin
+      for Enabled in Boolean loop
+         for Has_Location in Boolean loop
+            for Status in Status_Code loop
+               for Is_Post in Boolean loop
+                  for Is_Head in Boolean loop
+                     declare
+                        Expected : constant Redirect_Action :=
+                          (if not Enabled
+                             or else not Has_Location
+                             or else Status not in 301 | 302 | 303 | 307 | 308
+                           then Return_Redirect_Response
+                           elsif Status = 303 and then Is_Head
+                           then Follow_As_Head
+                           elsif Status = 303
+                             or else
+                               (Status in 301 | 302 and then Is_Post)
+                           then Follow_As_Get
+                           else Follow_Preserving_Method);
+                     begin
+                        pragma Assert
+                          (Classify_Redirect
+                             (Enabled, Has_Location, Status, Is_Post,
+                              Is_Head) = Expected);
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+         end loop;
+      end loop;
+   end Check_Redirects;
+
 begin
    Check_Upload_Validation;
    Check_Pulls;
    Check_Stale_Retries;
    Check_Informational;
    Check_Expectation_Responses;
+   Check_Redirects;
 end Flyology.HTTP.Client_Policy.Smoke;

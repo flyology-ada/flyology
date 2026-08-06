@@ -95,6 +95,7 @@ project Runtime_Smoke is
       "http_client_parser_randomized.adb",
       "http_client_pool_model.adb",
       "http_client_pool_races.adb",
+      "http_client_redirects.adb",
       "http_client_tls_closure.adb",
       "http_client_tls_smoke.adb",
       "io_smoke.adb",

@@ -24,6 +24,36 @@ package Flyology.HTTP.Client is
    --  Raised when a streaming request body violates the progress contract or
    --  does not finish on exactly its positive declared length.
    Request_Body_Error : exception;
+   --  Raised when an enabled redirect cannot be followed safely because its
+   --  target is invalid, repeats a prior target, exceeds the configured hop
+   --  limit, or requires replaying a one-shot request source.
+   Redirect_Error : exception;
+
+   --  Automatic redirect behavior. Returning redirects is the default and
+   --  preserves the response exactly as received. Same-origin following never
+   --  sends a request to a different scheme, host, or port.
+   --  @enum Return_Redirects Return every redirect response to the caller
+   --  @enum Follow_Same_Origin Follow eligible redirects within the client
+   --     origin
+   type Redirect_Mode is (Return_Redirects, Follow_Same_Origin);
+
+   --  Supported bound for automatically followed redirect hops.
+   subtype Redirect_Limit is Natural range 0 .. 20;
+
+   --  Per-request redirect policy.
+   --  @field Mode Whether redirects are returned or followed within the origin
+   --  @field Maximum_Hops Maximum redirects followed before Redirect_Error
+   type Redirect_Configuration is record
+      Mode          : Redirect_Mode := Return_Redirects;
+      Maximum_Hops  : Redirect_Limit := 5;
+   end record;
+
+   --  Default policy: return redirect responses without following them.
+   No_Redirects : constant Redirect_Configuration := (others => <>);
+
+   --  Opt-in policy that follows at most five same-origin redirects.
+   Default_Same_Origin_Redirects : constant Redirect_Configuration :=
+     (Mode => Follow_Same_Origin, Maximum_Hops => 5);
 
    --  Pool reuse and retention policy. Capacity remains the Client
    --  discriminant and bounds open plus connecting slots.
@@ -91,6 +121,14 @@ package Flyology.HTTP.Client is
    --  @param Value Origin-form target
    --  @exception Constraint_Error Value is not a supported request target
    procedure Set_Target (Item : in out Request; Value : String);
+
+   --  Replace the request's automatic redirect policy. One monotonic Execute
+   --  deadline covers every hop and every intermediate response-body drain.
+   --  Cross-origin redirects are always returned to the caller.
+   --  @param Item Request to change
+   --  @param Value Redirect mode and hop bound
+   procedure Set_Redirects
+     (Item : in out Request; Value : Redirect_Configuration);
 
    --  Append one end-to-end request field. Framing, connection, upgrade, and
    --  Expect fields are client-controlled and rejected here.
@@ -273,6 +311,7 @@ package Flyology.HTTP.Client is
    --     combination is unsupported; CONNECT is not implemented
    --  @exception Protocol_Error Response framing is malformed or unsupported
    --  @exception Response_Too_Large Response head exceeds its bound
+   --  @exception Redirect_Error An enabled redirect cannot be followed safely
    --  @exception Flyology.IO.Timeout_Error Whole-exchange deadline expires
    --  @exception Flyology.IO.Device_Error Established transport I/O fails
    --  @exception Flyology.IO.Sockets.Socket_Error Socket transmission fails
@@ -303,6 +342,7 @@ package Flyology.HTTP.Client is
    --     ends before a known length is complete
    --  @exception Protocol_Error Response framing is malformed or unsupported
    --  @exception Response_Too_Large Response head exceeds its bound
+   --  @exception Redirect_Error An enabled redirect cannot be followed safely
    --  @exception Flyology.IO.Timeout_Error Whole-exchange deadline expires
    --  @exception Flyology.IO.Device_Error Established transport I/O fails
    --  @exception Flyology.IO.Sockets.Socket_Error Socket transmission fails
@@ -513,6 +553,7 @@ private
       Body_Value   : Flyology.Bytes.Unbounded_Bytes;
       Expect_Continue : Boolean := False;
       Continue_Wait   : Duration := 1.0;
+      Redirects       : Redirect_Configuration := No_Redirects;
    end record;
 
    type Body_Length is record

@@ -54,6 +54,7 @@
             <li><a href="#client-request">Build a request</a></li>
             <li><a href="#client-bodies">Stream request bodies</a></li>
             <li><a href="#client-response">Consume a response</a></li>
+            <li><a href="#client-redirects">Follow redirects</a></li>
             <li><a href="#client-pool">Pool and shutdown</a></li>
             <li><a href="#client-tls">HTTPS and limits</a></li>
             <li><a href="#start">Start the server</a></li>
@@ -222,7 +223,24 @@ end loop;</code></pre></figure>
             <p>Completing a fixed-length, chunked, no-body, or valid close-delimited response releases or closes the lease as required. Chunked trailers become available only after completion through <code>Trailer_Count</code>, <code>Trailer_Name</code>, <code>Trailer_Value</code>, and <code>Trailer</code>. Finalizing an incomplete response does not drain unknown application data: it closes that transport so partial framing cannot contaminate a later exchange. Ada accessibility also rejects a response that would outlive its aliased client.</p>
           </section>
 
-          <section id="client-pool"><span class="step-label">CLIENT 05</span><h2>Observe and stop the pool explicitly.</h2>
+          <section id="client-redirects"><span class="step-label">CLIENT 05</span><h2>Opt into bounded same-origin redirects.</h2>
+            <p>Redirects are returned by default. Call <code>Set_Redirects (Request, Default_Same_Origin_Redirects)</code>, or provide a <code>Redirect_Configuration</code> with an explicit <code>Maximum_Hops</code>, when automatic following is appropriate. The policy recognizes 301, 302, 303, 307, and 308. Relative, query-only, scheme-relative, and absolute HTTP(S) <code>Location</code> values are resolved with fragment removal and dot-segment normalization.</p>
+            <figure class="code-panel"><figcaption>follow at most three same-origin hops</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Client.Set_Redirects
+  (Request,
+   (Mode          =&gt; Client.Follow_Same_Origin,
+    Maximum_Hops =&gt; 3));
+
+declare
+   Reply : Client.Response :=
+     Client.Execute (HTTP, Request, Timeout =&gt; 5.0);
+begin
+   null;
+end;</code></pre></figure>
+            <p>The origin-bound client never follows a redirect to a different scheme, host, or port; it returns that response unchanged, so credentials are not forwarded to another authority. For 301 and 302, POST becomes GET. A 303 becomes GET except that HEAD remains HEAD. A 307 or 308 preserves the method and body. Method rewriting removes the request body, trailers, <code>Expect</code>, and content-specific fields.</p>
+            <p>A retained body is directly replayable. A streamed body on a method-preserving redirect must implement <code>Rewindable_Request_Body_Source</code>; a one-shot source raises <code>Redirect_Error</code>. The same exception reports invalid or duplicate locations, cycles, and exhausted hop limits. Intermediate bodies are drained before their transport is reused, and one monotonic <code>Execute</code> deadline covers the complete chain.</p>
+          </section>
+
+          <section id="client-pool"><span class="step-label">CLIENT 06</span><h2>Observe and stop the pool explicitly.</h2>
             <p><code>Execute</code> waits for an idle transport or a free creation slot inside the request deadline. An idempotent request may be retried once when a reused transport fails before any response byte arrives; the retry stays inside the same deadline. Empty and retained bodies can be replayed directly. A streamed body is eligible only through <code>Rewindable_Request_Body_Source</code>, whose nonblocking <code>Rewind</code> must restore exactly the same bytes and declared length. Non-idempotent and one-shot streamed requests are never replayed automatically.</p>
             <p><code>Diagnostics</code> returns one coherent snapshot. Current counts distinguish pending transports, active exchanges, reusable and closing transports, and admission waiters. Cumulative counts report creations, reuses, closes, stale retries, and admission timeouts. Exchange and transport counts are intentionally separate so the vocabulary can survive a later multiplexed protocol.</p>
             <figure class="code-panel"><figcaption>maintenance and terminal shutdown</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Snapshot : constant Client.Client_Diagnostics := Client.Diagnostics (HTTP);
@@ -232,7 +250,7 @@ Client.Shutdown (HTTP, 5.0);    -- reject admission and drain leases</code></pre
             <p><code>Prune_Idle</code> closes currently idle connections without disturbing active leases. <code>Shutdown</code> is terminal: it rejects new admission, interrupts admitted transport operations, closes idle transports, and waits for connecting slots and response leases to drain. A shutdown timeout leaves the client stopping and may be retried. Finalization also requests shutdown, but an application should call <code>Shutdown</code> where a bounded, observable drain matters.</p>
           </section>
 
-          <section id="client-tls"><span class="step-label">CLIENT 06</span><h2>Configure authenticated HTTPS and handle explicit limits.</h2>
+          <section id="client-tls"><span class="step-label">CLIENT 07</span><h2>Configure authenticated HTTPS and handle explicit limits.</h2>
             <p>An HTTPS origin requires the <code>Configure</code> overload that receives an initialized provider-neutral TLS backend. The client retains independently owned provider state, so the original backend object may be finalized after configuration. With the optional OpenSSL provider, normal client initialization performs certificate-chain and hostname verification; the maintained command-line client deliberately exposes no insecure bypass.</p>
             <figure class="code-panel"><figcaption>authenticated OpenSSL client</figcaption><button class="copy-button" type="button" data-copy>Copy</button><pre><code class="language-ada">Flyology.IO.TLS.OpenSSL.Initialize_Client (Backend);
 Client.Configure
@@ -241,7 +259,7 @@ Client.Configure
    Backend'Access,
    Client.Default_Pool_Configuration);</code></pre></figure>
             <p>Callers can distinguish pool shutdown (<code>Client_Closed</code>), resolution or address exhaustion (<code>Connection_Error</code>), source-contract failure (<code>Request_Body_Error</code>), oversized retained response data (<code>Response_Too_Large</code>), malformed protocol input (<code>Protocol_Error</code>), timeout, cancellation, established I/O failure, socket failure, and TLS failure. Source-defined exceptions propagate after the leased transport is discarded.</p>
-            <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p><strong>The current transport engine sends HTTP/1.1 requests.</strong> It accepts compatible HTTP/1.0 responses, fixed-length, chunked, no-body, and close-delimited response framing. Redirect policy, content decoding, proxying, authentication helpers, and HTTP/2 are not yet implemented. <code>Protocol</code> remains opaque so later engines can grow without turning application code into an exhaustive case statement.</p></aside>
+            <aside class="callout"><span class="callout-symbol" aria-hidden="true">!</span><p><strong>The current transport engine sends HTTP/1.1 requests.</strong> It accepts compatible HTTP/1.0 responses, fixed-length, chunked, no-body, and close-delimited response framing. Content decoding, proxying, authentication helpers, and HTTP/2 are not yet implemented. <code>Protocol</code> remains opaque so later engines can grow without turning application code into an exhaustive case statement.</p></aside>
             <p>The same API and outcome contracts are tested from native and lightweight tasks. Run <code>./scripts/http-client-conformance.sh</code> for deterministic request, response, parser, pooling, lifetime, cancellation, timeout, TLS, adapter, and lane-parity coverage. Address cases cover IPv4 and bracketed IPv6 literals, default and explicit ports, IPv6-to-IPv4 resolution fallback, and all-address exhaustion under one deadline. A test-only one-byte receive cap forces every response and chunk/trailer delimiter across distinct client receive calls; TLS cases distinguish an orderly <code>close_notify</code> from transport truncation while streaming fixed-length, chunked, and close-delimited bodies. The parser campaign includes 42 named RFC 9110/9112 response seeds plus 10,000 fixed-seed random or corpus-derived mutated inputs through the production parser oracle. For interactive use, <code>./showcases/run_http_client_cli.sh -v https://example.com/</code> builds and runs the maintained curl-like example with complete outbound and inbound headers on standard error.</p>
           </section>
 

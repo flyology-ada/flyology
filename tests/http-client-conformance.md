@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs fifteen independent programs
+`scripts/http-client-conformance.sh` builds and runs sixteen independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -20,6 +20,7 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | Upload controls | Expect/continue after informational responses, final-response body suppression, one-time 417 fallback without Expect, bounded continue fallback, request trailer declaration and emission, prohibited and duplicate trailer rejection, exact known-length completion, one idempotent rewindable-source stale retry, one-shot non-retry, and lane parity |
 | Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, deterministic active-return and abort races, held-lease admission shutdown, idle prune/checkout races, coherent exchange/transport counters, and descriptor restoration |
 | Addressing | sequential IPv6-to-IPv4 localhost fallback under one deadline, live IPv4 and bracketed IPv6 literals, exact default and explicit-port Host serialization, all-address exhaustion, lane parity, and descriptor restoration |
+| Redirects | default no-follow behavior, bounded same-origin following, relative and absolute reference resolution, dot-segment and fragment handling, 302/303 method rewriting, 307 body replay, one-shot rejection, cross-origin return, cycle/limit/duplicate rejection, lane parity, and descriptor restoration |
 | Response fragmentation | a one-byte connection receive cap with an exact call count, forcing status-line, header, chunk, data, terminal-chunk, and trailer delimiters across distinct client receive calls in both task lanes |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
 | RFC response corpus | 42 named accepted and rejected examples covering status syntax, field folding and whitespace, length precedence, informational and bodyless responses, transfer codings, chunk extensions, trailers, and incomplete messages |

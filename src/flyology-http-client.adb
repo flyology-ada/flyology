@@ -363,6 +363,12 @@ package body Flyology.HTTP.Client is
       Item.Target_Value := To_Unbounded_String (Value);
    end Set_Target;
 
+   procedure Set_Redirects
+     (Item : in out Request; Value : Redirect_Configuration) is
+   begin
+      Item.Redirects := Value;
+   end Set_Redirects;
+
    procedure Add_Header
      (Item : in out Request; Name : String; Value : String)
    is
@@ -567,10 +573,10 @@ package body Flyology.HTTP.Client is
       Value   : Request;
       Source  : access Request_Body_Source'Class;
       Length  : Body_Length;
-      Timeout : Duration := 30.0;
-      Token   : access Flyology.Cancellation.Token := null) return Response
+      Started : Ada.Real_Time.Time;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token) return Response
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Connection : Pooled_Connection_Access;
       Slot       : Positive;
       Was_Reused : Boolean;
@@ -761,12 +767,376 @@ package body Flyology.HTTP.Client is
          raise;
    end Execute_Internal;
 
+   function Same_Origin (Left, Right : Origin) return Boolean is
+     (Scheme (Left) = Scheme (Right)
+        and then Host (Left) = Host (Right)
+        and then Port (Left) = Port (Right));
+
+   function Without_Fragment (Value : String) return String is
+      Marker : constant Natural := Ada.Strings.Fixed.Index (Value, "#");
+   begin
+      if Marker = 0 then
+         return Value;
+      elsif Marker = Value'First then
+         return "";
+      else
+         return Value (Value'First .. Marker - 1);
+      end if;
+   end Without_Fragment;
+
+   function Path_Part (Target : String) return String is
+      Marker : constant Natural := Ada.Strings.Fixed.Index (Target, "?");
+   begin
+      return
+        (if Marker = 0 then Target
+         elsif Marker = Target'First then "/"
+         else Target (Target'First .. Marker - 1));
+   end Path_Part;
+
+   function Remove_Dot_Segments (Value : String) return String is
+      Input  : Unbounded_String := To_Unbounded_String (Value);
+      Output : Unbounded_String;
+
+      procedure Remove_Last_Output_Segment is
+         Text : constant String := To_String (Output);
+         Slash : Natural := 0;
+      begin
+         for Index in reverse Text'Range loop
+            if Text (Index) = '/' then
+               Slash := Index;
+               exit;
+            end if;
+         end loop;
+         if Slash = 0 then
+            Output := Null_Unbounded_String;
+         elsif Slash = Text'First then
+            Output := Null_Unbounded_String;
+         else
+            Output := To_Unbounded_String (Text (Text'First .. Slash - 1));
+         end if;
+      end Remove_Last_Output_Segment;
+
+      procedure Move_Segment is
+         Text : constant String := To_String (Input);
+         Stop : Natural := Text'Last;
+         Start_Search : constant Natural :=
+           (if Text (Text'First) = '/' then Text'First + 1 else Text'First);
+      begin
+         if Start_Search <= Text'Last then
+            for Index in Start_Search .. Text'Last loop
+               if Text (Index) = '/' then
+                  Stop := Index - 1;
+                  exit;
+               end if;
+            end loop;
+         end if;
+         if Text (Text'First) = '/' and then Stop < Text'First then
+            Append (Output, "/");
+            Delete (Input, 1, 1);
+         else
+            Append (Output, Text (Text'First .. Stop));
+            Delete (Input, 1, Stop - Text'First + 1);
+         end if;
+      end Move_Segment;
+   begin
+      while Length (Input) > 0 loop
+         declare
+            Text : constant String := To_String (Input);
+         begin
+            if Ada.Strings.Fixed.Index (Text, "../") = Text'First then
+               Delete (Input, 1, 3);
+            elsif Ada.Strings.Fixed.Index (Text, "./") = Text'First then
+               Delete (Input, 1, 2);
+            elsif Ada.Strings.Fixed.Index (Text, "/./") = Text'First then
+               Replace_Slice (Input, 1, 3, "/");
+            elsif Text = "/." then
+               Input := To_Unbounded_String ("/");
+            elsif Ada.Strings.Fixed.Index (Text, "/../") = Text'First then
+               Replace_Slice (Input, 1, 4, "/");
+               Remove_Last_Output_Segment;
+            elsif Text = "/.." then
+               Input := To_Unbounded_String ("/");
+               Remove_Last_Output_Segment;
+            elsif Text = "." or else Text = ".." then
+               Input := Null_Unbounded_String;
+            else
+               Move_Segment;
+            end if;
+         end;
+      end loop;
+      return (if Length (Output) = 0 then "/" else To_String (Output));
+   end Remove_Dot_Segments;
+
+   procedure Resolve_Redirect
+     (Base_Origin : Origin;
+      Base_Target : String;
+      Location    : String;
+      Target      : out Unbounded_String;
+      Is_Same     : out Boolean)
+   is
+      Reference : constant String := Without_Fragment (Location);
+      Resolved_Origin : Origin := Base_Origin;
+      Raw_Target : Unbounded_String;
+
+      function First_Path_Character
+        (Value : String; From : Positive) return Natural
+      is
+      begin
+         for Index in From .. Value'Last loop
+            if Value (Index) = '/' or else Value (Index) = '?' then
+               return Index;
+            end if;
+         end loop;
+         return 0;
+      end First_Path_Character;
+
+      function Has_URI_Scheme (Value : String) return Boolean is
+         Colon : constant Natural := Ada.Strings.Fixed.Index (Value, ":");
+         Slash : constant Natural := Ada.Strings.Fixed.Index (Value, "/");
+         Query : constant Natural := Ada.Strings.Fixed.Index (Value, "?");
+      begin
+         return Colon /= 0
+           and then (Slash = 0 or else Colon < Slash)
+           and then (Query = 0 or else Colon < Query);
+      end Has_URI_Scheme;
+
+      procedure Parse_Absolute (Value : String; Scheme_Relative : Boolean) is
+         Start : constant Positive :=
+           (if Scheme_Relative then Value'First + 2
+            else Ada.Strings.Fixed.Index (Value, "://") + 3);
+         Split : constant Natural := First_Path_Character (Value, Start);
+         Origin_Last : constant Natural :=
+           (if Split = 0 then Value'Last else Split - 1);
+         Prefix : constant String :=
+           (if Scheme_Relative
+            then (if Scheme (Base_Origin) = Plain_HTTP
+                  then "http:" else "https:")
+            else "");
+      begin
+         Resolved_Origin := Parse_Origin
+           (Prefix & Value (Value'First .. Origin_Last));
+         if Split = 0 then
+            Raw_Target := To_Unbounded_String ("/");
+         elsif Value (Split) = '?' then
+            Raw_Target := To_Unbounded_String
+              ("/" & Value (Split .. Value'Last));
+         else
+            Raw_Target := To_Unbounded_String (Value (Split .. Value'Last));
+         end if;
+      exception
+         when Constraint_Error =>
+            raise Redirect_Error with "invalid redirect target origin";
+      end Parse_Absolute;
+   begin
+      if Reference'Length = 0 then
+         Raw_Target := To_Unbounded_String (Base_Target);
+      elsif Reference'Length >= 2
+        and then Reference (Reference'First .. Reference'First + 1) = "//"
+      then
+         Parse_Absolute (Reference, True);
+      elsif Ada.Strings.Fixed.Index (Reference, "://") /= 0 then
+         declare
+            Separator : constant Natural :=
+              Ada.Strings.Fixed.Index (Reference, "://");
+            Name : constant String :=
+              Ada.Characters.Handling.To_Lower
+                (Reference (Reference'First .. Separator - 1));
+         begin
+            if Name /= "http" and then Name /= "https" then
+               raise Redirect_Error with "unsupported redirect URI scheme";
+            end if;
+            Parse_Absolute (Reference, False);
+         end;
+      elsif Has_URI_Scheme (Reference) then
+         raise Redirect_Error with "unsupported redirect URI scheme";
+      elsif Reference (Reference'First) = '/' then
+         Raw_Target := To_Unbounded_String (Reference);
+      elsif Reference (Reference'First) = '?' then
+         Raw_Target := To_Unbounded_String
+           (Path_Part (Base_Target) & Reference);
+      else
+         declare
+            Base_Path : constant String := Path_Part (Base_Target);
+            Slash : Natural := Base_Path'First;
+         begin
+            for Index in reverse Base_Path'Range loop
+               if Base_Path (Index) = '/' then
+                  Slash := Index;
+                  exit;
+               end if;
+            end loop;
+            Raw_Target := To_Unbounded_String
+              (Base_Path (Base_Path'First .. Slash) & Reference);
+         end;
+      end if;
+
+      Is_Same := Same_Origin (Base_Origin, Resolved_Origin);
+      declare
+         Raw : constant String := To_String (Raw_Target);
+         Query : constant Natural := Ada.Strings.Fixed.Index (Raw, "?");
+         Path : constant String :=
+           (if Query = 0 then Raw else Raw (Raw'First .. Query - 1));
+         Suffix : constant String :=
+           (if Query = 0 then "" else Raw (Query .. Raw'Last));
+      begin
+         Target := To_Unbounded_String (Remove_Dot_Segments (Path) & Suffix);
+      end;
+   exception
+      when Redirect_Error => raise;
+      when others =>
+         raise Redirect_Error with "invalid redirect target";
+   end Resolve_Redirect;
+
+   procedure Rewrite_Without_Content
+     (Value : in out Request; As_Head : Boolean) is
+      Filtered : Flyology.HTTP.Headers.List;
+   begin
+      for Index in 1 .. Flyology.HTTP.Headers.Count (Value.Fields) loop
+         declare
+            Name : constant String :=
+              Flyology.HTTP.Headers.Name (Value.Fields, Index);
+            Lower : constant String := Ada.Characters.Handling.To_Lower (Name);
+         begin
+            if not (Ada.Strings.Fixed.Index (Lower, "content-") = Lower'First
+                    or else Lower = "digest")
+            then
+               Flyology.HTTP.Headers.Add
+                 (Filtered, Name,
+                  Flyology.HTTP.Headers.Value (Value.Fields, Index));
+            end if;
+         end;
+      end loop;
+      Value.Fields := Filtered;
+      Flyology.HTTP.Headers.Clear (Value.Trailer_Fields);
+      Value.Body_Value := Flyology.Bytes.Empty;
+      Value.Expect_Continue := False;
+      Value.Method_Value := To_Method (if As_Head then "HEAD" else "GET");
+   end Rewrite_Without_Content;
+
+   procedure Drain
+     (Item  : in out Response;
+      Token : access Flyology.Cancellation.Token) is
+      Buffer : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (Receive_Buffer_Size));
+      Last : Ada.Streams.Stream_Element_Offset;
+      Finished : Boolean;
+   begin
+      loop
+         Read_Body (Item, Buffer, Last, Finished, Token);
+         exit when Finished;
+      end loop;
+   end Drain;
+
+   function Take (Item : in out Response) return Response is
+   begin
+      return Result : Response do
+         Result.Data := Item.Data;
+         Item.Data := null;
+      end return;
+   end Take;
+
+   function Execute_Redirects
+     (Item    : aliased in out Client;
+      Value   : Request;
+      Source  : access Request_Body_Source'Class;
+      Length  : Body_Length;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token) return Response
+   is
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Current : Request := Value;
+      Current_Source : access Request_Body_Source'Class := Source;
+      Current_Length : Body_Length := Length;
+      Hops : Redirect_Limit := 0;
+      Seen : array (Redirect_Limit) of Unbounded_String;
+      Seen_Last : Redirect_Limit := 0;
+   begin
+      Seen (0) := Current.Target_Value;
+      loop
+         declare
+            Reply : Response := Execute_Internal
+              (Item, Current, Current_Source, Current_Length, Started,
+               Timeout, Token);
+            Locations : constant Natural := Header_Count (Reply, "Location");
+            Action : constant Redirect_Action := Classify_Redirect
+              (Current.Redirects.Mode = Follow_Same_Origin,
+               Locations > 0, Status (Reply),
+               Image (Current.Method_Value) = "POST",
+               Image (Current.Method_Value) = "HEAD");
+         begin
+            if Action = Return_Redirect_Response then
+               return Take (Reply);
+            elsif Locations /= 1 then
+               raise Redirect_Error with
+                 "redirect response has multiple Location fields";
+            elsif Hops = Current.Redirects.Maximum_Hops then
+               raise Redirect_Error with "redirect hop limit exceeded";
+            end if;
+
+            declare
+               Next_Target : Unbounded_String;
+               Within_Origin : Boolean;
+            begin
+               Resolve_Redirect
+                 (Item.Control.State.Origin_Value,
+                  To_String (Current.Target_Value), Header (Reply, "Location"),
+                  Next_Target, Within_Origin);
+               if not Within_Origin then
+                  return Take (Reply);
+               end if;
+               for Index in Redirect_Limit range 0 .. Seen_Last loop
+                  if Seen (Index) = Next_Target then
+                     raise Redirect_Error with "redirect cycle detected";
+                  end if;
+               end loop;
+
+               if Action = Follow_Preserving_Method
+                 and then Current_Source /= null
+                 and then Current_Source.all not in
+                   Rewindable_Request_Body_Source'Class
+               then
+                  raise Redirect_Error with
+                    "redirect requires a rewindable request body source";
+               end if;
+
+               Drain (Reply, Token);
+               if Action = Follow_As_Get or else Action = Follow_As_Head then
+                  Rewrite_Without_Content
+                    (Current, As_Head => Action = Follow_As_Head);
+                  Current_Source := null;
+                  Current_Length := Unknown_Length;
+               elsif Current_Source /= null then
+                  if Token /= null and then Token.Requested then
+                     raise Flyology.Cancellation.Operation_Cancelled;
+                  elsif Timeout >= 0.0
+                    and then Remaining (Started, Timeout) <= 0.0
+                  then
+                     raise Flyology.IO.Timeout_Error;
+                  end if;
+                  Rewind
+                    (Rewindable_Request_Body_Source'Class
+                       (Current_Source.all));
+               end if;
+               begin
+                  Set_Target (Current, To_String (Next_Target));
+               exception
+                  when Constraint_Error =>
+                     raise Redirect_Error with "invalid redirect target";
+               end;
+               Hops := Hops + 1;
+               Seen_Last := Seen_Last + 1;
+               Seen (Seen_Last) := Next_Target;
+            end;
+         end;
+      end loop;
+   end Execute_Redirects;
+
    function Execute
      (Item    : aliased in out Client;
       Value   : Request;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response is
-     (Execute_Internal
+     (Execute_Redirects
         (Item, Value, Source => null, Length => Unknown_Length,
          Timeout => Timeout, Token => Token));
 
@@ -776,7 +1146,7 @@ package body Flyology.HTTP.Client is
       Source  : in out Request_Body_Source'Class;
       Timeout : Duration := 30.0;
       Token   : access Flyology.Cancellation.Token := null) return Response is
-     (Execute_Internal
+     (Execute_Redirects
         (Item, Value, Source => Source'Access,
          Length => Declared_Length (Source),
          Timeout => Timeout, Token => Token));
