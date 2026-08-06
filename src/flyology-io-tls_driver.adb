@@ -27,6 +27,72 @@ package body Flyology.IO.TLS_Driver is
       raise TLS.TLS_Error with TLS.Error_Message (Item);
    end Raise_Provider_Error;
 
+   procedure Receive_Once
+     (Item   : in out TLS.Session'Class;
+      Data   : out Ada.Streams.Stream_Element_Array;
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Status : out TLS.Step_Status)
+   is
+      Before_Last : constant Ada.Streams.Stream_Element_Offset :=
+        Data'First - 1;
+   begin
+      Last := Before_Last;
+      if Data'Length = 0 then
+         Status := TLS.Complete;
+         return;
+      end if;
+      Status := TLS.Receive_Step (Item, Data, Last);
+      case Status is
+         when TLS.Complete =>
+            if not Policy.Complete_Progress_Valid
+              (Data'First, Data'Last, Last)
+            then
+               raise TLS.TLS_Error with
+                 "TLS provider returned an invalid receive bound";
+            end if;
+         when TLS.Want_Read | TLS.Want_Write | TLS.Peer_Closed =>
+            if not Policy.Progress_Preserved (Before_Last, Last) then
+               raise TLS.TLS_Error with
+                 "TLS provider changed receive output without progress";
+            end if;
+         when TLS.Failed =>
+            Raise_Provider_Error (Item);
+      end case;
+   end Receive_Once;
+
+   procedure Send_Once
+     (Item   : in out TLS.Session'Class;
+      Data   : Ada.Streams.Stream_Element_Array;
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Status : out TLS.Step_Status)
+   is
+      Before_Last : constant Ada.Streams.Stream_Element_Offset :=
+        Data'First - 1;
+   begin
+      Last := Before_Last;
+      if Data'Length = 0 then
+         Status := TLS.Complete;
+         return;
+      end if;
+      Status := TLS.Send_Step (Item, Data, Last);
+      case Status is
+         when TLS.Complete =>
+            if not Policy.Complete_Progress_Valid
+              (Data'First, Data'Last, Last)
+            then
+               raise TLS.TLS_Error with
+                 "TLS provider returned an invalid send bound";
+            end if;
+         when TLS.Want_Read | TLS.Want_Write | TLS.Peer_Closed =>
+            if not Policy.Progress_Preserved (Before_Last, Last) then
+               raise TLS.TLS_Error with
+                 "TLS provider changed send output without progress";
+            end if;
+         when TLS.Failed =>
+            Raise_Provider_Error (Item);
+      end case;
+   end Send_Once;
+
    procedure Handshake
      (Item        : in out TLS.Session'Class;
       Check       : not null access procedure;

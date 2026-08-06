@@ -8,6 +8,18 @@ with Flyology.IO.TLS;
 --  @exclude
 private package Flyology.IO.TLS_Driver is
 
+   procedure Receive_Once
+     (Item   : in out Flyology.IO.TLS.Session'Class;
+      Data   : out Ada.Streams.Stream_Element_Array;
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Status : out Flyology.IO.TLS.Step_Status);
+
+   procedure Send_Once
+     (Item   : in out Flyology.IO.TLS.Session'Class;
+      Data   : Ada.Streams.Stream_Element_Array;
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Status : out Flyology.IO.TLS.Step_Status);
+
    procedure Handshake
      (Item        : in out Flyology.IO.TLS.Session'Class;
       Check       : not null access procedure;

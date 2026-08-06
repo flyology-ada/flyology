@@ -119,6 +119,7 @@ project Flyology is
             "flyology-fairness.ads",
             "flyology-io.ads",
             "flyology-io-connections.ads",
+            "flyology-io-connections-drivers.ads",
             "flyology-io-connections-tls.ads",
             "flyology-io-dns.ads",
             "flyology-io-dns-testing.ads",

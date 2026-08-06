@@ -738,6 +738,8 @@ Flyology exposes synchronous operations in:
   send operations.
 - `Flyology.IO.Connections`: bounded admission, single-owner sockets,
   cancellation tokens, and descriptor-generation-safe close.
+- `Flyology.IO.Connections.Drivers`: scoped, bounded full-duplex transport
+  progress for a single protocol pump without descriptor extraction.
 - `Flyology.IO.Connections.TLS`: ownership-preserving TLS replacement for an
   admitted plaintext connection.
 - `Flyology.IO.TLS`: provider-neutral nonblocking TLS sessions with owned
@@ -993,6 +995,37 @@ releasing ownership, and ordinary `Connections.Close` remains the terminal,
 idempotent cleanup. Structured-server handlers need no new transport type: the
 connection they already receive supports the child-package operation in both
 lightweight and native handler lanes.
+
+Long-lived multiplexed protocols can put one transport pump under
+`Flyology.IO.Connections.Drivers.Run`. The callback receives a scoped
+`Capability`, not the socket or TLS session. `Receive` and `Send` each perform
+at most one immediate plaintext syscall or provider step and report progress,
+peer closure, or the read/write readiness needed next. `Wait` combines those
+transport interests with a reusable `Outbound_Wakeup`, concurrent connection
+close, manager shutdown, and an optional cancellation token. It suspends a
+lightweight task or blocks only a native task's pthread.
+
+```ada
+procedure Pump
+  (IO : in out Flyology.IO.Connections.Drivers.Capability) is
+begin
+   --  Drain bounded protocol input/output work, then wait for transport or
+   --  outbound work. The protocol owns framing, streams, and queue policy.
+   null;
+end Pump;
+
+Flyology.IO.Connections.Drivers.Run
+  (Owned, Pump'Access, Timeout => 30.0, Token => Stop'Access);
+```
+
+`Run` holds the connection's existing generation-checked operation lease for
+the callback. Callback return, exception unwinding, and task abort restore the
+socket to `Connection`; the admission permit remains held. A concurrent
+`Close` wakes the pump, waits for that restoration, then closes the descriptor
+and releases admission. TLS `WANT_READ` and `WANT_WRITE` are reported directly,
+including when a receive needs write readiness or a send needs read readiness.
+The child package contains no HTTP framing, stream, compression, retry, or
+pooling policy.
 
 The standalone `Flyology.IO.TLS.Connection` API remains available for sockets
 that start as TLS before connection admission. It retains its existing source

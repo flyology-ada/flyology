@@ -1,5 +1,4 @@
 with Ada.Exceptions;
-with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.Connection_Policy;
 with Flyology.IO.TLS_Driver;
@@ -26,15 +25,6 @@ package body Flyology.IO.Connections is
    --  flags provide the equivalent process-safety behavior.
    procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
    pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
-
-   type Operation_Guard (Item : not null access Connection) is
-     new Ada.Finalization.Limited_Controlled with record
-      Generation : aliased Descriptor_Generation := 0;
-      State      : aliased Operation_State := Unregistered;
-      Socket     : Sockets.Socket_Type;
-   end record;
-
-   overriding procedure Finalize (Guard : in out Operation_Guard);
 
    --  The gate and descriptor controller update Armed in their protected
    --  ownership transitions. Socket holds an accepted descriptor until the
@@ -497,7 +487,7 @@ package body Flyology.IO.Connections is
    end Interrupt_Sources;
 
    procedure Acquire_Operation
-     (Item          : in out Connection;
+     (Item          : not null Connection_Access;
       Started       : Ada.Real_Time.Time;
       Timeout       : Duration;
       Token         : access Cancellation_Token;
@@ -783,7 +773,7 @@ package body Flyology.IO.Connections is
       end if;
 
       Acquire_Operation
-        (Item, Started, Timeout, Token,
+        (Item'Unchecked_Access, Started, Timeout, Token,
          FD, Guard, Close_Source, Owner, Transport);
       if Transport /= Plain_Transport then
          raise Program_Error with
@@ -836,7 +826,7 @@ package body Flyology.IO.Connections is
       Transport    : Transport_Kind;
    begin
       Acquire_Operation
-        (Item, Started, Infinite, null,
+        (Item'Unchecked_Access, Started, Infinite, null,
          FD, Guard, Close_Source, Owner, Transport);
       pragma Assert
         (FD >= 0 and then Close_Source >= 0 and then Owner /= null);
@@ -871,7 +861,7 @@ package body Flyology.IO.Connections is
       end Await;
    begin
       Acquire_Operation
-        (Item, Started, Timeout, Token,
+        (Item'Unchecked_Access, Started, Timeout, Token,
          FD, Guard, Close_Source, Owner, Transport);
       if Transport /= TLS_Transport or else Item.TLS_Session = null then
          raise Program_Error with "connection transport does not use TLS";
@@ -1012,7 +1002,7 @@ package body Flyology.IO.Connections is
       end Await;
    begin
       Acquire_Operation
-        (Item, Started, Timeout, Token,
+        (Item'Unchecked_Access, Started, Timeout, Token,
          FD, Guard, Interrupts (1), Owner, Transport);
       pragma Assert
         (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
@@ -1101,7 +1091,7 @@ package body Flyology.IO.Connections is
       end Await;
    begin
       Acquire_Operation
-        (Item, Started, Timeout, Token,
+        (Item'Unchecked_Access, Started, Timeout, Token,
          FD, Guard, Interrupts (1), Owner, Transport);
       pragma Assert
         (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
@@ -1174,7 +1164,7 @@ package body Flyology.IO.Connections is
       end Await;
    begin
       Acquire_Operation
-        (Item, Started, Timeout, Token,
+        (Item'Unchecked_Access, Started, Timeout, Token,
          FD, Guard, Interrupts (1), Owner, Transport);
       pragma Assert
         (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
