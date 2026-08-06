@@ -37,6 +37,8 @@
 #define SSL_CTRL_MODE 33
 #define SSL_CTRL_SET_MIN_PROTO_VERSION 123
 #define SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER 0x00000002UL
+#define SSL_TLSEXT_ERR_OK 0
+#define SSL_TLSEXT_ERR_NOACK 3
 #define TLS1_2_VERSION 0x0303
 #define OPENSSL_VERSION 0
 
@@ -45,6 +47,9 @@ typedef struct ssl_st SSL;
 typedef struct ssl_method_st SSL_METHOD;
 typedef struct x509_store_ctx_st X509_STORE_CTX;
 typedef int (*SSL_verify_cb)(int, X509_STORE_CTX *);
+typedef int (*SSL_alpn_select_cb)(SSL *, const unsigned char **,
+                                  unsigned char *, const unsigned char *,
+                                  unsigned int, void *);
 
 struct fly_module {
    void *crypto;
@@ -64,6 +69,7 @@ struct fly_module {
    int (*SSL_CTX_use_certificate_chain_file)(SSL_CTX *, const char *);
    int (*SSL_CTX_use_PrivateKey_file)(SSL_CTX *, const char *, int);
    int (*SSL_CTX_check_private_key)(const SSL_CTX *);
+   void (*SSL_CTX_set_alpn_select_cb)(SSL_CTX *, SSL_alpn_select_cb, void *);
    SSL *(*SSL_new)(SSL_CTX *);
    void (*SSL_free)(SSL *);
    int (*SSL_set_fd)(SSL *, int);
@@ -71,6 +77,9 @@ struct fly_module {
    void (*SSL_set_accept_state)(SSL *);
    long (*SSL_ctrl)(SSL *, int, long, void *);
    int (*SSL_set1_host)(SSL *, const char *);
+   int (*SSL_set_alpn_protos)(SSL *, const unsigned char *, unsigned int);
+   void (*SSL_get0_alpn_selected)(const SSL *, const unsigned char **,
+                                  unsigned int *);
    int (*SSL_do_handshake)(SSL *);
    int (*SSL_read)(SSL *, void *, int);
    int (*SSL_write)(SSL *, const void *, int);
@@ -82,6 +91,8 @@ struct fly_provider {
    struct fly_module *module;
    SSL_CTX *ctx;
    int side;
+   unsigned char *alpn_protocols;
+   unsigned int alpn_protocols_length;
    _Atomic unsigned refs;
 };
 
@@ -290,6 +301,7 @@ static struct fly_module *load_from_directory(const char *directory,
    LOAD(module, SSL_CTX_use_certificate_chain_file, module->ssl);
    LOAD(module, SSL_CTX_use_PrivateKey_file, module->ssl);
    LOAD(module, SSL_CTX_check_private_key, module->ssl);
+   LOAD(module, SSL_CTX_set_alpn_select_cb, module->ssl);
    LOAD(module, SSL_new, module->ssl);
    LOAD(module, SSL_free, module->ssl);
    LOAD(module, SSL_set_fd, module->ssl);
@@ -297,6 +309,8 @@ static struct fly_module *load_from_directory(const char *directory,
    LOAD(module, SSL_set_accept_state, module->ssl);
    LOAD(module, SSL_ctrl, module->ssl);
    LOAD(module, SSL_set1_host, module->ssl);
+   LOAD(module, SSL_set_alpn_protos, module->ssl);
+   LOAD(module, SSL_get0_alpn_selected, module->ssl);
    LOAD(module, SSL_do_handshake, module->ssl);
    LOAD(module, SSL_read, module->ssl);
    LOAD(module, SSL_write, module->ssl);
@@ -341,10 +355,54 @@ static void provider_error(struct fly_module *module, char *buffer, size_t size,
    else set_error(buffer, size, fallback);
 }
 
+static int valid_alpn_list(const unsigned char *protocols, unsigned int length)
+{
+   unsigned int cursor = 0;
+   if (length != 0 && protocols == NULL) return 0;
+   while (cursor < length) {
+      unsigned int item_length = protocols[cursor++];
+      if (item_length == 0 || item_length > length - cursor) return 0;
+      cursor += item_length;
+   }
+   return cursor == length;
+}
+
+static int select_alpn(SSL *ssl, const unsigned char **selected,
+                       unsigned char *selected_length,
+                       const unsigned char *offered,
+                       unsigned int offered_length, void *argument)
+{
+   struct fly_provider *provider = argument;
+   unsigned int server_cursor = 0;
+   (void)ssl;
+   if (!valid_alpn_list(offered, offered_length)) return SSL_TLSEXT_ERR_NOACK;
+   while (server_cursor < provider->alpn_protocols_length) {
+      unsigned int server_length = provider->alpn_protocols[server_cursor++];
+      const unsigned char *server_value =
+        provider->alpn_protocols + server_cursor;
+      unsigned int client_cursor = 0;
+      while (client_cursor < offered_length) {
+         unsigned int client_length = offered[client_cursor++];
+         const unsigned char *client_value = offered + client_cursor;
+         if (client_length == server_length &&
+             memcmp(client_value, server_value, server_length) == 0) {
+            *selected = client_value;
+            *selected_length = (unsigned char)client_length;
+            return SSL_TLSEXT_ERR_OK;
+         }
+         client_cursor += client_length;
+      }
+      server_cursor += server_length;
+   }
+   return SSL_TLSEXT_ERR_NOACK;
+}
+
 void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
                                             const char *certificate,
                                             const char *private_key,
                                             const char *directory,
+                                            const unsigned char *protocols,
+                                            unsigned int protocols_length,
                                             char *error, size_t error_size)
 {
    struct fly_module *module = load_module(directory, error, error_size);
@@ -359,11 +417,29 @@ void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
    }
    provider->module = module;
    provider->side = side;
+   if (!valid_alpn_list(protocols, protocols_length)) {
+      set_error(error, error_size, "invalid ALPN protocol list");
+      free(provider);
+      destroy_module(module);
+      return NULL;
+   }
+   if (protocols_length != 0) {
+      provider->alpn_protocols = malloc(protocols_length);
+      if (provider->alpn_protocols == NULL) {
+         set_error(error, error_size, "cannot allocate ALPN protocol list");
+         free(provider);
+         destroy_module(module);
+         return NULL;
+      }
+      memcpy(provider->alpn_protocols, protocols, protocols_length);
+      provider->alpn_protocols_length = protocols_length;
+   }
    atomic_init(&provider->refs, 1);
    module->ERR_clear_error();
    provider->ctx = module->SSL_CTX_new(module->TLS_method());
    if (provider->ctx == NULL) {
       provider_error(module, error, error_size, "SSL_CTX_new failed");
+      free(provider->alpn_protocols);
       free(provider);
       destroy_module(module);
       return NULL;
@@ -373,6 +449,7 @@ void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
       provider_error(module, error, error_size,
                      "cannot require TLS version 1.2 or newer");
       module->SSL_CTX_free(provider->ctx);
+      free(provider->alpn_protocols);
       free(provider);
       destroy_module(module);
       return NULL;
@@ -386,6 +463,7 @@ void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
             provider_error(module, error, error_size,
                            "cannot load client trust file");
             module->SSL_CTX_free(provider->ctx);
+            free(provider->alpn_protocols);
             free(provider);
             destroy_module(module);
             return NULL;
@@ -394,6 +472,7 @@ void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
          provider_error(module, error, error_size,
                         "cannot load default client trust paths");
          module->SSL_CTX_free(provider->ctx);
+         free(provider->alpn_protocols);
          free(provider);
          destroy_module(module);
          return NULL;
@@ -408,10 +487,14 @@ void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
          provider_error(module, error, error_size,
                         "cannot load matching server certificate and key");
          module->SSL_CTX_free(provider->ctx);
+         free(provider->alpn_protocols);
          free(provider);
          destroy_module(module);
          return NULL;
       }
+      if (provider->alpn_protocols_length != 0)
+         module->SSL_CTX_set_alpn_select_cb(provider->ctx, select_alpn,
+                                             provider);
    }
    return provider;
 }
@@ -421,6 +504,7 @@ static void provider_release(struct fly_provider *provider)
    if (atomic_fetch_sub_explicit(&provider->refs, 1, memory_order_acq_rel) == 1) {
       struct fly_module *module = provider->module;
       module->SSL_CTX_free(provider->ctx);
+      free(provider->alpn_protocols);
       free(provider);
       destroy_module(module);
    }
@@ -465,6 +549,8 @@ void flyology_tls_openssl_provider_version(void *handle, char *buffer,
 
 void *flyology_tls_openssl_session_create(void *provider_handle, int fd,
                                            int side, const char *server_name,
+                                           const unsigned char *protocols,
+                                           unsigned int protocols_length,
                                            char *error, size_t error_size)
 {
    struct fly_provider *provider = provider_handle;
@@ -476,6 +562,12 @@ void *flyology_tls_openssl_session_create(void *provider_handle, int fd,
    }
    if (provider->side != side) {
       set_error(error, error_size, "provider role does not match session");
+      provider_release(provider);
+      return NULL;
+   }
+   if (!valid_alpn_list(protocols, protocols_length) ||
+       (side != 0 && protocols_length != 0)) {
+      set_error(error, error_size, "invalid per-session ALPN protocol list");
       provider_release(provider);
       return NULL;
    }
@@ -514,6 +606,16 @@ void *flyology_tls_openssl_session_create(void *provider_handle, int fd,
           module->SSL_set1_host(session->ssl, server_name) != 1) {
          provider_error(module, error, error_size,
                         "cannot configure SNI and hostname verification");
+         module->SSL_free(session->ssl);
+         free(session);
+         provider_release(provider);
+         return NULL;
+      }
+      if (protocols_length != 0 &&
+          module->SSL_set_alpn_protos(session->ssl, protocols,
+                                      protocols_length) != 0) {
+         provider_error(module, error, error_size,
+                        "cannot configure ALPN protocol offer");
          module->SSL_free(session->ssl);
          free(session);
          provider_release(provider);
@@ -640,4 +742,20 @@ void flyology_tls_openssl_session_error(void *handle, char *buffer, size_t size)
    set_error(buffer, size,
              session != NULL && session->error[0] != '\0'
                ? session->error : "TLS provider failed");
+}
+
+size_t flyology_tls_openssl_session_selected_protocol(void *handle,
+                                                       unsigned char *buffer,
+                                                       size_t size)
+{
+   struct fly_session *session = handle;
+   const unsigned char *selected = NULL;
+   unsigned int selected_length = 0;
+   if (session == NULL) return 0;
+   session->provider->module->SSL_get0_alpn_selected
+     (session->ssl, &selected, &selected_length);
+   if (selected == NULL || selected_length == 0) return 0;
+   if (selected_length > size) return 0;
+   memcpy(buffer, selected, selected_length);
+   return selected_length;
 }

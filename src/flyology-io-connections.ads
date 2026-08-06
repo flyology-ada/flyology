@@ -294,6 +294,7 @@ private
    --  @param Backend Provider used to create the session
    --  @param Side Client or server handshake role
    --  @param Server_Name Client verification name or empty server name
+   --  @param Factory Capability-specific session factory
    --  @param Timeout Shared operation deadline in seconds
    --  @param Token Optional cancellation source
    procedure Upgrade_TLS
@@ -301,8 +302,20 @@ private
       Backend     : in out Flyology.IO.TLS.Provider'Class;
       Side        : Flyology.IO.TLS.Role;
       Server_Name : String;
+      Factory     : not null access function
+        (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
       Timeout     : Duration;
       Token       : access Cancellation_Token);
+
+   --  @exclude
+   --  Query an installed TLS session while holding the connection lease.
+   --  @param Item Upgraded admitted connection to inspect
+   --  @param Query Session-specific query callback
+   --  @return Stable query result copied before releasing the lease
+   function Query_TLS_Session
+     (Item  : in out Connection;
+      Query : not null access function
+        (Value : Flyology.IO.TLS.Session'Class) return String) return String;
 
    --  @exclude
    --  @param Item Upgraded admitted connection being shut down

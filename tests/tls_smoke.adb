@@ -11,6 +11,7 @@ with Flyology.IO.Connections;
 with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
+with Flyology.IO.TLS.ALPN;
 with Flyology.IO.TLS.OpenSSL;
 with Flyology.IO.TLS.Testing;
 with Interfaces.C;
@@ -20,6 +21,7 @@ procedure TLS_Smoke is
    package Connections renames Flyology.IO.Connections;
    package Connection_TLS renames Flyology.IO.Connections.TLS;
    package TLS renames Flyology.IO.TLS;
+   package ALPN renames Flyology.IO.TLS.ALPN;
    package TLS_Testing renames Flyology.IO.TLS.Testing;
    package OpenSSL renames Flyology.IO.TLS.OpenSSL;
    package Sockets renames Flyology.IO.Sockets;
@@ -27,6 +29,7 @@ procedure TLS_Smoke is
    use Ada.Streams;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
+   use type ALPN.Protocol_List;
 
    Certificate : constant String :=
      "tests/fixtures/tls/server-cert.pem";
@@ -57,6 +60,8 @@ procedure TLS_Smoke is
 
    Client_Backend : OpenSSL.OpenSSL_Provider;
    Server_Backend : OpenSSL.OpenSSL_Provider;
+   H2_Then_HTTP_1_1 : constant ALPN.Protocol_List :=
+     ALPN.Offer ("h2") & "http/1.1";
 
    protected type Outcome is
       procedure Report (Passed : Boolean);
@@ -95,8 +100,9 @@ procedure TLS_Smoke is
          Payload (Index) := Stream_Element (Index mod 251);
       end loop;
       Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
-      TLS.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
+      ALPN.Take
+        (Client_Backend, Client_Socket, TLS.Client, "localhost",
+         H2_Then_HTTP_1_1, Client);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
       pragma Assert (not Sockets.Is_Open (Client_Socket));
       pragma Assert (not Sockets.Is_Open (Server_Socket));
@@ -357,8 +363,9 @@ procedure TLS_Smoke is
       Result        : Outcome;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Silent_Peer);
-      TLS.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
+      ALPN.Take
+        (Client_Backend, Client_Socket, TLS.Client, "localhost",
+         H2_Then_HTTP_1_1, Client);
       declare
          task Timer is
             pragma Task_Info (Model);
@@ -435,8 +442,9 @@ procedure TLS_Smoke is
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Silent_Peer);
-      TLS.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
+      ALPN.Take
+        (Client_Backend, Client_Socket, TLS.Client, "localhost",
+         H2_Then_HTTP_1_1, Client);
       declare
          task Waiter is
             pragma Task_Info (Model);
@@ -1528,12 +1536,106 @@ procedure TLS_Smoke is
       Sockets.Close_Socket (New_Peer);
    end Run_Generation_Reuse;
 
+   procedure Run_ALPN_Negotiation
+     (Model            : Flyology.Execution_Model;
+      Server_Protocols : ALPN.Protocol_List;
+      Expected         : String)
+   is
+      Client_Provider : OpenSSL.OpenSSL_Provider;
+      Server_Provider : OpenSSL.OpenSSL_Provider;
+      Client_Socket   : Sockets.Socket_Type;
+      Server_Socket   : Sockets.Socket_Type;
+      Client          : TLS.Connection;
+      Server          : TLS.Connection;
+      Result          : Outcome;
+   begin
+      OpenSSL.Initialize_Client
+        (Client_Provider,
+         CA_File           => Certificate,
+         Library_Directory => Library_Directory);
+      OpenSSL.Initialize_Server
+        (Server_Provider, Certificate, Private_Key, Server_Protocols,
+         Library_Directory => Library_Directory);
+      Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
+      ALPN.Take
+        (Client_Provider, Client_Socket, TLS.Client, "localhost",
+         H2_Then_HTTP_1_1, Client);
+      TLS.Take
+        (Server_Provider, Server_Socket, TLS.Server, "", Server);
+
+      declare
+         task Client_Task is
+            pragma Task_Info (Model);
+         end Client_Task;
+         task Server_Task is
+            pragma Task_Info (Model);
+         end Server_Task;
+
+         task body Client_Task is
+         begin
+            TLS.Handshake (Client, Timeout => 5.0);
+            Result.Report (True);
+         exception
+            when others =>
+               Result.Report (False);
+         end Client_Task;
+
+         task body Server_Task is
+         begin
+            TLS.Handshake (Server, Timeout => 5.0);
+            Result.Report (True);
+         exception
+            when others =>
+               Result.Report (False);
+         end Server_Task;
+      begin
+         Result.Wait;
+      end;
+
+      pragma Assert (Result.Passed);
+      pragma Assert (ALPN.Selected_Protocol (Client) = Expected);
+      pragma Assert (ALPN.Selected_Protocol (Server) = Expected);
+      TLS.Close (Client);
+      TLS.Close (Server);
+   end Run_ALPN_Negotiation;
+
+   procedure Run_ALPN_Invalid_OpenSSL is
+      Baseline : constant Interfaces.C.unsigned := Live_OpenSSL_Modules;
+   begin
+      declare
+         Backend : OpenSSL.OpenSSL_Provider;
+         Socket  : Sockets.Socket_Type;
+         Peer    : Sockets.Socket_Type;
+         Item    : TLS.Connection;
+         Rejected : Boolean := False;
+      begin
+         OpenSSL.Initialize_Server
+           (Backend, Certificate, Private_Key,
+            Library_Directory => Library_Directory);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         begin
+            ALPN.Take
+              (Backend, Socket, TLS.Server, "", ALPN.Offer ("h2"), Item);
+         exception
+            when Program_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+         pragma Assert (Sockets.Is_Open (Socket));
+         pragma Assert (not TLS.Is_Open (Item));
+         Sockets.Close_Socket (Socket);
+         Sockets.Close_Socket (Peer);
+      end;
+      pragma Assert (Live_OpenSSL_Modules = Baseline);
+   end Run_ALPN_Invalid_OpenSSL;
+
    procedure Run_Provider_Lifetime is
       Client_Socket : Sockets.Socket_Type;
       Server_Socket : Sockets.Socket_Type;
       Client        : TLS.Connection;
       Server        : TLS.Connection;
       Result        : Outcome;
+      Baseline      : constant Interfaces.C.unsigned := Live_OpenSSL_Modules;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
       declare
@@ -1543,9 +1645,11 @@ procedure TLS_Smoke is
            (Short_Lived,
             CA_File           => Certificate,
             Library_Directory => Library_Directory);
-         TLS.Take
-           (Short_Lived, Client_Socket, TLS.Client, "localhost", Client);
+         ALPN.Take
+           (Short_Lived, Client_Socket, TLS.Client, "localhost",
+            H2_Then_HTTP_1_1, Client);
       end;
+      pragma Assert (Live_OpenSSL_Modules = Baseline + 1);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
 
       declare
@@ -1559,6 +1663,9 @@ procedure TLS_Smoke is
          task body Client_Task is
          begin
             TLS.Handshake (Client, Timeout => 5.0);
+            if ALPN.Selected_Protocol (Client)'Length /= 0 then
+               raise Program_Error with "unexpected ALPN selection";
+            end if;
             TLS.Shutdown (Client, Timeout => 5.0);
             Result.Report (True);
          exception
@@ -1581,6 +1688,7 @@ procedure TLS_Smoke is
       pragma Assert (Result.Passed);
       TLS.Close (Client);
       TLS.Close (Server);
+      pragma Assert (Live_OpenSSL_Modules = Baseline);
    end Run_Provider_Lifetime;
 
 begin
@@ -1616,6 +1724,19 @@ begin
    Run_Empty_Control (Flyology.Lightweight_Task);
    Run_Empty_Control (Flyology.Native_Task);
    Run_Generation_Reuse;
+   Run_ALPN_Negotiation
+     (Flyology.Lightweight_Task, ALPN.Empty_Protocol_List, "");
+   Run_ALPN_Negotiation
+     (Flyology.Native_Task, ALPN.Empty_Protocol_List, "");
+   Run_ALPN_Negotiation
+     (Flyology.Lightweight_Task, H2_Then_HTTP_1_1, "h2");
+   Run_ALPN_Negotiation
+     (Flyology.Native_Task, H2_Then_HTTP_1_1, "h2");
+   Run_ALPN_Negotiation
+     (Flyology.Lightweight_Task, ALPN.Offer ("http/1.1"), "http/1.1");
+   Run_ALPN_Negotiation
+     (Flyology.Native_Task, ALPN.Offer ("http/1.1"), "http/1.1");
+   Run_ALPN_Invalid_OpenSSL;
    Run_Close_Finalization_Fault;
    Run_Loader_Error;
    Run_Provider_Lifetime;

@@ -10,6 +10,9 @@ package body Flyology.IO.TLS.OpenSSL is
    Error_Capacity : constant := 1_024;
    subtype Error_Buffer is
      C.char_array (0 .. C.size_t (Error_Capacity - 1));
+   type Unsigned_Char_Array is
+     array (C.size_t range <>) of aliased C.unsigned_char
+     with Convention => C;
 
    function C_Provider_Create
      (Side        : C.int;
@@ -17,6 +20,8 @@ package body Flyology.IO.TLS.OpenSSL is
       Certificate : CS.chars_ptr;
       Private_Key : CS.chars_ptr;
       Directory   : CS.chars_ptr;
+      Protocols       : System.Address;
+      Protocol_Length : C.unsigned;
       Error       : System.Address;
       Error_Size  : C.size_t) return System.Address;
    pragma Import
@@ -43,6 +48,8 @@ package body Flyology.IO.TLS.OpenSSL is
       FD          : C.int;
       Side        : C.int;
       Server_Name : CS.chars_ptr;
+      Protocols       : System.Address;
+      Protocol_Length : C.unsigned;
       Error       : System.Address;
       Error_Size  : C.size_t) return System.Address;
    pragma Import
@@ -76,6 +83,14 @@ package body Flyology.IO.TLS.OpenSSL is
       Size   : C.size_t);
    pragma Import (C, C_Session_Error, "flyology_tls_openssl_session_error");
 
+   function C_Selected_Protocol
+     (Handle : System.Address;
+      Buffer : System.Address;
+      Size   : C.size_t) return C.size_t;
+   pragma Import
+     (C, C_Selected_Protocol,
+      "flyology_tls_openssl_session_selected_protocol");
+
    function Image (Buffer : Error_Buffer) return String is
      (C.To_Ada (Buffer, Trim_Nul => True));
 
@@ -106,6 +121,37 @@ package body Flyology.IO.TLS.OpenSSL is
          when others => return Failed;
       end case;
    end Status;
+
+   function Encode
+     (Protocols : ALPN.Protocol_List)
+      return Ada.Streams.Stream_Element_Array
+   is
+      Length : Natural := 0;
+   begin
+      for Index in 1 .. ALPN.Count (Protocols) loop
+         Length := Length + ALPN.Identifier (Protocols, Index)'Length + 1;
+      end loop;
+      declare
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Length));
+         Cursor : Ada.Streams.Stream_Element_Offset := Result'First;
+      begin
+         for Index in 1 .. ALPN.Count (Protocols) loop
+            declare
+               Value : constant String := ALPN.Identifier (Protocols, Index);
+            begin
+               Result (Cursor) := Ada.Streams.Stream_Element (Value'Length);
+               Cursor := Cursor + 1;
+               for Element of Value loop
+                  Result (Cursor) :=
+                    Ada.Streams.Stream_Element (Character'Pos (Element));
+                  Cursor := Cursor + 1;
+               end loop;
+            end;
+         end loop;
+         return Result;
+      end;
+   end Encode;
 
    protected body Provider_State is
       procedure Install
@@ -143,6 +189,8 @@ package body Flyology.IO.TLS.OpenSSL is
         (FD          : C.int;
          Side        : Role;
          Server_Name : CS.chars_ptr;
+         Protocols       : System.Address;
+         Protocol_Length : C.unsigned;
          Error       : System.Address;
          Error_Size  : C.size_t;
          Value       : out System.Address)
@@ -156,7 +204,7 @@ package body Flyology.IO.TLS.OpenSSL is
          end if;
          Value := C_Session_Create
            (Handle, FD, (if Side = Client then 0 else 1), Server_Name,
-            Error, Error_Size);
+            Protocols, Protocol_Length, Error, Error_Size);
       end Create_Session;
 
       procedure Retain
@@ -177,7 +225,8 @@ package body Flyology.IO.TLS.OpenSSL is
       CA_File           : String;
       Certificate_File  : String;
       Private_Key_File  : String;
-      Library_Directory : String)
+      Library_Directory : String;
+      Protocols         : ALPN.Protocol_List)
    is
       CA          : CS.chars_ptr := CS.Null_Ptr;
       Certificate : CS.chars_ptr := CS.Null_Ptr;
@@ -185,6 +234,8 @@ package body Flyology.IO.TLS.OpenSSL is
       Directory   : CS.chars_ptr := CS.Null_Ptr;
       Error       : aliased Error_Buffer := (others => C.nul);
       Value       : System.Address := System.Null_Address;
+      Encoded     : aliased constant Ada.Streams.Stream_Element_Array :=
+        Encode (Protocols);
    begin
       if Item.State.Is_Available then
          raise Program_Error with "OpenSSL provider is already initialized";
@@ -201,6 +252,9 @@ package body Flyology.IO.TLS.OpenSSL is
       Value := C_Provider_Create
         ((if Side = Client then 0 else 1),
          CA, Certificate, Private_Key, Directory,
+         (if Encoded'Length = 0 then System.Null_Address
+          else Encoded'Address),
+         C.unsigned (Encoded'Length),
          Error'Address, Error'Length);
       CS.Free (CA);
       CS.Free (Certificate);
@@ -231,7 +285,9 @@ package body Flyology.IO.TLS.OpenSSL is
       Library_Directory : String := "")
    is
    begin
-      Initialize (Item, Client, CA_File, "", "", Library_Directory);
+      Initialize
+        (Item, Client, CA_File, "", "", Library_Directory,
+         ALPN.Empty_Protocol_List);
    end Initialize_Client;
 
    procedure Initialize_Server
@@ -247,7 +303,24 @@ package body Flyology.IO.TLS.OpenSSL is
       end if;
       Initialize
         (Item, Server, "", Certificate_File, Private_Key_File,
-         Library_Directory);
+         Library_Directory, ALPN.Empty_Protocol_List);
+   end Initialize_Server;
+
+   procedure Initialize_Server
+     (Item              : in out OpenSSL_Provider;
+      Certificate_File  : String;
+      Private_Key_File  : String;
+      Protocols         : ALPN.Protocol_List;
+      Library_Directory : String := "")
+   is
+   begin
+      if Certificate_File'Length = 0 or else Private_Key_File'Length = 0 then
+         raise Program_Error with
+           "OpenSSL server requires certificate and key";
+      end if;
+      Initialize
+        (Item, Server, "", Certificate_File, Private_Key_File,
+         Library_Directory, Protocols);
    end Initialize_Server;
 
    function Version (Item : OpenSSL_Provider) return String is
@@ -292,14 +365,35 @@ package body Flyology.IO.TLS.OpenSSL is
       Side        : Role;
       Server_Name : String) return Session_Access
    is
-      Name  : CS.chars_ptr := CS.Null_Ptr;
-      Error : aliased Error_Buffer := (others => C.nul);
-      Value : System.Address := System.Null_Address;
+   begin
+      return Create_Session
+        (Item, FD, Side, Server_Name, ALPN.Empty_Protocol_List);
+   end Create_Session;
+
+   overriding function Create_Session
+     (Item        : in out OpenSSL_Provider;
+      FD          : Descriptor;
+      Side        : Role;
+      Server_Name : String;
+      Protocols   : ALPN.Protocol_List) return Session_Access
+   is
+      Name    : CS.chars_ptr := CS.Null_Ptr;
+      Error   : aliased Error_Buffer := (others => C.nul);
+      Value   : System.Address := System.Null_Address;
+      Encoded : aliased constant Ada.Streams.Stream_Element_Array :=
+        Encode (Protocols);
    begin
       Reject_Nul (Server_Name, "TLS server name");
+      if Side = Server and then Encoded'Length /= 0 then
+         raise Program_Error with
+           "OpenSSL server sessions use provider-level ALPN protocols";
+      end if;
       Name := CS.New_String (Server_Name);
       Item.State.Create_Session
-        (C.int (FD), Side, Name, Error'Address, Error'Length, Value);
+        (C.int (FD), Side, Name,
+         (if Encoded'Length = 0 then System.Null_Address
+          else Encoded'Address),
+         C.unsigned (Encoded'Length), Error'Address, Error'Length, Value);
       CS.Free (Name);
       if Value = System.Null_Address then
          raise TLS_Error with "OpenSSL: " & Image (Error);
@@ -373,6 +467,20 @@ package body Flyology.IO.TLS.OpenSSL is
       C_Session_Error (Item.Handle, Buffer'Address, Buffer'Length);
       return "OpenSSL: " & Image (Buffer);
    end Error_Message;
+
+   overriding function Selected_Protocol
+     (Item : OpenSSL_Session) return String
+   is
+      Buffer : aliased Unsigned_Char_Array (0 .. 254) := (others => 0);
+      Length : constant C.size_t :=
+        C_Selected_Protocol (Item.Handle, Buffer'Address, Buffer'Length);
+      Result : String (1 .. Natural (Length));
+   begin
+      for Index in Result'Range loop
+         Result (Index) := Character'Val (Buffer (C.size_t (Index - 1)));
+      end loop;
+      return Result;
+   end Selected_Protocol;
 
    overriding procedure Finalize (Item : in out OpenSSL_Session) is
    begin

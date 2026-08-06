@@ -1,5 +1,6 @@
 with Interfaces.C;
 with Interfaces.C.Strings;
+with Flyology.IO.TLS.ALPN;
 with System;
 
 --  Adapts OpenSSL 3.x to Flyology's provider-neutral nonblocking TLS engine.
@@ -23,7 +24,7 @@ package Flyology.IO.TLS.OpenSSL is
    --  call on a provider after its finalization begins. Sessions already
    --  created remain usable after provider finalization.
    type OpenSSL_Provider is
-     new Ada.Finalization.Limited_Controlled and Provider with private;
+     new Ada.Finalization.Limited_Controlled and ALPN.Provider with private;
 
    --  Configure a client provider. An empty CA_File selects OpenSSL's default
    --  trust paths. Peer-chain and DNS hostname verification are always on;
@@ -56,6 +57,25 @@ package Flyology.IO.TLS.OpenSSL is
      (Item              : in out OpenSSL_Provider;
       Certificate_File  : String;
       Private_Key_File  : String;
+      Library_Directory : String := "");
+
+   --  Configure a server provider and its ordered ALPN preference list. During
+   --  each handshake OpenSSL selects the first configured identifier also
+   --  offered by the client. No overlap or an empty list yields no selection.
+   --  Credential, loading, and task-safety behavior match Initialize_Server.
+   --  @param Item Provider to initialize
+   --  @param Certificate_File PEM leaf certificate and optional chain
+   --  @param Private_Key_File PEM private key matching Certificate_File
+   --  @param Protocols Ordered server protocol preference list
+   --  @param Library_Directory Optional directory containing a matched pair
+   --  @exception TLS_Error Loading or credential validation fails
+   --  @exception Program_Error Item is initialized, a required path is empty,
+   --     or a path contains an embedded NUL
+   procedure Initialize_Server
+     (Item              : in out OpenSSL_Provider;
+      Certificate_File  : String;
+      Private_Key_File  : String;
+      Protocols         : ALPN.Protocol_List;
       Library_Directory : String := "");
 
    --  Return the loaded OpenSSL version text, or an empty String before
@@ -95,6 +115,26 @@ package Flyology.IO.TLS.OpenSSL is
       Side        : Role;
       Server_Name : String) return Session_Access;
 
+   --  Allocate a nonblocking OpenSSL session and preserve the ordered client
+   --  ALPN offer. Empty Protocols sends no ALPN extension. A server provider
+   --  obtains its selection list from the ALPN Initialize_Server overload and
+   --  therefore accepts only an empty per-session Protocols list.
+   --  @param Item Initialized provider
+   --  @param FD Borrowed connected descriptor
+   --  @param Side Role matching the provider configuration
+   --  @param Server_Name Verified client DNS name, or empty for a server
+   --  @param Protocols Ordered client offer or empty server list
+   --  @return ALPN-capable provider session retained across readiness retries
+   --  @exception TLS_Error OpenSSL session setup fails
+   --  @exception Program_Error Server_Name contains an embedded NUL or a
+   --     server session receives a nonempty Protocols list
+   overriding function Create_Session
+     (Item        : in out OpenSSL_Provider;
+      FD          : Descriptor;
+      Side        : Role;
+      Server_Name : String;
+      Protocols   : ALPN.Protocol_List) return Session_Access;
+
 private
    --  Serializes access to the refcounted C provider across creation, queries,
    --  and controlled finalization.
@@ -114,6 +154,8 @@ private
         (FD          : Interfaces.C.int;
          Side        : Role;
          Server_Name : Interfaces.C.Strings.chars_ptr;
+         Protocols       : System.Address;
+         Protocol_Length : Interfaces.C.unsigned;
          Error       : System.Address;
          Error_Size  : Interfaces.C.size_t;
          Value       : out System.Address);
@@ -128,7 +170,7 @@ private
 
    --  Controlled public provider state guarded by Provider_State.
    type OpenSSL_Provider is
-     new Ada.Finalization.Limited_Controlled and Provider with record
+     new Ada.Finalization.Limited_Controlled and ALPN.Provider with record
       State : Provider_State;
    end record;
 
@@ -137,7 +179,7 @@ private
    overriding procedure Finalize (Item : in out OpenSSL_Provider);
 
    --  Owning handle for one C adapter session.
-   type OpenSSL_Session is new Session with record
+   type OpenSSL_Session is new Session and ALPN.Session with record
       Handle : System.Address := System.Null_Address;
    end record;
 
@@ -173,6 +215,11 @@ private
    --  @param Item Failed session
    --  @return Stable diagnostic copy
    overriding function Error_Message (Item : OpenSSL_Session) return String;
+   --  Copy OpenSSL's negotiated ALPN identifier after handshake.
+   --  @param Item Handshaken session to inspect
+   --  @return Selected opaque identifier or an empty String
+   overriding function Selected_Protocol
+     (Item : OpenSSL_Session) return String;
    --  Release OpenSSL session state without closing its borrowed descriptor.
    --  @param Item Session being finalized
    overriding procedure Finalize (Item : in out OpenSSL_Session);

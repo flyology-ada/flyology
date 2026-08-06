@@ -293,6 +293,34 @@ package Flyology.IO.TLS is
    function Is_Open (Item : Connection) return Boolean;
 
 private
+   --  Child capabilities use these callbacks to share the connection
+   --  ownership and serialization machinery without extending Provider's
+   --  required primitive set.
+   --  @exclude
+   --  @param Backend Provider used for validation and diagnostics
+   --  @param Socket Connected socket transferred on success
+   --  @param Side Client or server handshake role
+   --  @param Server_Name Client verification name or empty server name
+   --  @param Factory Capability-specific session factory
+   --  @param Item Closed connection receiving the session
+   procedure Take_With_Factory
+     (Backend     : in out Provider'Class;
+      Socket      : in out Flyology.IO.Sockets.Socket_Type;
+      Side        : Role;
+      Server_Name : String;
+      Factory     : not null access function
+        (FD : Descriptor) return Session_Access;
+      Item        : in out Connection);
+
+   --  @exclude
+   --  @param Item Open connection whose session is queried
+   --  @param Query Capability-specific session query
+   --  @return Stable query result copied under operation serialization
+   function Query_Session
+     (Item  : in out Connection;
+      Query : not null access function
+        (Value : Session'Class) return String) return String;
+
    type Descriptor_Generation is mod 2 ** 64;
    --  Distinguish successful serialization from a close observed at the gate.
    type Acquire_Result is (Acquired, Closing, Closed, Replaced);
