@@ -290,7 +290,10 @@ required by the changed boundary.
   origin groups, use `--commit` to create the standard Problem/Solution commit,
   or use `--push` to update, commit, and publish in one step. Selecting any
   crate deliberately advances all development manifests that share its source
-  origin; stable release manifests are intentionally excluded.
+  origin. A stable semantic version retires that crate's `-dev` manifests at
+  the same three-part version or lower; newer development lines remain active.
+  Retired development and stable release manifests are intentionally excluded
+  from remote resolution and edits.
 - CI in `.github/workflows/ci.yml` is the hosted reference. Do not add
   `continue-on-error` to conceal a backend failure.
 
