@@ -328,6 +328,7 @@ flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 http_smoke
 http_client_smoke
+http_client_addressing
 http_client_boundaries_smoke
 http_client_deadline_matrix
 http_client_fragmentation

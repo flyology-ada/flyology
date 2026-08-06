@@ -83,6 +83,7 @@ project Runtime_Smoke is
       "flyology-wall_clock_waits-smoke.adb",
       "http_smoke.adb",
       "http_client_smoke.adb",
+      "http_client_addressing.adb",
       "http_client_boundaries_smoke.adb",
       "http_client_deadline_matrix.adb",
       "http_client_fragmentation.adb",

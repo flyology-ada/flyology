@@ -1,6 +1,9 @@
 package body Flyology.HTTP.Client.Testing is
    use type Ada.Streams.Stream_Element_Offset;
 
+   function Serialized_Host (Value : Origin) return String is
+     (Host_Field (Value));
+
    procedure Validate_Response
      (Value : Ada.Streams.Stream_Element_Array) is
    begin

@@ -4,6 +4,12 @@ with Ada.Streams;
 --  and coverage-guided fuzzing, not application use.
 package Flyology.HTTP.Client.Testing is
 
+   --  Return the exact Host field value used by the production HTTP/1.1
+   --  serializer. This exposes no request or transport state.
+   --  @param Value Origin whose authority is serialized
+   --  @return Host field value without the field name
+   function Serialized_Host (Value : Origin) return String;
+
    --  Fixed fuzz-input capacity accepted by GNATfuzz's automatic marshaller.
    Fuzz_Capacity : constant Positive := 1_000;
    subtype Fuzz_Length is Natural range 0 .. Fuzz_Capacity;

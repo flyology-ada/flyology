@@ -491,6 +491,11 @@ private
    type Client_State_Access is access Client_State;
 
    --  @exclude
+   --  @param Value Origin serialized by the HTTP/1 implementation
+   --  @return Host field authority without the field name
+   function Host_Field (Value : Origin) return String;
+
+   --  @exclude
    --  @param Value Complete response bytes for the parser test oracle
    procedure Validate_Response_Bytes_For_Testing
      (Value : Ada.Streams.Stream_Element_Array);
