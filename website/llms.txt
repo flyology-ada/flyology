@@ -21,6 +21,6 @@ Flyology uses the terms "lightweight task" and "native task." Lightweight schedu
 
 ## Optional
 
-- [Development journal](https://flyology.org/journal/): Dated implementation notes, measurements, corrections, and operating boundaries.
+- [Development journal](https://flyology.org/journal/): Reserved for future runtime records, with links to the active HTTP and Postgres library journals.
 - [Flyology HTTP](https://http.flyology.org/): A separate HTTP/1.1 client and application-server library built on Flyology task-aware I/O.
 - [Flyology Postgres](https://postgres.flyology.org/): A separate ecosystem project exploring PostgreSQL access with Flyology.

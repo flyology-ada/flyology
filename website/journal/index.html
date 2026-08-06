@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Dated Flyology Runtime development notes, measurements, implementation details, and their operating boundaries.">
+    <meta name="description" content="The Flyology Runtime journal is reserved for future dated notes; current library records live in the HTTP and Postgres journals.">
     <meta name="theme-color" content="#17213d">
     <title>Journal · Flyology Runtime</title>
     <link rel="canonical" href="https://flyology.org/journal/">
@@ -53,22 +53,28 @@
       <header class="journal-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology Runtime</a></li><li aria-current="page">Journal</li></ol>
-          <h1>Field notes from an experimental runtime.</h1>
+          <h1>Runtime journal entries are coming.</h1>
         </div>
-        <p>Measurements, implementation decisions, and unfinished questions. Each entry keeps its environment and limits close to the finding.</p>
+        <p>This index is reserved for dated findings about the runtime itself. Library-specific records already live with the libraries that produced them.</p>
       </header>
 
-      <section class="journal-index" aria-labelledby="entries-title">
-        <h2 class="visually-hidden" id="entries-title">Journal entries</h2>
-        <a class="journal-entry" href="2026-08-teaching-programs-postgres/">
-          <time datetime="2026-08-04">04 Aug 2026</time>
-          <span class="journal-entry-copy">
-            <strong>Teaching programs to speak Postgres</strong>
-            <span>A routine database-client need became a bidirectional protocol library, and a way for application-defined programs to answer through familiar Postgres tools.</span>
-          </span>
-          <span class="journal-entry-action">Read the entry</span>
-        </a>
-      </section>
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Ecosystem journals">
+          <p class="toc-title">Ecosystem journals</p>
+          <ol>
+            <li><a href="https://http.flyology.org/journal/">Flyology HTTP</a></li>
+            <li><a href="https://postgres.flyology.org/journal/">Flyology Postgres</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section>
+            <h2>What belongs here.</h2>
+            <p>Future entries will record runtime implementation decisions, measurements, proof results, and corrections. Each entry will keep its source revision, environment, evidence, and operating limits close to the finding.</p>
+            <p>For protocol-library work available now, use the HTTP and Postgres journals in the ecosystem rail.</p>
+          </section>
+        </article>
+      </div>
     </main>
 
     <footer class="site-footer">
