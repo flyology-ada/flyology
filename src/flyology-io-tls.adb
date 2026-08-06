@@ -407,11 +407,13 @@ package body Flyology.IO.TLS is
       raise TLS_Error with Error_Message (Item);
    end Raise_Provider_Error;
 
-   procedure Take
+   procedure Take_With_Factory
      (Backend     : in out Provider'Class;
       Socket      : in out Sockets.Socket_Type;
       Side        : Role;
       Server_Name : String;
+      Factory     : not null access function
+        (FD : Descriptor) return Session_Access;
       Item        : in out Connection)
    is
       FD          : Descriptor;
@@ -432,7 +434,7 @@ package body Flyology.IO.TLS is
       Flyology.IO.Sockets.Prepare (Socket);
       FD := Flyology.IO.Sockets.Native_Descriptor (Socket);
       Disable_SIGPIPE (Interfaces.C.int (FD));
-      New_Session := Create_Session (Backend, FD, Side, Server_Name);
+      New_Session := Factory (FD);
       if New_Session = null then
          raise TLS_Error with Name (Backend) & " returned no TLS session";
       end if;
@@ -446,7 +448,37 @@ package body Flyology.IO.TLS is
             Free (New_Session);
             raise;
       end;
+   end Take_With_Factory;
+
+   procedure Take
+     (Backend     : in out Provider'Class;
+      Socket      : in out Sockets.Socket_Type;
+      Side        : Role;
+      Server_Name : String;
+      Item        : in out Connection)
+   is
+      function Factory (FD : Descriptor) return Session_Access is
+        (Create_Session (Backend, FD, Side, Server_Name));
+   begin
+      Take_With_Factory
+        (Backend, Socket, Side, Server_Name, Factory'Access, Item);
    end Take;
+
+   function Query_Session
+     (Item  : in out Connection;
+      Query : not null access function
+        (Value : Session'Class) return String) return String
+   is
+      Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      FD           : Descriptor;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Close_Source : Descriptor;
+   begin
+      Acquire_Operation
+        (Item, Started, Infinite, null, FD, Guard, Close_Source);
+      pragma Assert (FD >= 0 and then Close_Source >= 0);
+      return Query (Item.Session.all);
+   end Query_Session;
 
    procedure Handshake
      (Item    : in out Connection;

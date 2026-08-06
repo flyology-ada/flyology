@@ -857,6 +857,25 @@ trust data, certificates, and keys, so it should run before event loops start or
 from a native task. Flyology neither reads TLS records itself nor contains
 cryptographic primitives.
 
+`Flyology.IO.TLS.ALPN` is an optional capability layered over the core provider
+SPI. Existing providers remain source-compatible; an ALPN-aware provider opts
+into separate provider and session interfaces. A client builds an ordered list
+of opaque identifiers with `Offer` and `&`, supplies it to the ALPN `Take`
+overload, completes the ordinary TLS handshake, and then reads the peer's
+selection with `Selected_Protocol`. An empty result means that the peer made no
+selection. The admitted-connection API has matching
+`Flyology.IO.Connections.TLS.Upgrade` and `Selected_Protocol` operations, so a
+pooled HTTP client can negotiate before choosing its protocol implementation.
+Flyology does not interpret identifiers or decide whether a missing or fallback
+selection is acceptable.
+
+The OpenSSL adapter implements the ALPN capability. Client offers are set per
+session in caller order. The ALPN overload of `Initialize_Server` accepts an
+ordered server preference list and selects its first identifier also offered by
+the client; no overlap produces no selection. For example, an HTTP client can
+offer `ALPN.Offer ("h2") & "http/1.1"`, then require `"h2"` or use the returned
+`"http/1.1"` according to its own policy.
+
 The adapter boundary is public. A downstream crate can implement another
 provider by returning nonblocking `Complete`, `Want_Read`, `Want_Write`,
 `Peer_Closed`, or `Failed` steps. Flyology currently tests only OpenSSL 3.
@@ -2159,7 +2178,11 @@ Current smoke coverage includes:
 - generation-tagged connection close under forced descriptor-number reuse,
   simultaneous cancellation/close, readiness/timeout races in both lanes,
   exclusive same-descriptor waiters, and removal of all poller registrations;
-- OpenSSL 3 handshake, hostname verification, backpressured partial transfer,
+- provider-neutral ALPN offer ordering, validation, no-selection, `h2`, and
+  `http/1.1` fallback outcomes, retained-provider sessions, admitted-connection
+  upgrade, timeout, cancellation, and native/lightweight parity;
+- OpenSSL 3 handshake, hostname verification, ALPN no-selection, `h2`, and
+  `http/1.1` fallback negotiation, backpressured partial transfer,
   orderly `close_notify`, abrupt peer failure, timeout, immediate cancellation,
   queued cancellation and timeout, concurrent close, provider lifetime,
   mismatched-library rejection, provider result validation, explicit

@@ -302,6 +302,7 @@ thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke
 tls_smoke
+tls_alpn_smoke
 tls_state_model
 tcp_native_smoke
 wake_source_state_model

@@ -739,6 +739,8 @@ package body Flyology.IO.Connections is
       Backend     : in out TLS.Provider'Class;
       Side        : TLS.Role;
       Server_Name : String;
+      Factory     : not null access function
+        (FD : Descriptor) return TLS.Session_Access;
       Timeout     : Duration;
       Token       : access Cancellation_Token)
    is
@@ -802,8 +804,7 @@ package body Flyology.IO.Connections is
       FD := Sockets.Native_Descriptor (Guard.Socket);
       Disable_SIGPIPE (Interfaces.C.int (FD));
       Check_Setup_Deadline;
-      Session_Hold.Value :=
-        TLS.Create_Session (Backend, FD, Side, Server_Name);
+      Session_Hold.Value := Factory (FD);
       Check_Setup_Deadline;
       if Session_Hold.Value = null then
          raise TLS.TLS_Error with
@@ -821,6 +822,29 @@ package body Flyology.IO.Connections is
       Item.Controller.Finish_TLS_Upgrade (Guard.Generation);
       Disarm (Cleanup);
    end Upgrade_TLS;
+
+   function Query_TLS_Session
+     (Item  : in out Connection;
+      Query : not null access function
+        (Value : TLS.Session'Class) return String) return String
+   is
+      Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Guard        : Operation_Guard (Item'Unchecked_Access);
+      FD           : Descriptor;
+      Close_Source : Descriptor;
+      Owner        : Server_Access;
+      Transport    : Transport_Kind;
+   begin
+      Acquire_Operation
+        (Item, Started, Infinite, null,
+         FD, Guard, Close_Source, Owner, Transport);
+      pragma Assert
+        (FD >= 0 and then Close_Source >= 0 and then Owner /= null);
+      if Transport /= TLS_Transport or else Item.TLS_Session = null then
+         raise Program_Error with "connection transport does not use TLS";
+      end if;
+      return Query (Item.TLS_Session.all);
+   end Query_TLS_Session;
 
    procedure Shutdown_TLS
      (Item    : in out Connection;
