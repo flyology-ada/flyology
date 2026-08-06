@@ -6,6 +6,7 @@ package body Flyology.Observability is
    use type C.int;
    use type C.size_t;
    use type C.unsigned;
+   use type C.unsigned_long_long;
 
    ABI_Version : constant C.unsigned := 5;
 
@@ -51,6 +52,29 @@ package body Flyology.Observability is
       Snapshot_Size : C.size_t) return C.int;
    pragma Import
      (C, Runtime_Observe_Group, "flyology_runtime_observe_group");
+
+   Task_Snapshot_ABI_Version : constant C.unsigned := 1;
+   type Runtime_Task_Snapshot_Metadata is record
+      Version : C.unsigned;
+      Written : C.unsigned_long_long;
+      Total   : C.unsigned_long_long;
+   end record with Convention => C;
+
+   function Runtime_Observe_Tasks
+     (Group         : C.int;
+      Items         : System.Address;
+      Capacity      : C.size_t;
+      Item_Size     : C.size_t;
+      Metadata      : System.Address;
+      Metadata_Size : C.size_t) return C.int;
+   pragma Import
+     (C, Runtime_Observe_Tasks, "flyology_runtime_observe_tasks");
+
+   function Runtime_Current_Task_Instance return C.unsigned_long_long;
+   pragma Import
+     (C,
+      Runtime_Current_Task_Instance,
+      "flyology_runtime_current_task_instance");
 
    function Runtime_Observe_Last_Fatal return C.int;
    pragma Import
@@ -131,6 +155,46 @@ package body Flyology.Observability is
          Migrations_Out           => Counter (Raw.Migrations_Out));
       return True;
    end Snapshot;
+
+   function Current_Task_Instance return Task_Instance_Id is
+     (Task_Instance_Id (Runtime_Current_Task_Instance));
+
+   function Snapshot_Tasks
+     (Group : Group_Id;
+      Items : in out Task_Snapshot_Array;
+      Count : out Natural;
+      Total : out Counter) return Boolean
+   is
+      Metadata : aliased Runtime_Task_Snapshot_Metadata :=
+        (Version => 0, Written => 0, Total => 0);
+      Status : C.int;
+   begin
+      Count := 0;
+      Total := 0;
+      if Items'Length = 0 then
+         raise Constraint_Error with "task snapshot buffer must be nonempty";
+      end if;
+      Status := Runtime_Observe_Tasks
+        (C.int (Group),
+         Items (Items'First)'Address,
+         C.size_t (Items'Length),
+         Task_Snapshot'Size / 8,
+         Metadata'Address,
+         Runtime_Task_Snapshot_Metadata'Size / 8);
+      if Status = 0 then
+         return False;
+      elsif Status /= 1
+        or else Metadata.Version /= Task_Snapshot_ABI_Version
+        or else Metadata.Written > C.unsigned_long_long (Items'Length)
+        or else Metadata.Total < Metadata.Written
+      then
+         raise Program_Error with
+           "incompatible Flyology task snapshot ABI";
+      end if;
+      Count := Natural (Metadata.Written);
+      Total := Counter (Metadata.Total);
+      return True;
+   end Snapshot_Tasks;
 
    function Last_Fatal return Fatal_Context is
      (case Runtime_Observe_Last_Fatal is

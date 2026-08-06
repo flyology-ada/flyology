@@ -71,6 +71,7 @@ based on the surviving correspondence.
   - [Buffer-pool contention showcase](#buffer-pool-contention-showcase)
   - [Connection-density showcase](#connection-density-showcase)
   - [Task-lifecycle showcase](#task-lifecycle-showcase)
+  - [Task-snapshot contention showcase](#task-snapshot-contention-showcase)
   - [Cancellation-density showcase](#cancellation-density-showcase)
 - [Performance snapshot](#performance-snapshot)
 - [Current constraints](#current-constraints)
@@ -1454,6 +1455,28 @@ begin
 end;
 ```
 
+`Snapshot_Tasks` copies a bounded prefix of one group's lightweight task
+membership into caller-owned records. Each record contains a process-lifetime
+instance ID, scheduler state, base priority, wait/pin/deferred-reap flags, and
+usable guarded-stack bytes. It contains no ATCB, fiber, or task-control pointer.
+List order is unspecified; `Total` reports complete membership so callers can
+detect truncation. A lightweight task can correlate itself with a copied record
+through the lock-free `Current_Task_Instance`; native tasks receive
+`No_Task_Instance`.
+
+```ada
+declare
+   Items : Flyology.Observability.Task_Snapshot_Array (1 .. 32);
+   Count : Natural;
+   Total : Flyology.Observability.Counter;
+begin
+   if Flyology.Observability.Snapshot_Tasks (0, Items, Count, Total) then
+      --  Only Items (1 .. Count) was overwritten.
+      null;
+   end if;
+end;
+```
+
 A snapshot reports thread startup state and whether the group is dedicated or
 reserved; total and thread-pinned members; members in ready, waiting, running,
 migrating, and finished states;
@@ -1476,6 +1499,15 @@ group creation or migration as well as scheduler queue maintenance; it is
 intended for periodic diagnostics, not per-request instrumentation. Lifetime
 counters are updated under the owning group lock, wrap modulo 2^64, and never
 reset because groups are permanent.
+
+`Snapshot_Tasks` uses the same lock order but stops after the caller's buffer is
+full, so its locked work is `O(min(group members, buffer capacity))`. It neither
+allocates nor invokes a callback while locked. A small buffer therefore bounds
+this call's list-walk hold time independently of group size; lock-acquisition
+wait and repeated callers can still delay that group's scheduler. Task creation
+already held the registry shard and group locks before instance IDs were added.
+ID assignment occurs under the existing shard-lock acquisition and adds no new
+lock or lock order.
 
 `Made_Progress` compares two samples. A group with runnable or running work but
 no dispatch or poll progress over the sampling interval is a useful loop-lag
@@ -2284,6 +2316,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_buffer_pool_contention.sh 32 20000
 ./showcases/run_connection_density.sh
 ./showcases/run_task_lifecycle.sh
+./showcases/run_task_snapshot_contention.sh
 ./showcases/run_dormant_stack_pressure.sh 128 64
 ./showcases/run_http_benchmark.sh
 ```
@@ -2490,6 +2523,29 @@ stack size are recorded with every CSV row. A bounded 1,000-task native run is
 included as a reference; the scale and contention cases remain lightweight.
 The investigation and retained-change measurements are recorded in
 [`docs/task-lifecycle-performance.md`](docs/task-lifecycle-performance.md).
+
+### Task-snapshot contention showcase
+
+`run_task_snapshot_contention.sh` creates 1,000 or 10,000 lightweight tasks in
+one execution group, parking all but one runnable member that uses cooperative
+checkpoints. A native observer requests 1, 32, 256, or all task records. The
+saturated phase reacquires the observation locks continuously to expose the
+contention bound; 100 Hz phases measure periodic diagnostic use. The existing
+aggregate group snapshot is included as an `O(group members)` reference.
+
+Each CSV row reports call throughput, p50/p95/p99/maximum call latency, and the
+runnable member's dispatch rate relative to adjacent no-observation windows,
+along with toolchain, platform, architecture, runtime configuration, member
+count, capacity, cadence, and requested stack size. Correctness checks validate
+membership and unique nonzero IDs; timing does not determine pass or failure.
+
+```sh
+./showcases/run_task_snapshot_contention.sh 5 \
+  /tmp/flyology-task-snapshot-contention.csv
+```
+
+Design details and the retained host measurements are in
+[`docs/task-snapshot-observability.md`](docs/task-snapshot-observability.md).
 
 ### Dormant-stack pressure showcase
 

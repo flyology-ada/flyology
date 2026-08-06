@@ -5,7 +5,10 @@ with Flyology.Observability;
 with System;
 
 procedure Lifecycle_Churn_Smoke is
+   package Observation renames Flyology.Observability;
+
    use type Flyology.Observability.Counter;
+   use type Flyology.Observability.Task_Instance_Id;
    use type System.Address;
 
    Churn_Count : constant := 1_000;
@@ -232,20 +235,44 @@ procedure Lifecycle_Churn_Smoke is
      (Address_Task, Address_Access);
 
    procedure Check_Task_Address_Reuse is
-      Previous : System.Address := System.Null_Address;
-      Reused   : Boolean := False;
+      Previous          : System.Address := System.Null_Address;
+      Previous_Instance : Observation.Task_Instance_Id :=
+        Observation.No_Task_Instance;
+      Items             : Observation.Task_Snapshot_Array (1 .. 1);
+      Count             : Natural;
+      Total             : Observation.Counter;
+      Reused            : Boolean := False;
    begin
       for Attempt in 1 .. 1_000 loop
          declare
             Item : Address_Access := new Address_Task;
             Current : constant System.Address := Item.all'Address;
+            Current_Instance : Observation.Task_Instance_Id;
          begin
             while not Item.all'Terminated loop
                delay 0.000_1;
             end loop;
+            if not Observation.Snapshot_Tasks (0, Items, Count, Total)
+              or else Count /= 1
+              or else Total /= 1
+            then
+               raise Program_Error with
+                 "finished task was not observable before deallocation";
+            end if;
+            Current_Instance := Items (1).Instance;
+            if Current_Instance = Observation.No_Task_Instance then
+               raise Program_Error with "task snapshot identity was zero";
+            end if;
+            if Current = Previous
+              and then Current_Instance = Previous_Instance
+            then
+               raise Program_Error with
+                 "task snapshot identity was reused with task address";
+            end if;
             Free_Address (Item);
             Reused := Reused or else Current = Previous;
             Previous := Current;
+            Previous_Instance := Current_Instance;
          end;
          exit when Reused;
       end loop;

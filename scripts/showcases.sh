@@ -54,5 +54,12 @@ FLYOLOGY_LIFECYCLE_LARGE=1000 \
 FLYOLOGY_LIFECYCLE_NATIVE=100 \
   "$project_root/showcases/run_task_lifecycle.sh" 1
 
+printf '\n== task_snapshot_contention ==\n'
+FLYOLOGY_SNAPSHOT_SMALL=100 \
+FLYOLOGY_SNAPSHOT_LARGE=1000 \
+FLYOLOGY_SNAPSHOT_WINDOW=0.050 \
+FLYOLOGY_SNAPSHOT_PERIODIC_WINDOW=0.100 \
+  "$project_root/showcases/run_task_snapshot_contention.sh" 1
+
 printf '\n== dormant_stack_pressure ==\n'
 "$project_root/showcases/run_dormant_stack_pressure.sh"

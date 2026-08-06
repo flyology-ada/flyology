@@ -41,6 +41,15 @@ package System.Flyology.Scheduler is
    function Current_Group return Interfaces.C.int;
    pragma Export (C, Current_Group, "flyology_runtime_current_group");
 
+   --  Lock-free self-observation. The running fiber is exclusively owned by
+   --  its event-loop thread until user code suspends or returns. Native tasks
+   --  and scheduler code outside a running fiber receive zero.
+   function Current_Task_Instance return Interfaces.C.unsigned_long_long;
+   pragma Export
+     (C,
+      Current_Task_Instance,
+      "flyology_runtime_current_task_instance");
+
    function Configured_Pool_Size return Interfaces.C.int;
    pragma Export
      (C, Configured_Pool_Size, "flyology_runtime_configured_pool_size");
@@ -142,6 +151,19 @@ package System.Flyology.Scheduler is
       Snapshot      : System.Address;
       Snapshot_Size : Interfaces.C.size_t) return Interfaces.C.int;
    pragma Export (C, Observe_Group, "flyology_runtime_observe_group");
+
+   --  Internal bounded-enumeration ABI used by Flyology.Observability. Items
+   --  points at caller-owned fixed-size records; Metadata reports the copied
+   --  prefix and complete member count. The function allocates nothing and
+   --  invokes no callback while holding topology and group locks.
+   function Observe_Tasks
+     (Group         : Interfaces.C.int;
+      Items         : System.Address;
+      Capacity      : Interfaces.C.size_t;
+      Item_Size     : Interfaces.C.size_t;
+      Metadata      : System.Address;
+      Metadata_Size : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export (C, Observe_Tasks, "flyology_runtime_observe_tasks");
 
    function Observe_Last_Fatal return Interfaces.C.int;
    pragma Export

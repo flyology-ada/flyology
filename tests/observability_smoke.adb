@@ -11,26 +11,48 @@ procedure Observability_Smoke is
 
    use type Interfaces.Unsigned_64;
    use type Observation.Event_Thread_State;
+   use type Observation.Task_Instance_Id;
+   use type Observation.Task_State;
 
    Reader_Socket : Flyology.IO.Sockets.Socket_Type;
    Writer_Socket : Flyology.IO.Sockets.Socket_Type;
 
+   type Instance_Array is
+     array (Positive range <>) of Observation.Task_Instance_Id;
+
    protected Control is
-      procedure Started;
+      procedure Started
+        (Slot     : Positive;
+         Instance : Observation.Task_Instance_Id);
       procedure Finished;
       procedure Open;
       entry Wait_Until_Started;
       entry Wait_Until_Finished;
       entry Gate;
+      function Instance (Slot : Positive)
+        return Observation.Task_Instance_Id;
    private
       Started_Count  : Natural := 0;
       Finished_Count : Natural := 0;
       Is_Open        : Boolean := False;
+      Instances      : Instance_Array (1 .. 3) :=
+        (others => Observation.No_Task_Instance);
    end Control;
 
    protected body Control is
-      procedure Started is
+      procedure Started
+        (Slot     : Positive;
+         Instance : Observation.Task_Instance_Id)
+      is
       begin
+         if Slot not in Instances'Range
+           or else Instance = Observation.No_Task_Instance
+           or else Instances (Slot) /= Observation.No_Task_Instance
+         then
+            raise Program_Error with
+              "current task instance identity is inconsistent";
+         end if;
+         Instances (Slot) := Instance;
          Started_Count := Started_Count + 1;
       end Started;
 
@@ -58,12 +80,44 @@ procedure Observability_Smoke is
       begin
          null;
       end Gate;
+
+      function Instance (Slot : Positive)
+        return Observation.Task_Instance_Id is (Instances (Slot));
    end Control;
 
    Before_Release : Observation.Group_Snapshot;
    After_Release  : Observation.Group_Snapshot;
+   Task_Items : Observation.Task_Snapshot_Array (1 .. 4) :=
+     (others =>
+        (Instance           => Observation.Task_Instance_Id (42),
+         State              => Observation.Task_Ready,
+         Base_Priority      => 0,
+         Flags              => 0,
+         Stack_Usable_Bytes => 0));
+   Later_Task_Items : Observation.Task_Snapshot_Array (1 .. 3);
+   Small_Task_Items : Observation.Task_Snapshot_Array (1 .. 2);
+   Task_Count : Natural;
+   Later_Task_Count : Natural;
+   Small_Task_Count : Natural;
+   Task_Total : Observation.Counter;
+   Later_Task_Total : Observation.Counter;
+   Small_Task_Total : Observation.Counter;
    Parked_Observed : Boolean := False;
    Completion_Observed : Boolean := False;
+
+   function Contains
+     (Items    : Observation.Task_Snapshot_Array;
+      Count    : Natural;
+      Instance : Observation.Task_Instance_Id) return Boolean
+   is
+   begin
+      for Index in Items'First .. Items'First + Count - 1 loop
+         if Items (Index).Instance = Instance then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Contains;
 
    function Parked (Sample : Observation.Group_Snapshot) return Boolean is
      (Sample.Thread_State = Observation.Running
@@ -119,14 +173,14 @@ begin
 
       task body Timed is
       begin
-         Control.Started;
+         Control.Started (1, Observation.Current_Task_Instance);
          delay 0.100;
          Control.Finished;
       end Timed;
 
       task body Descriptor is
       begin
-         Control.Started;
+         Control.Started (2, Observation.Current_Task_Instance);
          if not Flyology.IO.Wait
            (Flyology.IO.Sockets.Native_Descriptor (Reader_Socket),
             Flyology.IO.For_Read,
@@ -143,7 +197,7 @@ begin
             Pin : Groups.Thread_Pin := Groups.Pin_To_Current_Thread;
             pragma Unreferenced (Pin);
          begin
-            Control.Started;
+            Control.Started (3, Observation.Current_Task_Instance);
             Control.Gate;
             Control.Finished;
          end;
@@ -164,6 +218,86 @@ begin
          end loop;
          if not Parked_Observed then
             raise Program_Error with "parked group snapshot is inconsistent";
+         end if;
+
+         if not Observation.Snapshot_Tasks
+           (1, Task_Items, Task_Count, Task_Total)
+           or else Task_Count /= 3
+           or else Task_Total /= 3
+           or else Task_Items (4).Instance /= Observation.Task_Instance_Id (42)
+         then
+            raise Program_Error with "task snapshot count is inconsistent";
+         end if;
+         declare
+            Pinned      : Natural := 0;
+            Timer_Waits : Natural := 0;
+            Descriptors : Natural := 0;
+         begin
+            for Index in 1 .. Task_Count loop
+               if Task_Items (Index).Instance = Observation.No_Task_Instance
+                 or else Task_Items (Index).State /= Observation.Task_Waiting
+                 or else Task_Items (Index).Stack_Usable_Bytes = 0
+                 or else Observation.Has_Flag
+                   (Task_Items (Index), Observation.Task_File_Wait_Flag)
+                 or else Observation.Has_Flag
+                   (Task_Items (Index),
+                    Observation.Task_Destroy_Requested_Flag)
+               then
+                  raise Program_Error with
+                    "task snapshot entry is inconsistent";
+               end if;
+               if Observation.Has_Flag
+                 (Task_Items (Index), Observation.Task_Pinned_Flag)
+               then
+                  Pinned := Pinned + 1;
+               end if;
+               if Observation.Has_Flag
+                 (Task_Items (Index), Observation.Task_Timer_Wait_Flag)
+               then
+                  Timer_Waits := Timer_Waits + 1;
+               end if;
+               if Observation.Has_Flag
+                 (Task_Items (Index), Observation.Task_Descriptor_Wait_Flag)
+               then
+                  Descriptors := Descriptors + 1;
+               end if;
+            end loop;
+            if Pinned /= 1 or else Timer_Waits /= 2 or else Descriptors /= 1
+            then
+               raise Program_Error with "task snapshot flags are inconsistent";
+            end if;
+         end;
+         if not Observation.Snapshot_Tasks
+           (1, Later_Task_Items, Later_Task_Count, Later_Task_Total)
+           or else Later_Task_Count /= 3
+           or else Later_Task_Total /= 3
+         then
+            raise Program_Error with "repeated task snapshot failed";
+         end if;
+         for Index in 1 .. Task_Count loop
+            if not Contains
+              (Later_Task_Items,
+               Later_Task_Count,
+               Task_Items (Index).Instance)
+            then
+               raise Program_Error with
+                 "task instance identity changed between snapshots";
+            end if;
+         end loop;
+         for Index in 1 .. 3 loop
+            if not Contains
+              (Task_Items, Task_Count, Control.Instance (Index))
+            then
+               raise Program_Error with
+                 "self task identity was absent from group snapshot";
+            end if;
+         end loop;
+         if not Observation.Snapshot_Tasks
+           (1, Small_Task_Items, Small_Task_Count, Small_Task_Total)
+           or else Small_Task_Count /= 2
+           or else Small_Task_Total /= 3
+         then
+            raise Program_Error with "bounded task snapshot did not truncate";
          end if;
 
          Release_All;
@@ -195,6 +329,13 @@ begin
    end loop;
    if not Completion_Observed then
       raise Program_Error with "cumulative observation counters did not move";
+   end if;
+   if not Observation.Snapshot_Tasks
+     (1, Task_Items, Task_Count, Task_Total)
+     or else Task_Count /= 0
+     or else Task_Total /= 0
+   then
+      raise Program_Error with "empty task snapshot is inconsistent";
    end if;
 
    Flyology.IO.Sockets.Close_Socket (Reader_Socket);

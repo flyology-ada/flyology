@@ -75,6 +75,9 @@ package body System.Flyology.Scheduler is
    Registry_Shard_Count : constant := 64;
    subtype Registry_Shard_Index is
      Natural range 0 .. Registry_Shard_Count - 1;
+   Instance_Shard_Span : constant C.unsigned_long_long := 2**58;
+   Instance_Sequence_Last : constant C.unsigned_long_long :=
+     Instance_Shard_Span - 1;
    --  Readiness is local to a loop, so each group owns a smaller prime-sized
    --  descriptor table. Collision chains also represent legitimate fan-out
    --  when several tasks wait on the same descriptor and direction.
@@ -181,8 +184,38 @@ package body System.Flyology.Scheduler is
    function To_Runtime_Group_Snapshot is new Ada.Unchecked_Conversion
      (System.Address, Runtime_Group_Snapshot_Access);
 
+   Task_Snapshot_ABI_Version : constant C.unsigned := 1;
+   type Runtime_Task_Snapshot is record
+      Instance           : C.unsigned_long_long;
+      State              : C.int;
+      Base_Priority      : C.int;
+      Flags              : C.unsigned;
+      Stack_Usable_Bytes : C.unsigned_long_long;
+   end record with Convention => C;
+   type Runtime_Task_Snapshot_Access is access all Runtime_Task_Snapshot;
+   function To_Runtime_Task_Snapshot is new Ada.Unchecked_Conversion
+     (System.Address, Runtime_Task_Snapshot_Access);
+
+   type Runtime_Task_Snapshot_Metadata is record
+      Version : C.unsigned;
+      Written : C.unsigned_long_long;
+      Total   : C.unsigned_long_long;
+   end record with Convention => C;
+   type Runtime_Task_Snapshot_Metadata_Access is
+     access all Runtime_Task_Snapshot_Metadata;
+   function To_Runtime_Task_Snapshot_Metadata is new Ada.Unchecked_Conversion
+     (System.Address, Runtime_Task_Snapshot_Metadata_Access);
+
+   Task_Pinned_Flag            : constant C.unsigned := 2#000001#;
+   Task_Timer_Wait_Flag        : constant C.unsigned := 2#000010#;
+   Task_Descriptor_Wait_Flag   : constant C.unsigned := 2#000100#;
+   Task_File_Wait_Flag         : constant C.unsigned := 2#001000#;
+   Task_File_Pending_Flag      : constant C.unsigned := 2#010000#;
+   Task_Destroy_Requested_Flag : constant C.unsigned := 2#100000#;
+
    type Fiber is record
       T          : System.Address := System.Null_Address;
+      Instance   : C.unsigned_long_long := 0;
       Context    : Contexts.Context_Access;
       Wrapper    : System.Address := System.Null_Address;
       Priority   : C.int := 0;
@@ -304,6 +337,8 @@ package body System.Flyology.Scheduler is
      array (Registry_Bucket_Index) of Fiber_Access;
    type Registry_Shard_Lock_Array is
      array (Registry_Shard_Index) of Scheduler_Mutex;
+   type Registry_Instance_Array is
+     array (Registry_Shard_Index) of C.unsigned_long_long;
 
    Placement_Requests : Placement_Request_Array;
    Placement_Platform_Initialized : Boolean := False;
@@ -332,6 +367,7 @@ package body System.Flyology.Scheduler is
    --  Hot Wake and Set_Priority paths take only one shard and one group.
    Topology_Lock  : Scheduler_Mutex;
    Registry_Shard_Locks : Registry_Shard_Lock_Array;
+   Registry_Instances : Registry_Instance_Array := (others => 0);
    Initialized    : Boolean := False;
    Event_Runtime_Active : C.int := 0;
    pragma Atomic (Event_Runtime_Active);
@@ -2074,6 +2110,13 @@ package body System.Flyology.Scheduler is
          Free_Fiber (Item);
          return -1;
       end if;
+      if Registry_Instances (Shard) = Instance_Sequence_Last then
+         Fatal;
+      end if;
+      Registry_Instances (Shard) := Registry_Instances (Shard) + 1;
+      Item.Instance :=
+        C.unsigned_long_long (Shard) * Instance_Shard_Span
+        + Registry_Instances (Shard);
       Lock_Group (Target);
       Register_Locked (Item);
       Link_Group_Head_Locked (Target, Item);
@@ -2129,6 +2172,11 @@ package body System.Flyology.Scheduler is
 
    function Current_Group return C.int is
      (if Current_Task = System.Null_Address then -1 else Thread_Group.Id);
+
+   function Current_Task_Instance return C.unsigned_long_long is
+     (if Is_Event_Thread and then Thread_Group.Current_Fiber /= null
+      then Thread_Group.Current_Fiber.Instance
+      else 0);
 
    function Set_Current_Dormancy
      (Policy                   : C.int;
@@ -2530,6 +2578,102 @@ package body System.Flyology.Scheduler is
       when others =>
          Fatal;
    end Observe_Group;
+
+   function Observe_Tasks
+     (Group         : C.int;
+      Items         : System.Address;
+      Capacity      : C.size_t;
+      Item_Size     : C.size_t;
+      Metadata      : System.Address;
+      Metadata_Size : C.size_t) return C.int
+   is
+      Target   : Loop_Group_Access;
+      Item     : Fiber_Access;
+      Output   : Runtime_Task_Snapshot_Access;
+      Summary  : Runtime_Task_Snapshot_Metadata_Access;
+      Written  : Natural := 0;
+      Expected : Natural;
+      Flags    : C.unsigned;
+   begin
+      if Items = System.Null_Address
+        or else Capacity = 0
+        or else Capacity > C.size_t (Natural'Last)
+        or else Item_Size /= Runtime_Task_Snapshot'Size / 8
+        or else Metadata = System.Null_Address
+        or else Metadata_Size /= Runtime_Task_Snapshot_Metadata'Size / 8
+        or else not Scheduling.Valid_Group (Group)
+      then
+         return -1;
+      elsif In_Fork_Child or else not Initialized then
+         return 0;
+      end if;
+
+      Lock_Topology;
+      Target := Groups (Group_Index (Group));
+      if Target = null then
+         Unlock_Topology;
+         return 0;
+      end if;
+
+      Lock_Group (Target);
+      Summary := To_Runtime_Task_Snapshot_Metadata (Metadata);
+      Summary.all :=
+        (Version => Task_Snapshot_ABI_Version,
+         Written => 0,
+         Total   => C.unsigned_long_long (Target.Member_Count));
+      Expected := Natural'Min (Target.Member_Count, Natural (Capacity));
+      Item := Target.Fibers;
+      while Item /= null and then Written < Expected loop
+         Output := To_Runtime_Task_Snapshot
+           (Items
+            + SSE.Storage_Offset (Written)
+              * SSE.Storage_Offset (Runtime_Task_Snapshot'Size / 8));
+         Flags := 0;
+         if Item.Thread_Pin_Count /= 0 then
+            Flags := Flags or Task_Pinned_Flag;
+         end if;
+         if Item.Timer_Index /= 0 then
+            Flags := Flags or Task_Timer_Wait_Flag;
+         end if;
+         if Item.IO_Wait then
+            Flags := Flags or Task_Descriptor_Wait_Flag;
+         end if;
+         if Item.File_Wait then
+            Flags := Flags or Task_File_Wait_Flag;
+         end if;
+         if Item.File_Pending then
+            Flags := Flags or Task_File_Pending_Flag;
+         end if;
+         if Item.Destroy_Requested then
+            Flags := Flags or Task_Destroy_Requested_Flag;
+         end if;
+         Output.all :=
+           (Instance           => Item.Instance,
+            State              =>
+              (case Item.State is
+                  when Ready     => 0,
+                  when Waiting   => 1,
+                  when Running   => 2,
+                  when Migrating => 3,
+                  when Finished  => 4),
+            Base_Priority      => Item.Priority,
+            Flags              => Flags,
+            Stack_Usable_Bytes =>
+              C.unsigned_long_long (Contexts.Stack_Size (Item.Context)));
+         Written := Written + 1;
+         Item := Item.Next_Group;
+      end loop;
+      if Written /= Expected then
+         Fatal;
+      end if;
+      Summary.Written := C.unsigned_long_long (Written);
+      Unlock_Group (Target);
+      Unlock_Topology;
+      return 1;
+   exception
+      when others =>
+         Fatal;
+   end Observe_Tasks;
 
    function Observe_Last_Fatal return C.int is (Last_Fatal_Context);
 

@@ -16,6 +16,75 @@ package Flyology.Observability with Preelaborate is
    --  Unsigned process-lifetime counter; values wrap modulo Counter'Modulus.
    subtype Counter is Interfaces.Unsigned_64;
 
+   --  Process-lifetime identity of one lightweight task instance. The value is
+   --  diagnostic only: it is not an Ada Task_Id or a task-control handle.
+   type Task_Instance_Id is new Interfaces.Unsigned_64;
+   --  Sentinel that is never assigned to a lightweight task instance.
+   No_Task_Instance : constant Task_Instance_Id := 0;
+
+   --  Return the calling lightweight task's process-lifetime diagnostic
+   --  identity without acquiring a runtime lock. A native task, including
+   --  the environment task, receives No_Task_Instance.
+   --  @return Calling lightweight task identity or No_Task_Instance
+   function Current_Task_Instance return Task_Instance_Id;
+
+   --  Scheduler state copied for one lightweight task.
+   --  @enum Task_Ready The task is runnable
+   --  @enum Task_Waiting The task is suspended
+   --  @enum Task_Running The task is executing on its event loop
+   --  @enum Task_Migrating The task is transferring between groups
+   --  @enum Task_Finished The task body finished and awaits reap
+   type Task_State is
+     (Task_Ready,
+      Task_Waiting,
+      Task_Running,
+      Task_Migrating,
+      Task_Finished)
+     with Convention => C;
+
+   --  Bit set copied with a lightweight task snapshot.
+   type Task_Flags is mod 2**32 with Size => 32, Convention => C;
+   --  The task holds at least one thread pin.
+   Task_Pinned_Flag : constant Task_Flags := 2#000001#;
+   --  The task is registered in the group deadline heap.
+   Task_Timer_Wait_Flag : constant Task_Flags := 2#000010#;
+   --  The task is waiting for descriptor readiness.
+   Task_Descriptor_Wait_Flag : constant Task_Flags := 2#000100#;
+   --  The task owns an in-flight or queued file request.
+   Task_File_Wait_Flag : constant Task_Flags := 2#001000#;
+   --  The task's file request is queued for kernel submission.
+   Task_File_Pending_Flag : constant Task_Flags := 2#010000#;
+   --  Reap was requested while the fiber was still running or migrating.
+   Task_Destroy_Requested_Flag : constant Task_Flags := 2#100000#;
+
+   --  Copied diagnostic state for one lightweight task. Instance remains
+   --  stable across migration and is never reused during the process lifetime.
+   --  @field Instance Process-lifetime lightweight task instance identity
+   --  @field State Scheduler state at the group snapshot instant
+   --  @field Base_Priority Current GNARL base priority
+   --  @field Flags Pinned, wait, pending-file, and deferred-reap flags
+   --  @field Stack_Usable_Bytes Usable bytes in the guarded fiber stack
+   type Task_Snapshot is record
+      Instance           : Task_Instance_Id := No_Task_Instance;
+      State              : Task_State := Task_Waiting;
+      Base_Priority      : Interfaces.Integer_32 := 0;
+      Flags              : Task_Flags := 0;
+      Stack_Usable_Bytes : Counter := 0;
+   end record with Convention => C;
+
+   --  Caller-owned output buffer for bounded lightweight task enumeration.
+   type Task_Snapshot_Array is array (Positive range <>) of Task_Snapshot
+     with Convention => C;
+
+   --  Test one flag in a copied task snapshot.
+   --  @param Item Snapshot to inspect
+   --  @param Flag Flag value to test
+   --  @return True when Flag is set in Item
+   function Has_Flag
+     (Item : Task_Snapshot;
+      Flag : Task_Flags) return Boolean
+   is ((Item.Flags and Flag) /= 0);
+
    --  Lifecycle of one event-loop scheduler thread.
    --  @enum Starting The thread is entering scheduler startup
    --  @enum Running The scheduler loop is active
@@ -133,6 +202,26 @@ package Flyology.Observability with Preelaborate is
    function Snapshot
      (Group  : Group_Id;
       Result : out Group_Snapshot) return Boolean;
+
+   --  Copy a bounded prefix of Group's lightweight task membership while
+   --  holding the topology and selected group scheduler locks. No allocation
+   --  or callback occurs while locked. List order is unspecified. Entries are
+   --  coherent with one another, but a later call may observe migration,
+   --  creation, or reap. Only Items (Items'First .. Items'First + Count - 1)
+   --  is overwritten; the remainder retains its incoming value. Total reports
+   --  the complete group membership, so Count < Total indicates truncation.
+   --  @param Group Execution group to observe
+   --  @param Items Caller-owned nonempty output buffer
+   --  @param Count Number of entries copied into Items
+   --  @param Total Complete group membership at the snapshot instant
+   --  @return True when Group exists; False without starting event machinery
+   --  @exception Constraint_Error Items is empty
+   --  @exception Program_Error Runtime and library task snapshot ABIs differ
+   function Snapshot_Tasks
+     (Group : Group_Id;
+      Items : in out Task_Snapshot_Array;
+      Count : out Natural;
+      Total : out Counter) return Boolean;
 
    --  Test whether dispatch or polling counters changed between snapshots.
    --  This avoids adding a clock read to each scheduler dispatch.
