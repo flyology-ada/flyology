@@ -332,6 +332,7 @@ http_client_boundaries_smoke
 http_client_body_adapters_smoke
 http_client_upload_controls_smoke
 http_client_streaming_smoke
+http_client_rfc_corpus
 http_client_parser_matrix
 http_client_parser_randomized
 http_client_pool_model

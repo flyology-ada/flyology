@@ -351,8 +351,31 @@ package body HTTP_1_Internals is
    is
       First_CRLF : constant Natural := Ada.Strings.Fixed.Index (Head, CRLF);
       Cursor     : Natural;
+      Current_Name  : Unbounded_String;
+      Current_Value : Unbounded_String;
+      Have_Field    : Boolean := False;
       Status_Line : constant String :=
         (if First_CRLF = 0 then Head else Head (Head'First .. First_CRLF - 1));
+
+      procedure Flush_Field is
+      begin
+         if not Have_Field then
+            return;
+         end if;
+         begin
+            Flyology.HTTP.Headers.Add
+              (Data.Fields, To_String (Current_Name),
+               To_String (Current_Value));
+         exception
+            when Flyology.HTTP.Headers.Headers_Too_Large =>
+               raise Response_Too_Large;
+            when Constraint_Error =>
+               raise Protocol_Error with "invalid HTTP response field";
+         end;
+         Current_Name := Null_Unbounded_String;
+         Current_Value := Null_Unbounded_String;
+         Have_Field := False;
+      end Flush_Field;
    begin
       Flyology.HTTP.Headers.Clear (Data.Fields);
       if Status_Line'Length < 12
@@ -377,9 +400,8 @@ package body HTTP_1_Internals is
          if Status_Line'Last < Start + 2
            or else (for some Index in Start .. Start + 2 =>
                       Status_Line (Index) not in '0' .. '9')
-           or else
-             (Status_Line'Last > Start + 2
-                and then Status_Line (Start + 3) /= ' ')
+           or else Status_Line'Last = Start + 2
+           or else Status_Line (Start + 3) /= ' '
          then
             raise Protocol_Error with "malformed HTTP response status";
          end if;
@@ -419,26 +441,31 @@ package body HTTP_1_Internals is
          begin
             exit when Line_Last < Cursor;
             if Head (Cursor) in ' ' | Character'Val (9) then
-               raise Protocol_Error with "obsolete folded HTTP response field";
+               if not Have_Field then
+                  raise Protocol_Error with
+                    "whitespace before first HTTP response field";
+               end if;
+               Append (Current_Value, " ");
+               Append
+                 (Current_Value, Trim_OWS (Head (Cursor .. Line_Last)));
+            else
+               Flush_Field;
+               Colon := Ada.Strings.Fixed.Index
+                 (Head (Cursor .. Line_Last), ":");
+               if Colon = 0 or else Colon = Cursor then
+                  raise Protocol_Error with "malformed HTTP response field";
+               end if;
+               Current_Name := To_Unbounded_String
+                 (Head (Cursor .. Colon - 1));
+               Current_Value := To_Unbounded_String
+                 (Trim_OWS (Head (Colon + 1 .. Line_Last)));
+               Have_Field := True;
             end if;
-            Colon := Ada.Strings.Fixed.Index (Head (Cursor .. Line_Last), ":");
-            if Colon = 0 or else Colon = Cursor then
-               raise Protocol_Error with "malformed HTTP response field";
-            end if;
-            begin
-               Flyology.HTTP.Headers.Add
-                 (Data.Fields, Head (Cursor .. Colon - 1),
-                  Trim_OWS (Head (Colon + 1 .. Line_Last)));
-            exception
-               when Flyology.HTTP.Headers.Headers_Too_Large =>
-                  raise Response_Too_Large;
-               when Constraint_Error =>
-                  raise Protocol_Error with "invalid HTTP response field";
-            end;
             exit when Mark = 0;
             Cursor := Mark + CRLF'Length;
          end;
       end loop;
+      Flush_Field;
    end Parse_Response_Head;
 
    procedure Read_Next_Head
@@ -833,23 +860,127 @@ package body HTTP_1_Internals is
       end loop;
    end Ensure_Pending;
 
+   function Is_Token_Character (Value : Character) return Boolean is
+     (Value in 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9'
+        | '!' | '#' | '$' | '%' | '&' | ''' | '*' | '+' | '-' | '.'
+        | '^' | '_' | '`' | '|' | '~');
+
+   function Is_Quoted_Text (Value : Character) return Boolean is
+     (Value = Character'Val (9)
+        or else Value = ' '
+        or else Value = '!'
+        or else Value in '#' .. '['
+        or else Value in ']' .. '~'
+        or else Character'Pos (Value) >= 128);
+
+   function Is_Quoted_Pair_Value (Value : Character) return Boolean is
+     (Value = Character'Val (9)
+        or else Value = ' '
+        or else Value in '!' .. '~'
+        or else Character'Pos (Value) >= 128);
+
+   procedure Validate_Chunk_Extensions
+     (Line : String; First_Semicolon : Natural)
+   is
+      Cursor : Natural := First_Semicolon;
+   begin
+      while Cursor <= Line'Last loop
+         if Line (Cursor) /= ';' then
+            raise Protocol_Error with "invalid HTTP chunk extension";
+         end if;
+         Cursor := Cursor + 1;
+         while Cursor <= Line'Last
+           and then Line (Cursor) in ' ' | Character'Val (9)
+         loop
+            Cursor := Cursor + 1;
+         end loop;
+         if Cursor > Line'Last
+           or else not Is_Token_Character (Line (Cursor))
+         then
+            raise Protocol_Error with "invalid HTTP chunk extension";
+         end if;
+         while Cursor <= Line'Last
+           and then Is_Token_Character (Line (Cursor))
+         loop
+            Cursor := Cursor + 1;
+         end loop;
+         while Cursor <= Line'Last
+           and then Line (Cursor) in ' ' | Character'Val (9)
+         loop
+            Cursor := Cursor + 1;
+         end loop;
+         if Cursor <= Line'Last and then Line (Cursor) = '=' then
+            Cursor := Cursor + 1;
+            while Cursor <= Line'Last
+              and then Line (Cursor) in ' ' | Character'Val (9)
+            loop
+               Cursor := Cursor + 1;
+            end loop;
+            if Cursor > Line'Last then
+               raise Protocol_Error with "invalid HTTP chunk extension";
+            elsif Line (Cursor) = '"' then
+               Cursor := Cursor + 1;
+               loop
+                  if Cursor > Line'Last then
+                     raise Protocol_Error with
+                       "unterminated HTTP chunk extension";
+                  elsif Line (Cursor) = '"' then
+                     Cursor := Cursor + 1;
+                     exit;
+                  elsif Line (Cursor) = Character'Val (16#5C#) then
+                     Cursor := Cursor + 1;
+                     if Cursor > Line'Last
+                       or else not Is_Quoted_Pair_Value (Line (Cursor))
+                     then
+                        raise Protocol_Error with
+                          "invalid HTTP chunk extension escape";
+                     end if;
+                     Cursor := Cursor + 1;
+                  elsif Is_Quoted_Text (Line (Cursor)) then
+                     Cursor := Cursor + 1;
+                  else
+                     raise Protocol_Error with
+                       "invalid HTTP chunk extension value";
+                  end if;
+               end loop;
+            elsif Is_Token_Character (Line (Cursor)) then
+               while Cursor <= Line'Last
+                 and then Is_Token_Character (Line (Cursor))
+               loop
+                  Cursor := Cursor + 1;
+               end loop;
+            else
+               raise Protocol_Error with "invalid HTTP chunk extension";
+            end if;
+            while Cursor <= Line'Last
+              and then Line (Cursor) in ' ' | Character'Val (9)
+            loop
+               Cursor := Cursor + 1;
+            end loop;
+         end if;
+         if Cursor <= Line'Last and then Line (Cursor) /= ';' then
+            raise Protocol_Error with "invalid HTTP chunk extension";
+         end if;
+      end loop;
+   end Validate_Chunk_Extensions;
+
    function Chunk_Size (Line : String) return Natural is
       Semicolon : constant Natural := Ada.Strings.Fixed.Index (Line, ";");
-      Last      : constant Natural :=
+      Last      : Natural :=
         (if Semicolon = 0 then Line'Last else Semicolon - 1);
       Result    : Natural := 0;
       Digit     : Natural;
    begin
+      if Semicolon /= 0 then
+         while Last >= Line'First
+           and then Line (Last) in ' ' | Character'Val (9)
+         loop
+            Last := Last - 1;
+         end loop;
+      end if;
       if Line'Length = 0 or else Last < Line'First then
          raise Protocol_Error with "empty HTTP chunk size";
       end if;
-      for Index in Line'Range loop
-         if Character'Pos (Line (Index)) < 32
-           or else Character'Pos (Line (Index)) = 127
-         then
-            raise Protocol_Error with "invalid HTTP chunk extension";
-         end if;
-      end loop;
       for Index in Line'First .. Last loop
          case Line (Index) is
             when '0' .. '9' =>
@@ -868,6 +999,9 @@ package body HTTP_1_Internals is
          end if;
          Result := Result * 16 + Digit;
       end loop;
+      if Semicolon /= 0 then
+         Validate_Chunk_Extensions (Line, Semicolon);
+      end if;
       return Result;
    end Chunk_Size;
 

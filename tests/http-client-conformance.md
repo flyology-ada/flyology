@@ -8,7 +8,7 @@ those checks for a general-purpose client API.
 
 ## Deterministic ledger
 
-`scripts/http-client-conformance.sh` builds and runs nine independent programs
+`scripts/http-client-conformance.sh` builds and runs ten independent programs
 plus compile-fail client/response and body-source/payload lifetime fixtures:
 
 | Boundary | Cases |
@@ -21,8 +21,9 @@ plus compile-fail client/response and body-source/payload lifetime fixtures:
 | Pool | bounded admission timeout, idle reuse, abandonment close, one stale-idle retry only for idempotent methods, request-count/idle-time/total-age rotation, HTTP/1.0 keep-alive, pruning, shutdown interruption, coherent exchange/transport counters, descriptor restoration |
 | Response head | repeated fields, an informational response before the final response, and byte-at-a-time status/header delivery |
 | Message framing | fixed length, chunked decoding, chunk extensions, trailers, and an HTTP/1.0 close-delimited body |
+| RFC response corpus | 42 named accepted and rejected examples covering status syntax, field folding and whitespace, length precedence, informational and bodyless responses, transfer codings, chunk extensions, trailers, and incomplete messages |
 | Parser matrix | exact and over-limit heads, field-count exhaustion, invalid names and values, equal and conflicting lengths, decimal/chunk overflow, coding chains, missing delimiters, forbidden/incomplete trailers, and bodyless status rules |
-| Parser mutation | 10,000 fixed-seed random and near-valid mutated inputs through the same production parser oracle used by GNATfuzz |
+| Parser mutation | 10,000 fixed-seed random and near-valid inputs, rotating all 42 RFC seeds through zero to eight byte mutations and the same production parser oracle used by GNATfuzz |
 | Deadlines and cancellation | pool admission and response-head deadlines, fixed-body deadline continuity, and call-scoped chunked-body cancellation |
 | Task lanes | the same successful, streaming, and boundary exchange sequences from native and explicitly lightweight callers |
 | HTTPS | OpenSSL certificate and hostname verification, retained provider state after the original provider finalizes, native/lightweight reuse, mismatch rejection, handshake timeout and cancellation, and descriptor restoration |
@@ -50,6 +51,17 @@ pool/descriptor lifecycle. Timing checks use bounded deadlines only; they do
 not assert scheduler traces or exact wall-clock coincidences.
 
 ## External scenario sources
+
+The checked-in response corpus derives its expected outcomes from the current
+HTTP specifications, principally [RFC 9112](https://www.rfc-editor.org/rfc/rfc9112.html)
+Sections 2.2-2.3, 4, 5.1-5.2, 6.1-6.3, and 7.1-7.1.2, plus
+[RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html) Sections 5.5, 6.5.1,
+8.6, and 15. Each seed has a stable descriptive name, expected disposition,
+and section reference in `http_client_rfc_seeds.adb`. The corpus is executable:
+`http_client_rfc_corpus.adb` checks every unmodified seed, while
+`http_client_parser_randomized.adb` uses the same seeds as mutation bases.
+That arrangement keeps the standards examples reviewable in source control
+without treating a generated fuzzing artifact as the requirement ledger.
 
 The [Dart HTTP client conformance package](https://dart.googlesource.com/http/+/main/pkgs/http_client_conformance_tests/)
 is the closest reusable client-oriented design: it starts controlled servers
@@ -81,9 +93,10 @@ above.
 production status, header, length, chunk, and trailer validators. It accepts a
 fixed 1,000-byte array plus a prefix length. Documented protocol and size
 rejections are normal outcomes; assertion failures, runtime checks, hangs, and
-other exceptions remain crashes. The larger exact-boundary cases stay in the
-deterministic parser matrix because GNATfuzz's automatic marshaller limits
-array parameters to 1,000 components.
+other exceptions remain crashes. The RFC corpus and fixed-seed mutation test
+call that same wrapper. The larger exact-boundary cases stay in the deterministic
+parser matrix because GNATfuzz's automatic marshaller limits array parameters
+to 1,000 components.
 
 Run `./scripts/http-client-fuzz.sh prepare` through Alire when the AdaCore tool
 is available. It analyzes the dedicated wrapper, selects its reported
@@ -92,4 +105,6 @@ a starting corpus under ignored `build/gnatfuzz/http-client`. Run
 `./scripts/http-client-fuzz.sh fuzz` for the campaign. Replay every saved crash
 and record the tool version, seed revision, duration, engines, coverage
 plateau, and minimized reproducer. GNATfuzz was not available in the current
-toolchain, so no fuzz result is claimed here.
+toolchain, so no fuzz result or generated binary corpus is claimed here. The
+human-readable RFC seeds remain checked in independently of that generated
+TGen corpus.

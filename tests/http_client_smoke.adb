@@ -245,7 +245,14 @@ procedure HTTP_Client_Smoke is
       end;
       Expect_Head_Error ("/conflicting-length");
       Expect_Head_Error ("/te-and-length");
-      Expect_Head_Error ("/folded-field");
+      Client.Set_Target (Value, "/folded-field");
+      declare
+         Response : constant Client.Response := Client.Execute (Item, Value);
+      begin
+         pragma Assert
+           (Client.Header (Response, "X-Test") = "first continuation");
+         pragma Assert (Client.Body_Complete (Response));
+      end;
       Expect_Head_Error ("/bad-status");
       Expect_Body_Error ("/short-body");
       Expect_Body_Error ("/bad-chunk");

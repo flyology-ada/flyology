@@ -1240,8 +1240,10 @@ handshake timeout/cancellation, and descriptor restoration. The coverage
 ledger and remaining negative matrix are in
 [`tests/http-client-conformance.md`](tests/http-client-conformance.md).
 Run it with `./scripts/http-client-conformance.sh`. The stateless production
-parser fuzz wrapper is prepared with `./scripts/http-client-fuzz.sh prepare`
-when AdaCore GNATfuzz is installed.
+parser is also checked against 42 named RFC 9110/9112 response seeds and 10,000
+fixed-seed random or corpus-derived mutated inputs. Its GNATfuzz wrapper is
+prepared with `./scripts/http-client-fuzz.sh prepare` when AdaCore GNATfuzz is
+installed.
 
 The maintained `http_client_cli` showcase is a small curl-like command. It
 streams the response body to standard output or a file and supports custom
