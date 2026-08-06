@@ -44,6 +44,7 @@ based on the surviving correspondence.
   - [Context switching is not event polling](#context-switching-is-not-event-polling)
 - [Concurrency primitives](#concurrency-primitives)
   - [Ownership-transfer buffers](#ownership-transfer-buffers)
+  - [Structured supervision](#structured-supervision)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
   - [TLS](#tls)
@@ -615,6 +616,19 @@ use ordinary Ada protected entries and task scopes; they do not introduce an
 executor, detached tasks, or a second scheduling model. A protected entry wait
 suspends a lightweight task cooperatively and retains normal GNARL behavior for
 a native task.
+
+### Structured supervision
+
+Ada-native [structured supervision](docs/supervision-design.md) provides typed
+heterogeneous static trees and fixed-capacity homogeneous dynamic families.
+Both use lane-selectable generation tasks, explicit readiness,
+generation-owned cancellation, 64-bit logical ids and generations, bounded
+restart policy, nested incident propagation, fixed snapshots, and bounded
+event rings. Static trees validate dependencies and named cohorts, start in
+deterministic topological order, stop in reverse order, and coordinate isolated,
+cohort, or transitive-dependent recovery. Each restart constructs a fresh Ada
+task object under a local master; stale handles cannot control its replacement.
+The website has a focused [supervision guide](https://flyology.org/guide/supervision/).
 
 `Flyology.Capacity.Gate` admits a fixed number of concurrent holders. It offers
 blocking, nonblocking, and timed acquisition, terminal shutdown, waiter and
@@ -1803,6 +1817,15 @@ proved admission, close/drain, counter, and circular-index transitions. Worker
 pools likewise consume proved start, completion classification, worker join,
 and terminal-state decisions. Resource destruction, task activation,
 protected-object mutual exclusion, and provider calls remain outside SPARK.
+
+The supervision policy kernel proves run-time safety and its contracts for
+bounded state transitions, deterministic order bounds, affected-set framing,
+restart classification and accounting, capped backoff, stability reset,
+incident observation, and nonzero generation matching. Its model smoke test
+supplies the stronger graph, ordering, incident, and stale-generation examples
+described in the design document. Task construction, readiness, stopping, and
+resource reclamation are implemented by the non-SPARK structured controller
+and covered by a live semantic smoke test.
 
 Structured listener cleanup also consumes a proved descriptor-token transition
 after the imported close function returns: the token becomes invalid before a

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Build structured Flyology supervision trees with typed static children, bounded dynamic families, readiness, generation-safe restart, recovery budgets, and replayable events.">
+    <meta name="theme-color" content="#17213d">
+    <title>Structured task supervision · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/supervision/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Supervision</li></ol>
+          <h1>Restart a service without escaping its Ada scope.</h1>
+        </div>
+        <p class="doc-hero-copy">A supervisor owns fresh task generations, waits for explicit readiness, coordinates dependent recovery, and returns only after structured join. Recovery is typed and bounded, but it cannot make shared memory safe or force an uncooperative task to terminate.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#intro">Why supervision</a></li>
+            <li><a href="#model">Mental model</a></li>
+            <li><a href="#choose">Choose a controller</a></li>
+            <li><a href="#identity">Identity and lifecycle</a></li>
+            <li><a href="#static">Static services</a></li>
+            <li><a href="#recovery">Dependencies and cohorts</a></li>
+            <li><a href="#families">Dynamic families</a></li>
+            <li><a href="#budgets">Incidents and budgets</a></li>
+            <li><a href="#stopping">Stopping and resources</a></li>
+            <li><a href="#observe">Observe decisions</a></li>
+            <li><a href="#limits">What is not promised</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="intro">
+            <span class="step-label">WHY</span>
+            <h2>Keep service failure from becoming improvised recovery.</h2>
+            <p>A long-running task can return unexpectedly, raise an exception, fail during activation, or become unusable before it is ready. Restarting it safely involves more than running the same body again: someone must own the old generation through cleanup, decide whether recovery is still allowed, reconstruct its resources, and prevent dependents from seeing the replacement too early. A supervisor makes that policy explicit and keeps it inside one Ada scope.</p>
+            <p>Supervision is useful for restart-safe service loops, listeners, polling agents, caches, connection-like dynamic children, and subsystems whose members have declared startup dependencies. It is a poor fit for work that cannot be repeated safely, tasks that borrow shorter-lived state, or children whose shared-memory effects cannot be distinguished from a clean generation.</p>
+            <p>Erlang/OTP made supervision trees a durable model for separating service work from recovery policy. Flyology keeps that core insight – an owner observes failure and decides what to reconstruct – while expressing it through ordinary Ada tasks, masters, typed factories, bounded storage, and explicit resource reacquisition. Ada tasks share memory and external resources, so this API does not assume process isolation or guaranteed forced termination.</p>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p>Supervision is built on ordinary Ada task semantics, without scheduler or GNARL changes. Supervised children retain the same activation, masters, rendezvous, protected objects, exception propagation, finalization, abort deferral, and lightweight or native execution lane as any other Flyology task.</p>
+          </aside>
+
+          <section id="model">
+            <span class="step-label">MODEL</span>
+            <h2>A restart is a replacement, never resurrection.</h2>
+            <p>A terminated Ada task does not start again. Flyology constructs a new task object, assigns the next generation, runs the same typed factory, and withholds publication until that generation reports readiness. The old generation must finish task-body cleanup and join before replacement construction begins.</p>
+            <figure class="architecture-figure">
+              <svg role="img" aria-labelledby="supervision-title supervision-desc" viewBox="0 0 760 350">
+                <title id="supervision-title">One structured replacement sequence</title>
+                <desc id="supervision-desc">A running generation fails, stops and joins, waits for bounded backoff, constructs a new task, waits for readiness, and then publishes it.</desc>
+                <defs><marker id="supervision-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker></defs>
+                <rect class="diagram-violet" x="28" y="48" width="152" height="72" rx="13"/>
+                <text x="104" y="78" text-anchor="middle" font-size="15" font-weight="600">Generation 7</text>
+                <text class="diagram-muted" x="104" y="100" text-anchor="middle">running, then failed</text>
+                <path class="diagram-line" d="M180 84h74" marker-end="url(#supervision-arrow)"/>
+                <rect class="diagram-box" x="260" y="48" width="152" height="72" rx="13"/>
+                <text x="336" y="78" text-anchor="middle" font-size="15" font-weight="600">Stop and join</text>
+                <text class="diagram-muted" x="336" y="100" text-anchor="middle">cleanup completes</text>
+                <path class="diagram-line" d="M412 84h74" marker-end="url(#supervision-arrow)"/>
+                <rect class="diagram-box" x="492" y="48" width="124" height="72" rx="13"/>
+                <text x="554" y="78" text-anchor="middle" font-size="15" font-weight="600">Backoff</text>
+                <text class="diagram-muted" x="554" y="100" text-anchor="middle">monotonic</text>
+                <path class="diagram-line" d="M554 120v72" marker-end="url(#supervision-arrow)"/>
+                <rect class="diagram-teal" x="468" y="198" width="172" height="76" rx="13"/>
+                <text x="554" y="229" text-anchor="middle" font-size="15" font-weight="600">Generation 8</text>
+                <text class="diagram-muted" x="554" y="251" text-anchor="middle">fresh task and resources</text>
+                <path class="diagram-line" d="M468 236H365" marker-end="url(#supervision-arrow)"/>
+                <rect class="diagram-box" x="187" y="198" width="172" height="76" rx="13"/>
+                <text x="273" y="229" text-anchor="middle" font-size="15" font-weight="600">Readiness gate</text>
+                <text class="diagram-muted" x="273" y="251" text-anchor="middle">publish only when usable</text>
+                <path class="diagram-accent" d="M187 236H84" marker-end="url(#supervision-arrow)"/>
+                <rect class="diagram-violet" x="28" y="198" width="150" height="76" rx="13"/>
+                <text x="103" y="229" text-anchor="middle" font-size="15" font-weight="600">Running</text>
+                <text class="diagram-muted" x="103" y="251" text-anchor="middle">new identity visible</text>
+              </svg>
+            </figure>
+            <p>The synchronous <code>Run</code> call is the ownership boundary. Manager tasks, generation controls, copied requests, event storage, and child task objects cannot outlive that call's Ada master.</p>
+          </section>
+
+          <section id="choose">
+            <span class="step-label">TOPOLOGY</span>
+            <h2>Choose by topology, not by expected child count.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Supervision.Static</code></dt><dd>Use an enumeration for a small heterogeneous tree. Each member may have a different factory, lane, restart rule, dependency set, and named recovery cohort. Storage includes a fixed dependency matrix.</dd></div>
+                <div class="decision-row"><dt><code>Supervision.Families</code></dt><dd>Use fixed slots for many homogeneous children with one typed request and one common policy. Storage is linear in <code>Maximum_Children</code>; no dense dependency matrix is allocated.</dd></div>
+                <div class="decision-row"><dt>Nested node</dt><dd>Run either controller inside a supervised generation with <code>Run_Nested</code>. A failure carries the same incident, attempt, and absolute recovery deadline into the parent.</dd></div>
+              </dl>
+            </div>
+            <p><code>Child_Id</code> is a nonzero 64-bit logical identity. Each generic instantiation declares its own fixed capacity, so memory use is visible in the type and configuration.</p>
+          </section>
+
+          <section id="identity">
+            <span class="step-label">IDENTITY</span>
+            <h2>Use the logical id to observe and the generation to act.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Child_Id</code></dt><dd>Stable service or slot identity across replacement. Use it for dashboards and logical lookup.</dd></div>
+                <div class="decision-row"><dt><code>Generation</code></dt><dd>Nonzero 64-bit construction identity. It advances on restart and on dynamic slot reuse.</dd></div>
+                <div class="decision-row"><dt><code>Child_Handle</code></dt><dd>The exact pair of logical id and generation. Stop and exact-snapshot operations reject stale handles, so generation 7 cannot control generation 8.</dd></div>
+                <div class="decision-row"><dt><code>Ada.Task_Identification.Task_Id</code></dt><dd>Copied diagnostic identity of the actual task object. It is never used to address a replacement.</dd></div>
+              </dl>
+            </div>
+            <ol class="state-rail" aria-label="Supervised child lifecycle">
+              <li>Configured</li><li>Starting</li><li>Running</li><li>Stopping</li><li>Terminated</li><li>Backing off</li><li>Restarting</li><li>Starting</li><li>Joined</li>
+            </ol>
+            <p><code>Joined</code> means the task can no longer publish, its task-body finalization and dependent-task joins completed, and supervisor-owned generation state is reclaimable. <code>Stuck</code> is a termination classification, not a claim that a live task was killed.</p>
+          </section>
+
+          <section id="static">
+            <span class="step-label">STATIC</span>
+            <h2>Describe heterogeneous services with ordinary Ada types.</h2>
+            <p>The generic takes typed functions for identity, policy, dependencies, and cohort membership. A dispatching factory selects a normal structured child runner. No address-valued payload or universal callback context is needed.</p>
+            <figure class="code-panel">
+              <figcaption>an independent restartable metrics service</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">type Service is (Metrics);
+
+function Logical_Id (Child : Service) return Child_Id is
+  (case Child is when Metrics =&gt; 4_294_967_297);
+
+function Specification (Child : Service)
+  return Child_Specification is
+  (Restart           =&gt; On_Failure,
+   Impact            =&gt; Isolate_Child,
+   Recovery          =&gt; Metrics_Recovery,
+   Stopping          =&gt; Default_Stop_Policy,
+   Readiness_Timeout =&gt; Ada.Real_Time.Seconds (2),
+   Restart_Safe      =&gt; True,
+   Lane              =&gt; Lightweight_Lane,
+   Has_Group         =&gt; True,
+   Group             =&gt; 2);
+
+function Depends_On (Child, Prerequisite : Service)
+  return Boolean is (False);
+
+function Cohort_Member (Trigger, Member : Service)
+  return Boolean is (True);
+
+package Metrics_Supervision is new Flyology.Supervision.Static
+  (Child_Kind          =&gt; Service,
+   Application_Context =&gt; Metrics_Context,
+   Logical_Id          =&gt; Logical_Id,
+   Specification       =&gt; Specification,
+   Depends_On          =&gt; Depends_On,
+   Cohort_Member       =&gt; Cohort_Member,
+   Run_One_Generation  =&gt; Run_Generation);</code></pre>
+            </figure>
+            <p><code>Run_Generation</code> normally calls an instance of <code>Flyology.Supervision.Children</code>. Inside the task body, acquire and validate the listener, descriptor, buffer, execution group, or other generation-owned resources, then call <code>Mark_Ready</code>. A failed bind never becomes visible as a running service.</p>
+          </section>
+
+          <section id="recovery">
+            <span class="step-label">RECOVERY</span>
+            <h2>Recover an explicit set in dependency order.</h2>
+            <p>A static node validates an acyclic dependency graph before activating a task. It starts the lowest-id ready child first and stops in reverse topological order. A failure selects one of four impacts.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Isolate_Child</code></dt><dd>Stop, join, and replace only the failed child.</dd></div>
+                <div class="decision-row"><dt><code>Restart_Cohort</code></dt><dd>Use the typed <code>Cohort_Member</code> relation to restart an explicitly named set.</dd></div>
+                <div class="decision-row"><dt><code>Restart_Dependents</code></dt><dd>Restart the failed prerequisite and every transitive declared user.</dd></div>
+                <div class="decision-row"><dt><code>Escalate</code></dt><dd>Perform no local reconstruction. Stop the node and return the causal incident to its owner.</dd></div>
+              </dl>
+            </div>
+            <p>For <code>Database -&gt; Cache -&gt; API</code>, a database failure with <code>Restart_Dependents</code> stops API, then Cache, joins Database, waits once, and starts Database, Cache, then API. Each replacement must report readiness before its dependent starts. An unrelated Telemetry child continues.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Configuration rejects an affected child without <code>Restart_Safe</code> and a recovery set that would leave a running dependent attached to a replaced prerequisite. This flag is an application acknowledgement, not a proof of idempotence or shared-state safety.</p>
+            </aside>
+          </section>
+
+          <section id="families">
+            <span class="step-label">FAMILIES</span>
+            <h2>Scale homogeneous children with fixed linear storage.</h2>
+            <p>A family reserves a slot under its protected state, copies the typed request outside that lock, then commits admission. It allocates one persistent manager lazily for each slot that is ever used. Managers are bounded by <code>Maximum_Children</code>, are reused with their slots, and finish at the family scope's join boundary. Their task-object storage is reclaimed only after termination is observable.</p>
+            <figure class="code-panel">
+              <figcaption>a bounded connection-like family</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">package Sessions is new Flyology.Supervision.Families
+  (Request             =&gt; Session_Request,
+   Application_Context =&gt; Session_Context,
+   Run_One_Generation  =&gt; Run_Session_Generation,
+   Policy              =&gt; Session_Policy,
+   First_Child_Id      =&gt; 10_000_000_000,
+   Maximum_Children    =&gt; 100_000,
+   Event_Capacity      =&gt; 1_024);
+
+Owner.Start; -- Owner calls Sessions.Run synchronously.
+Sessions.Start (Family, Request, Exact_Handle);
+
+-- This cannot stop a replacement after the slot is reused.
+Sessions.Stop (Family, Exact_Handle);
+
+Latest := Sessions.Latest
+  (Family, Flyology.Supervision.Child (Exact_Handle));</code></pre>
+            </figure>
+            <p><code>Current (Family, Handle)</code> is exact and raises <code>Stale_Handle</code> after replacement or reuse. <code>Current (Family, Child_Id)</code> is an observational lookup of the latest occupied generation and does not grant authority to mutate it. Capacity exhaustion raises <code>Constraint_Error</code> before admission.</p>
+            <p>A family policy may isolate one slot or escalate its incident. Named cohorts and dependency closure describe heterogeneous topology, so place the family under a static node when recovery must coordinate it with other services. The family never infers relationships among independent requests.</p>
+          </section>
+
+          <section id="budgets">
+            <span class="step-label">BUDGETS</span>
+            <h2>Count one recovery cascade once.</h2>
+            <p>The first recoverable failure creates an <code>Incident_Id</code>, attempt 1, and an absolute monotonic deadline. Cohort members and nested nodes receive that same context. A node records a given incident and attempt at most once, so crossing a tree boundary does not silently multiply the retry allowance.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Burst and window</dt><dd>Reject another attempt after the fixed count within a monotonic window.</dd></div>
+                <div class="decision-row"><dt>Total attempts</dt><dd>Bound all attempts in the incident even when windows roll over.</dd></div>
+                <div class="decision-row"><dt>Backoff</dt><dd>Double the delay after each consecutive attempt and cap it at <code>Maximum_Backoff</code>.</dd></div>
+                <div class="decision-row"><dt>Stability reset</dt><dd>Reset consecutive and incident accounting only after a replacement remains ready for the declared interval.</dd></div>
+                <div class="decision-row"><dt>Recovery deadline</dt><dd>Reject a delay that cannot finish before the inherited absolute deadline.</dd></div>
+              </dl>
+            </div>
+            <p>Static nodes apply both child and subtree limits. Dynamic families apply the common child policy to each slot and can be placed under a static node when a wider subtree budget is required. Exhaustion stops owned children, records <code>Policy_Exhaustion</code>, and returns <code>Recovery_Exhausted</code> with the same incident.</p>
+          </section>
+
+          <section id="stopping">
+            <span class="step-label">STOPPING</span>
+            <h2>Deadlines classify progress; they do not force completion.</h2>
+            <p>Stopping first publishes a fresh cooperative cancellation token. After <code>Grace</code>, policy may request Ada abort. After <code>Abort_Observation</code>, a still-live generation is classified <code>Stuck</code>. No replacement starts while that old generation or its task-owned finalization remains live.</p>
+            <ul>
+              <li>A lightweight task can monopolize its cooperative execution group if it never suspends.</li>
+              <li>A native task can remain inside a foreign call that does not return.</li>
+              <li>Ada abort may be deferred in a protected action, rendezvous, finalization, or another abort-deferred region.</li>
+              <li>A synchronous supervisor cannot return while a dependent task remains live. A stuck child is observable, but the Ada master still waits.</li>
+            </ul>
+            <p>Each new generation must reacquire sockets, descriptors, unique buffers, dedicated execution groups, thread pins, capacity permits, and provider sessions through its normal typed initialization path. Do not carry a borrowed token, callback access, resource handle, or pointer into the old task's locals across generations.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>Supervisor managers and factory runners default to lightweight execution group 127. Keep supervised lightweight children off that group. Many supervisors can share this one control plane, so the design does not create one pthread per supervisor.</p>
+            </aside>
+          </section>
+
+          <section id="observe">
+            <span class="step-label">EVENTS</span>
+            <h2>Copy decisions out, then format them.</h2>
+            <p>Each controller keeps a fixed snapshot per logical child and a fixed-capacity event ring. Protected actions append scalar and bounded copied data only. Logging, callback invocation, allocation, and finalizing user assignment stay outside the lock.</p>
+            <figure class="code-panel">
+              <figcaption>drain a bounded event ring</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Cursor  : Event_Sequence := 0;
+Events  : Supervisor_Event_Array (1 .. 64);
+Count   : Natural;
+Dropped : Event_Sequence;
+
+Services.Read_Events
+  (Supervisor, Cursor, Events, Count, Dropped);
+
+for Index in 1 .. Count loop
+   Render_Outside_The_Controller (Events (Index));
+end loop;</code></pre>
+            </figure>
+            <p>An event records sequence, monotonic time, logical id, generation, lifecycle transition, lane and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from a termination handler.</p>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">BOUNDARY</span>
+            <h2>Keep the safety boundary visible.</h2>
+            <ul>
+              <li>Supervision does not isolate memory. Siblings may share protected and unprotected application state, file descriptors, external services, and foreign libraries.</li>
+              <li><code>Restart_Safe</code> does not make partial external effects idempotent. Document reconciliation, ownership, and generation boundaries for each restartable child.</li>
+              <li>Readiness says the child chose to publish usability. It cannot prove the application's readiness check was complete.</li>
+              <li>Event storage, child slots, dependency matrices, managers, messages, and attempt accounting are bounded by declared types and generic capacities.</li>
+              <li>Flyology is experimental. Validate both lightweight and native lanes, startup rollback, cancellation, finalization, resource reacquisition, and stuck behavior for the exact host and compiler release.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Use the <a href="../../api/">generated API reference</a> for exact contracts, and the <a href="../../architecture/">architecture guide</a> for task routing, execution groups, scheduling, and runtime lifecycle.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../timers/">Timers</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
