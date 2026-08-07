@@ -486,17 +486,31 @@ package body Flyology.IO.TLS is
          Transferred := True;
       end Initialize;
    begin
-      if not Sockets.Is_Open (Socket) then
-         raise Program_Error with "cannot give TLS a closed socket";
-      elsif Is_Open (Item) or else Sockets.Is_Open (Item.Socket) then
-         raise Program_Error with "TLS connection already owns a socket";
-      elsif Side = Client and then Server_Name'Length = 0 then
-         raise Program_Error with "TLS client requires a server name";
-      elsif Side = Server and then Server_Name'Length /= 0 then
-         raise Program_Error with "TLS server does not accept a server name";
-      elsif not Is_Available (Backend) then
-         raise TLS_Error with Name (Backend) & " provider is unavailable";
-      end if;
+      --  Item retains a socket whenever the controller still owns a
+      --  descriptor or a previous close failed to release one. Refusing both
+      --  keeps the transfer below unable to fail after it adopts.
+      case Policy.Classify_Take
+        (Socket_Open        => Sockets.Is_Open (Socket),
+         Connection_Retains =>
+           Is_Open (Item) or else Sockets.Is_Open (Item.Socket),
+         Client_Side        => Side = Client,
+         Server_Name_Given  => Server_Name'Length /= 0,
+         Provider_Available => Is_Available (Backend))
+      is
+         when Policy.Transfer_Ownership =>
+            null;
+         when Policy.Reject_Closed_Socket =>
+            raise Program_Error with "cannot give TLS a closed socket";
+         when Policy.Reject_Retained_Socket =>
+            raise Program_Error with "TLS connection already owns a socket";
+         when Policy.Reject_Missing_Server_Name =>
+            raise Program_Error with "TLS client requires a server name";
+         when Policy.Reject_Unexpected_Server_Name =>
+            raise Program_Error with
+              "TLS server does not accept a server name";
+         when Policy.Reject_Unavailable_Provider =>
+            raise TLS_Error with Name (Backend) & " provider is unavailable";
+      end case;
 
       Flyology.IO.Sockets.Prepare (Socket);
       FD := Flyology.IO.Sockets.Native_Descriptor (Socket);

@@ -14,6 +14,42 @@ is
    type Acquire_Action is
      (Acquire_Operation, Reject_Closing, Reject_Closed, Reject_Replaced);
 
+   --  Admission decision for a socket handed to a TLS connection. Every
+   --  rejection is decided before the transfer touches provider or connection
+   --  state, so a refused transfer leaves the caller's socket untouched.
+   type Take_Action is
+     (Transfer_Ownership,
+      Reject_Closed_Socket,
+      Reject_Retained_Socket,
+      Reject_Missing_Server_Name,
+      Reject_Unexpected_Server_Name,
+      Reject_Unavailable_Provider);
+
+   function Classify_Take
+     (Socket_Open        : Boolean;
+      Connection_Retains : Boolean;
+      Client_Side        : Boolean;
+      Server_Name_Given  : Boolean;
+      Provider_Available : Boolean) return Take_Action
+   with Post =>
+     (if not Socket_Open then
+         Classify_Take'Result = Reject_Closed_Socket
+      elsif Connection_Retains then
+         Classify_Take'Result = Reject_Retained_Socket
+      elsif Client_Side and then not Server_Name_Given then
+         Classify_Take'Result = Reject_Missing_Server_Name
+      elsif not Client_Side and then Server_Name_Given then
+         Classify_Take'Result = Reject_Unexpected_Server_Name
+      elsif not Provider_Available then
+         Classify_Take'Result = Reject_Unavailable_Provider
+      else Classify_Take'Result = Transfer_Ownership)
+     --  A transfer starts only from a socket that owns a descriptor and a
+     --  connection that retains none, which is what makes the transfer's
+     --  socket move unable to fail.
+     and then
+       (if Classify_Take'Result = Transfer_Ownership then
+           Socket_Open and then not Connection_Retains);
+
    function Classify_Acquire
      (Generation_Matches : Boolean;
       Closing            : Boolean;

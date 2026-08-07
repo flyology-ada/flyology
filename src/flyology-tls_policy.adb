@@ -11,6 +11,22 @@ is
       elsif not Descriptor_Open then Reject_Closed
       else Acquire_Operation);
 
+   function Classify_Take
+     (Socket_Open        : Boolean;
+      Connection_Retains : Boolean;
+      Client_Side        : Boolean;
+      Server_Name_Given  : Boolean;
+      Provider_Available : Boolean) return Take_Action
+   is
+     (if not Socket_Open then Reject_Closed_Socket
+      elsif Connection_Retains then Reject_Retained_Socket
+      elsif Client_Side and then not Server_Name_Given then
+         Reject_Missing_Server_Name
+      elsif not Client_Side and then Server_Name_Given then
+         Reject_Unexpected_Server_Name
+      elsif not Provider_Available then Reject_Unavailable_Provider
+      else Transfer_Ownership);
+
    function Close_Leader
      (Descriptor_Open : Boolean;
       Closing         : Boolean) return Boolean
