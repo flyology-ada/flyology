@@ -23,6 +23,10 @@ is
    is
      (Active + 1);
 
+   function Obligation_After_Acquire (Action : Acquire_Action) return Boolean
+   is
+     (Action = Admit_Permit);
+
    function Release_Allowed (Active : Natural) return Boolean is
      (Active > 0);
 

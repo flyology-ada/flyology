@@ -22,13 +22,13 @@ package body Flyology.Capacity is
         when Policy.Acquire_Entry_Open
           (Stopping, Active_Count, Capacity)
       is
+         Action : constant Policy.Acquire_Action :=
+           Policy.Classify_Acquire (Stopping, Active_Count, Capacity);
       begin
          if Cleanup_Armed /= null and then Cleanup_Armed.all then
             raise Program_Error with "capacity cleanup is already armed";
          end if;
-         case Policy.Classify_Acquire
-           (Stopping, Active_Count, Capacity)
-         is
+         case Action is
             when Policy.Admit_Permit =>
                if Active_Count + 1 = Capacity and then Acquire_Signalled then
                   Wake_Sources.Consume (Acquire_Wake);
@@ -36,32 +36,37 @@ package body Flyology.Capacity is
                end if;
                Active_Count :=
                  Policy.Active_After_Acquire (Active_Count, Capacity);
-               if Cleanup_Armed /= null then
-                  Cleanup_Armed.all := True;
-               end if;
                Accepted := True;
-               --  This barrier is inside the protected action: abort stays
-               --  deferred after the permit is counted until the caller's
-               --  cleanup obligation is already authoritative.
-               Test_Hooks.Capacity_Acquire_Barrier;
             when Policy.Reject_Closed =>
                Accepted := False;
             when Policy.Wait_For_Permit =>
                raise Program_Error with "capacity entry opened while full";
          end case;
+         --  Permit ownership and the caller's cleanup obligation change in
+         --  the same protected action, so a pending abort cannot separate
+         --  them.
+         if Cleanup_Armed /= null then
+            Cleanup_Armed.all := Policy.Obligation_After_Acquire (Action);
+         end if;
+         if Accepted then
+            --  This barrier is inside the protected action: abort stays
+            --  deferred after the permit is counted until the caller's
+            --  cleanup obligation is already authoritative.
+            Test_Hooks.Capacity_Acquire_Barrier;
+         end if;
       end Acquire;
 
       procedure Try_Acquire
         (Result        : out Acquire_Result;
          Cleanup_Armed : access Boolean := null)
       is
+         Action : constant Policy.Acquire_Action :=
+           Policy.Classify_Acquire (Stopping, Active_Count, Capacity);
       begin
          if Cleanup_Armed /= null and then Cleanup_Armed.all then
             raise Program_Error with "capacity cleanup is already armed";
          end if;
-         case Policy.Classify_Acquire
-           (Stopping, Active_Count, Capacity)
-         is
+         case Action is
             when Policy.Admit_Permit =>
                if Active_Count + 1 = Capacity and then Acquire_Signalled then
                   Wake_Sources.Consume (Acquire_Wake);
@@ -69,15 +74,18 @@ package body Flyology.Capacity is
                end if;
                Active_Count :=
                  Policy.Active_After_Acquire (Active_Count, Capacity);
-               if Cleanup_Armed /= null then
-                  Cleanup_Armed.all := True;
-               end if;
                Result := Permit_Acquired;
             when Policy.Wait_For_Permit =>
                Result := Gate_Full;
             when Policy.Reject_Closed =>
                Result := Gate_Closed;
          end case;
+         --  Permit ownership and the caller's cleanup obligation change in
+         --  the same protected action, so a pending abort cannot separate
+         --  them.
+         if Cleanup_Armed /= null then
+            Cleanup_Armed.all := Policy.Obligation_After_Acquire (Action);
+         end if;
       end Try_Acquire;
 
       procedure Release (Cleanup_Armed : access Boolean := null) is

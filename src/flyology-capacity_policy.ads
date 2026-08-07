@@ -39,6 +39,13 @@ is
         Post => Active_After_Acquire'Result = Active + 1
           and then Active_After_Acquire'Result <= Capacity;
 
+   --  Report the cleanup obligation a caller holds after one classified
+   --  attempt. Permit ownership and the obligation change together, so a
+   --  caller aborted after the protected action still owes exactly one
+   --  release when, and only when, the attempt was admitted.
+   function Obligation_After_Acquire (Action : Acquire_Action) return Boolean
+   with Post => Obligation_After_Acquire'Result = (Action = Admit_Permit);
+
    --  Reject unmatched or duplicate releases.
    function Release_Allowed (Active : Natural) return Boolean
    with Post => Release_Allowed'Result = (Active > 0);
