@@ -1,11 +1,14 @@
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
+with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Byte_Strings is
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Addressing.Storage_Offset;
 
    Length_Offset : constant Byte_Count := 48;
 
@@ -19,6 +22,10 @@ package body Flyology.Data_Structures.Byte_Strings is
       Maximum_Length : Interfaces.Unsigned_32) is
    begin
       Item.Core := Core;
+      Item.Length_Address := Layouts.Address_At
+        (Core, Length_Offset, 8, 8);
+      Item.Payload_Address := Layouts.Address_At
+        (Core, Layouts.Header_Size, Byte_Count (Maximum_Length), 1);
       Item.Capacity_Value := Maximum_Length;
    end Set_View;
 
@@ -73,6 +80,8 @@ package body Flyology.Data_Structures.Byte_Strings is
    procedure Detach (Item : in out View) is
    begin
       Layouts.Detach (Item.Core);
+      Item.Length_Address := System.Null_Address;
+      Item.Payload_Address := System.Null_Address;
       Item.Capacity_Value := 0;
    end Detach;
 
@@ -91,7 +100,7 @@ package body Flyology.Data_Structures.Byte_Strings is
    begin
       Layouts.Require_Ready (Item.Core);
       Result := Bytes.Read_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8));
+        (Item.Length_Address);
       if Result > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "byte-string length is corrupt";
       end if;
@@ -104,9 +113,12 @@ package body Flyology.Data_Structures.Byte_Strings is
    function Data_Address
      (Item : View; Offset, Extent : Byte_Count) return System.Address is
    begin
-      return Layouts.Address_At
-        (Item.Core, Layouts.Checked_Add (Layouts.Header_Size, Offset),
-         Extent, 1);
+      if Offset > Byte_Count (Item.Capacity_Value)
+        or else Extent > Byte_Count (Item.Capacity_Value) - Offset
+      then
+         raise Layout_Error with "byte-string payload extent is corrupt";
+      end if;
+      return Item.Payload_Address + Addressing.Storage_Offset (Offset);
    end Data_Address;
 
    procedure Assign
@@ -122,8 +134,7 @@ package body Flyology.Data_Structures.Byte_Strings is
             Interfaces.C.size_t (Data'Length));
       end if;
       Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8),
-         Interfaces.Unsigned_64 (Data'Length));
+        (Item.Length_Address, Interfaces.Unsigned_64 (Data'Length));
    end Assign;
 
    procedure Append
@@ -144,8 +155,7 @@ package body Flyology.Data_Structures.Byte_Strings is
             Data'Address, Interfaces.C.size_t (Data'Length));
       end if;
       Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8),
-         Old_Length + Interfaces.Unsigned_64 (Data'Length));
+        (Item.Length_Address, Old_Length + Interfaces.Unsigned_64 (Data'Length));
    end Append;
 
    procedure Read
@@ -166,8 +176,7 @@ package body Flyology.Data_Structures.Byte_Strings is
    procedure Clear (Item : in out View) is
    begin
       Layouts.Require_Ready (Item.Core);
-      Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8), 0);
+      Bytes.Write_U64 (Item.Length_Address, 0);
    end Clear;
 
    procedure Destroy (Item : in out View) is

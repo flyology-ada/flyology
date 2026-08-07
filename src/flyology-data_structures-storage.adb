@@ -2,11 +2,17 @@ with System.Address_To_Access_Conversions;
 
 package body Flyology.Data_Structures.Storage is
    use type Interfaces.C.int;
+   use type Interfaces.C.size_t;
+
+   type Eight_Bytes is array (Natural range 0 .. 7) of Interfaces.Unsigned_8
+     with Component_Size => 8, Size => 64, Alignment => 1;
 
    package U32_Access is new System.Address_To_Access_Conversions
      (Interfaces.Unsigned_32);
    package U64_Access is new System.Address_To_Access_Conversions
      (Interfaces.Unsigned_64);
+   package Eight_Access is new System.Address_To_Access_Conversions
+     (Eight_Bytes);
 
    function C_Copy
      (Target : System.Address;
@@ -45,6 +51,11 @@ package body Flyology.Data_Structures.Storage is
       Source : System.Address;
       Length : Interfaces.C.size_t) is
    begin
+      if Length = 8 then
+         Eight_Access.To_Pointer (Target).all :=
+           Eight_Access.To_Pointer (Source).all;
+         return;
+      end if;
       declare
          Ignored : constant System.Address := C_Copy (Target, Source, Length);
          pragma Unreferenced (Ignored);

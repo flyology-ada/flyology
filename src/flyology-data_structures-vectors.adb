@@ -1,11 +1,16 @@
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
+with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Vectors is
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Addressing.Integer_Address;
+   use type Addressing.Storage_Offset;
+   use type System.Address;
 
    Length_Offset : constant Byte_Count := 48;
 
@@ -37,6 +42,12 @@ package body Flyology.Data_Structures.Vectors is
       Stride : Byte_Count) is
    begin
       Item.Core := Core;
+      Item.Length_Address := Layouts.Address_At
+        (Core, Length_Offset, 8, 8);
+      Item.Payload_Address := Layouts.Address_At
+        (Core, Layouts.Header_Size,
+         Core.Extent - Layouts.Header_Size, 1);
+      Item.Payload_Extent := Core.Extent - Layouts.Header_Size;
       Item.Capacity_Value := Capacity;
       Item.Element_Value := Element_Size;
       Item.Stride := Stride;
@@ -98,6 +109,9 @@ package body Flyology.Data_Structures.Vectors is
    procedure Detach (Item : in out View) is
    begin
       Layouts.Detach (Item.Core);
+      Item.Length_Address := System.Null_Address;
+      Item.Payload_Address := System.Null_Address;
+      Item.Payload_Extent := 0;
       Item.Capacity_Value := 0;
       Item.Element_Value := 0;
       Item.Stride := 0;
@@ -118,7 +132,7 @@ package body Flyology.Data_Structures.Vectors is
    begin
       Layouts.Require_Ready (Item.Core);
       Result := Bytes.Read_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8));
+        (Item.Length_Address);
       if Result > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "vector length is corrupt";
       end if;
@@ -138,12 +152,34 @@ package body Flyology.Data_Structures.Vectors is
    function Element_Address
      (Item : View; Index : Interfaces.Unsigned_64) return System.Address
    is
-      Relative : constant Byte_Count := Layouts.Checked_Add
-        (Layouts.Header_Size,
-         Layouts.Checked_Multiply (Byte_Count (Index), Item.Stride));
+      Relative   : Byte_Count;
+      Base_Value : Addressing.Integer_Address;
    begin
-      return Layouts.Address_At
-        (Item.Core, Relative, Byte_Count (Item.Element_Value), 1);
+      if not Item.Core.Attached
+        or else Item.Payload_Address = System.Null_Address
+      then
+         raise Region_Error with "detached vector view";
+      elsif Index >= Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         raise Layout_Error with "vector element index exceeds payload";
+      end if;
+
+      Relative := Layouts.Checked_Multiply
+        (Byte_Count (Index), Item.Stride);
+      if Relative > Item.Payload_Extent
+        or else Byte_Count (Item.Element_Value) >
+          Item.Payload_Extent - Relative
+      then
+         raise Layout_Error with "vector element extent is corrupt";
+      elsif Relative > Byte_Count (Addressing.Storage_Offset'Last) then
+         raise Region_Error with "vector element offset is not native";
+      end if;
+
+      Base_Value := Addressing.To_Integer (Item.Payload_Address);
+      if Relative > Byte_Count (Addressing.Integer_Address'Last - Base_Value)
+      then
+         raise Region_Error with "vector element address overflows";
+      end if;
+      return Item.Payload_Address + Addressing.Storage_Offset (Relative);
    end Element_Address;
 
    procedure Try_Append
@@ -162,7 +198,7 @@ package body Flyology.Data_Structures.Vectors is
         (Element_Address (Item, Current), Data'Address,
          Interfaces.C.size_t (Data'Length));
       Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8), Current + 1);
+        (Item.Length_Address, Current + 1);
       Appended := True;
    end Try_Append;
 
@@ -215,15 +251,14 @@ package body Flyology.Data_Structures.Vectors is
         (Data'Address, Element_Address (Item, Current - 1),
          Interfaces.C.size_t (Data'Length));
       Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8), Current - 1);
+        (Item.Length_Address, Current - 1);
       Popped := True;
    end Try_Pop;
 
    procedure Clear (Item : in out View) is
    begin
       Layouts.Require_Ready (Item.Core);
-      Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Length_Offset, 8, 8), 0);
+      Bytes.Write_U64 (Item.Length_Address, 0);
    end Clear;
 
    procedure Destroy (Item : in out View) is

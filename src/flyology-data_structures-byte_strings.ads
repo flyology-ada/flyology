@@ -105,7 +105,9 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
 
 private
    type View is limited record
-      Core           : Layouts.Local_View;
-      Capacity_Value : Interfaces.Unsigned_32 := 0;
+      Core            : Layouts.Local_View;
+      Length_Address  : System.Address := System.Null_Address;
+      Payload_Address : System.Address := System.Null_Address;
+      Capacity_Value  : Interfaces.Unsigned_32 := 0;
    end record;
 end Flyology.Data_Structures.Byte_Strings;
