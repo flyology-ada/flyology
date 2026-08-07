@@ -781,6 +781,18 @@ uses host headers for address conversion, socket constants, variadic descriptor
 configuration, and `errno` capture; retry, timeout, cancellation, and exception
 policy remain in Ada.
 
+`Receive_Datagram` is the task-aware UDP boundary for wildcard and multihomed
+servers. One `recvmsg` returns the source endpoint, the kernel-selected local
+destination endpoint, the original datagram length, explicit truncation state,
+and received ECN codepoint. Zero-length datagrams remain distinct successful
+messages. `Send_Datagram` can reuse that local destination as its source when
+replying. Darwin and Linux use IPv4 and IPv6 packet-info ancillary data;
+traffic-class ancillary data supplies ECN. `ECN_Unavailable` is reserved for an
+adopted socket without traffic-class delivery or a future backend without
+equivalent metadata. Flyology-created datagram sockets enable the required
+options, while
+`Enable_Datagram_Metadata` provides the same setup for adopted descriptors.
+
 Socket operations use readiness, not callback delivery and not kernel
 completion queues. The lightweight path is:
 

@@ -177,6 +177,30 @@ package body Flyology.IO.Sockets is
    pragma Import
      (C, C_Receive_From, "flyology_socket_receive_from");
 
+   function C_Enable_Datagram_Metadata
+     (Socket : Interfaces.C.int;
+      Error  : access Interfaces.C.int) return Interfaces.C.int;
+   pragma Import
+     (C, C_Enable_Datagram_Metadata,
+      "flyology_socket_enable_datagram_metadata");
+
+   function C_Receive_Datagram
+     (Socket              : Interfaces.C.int;
+      Buffer              : System.Address;
+      Length              : Interfaces.C.size_t;
+      Source_Family       : access Interfaces.C.unsigned_char;
+      Source_Address      : System.Address;
+      Source_Port         : access Interfaces.C.unsigned;
+      Source_Scope        : access Interfaces.C.unsigned;
+      Destination_Family  : access Interfaces.C.unsigned_char;
+      Destination_Address : System.Address;
+      Destination_Port    : access Interfaces.C.unsigned;
+      Destination_Scope   : access Interfaces.C.unsigned;
+      ECN                  : access Interfaces.C.int;
+      Error                : access Interfaces.C.int) return Interfaces.C.long;
+   pragma Import
+     (C, C_Receive_Datagram, "flyology_socket_receive_datagram");
+
    function C_Send
      (Socket : Interfaces.C.int;
       Buffer : System.Address;
@@ -194,6 +218,22 @@ package body Flyology.IO.Sockets is
       Scope   : Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.long;
    pragma Import (C, C_Send_To, "flyology_socket_send_to");
+
+   function C_Send_Datagram
+     (Socket              : Interfaces.C.int;
+      Buffer              : System.Address;
+      Length              : Interfaces.C.size_t;
+      Destination_Family  : Interfaces.C.int;
+      Destination_Address : System.Address;
+      Destination_Port    : Interfaces.C.unsigned;
+      Destination_Scope   : Interfaces.C.unsigned;
+      Select_Source       : Interfaces.C.int;
+      Source_Family       : Interfaces.C.int;
+      Source_Address      : System.Address;
+      Source_Port         : Interfaces.C.unsigned;
+      Source_Scope        : Interfaces.C.unsigned;
+      Error                : access Interfaces.C.int) return Interfaces.C.long;
+   pragma Import (C, C_Send_Datagram, "flyology_socket_send_datagram");
 
    function C_Bytes_To_Read
      (Socket : Interfaces.C.int;
@@ -283,6 +323,30 @@ package body Flyology.IO.Sockets is
      (case Value.Family is
          when IPv4 => Value.V4 (Value.V4'First)'Address,
          when IPv6 => Value.V6 (Value.V6'First)'Address);
+
+   function Make_Endpoint
+     (Family  : Interfaces.C.unsigned_char;
+      Address : IPv6_Octets;
+      Port    : Interfaces.C.unsigned;
+      Scope   : Interfaces.C.unsigned) return Endpoint
+   is
+   begin
+      if Family = 4 then
+         return
+           (Family => IPv4,
+            Address =>
+              (Family => IPv4,
+               V4 => (Address (1), Address (2), Address (3), Address (4))),
+            Port => Flyology.IO.Sockets.Port (Port), Scope => 0);
+      elsif Family = 6 then
+         return
+           (Family => IPv6, Address => (Family => IPv6, V6 => Address),
+            Port => Flyology.IO.Sockets.Port (Port),
+            Scope => Scope_ID (Scope));
+      else
+         raise Socket_Error with "datagram metadata has unsupported family";
+      end if;
+   end Make_Endpoint;
 
    function Policy_Error_Kind
      (Error : Interfaces.C.int) return Flyology.Socket_Policy.Error_Kind
@@ -518,6 +582,14 @@ package body Flyology.IO.Sockets is
          Raise_Error ("configure socket", Error);
       end if;
    end Prepare;
+
+   procedure Enable_Datagram_Metadata (Socket : Socket_Type) is
+      Error : aliased Interfaces.C.int;
+   begin
+      if C_Enable_Datagram_Metadata (Socket.Value, Error'Access) /= 0 then
+         Raise_Error ("configure datagram metadata", Error);
+      end if;
+   end Enable_Datagram_Metadata;
 
    procedure Set_Socket_Option
      (Socket : Socket_Type; Option : Option_Type)
@@ -897,6 +969,85 @@ package body Flyology.IO.Sockets is
       Receive_Prepared (Socket, Item, Last, Timeout, Interrupts);
    end Receive;
 
+   procedure Receive_Datagram
+     (Socket     : Socket_Type;
+      Item       : out Ada.Streams.Stream_Element_Array;
+      Last       : out Ada.Streams.Stream_Element_Offset;
+      Metadata   : out Datagram_Metadata;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   is
+      Started             : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Source_Family       : aliased Interfaces.C.unsigned_char;
+      Source_Address      : aliased IPv6_Octets := (others => 0);
+      Source_Port         : aliased Interfaces.C.unsigned;
+      Source_Scope        : aliased Interfaces.C.unsigned;
+      Destination_Family  : aliased Interfaces.C.unsigned_char;
+      Destination_Address : aliased IPv6_Octets := (others => 0);
+      Destination_Port    : aliased Interfaces.C.unsigned;
+      Destination_Scope   : aliased Interfaces.C.unsigned;
+      C_ECN               : aliased Interfaces.C.int;
+      Error               : aliased Interfaces.C.int;
+      Result              : Interfaces.C.long;
+      Buffer              : constant System.Address :=
+        (if Item'Length = 0
+         then System.Null_Address
+         else Item (Item'First)'Address);
+      Copied              : Natural;
+   begin
+      Prepare (Socket);
+      loop
+         Result := C_Receive_Datagram
+           (Socket.Value, Buffer, Interfaces.C.size_t (Item'Length),
+            Source_Family'Access,
+            Source_Address (Source_Address'First)'Address,
+            Source_Port'Access, Source_Scope'Access,
+            Destination_Family'Access,
+            Destination_Address (Destination_Address'First)'Address,
+            Destination_Port'Access, Destination_Scope'Access,
+            C_ECN'Access, Error'Access);
+         if Result >= 0 then
+            Copied := Natural'Min (Natural (Result), Item'Length);
+            Last :=
+              (if Copied = 0
+               then Item'First - 1
+               else Item'First
+                 + Ada.Streams.Stream_Element_Offset (Copied) - 1);
+            Metadata :=
+              (Source =>
+                 Make_Endpoint
+                   (Source_Family, Source_Address, Source_Port, Source_Scope),
+               Destination =>
+                 Make_Endpoint
+                   (Destination_Family, Destination_Address,
+                    Destination_Port, Destination_Scope),
+               Original_Length => Natural (Result),
+               Truncated => Natural (Result) > Item'Length,
+               ECN =>
+                 (case C_ECN is
+                     when 0 => Not_ECT,
+                     when 1 => ECT_One,
+                     when 2 => ECT_Zero,
+                     when 3 => Congestion_Experienced,
+                     when others => ECN_Unavailable));
+            return;
+         end if;
+         case Flyology.Socket_Policy.Classify_IO_Error
+           (Policy_Error_Kind (Error))
+         is
+            when Flyology.Socket_Policy.Wait_For_Ready =>
+               Wait_For (Socket, For_Read, Started, Timeout, Interrupts);
+            when Flyology.Socket_Policy.Retry_Operation =>
+               if Timeout >= 0.0 and then Remaining (Started, Timeout) <= 0.0
+               then
+                  raise Timeout_Error with "socket operation timed out";
+               end if;
+            when Flyology.Socket_Policy.Fail_Operation =>
+               Raise_Error ("recvmsg", Error);
+         end case;
+      end loop;
+   end Receive_Datagram;
+
    procedure Receive
      (Socket     : Socket_Type;
       Item       : in out Flyology.Buffers.Unique_Buffer;
@@ -999,6 +1150,90 @@ package body Flyology.IO.Sockets is
       Prepare (Socket);
       Send_Prepared (Socket, Item, Last, Timeout, Interrupts);
    end Send;
+
+   procedure Send_Datagram_Common
+     (Socket        : Socket_Type;
+      Item          : Ada.Streams.Stream_Element_Array;
+      Last          : out Ada.Streams.Stream_Element_Offset;
+      Destination   : Endpoint;
+      Source        : Endpoint;
+      Select_Source : Boolean;
+      Timeout       : Duration;
+      Interrupts    : Interrupt_Set)
+   is
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Error   : aliased Interfaces.C.int;
+      Result  : Interfaces.C.long;
+      Buffer  : constant System.Address :=
+        (if Item'Length = 0
+         then System.Null_Address
+         else Item (Item'First)'Address);
+   begin
+      Prepare (Socket);
+      loop
+         Result := C_Send_Datagram
+           (Socket.Value, Buffer, Interfaces.C.size_t (Item'Length),
+            Family_Code (Destination.Family),
+            Address_Data (Destination.Address),
+            Interfaces.C.unsigned (Destination.Port),
+            Interfaces.C.unsigned (Destination.Scope),
+            Boolean'Pos (Select_Source), Family_Code (Source.Family),
+            Address_Data (Source.Address), Interfaces.C.unsigned (Source.Port),
+            Interfaces.C.unsigned (Source.Scope), Error'Access);
+         if Result >= 0 then
+            if Result /= Interfaces.C.long (Item'Length) then
+               raise Device_Error with "partial datagram send";
+            end if;
+            Last :=
+              (if Result = 0
+               then Item'First - 1
+               else Item'First
+                 + Ada.Streams.Stream_Element_Offset (Result) - 1);
+            return;
+         end if;
+         case Flyology.Socket_Policy.Classify_IO_Error
+           (Policy_Error_Kind (Error))
+         is
+            when Flyology.Socket_Policy.Wait_For_Ready =>
+               Wait_For (Socket, For_Write, Started, Timeout, Interrupts);
+            when Flyology.Socket_Policy.Retry_Operation =>
+               if Timeout >= 0.0 and then Remaining (Started, Timeout) <= 0.0
+               then
+                  raise Timeout_Error with "socket operation timed out";
+               end if;
+            when Flyology.Socket_Policy.Fail_Operation =>
+               Raise_Error ("sendmsg", Error);
+         end case;
+      end loop;
+   end Send_Datagram_Common;
+
+   procedure Send_Datagram
+     (Socket      : Socket_Type;
+      Item        : Ada.Streams.Stream_Element_Array;
+      Last        : out Ada.Streams.Stream_Element_Offset;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite;
+      Interrupts  : Interrupt_Set := No_Interrupts)
+   is
+   begin
+      Send_Datagram_Common
+        (Socket, Item, Last, Destination, Destination, False, Timeout,
+         Interrupts);
+   end Send_Datagram;
+
+   procedure Send_Datagram
+     (Socket      : Socket_Type;
+      Item        : Ada.Streams.Stream_Element_Array;
+      Last        : out Ada.Streams.Stream_Element_Offset;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite;
+      Interrupts  : Interrupt_Set := No_Interrupts)
+   is
+   begin
+      Send_Datagram_Common
+        (Socket, Item, Last, Destination, Source, True, Timeout, Interrupts);
+   end Send_Datagram;
 
    procedure Send
      (Socket     : Socket_Type;

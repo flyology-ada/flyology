@@ -263,6 +263,7 @@ connection_state_model
 connection_tls_upgrade_smoke
 concurrency_primitives_smoke
 context_abi_matrix
+datagram_io_smoke
 descriptor_ownership_smoke
 dns_smoke
 dns_parser_smoke
