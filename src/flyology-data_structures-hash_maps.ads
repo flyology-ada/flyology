@@ -58,8 +58,9 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Key_Size   : Positive;
       Value_Size : Positive);
 
-   --  Attach to a quiescent map, validating its expected geometry and all
-   --  entry-state/count bookkeeping.
+   --  Attach to a quiescent map, validating its expected geometry, entry
+   --  states and count, fixed-key hashes, linear-probe reachability, and key
+   --  uniqueness.
    --  @param Item View attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored map offset

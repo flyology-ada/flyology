@@ -100,6 +100,13 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Item Initialized local view
    procedure Publish (Item : Local_View);
 
+   --  Atomically mark a nested leaf incomplete before its containing layout
+   --  is published. Relative must identify the nested shared-header state.
+   --  @param Item Initialized containing view
+   --  @param Relative Structure-relative nested leaf location
+   procedure Invalidate_Nested
+     (Item : Local_View; Relative : Byte_Count);
+
    --  Acquire and validate the shared header of an existing structure.
    --  @param Item Captured full view returned to the leaf
    --  @param Header Validated leaf-specific common-header fields
@@ -127,5 +134,6 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Item Local view to detach
    procedure Detach (Item : in out Local_View);
    pragma Inline_Always
-     (Checked_Add, Checked_Multiply, Align_Up, Address_At, Require_Ready);
+     (Checked_Add, Checked_Multiply, Align_Up, Address_At, Require_Ready,
+      Invalidate_Nested);
 end Flyology.Data_Structures.Layouts;

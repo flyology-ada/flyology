@@ -7,6 +7,8 @@ package body Flyology.Data_Structures.Storage is
    type Eight_Bytes is array (Natural range 0 .. 7) of Interfaces.Unsigned_8
      with Component_Size => 8, Size => 64, Alignment => 1;
 
+   package U8_Access is new System.Address_To_Access_Conversions
+     (Interfaces.Unsigned_8);
    package U32_Access is new System.Address_To_Access_Conversions
      (Interfaces.Unsigned_32);
    package U64_Access is new System.Address_To_Access_Conversions
@@ -25,6 +27,10 @@ package body Flyology.Data_Structures.Storage is
       Right  : System.Address;
       Length : Interfaces.C.size_t) return Interfaces.C.int;
    pragma Import (C, C_Equal, "memcmp");
+
+   function Read_U8
+     (Address : System.Address) return Interfaces.Unsigned_8 is
+     (U8_Access.To_Pointer (Address).all);
 
    function Read_U32
      (Address : System.Address) return Interfaces.Unsigned_32 is

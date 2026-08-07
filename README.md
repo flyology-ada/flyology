@@ -755,6 +755,10 @@ initialize the leaf at the envelope's validated content location. The envelope
 persists and validates that nested magic/version/schema without duplicating
 their numeric literals at the call site. Direct leaf use deliberately opts out
 of this extra boundary, not out of the leaf's structural validation.
+Envelope initialization atomically marks the nested leaf state incomplete
+before publishing the envelope. Reinitializing an extent therefore cannot
+leave stale ready leaf content attachable if execution stops before the caller
+completes the documented second-step leaf initialization.
 Applications should assign signatures independently and keep them stable; the
 value reduces accidental misidentification but is not authentication or a
 cryptographic integrity check.

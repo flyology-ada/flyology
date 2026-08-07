@@ -84,6 +84,7 @@ package body Flyology.Data_Structures.Envelopes is
       Set_View
         (Item, Core, Content_Offset, Content_Extent,
          Content_Alignment);
+      Layouts.Invalidate_Nested (Item.Core, Item.Content_Offset);
       Bytes.Write_U64
         (Layouts.Address_At (Item.Core, Nested_Magic_Offset, 8, 8),
          Nested_Identity.Magic);

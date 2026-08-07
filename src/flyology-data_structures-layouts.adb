@@ -175,6 +175,13 @@ package body Flyology.Data_Structures.Layouts is
         (Address_At (Item, State_Offset, 4, 4), Ready);
    end Publish;
 
+   procedure Invalidate_Nested
+     (Item : Local_View; Relative : Byte_Count) is
+   begin
+      Atomic.Store_Release_U32
+        (Address_At (Item, Relative, 4, 4), Initializing);
+   end Invalidate_Nested;
+
    procedure Attach
      (Item           : out Local_View;
       Header         : out Header_Values;

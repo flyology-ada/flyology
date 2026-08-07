@@ -94,6 +94,27 @@ package body Flyology.Data_Structures.Hash_Maps is
       return Slot_Address + Addressing.Storage_Offset (Offset);
    end Field_Address;
 
+   function Hash
+     (Key : Ada.Streams.Stream_Element_Array) return Interfaces.Unsigned_64;
+
+   function Entry_Key_Hash
+     (Item : View; Slot_Address : System.Address)
+      return Interfaces.Unsigned_64
+   is
+      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+   begin
+      for Offset in Interfaces.Unsigned_32 range 0 .. Item.Key_Value - 1 loop
+         Result := (Result xor Interfaces.Unsigned_64
+           (Bytes.Read_U8
+              (Field_Address
+                 (Item, Slot_Address,
+                  Layouts.Checked_Add
+                    (Key_Offset, Byte_Count (Offset)),
+                  1)))) * 16#0000_0100_0000_01B3#;
+      end loop;
+      return Result;
+   end Entry_Key_Hash;
+
    procedure Initialize
      (Item       : out View;
       Region     : Region_View;
@@ -143,7 +164,11 @@ package body Flyology.Data_Structures.Hash_Maps is
       Header : Layouts.Header_Values;
       Value_Offset, Stride, Extent : Byte_Count;
       Occupied : Interfaces.Unsigned_64 := 0;
-      State : Interfaces.Unsigned_32;
+      State, Candidate_State : Interfaces.Unsigned_32;
+      Stored_Hash, Candidate_Hash : Interfaces.Unsigned_64;
+      Candidate : Interfaces.Unsigned_64;
+      Reached : Boolean;
+      Slot_Address, Candidate_Address : System.Address;
    begin
       Geometry
         (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
@@ -176,6 +201,60 @@ package body Flyology.Data_Structures.Hash_Maps is
       if Occupied /= Header.Word_1 then
          raise Layout_Error with "hash-map occupied count is corrupt";
       end if;
+
+      for Index in Interfaces.Unsigned_64 range
+        0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
+      loop
+         Slot_Address := Entry_Address (Item, Index);
+         State := Bytes.Read_U32
+           (Field_Address (Item, Slot_Address, State_Offset, 4));
+         if State = Occupied_State then
+            Stored_Hash := Bytes.Read_U64
+              (Field_Address (Item, Slot_Address, Hash_Offset, 8));
+            if Stored_Hash /= Entry_Key_Hash (Item, Slot_Address) then
+               raise Layout_Error with "hash-map stored hash is corrupt";
+            end if;
+
+            Reached := False;
+            for Probe in Interfaces.Unsigned_64 range
+              0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
+            loop
+               Candidate := (Stored_Hash + Probe) and Item.Mask;
+               Candidate_Address := Entry_Address (Item, Candidate);
+               Candidate_State := Bytes.Read_U32
+                 (Field_Address
+                    (Item, Candidate_Address, State_Offset, 4));
+               if Candidate_State = Empty_State then
+                  raise Layout_Error with
+                    "hash-map occupied entry is outside its probe chain";
+               elsif Candidate = Index then
+                  Reached := True;
+                  exit;
+               elsif Candidate_State = Occupied_State then
+                  Candidate_Hash := Bytes.Read_U64
+                    (Field_Address
+                       (Item, Candidate_Address, Hash_Offset, 8));
+                  if Candidate_Hash = Stored_Hash
+                    and then Bytes.Equal
+                      (Field_Address
+                         (Item, Candidate_Address, Key_Offset,
+                          Byte_Count (Item.Key_Value)),
+                       Field_Address
+                         (Item, Slot_Address, Key_Offset,
+                          Byte_Count (Item.Key_Value)),
+                       Interfaces.C.size_t (Item.Key_Value))
+                  then
+                     raise Layout_Error with
+                       "hash-map contains duplicate occupied keys";
+                  end if;
+               end if;
+            end loop;
+            if not Reached then
+               raise Layout_Error with
+                 "hash-map occupied entry is outside its probe chain";
+            end if;
+         end if;
+      end loop;
    end Attach;
 
    procedure Detach (Item : in out View) is

@@ -63,6 +63,7 @@ procedure Data_Structures_Smoke is
    MPMC_Location  : constant DS.Region_Offset := 32_768;
    Map_Location   : constant DS.Region_Offset := 65_536;
    Envelope_Location : constant DS.Region_Offset := 100_000;
+   Crash_Envelope_Location : constant DS.Region_Offset := 110_000;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4, 8);
 
@@ -157,9 +158,27 @@ procedure Data_Structures_Smoke is
       return Result;
    end Decode;
 
+   function Test_Hash
+     (Key : Ada.Streams.Stream_Element_Array)
+      return Interfaces.Unsigned_64
+   is
+      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+   begin
+      for Byte of Key loop
+         Result := (Result xor Interfaces.Unsigned_64 (Byte)) *
+           16#0000_0100_0000_01B3#;
+      end loop;
+      return Result;
+   end Test_Hash;
+
    function Raw_Offset
      (Location : DS.Region_Offset; Relative : Natural) return C.size_t is
      (C.size_t (DS.Byte_Count (Location) + DS.Byte_Count (Relative)));
+
+   function Map_Entry_Offset
+     (Index : Interfaces.Unsigned_64; Relative : Natural) return C.size_t is
+     (Raw_Offset
+        (Map_Location, 64 + Natural (Index) * 32 + Relative));
 
    Temp_Root : constant String := Ada.Environment_Variables.Value
      ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
@@ -176,7 +195,7 @@ procedure Data_Structures_Smoke is
    Vector_A, Vector_B, Vector_C : Vectors.View;
    Ring_A, Ring_B, Ring_C, Ring_Bad : SPSC.View;
    Multi_A, Multi_B, Multi_C, Multi_Bad : MPMC.View;
-   Map_A, Map_B, Map_C : Maps.View;
+   Map_A, Map_B, Map_C, Map_Bad : Maps.View;
    Envelope_A, Envelope_B, Envelope_C : Contract_V1.View;
    Wrapped_A, Wrapped_B, Wrapped_C : Vectors.View;
 
@@ -319,6 +338,102 @@ begin
    Assert (Flag and then Decode (Eight) = 222,
       "hash-map B-to-A replacement was not visible");
 
+   declare
+      Home : constant Interfaces.Unsigned_64 := Test_Hash (Key_1) and 15;
+      Saved_Hash : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Home, 8));
+      Failed : Boolean := False;
+   begin
+      Write_U64
+        (Base_B, Map_Entry_Offset (Home, 8), Saved_Hash xor 1);
+      begin
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U64 (Base_B, Map_Entry_Offset (Home, 8), Saved_Hash);
+      Assert (Failed, "hash-map entry with a mismatched hash was accepted");
+   end;
+
+   declare
+      Home : constant Interfaces.Unsigned_64 := Test_Hash (Key_1) and 15;
+      Gap : constant Interfaces.Unsigned_64 := (Home + 1) and 15;
+      Target : constant Interfaces.Unsigned_64 := (Home + 2) and 15;
+      Target_State : constant Interfaces.Unsigned_32 :=
+        Read_U32 (Base_B, Map_Entry_Offset (Target, 0));
+      Target_Hash : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Target, 8));
+      Target_Key : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Target, 16));
+      Target_Value : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Target, 24));
+      Home_Key : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Home, 16));
+      Home_Value : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Home, 24));
+      Failed : Boolean := False;
+   begin
+      Assert
+        (Read_U32 (Base_B, Map_Entry_Offset (Home, 0)) = 1
+         and then Read_U32 (Base_B, Map_Entry_Offset (Gap, 0)) = 0
+         and then Target_State = 0,
+         "hash-map corruption fixture does not have an empty probe gap");
+      Write_U32 (Base_B, Map_Entry_Offset (Home, 0), 0);
+      Write_U64
+        (Base_B, Map_Entry_Offset (Target, 8), Test_Hash (Key_1));
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 16), Home_Key);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 24), Home_Value);
+      Write_U32 (Base_B, Map_Entry_Offset (Target, 0), 1);
+      begin
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32 (Base_B, Map_Entry_Offset (Target, 0), Target_State);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 8), Target_Hash);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 16), Target_Key);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 24), Target_Value);
+      Write_U32 (Base_B, Map_Entry_Offset (Home, 0), 1);
+      Assert (Failed, "hash-map entry beyond an empty probe gap was accepted");
+   end;
+
+   declare
+      Home : constant Interfaces.Unsigned_64 := Test_Hash (Key_1) and 15;
+      Target : constant Interfaces.Unsigned_64 := (Home + 1) and 15;
+      Target_State : constant Interfaces.Unsigned_32 :=
+        Read_U32 (Base_B, Map_Entry_Offset (Target, 0));
+      Target_Hash : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Target, 8));
+      Target_Key : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Target, 16));
+      Target_Value : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Target, 24));
+      Home_Key : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Home, 16));
+      Home_Value : constant Interfaces.Unsigned_64 :=
+        Read_U64 (Base_B, Map_Entry_Offset (Home, 24));
+      Failed : Boolean := False;
+   begin
+      Assert (Target_State = 0, "hash-map duplicate fixture is not empty");
+      Write_U64
+        (Base_B, Map_Entry_Offset (Target, 8), Test_Hash (Key_1));
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 16), Home_Key);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 24), Home_Value);
+      Write_U32 (Base_B, Map_Entry_Offset (Target, 0), 1);
+      Write_U64 (Base_B, Raw_Offset (Map_Location, 48), 2);
+      begin
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U64 (Base_B, Raw_Offset (Map_Location, 48), 1);
+      Write_U32 (Base_B, Map_Entry_Offset (Target, 0), Target_State);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 8), Target_Hash);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 16), Target_Key);
+      Write_U64 (Base_B, Map_Entry_Offset (Target, 24), Target_Value);
+      Assert (Failed, "duplicate occupied hash-map keys were accepted");
+   end;
+
    Vectors.Try_Append (Wrapped_A, Encode (909), Flag);
    Vectors.Read (Wrapped_B, 1, Eight);
    Assert (Flag and then Decode (Eight) = 909,
@@ -358,6 +473,54 @@ begin
          when DS.Layout_Error => Failed := True;
       end;
       Assert (Failed, "wrong envelope nested layout identity was accepted");
+   end;
+
+   declare
+      First_Envelope, Reused_Envelope, Peer_Envelope : Contract_V1.View;
+      Stale_Leaf, New_Leaf, Peer_Leaf, Failed_Leaf : Vectors.View;
+      Crash_Content : DS.Region_Offset := DS.Null_Offset;
+      Failed : Boolean := False;
+   begin
+      Contract_V1.Initialize
+        (First_Envelope, Region_A, Crash_Envelope_Location,
+         Envelope_Content_Extent, 8);
+      Crash_Content := Contract_V1.Content_Location (First_Envelope);
+      Vectors.Initialize (Stale_Leaf, Region_A, Crash_Content, 4, 8);
+      Vectors.Try_Append (Stale_Leaf, Encode (707), Flag);
+      Assert
+        (Flag and then
+         Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) = 2,
+         "stale nested leaf was not ready before envelope reuse");
+      Vectors.Detach (Stale_Leaf);
+      Contract_V1.Detach (First_Envelope);
+
+      Contract_V1.Initialize
+        (Reused_Envelope, Region_A, Crash_Envelope_Location,
+         Envelope_Content_Extent, 8);
+      Contract_V1.Attach
+        (Peer_Envelope, Region_B, Crash_Envelope_Location,
+         Envelope_Content_Extent, 8);
+      Assert
+        (Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) = 1,
+         "envelope reuse did not invalidate stale nested state");
+      begin
+         Vectors.Attach (Failed_Leaf, Region_B, Crash_Content, 4, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed,
+         "stale nested leaf survived the envelope initialization window");
+
+      Vectors.Initialize (New_Leaf, Region_A, Crash_Content, 4, 8);
+      Vectors.Attach (Peer_Leaf, Region_B, Crash_Content, 4, 8);
+      Assert
+        (Vectors.Length (Peer_Leaf) = 0,
+         "nested leaf did not finish initialization after envelope reuse");
+      Vectors.Destroy (New_Leaf);
+      Vectors.Detach (Peer_Leaf);
+      Contract_V1.Destroy (Reused_Envelope);
+      Contract_V1.Detach (Peer_Envelope);
    end;
 
    declare

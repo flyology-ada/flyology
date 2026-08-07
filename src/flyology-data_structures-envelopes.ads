@@ -4,8 +4,9 @@ private with Flyology.Data_Structures.Layouts;
 --  Adds an optional application-level contract around one relocatable object.
 --  Leaf structures always retain their own mandatory magic/version/schema;
 --  this envelope additionally checks the consumer's chosen contract identity
---  and version before it computes the nested location. The envelope does not
---  synchronize or manage the nested object, and direct leaf use opts out.
+--  and version before it computes the nested location. Initialization marks
+--  the nested leaf incomplete, but the envelope does not otherwise initialize,
+--  synchronize, or manage that object, and direct leaf use opts out.
 --  @formal Nested_Identity Stable identity exported by the nested leaf
 --  @formal Contract_Signature Nonzero 64-bit application contract identity
 --  @formal Contract_Version Nonzero 64-bit application contract version
@@ -39,9 +40,11 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
      (Content_Extent    : Byte_Count;
       Content_Alignment : Byte_Count := 8) return Byte_Count;
 
-   --  Initialize and publish a contract envelope. The caller then initializes
+   --  Initialize a contract envelope, atomically mark the nested leaf state
+   --  incomplete, and then publish the envelope. The caller then initializes
    --  the nested leaf at Content_Location. A crash between those steps leaves
-   --  the nested leaf incomplete, which its own attachment rejects.
+   --  the nested leaf incomplete even when this extent previously contained a
+   --  ready leaf, so the leaf's own attachment rejects it.
    --  @param Item Envelope view attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero offset aligned for Content_Alignment
