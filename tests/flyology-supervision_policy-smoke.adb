@@ -26,6 +26,7 @@ procedure Flyology.Supervision_Policy.Smoke is
    Was_New : Boolean;
 
    Generation : Public.Generation := Public.Generation'First;
+   High_Id : constant Public.Child_Id := 2 ** 40;
 begin
    --  Child 2 and 3 depend on 1; child 4 depends on both 2 and 3.
    Dependencies (2, 1) := True;
@@ -75,6 +76,8 @@ begin
    pragma Assert
      (Transition_Allowed (Public.Starting, Public.Ready));
    pragma Assert
+     (Transition_Allowed (Public.Starting, Public.Running));
+   pragma Assert
      (Transition_Allowed (Public.Ready, Public.Running));
    pragma Assert
      (Transition_Allowed (Public.Running, Public.Terminated));
@@ -103,7 +106,12 @@ begin
    pragma Assert
      (not Should_Restart (Public.Always, Public.Stuck));
    pragma Assert
+     (not Should_Restart (Public.Always, Public.Supervisor_Shutdown));
+   pragma Assert
      (Should_Restart (Public.Always, Public.Normal_Return));
+
+   pragma Assert
+     (Backoff_For (Attempt_Count'Last, 0, 8) = 0);
 
    Classify_Attempt (Limits, Account, 100, 200, Admission, Backoff);
    pragma Assert (Admission = Restart_Admitted and then Backoff = 2);
@@ -150,12 +158,17 @@ begin
    pragma Assert (Generation = 2);
    pragma Assert (Generation_Matches (1, Generation, 1, Generation));
    pragma Assert
+     (Generation_Matches (High_Id, Generation, High_Id, Generation));
+   pragma Assert
      (not Generation_Matches
-        (1, Generation, 1, Public.Generation'First));
-   Generation := Next_Generation (Public.Generation'Last);
-   pragma Assert (Generation = Public.Generation'First);
+        (High_Id, Generation, High_Id, Public.Generation'First));
+   pragma Assert
+     (not Generation_Can_Advance (Public.Generation'Last));
 
-   pragma Assert (Next_Incident (Incident_Id'Last) = Incident_Id'First);
+   pragma Assert (Incident_Can_Advance (Incident_Id'First));
+   pragma Assert
+     (Next_Incident (Incident_Id'First) = Incident_Id'First + 1);
+   pragma Assert (not Incident_Can_Advance (Incident_Id'Last));
 
    pragma Assert
      (Same_Incident_Attempt (True, 7, 3, 7, 3));

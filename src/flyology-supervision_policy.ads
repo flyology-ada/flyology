@@ -26,6 +26,43 @@ is
       Items  : Child_Order := (others => Child_Id'First);
    end record;
 
+   --  Report whether Id occurs strictly before Position in Plan.
+   function Appears_Before
+     (Plan     : Order_Plan;
+      Id       : Child_Id;
+      Position : Child_Id) return Boolean is
+     (for some Earlier in Child_Id =>
+        Earlier < Position
+        and then Earlier <= Plan.Length
+        and then Plan.Items (Earlier) = Id)
+   with Ghost;
+
+   --  State the semantic contract for the emitted prefix of a start plan:
+   --  children occur at most once and every prerequisite precedes its user. A
+   --  successful full-length plan therefore contains every configured child.
+   --  Lowest-id selection remains an executable deterministic property tested
+   --  by the policy model rather than a second quantified proof obligation.
+   function Valid_Start_Order
+     (Count        : Child_Count;
+      Dependencies : Dependency_Matrix;
+      Plan         : Order_Plan) return Boolean is
+     (Plan.Length <= Count
+      and then
+        (for all Position in Child_Id =>
+           (if Position <= Plan.Length then
+               Plan.Items (Position) <= Count
+               and then
+                 (for all Earlier in Child_Id =>
+                    (if Earlier < Position then
+                        Plan.Items (Earlier) /= Plan.Items (Position)))
+               and then
+                 (for all Prerequisite in Child_Id =>
+                    (if Prerequisite <= Count
+                       and then Dependencies
+                         (Plan.Items (Position), Prerequisite)
+                     then Appears_Before (Plan, Prerequisite, Position))))))
+   with Ghost;
+
    --  Return a deterministic, lowest-id-first topological start order.
    procedure Plan_Start_Order
      (Count        : Child_Count;
@@ -33,7 +70,11 @@ is
       Plan         : out Order_Plan)
    with Global => null,
         Post   => Plan.Length <= Count
-          and then (if Plan.Valid then Plan.Length = Count);
+          and then
+            (if Plan.Valid then
+                Plan.Length = Count
+                and then Valid_Start_Order (Count, Dependencies, Plan)
+             else Plan.Length < Count);
 
    --  Reverse a valid start order for rollback or shutdown.
    procedure Plan_Stop_Order
@@ -49,6 +90,25 @@ is
                    Stop.Items (Position) =
                      Start.Items
                        (Child_Id (Start.Length - Position + 1))));
+
+   --  Report whether a set contains no unconfigured child and is closed under
+   --  every configured dependent edge. With Failed included, this guarantees
+   --  complete transitive-dependent recovery.
+   function Dependent_Recovery_Closed
+     (Count        : Child_Count;
+      Dependencies : Dependency_Matrix;
+      Affected     : Child_Set) return Boolean is
+     ((for all Id in Child_Id =>
+         (if Id > Count then not Affected (Id)))
+      and then
+        (for all User in Child_Id =>
+           (for all Prerequisite in Child_Id =>
+              (if User <= Count
+                 and then Prerequisite <= Count
+                 and then Dependencies (User, Prerequisite)
+                 and then Affected (Prerequisite)
+               then Affected (User)))))
+   with Ghost;
 
    --  Compute the logical children affected by one explicit impact. For
    --  Restart_Dependents, dependency edges are followed transitively from the
@@ -74,7 +134,10 @@ is
                       Affected (Id) =
                         (Id = Failed
                          or else (Id <= Count and then Cohort (Id)))),
-                when Public.Restart_Dependents => True);
+                when Public.Restart_Dependents =>
+                   Affected (Failed)
+                   and then Dependent_Recovery_Closed
+                     (Count, Dependencies, Affected));
 
    --  Decide whether a lifecycle transition is legal in the scalar model.
    function Transition_Allowed
@@ -93,8 +156,8 @@ is
       Kind   : Public.Termination_Kind) return Boolean
    with Global => null,
         Post   =>
-          (if Kind in Public.No_Termination | Public.Stuck |
-              Public.Policy_Exhaustion
+          (if Kind in Public.No_Termination | Public.Supervisor_Shutdown |
+              Public.Stuck | Public.Policy_Exhaustion
            then not Should_Restart'Result
            else
              (case Policy is
@@ -286,28 +349,34 @@ is
            and then Queued_Children = 0
            and then Live_Managers = 0);
 
-   --  Advance an incident id while reserving zero as invalid.
+   --  Report whether an incident id can advance without reuse.
+   function Incident_Can_Advance (Value : Incident_Id) return Boolean is
+     (Value < Incident_Id'Last);
+
+   --  Advance an incident id without wrapping to a stale identity.
    function Next_Incident (Value : Incident_Id) return Incident_Id
    with Global => null,
-        Post   =>
-          (if Value = Incident_Id'Last then
-              Next_Incident'Result = Incident_Id'First
-           else Next_Incident'Result = Value + 1);
+        Pre    => Incident_Can_Advance (Value),
+        Post   => Next_Incident'Result = Value + 1;
 
-   --  Advance a child generation while reserving zero as invalid.
+   --  Report whether a generation can advance without making an old handle
+   --  current again.
+   function Generation_Can_Advance
+     (Value : Public.Generation) return Boolean is
+     (Value < Public.Generation'Last);
+
+   --  Advance a child generation without wrapping to a stale identity.
    function Next_Generation
      (Value : Public.Generation) return Public.Generation
    with Global => null,
-        Post   =>
-          (if Value = Public.Generation'Last then
-              Next_Generation'Result = Public.Generation'First
-           else Next_Generation'Result = Value + 1);
+        Pre    => Generation_Can_Advance (Value),
+        Post   => Next_Generation'Result = Value + 1;
 
    --  Reject stale generation-qualified observations or commands.
    function Generation_Matches
-     (Expected_Id         : Child_Id;
+     (Expected_Id         : Public.Child_Id;
       Expected_Generation : Public.Generation;
-      Supplied_Id         : Child_Id;
+      Supplied_Id         : Public.Child_Id;
       Supplied_Generation : Public.Generation) return Boolean
    with Global => null,
         Post   => Generation_Matches'Result =

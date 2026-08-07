@@ -30,9 +30,10 @@ generic
       Member  : Child_Kind) return Boolean;
 
    --  Construct and join exactly one new Ada task generation. Applications
-   --  normally dispatch to an instance of Flyology.Supervision.Children.
-   --  The operation must not return while its generation task or resources
-   --  remain live.
+   --  normally dispatch to an instance of
+   --  Flyology.Supervision.Task_Generations; the Children package remains a
+   --  convenience adapter for procedure bodies. The operation must not return
+   --  while its generation task or resources remain live.
    --  @param Context Application state owned by the enclosing Run call
    --  @param Child Logical static child kind
    --  @param Control Fresh generation readiness and cancellation channel

@@ -317,7 +317,9 @@ package body Flyology.Supervision.Static is
          end if;
 
          if Has_Generation (Child) then
-            if Snapshots (Child).Generation = Generation'Last then
+            if not Policy.Generation_Can_Advance
+              (Snapshots (Child).Generation)
+            then
                Snapshots (Child).Termination :=
                  Empty_Summary (Policy_Exhaustion);
                Begin_Terminal_Stop
@@ -327,7 +329,7 @@ package body Flyology.Supervision.Static is
                return;
             end if;
             Snapshots (Child).Generation :=
-              Snapshots (Child).Generation + 1;
+              Policy.Next_Generation (Snapshots (Child).Generation);
          else
             Has_Generation (Child) := True;
          end if;

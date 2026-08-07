@@ -1,8 +1,10 @@
 with Ada.Real_Time;
+with Ada.Task_Identification;
 with Flyology.Cancellation;
 with Flyology.Supervision.Families;
-with Flyology.Supervision.Input_Children;
+with Flyology.Supervision.Input_Task_Generations;
 with Interfaces;
+with System.Multiprocessors;
 
 procedure Flyology.Supervision.Families_Smoke is
    use type Ada.Real_Time.Time;
@@ -39,16 +41,20 @@ procedure Flyology.Supervision.Families_Smoke is
       Started : Counts;
    end record;
 
-   procedure Execute
-     (State   : in out Context;
-      Input   : Request;
+   task type Family_Task
+     (State   : not null access Context;
+      Input   : not null access constant Request;
       Control : not null access Flyology.Supervision.Generation_Control)
-   is
+   with CPU => System.Multiprocessors.Not_A_Specific_CPU is
+      pragma Task_Info (Flyology.Native_Task);
+   end Family_Task;
+
+   task body Family_Task is
       Attempt : Positive;
    begin
-      State.Started.Begin_Generation (Input, Attempt);
+      State.Started.Begin_Generation (Input.all, Attempt);
       Flyology.Supervision.Mark_Ready (Control.all);
-      if Input = Request'First and then Attempt = 1 then
+      if Input.all = Request'First and then Attempt = 1 then
          raise Test_Failure with "first family generation fails";
       end if;
       loop
@@ -57,13 +63,40 @@ procedure Flyology.Supervision.Families_Smoke is
          end if;
          delay 0.001;
       end loop;
-   end Execute;
+   exception
+      when Flyology.Cancellation.Operation_Cancelled =>
+         Flyology.Supervision.Report_Cancellation (Control.all);
+      when Occurrence : others =>
+         Flyology.Supervision.Report_Exception (Control.all, Occurrence);
+   end Family_Task;
 
-   package Child is new Flyology.Supervision.Input_Children
+   function Create_Family_Task
+     (State   : not null access Context;
+      Input   : not null access constant Request;
+      Control : not null access Flyology.Supervision.Generation_Control)
+      return Family_Task
+   is
+   begin
+      return Subject : Family_Task (State, Input, Control);
+   end Create_Family_Task;
+
+   function Identity
+     (Subject : in out Family_Task)
+      return Ada.Task_Identification.Task_Id is
+     (Subject'Identity);
+
+   procedure Abort_Subject (Subject : in out Family_Task) is
+   begin
+      abort Subject;
+   end Abort_Subject;
+
+   package Child is new Flyology.Supervision.Input_Task_Generations
      (Input_Type          => Request,
       Application_Context => Context,
-      Execute             => Execute,
-      Task_Model          => Flyology.Native_Task);
+      Generation_Task     => Family_Task,
+      Create              => Create_Family_Task,
+      Task_Identity       => Identity,
+      Abort_Task          => Abort_Subject);
 
    procedure Run_Generation
      (State   : aliased in out Context;
@@ -81,7 +114,7 @@ procedure Flyology.Supervision.Families_Smoke is
         (Burst_Attempts    => 3,
          Window            => Ada.Real_Time.Seconds (1),
          Total_Attempts    => 3,
-         Initial_Backoff   => Ada.Real_Time.Milliseconds (1),
+         Initial_Backoff   => Ada.Real_Time.Time_Span_Zero,
          Maximum_Backoff   => Ada.Real_Time.Milliseconds (4),
          Stability_Reset   => Ada.Real_Time.Seconds (1),
          Recovery_Deadline => Ada.Real_Time.Seconds (2)),

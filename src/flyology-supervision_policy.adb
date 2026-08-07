@@ -1,50 +1,77 @@
-with Flyology.Counter_Policy;
-
 package body Flyology.Supervision_Policy
   with SPARK_Mode
 is
-   package Counters renames Flyology.Counter_Policy;
-
    procedure Plan_Start_Order
      (Count        : Child_Count;
       Dependencies : Dependency_Matrix;
       Plan         : out Order_Plan)
    is
       Emitted   : Child_Set := (others => False);
+      Ready_Set : Child_Set := (others => False);
       Candidate : Child_Id;
       Found     : Boolean;
-      Ready     : Boolean;
    begin
       Plan := (Valid => False,
                Length => 0,
                Items => (others => Child_Id'First));
       for Position in 1 .. Count loop
          pragma Loop_Invariant (Plan.Length = Position - 1);
+         pragma Loop_Invariant
+           (Valid_Start_Order (Count, Dependencies, Plan));
+         pragma Loop_Invariant
+           (for all Id in Child_Id =>
+              Emitted (Id) =
+                (Id <= Count
+                 and then Appears_Before
+                   (Plan, Id, Child_Id (Position))));
+
+         for Id in Child_Id loop
+            Ready_Set (Id) :=
+              Id <= Count
+              and then not Emitted (Id)
+              and then
+                (for all Prerequisite in Child_Id =>
+                   (if Prerequisite <= Count
+                      and then Dependencies (Id, Prerequisite)
+                    then Emitted (Prerequisite)));
+            pragma Loop_Invariant
+              (for all Checked in Child_Id =>
+                 (if Checked <= Id then
+                     Ready_Set (Checked) =
+                       (Checked <= Count
+                        and then not Emitted (Checked)
+                        and then
+                          (for all Prerequisite in Child_Id =>
+                             (if Prerequisite <= Count
+                                and then Dependencies
+                                  (Checked, Prerequisite)
+                              then Emitted (Prerequisite))))));
+         end loop;
+
          Found := False;
          Candidate := Child_Id'First;
          for Id in Child_Id loop
-            pragma Loop_Invariant (not Found or else Candidate <= Count);
-            if Id <= Count and then not Emitted (Id) and then not Found then
-               Ready := True;
-               for Prerequisite in Child_Id loop
-                  if Prerequisite <= Count
-                    and then Dependencies (Id, Prerequisite)
-                    and then not Emitted (Prerequisite)
-                  then
-                     Ready := False;
-                  end if;
-               end loop;
-               if Ready then
-                  Candidate := Id;
-                  Found := True;
-               end if;
+            if Ready_Set (Id) and then not Found then
+               Candidate := Id;
+               Found := True;
             end if;
+            pragma Loop_Invariant
+              (if Found then Ready_Set (Candidate));
          end loop;
          if not Found then
             return;
          end if;
+
+         pragma Assert (Candidate <= Count);
+         pragma Assert (not Emitted (Candidate));
+         pragma Assert
+           (for all Prerequisite in Child_Id =>
+              (if Prerequisite <= Count
+                 and then Dependencies (Candidate, Prerequisite)
+               then Emitted (Prerequisite)));
          Plan.Length := Position;
          Plan.Items (Child_Id (Position)) := Candidate;
+         pragma Assert (Valid_Start_Order (Count, Dependencies, Plan));
          Emitted (Candidate) := True;
       end loop;
       Plan.Valid := True;
@@ -89,21 +116,78 @@ is
                end if;
             end loop;
          when Public.Restart_Dependents =>
-            Affected (Failed) := True;
-            for Pass in 1 .. Count loop
-               for Id in Child_Id loop
-                  if Id <= Count and then not Affected (Id) then
-                     for Prerequisite in Child_Id loop
-                        if Prerequisite <= Count
-                          and then Dependencies (Id, Prerequisite)
-                          and then Affected (Prerequisite)
-                        then
-                           Affected (Id) := True;
-                        end if;
-                     end loop;
-                  end if;
+            declare
+               Processed : Child_Set := (others => False);
+               Source    : Child_Id := Failed;
+               Found     : Boolean;
+            begin
+               Affected (Failed) := True;
+               --  Each iteration expands one affected child that has not yet
+               --  been processed. Processed entries only become true, so the
+               --  finite worklist performs at most Count expansions.
+               loop
+                  pragma Loop_Invariant (Affected (Failed));
+                  pragma Loop_Invariant
+                    (for all Id in Child_Id =>
+                       (if Processed (Id) then Id <= Count));
+                  pragma Loop_Invariant
+                    (for all Prerequisite in Child_Id =>
+                       (if Processed (Prerequisite) then
+                           (for all User in Child_Id =>
+                              (if User <= Count
+                                 and then Dependencies (User, Prerequisite)
+                               then Affected (User)))));
+
+                  Found := False;
+                  for Id in Child_Id loop
+                     if Id <= Count
+                       and then Affected (Id)
+                       and then not Processed (Id)
+                       and then not Found
+                     then
+                        Source := Id;
+                        Found := True;
+                     end if;
+                     pragma Loop_Invariant
+                       (if Found then
+                           Source <= Count
+                           and then Affected (Source)
+                           and then not Processed (Source));
+                     pragma Loop_Invariant
+                       (if not Found then
+                           (for all Checked in Child_Id =>
+                              (if Checked <= Id
+                                 and then Checked <= Count
+                                 and then Affected (Checked)
+                               then Processed (Checked))));
+                  end loop;
+                  exit when not Found;
+
+                  for User in Child_Id loop
+                     pragma Loop_Invariant (Affected (Failed));
+                     pragma Loop_Invariant
+                       (for all Prerequisite in Child_Id =>
+                          (if Processed (Prerequisite) then
+                              (for all Dependent in Child_Id =>
+                                 (if Dependent <= Count
+                                    and then Dependencies
+                                      (Dependent, Prerequisite)
+                                  then Affected (Dependent)))));
+                     pragma Loop_Invariant
+                       (for all Checked in Child_Id =>
+                          (if Checked < User
+                             and then Checked <= Count
+                             and then Dependencies (Checked, Source)
+                           then Affected (Checked)));
+                     if User <= Count
+                       and then Dependencies (User, Source)
+                     then
+                        Affected (User) := True;
+                     end if;
+                  end loop;
+                  Processed (Source) := True;
                end loop;
-            end loop;
+            end;
       end case;
       for Id in Child_Id loop
          if Id > Count then
@@ -124,8 +208,8 @@ is
          when Public.Configured =>
             To in Public.Starting | Public.Joined,
          when Public.Starting =>
-            To in Public.Ready | Public.Stopping | Public.Terminated |
-              Public.Failed_Escalated,
+            To in Public.Ready | Public.Running | Public.Stopping |
+              Public.Terminated | Public.Failed_Escalated,
          when Public.Ready =>
             To in Public.Running | Public.Stopping | Public.Terminated,
          when Public.Running =>
@@ -158,8 +242,8 @@ is
      (Policy : Public.Restart_Kind;
       Kind   : Public.Termination_Kind) return Boolean
    is
-     (if Kind in Public.No_Termination | Public.Stuck |
-         Public.Policy_Exhaustion
+     (if Kind in Public.No_Termination | Public.Supervisor_Shutdown |
+         Public.Stuck | Public.Policy_Exhaustion
       then False
       else
         (case Policy is
@@ -174,6 +258,9 @@ is
    is
       Result : Tick := Initial_Delay;
    begin
+      if Result = 0 then
+         return Result;
+      end if;
       for Index in 2 .. Attempt loop
          pragma Loop_Invariant (Result <= Maximum_Delay);
          pragma Loop_Invariant (Result >= Initial_Delay);
@@ -299,18 +386,16 @@ is
       and then Live_Managers = 0);
 
    function Next_Incident (Value : Incident_Id) return Incident_Id is
-     (Incident_Id
-        (Counters.Nonzero_Successor (Interfaces.Unsigned_64 (Value))));
+     (Value + 1);
 
    function Next_Generation
      (Value : Public.Generation) return Public.Generation is
-     (Public.Generation
-        (Counters.Nonzero_Successor (Interfaces.Unsigned_64 (Value))));
+     (Value + 1);
 
    function Generation_Matches
-     (Expected_Id          : Child_Id;
+     (Expected_Id          : Public.Child_Id;
       Expected_Generation : Public.Generation;
-      Supplied_Id          : Child_Id;
+      Supplied_Id          : Public.Child_Id;
       Supplied_Generation  : Public.Generation) return Boolean
    is
      (Expected_Id = Supplied_Id

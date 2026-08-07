@@ -3,6 +3,8 @@ with Ada.Task_Identification;
 with Flyology.Cancellation;
 with Flyology.Supervision.Children;
 with Flyology.Supervision.Static;
+with Flyology.Supervision.Task_Generations;
+with System.Multiprocessors;
 
 procedure Flyology.Supervision.Static_Smoke is
    use type Ada.Real_Time.Time;
@@ -88,10 +90,61 @@ procedure Flyology.Supervision.Static_Smoke is
       end loop;
    end Execute_Restartable;
 
-   package Restart_Child is new Flyology.Supervision.Children
+   task type Restart_Task
+     (State   : not null access Restart_Context;
+      Control : not null access Flyology.Supervision.Generation_Control)
+   with CPU => System.Multiprocessors.Not_A_Specific_CPU is
+      pragma Task_Info (Flyology.Native_Task);
+      entry Start;
+   end Restart_Task;
+
+   task body Restart_Task is
+   begin
+      accept Start;
+      Execute_Restartable (State.all, Control);
+      Flyology.Supervision.Report_Normal_Return (Control.all);
+   exception
+      when Flyology.Cancellation.Operation_Cancelled =>
+         Flyology.Supervision.Report_Cancellation (Control.all);
+      when Occurrence : others =>
+         Flyology.Supervision.Report_Exception (Control.all, Occurrence);
+   end Restart_Task;
+
+   function Create_Restart
+     (State   : not null access Restart_Context;
+      Control : not null access Flyology.Supervision.Generation_Control)
+      return Restart_Task
+   is
+   begin
+      return Subject : Restart_Task (State, Control);
+   end Create_Restart;
+
+   procedure Initialize_Restart
+     (Subject : in out Restart_Task;
+      Control : aliased in out Flyology.Supervision.Generation_Control)
+   is
+      pragma Unreferenced (Control);
+   begin
+      Subject.Start;
+   end Initialize_Restart;
+
+   function Restart_Identity
+     (Subject : in out Restart_Task)
+      return Ada.Task_Identification.Task_Id is
+     (Subject'Identity);
+
+   procedure Abort_Restart (Subject : in out Restart_Task) is
+   begin
+      abort Subject;
+   end Abort_Restart;
+
+   package Restart_Child is new Flyology.Supervision.Task_Generations
      (Application_Context => Restart_Context,
-      Execute             => Execute_Restartable,
-      Task_Model          => Flyology.Native_Task);
+      Generation_Task     => Restart_Task,
+      Create              => Create_Restart,
+      Initialize          => Initialize_Restart,
+      Task_Identity       => Restart_Identity,
+      Abort_Task          => Abort_Restart);
 
    type Restart_Kind is (Service);
 
@@ -681,7 +734,18 @@ begin
             Restart_Supervisors.Request_Shutdown (Item);
             Owner.Join;
             raise Program_Error with
-              "restart supervisor did not publish generation three";
+              "restart supervisor did not publish generation three; attempts="
+              & Context.State.Attempts'Image
+              & ", generation="
+              & Restart_Supervisors.Current
+                  (Item, Service).Generation'Image
+              & ", state="
+              & Restart_Supervisors.Current (Item, Service).State'Image
+              & ", outcome=" & Result.Outcome'Image
+              & ", termination=" & Result.Termination.Kind'Image
+              & ", message="
+              & Result.Termination.Message
+                  (1 .. Result.Termination.Message_Length);
          end if;
          delay 0.001;
       end loop;

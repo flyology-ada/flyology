@@ -76,6 +76,14 @@ only when usage reporting was requested. Kernel CQE delivery, flag semantics,
 socket byte acceptance, the imported ABI, and Ada asynchronous-transfer races
 remain outside SPARK and require the Linux and lane-parity tests.
 
+The supervision policy strengthening proves that every successful start plan
+contains each configured child once with all prerequisites earlier, and that a
+dependent-recovery set contains the failed child, excludes unconfigured ids,
+and is closed under every configured dependency edge. Deterministic lowest-id
+selection and exact minimality of the dependent set remain executable model
+properties. The finite Boolean worklist is not claimed as a separate
+`Always_Terminates` proof.
+
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
      (Strategic Loop Step 5) in workflow.md in the /gnatprove Skill.
@@ -217,6 +225,17 @@ remain outside SPARK and require the Linux and lane-parity tests.
 - [x] `Flyology.Timer_Set_Policy.Collect_Due` (level 1, mode all)
 - [x] HTTP client upload-policy proof and integration boundary
 - [x] Task-result lifecycle policy and runtime integration boundary
+- [x] Supervision policy contract strengthening (level 1, mode all)
+  - [x] `Flyology.Supervision_Policy.Plan_Start_Order` (level 1, mode all)
+    - [x] Readiness-table invariant
+    - [x] Selected-candidate readiness invariant
+    - [x] Emitted-set and plan-prefix correspondence
+    - [x] Configured-id, uniqueness, and prerequisite-order contract
+  - [x] `Flyology.Supervision_Policy.Affected_Children` (level 1, mode all)
+    - [x] Failed child remains affected during dependent recovery
+    - [x] Unconfigured child ids remain excluded
+    - [x] Every configured edge out of an affected prerequisite is closed
+  - [x] Fresh whole-unit application widening and runtime proof suite
 
 ## In Progress
 <!-- A subagent executes the Tactical Loop for the subprogram below.
@@ -232,6 +251,26 @@ remain outside SPARK and require the Linux and lane-parity tests.
 - None.
 
 ## Discovered Obligations
+
+- [x] Prove successful start plans contain every configured child exactly
+      once and place prerequisites first
+- [x] Prove `Plan_Start_Order` readiness and candidate-selection loop
+      invariants
+- [x] Prove `Plan_Start_Order` local bounds, nonduplication, readiness, and
+      plan-prefix correspondence assertions
+- [x] Retain lowest-id selection as executable deterministic policy and model
+      coverage after the fully quantified proof required disproportionate
+      ghost machinery
+- [x] Prove an invalid start plan stops before emitting every configured child
+- [x] Prove dependent recovery excludes unconfigured ids and is closed under
+      every configured dependent edge
+- [x] Keep the proved Boolean worklist after bounded-loop termination variants
+      required disproportionate cardinality or queue-prefix ghost machinery;
+      each iteration marks one affected configured child processed and no
+      processed bit is cleared
+- [x] Fresh whole-unit widening of `Flyology.Supervision_Policy`
+- [x] Re-run the application and runtime proof suites after strengthening the
+      production supervision policy contracts
 
 - [x] Strengthen `Down_Ready` so every direct child of a nonroot position is
       ordered after that position's parent

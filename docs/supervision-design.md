@@ -9,8 +9,10 @@ task identity authoritative. It does not isolate shared memory or change GNARL
 task semantics.
 
 The checked-in implementation consists of the public vocabulary and
-generation control in `Flyology.Supervision`, the lane-selectable structured
-task runners in `Flyology.Supervision.Children` and
+generation control in `Flyology.Supervision`, application-task owners in
+`Flyology.Supervision.Task_Generations` and
+`Flyology.Supervision.Input_Task_Generations`, procedure-body convenience
+adapters in `Flyology.Supervision.Children` and
 `Flyology.Supervision.Input_Children`, the heterogeneous static controller in
 `Flyology.Supervision.Static`, the homogeneous fixed-capacity controller in
 `Flyology.Supervision.Families`, and the SPARK policy kernel in
@@ -61,7 +63,7 @@ contracts should not be silently changed.
 | `Flyology.Capacity` | bounded admission and drain when a child owns concurrent work | no supervisor-specific behavior belongs in the gate | permits never transfer implicitly to a replacement |
 | `Flyology.IO.Structured_Servers` | reverse cleanup, exact listener ownership, cancel/drain phases, activation rollback | a future server factory can be supervised as one logical child | `Server` remains one-shot; restart creates a new server and listener |
 | `Flyology.Observability` | actual lightweight group and sampled stall evidence | supervision snapshots are an application layer, not a runtime ABI extension | scheduler counters do not determine restart policy |
-| scheduler create/destroy/reap | evidence that a finished fiber is reaped only after GNARL destroys its task object, with running/migrating destruction deferred | none for the first implementation | supervision remains above GNARL |
+| scheduler create/destroy/reap | evidence that a finished fiber is reaped only after GNARL destroys its task object, with running/migrating destruction deferred | none for the first implementation | supervision composes ordinary Ada task semantics |
 
 The scheduler already distinguishes a task wrapper returning from the later
 fiber-record reap. A supervisor must wait for the Ada task master and task-body
@@ -135,13 +137,71 @@ and dependent-task joining remain Ada-controlled. Omitting `Request_Shutdown`
 is safe only if another terminal rule ends `Run`; omitting an explicit join is
 safe because `Run` cannot return without one.
 
-Each child kind normally instantiates `Flyology.Supervision.Children` with its
-exact context, callback, task designation, CPU, and resource types. `Run`
-declares the actual generation task in a local block. Its outer body wrapper
-catches and copies failure information; the block's master joins the task
-before the operation returns. Re-entering `Run` creates a new task object under
-a new local master without an access-to-task allocation or detached collection
-master.
+The primary generation boundary accepts an application-defined task type:
+
+```ada
+generic
+   type Application_Context (<>) is limited private;
+   type Generation_Task (<>) is limited private;
+   with function Create
+     (Context : not null access Application_Context;
+      Control : not null access Generation_Control) return Generation_Task
+      is <>;
+   with procedure Initialize
+     (Subject : in out Generation_Task;
+      Control : aliased in out Generation_Control) is null;
+   with function Task_Identity
+     (Subject : in out Generation_Task) return Ada.Task_Identification.Task_Id
+      is <>;
+   with procedure Abort_Task (Subject : in out Generation_Task) is <>;
+package Flyology.Supervision.Task_Generations is
+   procedure Run
+     (Context : aliased in out Application_Context;
+      Control : aliased in out Generation_Control;
+      Result  : out Generation_Result);
+end Flyology.Supervision.Task_Generations;
+```
+
+`Generation_Task` is an indefinite limited-private formal, so its actual may
+be an ordinary task type with any discriminants, application entries, task
+aspects, package operations, and a separately written task body. `Create`
+returns that exact task object by Ada limited build-in-place return; no copying
+or address-valued payload is involved. The generic declares the result in a
+local block. `Initialize` may make a bounded startup entry call or invoke a
+task-specific package operation after activation; it runs outside controller
+locks and must not retain the task object or execute the service loop. The
+application task body reports exactly one terminal outcome with
+`Report_Normal_Return`, `Report_Cancellation`, or `Report_Exception`.
+Generation-owned resources belong in an inner block and the reporting handler
+belongs outside that block, so controlled cleanup and dependent-task joins
+precede the report. Termination without a report is `Abnormal_Completion`.
+
+The generic observes termination, dispatches the configured optional Ada abort
+through the typed `Abort_Task` adapter, and leaves the local master only after
+the task has terminated. Re-entering `Run` constructs a new object under a new
+master. No access-to-task allocation or detached collection master is used.
+`Task_Identity` supplies diagnostic identity and `Abort_Task` supplies the
+optional last-resort stop request for the exact generation type. `Create` is
+also the lifetime boundary: it may select arbitrary discriminants from the
+typed context, but every reference retained by the returned task must remain
+valid until that task joins. The boxed defaults infer directly visible,
+profile-conformant `Create`, `Task_Identity`, and `Abort_Task` operations by
+name. `Initialize` remains explicit when used because omission intentionally
+selects its null default.
+
+`Flyology.Supervision.Children` remains source-compatible as a convenience for
+applications that only need a procedure body. It declares a private task type
+and uses `Task_Generations`; it is no longer the architectural generation
+boundary.
+
+The task object itself does not escape `Task_Generations.Run`. Startup code may
+use its entries through `Initialize`, and generation-owned tasks may use their
+normal lexical references. A long-lived public service API must instead use a
+typed protected object or bounded channel in the application context and carry
+the scalar `Child_Handle` obtained from `Handle (Control)`. The receiver rejects
+a handle whose generation is no longer current. Publishing a naked
+access-to-task value would let a stale client rendezvous with reclaimed storage
+and is deliberately unsupported.
 
 The application topology dispatch is an exhaustive case over its enumeration:
 
@@ -153,9 +213,9 @@ procedure Run_One_Generation
    Result  : out Generation_Result) is
 begin
    case Id is
-      when Database => Database_Child.Run (Tree, Control, Result);
-      when Cache    => Cache_Child.Run (Tree, Control, Result);
-      when API      => API_Child.Run (Tree, Control, Result);
+      when Database => Database_Generation.Run (Tree, Control, Result);
+      when Cache    => Cache_Generation.Run (Tree, Control, Result);
+      when API      => API_Generation.Run (Tree, Control, Result);
    end case;
 end Run_One_Generation;
 ```
@@ -175,7 +235,7 @@ protected call.
 - Access-to-task factories make restart construction direct, but a
   library-level access type gives allocated tasks a collection master wider
   than the supervisor. Explicit joins can compensate operationally, but the
-  local-generation procedure above lets Ada enforce the master directly.
+  local task-generation generic above lets Ada enforce the master directly.
 - A controlled child handle is still useful for user-facing lookup and
   finalization, but it is not sufficient ownership by itself. The task master
   and synchronous `Run` scope remain authoritative.
@@ -208,6 +268,15 @@ package Flyology.Supervision.Families is
      (Item : in out Family; Handle : Child_Handle);
 end Flyology.Supervision.Families;
 ```
+
+Its generation factory normally comes from
+`Flyology.Supervision.Input_Task_Generations`. That generic accepts an
+application task type plus a build-in-place constructor receiving context,
+immutable request, and generation control. It makes a stable request copy
+before task construction and keeps the copy alive through task join. The task
+type may choose any discriminants; the family remains homogeneous because each
+slot uses that same constructor and task type. Each admitted slot supplies a
+different typed request and receives a distinct logical id and generation.
 
 The family has fixed slot and event capacity. Input is copied before admission
 is committed, following `Task_Scopes.Spawn`. An outstanding reservation counts
@@ -274,10 +343,10 @@ It is never used as the logical id and is never applied to a replacement.
 Every command, readiness report, termination report, and event contains child
 id and generation. Protected state accepts it only if both match the current
 slot. A late termination handler, timeout, or cancellation event from generation
-N therefore cannot stop or publish generation N+1. Generation wrap reserves
-zero and is observable. The policy kernel models nonzero wrap, while each live
-controller fails closed at generation exhaustion instead of reusing a live
-supervisor's generation value.
+N therefore cannot stop or publish generation N+1. Generation and incident
+identities never wrap. The policy kernel requires an available successor, and
+each live controller fails closed at generation exhaustion instead of making a
+stale handle current again.
 
 Legal scalar transitions are:
 
@@ -296,6 +365,10 @@ Failed_Escalated -> Stopping -> Terminated -> Joined
 Failed_Escalated ----------------------------> Joined  (only with no live task)
 ```
 
+`Ready` is the policy-visible handshake state. A controller may publish
+readiness atomically as `Starting -> Running`; that transition means the same
+handshake completed, not that activation alone established usability.
+
 `Stuck` is a termination classification, not a false claim that the task
 terminated. The logical state remains `Stopping` or `Failed_Escalated` with a
 live-generation flag until `Is_Terminated` and the task master confirm the
@@ -303,7 +376,7 @@ join. `Joined` means no task can publish again and all generation-owned
 resources finalized. The fixed event ring remains owned by the supervisor so
 an observer can drain the terminal sequence after `Run` returns.
 
-The old task object can leave scope only after its outer wrapper has returned,
+The old task object can leave scope only after its outer body has returned,
 all task-body locals and dependent tasks have finalized/joined, and its local
 master completes. A replacement is constructed afterward. Runtime fiber-record
 reaping is GNARL/Flyology machinery and is not a supervisor resource-reclamation
@@ -332,11 +405,13 @@ diagnostics, and monotonic timestamps. An `Exception_Occurrence`, pointers into
 the task stack, traceback-owned transient storage, or callback context is not
 retained.
 
-The primary mechanism is the outer task-body wrapper because it runs in a known
-task context and can classify application exceptions. The runner retrieves the
-bounded result through a rendezvous, then explicitly observes task termination
-before leaving the local master. This avoids retaining an exception occurrence
-or finalizing shared completion state before task teardown finishes.
+The primary mechanism is the application task's outer exception handler because
+it runs in the failing task context and can copy the exception while the
+occurrence is valid. Its reporting operation copies only fixed data into the
+generation control. The task-generation owner then observes task termination
+before leaving the local master. This avoids retaining an exception occurrence,
+task-local pointer, or access value after task teardown. The procedure-body
+convenience adapters generate this outer handler automatically.
 
 `Ada.Task_Termination` is deliberately not used by this implementation. Its
 handler context would require a second constrained publication path and is not
@@ -432,13 +507,15 @@ use `Never` or `Escalate`, not local automatic restart.
 ## Control-plane placement
 
 A failed lightweight child must not starve its manager on the same cooperative
-group. `Flyology.Supervision.Static` defaults its manager and factory-runner
+group. `Flyology.Supervision.Static` defaults its manager and generation-owner
 fibers to shared group 127. Applications must keep that group outside the
 automatic pool and must not assign it to a supervised child. Explicit child
 group equality is rejected during validation. All supervisor instances can
 share that group, so this costs one event-loop pthread per process when first
-used, not one pthread per supervisor. Managers run only bounded policy steps;
-user callbacks and child cleanup run in the configured generation task.
+used, not one pthread per supervisor. Managers run only bounded policy steps.
+`Run_One_Generation`, `Initialize`, identity, and abort adapters must also be
+bounded or suspend promptly; the service loop and task cleanup run in the
+application task's declared lane and group.
 
 This is initially an application/runtime-configuration contract. An unrelated
 task could still explicitly select the reserved group. If experience shows that
@@ -463,16 +540,17 @@ events later. The pure policy kernel independently models transition legality,
 ordering, affected sets, restart accounting, hierarchical incident
 observation, generation matching, repeated-attempt classification, and the
 dynamic-family join condition. Contracts prove exact isolate and cohort sets;
-the bounded transitive-dependent closure remains an executable model assertion
-because its quantified theorem does not discharge within the project's normal
-proof budget. The production controllers consume the repeated-attempt and join
+they also prove that dependent recovery contains the failed child, excludes
+unconfigured ids, and is closed under every configured dependency edge. The
+lowest-id tie-break and exact minimal dependent set remain executable model
+assertions. The production controllers consume the repeated-attempt and join
 decisions; task construction, protected state, and resource reclamation remain
 outside SPARK.
 
 ## Worked example: independent restartable service
 
 The listener is acquired inside each generation; it is never inherited from a
-failed server object. This uses the checked-in child runner API.
+failed server object. The application declares the task type and its entry.
 
 ```ada
 type Service_Id is (Metrics);
@@ -483,22 +561,63 @@ type Metrics_State is limited record
    Counters : Metrics_Counters;
 end record;
 
-procedure Serve_Metrics
-  (State   : in out Metrics_State;
-   Control : not null access Generation_Control) is
-   Listener : Flyology.IO.Sockets.Socket_Type;
-   Server   : aliased HTTP.Server (Capacity => 32);
-begin
-   Bind_Listener (State.Address, Listener);
-   Mark_Ready (Control.all); --  Bound and owned by this generation.
-   HTTP.Serve (Server, Listener, State.Counters, Drain_Timeout => 2.0);
-end Serve_Metrics;
+task type Metrics_Task
+  (State   : not null access Metrics_State;
+   Control : not null access Generation_Control)
+with CPU => 2 is
+   pragma Task_Info (Flyology.Lightweight_Task);
+   entry Configure;
+end Metrics_Task;
 
-package Metrics_Child is new Flyology.Supervision.Children
+task body Metrics_Task is
+begin
+   accept Configure;
+   declare
+      Listener : Flyology.IO.Sockets.Socket_Type;
+      Server   : aliased HTTP.Server (Capacity => 32);
+   begin
+      Bind_Listener (State.Address, Listener);
+      Mark_Ready (Control.all); --  Bound and owned by this generation.
+      HTTP.Serve (Server, Listener, State.Counters, Drain_Timeout => 2.0);
+   end; --  Server, handlers, and listener finish before the report.
+   Report_Normal_Return (Control.all);
+exception
+   when Flyology.Cancellation.Operation_Cancelled =>
+      Report_Cancellation (Control.all);
+   when Occurrence : others =>
+      Report_Exception (Control.all, Occurrence);
+end Metrics_Task;
+
+procedure Initialize
+  (Subject : in out Metrics_Task;
+   Control : aliased in out Generation_Control) is
+   pragma Unreferenced (Control);
+begin
+   Subject.Configure; --  A task-specific rendezvous outside controller locks.
+end Initialize;
+
+function Task_Identity
+  (Subject : in out Metrics_Task) return Ada.Task_Identification.Task_Id is
+  (Subject'Identity);
+
+procedure Abort_Task (Subject : in out Metrics_Task) is
+begin
+   abort Subject;
+end Abort_Task;
+
+function Create
+  (State   : not null access Metrics_State;
+   Control : not null access Generation_Control) return Metrics_Task
+is
+begin
+   return Subject : Metrics_Task (State, Control);
+end Create;
+
+package Metrics_Generation is new Flyology.Supervision.Task_Generations
   (Application_Context => Metrics_State,
-   Execute             => Serve_Metrics,
-   Task_Model          => Flyology.Lightweight_Task,
-   Task_CPU            => 2);
+   Generation_Task     => Metrics_Task,
+   --  Create, Task_Identity, and Abort_Task are inferred by name.
+   Initialize          => Initialize);
 
 function Specification (Id : Service_Id) return Child_Specification is
   (Restart    => On_Failure,
@@ -514,6 +633,10 @@ function Specification (Id : Service_Id) return Child_Specification is
    Group      => 2,
    others     => <>);
 ```
+
+The static topology's exhaustive `Run_One_Generation` dispatcher calls
+`Metrics_Generation.Run`. `Children` can express the same lifecycle with less
+code when an application does not need its own task declaration.
 
 An unhandled parsing exception closes the server scope, joins all handlers, and
 closes the listener. Only then can a new `Metrics` generation bind a new
@@ -577,10 +700,16 @@ The checked-in policy-model smoke test covers:
 - restart-kind classification;
 - burst, total, backoff, deadline, and stability-reset accounting;
 - one hierarchical incident attempt observed once per node; and
-- stale generation rejection and nonzero generation/incident wrap.
+- stale generation rejection and fail-closed generation/incident exhaustion.
 
-The checked-in live static-supervisor smoke test additionally covers:
+The checked-in task-generation and live static-supervisor smoke tests
+additionally cover:
 
+- application-defined native task types with application entries;
+- normal return, copied exception identity, cooperative shutdown, abort
+  observation, task-body finalization, and typed immutable input;
+- task-specific initialization failure without misclassifying it as activation
+  failure;
 - logical ids above both 32-bit and 16-bit ranges;
 - an unhandled exception followed by independent automatic restart;
 - fresh generation controls and non-null Ada task identities;
@@ -594,26 +723,22 @@ The checked-in live static-supervisor smoke test additionally covers:
 - explicit shutdown and complete structured join; and
 - an uncooperative child observed as `Stuck` before it later returns and joins.
 
-The dynamic-family smoke test covers a logical id above 32 bits, typed
-admission, automatic restart, native-task cancellation, fixed-slot reuse with
-fresh recovery accounting, stale-handle rejection, explicit shutdown, and
-bounded event overwrite reporting. The child-runner tests also exercise the
-completion rendezvous that prevents local synchronization state from
-finalizing before Ada task teardown.
+The dynamic-family smoke test constructs its application-defined input task
+type through `Input_Task_Generations` and covers a logical id above 32 bits,
+typed admission, automatic restart, native-task cancellation, fixed-slot reuse
+with fresh recovery accounting, stale-handle rejection, explicit shutdown, and
+bounded event overwrite reporting. Procedure-body compatibility adapters are
+also exercised by the remaining static child cases.
 
-Additional semantic tests are still needed in both task lanes for:
+Additional semantic hardening is still useful for:
 
-1. normal return under `Never`, `On_Failure`, and `Always`;
-2. an unhandled exception with bounded id/message retention;
-3. explicit cancellation versus supervisor shutdown;
-4. abort reported as abnormal and abort deferred through finalization;
-5. partial startup rollback in reverse dependency order;
-6. burst, total, and absolute-deadline exhaustion in the live controller;
-7. scope exit or caller abort without explicit shutdown;
-8. a lightweight child monopolizing its non-control group;
-9. a native child stuck in an isolated foreign-call subprocess;
-10. exact socket/buffer/dedicated-group/thread-pin reacquisition; and
-11. no callback, allocation, log formatting, or finalizing assignment while a
+1. normal return under each restart kind in a live controller;
+2. abort deferred through application finalization;
+3. scope exit or caller abort without explicit shutdown;
+4. a lightweight child monopolizing its non-control group;
+5. a native child stuck in an isolated foreign-call subprocess;
+6. exact socket/buffer/dedicated-group/thread-pin reacquisition; and
+7. no callback, allocation, log formatting, or finalizing assignment while a
     protected action executes.
 
 The uncooperative cases must run in subprocesses with timeouts. A passing test
@@ -623,10 +748,10 @@ observes `Stuck`; it must not wait forever or claim the task was killed.
 
 1. **Policy and vocabulary (implemented).** Public bounded values, states,
    failure classifications, generation controls, and the proved scalar kernel.
-2. **Structured generation and independent supervisor (implemented).** Typed
-   lane-selectable task runner, readiness, cancellation, optional abort,
-   generation-safe snapshots, bounded independent restart, synchronous join,
-   and typed terminal results.
+2. **Structured generation and independent supervisor (implemented).**
+   Application-defined task types, procedure-body compatibility adapters,
+   readiness, cancellation, optional abort, generation-safe snapshots, bounded
+   independent restart, synchronous join, and typed terminal results.
 3. **Static DAG (implemented).** Heterogeneous dispatch, deterministic
    validation and ordering, coordinated cohorts/dependents, child and subtree
    accounts, nested incidents, and a fixed event ring.

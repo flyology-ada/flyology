@@ -74,6 +74,17 @@ package body Flyology.Supervision is
          Escalated := True;
       end Publish_Escalation;
 
+      procedure Publish_Termination (Value : Termination_Summary) is
+      begin
+         if not Opened then
+            raise Program_Error with "generation control is inactive";
+         elsif Termination_Reported then
+            raise Program_Error with "generation outcome is already reported";
+         end if;
+         Termination := Value;
+         Termination_Reported := True;
+      end Publish_Termination;
+
       procedure Close_Incident is
       begin
          if not Opened then
@@ -103,7 +114,23 @@ package body Flyology.Supervision is
       function Is_Abort_Requested return Boolean is (Abort_Requested);
 
       function Current_Incident return Incident_Context is (Incident);
+
+      procedure Read_Termination
+        (Reported : out Boolean;
+         Value    : out Termination_Summary) is
+      begin
+         Reported := Termination_Reported;
+         Value := Termination;
+      end Read_Termination;
    end Generation_Control_State;
+
+   function Base_Summary
+     (Kind : Termination_Kind) return Termination_Summary is
+     ((Kind           => Kind,
+       Exception_Id   => Ada.Exceptions.Null_Id,
+       Task_Id        => Ada.Task_Identification.Current_Task,
+       Message_Length => 0,
+       Message        => (others => ' ')));
 
    function Active (Context : Incident_Context) return Boolean is
      (Context.Is_Active);
@@ -178,6 +205,40 @@ package body Flyology.Supervision is
       Control.State.Publish_Escalation (Context);
    end Report_Escalation;
 
+   procedure Report_Normal_Return (Control : in out Generation_Control) is
+   begin
+      Control.State.Publish_Termination (Base_Summary (Normal_Return));
+   end Report_Normal_Return;
+
+   procedure Report_Cancellation (Control : in out Generation_Control) is
+   begin
+      Control.State.Publish_Termination
+        (Base_Summary
+           (if Shutdown_Stop (Control)
+            then Supervisor_Shutdown
+            else Cancelled));
+   end Report_Cancellation;
+
+   procedure Report_Exception
+     (Control    : in out Generation_Control;
+      Occurrence : Ada.Exceptions.Exception_Occurrence)
+   is
+      Message : constant String :=
+        Ada.Exceptions.Exception_Message (Occurrence);
+      Length  : constant Diagnostic_Length :=
+        Diagnostic_Length'Min
+          (Diagnostic_Length'Last, Message'Length);
+      Value   : Termination_Summary := Base_Summary (Unhandled_Exception);
+   begin
+      Value.Exception_Id := Ada.Exceptions.Exception_Identity (Occurrence);
+      Value.Message_Length := Length;
+      if Length > 0 then
+         Value.Message (1 .. Length) :=
+           Message (Message'First .. Message'First + Length - 1);
+      end if;
+      Control.State.Publish_Termination (Value);
+   end Report_Exception;
+
    procedure Open
      (Control : in out Generation_Control;
       Value   : Child_Handle;
@@ -241,5 +302,13 @@ package body Flyology.Supervision is
 
    function Shutdown_Stop (Control : Generation_Control) return Boolean is
      (Control.State.Is_Shutdown);
+
+   procedure Read_Termination
+     (Control  : in out Generation_Control;
+      Reported : out Boolean;
+      Value    : out Termination_Summary) is
+   begin
+      Control.State.Read_Termination (Reported, Value);
+   end Read_Termination;
 
 end Flyology.Supervision;

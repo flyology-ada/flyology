@@ -1,6 +1,8 @@
 with System.Multiprocessors;
 
---  Creates one structured Ada task generation with a typed immutable input.
+--  Convenience adapter that turns an application procedure into one
+--  structured Ada task generation with a typed immutable input. Applications
+--  that define their own task type use Supervision.Input_Task_Generations.
 --  Each call owns a fresh task object and joins it before returning.
 --  @formal Input_Type Typed generation input retained by the caller
 --  @formal Application_Context Generation callback state

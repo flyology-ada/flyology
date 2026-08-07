@@ -1,6 +1,8 @@
 with System.Multiprocessors;
 
---  Creates one structured Ada task generation with a fixed execution lane.
+--  Convenience adapter that turns an application procedure into one
+--  structured Ada task generation with a fixed execution lane. Applications
+--  that define their own task type use Supervision.Task_Generations instead.
 --  Each call owns a fresh task object and returns only after its Ada master
 --  has joined the task and completed task-body finalization.
 --  @formal Application_Context Generation callback state

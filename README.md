@@ -621,10 +621,13 @@ a native task.
 
 Ada-native [structured supervision](docs/supervision-design.md) provides typed
 heterogeneous static trees and fixed-capacity homogeneous dynamic families.
-Both use lane-selectable generation tasks, explicit readiness,
+Applications may supply their own task types, entries, task aspects, and task
+bodies through `Supervision.Task_Generations` or
+`Supervision.Input_Task_Generations`; procedure-body adapters remain available
+for simpler children. Both controllers use explicit readiness,
 generation-owned cancellation, 64-bit logical ids and generations, bounded
-restart policy, nested incident propagation, fixed snapshots, and bounded
-event rings. Static trees validate dependencies and named cohorts, start in
+restart policy, nested incident propagation, fixed snapshots, and bounded event
+rings. Static trees validate dependencies and named cohorts, start in
 deterministic topological order, stop in reverse order, and coordinate isolated,
 cohort, or transitive-dependent recovery. Each restart constructs a fresh Ada
 task object under a local master; stale handles cannot control its replacement.
@@ -1819,18 +1822,19 @@ and terminal-state decisions. Resource destruction, task activation,
 protected-object mutual exclusion, and provider calls remain outside SPARK.
 
 The supervision policy kernel proves run-time safety and its contracts for
-bounded state transitions, deterministic order bounds, affected-set
-classification,
-restart classification and accounting, capped backoff, stability reset,
+bounded state transitions, complete successful start plans, prerequisite
+precedence, dependent-recovery closure, exact isolate and cohort sets, restart
+classification and accounting, capped backoff, stability reset,
 incident observation, nonzero generation matching, repeated-incident
 classification, and dynamic-family join admission. Production controllers use
 the last two decisions to prevent one replacement failure from reusing an
 already charged attempt and to keep a family open until every typed-input
 reservation has committed or rolled back. The model smoke test supplies the
-stronger graph, ordering, incident, stale-generation, and admission examples
-described in the design document. Task construction, readiness, stopping, and
-resource reclamation are implemented by the non-SPARK structured controller
-and covered by live semantic smoke tests.
+deterministic lowest-id tie-break, exact minimal dependent set, incident,
+stale-generation, and admission examples described in the design document.
+Task construction, readiness, stopping, and resource reclamation are
+implemented by the non-SPARK structured controller and covered by live semantic
+smoke tests.
 
 Structured listener cleanup also consumes a proved descriptor-token transition
 after the imported close function returns: the token becomes invalid before a

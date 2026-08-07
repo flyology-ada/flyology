@@ -63,6 +63,7 @@
           <p class="toc-title">On this page</p>
           <ol>
             <li><a href="#intro">Why supervision</a></li>
+            <li><a href="#first-example">First example</a></li>
             <li><a href="#model">Mental model</a></li>
             <li><a href="#choose">Choose a controller</a></li>
             <li><a href="#identity">Identity and lifecycle</a></li>
@@ -78,22 +79,213 @@
 
         <article class="prose">
           <section id="intro">
-            <span class="step-label">WHY</span>
-            <h2>Keep service failure from becoming improvised recovery.</h2>
-            <p>A long-running task can return unexpectedly, raise an exception, fail during activation, or become unusable before it is ready. Restarting it safely involves more than running the same body again: someone must own the old generation through cleanup, decide whether recovery is still allowed, reconstruct its resources, and prevent dependents from seeing the replacement too early. A supervisor makes that policy explicit and keeps it inside one Ada scope.</p>
-            <p>Supervision is useful for restart-safe service loops, listeners, polling agents, caches, connection-like dynamic children, and subsystems whose members have declared startup dependencies. It is a poor fit for work that cannot be repeated safely, tasks that borrow shorter-lived state, or children whose shared-memory effects cannot be distinguished from a clean generation.</p>
-            <p>Erlang/OTP made supervision trees a durable model for separating service work from recovery policy. Flyology keeps that core insight – an owner observes failure and decides what to reconstruct – while expressing it through ordinary Ada tasks, masters, typed factories, bounded storage, and explicit resource reacquisition. Ada tasks share memory and external resources, so this API does not assume process isolation or guaranteed forced termination.</p>
+            <span class="step-label">WHY SUPERVISION</span>
+            <h2>One logical service, successive task objects.</h2>
+            <p>A long-running task can return unexpectedly, raise an exception, fail during activation, or never become usable. A supervisor keeps the service identity stable while owning each concrete Ada task object as a separate generation.</p>
+            <ol>
+              <li>Construct generation 1 under the supervisor's Ada master.</li>
+              <li>Wait until the task reports that its resources and application state are ready.</li>
+              <li>If it fails, request stop where necessary and wait for task-body cleanup, dependent-task joins, and finalization.</li>
+              <li>Consult the bounded restart policy. If recovery is admitted, wait for backoff and construct generation 2 from fresh resources.</li>
+              <li>On shutdown or exhausted policy, join everything the supervisor owns before <code>Run</code> returns.</li>
+            </ol>
+            <p>The supervisor does not resurrect a terminated task. It decides whether to construct a replacement and keeps that replacement unpublished until it is ready. This is useful for restart-safe service loops, listeners, polling agents, caches, connection-like dynamic children, and subsystems with declared startup dependencies. It is a poor fit when work cannot be repeated safely, a child borrows shorter-lived state, or partial shared-memory and external effects cannot be reconciled.</p>
+            <p>Erlang/OTP made supervision trees a durable way to separate service work from recovery policy. Flyology keeps that core idea while expressing it through application-defined Ada task types, masters, bounded policy, and explicit resource reacquisition. Ada tasks share memory and external resources, so supervision cannot supply process isolation or guaranteed forced termination.</p>
           </section>
 
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">i</span>
-            <p>Supervision is built on ordinary Ada task semantics, without scheduler or GNARL changes. Supervised children retain the same activation, masters, rendezvous, protected objects, exception propagation, finalization, abort deferral, and lightweight or native execution lane as any other Flyology task.</p>
+            <p>Supervision uses ordinary Ada task semantics. Children keep the same activation, masters, rendezvous, protected objects, exception propagation, finalization, abort deferral, and lightweight or native execution lane as other Flyology tasks.</p>
           </aside>
+
+          <section id="first-example">
+            <span class="step-label">FIRST EXAMPLE</span>
+            <h2>Supervise one restartable service.</h2>
+            <p>This is the complete supervision wiring for one polling service. Only the application-defined context, resource, acquisition, and sampling details are omitted. The application declares the actual task type, its entry, lane, execution group, and outer exception handler. Flyology owns each constructed task object through termination and join.</p>
+            <figure class="code-panel">
+              <figcaption>declare the task type and its generation owner</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  This name survives restarts; task objects do not.
+type Service is (Metrics);
+
+--  The application still owns the task's shape, entries, and execution lane.
+--  Control is borrowed from the supervisor for this generation only.
+task type Metrics_Task
+  (Context : not null access Metrics_Context;
+   Control : not null access Generation_Control)
+with CPU =&gt; 2 is
+   --  The service runs as a lightweight task in execution group 2.
+   pragma Task_Info (Flyology.Lightweight_Task);
+   entry Start;
+end Metrics_Task;
+
+task body Metrics_Task is
+begin
+   --  Reacquire generation-owned resources instead of inheriting them from
+   --  the task object that failed.
+   declare
+      Resources : Metrics_Resources := Acquire (Context);
+   begin
+      --  Initialize calls this entry after Ada activation succeeds.
+      accept Start;
+
+      --  Dependents cannot see this generation until acquisition succeeded.
+      Mark_Ready (Control.all);
+      loop
+         --  Stop is cooperative. Task-aware I/O may use the same token.
+         if Stopping (Control.all).Requested then
+            raise Flyology.Cancellation.Operation_Cancelled;
+         end if;
+
+         Sample (Resources);
+         delay 1.0;
+      end loop;
+   end;  --  Resources finalize before the terminal report below.
+
+   --  This application-defined task body owns its exception boundary;
+   --  Task_Generations owns the object but cannot catch through that boundary.
+   --  Report only after all generation-owned cleanup completed.
+   Report_Normal_Return (Control.all);
+exception
+   --  Preserve the distinction between cooperative cancellation and failure.
+   when Flyology.Cancellation.Operation_Cancelled =&gt;
+      Report_Cancellation (Control.all);
+   --  Copy bounded exception identity and message while Occurrence is valid.
+   when Occurrence : others =&gt;
+      Report_Exception (Control.all, Occurrence);
+end Metrics_Task;
+
+procedure Initialize
+  (Subject : in out Metrics_Task;
+   Control : aliased in out Generation_Control)
+is
+   pragma Unreferenced (Control);
+begin
+   --  This rendezvous is application-specific startup, outside supervisor
+   --  locks. It must return so the readiness deadline remains observable.
+   Subject.Start;
+end Initialize;
+
+function Task_Identity
+  (Subject : in out Metrics_Task)
+   return Ada.Task_Identification.Task_Id is
+  (Subject'Identity);
+
+procedure Abort_Task (Subject : in out Metrics_Task) is
+begin
+   abort Subject;
+end Abort_Task;
+
+function Create
+  (Context : not null access Metrics_Context;
+   Control : not null access Generation_Control) return Metrics_Task
+is
+begin
+   --  Limited build-in-place return constructs the exact task object under
+   --  Task_Generations.Run's local Ada master.
+   return Subject : Metrics_Task (Context, Control);
+end Create;
+
+--  This generic owns construction, observation, optional abort, and join for
+--  one Metrics_Task generation. It does not replace the task's public API.
+package Metrics_Generation is new Flyology.Supervision.Task_Generations
+  (Application_Context =&gt; Metrics_Context,
+   Generation_Task     =&gt; Metrics_Task,
+   --  Create, Task_Identity, and Abort_Task are inferred by name.
+   Initialize          =&gt; Initialize);
+
+procedure Run_Generation
+  (Context : aliased in out Metrics_Context;
+   Child   : Service;
+   Control : aliased in out Generation_Control;
+   Result  : out Generation_Result)
+is
+   pragma Unreferenced (Child);
+begin
+   --  Each call constructs and joins one fresh Metrics_Task. Static.Run calls
+   --  this again only when policy admits a replacement generation.
+   Metrics_Generation.Run (Context, Control, Result);
+end Run_Generation;</code></pre>
+            </figure>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p><strong>What the generation operations do.</strong> Each formal subprogram is statically tied to <code>Metrics_Task</code>. <code>Create</code> chooses its discriminants and constructs the exact task object by limited build-in-place return. <code>Task_Identity</code> supplies diagnostic identity, and <code>Abort_Task</code> supplies the optional last-resort stop request. Those three operations use the generic's <code>is &lt;&gt;</code> defaults, so compatible directly visible declarations are inferred by name. <code>Initialize</code> stays explicit: omitting it selects the useful null default rather than an inferred startup rendezvous. Together the operations let the generic own a task generation without defining the task's entries, body, or service API. When an application needs only a procedure body, <code>Supervision.Children</code> defines the task wrapper itself and reports normal return, cancellation, and exceptions automatically.</p>
+            </aside>
+            <figure class="code-panel">
+              <figcaption>declare the policy, supervisor type, and owner</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Recovery is finite in rate, attempt count, delay, and elapsed time.
+Limits : constant Recovery_Limits :=
+  (--  Admit at most 3 attempts in any 5-second monotonic window.
+   Burst_Attempts    =&gt; 3,
+   Window            =&gt; Ada.Real_Time.Seconds (5),
+
+   --  Admit at most 10 attempts before this recovery incident is exhausted.
+   Total_Attempts    =&gt; 10,
+
+   --  Wait 10 ms before attempt 1, double after consecutive attempts, and
+   --  never delay longer than 1 second.
+   Initial_Backoff   =&gt; Ada.Real_Time.Milliseconds (10),
+   Maximum_Backoff   =&gt; Ada.Real_Time.Seconds (1),
+
+   --  Staying ready for 30 seconds closes the incident and resets accounting.
+   Stability_Reset   =&gt; Ada.Real_Time.Seconds (30),
+
+   --  Reject any attempt or backoff that cannot fit inside this absolute
+   --  60-second recovery interval.
+   Recovery_Deadline =&gt; Ada.Real_Time.Seconds (60));
+
+--  The logical id stays 1 while Ada task identity changes on every restart.
+function Logical_Id (Child : Service) return Child_Id is
+  (case Child is when Metrics =&gt; 1);
+
+--  On_Failure restarts failures, but not normal return or explicit shutdown.
+--  Isolate_Child says no sibling needs coordinated recovery.
+function Policy (Child : Service) return Child_Specification is
+  (case Child is
+      when Metrics =&gt;
+        (Restart           =&gt; On_Failure,
+         Impact            =&gt; Isolate_Child,
+         Recovery          =&gt; Limits,
+         Stopping          =&gt; Default_Stop_Policy,
+         Readiness_Timeout =&gt; Ada.Real_Time.Seconds (2),
+         Restart_Safe      =&gt; True,
+         Lane              =&gt; Lightweight_Lane,
+         Has_Group         =&gt; True,
+         Group             =&gt; 2));
+
+--  A one-child topology has neither dependencies nor named cohorts.
+function No_Relationship (Left, Right : Service) return Boolean is
+  (False);
+
+--  The static generic validates the typed topology before starting children.
+package Metrics_Supervision is new Flyology.Supervision.Static
+  (Child_Kind          =&gt; Service,
+   Application_Context =&gt; Metrics_Context,
+   Logical_Id          =&gt; Logical_Id,
+   Specification       =&gt; Policy,
+   Depends_On          =&gt; No_Relationship,
+   Cohort_Member       =&gt; No_Relationship,
+   Run_One_Generation  =&gt; Run_Generation,
+   Subtree_Recovery    =&gt; Limits);
+
+declare
+   Node    : aliased Metrics_Supervision.Supervisor;
+   Context : aliased Metrics_Context;
+   Result  : Supervisor_Result;
+begin
+   --  Run synchronously owns the whole tree. It returns only after every
+   --  generation and supervisor manager that can terminate has joined.
+   Metrics_Supervision.Run (Node, Context, Result);
+end;</code></pre>
+            </figure>
+            <p>The inner block makes <code>Resources</code> finalize before the outer handler reports a terminal outcome. The policy is explicit: an unexpected exception from <code>Sample</code> is a failure, <code>On_Failure</code> admits replacement, and <code>Isolate_Child</code> limits recovery to this child. The task type itself selects lightweight group 2; the policy declares the same placement for bounded observation but cannot inspect or override the task type's actual aspects. The controller joins the failed task, applies <code>Limits</code>, and invokes <code>Run_Generation</code> for a new <code>Metrics_Task</code>. <code>Run</code> synchronously owns the tree; another task may call <code>Request_Shutdown</code>, and <code>Run</code> returns only after every terminable generation and manager has joined.</p>
+          </section>
 
           <section id="model">
             <span class="step-label">MODEL</span>
             <h2>A restart is a replacement, never resurrection.</h2>
-            <p>A terminated Ada task does not start again. Flyology constructs a new task object, assigns the next generation, runs the same typed factory, and withholds publication until that generation reports readiness. The old generation must finish task-body cleanup and join before replacement construction begins.</p>
+            <p>A terminated Ada task does not start again. Flyology constructs a new object of the application task type, assigns the next generation, and withholds publication until that generation reports readiness. The old generation must finish task-body cleanup and join before replacement construction begins.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="supervision-title supervision-desc" viewBox="0 0 760 350">
                 <title id="supervision-title">One structured replacement sequence</title>
@@ -132,7 +324,7 @@
             <h2>Choose by topology, not by expected child count.</h2>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>Supervision.Static</code></dt><dd>Use an enumeration for a small heterogeneous tree. Each member may have a different factory, lane, restart rule, dependency set, and named recovery cohort. Storage includes a fixed dependency matrix.</dd></div>
+                <div class="decision-row"><dt><code>Supervision.Static</code></dt><dd>Use an enumeration for a heterogeneous tree. Each member may have a different task type, lane, restart rule, dependency set, and named recovery cohort. Storage includes a fixed dependency matrix.</dd></div>
                 <div class="decision-row"><dt><code>Supervision.Families</code></dt><dd>Use fixed slots for many homogeneous children with one typed request and one common policy. Storage is linear in <code>Maximum_Children</code>; no dense dependency matrix is allocated.</dd></div>
                 <div class="decision-row"><dt>Nested node</dt><dd>Run either controller inside a supervised generation with <code>Run_Nested</code>. A failure carries the same incident, attempt, and absolute recovery deadline into the parent.</dd></div>
               </dl>
@@ -146,29 +338,33 @@
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><code>Child_Id</code></dt><dd>Stable service or slot identity across replacement. Use it for dashboards and logical lookup.</dd></div>
-                <div class="decision-row"><dt><code>Generation</code></dt><dd>Nonzero 64-bit construction identity. It advances on restart and on dynamic slot reuse.</dd></div>
+                <div class="decision-row"><dt><code>Generation</code></dt><dd>Nonzero 64-bit construction identity. It advances on restart and on dynamic slot reuse, never wraps, and fails closed if its successor space is exhausted.</dd></div>
                 <div class="decision-row"><dt><code>Child_Handle</code></dt><dd>The exact pair of logical id and generation. Stop and exact-snapshot operations reject stale handles, so generation 7 cannot control generation 8.</dd></div>
                 <div class="decision-row"><dt><code>Ada.Task_Identification.Task_Id</code></dt><dd>Copied diagnostic identity of the actual task object. It is never used to address a replacement.</dd></div>
               </dl>
             </div>
             <ol class="state-rail" aria-label="Supervised child lifecycle">
-              <li>Configured</li><li>Starting</li><li>Running</li><li>Stopping</li><li>Terminated</li><li>Backing off</li><li>Restarting</li><li>Starting</li><li>Joined</li>
+              <li>Configured</li><li>Starting</li><li>Ready</li><li>Running</li><li>Stopping</li><li>Terminated</li><li>Backing off</li><li>Restarting</li><li>Starting</li><li>Joined</li>
             </ol>
-            <p><code>Joined</code> means the task can no longer publish, its task-body finalization and dependent-task joins completed, and supervisor-owned generation state is reclaimable. <code>Stuck</code> is a termination classification, not a claim that a live task was killed.</p>
+            <p><code>Ready</code> records the application handshake. A controller may publish it atomically as <code>Starting -&gt; Running</code>; activation alone is never enough. <code>Joined</code> means the task can no longer publish, its task-body finalization and dependent-task joins completed, and supervisor-owned generation state is reclaimable. <code>Stuck</code> is a termination classification, not a claim that a live task was killed.</p>
           </section>
 
           <section id="static">
             <span class="step-label">STATIC</span>
             <h2>Describe heterogeneous services with ordinary Ada types.</h2>
-            <p>The generic takes typed functions for identity, policy, dependencies, and cohort membership. A dispatching factory selects a normal structured child runner. No address-valued payload or universal callback context is needed.</p>
+            <p>The generic takes typed functions for identity, policy, dependencies, and cohort membership. An exhaustive dispatcher selects the task-generation package for each enumeration value. Every service may use a different application task type; no address-valued payload or universal callback context is needed.</p>
             <figure class="code-panel">
               <figcaption>an independent restartable metrics service</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">type Service is (Metrics);
+              <pre><code class="language-ada">--  An enumeration makes the heterogeneous topology closed and exhaustive.
+type Service is (Metrics);
 
+--  This identity is stable across every Metrics_Task generation.
 function Logical_Id (Child : Service) return Child_Id is
   (case Child is when Metrics =&gt; 4_294_967_297);
 
+--  The configured lane and group describe what observers should expect. The
+--  Metrics_Task declaration remains authoritative for its actual aspects.
 function Specification (Child : Service)
   return Child_Specification is
   (Restart           =&gt; On_Failure,
@@ -181,12 +377,16 @@ function Specification (Child : Service)
    Has_Group         =&gt; True,
    Group             =&gt; 2);
 
+--  No prerequisite must be ready before this independent service starts.
 function Depends_On (Child, Prerequisite : Service)
   return Boolean is (False);
 
+--  Cohort membership matters only when Impact is Restart_Cohort.
 function Cohort_Member (Trigger, Member : Service)
   return Boolean is (True);
 
+--  A larger enumeration uses the same generic and dispatches each member to
+--  its own Task_Generations instance inside Run_Generation.
 package Metrics_Supervision is new Flyology.Supervision.Static
   (Child_Kind          =&gt; Service,
    Application_Context =&gt; Metrics_Context,
@@ -196,7 +396,11 @@ package Metrics_Supervision is new Flyology.Supervision.Static
    Cohort_Member       =&gt; Cohort_Member,
    Run_One_Generation  =&gt; Run_Generation);</code></pre>
             </figure>
-            <p><code>Run_Generation</code> normally calls an instance of <code>Flyology.Supervision.Children</code>. Inside the task body, acquire and validate the listener, descriptor, buffer, execution group, or other generation-owned resources, then call <code>Mark_Ready</code>. A failed bind never becomes visible as a running service.</p>
+            <p><code>Run_Generation</code> normally calls an instance of <code>Flyology.Supervision.Task_Generations</code>. The first example shows the one-child form; a larger dispatcher uses one package per task type. Inside each task body, acquire and validate the listener, descriptor, buffer, dedicated execution group, or other generation-owned resource, then call <code>Mark_Ready</code>. A failed bind never becomes visible as a running service.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p><strong>Task entries remain local to the generation.</strong> <code>Initialize</code> may use startup entries, and tasks owned inside the generation may use normal lexical references. Do not publish a naked access-to-task value. For a long-lived client API, route typed commands through a protected object or bounded channel in the application context and include the <code>Child_Handle</code> returned by <code>Handle (Control)</code>; the receiver rejects a stale generation.</p>
+            </aside>
           </section>
 
           <section id="recovery">
@@ -211,6 +415,44 @@ package Metrics_Supervision is new Flyology.Supervision.Static
                 <div class="decision-row"><dt><code>Escalate</code></dt><dd>Perform no local reconstruction. Stop the node and return the causal incident to its owner.</dd></div>
               </dl>
             </div>
+            <figure class="code-panel">
+              <figcaption>declare a dependent service chain</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">type Service is (Database, Cache, API, Telemetry);
+
+--  Arguments read as "Child requires Prerequisite". The controller validates
+--  this graph, starts prerequisites first, and stops users first.
+function Depends_On (Child, Prerequisite : Service) return Boolean is
+  ((Child = Cache and then Prerequisite = Database)
+   or else (Child = API and then Prerequisite = Cache));
+
+function Specification (Child : Service)
+  return Child_Specification is
+begin
+   case Child is
+      when Database =&gt;
+         return
+           (Restart           =&gt; On_Failure,
+            --  A database replacement also replaces Cache and API because
+            --  they transitively depend on it. Telemetry remains running.
+            Impact            =&gt; Restart_Dependents,
+            Recovery          =&gt; Shared_Recovery,
+            Stopping          =&gt; Default_Stop_Policy,
+            Readiness_Timeout =&gt; Ada.Real_Time.Seconds (5),
+            Restart_Safe      =&gt; True,
+            Lane              =&gt; Native_Lane,
+            Has_Group         =&gt; False,
+            Group             =&gt; 0);
+      when Cache | API | Telemetry =&gt;
+         return Service_Policy (Child);
+   end case;
+end Specification;
+
+--  This relation is consulted only by Restart_Cohort. It can name a recovery
+--  set that is not derived from dependency edges.
+function Cohort_Member (Trigger, Member : Service) return Boolean is
+  (Trigger = Database and then Member in Database | Cache | API);</code></pre>
+            </figure>
             <p>For <code>Database -&gt; Cache -&gt; API</code>, a database failure with <code>Restart_Dependents</code> stops API, then Cache, joins Database, waits once, and starts Database, Cache, then API. Each replacement must report readiness before its dependent starts. An unrelated Telemetry child continues.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
@@ -221,30 +463,103 @@ package Metrics_Supervision is new Flyology.Supervision.Static
           <section id="families">
             <span class="step-label">FAMILIES</span>
             <h2>Scale homogeneous children with fixed linear storage.</h2>
-            <p>A family reserves a slot under its protected state, copies the typed request outside that lock, then commits admission. Shutdown waits for every outstanding reservation to commit or roll back; a commit that loses the race with shutdown is rejected and rolled back. Reusing a free slot advances its generation and starts fresh recovery accounting. The family allocates one persistent manager lazily for each slot that is ever used. Managers are bounded by <code>Maximum_Children</code>, are reused with their slots, and finish at the family scope's join boundary. Their task-object storage is reclaimed only after termination is observable.</p>
+            <p>A family uses one application task type and one typed request type for every slot. <code>Input_Task_Generations</code> keeps a stable immutable request copy beside the task object through join. The family reserves a slot under its protected state, copies the request outside that lock, then commits admission. Shutdown waits for every outstanding reservation to commit or roll back; a commit that loses the race with shutdown is rejected and rolled back. Reusing a free slot advances its generation and starts fresh recovery accounting. The family allocates one persistent manager lazily for each slot that is ever used. Managers are bounded by <code>Maximum_Children</code>, are reused with their slots, and finish at the family scope's join boundary. Their task-object storage is reclaimed only after termination is observable.</p>
             <figure class="code-panel">
               <figcaption>a bounded connection-like family</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">package Sessions is new Flyology.Supervision.Families
-  (Request             =&gt; Session_Request,
+              <pre><code class="language-ada">--  Every family slot uses this task type and the same restart policy.
+--  Input points to the generation owner's stable immutable request copy.
+task type Session_Task
+  (State   : not null access Session_Context;
+   Input   : not null access constant Session_Request;
+   Control : not null access Generation_Control)
+with CPU =&gt; 6 is
+   pragma Task_Info (Flyology.Lightweight_Task);
+   entry Start;
+end Session_Task;
+
+--  Session_Task keeps its own body, entries, aspects, and package operations.
+function Create
+  (State   : not null access Session_Context;
+   Input   : not null access constant Session_Request;
+   Control : not null access Generation_Control) return Session_Task
+is
+begin
+   --  Choose all task discriminants here. The result is built directly under
+   --  the generation's local Ada master and is never copied.
+   return Subject : Session_Task (State, Input, Control);
+end Create;
+
+--  The input-aware generation owner keeps Input alive until Session_Task
+--  terminates, finalizes, and joins.
+--  Define the same Task_Identity and Abort_Task adapters shown above. Their
+--  conventional names, and Create, are inferred. Initialize_Session remains
+--  explicit because omission means no post-activation hook.
+package Session_Generation is new
+  Flyology.Supervision.Input_Task_Generations
+    (Input_Type          =&gt; Session_Request,
+     Application_Context =&gt; Session_Context,
+     Generation_Task     =&gt; Session_Task,
+     Initialize          =&gt; Initialize_Session);
+
+procedure Run_Session_Generation
+  (Context : aliased in out Session_Context;
+   Input   : Session_Request;
+   Control : aliased in out Generation_Control;
+   Result  : out Generation_Result) is
+begin
+   --  Families calls this once for initial admission and again for an admitted
+   --  replacement of the same logical slot.
+   Session_Generation.Run (Context, Input, Control, Result);
+end Run_Session_Generation;
+
+--  Slot, manager, and event storage are all bounded by generic capacities.
+package Sessions is new Flyology.Supervision.Families
+  (--  One typed value is copied and retained for each admitted generation.
+   Request             =&gt; Session_Request,
+
+   --  Shared family state is borrowed from Sessions.Run and outlives every
+   --  slot manager and task generation owned by that call.
    Application_Context =&gt; Session_Context,
+
+   --  This synchronous operation constructs, observes, and joins exactly one
+   --  Session_Task generation for initial start or admitted replacement.
    Run_One_Generation  =&gt; Run_Session_Generation,
+
+   --  Every slot uses the same restart, readiness, stopping, and lane policy.
    Policy              =&gt; Session_Policy,
+
+   --  Slot 1 receives this logical id; later slots use the following ids in
+   --  one contiguous range. Reuse changes generation, not logical id.
    First_Child_Id      =&gt; 10_000_000_000,
+
+   --  At most this many slots may be occupied. The same bound limits the
+   --  lazily allocated persistent manager set and makes storage linear.
    Maximum_Children    =&gt; 100_000,
+
+   --  Managers share this lightweight control-plane execution group. The
+   --  Session_Task service loop remains in its own declared group 6.
+   Control_Group       =&gt; 127,
+
+   --  Retain this many decisions for the whole family; new events overwrite
+   --  the oldest entries and readers receive the exact dropped count.
    Event_Capacity      =&gt; 1_024);
 
 Owner.Start; -- Owner calls Sessions.Run synchronously.
+
+--  Start reserves one slot and returns authority for its exact generation.
 Sessions.Start (Family, Request, Exact_Handle);
 
--- This cannot stop a replacement after the slot is reused.
+--  This cannot stop a replacement after the slot is reused because Stop
+--  checks both the logical child id and generation.
 Sessions.Stop (Family, Exact_Handle);
 
+--  Latest is observational lookup by logical slot, not mutation authority.
 Latest := Sessions.Latest
   (Family, Flyology.Supervision.Child (Exact_Handle));</code></pre>
             </figure>
             <p><code>Current (Family, Handle)</code> is exact and raises <code>Stale_Handle</code> after replacement or reuse. <code>Current (Family, Child_Id)</code> is an observational lookup of the latest occupied generation and does not grant authority to mutate it. Capacity exhaustion raises <code>Constraint_Error</code> before admission.</p>
-            <p>A family policy may isolate one slot or escalate its incident. Named cohorts and dependency closure describe heterogeneous topology, so place the family under a static node when recovery must coordinate it with other services. The family never infers relationships among independent requests.</p>
+            <p>A family policy may isolate one slot or escalate its incident. All slots share the task type, policy, and configured lane or group; use separate family instances when those differ. Named cohorts and dependency closure describe heterogeneous topology, so place the family as a child of a static node when its recovery must coordinate with a database, listener, sibling family, or other service. The containing static node may restart that family child as part of a cohort or dependent closure. The family never infers relationships among independent requests.</p>
           </section>
 
           <section id="budgets">
@@ -276,7 +591,7 @@ Latest := Sessions.Latest
             <p>Each new generation must reacquire sockets, descriptors, unique buffers, dedicated execution groups, thread pins, capacity permits, and provider sessions through its normal typed initialization path. Do not carry a borrowed token, callback access, resource handle, or pointer into the old task's locals across generations.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p>Supervisor managers and factory runners default to lightweight execution group 127. Keep supervised lightweight children off that group. Many supervisors can share this one control plane, so the design does not create one pthread per supervisor.</p>
+              <p>Supervisor managers and generation owners default to lightweight execution group 127. Keep supervised lightweight children off that group. Many supervisors can share this one control plane, so the design does not create one pthread per supervisor. Generation dispatch, <code>Initialize</code>, identity, and abort adapters must be bounded or suspend promptly; the service loop belongs in the application task's declared lane and group.</p>
             </aside>
           </section>
 
@@ -287,19 +602,26 @@ Latest := Sessions.Latest
             <figure class="code-panel">
               <figcaption>drain a bounded event ring</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">Cursor  : Event_Sequence := 0;
+              <pre><code class="language-ada">--  Cursor is caller-owned, so each observer advances independently.
+Cursor  : Event_Sequence := 0;
 Events  : Supervisor_Event_Array (1 .. 64);
 Count   : Natural;
 Dropped : Event_Sequence;
 
+--  The protected controller only copies bounded event values into Events.
 Services.Read_Events
   (Supervisor, Cursor, Events, Count, Dropped);
 
+--  Formatting and logging happen after the protected action returns.
 for Index in 1 .. Count loop
    Render_Outside_The_Controller (Events (Index));
 end loop;</code></pre>
             </figure>
             <p>An event records sequence, monotonic time, logical id, generation, lifecycle transition, lane and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from a termination handler.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">✓</span>
+              <p><strong>Verification boundary.</strong> The fixed policy kernel is SPARK-proved for complete successful start plans, prerequisite precedence, exact isolate and cohort sets, dependent-recovery closure, restart accounting, backoff, incident, generation, and family-join decisions. The deterministic lowest-id tie-break and exact minimal dependent set remain executable and model-tested. Task activation, readiness, protected state, stopping, finalization, and resource reclamation are covered by live semantic tests rather than claimed as SPARK-proved.</p>
+            </aside>
           </section>
 
           <section id="limits">

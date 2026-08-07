@@ -6,8 +6,9 @@ with Flyology.Execution_Groups;
 with Interfaces;
 
 --  Defines the bounded, generation-safe vocabulary for structured task
---  supervision. Child packages provide structured task runners and typed
---  supervisors; no supervised task is detached from its Ada master.
+--  supervision. Task-generation generics own application-defined Ada task
+--  types; controllers supply typed topology and policy. No supervised task is
+--  detached from its Ada master.
 package Flyology.Supervision is
 
    --  Stable nonzero logical identity of one configured child. Capacity is a
@@ -160,7 +161,8 @@ package Flyology.Supervision is
    --  Child-level restart selection.
    --  @enum Never Do not replace a terminated generation
    --  @enum On_Failure Replace only after a failure-class termination
-   --  @enum Always Replace after normal or failed termination
+   --  @enum Always Replace after normal or failed termination, but never after
+   --  explicit supervisor shutdown, a stuck child, or policy exhaustion
    type Restart_Kind is (Never, On_Failure, Always);
 
    --  Explicit effect of one child failure.
@@ -219,7 +221,8 @@ package Flyology.Supervision is
       Request_Abort     => False,
       Abort_Observation => Ada.Real_Time.Seconds (1));
 
-   --  Actual execution lane of a live generation.
+   --  Configured execution lane recorded by supervision policy. The task type
+   --  owns its actual CPU aspect and Task_Info designation.
    --  @enum No_Lane No generation is running
    --  @enum Lightweight_Lane Generation is a lightweight task
    --  @enum Native_Lane Generation is a native task
@@ -307,6 +310,37 @@ package Flyology.Supervision is
    procedure Report_Escalation
      (Control : in out Generation_Control;
       Context : Incident_Context);
+
+   --  Report normal completion from the outer body of the generation task,
+   --  after its generation-owned inner resource scope has finalized. A
+   --  generation task must report exactly one terminal outcome. If it
+   --  terminates without reporting, its task-generation owner classifies the
+   --  outcome as Abnormal_Completion.
+   --  @param Control Generation control borrowed by the reporting task
+   --  @exception Program_Error No active generation exists or an outcome was
+   --  already reported
+   procedure Report_Normal_Return (Control : in out Generation_Control);
+
+   --  Report cooperative cancellation from the outer body of the generation
+   --  task. Cancellation caused by supervisor shutdown is retained as
+   --  Supervisor_Shutdown rather than Cancelled.
+   --  @param Control Generation control borrowed by the reporting task
+   --  @exception Program_Error No active generation exists or an outcome was
+   --  already reported
+   procedure Report_Cancellation (Control : in out Generation_Control);
+
+   --  Copy an unhandled exception into bounded generation state while its
+   --  occurrence is still valid. Place the handler outside the task's owned
+   --  resource block so cleanup precedes this report. The copied exception
+   --  identity, message, and current Ada task identity remain valid after the
+   --  task object is gone.
+   --  @param Control Generation control borrowed by the reporting task
+   --  @param Occurrence Exception caught by the outer task-body handler
+   --  @exception Program_Error No active generation exists or an outcome was
+   --  already reported
+   procedure Report_Exception
+     (Control    : in out Generation_Control;
+      Occurrence : Ada.Exceptions.Exception_Occurrence);
 
    --  Completion returned by one structured generation runner after its local
    --  Ada master has joined the task and completed task-body finalization.
@@ -413,9 +447,9 @@ package Flyology.Supervision is
    --  @field Id Stable logical identity
    --  @field Generation Current or most recently completed generation
    --  @field State Current lifecycle
-   --  @field Lane Actual task lane
+   --  @field Lane Configured task lane
    --  @field Has_Group Whether Group is meaningful for a lightweight task
-   --  @field Group Current lightweight execution group
+   --  @field Group Configured lightweight execution group
    --  @field Termination Last bounded termination information
    --  @field Attempts Attempts admitted in the active incident
    --  @field Backoff Current monotonic delay
@@ -464,6 +498,7 @@ private
       procedure Publish_Stop (Shutdown : Boolean);
       procedure Publish_Abort;
       procedure Publish_Escalation (Incident : Incident_Context);
+      procedure Publish_Termination (Value : Termination_Summary);
       procedure Close_Incident;
       function Current_Handle return Child_Handle;
       function Is_Ready return Boolean;
@@ -471,6 +506,9 @@ private
       function Is_Shutdown return Boolean;
       function Is_Abort_Requested return Boolean;
       function Current_Incident return Incident_Context;
+      procedure Read_Termination
+        (Reported : out Boolean;
+         Value    : out Termination_Summary);
    private
       Value           : Child_Handle;
       Opened          : Boolean := False;
@@ -480,6 +518,8 @@ private
       Abort_Requested : Boolean := False;
       Escalated       : Boolean := False;
       Incident        : Incident_Context := No_Incident;
+      Termination_Reported : Boolean := False;
+      Termination          : Termination_Summary;
    end Generation_Control_State;
 
    type Generation_Control is limited record
@@ -537,4 +577,13 @@ private
    --  @param Control Internal generation control
    --  @return Whether stop represents supervisor shutdown
    function Shutdown_Stop (Control : Generation_Control) return Boolean;
+
+   --  @exclude
+   --  @param Control Internal generation control
+   --  @param Reported Whether the generation task published an outcome
+   --  @param Value Published outcome when Reported is True
+   procedure Read_Termination
+     (Control  : in out Generation_Control;
+      Reported : out Boolean;
+      Value    : out Termination_Summary);
 end Flyology.Supervision;

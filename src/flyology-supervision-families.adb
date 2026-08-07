@@ -146,11 +146,14 @@ package body Flyology.Supervision.Families is
          end if;
 
          if Has_Generation (Selected) then
-            if Snapshots (Selected).Generation = Generation'Last then
+            if not Flyology.Supervision_Policy.Generation_Can_Advance
+              (Snapshots (Selected).Generation)
+            then
                raise Program_Error with "family generation space exhausted";
             end if;
             Snapshots (Selected).Generation :=
-              Snapshots (Selected).Generation + 1;
+              Flyology.Supervision_Policy.Next_Generation
+                (Snapshots (Selected).Generation);
          else
             Has_Generation (Selected) := True;
          end if;
@@ -314,9 +317,12 @@ package body Flyology.Supervision.Families is
              (Current_Generation (Handle) = Snapshots (Slot).Generation
               or else
                 (Snapshots (Slot).State = Backing_Off
-                 and then Snapshots (Slot).Generation < Generation'Last
+                 and then
+                   Flyology.Supervision_Policy.Generation_Can_Advance
+                     (Snapshots (Slot).Generation)
                  and then Current_Generation (Handle) =
-                   Snapshots (Slot).Generation + 1))
+                   Flyology.Supervision_Policy.Next_Generation
+                     (Snapshots (Slot).Generation)))
          then
             Before := Snapshots (Slot).State;
             Active_Incidents (Slot) := Incident;
@@ -557,19 +563,22 @@ package body Flyology.Supervision.Families is
 
          Next_Attempt := Consecutive (Slot) + 1;
          Backoff := Policy.Recovery.Initial_Backoff;
-         for Index in 2 .. Next_Attempt loop
-            exit when Backoff = Policy.Recovery.Maximum_Backoff;
-            if Backoff > Policy.Recovery.Maximum_Backoff / 2 then
-               Backoff := Policy.Recovery.Maximum_Backoff;
-            else
-               Backoff := Backoff * 2;
-            end if;
-         end loop;
+         if Backoff > Ada.Real_Time.Time_Span_Zero then
+            for Index in 2 .. Next_Attempt loop
+               exit when Backoff = Policy.Recovery.Maximum_Backoff;
+               if Backoff > Policy.Recovery.Maximum_Backoff / 2 then
+                  Backoff := Policy.Recovery.Maximum_Backoff;
+               else
+                  Backoff := Backoff * 2;
+               end if;
+            end loop;
+         end if;
          Elapsed := Now - Incident_Since (Slot);
          if Elapsed > Policy.Recovery.Recovery_Deadline
            or else Backoff > Policy.Recovery.Recovery_Deadline - Elapsed
            or else Backoff > Recovery_Deadline (Cascade) - Now
-           or else Snapshots (Slot).Generation = Generation'Last
+           or else not Flyology.Supervision_Policy.Generation_Can_Advance
+             (Snapshots (Slot).Generation)
          then
             Snapshots (Slot).Termination.Kind := Policy_Exhaustion;
             Begin_Terminal
@@ -601,7 +610,8 @@ package body Flyology.Supervision.Families is
             Backoff);
          Next :=
            (Id         => Snapshots (Slot).Id,
-            Generation => Snapshots (Slot).Generation + 1);
+            Generation => Flyology.Supervision_Policy.Next_Generation
+              (Snapshots (Slot).Generation));
          Restart := True;
       end Publish_Termination;
 
