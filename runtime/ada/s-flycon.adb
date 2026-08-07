@@ -228,6 +228,22 @@ package body System.Flyology.Contexts is
    is
      ((Value + Alignment - 1) / Alignment * Alignment);
 
+   function Guard_Bytes (Page_Size : C.size_t) return C.size_t is
+     (Round_Up (Minimum_Stack_Guard_Bytes, Page_Size));
+
+   --  A usable size is mappable when the per-slot stride and the mapping
+   --  length of a single-slot arena, each one guard larger than the previous
+   --  quantity, remain representable in size_t.
+   function Sizing_Fits (Usable_Size, Guard_Size : C.size_t) return Boolean is
+     (Usable_Size /= 0
+      and then Usable_Size <= C.size_t'Last - 2 * Guard_Size);
+
+   --  Largest stack request Create can round up to a mappable usable size.
+   function Maximum_Request
+     (Page_Size, Guard_Size : C.size_t) return C.size_t
+   is
+     (C.size_t'Last - 2 * Guard_Size - (Page_Size - 1));
+
    function Acquire_Stack
      (Usable_Size : C.size_t;
       Stack       : out System.Address;
@@ -235,8 +251,7 @@ package body System.Flyology.Contexts is
       Slot        : out Natural) return Boolean
    is
       Page_Size : constant C.size_t := C.size_t (Get_Page_Size);
-      Guard_Size : constant C.size_t :=
-        Round_Up (Minimum_Stack_Guard_Bytes, Page_Size);
+      Guard_Size : constant C.size_t := Guard_Bytes (Page_Size);
       Item      : Stack_Arena_Access;
       Capacity  : Natural;
       Result    : C.int;
@@ -246,6 +261,16 @@ package body System.Flyology.Contexts is
       Stack := System.Null_Address;
       Arena := null;
       Slot := 0;
+
+      --  size_t is modular, so an oversized request would silently wrap the
+      --  stride and the arena mapping length instead of failing. Reject it
+      --  here: a wrapped stride divides the arena capacity by zero, and a
+      --  wrapped mapping length maps nothing while still handing out slot
+      --  addresses.
+      if not Sizing_Fits (Usable_Size, Guard_Size) then
+         return False;
+      end if;
+
       Lock_Pool;
       Locked := True;
 
@@ -474,13 +499,19 @@ package body System.Flyology.Contexts is
       Return_To  : Context_Access) return Context_Access
    is
       Page_Size   : constant C.size_t := C.size_t (Get_Page_Size);
+      Guard_Size  : constant C.size_t := Guard_Bytes (Page_Size);
       Usable_Size : C.size_t;
       Item        : Context_Access := new Context;
       Arena       : Stack_Arena_Access;
       Slot        : Natural;
       Top         : SSE.Integer_Address;
    begin
+      --  Rounding the request up to a page adds at most Page_Size - 1 bytes.
+      --  A request beyond Maximum_Request would wrap that round-up to a
+      --  smaller usable size - zero for the classic (size_t) -1 request -
+      --  which no longer describes the caller's stack at all.
       if Stack_Size = 0
+        or else Stack_Size > Maximum_Request (Page_Size, Guard_Size)
         or else Start = System.Null_Address
         or else Return_To = null
       then

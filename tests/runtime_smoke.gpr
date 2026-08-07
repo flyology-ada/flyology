@@ -104,6 +104,8 @@ project Runtime_Smoke is
       "stack_guard_smoke.adb",
       "stack_guard_violation_child.adb",
       "stack_size_parity_smoke.adb",
+      "stack_size_limits_child.adb",
+      "stack_size_limits_smoke.adb",
       "stack_pool_smoke.adb",
       "suspension_object_smoke.adb",
       "task_scopes_smoke.adb",

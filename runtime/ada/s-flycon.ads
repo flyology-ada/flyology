@@ -8,6 +8,14 @@ package System.Flyology.Contexts is
 
    function Capture return Context_Access;
 
+   --  Allocate a guarded stack and the register image of a context that has
+   --  never run. Stack_Size is rounded up to the host page size. The result
+   --  is null - with no stack, arena, or context retained - when the request
+   --  cannot be satisfied: a zero, unrepresentable, or unmappable stack size,
+   --  a null entry point, a null resumption context, or a failed mapping. An
+   --  unrepresentable size is one whose page round-up, per-slot arena stride,
+   --  or arena mapping length exceeds size_t. Create reports every such
+   --  request through the null result and propagates no exception.
    function Create
      (Stack_Size : Interfaces.C.size_t;
       Start      : System.Address;
