@@ -874,12 +874,167 @@ procedure Concurrency_Primitives_Smoke is
          Pools.Submit (Item, 1, Accepted);
          pragma Assert (not Accepted);
       end Exercise_Run_Abort;
+
+      --  A second Run must be rejected with Program_Error and must leave the
+      --  run that already owns the pool untouched: admission stays open, jobs
+      --  still complete, and the owner still joins its workers.
+      procedure Exercise_Duplicate_Run is
+         Item    : aliased Pools.Pool
+           (Worker_Count => 2, Queue_Capacity => 2);
+         Context : aliased Totals;
+         Outcome : Run_Outcome;
+
+         Rejected      : Boolean := False;
+         Still_Running : Boolean := False;
+         Still_Open    : Boolean := False;
+         Accepted      : Boolean := False;
+         Joined        : Boolean := False;
+         Result        : Run_Result := Run_Unexpected;
+      begin
+         declare
+            task Runner;
+
+            task body Runner is
+            begin
+               begin
+                  Pools.Run (Item, Context);
+                  Outcome.Set (Run_Succeeded);
+               exception
+                  when others =>
+                     Outcome.Set (Run_Unexpected);
+               end;
+            end Runner;
+         begin
+            while not Pools.Current (Item).Running loop
+               delay 0.0;
+            end loop;
+
+            begin
+               Pools.Run (Item, Context);
+            exception
+               when Program_Error =>
+                  Rejected := True;
+               when others =>
+                  null;
+            end;
+
+            Still_Running := Pools.Current (Item).Running;
+            Still_Open := not Pools.Current (Item).Shutdown_Requested;
+
+            Pools.Submit (Item, 5, Accepted);
+            Pools.Request_Shutdown (Item);
+
+            --  Bound the join. A rejected caller that terminalized the live
+            --  pool leaves the owner permanently queued on its worker
+            --  barrier, which must be reported rather than hang the suite.
+            select
+               Outcome.Wait (Result);
+               Joined := True;
+            or
+               delay 10.0;
+               abort Runner;
+            end select;
+         end;
+
+         pragma Assert (Rejected);
+         pragma Assert (Still_Running);
+         pragma Assert (Still_Open);
+         pragma Assert (Accepted);
+         pragma Assert (Joined);
+         pragma Assert (Result = Run_Succeeded);
+         pragma Assert (Context.Count = 1);
+         pragma Assert (Context.Sum = 5);
+         pragma Assert (Pools.Current (Item).Completed_Jobs = 1);
+         pragma Assert (Pools.Current (Item).Failures = 0);
+      end Exercise_Duplicate_Run;
+
+      --  Claiming the one-shot run is a single abort-deferred step. A caller
+      --  aborted while it is still trying to claim never armed teardown, so
+      --  the owning run keeps its workers, its queue, and its join barrier.
+      procedure Exercise_Claim_Abort is
+         Item    : aliased Pools.Pool
+           (Worker_Count => 2, Queue_Capacity => 2);
+         Context : aliased Totals;
+         Outcome : Run_Outcome;
+
+         Still_Running : Boolean := False;
+         Still_Open    : Boolean := False;
+         Accepted      : Boolean := False;
+         Joined        : Boolean := False;
+         Result        : Run_Result := Run_Unexpected;
+      begin
+         declare
+            task Runner;
+
+            task body Runner is
+            begin
+               begin
+                  Pools.Run (Item, Context);
+                  Outcome.Set (Run_Succeeded);
+               exception
+                  when others =>
+                     Outcome.Set (Run_Unexpected);
+               end;
+            end Runner;
+         begin
+            while not Pools.Current (Item).Running loop
+               delay 0.0;
+            end loop;
+
+            Worker_Pool_Test_Control.Reset;
+            Worker_Pool_Test_Control.Arm_Run_Claim_Barrier;
+            declare
+               task Claimer is
+                  pragma Task_Info (Flyology.Native_Task);
+               end Claimer;
+
+               task body Claimer is
+               begin
+                  Pools.Run (Item, Context);
+               exception
+                  when others =>
+                     null;
+               end Claimer;
+            begin
+               Worker_Pool_Test_Control.Wait_Run_Claim_Barrier;
+               abort Claimer;
+               Worker_Pool_Test_Control.Release_Run_Claim_Barrier;
+            end;
+            Worker_Pool_Test_Control.Reset;
+
+            Still_Running := Pools.Current (Item).Running;
+            Still_Open := not Pools.Current (Item).Shutdown_Requested;
+
+            Pools.Submit (Item, 9, Accepted);
+            Pools.Request_Shutdown (Item);
+
+            select
+               Outcome.Wait (Result);
+               Joined := True;
+            or
+               delay 10.0;
+               abort Runner;
+            end select;
+         end;
+
+         pragma Assert (Still_Running);
+         pragma Assert (Still_Open);
+         pragma Assert (Accepted);
+         pragma Assert (Joined);
+         pragma Assert (Result = Run_Succeeded);
+         pragma Assert (Context.Count = 1);
+         pragma Assert (Context.Sum = 9);
+         pragma Assert (Pools.Current (Item).Completed_Jobs = 1);
+         pragma Assert (Pools.Current (Item).Failures = 0);
+      end Exercise_Claim_Abort;
    begin
       Exercise_Success;
       Exercise_Failure;
       Exercise_Activation_Failure;
       Exercise_Abort_Safe_Shutdown;
       Exercise_Run_Abort;
+      Exercise_Duplicate_Run;
+      Exercise_Claim_Abort;
    end Exercise_Worker_Pool;
 
    procedure Exercise_Lightweight_Pool is new Exercise_Worker_Pool

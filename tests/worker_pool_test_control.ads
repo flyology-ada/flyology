@@ -4,6 +4,12 @@ package Worker_Pool_Test_Control is
 
    procedure Fail_Activation_At (Ordinal : Positive);
 
+   procedure Arm_Run_Claim_Barrier;
+
+   procedure Wait_Run_Claim_Barrier;
+
+   procedure Release_Run_Claim_Barrier;
+
    procedure Arm_Shutdown_Barrier;
 
    procedure Wait_Shutdown_Barrier;

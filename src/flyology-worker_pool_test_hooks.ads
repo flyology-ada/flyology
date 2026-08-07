@@ -4,6 +4,7 @@ private package Flyology.Worker_Pool_Test_Hooks is
    function Check_Activation return Boolean;
    function Consume_Failure return Boolean;
    function Completion_Wake return Boolean;
+   procedure Run_Claim_Barrier;
    procedure Shutdown_Barrier;
    procedure Token_Cleanup_Acquire;
    procedure Token_Cleanup_Barrier;

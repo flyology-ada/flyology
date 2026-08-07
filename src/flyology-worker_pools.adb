@@ -238,7 +238,21 @@ package body Flyology.Worker_Pools is
       type Run_Guard is
         new Ada.Finalization.Limited_Controlled with null record;
 
+      overriding procedure Initialize (Guard : in out Run_Guard);
       overriding procedure Finalize (Guard : in out Run_Guard);
+
+      overriding procedure Initialize (Guard : in out Run_Guard) is
+         pragma Unreferenced (Guard);
+      begin
+         --  Claiming the one-shot run and arming teardown is one abort-
+         --  deferred step, because default initialization of a controlled
+         --  object defers abort. A caller that loses the claim, or that is
+         --  aborted while making it, therefore never arms teardown and never
+         --  touches the pool state owned by the run already in progress.
+         Test_Hooks.Run_Claim_Barrier;
+         Item.State.Begin_Run (Item.Worker_Count);
+         Cleanup_Armed := True;
+      end Initialize;
 
       overriding procedure Finalize (Guard : in out Run_Guard) is
          pragma Unreferenced (Guard);
@@ -280,12 +294,9 @@ package body Flyology.Worker_Pools is
          end;
       end Stop_After_Failure;
    begin
-      --  Arm cleanup before publishing any lifecycle state. The guard's
-      --  finalization is abort-deferred, so an abort cannot leave a prepared
-      --  or running pool unterminated.
-      Cleanup_Armed := True;
-      Item.State.Begin_Run (Item.Worker_Count);
-
+      --  Cleanup is already armed: the guard's initialization claimed the
+      --  one-shot run, and its finalization is abort-deferred, so an abort
+      --  cannot leave a prepared or running pool unterminated.
       declare
          task type Worker with CPU => Worker_CPU is
             pragma Task_Info (Worker_Model);

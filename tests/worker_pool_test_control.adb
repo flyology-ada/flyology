@@ -14,6 +14,18 @@ package body Worker_Pool_Test_Control is
      with Import,
           Convention => C,
           External_Name => "flyology_test_worker_activation_fail_at";
+   procedure C_Arm_Run_Claim_Barrier
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_run_claim_barrier_arm";
+   function C_Run_Claim_Barrier_Reached return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_run_claim_barrier_reached";
+   procedure C_Release_Run_Claim_Barrier
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_worker_run_claim_barrier_release";
    procedure C_Arm_Shutdown_Barrier
      with Import,
           Convention => C,
@@ -97,6 +109,29 @@ package body Worker_Pool_Test_Control is
    begin
       C_Fail_Activation_At (Interfaces.C.int (Ordinal));
    end Fail_Activation_At;
+
+   procedure Arm_Run_Claim_Barrier is
+   begin
+      C_Arm_Run_Claim_Barrier;
+   end Arm_Run_Claim_Barrier;
+
+   procedure Wait_Run_Claim_Barrier is
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (10);
+   begin
+      while C_Run_Claim_Barrier_Reached = 0 loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error with
+              "worker pool run claim barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_Run_Claim_Barrier;
+
+   procedure Release_Run_Claim_Barrier is
+   begin
+      C_Release_Run_Claim_Barrier;
+   end Release_Run_Claim_Barrier;
 
    procedure Arm_Shutdown_Barrier is
    begin
