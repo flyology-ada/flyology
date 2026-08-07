@@ -65,6 +65,7 @@ project Runtime_Smoke is
       "dns_smoke.adb",
       "dns_parser_smoke.adb",
       "dns_parser_matrix.adb",
+      "dns_resilience_smoke.adb",
       "dormancy_smoke.adb",
       "default_policy_smoke.adb",
       "execution_groups_smoke.adb",

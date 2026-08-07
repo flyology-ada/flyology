@@ -1324,6 +1324,14 @@ package body Flyology.IO.DNS is
                end;
 
                loop
+                  --  Discarded datagrams and uncommitted transport errors
+                  --  both return here. A hostile peer can keep the socket
+                  --  readable forever, so both deadlines are re-checked
+                  --  before every wait rather than relying on Wait_Any
+                  --  reporting a timeout.
+                  exit when Ada.Real_Time.Clock >= Attempt_Deadline
+                    or else (not Infinite
+                             and then Remaining (Deadline, False) <= 0.0);
 #if FLYOLOGY_DNS_TEST_HOOKS then
                   Flyology.DNS_Test_Observations.Record_Receive_Wait
                     (After_Close => not Sockets.Is_Open (Channels (1)));

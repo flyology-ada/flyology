@@ -266,6 +266,7 @@ descriptor_ownership_smoke
 dns_smoke
 dns_parser_smoke
 dns_parser_matrix
+dns_resilience_smoke
 dormancy_smoke
 execution_groups_smoke
 exception_traceback_smoke
@@ -457,6 +458,10 @@ for test_main in $ordinary_mains; do
       ;;
     dns_parser_matrix)
       "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$current_test_bin/$test_main"
+      ;;
+    dns_resilience_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 60 \
         "$current_test_bin/$test_main"
       ;;
     process_lifecycle_smoke|process_exit_live_task_smoke)
