@@ -65,6 +65,7 @@ package body System.Flyology.Task_Results is
 
    type Owned_Result is limited record
       Gate  : Completion_Gate;
+      References : aliased Atomics.uint32 := 1;
       State : aliased Atomics.uint32 :=
         Atomics.uint32 (Policy.Phase'Pos (Policy.Running));
       Item  : Runtime_Result := Empty_Result;
@@ -106,6 +107,19 @@ package body System.Flyology.Task_Results is
 
    function Owned (T : System.Tasking.Task_Id) return Owned_Access;
 
+   function Retain (Value : Owned_Access) return Boolean;
+
+   procedure Release (Value : in out Owned_Access);
+
+   function Observe_Owned
+     (Value     : Owned_Access;
+      Item      : System.Address;
+      Item_Size : C.size_t) return C.int;
+
+   function Wait_Owned
+     (Value               : Owned_Access;
+      Timeout_Nanoseconds : C.long_long) return C.int;
+
    function Owned (T : System.Tasking.Task_Id) return Owned_Access is
    begin
       if T = null then
@@ -114,6 +128,64 @@ package body System.Flyology.Task_Results is
       return Owned_Addresses.To_Pointer
         (T.Attributes (Result_Attribute_Index));
    end Owned;
+
+   function Retain (Value : Owned_Access) return Boolean is
+      Expected : aliased Atomics.uint32;
+   begin
+      if Value = null then
+         return False;
+      end if;
+
+      Expected := Atomics.Atomic_Load_32
+        (Value.References'Address, Atomics.Acquire);
+      loop
+         if not Policy.Retain_Allowed (Policy.Reference_Count (Expected)) then
+            return False;
+         end if;
+         exit when Atomics.Atomic_Compare_Exchange_32
+           (Value.References'Address,
+            Expected'Address,
+            Atomics.uint32
+              (Policy.After_Retain (Policy.Reference_Count (Expected))),
+            Weak          => False,
+            Success_Model => Atomics.Acq_Rel,
+            Failure_Model => Atomics.Acquire);
+         --  A failed compare-exchange replaces Expected with the observed
+         --  value, so the next iteration revalidates both terminal cases.
+      end loop;
+      return True;
+   end Retain;
+
+   procedure Release (Value : in out Owned_Access) is
+      Expected : aliased Atomics.uint32;
+      Next     : Atomics.uint32;
+   begin
+      if Value = null then
+         return;
+      end if;
+
+      Expected := Atomics.Atomic_Load_32
+        (Value.References'Address, Atomics.Acquire);
+      loop
+         pragma Assert
+           (Policy.Release_Allowed (Policy.Reference_Count (Expected)));
+         Next := Atomics.uint32
+           (Policy.After_Release (Policy.Reference_Count (Expected)));
+         exit when Atomics.Atomic_Compare_Exchange_32
+           (Value.References'Address,
+            Expected'Address,
+            Next,
+            Weak          => False,
+            Success_Model => Atomics.Acq_Rel,
+            Failure_Model => Atomics.Acquire);
+      end loop;
+
+      if Next = 0 then
+         Free_Owned (Value);
+      else
+         Value := null;
+      end if;
+   end Release;
 
    procedure Copy_Bounded
      (Source    : String;
@@ -158,9 +230,7 @@ package body System.Flyology.Task_Results is
    procedure Release_Task_Result (Storage : System.Address) is
       Value : Owned_Access := Owned_Addresses.To_Pointer (Storage);
    begin
-      if Value /= null then
-         Free_Owned (Value);
-      end if;
+      Release (Value);
    end Release_Task_Result;
 
    function Detach_Task_Result
@@ -217,20 +287,18 @@ package body System.Flyology.Task_Results is
       Value.Gate.Publish;
    end Publish;
 
-   function Observe_Task
-     (T         : System.Address;
+   function Observe_Owned
+     (Value     : Owned_Access;
       Item      : System.Address;
       Item_Size : C.size_t) return C.int
    is
-      ID     : constant System.Tasking.Task_Id := To_Task_Id (T);
       Target : constant Result_Addresses.Object_Pointer :=
         Result_Addresses.To_Pointer (Item);
-      Value  : constant Owned_Access := Owned (ID);
       State  : Atomics.uint32;
    begin
       if Target = null or else Item_Size /= Runtime_Result'Size / 8 then
          return Code (Policy.Malformed_Request);
-      elsif ID = null or else Value = null then
+      elsif Value = null then
          return Code (Policy.Unknown_Task);
       end if;
       State := Atomics.Atomic_Load_32 (Value.State'Address, Atomics.Acquire);
@@ -242,17 +310,31 @@ package body System.Flyology.Task_Results is
    exception
       when others =>
          return Code (Policy.Runtime_Failure);
+   end Observe_Owned;
+
+   function Observe_Task
+     (T         : System.Address;
+      Item      : System.Address;
+      Item_Size : C.size_t) return C.int
+   is
+      ID : constant System.Tasking.Task_Id := To_Task_Id (T);
+   begin
+      if ID = null then
+         return Code (Policy.Unknown_Task);
+      end if;
+      return Observe_Owned (Owned (ID), Item, Item_Size);
+   exception
+      when others =>
+         return Code (Policy.Runtime_Failure);
    end Observe_Task;
 
-   function Wait_Task
-     (T                   : System.Address;
+   function Wait_Owned
+     (Value               : Owned_Access;
       Timeout_Nanoseconds : C.long_long) return C.int
    is
-      ID    : constant System.Tasking.Task_Id := To_Task_Id (T);
-      Value : constant Owned_Access := Owned (ID);
       State : Atomics.uint32;
    begin
-      if ID = null or else Value = null then
+      if Value = null then
          return Code (Policy.Unknown_Task);
       end if;
       State := Atomics.Atomic_Load_32 (Value.State'Address, Atomics.Acquire);
@@ -283,6 +365,66 @@ package body System.Flyology.Task_Results is
       --  Program_Error. Abort is not an exception and still propagates.
       when others =>
          return -3;
+   end Wait_Owned;
+
+   function Wait_Task
+     (T                   : System.Address;
+      Timeout_Nanoseconds : C.long_long) return C.int
+   is
+      ID : constant System.Tasking.Task_Id := To_Task_Id (T);
+   begin
+      if ID = null then
+         return Code (Policy.Unknown_Task);
+      end if;
+      return Wait_Owned (Owned (ID), Timeout_Nanoseconds);
+   exception
+      when others =>
+         return Code (Policy.Runtime_Failure);
    end Wait_Task;
+
+   function Attach_Monitor (T : System.Address) return System.Address is
+      ID    : constant System.Tasking.Task_Id := To_Task_Id (T);
+      Value : constant Owned_Access := Owned (ID);
+   begin
+      if ID = null or else not Retain (Value) then
+         return System.Null_Address;
+      end if;
+      return Value.all'Address;
+   exception
+      when others =>
+         return System.Null_Address;
+   end Attach_Monitor;
+
+   procedure Release_Monitor (Storage : System.Address) is
+      Value : Owned_Access := Owned_Addresses.To_Pointer (Storage);
+   begin
+      Release (Value);
+   exception
+      when others =>
+         null;
+   end Release_Monitor;
+
+   function Observe_Monitor
+     (Storage   : System.Address;
+      Item      : System.Address;
+      Item_Size : C.size_t) return C.int is
+   begin
+      return Observe_Owned
+        (Owned_Addresses.To_Pointer (Storage), Item, Item_Size);
+   exception
+      when others =>
+         return Code (Policy.Runtime_Failure);
+   end Observe_Monitor;
+
+   function Wait_Monitor
+     (Storage             : System.Address;
+      Timeout_Nanoseconds : C.long_long) return C.int is
+   begin
+      return Wait_Owned
+        (Owned_Addresses.To_Pointer (Storage), Timeout_Nanoseconds);
+   exception
+      when others =>
+         return Code (Policy.Runtime_Failure);
+   end Wait_Monitor;
 
 end System.Flyology.Task_Results;

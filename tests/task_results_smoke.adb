@@ -169,6 +169,41 @@ procedure Task_Results_Smoke is
          Free_Fast (Subject);
       end;
 
+      --  Independent monitors retain the fixed result after the allocator-
+      --  owned task object is reclaimed. They do not retain or address the
+      --  task itself and detach independently.
+      declare
+         Subject : Fast_Access := new Fast_Task;
+         First   : Results.Monitor;
+         Second  : Results.Monitor;
+         First_Observation  : Results.Task_Observation;
+         Second_Observation : Results.Task_Observation;
+      begin
+         Results.Attach (First, Subject.all'Identity);
+         Results.Attach (Second, Subject.all'Identity);
+         First_Observation := Results.Wait (First, Timeout => 2.0);
+         if First_Observation.Status /= Results.Terminal
+           or else First_Observation.Result.Cause /= Results.Normal_Completion
+         then
+            raise Program_Error with Label & " first monitor mismatch";
+         end if;
+
+         Free_Fast (Subject);
+         Second_Observation := Results.Observe (Second);
+         if Second_Observation.Status /= Results.Terminal
+           or else
+             Second_Observation.Result.Cause /= Results.Normal_Completion
+         then
+            raise Program_Error with
+              Label & " monitor did not survive task-object reclamation";
+         end if;
+         Results.Detach (First);
+         Results.Detach (First);
+         if Results.Attached (First) or else not Results.Attached (Second) then
+            raise Program_Error with Label & " monitor detach mismatch";
+         end if;
+      end;
+
       --  A declared task object owns the same persistent result sidecar; no
       --  allocator or access object is required.
       declare
@@ -240,9 +275,11 @@ procedure Task_Results_Smoke is
            (Timeout_Task, Timeout_Access);
 
          Subject     : Timeout_Access := new Timeout_Task;
+         Watch       : Results.Monitor;
          Observation : Results.Task_Observation;
       begin
          Timeout_Started.Wait;
+         Results.Attach (Watch, Subject.all'Identity);
          Observation := Results.Observe (Subject.all'Identity);
          if Observation.Status /= Results.Not_Terminal then
             raise Program_Error with Label & " running task was terminal";
@@ -251,8 +288,12 @@ procedure Task_Results_Smoke is
          if Observation.Status /= Results.Not_Terminal then
             raise Program_Error with Label & " direct wait did not time out";
          end if;
+         Observation := Results.Wait (Watch, Timeout => 0.01);
+         if Observation.Status /= Results.Not_Terminal then
+            raise Program_Error with Label & " monitor wait did not time out";
+         end if;
          STC.Set_True (Timeout_Gate);
-         Observation := Results.Wait (Subject.all'Identity, Timeout => 2.0);
+         Observation := Results.Wait (Watch, Timeout => 2.0);
          if Observation.Status /= Results.Terminal
            or else Observation.Result.Cause /= Results.Normal_Completion
          then
@@ -366,6 +407,7 @@ procedure Task_Results_Smoke is
       Subject_Started : Signal;
       Subject_Gate    : STC.Suspension_Object;
       Waiter_Started  : Signal;
+      Monitor_Waiter_Started : Signal;
 
       task type Subject_Task is
          pragma Task_Info (Flyology.Native_Task);
@@ -395,22 +437,49 @@ procedure Task_Results_Smoke is
          Observation := Results.Wait (Subject.all'Identity);
       end Waiter;
 
+      task Monitor_Waiter is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Monitor_Waiter;
+
+      task body Monitor_Waiter is
+         Watch       : Results.Monitor;
+         Observation : Results.Task_Observation;
+         pragma Unreferenced (Observation);
+      begin
+         Results.Attach (Watch, Subject.all'Identity);
+         Monitor_Waiter_Started.Set;
+         Observation := Results.Wait (Watch);
+      end Monitor_Waiter;
+
       Deadline : constant RT.Time := RT.Clock + RT.Seconds (2);
       Item     : Results.Task_Result;
    begin
       Subject_Started.Wait;
       Waiter_Started.Wait;
+      Monitor_Waiter_Started.Wait;
       delay 0.01;
       abort Waiter;
+      abort Monitor_Waiter;
       while not Waiter'Terminated loop
          if RT.Clock >= Deadline then
             raise Program_Error with "blocked direct waiter did not abort";
          end if;
          delay 0.001;
       end loop;
+      while not Monitor_Waiter'Terminated loop
+         if RT.Clock >= Deadline then
+            raise Program_Error with "blocked monitor waiter did not abort";
+         end if;
+         delay 0.001;
+      end loop;
       Item := Await_Task (Waiter'Identity, "aborted direct waiter");
       if Item.Cause /= Results.Abnormal_Completion then
          raise Program_Error with "direct wait swallowed task abort";
+      end if;
+      Item := Await_Task
+        (Monitor_Waiter'Identity, "aborted monitor waiter");
+      if Item.Cause /= Results.Abnormal_Completion then
+         raise Program_Error with "monitor wait swallowed task abort";
       end if;
       abort Subject.all;
       Item := Await_Task (Subject.all'Identity, "direct-wait subject");
@@ -467,6 +536,21 @@ procedure Task_Results_Smoke is
       if not Raised then
          raise Program_Error with "null Task_Id was accepted";
       end if;
+
+      Raised := False;
+      begin
+         declare
+            Watch : Results.Monitor;
+         begin
+            Results.Attach (Watch, Task_Ids.Null_Task_Id);
+         end;
+      exception
+         when Program_Error =>
+            Raised := True;
+      end;
+      if not Raised then
+         raise Program_Error with "monitor accepted null Task_Id";
+      end if;
    end Check_Null_Identity;
 
 begin
@@ -479,5 +563,6 @@ begin
    Check_Lightweight_Creation_Failure;
    Ada.Text_IO.Put_Line
      ("task results: completion, exception, abort, activation, finalization, "
-      & "declared and allocated lifetime, timed waits, and lane parity passed");
+      & "declared and allocated lifetime, retained monitors, timed waits, "
+      & "and lane parity passed");
 end Task_Results_Smoke;

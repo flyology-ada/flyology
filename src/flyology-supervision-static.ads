@@ -1,3 +1,4 @@
+with Ada.Finalization;
 with Ada.Real_Time;
 with Flyology.Execution_Groups;
 
@@ -15,6 +16,7 @@ with Flyology.Execution_Groups;
 --  @formal Control_Group Exact shared lightweight group for managers
 --  @formal Subtree_Recovery Recovery limits shared by the complete node
 --  @formal Event_Capacity Maximum retained supervisor events
+--  @formal Monitor_Capacity Maximum concurrent exact-generation waiters
 generic
    type Child_Kind is (<>);
    type Application_Context (<>) is limited private;
@@ -47,6 +49,7 @@ generic
    Control_Group : Flyology.Execution_Groups.Group_Selecting_CPU := 127;
    Subtree_Recovery : Recovery_Limits := Default_Recovery_Limits;
    Event_Capacity : Positive := 256;
+   Monitor_Capacity : Positive := 64;
 
 package Flyology.Supervision.Static is
 
@@ -112,6 +115,40 @@ package Flyology.Supervision.Static is
      (Item  : Supervisor;
       Child : Child_Kind) return Child_Snapshot;
 
+   --  Sample the exact current generation handle for Child. The handle may
+   --  become stale immediately after return, but Wait_Termination will then
+   --  report Generation_Replaced rather than observing a replacement as the
+   --  original task.
+   --  @param Item Running supervisor to inspect
+   --  @param Child Static child kind
+   --  @return Exact current child and generation
+   --  @exception Program_Error Configuration is not installed or Child has
+   --     not started its first generation
+   function Latest
+     (Item  : Supervisor;
+      Child : Child_Kind) return Child_Handle;
+
+   --  Wait for Handle's exact generation to terminate or be replaced. The
+   --  registration and current-generation check are one protected action, so
+   --  termination cannot be lost between them. A negative timeout waits
+   --  indefinitely, zero only checks, and a positive value is relative. The
+   --  call is abortable, must not be made from a protected action, and neither
+   --  affects the child nor follows a replacement generation. Item must
+   --  outlive the call.
+   --  @param Item Supervisor that owns Handle
+   --  @param Child Typed static child expected in Handle
+   --  @param Handle Exact generation to observe
+   --  @param Timeout Maximum relative wait; negative means indefinitely
+   --  @return Terminal, replaced, or timed-out fixed observation
+   --  @exception Program_Error Configuration is absent, Handle names another
+   --     child, or Handle predates the first generation
+   --  @exception Constraint_Error Monitor_Capacity waiters are already active
+   function Wait_Termination
+     (Item    : in out Supervisor;
+      Child   : Child_Kind;
+      Handle  : Child_Handle;
+      Timeout : Duration := -1.0) return Generation_Observation;
+
    --  Copy events after Cursor in ascending sequence order. Cursor advances to
    --  the last copied event. If older events were overwritten, Dropped is the
    --  exact sequence gap before the first copied event. The caller controls
@@ -146,6 +183,14 @@ private
    type Natural_Array is array (Child_Kind) of Natural;
    type Event_Buffer is array (Positive range 1 .. Event_Capacity) of
      Supervisor_Event;
+   subtype Monitor_Index is Positive range 1 .. Monitor_Capacity;
+   subtype Monitor_Token is Interfaces.Unsigned_64;
+   type Monitor_State is
+     (Monitor_Free, Monitor_Pending, Monitor_Terminated, Monitor_Replaced);
+   type Monitor_State_Array is array (Monitor_Index) of Monitor_State;
+   type Monitor_Token_Array is array (Monitor_Index) of Monitor_Token;
+   type Monitor_Handle_Array is array (Monitor_Index) of Child_Handle;
+   type Monitor_Snapshot_Array is array (Monitor_Index) of Child_Snapshot;
 
    type Lifecycle_Phase is
      (Unconfigured,
@@ -207,6 +252,25 @@ private
       function Has_Configuration return Boolean;
       function Read_Result return Supervisor_Result;
       function Read_Snapshot (Child : Child_Kind) return Child_Snapshot;
+      function Read_Latest (Child : Child_Kind) return Child_Handle;
+      procedure Register_Monitor
+        (Child     : Child_Kind;
+         Handle    : Child_Handle;
+         Immediate : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot;
+         Ticket    : out Monitor_Index;
+         Token     : out Monitor_Token);
+      entry Await_Monitor (Monitor_Index)
+        (Token    : Monitor_Token;
+         Status   : out Generation_Observation_Status;
+         Snapshot : out Child_Snapshot);
+      procedure Cancel_Monitor
+        (Ticket    : Monitor_Index;
+         Token     : Monitor_Token;
+         Completed : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot);
       procedure Copy_Events
         (Cursor  : in out Event_Sequence;
          Target  : out Supervisor_Event_Array;
@@ -250,6 +314,9 @@ private
          Incident    : Incident_Context := No_Incident;
          Backoff     : Ada.Real_Time.Time_Span :=
            Ada.Real_Time.Time_Span_Zero);
+      procedure Complete_Monitors
+        (Child  : Child_Kind;
+         Status : Generation_Observation_Status);
 
       Phase         : Lifecycle_Phase := Unconfigured;
       Configured    : Boolean := False;
@@ -291,14 +358,31 @@ private
       Event_Length   : Natural := 0;
       Event_Last_Sequence : Event_Sequence := 0;
       Event_Sequence_Exhausted : Boolean := False;
+      Monitor_States : Monitor_State_Array := (others => Monitor_Free);
+      Monitor_Tokens : Monitor_Token_Array := (others => 0);
+      Monitor_Handles : Monitor_Handle_Array;
+      Monitor_Snapshots : Monitor_Snapshot_Array;
       Start_Position : Natural := 0;
       Stop_Position  : Natural := 0;
       Managers_Done  : Natural := 0;
       Terminal       : Supervisor_Result;
    end Lifecycle;
 
+   type Lifecycle_Access is access all Lifecycle;
+   type Monitor_Guard is
+     limited new Ada.Finalization.Limited_Controlled with record
+      State  : Lifecycle_Access := null;
+      Ticket : Monitor_Index := Monitor_Index'First;
+      Token  : Monitor_Token := 0;
+      Active : Boolean := False;
+   end record;
+
+   --  @exclude
+   --  @param Item In-flight monitor registration to cancel during unwinding
+   overriding procedure Finalize (Item : in out Monitor_Guard);
+
    type Supervisor is limited record
-      State : Lifecycle;
+      State : aliased Lifecycle;
    end record;
 
 end Flyology.Supervision.Static;

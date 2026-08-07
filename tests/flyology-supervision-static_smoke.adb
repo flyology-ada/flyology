@@ -294,7 +294,8 @@ procedure Flyology.Supervision.Static_Smoke is
       Depends_On         => No_Restart_Dependency,
       Cohort_Member      => Restart_Cohort,
       Run_One_Generation => Run_Restart_Generation,
-      Subtree_Recovery   => Restart_Recovery);
+      Subtree_Recovery   => Restart_Recovery,
+      Monitor_Capacity   => 1);
 
    Exhausted_Recovery : constant Flyology.Supervision.Recovery_Limits :=
      (Burst_Attempts    => 1,
@@ -851,6 +852,8 @@ begin
       Saw_Restarting : Boolean := False;
       Recovery_Incident : Flyology.Supervision.Incident_Id :=
         Flyology.Supervision.Incident_Id'First;
+      Stable_Handle : Flyology.Supervision.Child_Handle;
+      Stable_Observation : Flyology.Supervision.Generation_Observation;
    begin
       Owner.Start;
       loop
@@ -877,7 +880,62 @@ begin
          delay 0.001;
       end loop;
       delay 0.150;
+      Stable_Handle := Restart_Supervisors.Latest (Item, Service);
+      Stable_Observation := Restart_Supervisors.Wait_Termination
+        (Item, Service, Stable_Handle, Timeout => 0.0);
+      pragma Assert
+        (Stable_Observation.Status =
+           Flyology.Supervision.Observation_Timed_Out);
+
+      --  An aborted waiter releases its bounded registration through
+      --  controlled finalization. Monitor_Capacity is one, so a leaked slot
+      --  would make the post-abort zero-time check raise Constraint_Error.
+      declare
+         task Waiter;
+         task body Waiter is
+         begin
+            --  Begin the wait in the statement sequence so task activation
+            --  completes before this deliberately blocking call.
+            declare
+               Observation : constant
+                 Flyology.Supervision.Generation_Observation :=
+                   Restart_Supervisors.Wait_Termination
+                     (Item, Service, Stable_Handle);
+               pragma Unreferenced (Observation);
+            begin
+               null;
+            end;
+         end Waiter;
+
+         Registered : Boolean := False;
+      begin
+         while not Registered loop
+            begin
+               Stable_Observation := Restart_Supervisors.Wait_Termination
+                 (Item, Service, Stable_Handle, Timeout => 0.0);
+            exception
+               when Constraint_Error =>
+                  Registered := True;
+            end;
+            exit when Registered;
+            delay 0.001;
+         end loop;
+         abort Waiter;
+      end;
+      Stable_Observation := Restart_Supervisors.Wait_Termination
+        (Item, Service, Stable_Handle, Timeout => 0.0);
+      pragma Assert
+        (Stable_Observation.Status =
+           Flyology.Supervision.Observation_Timed_Out);
+
       Context.State.Request_Failure;
+      Stable_Observation := Restart_Supervisors.Wait_Termination
+        (Item, Service, Stable_Handle, Timeout => 2.0);
+      pragma Assert
+        (Stable_Observation.Status =
+           Flyology.Supervision.Generation_Terminated);
+      pragma Assert
+        (Stable_Observation.Snapshot.Generation = 3);
       loop
          exit when Restart_Supervisors.Current (Item, Service).Ready
            and then
@@ -890,6 +948,12 @@ begin
          end if;
          delay 0.001;
       end loop;
+      Stable_Observation := Restart_Supervisors.Wait_Termination
+        (Item, Service, Stable_Handle, Timeout => 0.0);
+      pragma Assert
+        (Stable_Observation.Status = Flyology.Supervision.Generation_Replaced);
+      pragma Assert
+        (Stable_Observation.Snapshot.Generation = 4);
       Restart_Supervisors.Read_Events
         (Item, Cursor, Events, Count, Dropped);
       pragma Assert (Dropped = 0);

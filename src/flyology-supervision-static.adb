@@ -29,6 +29,28 @@ package body Flyology.Supervision.Static is
        Task_Id        => Ada.Task_Identification.Null_Task_Id,
        others         => <>));
 
+   function Completed_Observation
+     (Status   : Generation_Observation_Status;
+      Snapshot : Child_Snapshot) return Generation_Observation;
+
+   function Completed_Observation
+     (Status   : Generation_Observation_Status;
+      Snapshot : Child_Snapshot) return Generation_Observation is
+   begin
+      case Status is
+         when Generation_Terminated =>
+            return
+              (Status   => Generation_Terminated,
+               Snapshot => Snapshot);
+         when Generation_Replaced =>
+            return
+              (Status   => Generation_Replaced,
+               Snapshot => Snapshot);
+         when Observation_Timed_Out =>
+            raise Program_Error with "incomplete generation observation";
+      end case;
+   end Completed_Observation;
+
    function Failure_Summary
      (Occurrence : Ada.Exceptions.Exception_Occurrence;
       Kind       : Termination_Kind := Unhandled_Exception)
@@ -64,6 +86,28 @@ package body Flyology.Supervision.Static is
    end Failure_Summary;
 
    protected body Lifecycle is
+      procedure Complete_Monitors
+        (Child  : Child_Kind;
+         Status : Generation_Observation_Status) is
+      begin
+         pragma Assert (Status /= Observation_Timed_Out);
+         for Ticket in Monitor_Index loop
+            if Monitor_States (Ticket) = Monitor_Pending
+              and then
+                Is_Current
+                  (Monitor_Handles (Ticket),
+                   Child_Ids (Child),
+                   Snapshots (Child).Generation)
+            then
+               Monitor_States (Ticket) :=
+                 (if Status = Generation_Terminated
+                  then Monitor_Terminated
+                  else Monitor_Replaced);
+               Monitor_Snapshots (Ticket) := Snapshots (Child);
+            end if;
+         end loop;
+      end Complete_Monitors;
+
       procedure Configure
         (Specs        : Specification_Array;
          Ids          : Logical_Id_Array;
@@ -768,6 +812,7 @@ package body Flyology.Supervision.Static is
          if not Existing_Stuck then
             Snapshots (Child).Termination := Termination;
          end if;
+         Complete_Monitors (Child, Generation_Terminated);
          Record_Event
            (Child,
             Lifecycle_Changed,
@@ -936,6 +981,7 @@ package body Flyology.Supervision.Static is
             Snapshots (Child).Live := False;
             Snapshots (Child).Ready := False;
             Snapshots (Child).Termination := Termination;
+            Complete_Monitors (Child, Generation_Terminated);
             if Phase = Stopping_Children then
                Advance_Stop_Order;
             else
@@ -969,6 +1015,121 @@ package body Flyology.Supervision.Static is
       function Read_Snapshot
         (Child : Child_Kind) return Child_Snapshot is
         (Snapshots (Child));
+
+      function Read_Latest (Child : Child_Kind) return Child_Handle is
+      begin
+         if not Configured or else not Has_Generation (Child) then
+            raise Program_Error with
+              "static child has no current generation";
+         end if;
+         return
+           (Id         => Child_Ids (Child),
+            Generation => Snapshots (Child).Generation);
+      end Read_Latest;
+
+      procedure Register_Monitor
+        (Child     : Child_Kind;
+         Handle    : Child_Handle;
+         Immediate : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot;
+         Ticket    : out Monitor_Index;
+         Token     : out Monitor_Token)
+      is
+         Selected : Monitor_Index := Monitor_Index'First;
+         Found    : Boolean := False;
+         Reusable : Boolean := False;
+      begin
+         Immediate := True;
+         Status := Observation_Timed_Out;
+         Ticket := Monitor_Index'First;
+         Token := 0;
+         Snapshot := Snapshots (Child);
+         if not Configured
+           or else not Has_Generation (Child)
+           or else Flyology.Supervision.Child (Handle) /= Child_Ids (Child)
+         then
+            raise Program_Error with "invalid static generation monitor";
+         elsif Current_Generation (Handle) /= Snapshots (Child).Generation then
+            Status := Generation_Replaced;
+            return;
+         elsif not Snapshots (Child).Live then
+            Status := Generation_Terminated;
+            return;
+         end if;
+
+         for Candidate in Monitor_Index loop
+            if Monitor_Tokens (Candidate) /= Monitor_Token'Last then
+               Reusable := True;
+            end if;
+            if Monitor_States (Candidate) = Monitor_Free
+              and then Monitor_Tokens (Candidate) /= Monitor_Token'Last
+            then
+               Selected := Candidate;
+               Found := True;
+               exit;
+            end if;
+         end loop;
+         if not Found then
+            if Reusable then
+               raise Constraint_Error with
+                 "static supervisor monitor capacity exhausted";
+            else
+               raise Program_Error with
+                 "static supervisor monitor identity exhausted";
+            end if;
+         end if;
+
+         Monitor_Tokens (Selected) := Monitor_Tokens (Selected) + 1;
+         Monitor_Handles (Selected) := Handle;
+         Monitor_Snapshots (Selected) := Snapshots (Child);
+         Monitor_States (Selected) := Monitor_Pending;
+         Ticket := Selected;
+         Token := Monitor_Tokens (Selected);
+         Immediate := False;
+      end Register_Monitor;
+
+      entry Await_Monitor (for Ticket in Monitor_Index)
+        (Token    : Monitor_Token;
+         Status   : out Generation_Observation_Status;
+         Snapshot : out Child_Snapshot)
+        when Monitor_States (Ticket) in
+          Monitor_Terminated | Monitor_Replaced
+      is
+      begin
+         pragma Assert (Token = Monitor_Tokens (Ticket));
+         Status :=
+           (if Monitor_States (Ticket) = Monitor_Terminated
+            then Generation_Terminated
+            else Generation_Replaced);
+         Snapshot := Monitor_Snapshots (Ticket);
+         Monitor_States (Ticket) := Monitor_Free;
+      end Await_Monitor;
+
+      procedure Cancel_Monitor
+        (Ticket    : Monitor_Index;
+         Token     : Monitor_Token;
+         Completed : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot) is
+      begin
+         if Token /= Monitor_Tokens (Ticket) then
+            Completed := False;
+            Status := Observation_Timed_Out;
+            Snapshot := Monitor_Snapshots (Ticket);
+            return;
+         end if;
+         Completed := Monitor_States (Ticket) in
+           Monitor_Terminated | Monitor_Replaced;
+         Status :=
+           (if Monitor_States (Ticket) = Monitor_Terminated
+            then Generation_Terminated
+            elsif Monitor_States (Ticket) = Monitor_Replaced
+            then Generation_Replaced
+            else Observation_Timed_Out);
+         Snapshot := Monitor_Snapshots (Ticket);
+         Monitor_States (Ticket) := Monitor_Free;
+      end Cancel_Monitor;
 
       procedure Copy_Events
         (Cursor  : in out Event_Sequence;
@@ -1012,6 +1173,21 @@ package body Flyology.Supervision.Static is
          end loop;
       end Copy_Events;
    end Lifecycle;
+
+   overriding procedure Finalize (Item : in out Monitor_Guard) is
+      Completed : Boolean;
+      Status    : Generation_Observation_Status;
+      Snapshot  : Child_Snapshot;
+   begin
+      if Item.Active and then Item.State /= null then
+         Item.State.Cancel_Monitor
+           (Item.Ticket, Item.Token, Completed, Status, Snapshot);
+         Item.Active := False;
+      end if;
+   exception
+      when others =>
+         null;
+   end Finalize;
 
    procedure Validate_Configuration
      (Specs        : out Specification_Array;
@@ -1208,6 +1384,68 @@ package body Flyology.Supervision.Static is
          Live        => False,
          Escalated   => False);
    end Current;
+
+   function Latest
+     (Item  : Supervisor;
+      Child : Child_Kind) return Child_Handle
+   is
+   begin
+      return Item.State.Read_Latest (Child);
+   end Latest;
+
+   function Wait_Termination
+     (Item    : in out Supervisor;
+      Child   : Child_Kind;
+      Handle  : Child_Handle;
+      Timeout : Duration := -1.0) return Generation_Observation
+   is
+      Immediate : Boolean;
+      Completed : Boolean := False;
+      Status    : Generation_Observation_Status;
+      Snapshot  : Child_Snapshot;
+      Ticket    : Monitor_Index;
+      Token     : Monitor_Token;
+      Guard     : Monitor_Guard;
+      pragma Unreferenced (Guard);
+   begin
+      Item.State.Register_Monitor
+        (Child, Handle, Immediate, Status, Snapshot, Ticket, Token);
+      if Immediate then
+         return Completed_Observation (Status, Snapshot);
+      end if;
+
+      Guard.State := Item.State'Unchecked_Access;
+      Guard.Ticket := Ticket;
+      Guard.Token := Token;
+      Guard.Active := True;
+      if Timeout < 0.0 then
+         Item.State.Await_Monitor (Ticket) (Token, Status, Snapshot);
+         Guard.Active := False;
+         return Completed_Observation (Status, Snapshot);
+      elsif Timeout = 0.0 then
+         Item.State.Cancel_Monitor
+           (Ticket, Token, Completed, Status, Snapshot);
+         Guard.Active := False;
+      else
+         select
+            Item.State.Await_Monitor (Ticket) (Token, Status, Snapshot);
+            Completed := True;
+         or
+            delay Timeout;
+         end select;
+         if not Completed then
+            Item.State.Cancel_Monitor
+              (Ticket, Token, Completed, Status, Snapshot);
+         end if;
+         Guard.Active := False;
+      end if;
+
+      if Completed then
+         return Completed_Observation (Status, Snapshot);
+      else
+         return (Status => Observation_Timed_Out);
+      end if;
+   end Wait_Termination;
 
    procedure Read_Events
      (Item    : in out Supervisor;

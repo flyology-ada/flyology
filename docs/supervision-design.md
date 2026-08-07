@@ -28,6 +28,8 @@ The primitive should provide:
 
 - typed static topology and typed homogeneous dynamic families;
 - stable logical child ids distinct from generation and Ada task identity;
+- bounded waits that observe one exact generation without following its
+  replacement;
 - dependency-aware deterministic startup, rollback, shutdown, and restart;
 - explicit readiness, cooperative stopping, bounded policy state, and an
   observable `Stuck` outcome;
@@ -63,7 +65,7 @@ contracts should not be silently changed.
 | `Flyology.Capacity` | bounded admission and drain when a child owns concurrent work | no supervisor-specific behavior belongs in the gate | permits never transfer implicitly to a replacement |
 | `Flyology.IO.Structured_Servers` | reverse cleanup, exact listener ownership, cancel/drain phases, activation rollback | a future server factory can be supervised as one logical child | `Server` remains one-shot; restart creates a new server and listener |
 | `Flyology.Observability` | actual lightweight group and sampled stall evidence | supervision snapshots are an application layer, not a runtime ABI extension | scheduler counters do not determine restart policy |
-| `Flyology.Task_Results` | task-owned normal, exception, or abnormal terminal result published after finalization | map the fixed result into generation policy without another runtime callback | it observes termination only and contains no restart policy |
+| `Flyology.Task_Results` | task-owned normal, exception, or abnormal terminal result published after finalization; a limited monitor may retain that fixed sidecar after task-object reclamation | map the fixed result into generation policy without another runtime callback | it observes one exact task only and contains no restart policy or failure coupling |
 | scheduler create/destroy/reap | evidence that a finished fiber is reaped only after GNARL destroys its task object, with running/migrating destruction deferred | none for the first implementation | supervision composes ordinary Ada task semantics |
 
 The scheduler already distinguishes a task wrapper returning from the later
@@ -398,6 +400,45 @@ master completes. A replacement is constructed afterward. Runtime fiber-record
 reaping is GNARL/Flyology machinery and is not a supervisor resource-reclamation
 signal.
 
+### Monitoring and failure coupling
+
+Task observation and supervisor observation use different identities. A
+`Flyology.Task_Results.Monitor` is attached while one concrete Ada `Task_Id` is
+valid and retains only that task's fixed terminal sidecar. It remains useful
+after the task object is reclaimed, but it is passive and has no restart or
+cancellation effect.
+
+The controllers instead expose `Latest` and `Wait_Termination` over an exact
+`Child_Handle`. Registration and current-generation validation are one
+protected action. A negative timeout waits indefinitely, zero performs an
+immediate check, and a positive timeout is relative. The result is one of:
+
+- `Generation_Terminated`, with the retained terminal snapshot for that
+  generation;
+- `Generation_Replaced`, with the current replacement snapshot; or
+- `Observation_Timed_Out`, with no snapshot.
+
+The wait never follows the replacement. Static and family generic
+`Monitor_Capacity` values bound concurrent registrations. Each slot has a
+nonwrapping token, so an aborted or unwinding waiter cannot cancel a later
+registration that reused its slot. A controlled guard releases registration on
+abort and exceptional exit. No callback, formatting, allocation, or finalizing
+assignment occurs in the protected controller.
+
+Failure propagation is expressed through structured owners rather than a raw
+symmetric task link. `Task_Scopes` can cancel sibling operations when one fails.
+A supervisor child selects isolation, a named cohort, declared dependents, or
+escalation, and nested supervisors carry one incident through the hierarchy.
+Those policies name ownership and restart consequences that a bare task-to-task
+link cannot safely infer in shared-memory Ada. Passive task monitors and
+structured failure coupling therefore remain separate orthogonal operations.
+
+No general wait-any monitor set is included. The implemented consumers need
+either one exact task result, one exact generation, or the controller's bounded
+event ring. Adding publication fan-out and another registration owner without a
+concrete consumer would enlarge the runtime and lifetime surface without
+clarifying who owns the set or how it is bounded.
+
 ## Failure taxonomy and observation
 
 The public bounded summary represents:
@@ -550,8 +591,9 @@ for the task lifecycle itself.
 
 ## Observability
 
-Both controllers own one fixed snapshot per logical child and a generic-sized
-event ring. Each event copies a monotonic sequence and timestamp, logical id,
+Both controllers own one fixed snapshot per logical child, a generic-sized
+event ring, and a generic-sized exact-generation monitor table. Each event
+copies a monotonic sequence and timestamp, logical id,
 generation, state before and after, configured task model and group, termination
 kind, incident and attempt context, and admitted backoff. The snapshot retains
 the bounded termination summary, diagnostic Ada task id, readiness/live flags,

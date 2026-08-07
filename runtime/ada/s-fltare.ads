@@ -56,4 +56,36 @@ package System.Flyology.Task_Results is
    --  queued caller here is reported as -3 rather than an Ada exception
    --  crossing this Convention-C boundary. Abort is not an exception and
    --  still propagates to the caller.
+
+   function Attach_Monitor (T : System.Address) return System.Address;
+   pragma Export
+     (C, Attach_Monitor, "flyology_runtime_task_result_monitor_attach");
+   --  Retain T's result sidecar and return its opaque monitor storage. T must
+   --  remain a valid Ada task identity for this call, but its task object may
+   --  be reclaimed after a non-null result is returned. Return null when T is
+   --  null or has no Flyology result sidecar. No user callback is invoked.
+
+   procedure Release_Monitor (Storage : System.Address);
+   pragma Export
+     (C, Release_Monitor, "flyology_runtime_task_result_monitor_release");
+   --  Drop one attached monitor reference. The last reference deallocates the
+   --  sidecar and finalizes its completion gate in this caller, which must not
+   --  hold an ATCB, RTS, or application protected-object lock.
+
+   function Observe_Monitor
+     (Storage   : System.Address;
+      Item      : System.Address;
+      Item_Size : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export
+     (C, Observe_Monitor, "flyology_runtime_task_result_monitor_observe");
+   --  Observe retained monitor storage without consulting a Task_Id. Return
+   --  codes and result-copy ordering match Observe_Task.
+
+   function Wait_Monitor
+     (Storage             : System.Address;
+      Timeout_Nanoseconds : Interfaces.C.long_long) return Interfaces.C.int;
+   pragma Export
+     (C, Wait_Monitor, "flyology_runtime_task_result_monitor_wait");
+   --  Wait on retained monitor storage. Timeout and return-code semantics
+   --  match Wait_Task, and abort remains visible to the caller.
 end System.Flyology.Task_Results;

@@ -169,6 +169,32 @@ begin
       delay 0.001;
    end loop;
    Families.Start (Item, 1, First);
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 0.0);
+   begin
+      --  The first generation deliberately fails immediately, so either the
+      --  zero-time check wins or terminal publication wins. Both outcomes
+      --  are legal; following the replacement is not.
+      if Observation.Status not in
+        Flyology.Supervision.Observation_Timed_Out |
+        Flyology.Supervision.Generation_Terminated
+      then
+         raise Program_Error with
+           "zero-time family observation followed a replacement";
+      end if;
+   end;
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 2.0);
+   begin
+      pragma Assert
+        (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Observation.Snapshot.Generation = 1);
+      pragma Assert
+        (Observation.Snapshot.Termination.Kind =
+           Flyology.Supervision.Unhandled_Exception);
+   end;
    loop
       exit when Families.Current (Item, First).State =
         Flyology.Supervision.Backing_Off;
@@ -179,6 +205,21 @@ begin
       end if;
       delay 0.001;
    end loop;
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 0.0);
+   begin
+      if Observation.Status /= Flyology.Supervision.Generation_Terminated
+        or else Observation.Snapshot.Generation /= 1
+        or else Observation.Snapshot.State /=
+          Flyology.Supervision.Backing_Off
+      then
+         Families.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error with
+           "terminated family generation was not observable in backoff";
+      end if;
+   end;
    begin
       Families.Stop (Item, First);
       Families.Request_Shutdown (Item);
@@ -200,6 +241,14 @@ begin
       end if;
       delay 0.001;
    end loop;
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 0.0);
+   begin
+      pragma Assert
+        (Observation.Status = Flyology.Supervision.Generation_Replaced);
+      pragma Assert (Observation.Snapshot.Generation = 2);
+   end;
    Families.Read_Events
      (Item,
       Recovery_Cursor,
@@ -246,10 +295,26 @@ begin
    end loop;
    First := Families.Latest (Item, Flyology.Supervision.Child (First));
 
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, Second, Timeout => 0.0);
+   begin
+      pragma Assert
+        (Observation.Status = Flyology.Supervision.Observation_Timed_Out);
+   end;
+
    pragma Assert (State.Started.Value (1) = 2);
    pragma Assert
      (Families.Current (Item, First).Task_Model = Flyology.Native_Task);
    Families.Stop (Item, First);
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 2.0);
+   begin
+      pragma Assert
+        (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Observation.Snapshot.Generation = 2);
+   end;
    loop
       exit when Families.Current (Item, First).State =
         Flyology.Supervision.Joined;
@@ -330,4 +395,15 @@ begin
       pragma Assert
         (Pre_Result.Outcome = Flyology.Supervision.Shutdown_Completed);
    end;
+exception
+   when others =>
+      --  Preserve the original failure instead of hanging at the Ada master
+      --  while the owner and a live family child still depend on this scope.
+      Families.Request_Shutdown (Item);
+      select
+         Owner.Join;
+      or
+         delay 2.0;
+      end select;
+      raise;
 end Flyology.Supervision.Families_Smoke;

@@ -1,4 +1,6 @@
+with Ada.Finalization;
 with Ada.Task_Identification;
+with System;
 
 package Flyology.Task_Results with Preelaborate is
 
@@ -119,5 +121,68 @@ package Flyology.Task_Results with Preelaborate is
    function Wait
      (T       : Ada.Task_Identification.Task_Id;
       Timeout : Duration := -1.0) return Task_Observation;
+
+   --  Limited exact-task observation handle. Attach retains only the fixed
+   --  task-result sidecar; it neither retains the Ada task object nor follows
+   --  another task that later occupies related application state. Finalization
+   --  detaches automatically and never affects the observed task.
+   type Monitor is limited private;
+
+   --  Attach Item to the exact task represented by T. The caller must keep
+   --  T's task object alive for this call and obey Task_Id lifetime rules.
+   --  After Attach returns, the task object may be reclaimed while Item keeps
+   --  the copied terminal result and completion gate alive. A task that
+   --  already published its result is immediately observable. A created task
+   --  that never began its body still never publishes. The operation performs
+   --  no allocation and invokes no user callback.
+   --  @param Item Detached monitor to attach
+   --  @param T Exact Ada task identity to observe
+   --  @exception Program_Error Item is already attached, T is null, or T has
+   --     no Flyology-owned task-result storage
+   procedure Attach
+     (Item : in out Monitor;
+      T    : Ada.Task_Identification.Task_Id);
+
+   --  Report whether Item currently retains task-result storage.
+   --  @param Item Monitor to inspect
+   --  @return True between successful Attach and Detach or finalization
+   function Attached (Item : Monitor) return Boolean;
+
+   --  Release Item's observation reference. This is idempotent and does not
+   --  cancel, abort, restart, or otherwise signal the observed task. A later
+   --  Attach may reuse Item for another exact task.
+   --  @param Item Monitor to detach
+   procedure Detach (Item : in out Monitor);
+
+   --  Atomically copy Item's terminal result without waiting. Unlike the
+   --  Task_Id overload, this remains valid after target task-object
+   --  reclamation. The operation performs no allocation or callback.
+   --  @param Item Attached monitor
+   --  @return Terminal with a copied result, or Not_Terminal
+   --  @exception Program_Error Item is detached or the runtime and library
+   --     result ABIs differ
+   function Observe (Item : Monitor) return Task_Observation;
+
+   --  Wait up to Timeout through Item's retained completion gate. Timeout,
+   --  blocking, abortability, lane behavior, and protected-action restrictions
+   --  match the Task_Id overload. Detaching or finalizing Item concurrently
+   --  with this call is erroneous; structured ownership must keep the monitor
+   --  alive for every borrower.
+   --  @param Item Attached monitor kept alive throughout the call
+   --  @param Timeout Maximum relative wait; negative means indefinitely
+   --  @return Terminal with a copied result, or Not_Terminal on timeout
+   --  @exception Program_Error Item is detached or the runtime wait failed
+   function Wait
+     (Item    : Monitor;
+      Timeout : Duration := -1.0) return Task_Observation;
+
+private
+   type Monitor is limited new Ada.Finalization.Limited_Controlled with record
+      Storage : System.Address := System.Null_Address;
+   end record;
+
+   --  @exclude
+   --  @param Item Monitor whose retained sidecar reference is released
+   overriding procedure Finalize (Item : in out Monitor);
 
 end Flyology.Task_Results;

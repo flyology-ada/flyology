@@ -1562,6 +1562,34 @@ deallocated. `Wait` uses the same Ada-level operation from either lane: a native
 caller blocks through GNARL's native tasking path, while a lightweight caller
 suspends its fiber.
 
+When observation must outlive the task object, attach a limited
+`Flyology.Task_Results.Monitor` while the task identity is still valid. The
+monitor retains only the fixed result sidecar and completion gate. It does not
+retain, cancel, abort, restart, or otherwise signal the Ada task, and it never
+follows a later task or supervised generation.
+
+```ada
+declare
+   Watch : Flyology.Task_Results.Monitor;
+begin
+   Flyology.Task_Results.Attach (Watch, Worker'Identity);
+
+   --  Worker still follows its ordinary Ada master. Watch may be observed
+   --  after that task object has been joined and reclaimed.
+   declare
+      Observation : constant Flyology.Task_Results.Task_Observation :=
+        Flyology.Task_Results.Wait (Watch, Timeout => 0.250);
+   begin
+      null;
+   end;
+end; --  Controlled finalization detaches Watch.
+```
+
+An attached monitor must outlive every concurrent borrower; detaching or
+finalizing it concurrently with `Observe` or `Wait` is erroneous. Multiple
+monitors may attach to one live task. There is no process-wide monitor registry
+or callback dispatch path.
+
 The task-owned result is attached to the ATCB before activation, so a task may
 terminate before its allocator returns without creating a registration race.
 If activation fails, Ada propagates `Tasking_Error`; an allocator that fails
@@ -1570,6 +1598,14 @@ does not catch or resume the old task and does not define supervisor or restart
 policy. The exact wrapper point, identity lifetime, storage cost, and remaining
 environment-task limit are described in
 [`docs/task-exit-results.md`](docs/task-exit-results.md).
+
+Supervisor monitoring is generation-qualified rather than `Task_Id`-qualified.
+The static and family controllers return an exact `Child_Handle`, and
+`Wait_Termination` reports that generation as terminated, replaced, or still
+live at the timeout. It never silently follows the replacement. Failure
+coupling remains structured: task scopes can cancel siblings on one operation
+failure, while supervisors express isolation, cohort, dependency, and nested
+escalation policy. Flyology does not add an unstructured symmetric task link.
 
 `Flyology.Observability` separately exposes a stable, read-only scheduler and
 stack snapshot for each event group. Calling `Snapshot` for a group that has

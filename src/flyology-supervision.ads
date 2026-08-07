@@ -503,6 +503,34 @@ package Flyology.Supervision is
       Escalated   : Boolean;
    end record;
 
+   --  Result of waiting for one exact supervised generation.
+   --  @enum Generation_Terminated The named generation completed and its
+   --     bounded terminal snapshot was retained
+   --  @enum Generation_Replaced The logical child now names another
+   --     generation; the returned snapshot describes that current generation
+   --  @enum Observation_Timed_Out The deadline elapsed before either outcome
+   type Generation_Observation_Status is
+     (Generation_Terminated,
+      Generation_Replaced,
+      Observation_Timed_Out);
+
+   --  One generation-safe supervisor observation. A timeout carries no
+   --  snapshot; completed observations contain only fixed copied state and do
+   --  not retain a task object or supervisor-owned resource.
+   --  @field Status Whether the generation terminated, was replaced, or the
+   --     wait timed out
+   --  @field Snapshot Exact terminal snapshot or current replacement snapshot
+   type Generation_Observation
+     (Status : Generation_Observation_Status := Observation_Timed_Out)
+   is record
+      case Status is
+         when Observation_Timed_Out =>
+            null;
+         when Generation_Terminated | Generation_Replaced =>
+            Snapshot : Child_Snapshot;
+      end case;
+   end record;
+
 private
    type Incident_Context is record
       Is_Active : Boolean := False;

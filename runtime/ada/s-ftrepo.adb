@@ -20,4 +20,12 @@ is
          when Unknown_Task      => -1,
          when Not_Terminal      => 0,
          when Terminal          => 1);
+
+   function After_Retain
+     (References : Reference_Count) return Reference_Count is
+     (References + 1);
+
+   function After_Release
+     (References : Reference_Count) return Reference_Count is
+     (References - 1);
 end System.Flyology.Task_Result_Policy;

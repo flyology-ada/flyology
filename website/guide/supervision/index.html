@@ -67,6 +67,7 @@
             <li><a href="#model">Mental model</a></li>
             <li><a href="#choose">Choose a controller</a></li>
             <li><a href="#identity">Identity and lifecycle</a></li>
+            <li><a href="#monitor">Observe one failure</a></li>
             <li><a href="#static">Static services</a></li>
             <li><a href="#recovery">Dependencies and cohorts</a></li>
             <li><a href="#families">Dynamic families</a></li>
@@ -380,6 +381,70 @@ end;</code></pre>
               <li>Configured</li><li>Starting</li><li>Ready</li><li>Running</li><li>Stopping</li><li>Terminated</li><li>Backing off</li><li>Restarting</li><li>Starting</li><li>Joined</li>
             </ol>
             <p><code>Ready</code> records the application handshake. A controller may publish it atomically as <code>Starting -&gt; Running</code>; activation alone is never enough. <code>Joined</code> means the task can no longer publish, its task-body finalization and dependent-task joins completed, and supervisor-owned generation state is reclaimable. <code>Stuck</code> is a termination classification, not a claim that a live task was killed.</p>
+          </section>
+
+          <section id="monitor">
+            <span class="step-label">MONITORING</span>
+            <h2>Observe one exact task or one exact generation.</h2>
+            <p>Observation is passive. It tells a caller how one task or generation ended; it does not cancel, abort, restart, or otherwise signal the target. Flyology keeps concrete Ada task identity separate from the logical identity that survives a restart.</p>
+            <figure class="code-panel">
+              <figcaption>retain one concrete task result</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Watch : Flyology.Task_Results.Monitor;
+begin
+   --  Attach while Worker and its Task_Id are still valid.
+   Flyology.Task_Results.Attach (Watch, Worker'Identity);
+
+   --  Watch retains only the fixed result sidecar and completion gate. The
+   --  Ada task still joins through its ordinary master, and its object may be
+   --  reclaimed before a later Observe or Wait on Watch.
+   declare
+      Outcome : constant Flyology.Task_Results.Task_Observation :=
+        Flyology.Task_Results.Wait (Watch, Timeout =&gt; 2.0);
+   begin
+      if Outcome.Status = Flyology.Task_Results.Terminal then
+         Render (Outcome.Result);
+      end if;
+   end;
+
+   --  Detach is idempotent. Finalization also detaches it automatically.
+   Flyology.Task_Results.Detach (Watch);
+end;</code></pre>
+            </figure>
+            <p>A task-result monitor names the exact <code>Ada.Task_Identification.Task_Id</code> supplied to <code>Attach</code>. It never follows a later task. Multiple monitors may retain the same fixed sidecar, but each limited monitor must outlive every task that calls <code>Observe</code> or <code>Wait</code> on it.</p>
+            <figure class="code-panel">
+              <figcaption>wait for one supervised generation</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   --  Latest returns Metrics' current logical id plus its exact generation.
+   Generation : constant Child_Handle :=
+     Metrics_Supervision.Latest (Supervisor, Metrics);
+
+   --  Registration and the current-generation check happen atomically inside
+   --  the controller. This wait never changes its target to a replacement.
+   Outcome : constant Generation_Observation :=
+     Metrics_Supervision.Wait_Termination
+       (Supervisor, Metrics, Generation, Timeout =&gt; 2.0);
+begin
+   case Outcome.Status is
+      when Generation_Terminated =&gt;
+         Render_Termination (Outcome.Snapshot);
+      when Generation_Replaced =&gt;
+         Render_Replacement (Outcome.Snapshot);
+      when Observation_Timed_Out =&gt;
+         null; --  The exact generation was still live at the timeout.
+   end case;
+end;</code></pre>
+            </figure>
+            <p><code>Monitor_Capacity</code> on each static or family generic bounds concurrent generation waits. A timed-out, aborted, or unwinding waiter releases its registration. Slot tokens prevent late cleanup from canceling a newer waiter that reused the same bounded slot.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <div class="callout-body">
+                <p class="callout-lede"><strong>Failure coupling is structured policy.</strong> A task scope can cancel sibling operations after one fails. A supervisor can isolate a child, restart a named cohort, restart declared dependents, or escalate the same incident to its parent. Flyology does not add a symmetric raw task link: in shared-memory Ada, a link cannot infer resource ownership, restart safety, or which sibling state remains valid.</p>
+                <p>There is no general wait-any monitor set in this slice. Exact task waits, exact generation waits, and bounded controller event rings cover the current consumers without adding hidden publication fan-out or another lifetime owner.</p>
+              </div>
+            </aside>
           </section>
 
           <section id="static">

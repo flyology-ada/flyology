@@ -61,11 +61,13 @@ identity, trailer-field definition rules, or the connection-lifecycle actions
 selected by those classifications. Exhaustive policy matrices and focused
 wire, adapter, ownership, and retry tests cover that integration boundary.
 The production task-result lifecycle policy proves the permitted transition
-classes and their resulting running or terminal phase. The runtime consumes
-those transitions for its atomic phase stores. It does not prove GNARL task
-creation/reap locking, release/acquire synchronization, protected-entry wakeup,
-or exception rendering; focused lane-parity and lifecycle tests cover those
-integration boundaries.
+classes and their resulting running or terminal phase. It also proves that an
+admitted sidecar retain increments without overflow and an admitted release
+decrements without underflow. The runtime consumes those transitions for its
+atomic phase and reference-count updates. It does not prove GNARL task
+creation/reap locking, compare-and-exchange synchronization, protected-entry
+wakeup, deallocation, or exception rendering; focused lane-parity, retained
+monitor, and lifecycle tests cover those integration boundaries.
 The production file-transfer completion policy proves that valid positive
 progress is returned before concurrent cancellation is classified, while
 unsupported and malformed completions remain distinct. The runtime SEND_ZC
@@ -107,6 +109,7 @@ remain the live integration boundary.
   - [x] Normal, exceptional, and abnormal cause encoding
   - [x] Exported observation and wait ABI outcome codes, including the
         closed negative failure set used by the Convention-C bodies
+  - [x] Sidecar retain and release transition bounds
   - [x] Whole `System.Flyology.Task_Result_Policy` unit widening
   - [x] Application and runtime policy suite widening
 - [x] Production-used bounded timer-set policy (level 1, mode all)
