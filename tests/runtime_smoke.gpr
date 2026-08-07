@@ -52,6 +52,7 @@ project Runtime_Smoke is
       "channel_reentrancy_child.adb",
       "channel_retention_smoke.adb",
       "connection_admission_smoke.adb",
+      "connection_close_abort_smoke.adb",
       "connection_driver_smoke.adb",
       "connection_driver_tls_smoke.adb",
       "connection_lifecycle_smoke.adb",

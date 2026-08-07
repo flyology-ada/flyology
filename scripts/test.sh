@@ -255,6 +255,7 @@ channel_reentrancy_child
 channel_retention_smoke
 closed_descriptor_wait_smoke
 connection_admission_smoke
+connection_close_abort_smoke
 connection_driver_smoke
 connection_driver_tls_smoke
 connection_lifecycle_smoke
@@ -332,6 +333,7 @@ structured_server_reuse_smoke
 task_result_publication_smoke'
 
 connection_hook_mains='connection_admission_smoke
+connection_close_abort_smoke
 connection_state_model
 connection_tls_upgrade_smoke
 descriptor_ownership_smoke'
@@ -346,7 +348,7 @@ wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -435,7 +437,7 @@ unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke)
       current_test_bin=$connection_test_bin
       ;;
     concurrency_primitives_smoke|task_scope_faults_smoke)
@@ -468,7 +470,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
       ;;
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
       ;;

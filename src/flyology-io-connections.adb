@@ -42,6 +42,27 @@ package body Flyology.IO.Connections is
       Armed : aliased Boolean := False;
    end record;
 
+   --  Result of one close attempt. Close leadership is taken in Initialize
+   --  and discharged in Finalize, so every terminal transition happens inside
+   --  an abort-deferred controlled operation. The outcome outlives the guard
+   --  and carries whatever must still be reported to the caller.
+   type Close_Outcome is limited record
+      FD             : Descriptor := Invalid_Descriptor;
+      Generation     : Descriptor_Generation := 0;
+      Leader         : Boolean := False;
+      Provider_Error : Boolean := False;
+      Failed         : Boolean := False;
+      Failure        : Ada.Exceptions.Exception_Occurrence;
+   end record;
+
+   type Close_Guard
+     (Item    : not null access Connection;
+      Outcome : not null access Close_Outcome)
+   is new Ada.Finalization.Limited_Controlled with null record;
+
+   overriding procedure Initialize (Guard : in out Close_Guard);
+   overriding procedure Finalize (Guard : in out Close_Guard);
+
    type Session_Setup_Guard is
      new Ada.Finalization.Limited_Controlled with record
       Value : TLS.Session_Access := null;
@@ -319,10 +340,14 @@ package body Flyology.IO.Connections is
          Generation := Current_Generation;
          Leader := Policy.Close_Leader (Current_FD >= 0, Closing);
          if Leader then
-            Closing := True;
             if Policy.Close_Wake_Required (Leader, Started_Operations) then
                Wake_Sources.Signal (Close_Wake);
             end if;
+            --  Publish the close only after the wake is known to be usable.
+            --  A failed signal leaves no leadership behind, so a later Close
+            --  can retry instead of waiting for a completion that the failed
+            --  attempt can no longer perform.
+            Closing := True;
          end if;
       end Begin_Close;
 
@@ -437,6 +462,72 @@ package body Flyology.IO.Connections is
             --  connection terminal and releases admission before raising.
             when others =>
                null;
+         end;
+      end if;
+   end Finalize;
+
+   overriding procedure Initialize (Guard : in out Close_Guard) is
+   begin
+      Guard.Item.Controller.Begin_Close
+        (Guard.Outcome.FD,
+         Guard.Outcome.Generation,
+         Guard.Outcome.Leader);
+   end Initialize;
+
+   overriding procedure Finalize (Guard : in out Close_Guard) is
+      Socket : Sockets.Socket_Type;
+      Owner  : Server_Access;
+
+      procedure Record_Failure
+        (Occurrence : Ada.Exceptions.Exception_Occurrence)
+      is
+      begin
+         if not Guard.Outcome.Failed then
+            Ada.Exceptions.Save_Occurrence (Guard.Outcome.Failure, Occurrence);
+            Guard.Outcome.Failed := True;
+         end if;
+      end Record_Failure;
+   begin
+      if not Guard.Outcome.Leader then
+         return;
+      end if;
+
+      --  The exact generation remains allocated until its sole operation has
+      --  observed Close_Wake and acknowledged release. Only then may the OS
+      --  recycle the integer descriptor.
+      Guard.Item.Controller.Await_Drained (Socket, Owner);
+      begin
+         Free (Guard.Item.TLS_Session);
+      exception
+         when others =>
+            Guard.Item.TLS_Session := null;
+            Guard.Outcome.Provider_Error := True;
+      end;
+      Guard.Item.TLS_Shutdown_Complete := False;
+      --  Each remaining obligation is attempted independently and the first
+      --  failure is reported. Close_Socket invalidates Socket even when close
+      --  reports an error, and Finish_Close is the only operation that ends
+      --  close leadership.
+      if Sockets.Is_Open (Socket) then
+         begin
+            Sockets.Close_Socket (Socket);
+         exception
+            when Occurrence : others =>
+               Record_Failure (Occurrence);
+         end;
+      end if;
+      begin
+         Guard.Item.Controller.Finish_Close (Guard.Outcome.Generation);
+      exception
+         when Occurrence : others =>
+            Record_Failure (Occurrence);
+      end;
+      if Owner /= null then
+         begin
+            Owner.Release;
+         exception
+            when Occurrence : others =>
+               Record_Failure (Occurrence);
          end;
       end if;
    end Finalize;
@@ -923,50 +1014,34 @@ package body Flyology.IO.Connections is
    end Accept_Connection;
 
    procedure Close (Item : in out Connection) is
-      FD         : Descriptor;
-      Generation : Descriptor_Generation;
-      Leader     : Boolean;
-      Socket     : Sockets.Socket_Type;
-      Owner      : Server_Access;
-      Provider_Error : Boolean := False;
+      Outcome : aliased Close_Outcome;
    begin
-      Item.Controller.Begin_Close (FD, Generation, Leader);
-      if not Leader then
-         if FD >= 0 then
+      --  Initialize takes close leadership and Finalize discharges it. Both
+      --  controlled operations defer abort, so an aborted leader still hands
+      --  the socket out, closes it, ends the close, and releases admission
+      --  instead of stranding every later Close in Await_Closed.
+      declare
+         Guard : Close_Guard (Item'Unchecked_Access, Outcome'Access);
+         pragma Unreferenced (Guard);
+      begin
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         if Outcome.Leader then
+            Test_Barrier (17);
+         end if;
+#end if;
+         null;
+      end;
+
+      if not Outcome.Leader then
+         if Outcome.FD >= 0 then
             Item.Controller.Await_Closed;
          end if;
          return;
       end if;
 
-      --  The exact generation remains allocated until its sole operation has
-      --  observed Close_Wake and acknowledged release. Only then may the OS
-      --  recycle the integer descriptor.
-      Item.Controller.Await_Drained (Socket, Owner);
-      begin
-         Free (Item.TLS_Session);
-      exception
-         when others =>
-            Item.TLS_Session := null;
-            Provider_Error := True;
-      end;
-      Item.TLS_Shutdown_Complete := False;
-      if Sockets.Is_Open (Socket) then
-         begin
-            Sockets.Close_Socket (Socket);
-         exception
-            when others =>
-               Item.Controller.Finish_Close (Generation);
-               if Owner /= null then
-                  Owner.Release;
-               end if;
-               raise;
-         end;
-      end if;
-      Item.Controller.Finish_Close (Generation);
-      if Owner /= null then
-         Owner.Release;
-      end if;
-      if Provider_Error then
+      if Outcome.Failed then
+         Ada.Exceptions.Reraise_Occurrence (Outcome.Failure);
+      elsif Outcome.Provider_Error then
          raise TLS.TLS_Error with "TLS provider session finalization failed";
       end if;
    end Close;
