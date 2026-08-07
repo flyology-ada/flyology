@@ -4,6 +4,8 @@ with Ada.Streams;
 with Ada.Text_IO;
 with Flyology;
 with Flyology.Data_Structures;
+with Flyology.Data_Structures.Byte_Strings;
+with Flyology.Data_Structures.Hash_Maps;
 with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
@@ -14,6 +16,8 @@ with System;
 
 procedure Data_Structures_Concurrency_Smoke is
    package DS renames Flyology.Data_Structures;
+   package Byte_Strings renames DS.Byte_Strings;
+   package Hash_Maps renames DS.Hash_Maps;
    package Regions renames DS.Regions;
    package SPSC renames DS.Rings.SPSC;
    package MPMC renames DS.Rings.MPMC;
@@ -21,7 +25,9 @@ procedure Data_Structures_Concurrency_Smoke is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_64;
+   use type Hash_Maps.Put_Result;
    use type MPMC.Pop_Result;
    use type MPMC.Push_Result;
    use type System.Address;
@@ -38,6 +44,8 @@ procedure Data_Structures_Concurrency_Smoke is
    SPSC_Location : constant DS.Region_Offset := 64;
    MPMC_Location : constant DS.Region_Offset := 131_072;
    Vector_Location : constant DS.Region_Offset := 524_288;
+   String_Location : constant DS.Region_Offset := 700_000;
+   Map_Location : constant DS.Region_Offset := 786_432;
 
    function Mapping_Create
      (Path   : C.char_array;
@@ -476,6 +484,199 @@ procedure Data_Structures_Concurrency_Smoke is
       end loop;
    end Run_Externally_Synchronized_Vector;
 
+   procedure Run_Externally_Synchronized_String is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 1_000;
+      Total        : constant Positive := Worker_Count * Per_Worker;
+      Capacity     : constant Positive := 8 * Total;
+      type View_Array is array (Positive range <>) of aliased Byte_Strings.View;
+      Views : View_Array (1 .. Worker_Count);
+      type View_Access is access all Byte_Strings.View;
+      Guard : Mutex;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive; Item : not null View_Access)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Owns_Lock : Boolean := False;
+         Value : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Value := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            Guard.Acquire;
+            Owns_Lock := True;
+            Byte_Strings.Append (Item.all, Encode (Value));
+            Guard.Release;
+            Owns_Lock := False;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others =>
+            if Owns_Lock then
+               Guard.Release;
+            end if;
+            Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+      Seen : Seen_Array (1 .. Total) := (others => False);
+      Data : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (Capacity));
+      Value : Interfaces.Unsigned_64;
+   begin
+      Byte_Strings.Initialize
+        (Views (1), Region_A, String_Location, Capacity);
+      for Index in 2 .. Worker_Count loop
+         if Index mod 2 = 0 then
+            Byte_Strings.Attach
+              (Views (Index), Region_B, String_Location, Capacity);
+         else
+            Byte_Strings.Attach
+              (Views (Index), Region_A, String_Location, Capacity);
+         end if;
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task (Index, Views (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 15.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with
+           "externally synchronized byte-string test timed out";
+      end select;
+      Assert
+        (Finished.Passed, "externally synchronized byte-string tasks failed");
+      Assert
+        (Byte_Strings.Length (Views (1)) = Capacity,
+         "externally synchronized byte string lost bytes");
+      Byte_Strings.Read (Views (2), Data);
+      for Position in 1 .. Total loop
+         declare
+            First : constant Ada.Streams.Stream_Element_Offset :=
+              Ada.Streams.Stream_Element_Offset ((Position - 1) * 8 + 1);
+         begin
+            Value := Decode
+              (Data
+                 (First ..
+                    First + Ada.Streams.Stream_Element_Offset (7)));
+         end;
+         Assert
+           (Value in 1 .. Interfaces.Unsigned_64 (Total)
+            and then not Seen (Positive (Value)),
+            "externally synchronized byte string duplicated/corrupted data");
+         Seen (Positive (Value)) := True;
+      end loop;
+      Byte_Strings.Destroy (Views (1));
+      for Index in 2 .. Worker_Count loop
+         Byte_Strings.Detach (Views (Index));
+      end loop;
+   end Run_Externally_Synchronized_String;
+
+   procedure Run_Externally_Synchronized_Map is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 1_000;
+      Total        : constant Positive := Worker_Count * Per_Worker;
+      Capacity     : constant Positive := 4_096;
+      type View_Array is array (Positive range <>) of aliased Hash_Maps.View;
+      Views : View_Array (1 .. Worker_Count);
+      type View_Access is access all Hash_Maps.View;
+      Guard : Mutex;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive; Item : not null View_Access)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Owns_Lock : Boolean := False;
+         Outcome : Hash_Maps.Put_Result;
+         Value : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Value := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            Guard.Acquire;
+            Owns_Lock := True;
+            Hash_Maps.Put
+              (Item.all, Encode (Value), Encode (Value xor 16#A5A5#),
+               Outcome);
+            Guard.Release;
+            Owns_Lock := False;
+            if Outcome /= Hash_Maps.Inserted then
+               raise Program_Error with "locked hash-map insert failed";
+            end if;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others =>
+            if Owns_Lock then
+               Guard.Release;
+            end if;
+            Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+      Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Found : Boolean;
+   begin
+      Hash_Maps.Initialize
+        (Views (1), Region_A, Map_Location, Capacity, 8, 8);
+      for Index in 2 .. Worker_Count loop
+         if Index mod 2 = 0 then
+            Hash_Maps.Attach
+              (Views (Index), Region_B, Map_Location, Capacity, 8, 8);
+         else
+            Hash_Maps.Attach
+              (Views (Index), Region_A, Map_Location, Capacity, 8, 8);
+         end if;
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task (Index, Views (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 15.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with
+           "externally synchronized hash-map test timed out";
+      end select;
+      Assert (Finished.Passed, "externally synchronized hash-map tasks failed");
+      Assert
+        (Hash_Maps.Length (Views (1)) = Total,
+         "externally synchronized hash map lost entries");
+      for Value in Interfaces.Unsigned_64 range
+        1 .. Interfaces.Unsigned_64 (Total)
+      loop
+         Hash_Maps.Get
+           (Views (2), Encode (Value), Data, Found);
+         Assert
+           (Found and then Decode (Data) = (Value xor 16#A5A5#),
+            "externally synchronized hash map returned a wrong value");
+      end loop;
+      Hash_Maps.Destroy (Views (1));
+      for Index in 2 .. Worker_Count loop
+         Hash_Maps.Detach (Views (Index));
+      end loop;
+   end Run_Externally_Synchronized_Map;
+
 begin
    Assert
      (Mapping_Create
@@ -487,6 +688,8 @@ begin
    Run_SPSC;
    Run_MPMC;
    Run_Externally_Synchronized_Vector;
+   Run_Externally_Synchronized_String;
+   Run_Externally_Synchronized_Map;
    Regions.Detach (Region_A);
    Regions.Detach (Region_B);
    Assert (Unmap (Base_A, Mapping_Length) = 0, "failed to unmap view A");

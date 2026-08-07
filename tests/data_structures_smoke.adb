@@ -556,6 +556,22 @@ begin
       end;
    end loop;
 
+   Strings.Assign (String_C, String_More);
+   declare
+      Remapped_Read : Ada.Streams.Stream_Element_Array (1 .. 5);
+   begin
+      Strings.Read (String_B, Remapped_Read);
+      Assert
+        (Remapped_Read = String_More,
+         "byte string mutation was not visible after third mapping");
+   end;
+   Strings.Append (String_B, String_Data);
+   Strings.Read (String_C, String_Read);
+   Assert
+     (String_Read (1 .. 5) = String_More
+      and then String_Read (6 .. 8) = String_Data,
+      "byte string did not continue across the third mapping");
+
    Vectors.Try_Append (Vector_C, Encode (3), Flag);
    Assert (Flag and then Vectors.Length (Vector_B) = 2,
            "vector did not continue after remap");
