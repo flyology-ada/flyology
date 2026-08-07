@@ -35,7 +35,13 @@ package System.Flyology.Poller is
       Condition  : Interest) return Boolean;
 
    --  Roll back an armed interest that has no scheduler waiters. This is used
-   --  transactionally when a later member of a multi-source wait cannot arm.
+   --  transactionally when a later member of a multi-source wait cannot arm,
+   --  and again whenever the scheduler removes a waiter that still owns
+   --  one-shot interests. It is idempotent: an interest the kernel already
+   --  consumed, and a descriptor whose owner closed it while the interest was
+   --  armed, both report success because nothing remains to cancel. False is
+   --  reserved for a genuinely broken poller, which the scheduler treats as
+   --  fatal.
    function Cancel
      (Item       : in out Poller;
       Descriptor : Interfaces.C.int;

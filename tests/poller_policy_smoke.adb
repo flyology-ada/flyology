@@ -3,6 +3,8 @@ with System.Flyology.Poller_Policy;
 procedure Poller_Policy_Smoke is
    package Policy renames System.Flyology.Poller_Policy;
 
+   use type Policy.Cancel_Outcome;
+
    Capacity : constant Policy.Batch_Capacity :=
      Policy.Max_Batch_Capacity;
    State    : Policy.Drain_State;
@@ -93,5 +95,32 @@ begin
    if Plan.Initial_Drain_Budget /= 1 then
       raise Program_Error with
         "one-result alternation skipped the retained file drain";
+   end if;
+
+   --  Cancellation is idempotent for an interest the kernel no longer holds.
+   --  A consumed one-shot interest answers ENOENT, and a descriptor closed
+   --  under an armed interest answers EBADF; neither may reach the scheduler
+   --  as a poller failure, because that turns an ordinary close race into a
+   --  process abort.
+   if Policy.Classify_Cancel (Succeeded => True, Error => 0)
+        /= Policy.Interest_Cleared
+     or else Policy.Classify_Cancel
+               (Succeeded => False,
+                Error     => Policy.Interest_Absent_Error)
+        /= Policy.Registration_Gone
+     or else Policy.Classify_Cancel
+               (Succeeded => False,
+                Error     => Policy.Descriptor_Closed_Error)
+        /= Policy.Registration_Gone
+   then
+      raise Program_Error with
+        "poller cancellation is not idempotent for an absent registration";
+   end if;
+
+   if Policy.Classify_Cancel (Succeeded => False, Error => 22)
+        /= Policy.Cancel_Failed
+   then
+      raise Program_Error with
+        "poller cancellation accepted an unexpected platform error";
    end if;
 end Poller_Policy_Smoke;

@@ -31,7 +31,6 @@ package body System.Flyology.Poller is
    EFD_NONBLOCK : constant C.int := 16#0000_0800#;
    EFD_CLOEXEC  : constant C.int := 16#0008_0000#;
    EAGAIN       : constant C.int := 11;
-   ENOENT       : constant C.int := 2;
 
    type Epoll_Event is record
       Events     : C.unsigned;
@@ -360,6 +359,7 @@ package body System.Flyology.Poller is
       Condition  : Interest) return Boolean
    is
       Watch_Item : constant Watch_Access := Find (Item, Descriptor);
+      Retained   : Boolean;
       Result     : C.int;
    begin
       if Watch_Item = null then
@@ -370,7 +370,8 @@ package body System.Flyology.Poller is
          Watch_Item.Writable := False;
       end if;
 
-      if Watch_Item.Readable or else Watch_Item.Writable then
+      Retained := Watch_Item.Readable or else Watch_Item.Writable;
+      if Retained then
          Result := Epoll_Ctl
            (Item.Descriptor,
             EPOLL_CTL_MOD,
@@ -379,18 +380,24 @@ package body System.Flyology.Poller is
       else
          Result := Epoll_Ctl
            (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
-         if Result = 0 or else OSI.errno = ENOENT then
+      end if;
+
+      --  EPOLL_CTL_MOD and EPOLL_CTL_DEL both answer EBADF once the owner has
+      --  closed the descriptor, because the kernel drops the registration with
+      --  it. That leaves no interest of either direction, so the whole
+      --  bookkeeping record goes even when this call retained one.
+      case Poller_Policy.Classify_Cancel (Result = 0, Integer (OSI.errno)) is
+         when Poller_Policy.Interest_Cleared =>
+            if not Retained then
+               Remove (Item, Watch_Item);
+            end if;
+            return True;
+         when Poller_Policy.Registration_Gone =>
             Remove (Item, Watch_Item);
             return True;
-         end if;
-      end if;
-      if Result = 0 then
-         return True;
-      elsif OSI.errno = ENOENT then
-         Remove (Item, Watch_Item);
-         return True;
-      end if;
-      return False;
+         when Poller_Policy.Cancel_Failed =>
+            return False;
+      end case;
    end Cancel;
 
    function Submit_File

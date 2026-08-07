@@ -20,6 +20,34 @@ is
       Initial_Drain_Budget : Drain_Budget;
    end record;
 
+   --  Result of asking the platform to drop one armed readiness interest.
+   type Cancel_Outcome is
+     (Interest_Cleared, Registration_Gone, Cancel_Failed);
+
+   --  POSIX error numbers that report an interest the kernel no longer holds.
+   --  Darwin and Linux agree on both values, so the classification below is
+   --  platform-neutral.
+   Interest_Absent_Error     : constant := 2;  --  ENOENT
+   Descriptor_Closed_Error   : constant := 9;  --  EBADF
+
+   --  Classify one epoll or kqueue cancellation request. Cancellation is
+   --  idempotent for a one-shot interest the kernel already consumed, which
+   --  reports ENOENT, and for a descriptor whose owner closed it while the
+   --  interest was armed, which reports EBADF because the registration went
+   --  with the descriptor. Only a poller that can no longer manage its own
+   --  registrations is a failure.
+   function Classify_Cancel
+     (Succeeded : Boolean;
+      Error     : Integer) return Cancel_Outcome
+   with Post =>
+     Classify_Cancel'Result =
+       (if Succeeded then Interest_Cleared
+        elsif Error = Interest_Absent_Error
+          or else Error = Descriptor_Closed_Error
+        then Registration_Gone
+        else Cancel_Failed);
+   pragma Inline_Always (Classify_Cancel);
+
    --  Plan the bounded file-drain turn that precedes the epoll probe. A
    --  retained obligation receives one slot unless a one-result caller must
    --  first take its alternating epoll turn.

@@ -1071,6 +1071,17 @@ owner-specific policy in `Connections`, TLS, and other structured layers while
 allowing low-level callers to compose a bounded set of lifecycle sources. Raw
 waits observe set members for readability but never consume or close them.
 
+A raw wait borrows its descriptor rather than owning it, so another task may
+close that descriptor while a poller interest is still armed. The kernel then
+drops the registration silently, and the suspended wait no longer has a
+readiness source: it ends at its deadline, or through an interrupt source, or
+not at all when neither is supplied. Closing a watched descriptor is therefore
+a liveness hazard for the waiting task, but it is not a runtime error. The
+pollers report the resulting `EBADF` or `ENOENT` cancellation as a removed
+interest, so a close race cannot escalate into a fatal scheduler failure.
+`Connections` avoids the hazard entirely by draining registrations before it
+releases a descriptor.
+
 `Flyology.Cancellation.Token` is the canonical one-shot token shared by
 connection and file I/O. `Connections.Cancellation_Token` and
 `Files.Cancellation_Token` are source-compatible subtypes of it, and both

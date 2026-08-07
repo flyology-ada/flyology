@@ -1037,7 +1037,11 @@ package body System.Flyology.Scheduler is
       --  The source that triggered this wake may already have been consumed
       --  by kevent/epoll; Cancel is deliberately idempotent for that case.
       --  Duplicate links are harmless: the first cancellation removes the
-      --  interest and later duplicates observe it as already absent.
+      --  interest and later duplicates observe it as already absent. A raw
+      --  wait does not own its descriptor, so the owner may also have closed
+      --  it while the interest was armed; Cancel reports that as removed
+      --  rather than as a failure. Fatal is therefore reserved for a poller
+      --  that can no longer manage its own registrations.
       for Kind in 1 .. Item.Active_IO_Link_Count loop
          Link := Active_IO_Link (Item, Kind);
          if Link.Descriptor >= 0

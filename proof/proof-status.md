@@ -151,6 +151,9 @@ integration boundaries.
   - [x] `Flyology.WebSocket_Deflate_Policy.Select_Distance_Tree`
   - [x] `Flyology.WebSocket_Deflate_Policy.Distance_Requirement_Is_Satisfied`
   - [x] Whole `Flyology.WebSocket_Deflate_Policy` unit widening
+- [x] Production-used poller cancellation classification (level 1, mode all)
+  - [x] `System.Flyology.Poller_Policy.Classify_Cancel`
+  - [x] Whole `System.Flyology.Poller_Policy` unit widening
 - [x] Production HTTP client upload policy (level 1, mode all)
   - [x] `Flyology.HTTP.Client_Policy.Validate_Upload`
   - [x] `Flyology.HTTP.Client_Policy.Classify_Pull`

@@ -19,6 +19,16 @@ is
       return Result;
    end Plan_Batch;
 
+   function Classify_Cancel
+     (Succeeded : Boolean;
+      Error     : Integer) return Cancel_Outcome
+   is
+     (if Succeeded then Interest_Cleared
+      elsif Error = Interest_Absent_Error
+        or else Error = Descriptor_Closed_Error
+      then Registration_Gone
+      else Cancel_Failed);
+
    function Remaining_Budget
      (Capacity : Batch_Capacity;
       Delivered : Batch_Count) return Drain_Budget

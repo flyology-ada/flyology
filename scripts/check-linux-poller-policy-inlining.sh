@@ -17,7 +17,7 @@ if ! undefined_symbols=$(nm -u "$object"); then
 fi
 
 policy_calls=$(printf '%s\n' "$undefined_symbols" | grep -E \
-  '(^|[[:space:]])_?system__flyology__poller_policy__(after_batch|after_drain|after_wake|plan_batch|remaining_budget)$' \
+  '(^|[[:space:]])_?system__flyology__poller_policy__(after_batch|after_drain|after_wake|classify_cancel|plan_batch|remaining_budget)$' \
   || true)
 if [ -n "$policy_calls" ]; then
   printf '%s\n' \

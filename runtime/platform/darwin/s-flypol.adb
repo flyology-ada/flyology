@@ -15,6 +15,7 @@ package body System.Flyology.Poller is
    use type C.short;
    use type C.unsigned_short;
    use type SSE.Integer_Address;
+   use type Poller_Policy.Cancel_Outcome;
 
    EVFILT_USER : constant C.short := C.short (-10);
    EVFILT_AIO  : constant C.short := C.short (-3);
@@ -24,7 +25,6 @@ package body System.Flyology.Poller is
    EV_DELETE   : constant C.unsigned_short := 16#0002#;
    EV_ONESHOT  : constant C.unsigned_short := 16#0010#;
    EV_CLEAR    : constant C.unsigned_short := 16#0020#;
-   ENOENT      : constant C.int := 2;
    NOTE_TRIGGER : constant C.unsigned := 16#0100_0000#;
    Wake_Ident   : constant SSE.Integer_Address := 1;
 
@@ -156,14 +156,19 @@ package body System.Flyology.Poller is
          Data   => 0,
          Udata  => 0,
          Ext    => (others => 0));
+      Succeeded : constant Boolean :=
+        Kevent
+          (Item.Descriptor, Change'Address, 1, System.Null_Address, 0, 0,
+           System.Null_Address) = 0;
    begin
-      if Kevent
-        (Item.Descriptor, Change'Address, 1, System.Null_Address, 0, 0,
-         System.Null_Address) = 0
-      then
-         return True;
-      end if;
-      return OSI.errno = ENOENT;
+      --  XNU drops a knote when its descriptor is closed and then answers
+      --  EV_DELETE for that integer with ENOENT, so a close race normally
+      --  arrives here as ENOENT rather than as the EBADF Linux reports. The
+      --  shared classification accepts either: neither leaves a registration
+      --  to cancel, and the scheduler must not treat that as a poller failure.
+      return Poller_Policy.Classify_Cancel
+               (Succeeded, Integer (OSI.errno)) /=
+             Poller_Policy.Cancel_Failed;
    end Cancel;
 
    function Submit_File

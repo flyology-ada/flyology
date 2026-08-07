@@ -252,6 +252,7 @@ ordinary_mains='cancellation_wake_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_retention_smoke
+closed_descriptor_wait_smoke
 connection_admission_smoke
 connection_driver_smoke
 connection_driver_tls_smoke
