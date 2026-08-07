@@ -1,6 +1,7 @@
 with Ada.Streams;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
+private with System;
 
 --  Provides bounded open-addressed maps from fixed-size byte keys to
 --  fixed-size byte values. Capacity is a power of two and probing is linear
@@ -139,5 +140,7 @@ private
       Mask           : Interfaces.Unsigned_64 := 0;
       Value_Offset   : Byte_Count := 0;
       Stride         : Byte_Count := 0;
+      Count_Address   : System.Address := System.Null_Address;
+      Entries_Address : System.Address := System.Null_Address;
    end record;
 end Flyology.Data_Structures.Hash_Maps;

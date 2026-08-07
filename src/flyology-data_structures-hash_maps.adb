@@ -1,11 +1,14 @@
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
+with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Hash_Maps is
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Addressing.Storage_Offset;
 
    Count_Offset : constant Byte_Count := 48;
    State_Offset : constant Byte_Count := 0;
@@ -62,30 +65,33 @@ package body Flyology.Data_Structures.Hash_Maps is
       Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
       Item.Value_Offset := Value_Offset;
       Item.Stride := Stride;
+
+      --  Core already covers the complete validated extent. Keep these native
+      --  addresses only in this process-local view so hot probes do not repeat
+      --  the region conversion for every field.
+      Item.Count_Address := Layouts.Address_At (Core, Count_Offset, 8, 8);
+      Item.Entries_Address := Layouts.Address_At
+        (Core, Layouts.Header_Size, Core.Extent - Layouts.Header_Size, 8);
    end Set_View;
 
-   function Entry_Relative
-     (Item : View; Index : Interfaces.Unsigned_64) return Byte_Count is
+   function Entry_Address
+     (Item : View; Index : Interfaces.Unsigned_64) return System.Address is
    begin
-      return Layouts.Checked_Add
-        (Layouts.Header_Size,
-         Layouts.Checked_Multiply (Byte_Count (Index), Item.Stride));
-   end Entry_Relative;
+      if Index >= Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         raise Layout_Error with "hash-map entry index is corrupt";
+      end if;
+      return Item.Entries_Address + Addressing.Storage_Offset
+        (Byte_Count (Index) * Item.Stride);
+   end Entry_Address;
 
    function Field_Address
-     (Item : View; Index : Interfaces.Unsigned_64;
-      Offset, Extent, Alignment : Byte_Count) return System.Address is
+     (Item : View; Slot_Address : System.Address;
+      Offset, Extent : Byte_Count) return System.Address is
    begin
-      if Index >= Interfaces.Unsigned_64 (Item.Capacity_Value)
-        or else Offset > Item.Stride
-        or else Extent > Item.Stride - Offset
-      then
+      if Offset > Item.Stride or else Extent > Item.Stride - Offset then
          raise Layout_Error with "hash-map entry geometry is corrupt";
       end if;
-      return Layouts.Address_At
-        (Item.Core,
-         Layouts.Checked_Add (Entry_Relative (Item, Index), Offset),
-         Extent, Alignment);
+      return Slot_Address + Addressing.Storage_Offset (Offset);
    end Field_Address;
 
    procedure Initialize
@@ -118,7 +124,9 @@ package body Flyology.Data_Structures.Hash_Maps is
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
          Bytes.Write_U32
-           (Field_Address (Item, Index, State_Offset, 4, 4), Empty_State);
+           (Field_Address
+              (Item, Entry_Address (Item, Index), State_Offset, 4),
+            Empty_State);
       end loop;
       Layouts.Publish (Item.Core);
    end Initialize;
@@ -157,7 +165,8 @@ package body Flyology.Data_Structures.Hash_Maps is
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
          State := Bytes.Read_U32
-           (Field_Address (Item, Index, State_Offset, 4, 4));
+           (Field_Address
+              (Item, Entry_Address (Item, Index), State_Offset, 4));
          if State = Occupied_State then
             Occupied := Occupied + 1;
          elsif State /= Empty_State and then State /= Deleted_State then
@@ -178,6 +187,8 @@ package body Flyology.Data_Structures.Hash_Maps is
       Item.Mask := 0;
       Item.Value_Offset := 0;
       Item.Stride := 0;
+      Item.Count_Address := System.Null_Address;
+      Item.Entries_Address := System.Null_Address;
    end Detach;
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
@@ -186,8 +197,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Result : Interfaces.Unsigned_64;
    begin
       Layouts.Require_Ready (Item.Core);
-      Result := Bytes.Read_U64
-        (Layouts.Address_At (Item.Core, Count_Offset, 8, 8));
+      Result := Bytes.Read_U64 (Item.Count_Address);
       if Result > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "hash-map count is corrupt";
       end if;
@@ -225,14 +235,15 @@ package body Flyology.Data_Structures.Hash_Maps is
    end Hash;
 
    function Key_Matches
-     (Item : View; Index, Hash_Value : Interfaces.Unsigned_64;
+     (Item : View; Slot_Address : System.Address;
+      Hash_Value : Interfaces.Unsigned_64;
       Key : Ada.Streams.Stream_Element_Array) return Boolean is
    begin
       return Bytes.Read_U64
-        (Field_Address (Item, Index, Hash_Offset, 8, 8)) = Hash_Value
+        (Field_Address (Item, Slot_Address, Hash_Offset, 8)) = Hash_Value
         and then Bytes.Equal
           (Field_Address
-             (Item, Index, Key_Offset, Byte_Count (Item.Key_Value), 1),
+             (Item, Slot_Address, Key_Offset, Byte_Count (Item.Key_Value)),
            Key'Address, Interfaces.C.size_t (Key'Length));
    end Key_Matches;
 
@@ -247,6 +258,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Index, Target : Interfaces.Unsigned_64;
       State : Interfaces.Unsigned_32;
       Count : Interfaces.Unsigned_64;
+      Slot_Address, Target_Address : System.Address;
    begin
       Check_Key (Item, Key);
       Check_Value (Item, Value'Length);
@@ -255,15 +267,16 @@ package body Flyology.Data_Structures.Hash_Maps is
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
          Index := (Hash_Value + Probe) and Item.Mask;
+         Slot_Address := Entry_Address (Item, Index);
          State := Bytes.Read_U32
-           (Field_Address (Item, Index, State_Offset, 4, 4));
+           (Field_Address (Item, Slot_Address, State_Offset, 4));
          if State = Occupied_State
-           and then Key_Matches (Item, Index, Hash_Value, Key)
+           and then Key_Matches (Item, Slot_Address, Hash_Value, Key)
          then
             Bytes.Copy
               (Field_Address
-                 (Item, Index, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value), 1),
+                 (Item, Slot_Address, Item.Value_Offset,
+                  Byte_Count (Item.Value_Value)),
                Value'Address, Interfaces.C.size_t (Value'Length));
             Result := Replaced;
             return;
@@ -275,43 +288,46 @@ package body Flyology.Data_Structures.Hash_Maps is
             Target :=
               (if First_Deleted = Interfaces.Unsigned_64'Last
                then Index else First_Deleted);
+            Target_Address := Entry_Address (Item, Target);
             Bytes.Write_U64
-              (Field_Address (Item, Target, Hash_Offset, 8, 8), Hash_Value);
+              (Field_Address (Item, Target_Address, Hash_Offset, 8),
+               Hash_Value);
             Bytes.Copy
               (Field_Address
-                 (Item, Target, Key_Offset, Byte_Count (Item.Key_Value), 1),
+                 (Item, Target_Address, Key_Offset,
+                  Byte_Count (Item.Key_Value)),
                Key'Address, Interfaces.C.size_t (Key'Length));
             Bytes.Copy
               (Field_Address
-                 (Item, Target, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value), 1),
+                 (Item, Target_Address, Item.Value_Offset,
+                  Byte_Count (Item.Value_Value)),
                Value'Address, Interfaces.C.size_t (Value'Length));
             Bytes.Write_U32
-              (Field_Address (Item, Target, State_Offset, 4, 4),
+              (Field_Address (Item, Target_Address, State_Offset, 4),
                Occupied_State);
-            Bytes.Write_U64
-              (Layouts.Address_At (Item.Core, Count_Offset, 8, 8), Count + 1);
+            Bytes.Write_U64 (Item.Count_Address, Count + 1);
             Result := Inserted;
             return;
          end if;
       end loop;
       if First_Deleted /= Interfaces.Unsigned_64'Last then
          Target := First_Deleted;
+         Target_Address := Entry_Address (Item, Target);
          Bytes.Write_U64
-           (Field_Address (Item, Target, Hash_Offset, 8, 8), Hash_Value);
+           (Field_Address (Item, Target_Address, Hash_Offset, 8), Hash_Value);
          Bytes.Copy
            (Field_Address
-              (Item, Target, Key_Offset, Byte_Count (Item.Key_Value), 1),
+              (Item, Target_Address, Key_Offset, Byte_Count (Item.Key_Value)),
             Key'Address, Interfaces.C.size_t (Key'Length));
          Bytes.Copy
            (Field_Address
-              (Item, Target, Item.Value_Offset,
-               Byte_Count (Item.Value_Value), 1),
+              (Item, Target_Address, Item.Value_Offset,
+               Byte_Count (Item.Value_Value)),
             Value'Address, Interfaces.C.size_t (Value'Length));
          Bytes.Write_U32
-           (Field_Address (Item, Target, State_Offset, 4, 4), Occupied_State);
-         Bytes.Write_U64
-           (Layouts.Address_At (Item.Core, Count_Offset, 8, 8), Count + 1);
+           (Field_Address (Item, Target_Address, State_Offset, 4),
+            Occupied_State);
+         Bytes.Write_U64 (Item.Count_Address, Count + 1);
          Result := Inserted;
       else
          Result := Table_Full;
@@ -325,6 +341,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Hash_Value : constant Interfaces.Unsigned_64 := Hash (Key);
       Candidate : Interfaces.Unsigned_64;
       State : Interfaces.Unsigned_32;
+      Slot_Address : System.Address;
    begin
       Check_Key (Item, Key);
       Layouts.Require_Ready (Item.Core);
@@ -332,14 +349,15 @@ package body Flyology.Data_Structures.Hash_Maps is
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
          Candidate := (Hash_Value + Probe) and Item.Mask;
+         Slot_Address := Entry_Address (Item, Candidate);
          State := Bytes.Read_U32
-           (Field_Address (Item, Candidate, State_Offset, 4, 4));
+           (Field_Address (Item, Slot_Address, State_Offset, 4));
          if State = Empty_State then
             Found := False;
             Index := 0;
             return;
          elsif State = Occupied_State
-           and then Key_Matches (Item, Candidate, Hash_Value, Key)
+           and then Key_Matches (Item, Slot_Address, Hash_Value, Key)
          then
             Found := True;
             Index := Candidate;
@@ -366,8 +384,8 @@ package body Flyology.Data_Structures.Hash_Maps is
          Bytes.Copy
            (Value'Address,
             Field_Address
-              (Item, Index, Item.Value_Offset,
-               Byte_Count (Item.Value_Value), 1),
+              (Item, Entry_Address (Item, Index), Item.Value_Offset,
+               Byte_Count (Item.Value_Value)),
             Interfaces.C.size_t (Value'Length));
       end if;
    end Get;
@@ -384,9 +402,10 @@ package body Flyology.Data_Structures.Hash_Maps is
       if Removed then
          Count := Stored_Count (Item);
          Bytes.Write_U32
-           (Field_Address (Item, Index, State_Offset, 4, 4), Deleted_State);
-         Bytes.Write_U64
-           (Layouts.Address_At (Item.Core, Count_Offset, 8, 8), Count - 1);
+           (Field_Address
+              (Item, Entry_Address (Item, Index), State_Offset, 4),
+            Deleted_State);
+         Bytes.Write_U64 (Item.Count_Address, Count - 1);
       end if;
    end Remove;
 
@@ -397,10 +416,11 @@ package body Flyology.Data_Structures.Hash_Maps is
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
          Bytes.Write_U32
-           (Field_Address (Item, Index, State_Offset, 4, 4), Empty_State);
+           (Field_Address
+              (Item, Entry_Address (Item, Index), State_Offset, 4),
+            Empty_State);
       end loop;
-      Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Count_Offset, 8, 8), 0);
+      Bytes.Write_U64 (Item.Count_Address, 0);
    end Clear;
 
    procedure Destroy (Item : in out View) is
