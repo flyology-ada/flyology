@@ -124,7 +124,10 @@ package Flyology.Native_Executors is
 
    --  Wait for one accepted operation, return its result, or re-raise its
    --  captured exception with the original exception identity and retained
-   --  message. Deadline bounds only this wait; the operation receives the
+   --  message. Copying a result into bounded storage runs Result_Type
+   --  assignment, so an exception from that copy becomes the operation's
+   --  captured outcome instead of a successful result.
+   --  Deadline bounds only this wait; the operation receives the
    --  separate deadline supplied to Submit. Ada.Real_Time.Time_Last means no
    --  wait deadline. Cancellation or deadline expiry abandons the result and
    --  requests the executor-owned operation token. Each handle is consumed

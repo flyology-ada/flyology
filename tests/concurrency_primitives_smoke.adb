@@ -95,6 +95,50 @@ procedure Concurrency_Primitives_Smoke is
    package Native_Executors is new Flyology.Native_Executors
      (Integer, Integer, Native_Work);
 
+   --  Result_Type is a generic formal private type, so copying a result into
+   --  the executor's bounded storage runs application code that may raise.
+   --  This actual models a copy that fails once, as an Unbounded_String or
+   --  other allocating component would under memory pressure. Only the worker
+   --  task arms and observes the injection, and the executor's protected
+   --  state orders it against the waiting caller.
+   Fragile_Copy_Armed : Boolean := False;
+   Fragile_Copy_Failures : Natural := 0;
+
+   type Fragile_Result is new Ada.Finalization.Controlled with record
+      Value : Integer := 0;
+   end record;
+
+   overriding procedure Adjust (Item : in out Fragile_Result);
+
+   overriding procedure Adjust (Item : in out Fragile_Result) is
+      pragma Unreferenced (Item);
+   begin
+      if Fragile_Copy_Armed then
+         Fragile_Copy_Armed := False;
+         Fragile_Copy_Failures := Fragile_Copy_Failures + 1;
+         raise Storage_Error with "injected native executor result copy";
+      end if;
+   end Adjust;
+
+   procedure Fragile_Work
+     (Input    : Integer;
+      Token    : access Flyology.Cancellation.Token;
+      Deadline : Ada.Real_Time.Time;
+      Result   : out Fragile_Result)
+   is
+      pragma Unreferenced (Token, Deadline);
+   begin
+      Result.Value := Input * 3;
+      if Input = 7 then
+         --  Arm only after this operation's own result is built so the
+         --  executor's completion copy is the failing one.
+         Fragile_Copy_Armed := True;
+      end if;
+   end Fragile_Work;
+
+   package Fragile_Executors is new Flyology.Native_Executors
+     (Integer, Fragile_Result, Fragile_Work);
+
    protected type Boolean_Result is
       procedure Set (Value : Boolean);
       entry Wait (Value : out Boolean);
@@ -427,6 +471,68 @@ procedure Concurrency_Primitives_Smoke is
       Worker_Pool_Test_Control.Reset;
       Native_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Abandon_Failure;
+
+   procedure Exercise_Native_Executor_Result_Copy_Failure is
+      use type Ada.Real_Time.Time;
+
+      Item      : aliased Fragile_Executors.Executor
+        (Workers => 1, Capacity => 1);
+      Accepted  : Boolean;
+      Reported  : Boolean := False;
+      Timed_Out : Boolean := False;
+      Result    : Fragile_Result;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Fragile_Executors.Start (Item);
+      declare
+         Handle : Fragile_Executors.Operation_Handle (Item'Access);
+      begin
+         Fragile_Executors.Submit
+           (Item, 7, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         begin
+            Fragile_Executors.Await
+              (Item, Handle, Result,
+               Deadline => Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5));
+         exception
+            when Flyology.IO.Timeout_Error =>
+               Timed_Out := True;
+            when others =>
+               Reported := True;
+         end;
+      end;
+      pragma Assert (Fragile_Copy_Failures = 1);
+      --  A failing result copy is a terminal outcome for the operation. The
+      --  waiting caller must observe it instead of sleeping on a slot that
+      --  no worker still owns.
+      pragma Assert (not Timed_Out);
+      pragma Assert (Reported);
+      pragma Assert
+        (Fragile_Executors.Statistics (Item).Failed_Executions = 1);
+      pragma Assert
+        (Fragile_Executors.Statistics (Item).Successful_Executions = 0);
+      pragma Assert
+        (Fragile_Executors.Statistics (Item).Running_Operations = 0);
+      pragma Assert
+        (Fragile_Executors.Statistics (Item).Outstanding_Operations = 0);
+
+      --  Exactly one accounting transition happened, so the slot is free and
+      --  the executor still admits and completes further work.
+      declare
+         Handle : Fragile_Executors.Operation_Handle (Item'Access);
+      begin
+         Fragile_Executors.Submit
+           (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Fragile_Executors.Await
+           (Item, Handle, Result,
+            Deadline => Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5));
+         pragma Assert (Result.Value = 12);
+      end;
+      pragma Assert
+        (Fragile_Executors.Statistics (Item).Successful_Executions = 1);
+      Fragile_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Result_Copy_Failure;
 
    procedure Exercise_Native_Executor_Shutdown_Failure is
       Item     : aliased Native_Executors.Executor
@@ -1046,6 +1152,7 @@ procedure Concurrency_Primitives_Smoke is
 
 begin
    Exercise_Channel;
+   Exercise_Native_Executor_Result_Copy_Failure;
    Exercise_Native_Executor_Abandon_Failure;
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;

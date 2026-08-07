@@ -133,32 +133,48 @@ package body Flyology.Native_Executors is
       end Operation_Data;
 
       procedure Complete (Slot : Positive; Result : Result_Type) is
+         Deliver : constant Boolean := not Detached (Slot);
       begin
-         Counters.Running_Operations := Counters.Running_Operations - 1;
-         Counters.Successful_Executions :=
-           Counters.Successful_Executions + 1;
-         if Detached (Slot) then
-            Status (Slot) := Free;
-            Detached (Slot) := False;
-            Counters.Outstanding_Operations :=
-              Counters.Outstanding_Operations - 1;
-         else
+         if Deliver then
+            --  Result_Type assignment is application code and may propagate,
+            --  for instance when copying an allocating component fails. Do it
+            --  before any counter or status transition so a failure leaves the
+            --  slot Running and lets the worker's Fail path record exactly one
+            --  terminal outcome.
             Results (Slot) := Result;
-            Status (Slot) := Completed;
             if Test_Hooks.Completion_Wake then
                Flyology.Wake_Sources.Ensure (Wakes (Slot));
                Wake_Armed (Slot) := True;
             end if;
+         end if;
+         Counters.Running_Operations := Counters.Running_Operations - 1;
+         Counters.Successful_Executions :=
+           Counters.Successful_Executions + 1;
+         if Deliver then
+            Status (Slot) := Completed;
             if Wake_Armed (Slot) then
                Flyology.Wake_Sources.Signal (Wakes (Slot));
                Wake_Pending (Slot) := True;
             end if;
+         else
+            Status (Slot) := Free;
+            Detached (Slot) := False;
+            Counters.Outstanding_Operations :=
+              Counters.Outstanding_Operations - 1;
          end if;
       end Complete;
 
       procedure Fail
         (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence) is
       begin
+         if Status (Slot) /= Running then
+            --  Complete already applied this operation's terminal transition
+            --  before propagating a later failure, or Operation_Data rejected
+            --  a slot this worker never owned. Reporting again would decrement
+            --  Running_Operations a second time and strand an unrelated
+            --  caller when a subsequent completion underflows.
+            return;
+         end if;
          Counters.Running_Operations := Counters.Running_Operations - 1;
          Counters.Failed_Executions := Counters.Failed_Executions + 1;
          if Detached (Slot) then
