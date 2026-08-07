@@ -155,6 +155,40 @@ procedure Task_Scope_Faults_Smoke is
    package Timing_Scopes is new
      Flyology.Task_Scopes (Integer, Duration, Measure_Cancellation);
 
+   --  Finalization of an unjoined scope must join its workers even when
+   --  requesting local cancellation cannot signal the borrowed wake
+   --  descriptor. Otherwise the scope storage is reclaimed under live workers
+   --  that still dereference it.
+   procedure Check_Finalize_Joins_After_Wake_Failure is
+      Reported : Boolean := False;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Progress.Reset;
+      begin
+         declare
+            Item   : Hold_Scopes.Scope (Capacity => 1, Parent => null);
+            Handle : Hold_Scopes.Operation_Handle;
+         begin
+            Hold_Scopes.Configure (Item, Ada.Real_Time.Time_Last);
+            Hold_Scopes.Spawn (Item, 7, Handle);
+            Progress.Await_Started;
+            Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
+            --  Leaving the block finalizes a configured, unjoined scope.
+         end;
+      exception
+         when Program_Error =>
+            Reported := True;
+      end;
+      --  Finalization really did take the failing signalling path, reported
+      --  it, and still waited for the operation to leave Execute.
+      pragma Assert
+        (Worker_Pool_Test_Control
+           .Remaining_Native_Executor_Cancellation_Failures = 0);
+      Worker_Pool_Test_Control.Reset;
+      pragma Assert (Reported);
+      pragma Assert (Progress.Finished);
+   end Check_Finalize_Joins_After_Wake_Failure;
+
    --  A cancellation monitor that cannot signal the scope token must stay
    --  alive for its Stop rendezvous, and Join must complete regardless, so
    --  the results of completed operations stay reachable.
@@ -233,6 +267,9 @@ procedure Task_Scope_Faults_Smoke is
      (if Ada.Command_Line.Argument_Count = 0 then "all"
       else Ada.Command_Line.Argument (1));
 begin
+   if Selection = "all" or else Selection = "finalize" then
+      Check_Finalize_Joins_After_Wake_Failure;
+   end if;
    if Selection = "all" or else Selection = "monitor" then
       Check_Join_Survives_Monitor_Failure;
    end if;

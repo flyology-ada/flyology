@@ -36,7 +36,9 @@ package Flyology.Task_Scopes is
    --  operations accepted during the scope lifetime. The Parent token is
    --  borrowed and may be null; when present, cancellation is linked downward
    --  to the scope-owned token. Join closes admission. Finalization requests
-   --  local cancellation, closes admission, and joins when Join was omitted.
+   --  local cancellation, closes admission, and joins when Join was omitted;
+   --  a cancellation request whose wake descriptor cannot be signalled is
+   --  reported only after every worker has been joined and released.
    type Scope
      (Capacity : Positive;
       Parent   : access Flyology.Cancellation.Token) is

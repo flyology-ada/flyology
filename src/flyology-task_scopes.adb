@@ -437,11 +437,25 @@ package body Flyology.Task_Scopes is
         (Worker_Array, Worker_Array_Access);
       procedure Free_Monitor is new Ada.Unchecked_Deallocation
         (Cancellation_Monitor, Cancellation_Monitor_Access);
+      Cancel_Failed  : Boolean := False;
+      Cancel_Failure : Ada.Exceptions.Exception_Occurrence;
    begin
       if Item.Cleanup_Required and then not Item.Is_Joined then
-         if not Item.Local_Stop.Requested then
-            Item.Local_Stop.Request;
-         end if;
+         begin
+            if not Item.Local_Stop.Requested then
+               Item.Local_Stop.Request;
+            end if;
+         exception
+            when Failure : others =>
+               --  Cancellation stays recorded when its wake descriptor cannot
+               --  be signalled, so the workers still finish. Joining them
+               --  cannot be skipped: they hold pointers into Item.State and
+               --  Item.Local_Stop, and the token releases the descriptors a
+               --  blocked operation borrowed as soon as this Finalize returns.
+               --  The failure is reported once the scope is quiet.
+               Cancel_Failed := True;
+               Ada.Exceptions.Save_Occurrence (Cancel_Failure, Failure);
+         end;
          Item.State.Close_Admission;
          Item.State.Await_All;
          Item.State.Shutdown;
@@ -472,6 +486,9 @@ package body Flyology.Task_Scopes is
             Free_Worker (Item.Workers (Index));
          end loop;
          Free_Workers (Item.Workers);
+      end if;
+      if Cancel_Failed then
+         Ada.Exceptions.Reraise_Occurrence (Cancel_Failure);
       end if;
    end Finalize;
 
