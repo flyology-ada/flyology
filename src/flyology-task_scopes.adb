@@ -249,36 +249,48 @@ package body Flyology.Task_Scopes is
    end Worker;
 
    task body Cancellation_Monitor is
-      Parent_Source : Cancellation_Access;
-      Child_Source  : Cancellation_Access;
-      Stopped       : Boolean := False;
+      Parent_Source  : Cancellation_Access;
+      Child_Source   : Cancellation_Access;
+      Release_Source : Cancellation_Access;
+      Stopped        : Boolean := False;
    begin
       select
          accept Start
-           (Parent : Cancellation_Access;
-            Child  : Cancellation_Access)
+           (Parent  : Cancellation_Access;
+            Child   : Cancellation_Access;
+            Release : Cancellation_Access)
          do
             Parent_Source := Parent;
             Child_Source := Child;
+            Release_Source := Release;
          end Start;
       or
          accept Stop;
          Stopped := True;
       end select;
 
-      while not Stopped loop
+      --  Wait on the parent token itself rather than polling it. The scope's
+      --  release signal is the abortable part, so whichever event happens
+      --  first ends the wait with no periodic wakeup: parent cancellation
+      --  reaches the scope token at protected-entry latency, and an idle
+      --  scope costs no timer wakeups while it lives.
+      if not Stopped and then Parent_Source /= null then
          select
-            accept Stop;
-            Stopped := True;
-         or
-            delay 0.01;
-            if Parent_Source /= null and then Parent_Source.Requested then
-               if not Child_Source.Requested then
-                  Child_Source.Request;
-               end if;
+            Parent_Source.Await_Request;
+            if not Child_Source.Requested then
+               Child_Source.Request;
             end if;
+         then abort
+            Release_Source.Await_Request;
          end select;
-      end loop;
+      end if;
+
+      --  Cancellation is one-shot, so nothing is left to observe. The Stop
+      --  rendezvous remains the handshake that tells Join and finalization
+      --  the monitor will not touch the scope-owned token again.
+      if not Stopped then
+         accept Stop;
+      end if;
    end Cancellation_Monitor;
 
    procedure Configure
@@ -317,7 +329,8 @@ package body Flyology.Task_Scopes is
          Item.Monitor := new Cancellation_Monitor;
          Item.Monitor_Stopped := False;
          Item.Monitor.Start
-           (Item.Parent.all'Unchecked_Access, Item.Token);
+           (Item.Parent.all'Unchecked_Access, Item.Token,
+            Item.Monitor_Release'Unchecked_Access);
       end if;
       Item.Is_Configured := True;
    end Configure;
@@ -349,6 +362,7 @@ package body Flyology.Task_Scopes is
       Item.State.Set_Expected_Workers (Item.Activated_Workers);
       Item.State.Await_Workers;
       if not Item.Monitor_Stopped then
+         Item.Monitor_Release.Request;
          Item.Monitor.Stop;
          Item.Monitor_Stopped := True;
       end if;
@@ -426,6 +440,7 @@ package body Flyology.Task_Scopes is
          Item.State.Await_Workers;
          if Item.Monitor /= null and then not Item.Monitor_Stopped then
             begin
+               Item.Monitor_Release.Request;
                Item.Monitor.Stop;
             exception
                when Tasking_Error => null;

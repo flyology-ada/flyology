@@ -191,9 +191,12 @@ private
 
    task type Cancellation_Monitor is
       pragma Task_Info (Flyology.Lightweight_Task);
+      --  Release is the scope-owned one-shot signal that ends the wait on
+      --  Parent; Stop is the rendezvous that acknowledges it.
       entry Start
-        (Parent : Cancellation_Access;
-         Child  : Cancellation_Access);
+        (Parent  : Cancellation_Access;
+         Child   : Cancellation_Access;
+         Release : Cancellation_Access);
       entry Stop;
    end Cancellation_Monitor;
    type Cancellation_Monitor_Access is access Cancellation_Monitor;
@@ -206,6 +209,9 @@ private
       Workers     : Worker_Array_Access;
       Monitor     : Cancellation_Monitor_Access;
       Local_Stop  : aliased Flyology.Cancellation.Token;
+      --  One-shot release signal for the cancellation monitor. No operation
+      --  ever borrows its wake descriptor, so requesting it cannot fail.
+      Monitor_Release : aliased Flyology.Cancellation.Token;
       Token       : Cancellation_Access;
       Is_Configured : Boolean := False;
       Cleanup_Required : Boolean := False;
