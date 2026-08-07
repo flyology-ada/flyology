@@ -1,0 +1,240 @@
+with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Storage;
+with Interfaces.C;
+
+package body Flyology.Data_Structures.Rings.SPSC is
+   package Atomic renames Flyology.Data_Structures.Atomics;
+   package Bytes renames Flyology.Data_Structures.Storage;
+
+   use type Interfaces.Unsigned_32;
+   use type Interfaces.Unsigned_64;
+
+   Head_Offset : constant Byte_Count := 64;
+   Tail_Offset : constant Byte_Count := 128;
+   Slots_Offset : constant Byte_Count := 192;
+
+   function U32 (Value : Positive) return Interfaces.Unsigned_32 is
+   begin
+      return Interfaces.Unsigned_32 (Value);
+   end U32;
+
+   procedure Geometry
+     (Capacity     : Positive;
+      Element_Size : Positive;
+      Stride       : out Byte_Count;
+      Extent       : out Byte_Count) is
+   begin
+      if (Interfaces.Unsigned_64 (Capacity) and
+          (Interfaces.Unsigned_64 (Capacity) - 1)) /= 0
+      then
+         raise Constraint_Error with "SPSC capacity must be a power of two";
+      end if;
+      Stride := Layouts.Align_Up (Byte_Count (Element_Size), 8);
+      Extent := Layouts.Checked_Add
+        (Slots_Offset,
+         Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
+   end Geometry;
+
+   function Required_Storage
+     (Capacity : Positive; Element_Size : Positive) return Byte_Count
+   is
+      Stride : Byte_Count;
+      Extent : Byte_Count;
+   begin
+      Geometry (Capacity, Element_Size, Stride, Extent);
+      return Extent;
+   end Required_Storage;
+
+   procedure Set_View
+     (Item         : out View;
+      Core         : Layouts.Local_View;
+      Capacity     : Interfaces.Unsigned_32;
+      Element_Size : Interfaces.Unsigned_32;
+      Stride       : Byte_Count) is
+   begin
+      Item.Core := Core;
+      Item.Capacity_Value := Capacity;
+      Item.Element_Value := Element_Size;
+      Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
+      Item.Stride := Stride;
+   end Set_View;
+
+   procedure Initialize
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive)
+   is
+      Stride : Byte_Count;
+      Extent : Byte_Count;
+      Core   : Layouts.Local_View;
+   begin
+      Geometry (Capacity, Element_Size, Stride, Extent);
+      Layouts.Begin_Initialize
+        (Core, Region, Location, Identity, Extent,
+         (Capacity     => U32 (Capacity),
+          Element_Size => U32 (Element_Size),
+          Alignment    => 8,
+          Auxiliary    => 0,
+          Word_1       => 0,
+          Word_2       => 0),
+         8);
+      Set_View (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
+      Atomic.Store_Release_U64
+        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8), 0);
+      Atomic.Store_Release_U64
+        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8), 0);
+      Layouts.Publish (Item.Core);
+   end Initialize;
+
+   procedure Attach
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive)
+   is
+      Core   : Layouts.Local_View;
+      Header : Layouts.Header_Values;
+      Stride : Byte_Count;
+      Extent : Byte_Count;
+      Head   : Interfaces.Unsigned_64;
+      Tail   : Interfaces.Unsigned_64;
+   begin
+      Geometry (Capacity, Element_Size, Stride, Extent);
+      Layouts.Attach (Core, Header, Region, Location, Identity, 8);
+      if Header.Capacity /= U32 (Capacity)
+        or else Header.Element_Size /= U32 (Element_Size)
+        or else Header.Alignment /= 8
+        or else Header.Auxiliary /= 0
+        or else Header.Word_1 /= 0
+        or else Header.Word_2 /= 0
+        or else Core.Extent /= Extent
+      then
+         raise Layout_Error with "SPSC ring configuration does not match";
+      end if;
+      Set_View (Item, Core, Header.Capacity, Header.Element_Size, Stride);
+      Head := Atomic.Load_Acquire_U64
+        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+      Tail := Atomic.Load_Acquire_U64
+        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+      if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         raise Layout_Error with "SPSC ring indices are corrupt";
+      end if;
+   end Attach;
+
+   procedure Detach (Item : in out View) is
+   begin
+      Layouts.Detach (Item.Core);
+      Item.Capacity_Value := 0;
+      Item.Element_Value := 0;
+      Item.Mask := 0;
+      Item.Stride := 0;
+   end Detach;
+
+   function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
+
+   function Current_Metadata (Item : View) return Metadata is
+   begin
+      if not Item.Core.Attached then
+         raise Region_Error with "detached SPSC ring view";
+      end if;
+      return
+        (Capacity     => Item.Capacity_Value,
+         Element_Size => Item.Element_Value,
+         Extent       => Item.Core.Extent);
+   end Current_Metadata;
+
+   procedure Check_Length (Item : View; Length : Natural) is
+   begin
+      if Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
+         raise Constraint_Error with "SPSC element length does not match";
+      end if;
+   end Check_Length;
+
+   function Element_Address
+     (Item : View; Position : Interfaces.Unsigned_64) return System.Address
+   is
+      Index : constant Byte_Count := Byte_Count (Position and Item.Mask);
+      Relative : constant Byte_Count := Layouts.Checked_Add
+        (Slots_Offset,
+         Layouts.Checked_Multiply (Index, Item.Stride));
+   begin
+      return Layouts.Address_At
+        (Item.Core, Relative, Byte_Count (Item.Element_Value), 1);
+   end Element_Address;
+
+   procedure Try_Push
+     (Item   : in out View;
+      Data   : Ada.Streams.Stream_Element_Array;
+      Pushed : out Boolean)
+   is
+      Head : Interfaces.Unsigned_64;
+      Tail : Interfaces.Unsigned_64;
+   begin
+      Check_Length (Item, Data'Length);
+      Layouts.Require_Ready (Item.Core);
+      Tail := Atomic.Load_Relaxed_U64
+        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+      Head := Atomic.Load_Acquire_U64
+        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+      if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         raise Layout_Error with "SPSC ring indices are corrupt";
+      elsif Tail - Head = Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         Pushed := False;
+         return;
+      end if;
+      Bytes.Copy
+        (Element_Address (Item, Tail), Data'Address,
+         Interfaces.C.size_t (Data'Length));
+      Atomic.Store_Release_U64
+        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8), Tail + 1);
+      Pushed := True;
+   end Try_Push;
+
+   procedure Try_Pop
+     (Item   : in out View;
+      Data   : out Ada.Streams.Stream_Element_Array;
+      Popped : out Boolean)
+   is
+      Head : Interfaces.Unsigned_64;
+      Tail : Interfaces.Unsigned_64;
+   begin
+      Check_Length (Item, Data'Length);
+      Layouts.Require_Ready (Item.Core);
+      Head := Atomic.Load_Relaxed_U64
+        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+      Tail := Atomic.Load_Acquire_U64
+        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+      if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         raise Layout_Error with "SPSC ring indices are corrupt";
+      elsif Tail = Head then
+         Popped := False;
+         return;
+      end if;
+      Bytes.Copy
+        (Data'Address, Element_Address (Item, Head),
+         Interfaces.C.size_t (Data'Length));
+      Atomic.Store_Release_U64
+        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8), Head + 1);
+      Popped := True;
+   end Try_Pop;
+
+   procedure Destroy (Item : in out View) is
+      Head : Interfaces.Unsigned_64;
+      Tail : Interfaces.Unsigned_64;
+   begin
+      Layouts.Require_Ready (Item.Core);
+      Head := Atomic.Load_Acquire_U64
+        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+      Tail := Atomic.Load_Acquire_U64
+        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+      if Head /= Tail then
+         raise Program_Error with "cannot destroy a nonempty SPSC ring";
+      end if;
+      Layouts.Mark_Destroyed (Item.Core);
+      Detach (Item);
+   end Destroy;
+
+end Flyology.Data_Structures.Rings.SPSC;

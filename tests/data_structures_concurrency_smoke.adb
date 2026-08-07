@@ -1,0 +1,505 @@
+with Ada.Command_Line;
+with Ada.Environment_Variables;
+with Ada.Streams;
+with Ada.Text_IO;
+with Flyology;
+with Flyology.Data_Structures;
+with Flyology.Data_Structures.Regions;
+with Flyology.Data_Structures.Rings.MPMC;
+with Flyology.Data_Structures.Rings.SPSC;
+with Flyology.Data_Structures.Vectors;
+with Interfaces;
+with Interfaces.C;
+with System;
+
+procedure Data_Structures_Concurrency_Smoke is
+   package DS renames Flyology.Data_Structures;
+   package Regions renames DS.Regions;
+   package SPSC renames DS.Rings.SPSC;
+   package MPMC renames DS.Rings.MPMC;
+   package Vectors renames DS.Vectors;
+   package C renames Interfaces.C;
+
+   use type C.int;
+   use type Interfaces.Unsigned_64;
+   use type MPMC.Pop_Result;
+   use type MPMC.Push_Result;
+   use type System.Address;
+
+   function Argument
+     (Position : Positive; Default : Positive) return Positive is
+     (if Ada.Command_Line.Argument_Count >= Position
+      then Positive'Value (Ada.Command_Line.Argument (Position))
+      else Default);
+
+   SPSC_Iterations : constant Positive := Argument (1, 250_000);
+   MPMC_Per_Producer : constant Positive := Argument (2, 25_000);
+   Mapping_Length : constant C.size_t := 1_048_576;
+   SPSC_Location : constant DS.Region_Offset := 64;
+   MPMC_Location : constant DS.Region_Offset := 131_072;
+   Vector_Location : constant DS.Region_Offset := 524_288;
+
+   function Mapping_Create
+     (Path   : C.char_array;
+      Length : C.size_t;
+      First  : access System.Address;
+      Second : access System.Address;
+      FD     : access C.int) return C.int;
+   pragma Import
+     (C, Mapping_Create, "flyology_test_mapping_create");
+
+   function Unmap
+     (Address : System.Address; Length : C.size_t) return C.int;
+   pragma Import (C, Unmap, "flyology_test_mapping_unmap");
+
+   function Close_Mapping
+     (Path : C.char_array; FD : C.int) return C.int;
+   pragma Import (C, Close_Mapping, "flyology_test_mapping_close");
+
+   procedure Assert (Condition : Boolean; Message : String) is
+   begin
+      if not Condition then
+         raise Program_Error with Message;
+      end if;
+   end Assert;
+
+   function Encode
+     (Value : Interfaces.Unsigned_64)
+      return Ada.Streams.Stream_Element_Array
+   is
+      Result : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Work : Interfaces.Unsigned_64 := Value;
+   begin
+      for Byte of Result loop
+         Byte := Ada.Streams.Stream_Element (Work and 16#FF#);
+         Work := Work / 256;
+      end loop;
+      return Result;
+   end Encode;
+
+   function Decode
+     (Data : Ada.Streams.Stream_Element_Array)
+      return Interfaces.Unsigned_64
+   is
+      Result : Interfaces.Unsigned_64 := 0;
+   begin
+      for Index in reverse Data'Range loop
+         Result := Result * 256 + Interfaces.Unsigned_64 (Data (Index));
+      end loop;
+      return Result;
+   end Decode;
+
+   protected type Completion (Expected : Positive) is
+      procedure Done (Success : Boolean);
+      entry Await_All;
+      function Passed return Boolean;
+   private
+      Count : Natural := 0;
+      All_OK : Boolean := True;
+   end Completion;
+
+   protected body Completion is
+      procedure Done (Success : Boolean) is
+      begin
+         Count := Count + 1;
+         All_OK := All_OK and Success;
+      end Done;
+
+      entry Await_All when Count = Expected is
+      begin
+         null;
+      end Await_All;
+
+      function Passed return Boolean is (All_OK);
+   end Completion;
+
+   protected type Mutex is
+      entry Acquire;
+      procedure Release;
+   private
+      Held : Boolean := False;
+   end Mutex;
+
+   protected body Mutex is
+      entry Acquire when not Held is
+      begin
+         Held := True;
+      end Acquire;
+
+      procedure Release is
+      begin
+         Held := False;
+      end Release;
+   end Mutex;
+
+   Temp_Root : constant String := Ada.Environment_Variables.Value
+     ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
+   Path : constant C.char_array := C.To_C
+     (Temp_Root & "/data-structures-concurrency.map");
+   Base_A : aliased System.Address := System.Null_Address;
+   Base_B : aliased System.Address := System.Null_Address;
+   FD     : aliased C.int := -1;
+   Region_A, Region_B : Regions.View;
+
+   procedure Cleanup is
+      Ignored : C.int;
+   begin
+      Ignored := Unmap (Base_A, Mapping_Length);
+      Ignored := Unmap (Base_B, Mapping_Length);
+      if FD >= 0 then
+         Ignored := Close_Mapping (Path, FD);
+      end if;
+   end Cleanup;
+
+   procedure Run_SPSC is
+      Producer_View, Consumer_View : aliased SPSC.View;
+      Finished : Completion (2);
+
+      task Producer is
+         pragma Task_Info (Flyology.Native_Task);
+         entry Start;
+      end Producer;
+
+      task Consumer is
+         pragma Task_Info (Flyology.Native_Task);
+         entry Start;
+      end Consumer;
+
+      task body Producer is
+         Pushed : Boolean;
+      begin
+         accept Start;
+         for Value in Interfaces.Unsigned_64 range
+           1 .. Interfaces.Unsigned_64 (SPSC_Iterations)
+         loop
+            loop
+               SPSC.Try_Push (Producer_View, Encode (Value), Pushed);
+               exit when Pushed;
+               delay 0.0;
+            end loop;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Producer;
+
+      task body Consumer is
+         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Popped : Boolean;
+      begin
+         accept Start;
+         for Expected in Interfaces.Unsigned_64 range
+           1 .. Interfaces.Unsigned_64 (SPSC_Iterations)
+         loop
+            loop
+               SPSC.Try_Pop (Consumer_View, Data, Popped);
+               exit when Popped;
+               delay 0.0;
+            end loop;
+            if Decode (Data) /= Expected then
+               raise Program_Error with "SPSC sequence mismatch";
+            end if;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Consumer;
+   begin
+      SPSC.Initialize
+        (Producer_View, Region_A, SPSC_Location, 1_024, 8);
+      SPSC.Attach
+        (Consumer_View, Region_B, SPSC_Location, 1_024, 8);
+      Producer.Start;
+      Consumer.Start;
+      select
+         Finished.Await_All;
+      or
+         delay 15.0;
+         abort Producer;
+         abort Consumer;
+         raise Program_Error with "SPSC native-task test timed out";
+      end select;
+      Assert (Finished.Passed, "SPSC native-task sequence test failed");
+      declare
+         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Popped : Boolean;
+      begin
+         SPSC.Try_Pop (Consumer_View, Data, Popped);
+         Assert (not Popped, "SPSC retained a duplicate element");
+      end;
+      SPSC.Destroy (Producer_View);
+      SPSC.Detach (Consumer_View);
+   end Run_SPSC;
+
+   Producer_Count : constant Positive := 4;
+   Consumer_Count : constant Positive := 4;
+   Total_MPMC : constant Positive := Producer_Count * MPMC_Per_Producer;
+   type Seen_Array is array (Positive range <>) of Boolean;
+
+   protected type Scoreboard
+     (Expected, Task_Count : Positive)
+   is
+      procedure Observe (Value : Interfaces.Unsigned_64);
+      procedure Done (Success : Boolean);
+      function Complete return Boolean;
+      entry Await_Tasks;
+      function Passed return Boolean;
+   private
+      Seen : Seen_Array (1 .. Expected) := (others => False);
+      Observed : Natural := 0;
+      Finished : Natural := 0;
+      All_OK : Boolean := True;
+   end Scoreboard;
+
+   protected body Scoreboard is
+      procedure Observe (Value : Interfaces.Unsigned_64) is
+      begin
+         if Value = 0 or else Value > Interfaces.Unsigned_64 (Expected) then
+            All_OK := False;
+         elsif Seen (Positive (Value)) then
+            All_OK := False;
+         else
+            Seen (Positive (Value)) := True;
+            Observed := Observed + 1;
+         end if;
+      end Observe;
+
+      procedure Done (Success : Boolean) is
+      begin
+         Finished := Finished + 1;
+         All_OK := All_OK and Success;
+      end Done;
+
+      function Complete return Boolean is (Observed = Expected);
+
+      entry Await_Tasks when Finished = Task_Count is
+      begin
+         null;
+      end Await_Tasks;
+
+      function Passed return Boolean is
+        (All_OK and then Observed = Expected);
+   end Scoreboard;
+
+   procedure Run_MPMC is
+      type View_Array is array (Positive range <>) of aliased MPMC.View;
+      Producer_Views : View_Array (1 .. Producer_Count);
+      Consumer_Views : View_Array (1 .. Consumer_Count);
+      Results : Scoreboard
+        (Expected => Total_MPMC,
+         Task_Count => Producer_Count + Consumer_Count);
+      type View_Access is access all MPMC.View;
+
+      task type Producer_Task
+        (Identifier : Positive; Ring : not null View_Access)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Producer_Task;
+
+      task type Consumer_Task (Ring : not null View_Access) is
+         pragma Task_Info (Flyology.Native_Task);
+      end Consumer_Task;
+
+      task body Producer_Task is
+         Outcome : MPMC.Push_Result;
+         Value : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. MPMC_Per_Producer loop
+            Value := Interfaces.Unsigned_64
+              ((Identifier - 1) * MPMC_Per_Producer + Sequence);
+            loop
+               MPMC.Try_Push (Ring.all, Encode (Value), Outcome);
+               exit when Outcome = MPMC.Pushed;
+               delay 0.0;
+            end loop;
+         end loop;
+         Results.Done (True);
+      exception
+         when others => Results.Done (False);
+      end Producer_Task;
+
+      task body Consumer_Task is
+         Outcome : MPMC.Pop_Result;
+         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+      begin
+         loop
+            MPMC.Try_Pop (Ring.all, Data, Outcome);
+            if Outcome = MPMC.Popped then
+               Results.Observe (Decode (Data));
+            elsif Results.Complete then
+               exit;
+            else
+               delay 0.0;
+            end if;
+         end loop;
+         Results.Done (True);
+      exception
+         when others => Results.Done (False);
+      end Consumer_Task;
+
+      type Producer_Access is access Producer_Task;
+      type Consumer_Access is access Consumer_Task;
+      type Producer_Array is array (Positive range <>) of Producer_Access;
+      type Consumer_Array is array (Positive range <>) of Consumer_Access;
+      Producers : Producer_Array (1 .. Producer_Count);
+      Consumers : Consumer_Array (1 .. Consumer_Count);
+   begin
+      MPMC.Initialize
+        (Producer_Views (1), Region_A, MPMC_Location, 1_024, 8);
+      for Index in 2 .. Producer_Count loop
+         MPMC.Attach
+           (Producer_Views (Index), Region_A, MPMC_Location, 1_024, 8);
+      end loop;
+      for Index in Consumer_Views'Range loop
+         MPMC.Attach
+           (Consumer_Views (Index), Region_B, MPMC_Location, 1_024, 8);
+      end loop;
+      for Index in Producers'Range loop
+         Producers (Index) := new Producer_Task
+           (Index, Producer_Views (Index)'Access);
+      end loop;
+      for Index in Consumers'Range loop
+         Consumers (Index) := new Consumer_Task
+           (Consumer_Views (Index)'Access);
+      end loop;
+      select
+         Results.Await_Tasks;
+      or
+         delay 20.0;
+         for Worker of Producers loop
+            abort Worker.all;
+         end loop;
+         for Worker of Consumers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with "MPMC native-task test timed out";
+      end select;
+      Assert (Results.Passed, "MPMC duplicate/loss test failed");
+      MPMC.Destroy (Producer_Views (1));
+      for Index in 2 .. Producer_Count loop
+         MPMC.Detach (Producer_Views (Index));
+      end loop;
+      for Index in Consumer_Views'Range loop
+         MPMC.Detach (Consumer_Views (Index));
+      end loop;
+   end Run_MPMC;
+
+   procedure Run_Externally_Synchronized_Vector is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 5_000;
+      Total        : constant Positive := Worker_Count * Per_Worker;
+      type View_Array is array (Positive range <>) of aliased Vectors.View;
+      Views : View_Array (1 .. Worker_Count);
+      type View_Access is access all Vectors.View;
+      Guard : Mutex;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive; Vector : not null View_Access)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Appended : Boolean;
+         Owns_Lock : Boolean := False;
+         Value : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Value := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            Guard.Acquire;
+            Owns_Lock := True;
+            Vectors.Try_Append (Vector.all, Encode (Value), Appended);
+            Guard.Release;
+            Owns_Lock := False;
+            if not Appended then
+               raise Program_Error with "locked vector append failed";
+            end if;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others =>
+            if Owns_Lock then
+               Guard.Release;
+            end if;
+            Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+      Seen : Seen_Array (1 .. Total) := (others => False);
+      Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Value : Interfaces.Unsigned_64;
+   begin
+      Vectors.Initialize
+        (Views (1), Region_A, Vector_Location, Total, 8);
+      for Index in 2 .. Worker_Count loop
+         if Index mod 2 = 0 then
+            Vectors.Attach
+              (Views (Index), Region_B, Vector_Location, Total, 8);
+         else
+            Vectors.Attach
+              (Views (Index), Region_A, Vector_Location, Total, 8);
+         end if;
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task
+           (Index, Views (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 15.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with
+           "externally synchronized vector test timed out";
+      end select;
+      Assert (Finished.Passed, "externally synchronized vector tasks failed");
+      Assert (Vectors.Length (Views (1)) = Total,
+              "externally synchronized vector lost elements");
+      for Index in 1 .. Total loop
+         Vectors.Read (Views (1), Index, Data);
+         Value := Decode (Data);
+         Assert
+           (Value in 1 .. Interfaces.Unsigned_64 (Total)
+            and then not Seen (Positive (Value)),
+            "externally synchronized vector duplicated/corrupted an element");
+         Seen (Positive (Value)) := True;
+      end loop;
+      Vectors.Destroy (Views (1));
+      for Index in 2 .. Worker_Count loop
+         Vectors.Detach (Views (Index));
+      end loop;
+   end Run_Externally_Synchronized_Vector;
+
+begin
+   Assert
+     (Mapping_Create
+        (Path, Mapping_Length, Base_A'Access, Base_B'Access, FD'Access) = 0,
+      "failed to map concurrency backing file twice");
+   Assert (Base_A /= Base_B, "concurrency mappings share one virtual base");
+   Regions.Attach (Region_A, Base_A, DS.Byte_Count (Mapping_Length));
+   Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
+   Run_SPSC;
+   Run_MPMC;
+   Run_Externally_Synchronized_Vector;
+   Regions.Detach (Region_A);
+   Regions.Detach (Region_B);
+   Assert (Unmap (Base_A, Mapping_Length) = 0, "failed to unmap view A");
+   Base_A := System.Null_Address;
+   Assert (Unmap (Base_B, Mapping_Length) = 0, "failed to unmap view B");
+   Base_B := System.Null_Address;
+   Assert (Close_Mapping (Path, FD) = 0, "failed to close concurrency map");
+   FD := -1;
+   Ada.Text_IO.Put_Line
+     ("data structures concurrency passed: SPSC="
+      & SPSC_Iterations'Image & " MPMC=" & Total_MPMC'Image);
+exception
+   when others =>
+      Cleanup;
+      raise;
+end Data_Structures_Concurrency_Smoke;

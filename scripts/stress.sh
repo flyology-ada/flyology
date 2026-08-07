@@ -50,6 +50,13 @@ FLYOLOGY_TEST_FAULTS=0 "$project_root/scripts/prepare-rts.sh" >/dev/null
 run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f -P tests/runtime_smoke.gpr stress_randomized.adb
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f -P tests/runtime_smoke.gpr data_structures_concurrency_smoke.adb
+
+printf '%s\n' "stress case=relocatable-rings"
+run_timed "$case_timeout" \
+  "$project_root/tests/bin/data_structures_concurrency_smoke" 1000000 100000
 
 for seed in $seeds; do
   printf '%s\n' "stress seed=$seed"

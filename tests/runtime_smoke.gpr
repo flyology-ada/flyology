@@ -64,6 +64,8 @@ project Runtime_Smoke is
       "context_abi_matrix.adb",
       "create_finalize_race_smoke.adb",
       "datagram_io_smoke.adb",
+      "data_structures_concurrency_smoke.adb",
+      "data_structures_smoke.adb",
       "descriptor_ownership_smoke.adb",
       "dns_smoke.adb",
       "dns_parser_smoke.adb",

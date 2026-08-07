@@ -274,6 +274,8 @@ connection_state_model
 connection_tls_upgrade_smoke
 concurrency_primitives_smoke
 context_abi_matrix
+data_structures_concurrency_smoke
+data_structures_smoke
 datagram_io_smoke
 descriptor_ownership_smoke
 dns_smoke

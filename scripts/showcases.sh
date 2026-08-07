@@ -67,3 +67,6 @@ printf '\n== dormant_stack_pressure ==\n'
 
 printf '\n== file_transfer_benchmark ==\n'
 "$project_root/showcases/run_file_transfer_benchmark.sh"
+
+printf '\n== data_structures_benchmark ==\n'
+"$project_root/showcases/run_data_structures_benchmark.sh" 10000 3

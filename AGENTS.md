@@ -122,6 +122,28 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   every buffer and channel tied to it, and mutation remains exclusive rather
   than reference-counted or atomically shared.
 
+## Relocatable data-structure invariants
+
+- `Flyology.Data_Structures` stored layouts contain no native address or Ada
+  access value. Persist relationships only as fixed-width offsets, indices,
+  generations, counters, hashes, and byte payloads; native bases belong only
+  to process-local views.
+- Check null sentinels, overflow, alignment, bounds, and complete object extent
+  before every native address conversion. Magic, version, schema, geometry,
+  initialization state, and mutable indices fail closed on attachment or use.
+- Byte strings, vectors, slab pools, and hash maps require application-level
+  exclusion across every view. SPSC permits exactly one producer and one
+  consumer. MPMC uses per-slot sequence counters and bounded CAS attempts.
+- Leaf magic/version/schema checks are mandatory. The optional `Envelopes`
+  generic adds a stable application-selected 64-bit signature and 64-bit
+  contract version without weakening a nested leaf's structural checks.
+- Ring operations are nonblocking and allocate nothing. Keep hot producer and
+  consumer counters on separate 64-byte control lines and use power-of-two
+  capacities for masked slot selection.
+- These packages own no mapping and provide no peer discovery, descriptor
+  exchange, wake channel, permissions, flushing, or process-death recovery.
+  Detach every local structure view before releasing its backing mapping.
+
 ## Runtime and ABI boundaries
 
 - Integration is below GNARL at `System.Task_Primitives.Operations`. Keep the

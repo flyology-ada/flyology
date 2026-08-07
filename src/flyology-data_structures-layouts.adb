@@ -1,0 +1,235 @@
+with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Storage;
+
+package body Flyology.Data_Structures.Layouts is
+   package Atomic renames Flyology.Data_Structures.Atomics;
+   package Bytes renames Flyology.Data_Structures.Storage;
+
+   use type Interfaces.Unsigned_32;
+   use type Interfaces.Unsigned_64;
+
+   Initializing : constant Interfaces.Unsigned_32 := 1;
+   Ready        : constant Interfaces.Unsigned_32 := 2;
+   Destroyed    : constant Interfaces.Unsigned_32 := 3;
+
+   State_Offset      : constant Byte_Count := 0;
+   Version_Offset    : constant Byte_Count := 4;
+   Magic_Offset      : constant Byte_Count := 8;
+   Schema_Offset     : constant Byte_Count := 16;
+   Extent_Offset     : constant Byte_Count := 24;
+   Capacity_Offset   : constant Byte_Count := 32;
+   Element_Offset    : constant Byte_Count := 36;
+   Alignment_Offset  : constant Byte_Count := 40;
+   Auxiliary_Offset  : constant Byte_Count := 44;
+   Word_1_Offset     : constant Byte_Count := 48;
+   Word_2_Offset     : constant Byte_Count := 56;
+
+   function Checked_Add (Left, Right : Byte_Count) return Byte_Count is
+   begin
+      if Right > Byte_Count'Last - Left then
+         raise Constraint_Error with "relocatable layout addition overflow";
+      end if;
+      return Left + Right;
+   end Checked_Add;
+
+   function Checked_Multiply (Left, Right : Byte_Count) return Byte_Count is
+   begin
+      if Left /= 0 and then Right > Byte_Count'Last / Left then
+         raise Constraint_Error with
+           "relocatable layout multiplication overflow";
+      end if;
+      return Left * Right;
+   end Checked_Multiply;
+
+   function Align_Up
+     (Value, Alignment : Byte_Count) return Byte_Count
+   is
+      Remainder : Byte_Count;
+   begin
+      if Alignment = 0
+        or else (Alignment and (Alignment - 1)) /= 0
+      then
+         raise Constraint_Error with "layout alignment is not a power of two";
+      end if;
+      Remainder := Value mod Alignment;
+      return
+        (if Remainder = 0 then Value
+         else Checked_Add (Value, Alignment - Remainder));
+   end Align_Up;
+
+   function Capture
+     (Region    : Region_View;
+      Location  : Region_Offset;
+      Extent    : Byte_Count;
+      Alignment : Byte_Count) return Local_View
+   is
+      Address : System.Address;
+      pragma Unreferenced (Address);
+   begin
+      if Location = Null_Offset then
+         raise Region_Error with "null structure location";
+      end if;
+      Address := Checked_Address
+        (Region.Base, Region.Length_Value, Region.Attached,
+         Location, Extent, Alignment);
+      return
+        (Base          => Region.Base,
+         Region_Length => Region.Length_Value,
+         Location      => Location,
+         Extent        => Extent,
+         Attached      => True);
+   end Capture;
+
+   function Address_At
+     (Item      : Local_View;
+      Relative  : Byte_Count;
+      Extent    : Byte_Count;
+      Alignment : Byte_Count := 1) return System.Address
+   is
+      Absolute : Byte_Count;
+   begin
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      elsif Relative > Item.Extent
+        or else Extent > Item.Extent - Relative
+      then
+         raise Layout_Error with "structure-relative extent is corrupt";
+      end if;
+      Absolute := Checked_Add (Byte_Count (Item.Location), Relative);
+      return Checked_Address
+        (Item.Base, Item.Region_Length, Item.Attached,
+         Region_Offset (Absolute), Extent, Alignment);
+   end Address_At;
+
+   procedure Write_Header
+     (Item     : Local_View;
+      Identity : Layout_Identity;
+      Extent   : Byte_Count;
+      Header   : Header_Values) is
+   begin
+      Bytes.Write_U32
+        (Address_At (Item, Version_Offset, 4, 4), Identity.Version);
+      Bytes.Write_U64
+        (Address_At (Item, Magic_Offset, 8, 8), Identity.Magic);
+      Bytes.Write_U64
+        (Address_At (Item, Schema_Offset, 8, 8), Identity.Schema);
+      Bytes.Write_U64
+        (Address_At (Item, Extent_Offset, 8, 8),
+         Interfaces.Unsigned_64 (Extent));
+      Bytes.Write_U32
+        (Address_At (Item, Capacity_Offset, 4, 4), Header.Capacity);
+      Bytes.Write_U32
+        (Address_At (Item, Element_Offset, 4, 4), Header.Element_Size);
+      Bytes.Write_U32
+        (Address_At (Item, Alignment_Offset, 4, 4), Header.Alignment);
+      Bytes.Write_U32
+        (Address_At (Item, Auxiliary_Offset, 4, 4), Header.Auxiliary);
+      Bytes.Write_U64
+        (Address_At (Item, Word_1_Offset, 8, 8), Header.Word_1);
+      Bytes.Write_U64
+        (Address_At (Item, Word_2_Offset, 8, 8), Header.Word_2);
+   end Write_Header;
+
+   procedure Begin_Initialize
+     (Item           : out Local_View;
+      Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Extent         : Byte_Count;
+      Header         : Header_Values;
+      Base_Alignment : Byte_Count) is
+   begin
+      if not Atomic.Supported then
+         raise Program_Error with
+           "process-capable 32/64-bit atomics are unavailable";
+      elsif Extent < Header_Size then
+         raise Constraint_Error with "structure extent is smaller than header";
+      end if;
+      Item := Capture (Region, Location, Extent, Base_Alignment);
+      Atomic.Store_Release_U32
+        (Address_At (Item, State_Offset, 4, 4), Initializing);
+      Write_Header (Item, Identity, Extent, Header);
+   end Begin_Initialize;
+
+   procedure Publish (Item : Local_View) is
+   begin
+      Atomic.Store_Release_U32
+        (Address_At (Item, State_Offset, 4, 4), Ready);
+   end Publish;
+
+   procedure Attach
+     (Item           : out Local_View;
+      Header         : out Header_Values;
+      Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Base_Alignment : Byte_Count)
+   is
+      Initial : constant Local_View :=
+        Capture (Region, Location, Header_Size, Base_Alignment);
+      Stored_Extent : Byte_Count;
+   begin
+      if not Atomic.Supported then
+         raise Program_Error with
+           "process-capable 32/64-bit atomics are unavailable";
+      elsif Atomic.Load_Acquire_U32
+        (Address_At (Initial, State_Offset, 4, 4)) /= Ready
+      then
+         raise Layout_Error with "structure initialization is incomplete";
+      elsif Bytes.Read_U32
+        (Address_At (Initial, Version_Offset, 4, 4)) /= Identity.Version
+      then
+         raise Layout_Error with "unsupported structure layout version";
+      elsif Bytes.Read_U64
+        (Address_At (Initial, Magic_Offset, 8, 8)) /= Identity.Magic
+      then
+         raise Layout_Error with "structure magic does not match";
+      elsif Bytes.Read_U64
+        (Address_At (Initial, Schema_Offset, 8, 8)) /= Identity.Schema
+      then
+         raise Layout_Error with "structure schema does not match";
+      end if;
+
+      Stored_Extent := Byte_Count
+        (Bytes.Read_U64 (Address_At (Initial, Extent_Offset, 8, 8)));
+      Item := Capture (Region, Location, Stored_Extent, Base_Alignment);
+      Header :=
+        (Capacity => Bytes.Read_U32
+           (Address_At (Item, Capacity_Offset, 4, 4)),
+         Element_Size => Bytes.Read_U32
+           (Address_At (Item, Element_Offset, 4, 4)),
+         Alignment => Bytes.Read_U32
+           (Address_At (Item, Alignment_Offset, 4, 4)),
+         Auxiliary => Bytes.Read_U32
+           (Address_At (Item, Auxiliary_Offset, 4, 4)),
+         Word_1 => Bytes.Read_U64
+           (Address_At (Item, Word_1_Offset, 8, 8)),
+         Word_2 => Bytes.Read_U64
+           (Address_At (Item, Word_2_Offset, 8, 8)));
+   end Attach;
+
+   procedure Require_Ready (Item : Local_View) is
+   begin
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      elsif Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4)) /= Ready
+      then
+         raise Layout_Error with "structure is not active";
+      end if;
+   end Require_Ready;
+
+   procedure Mark_Destroyed (Item : in out Local_View) is
+   begin
+      Require_Ready (Item);
+      Atomic.Store_Release_U32
+        (Address_At (Item, State_Offset, 4, 4), Destroyed);
+      Detach (Item);
+   end Mark_Destroyed;
+
+   procedure Detach (Item : in out Local_View) is
+   begin
+      Item := (others => <>);
+   end Detach;
+
+end Flyology.Data_Structures.Layouts;

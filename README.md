@@ -43,8 +43,9 @@ based on the surviving correspondence.
   - [GNARL integration boundary](#gnarl-integration-boundary)
   - [Context switching is not event polling](#context-switching-is-not-event-polling)
 - [Concurrency primitives](#concurrency-primitives)
-  - [Ownership-transfer buffers](#ownership-transfer-buffers)
   - [Structured supervision](#structured-supervision)
+  - [Relocatable data structures](#relocatable-data-structures)
+  - [Ownership-transfer buffers](#ownership-transfer-buffers)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
   - [TLS](#tls)
@@ -710,6 +711,61 @@ workers can execute concurrently.
 task-only coordination. Descriptor-backed wakeup remains available through
 `Wait_Source` when cancellation must participate in a socket or file wait; a
 task-only request does not allocate an OS descriptor.
+
+### Relocatable data structures
+
+`Flyology.Data_Structures` provides address-independent stored layouts for
+caller-owned contiguous regions. `Regions.View` records a native base only in
+process-local state; stored relationships use fixed-width offsets, indices,
+generations, counters, hashes, and payload bytes. Every layout begins with
+magic, version, schema, extent, and configuration fields. Attachment validates
+the complete extent and fails on incompatible, incomplete, truncated, or
+corrupt metadata. The packages create no mapping and package elaboration starts
+no task, scheduler, poller, or event loop.
+
+The first family is byte-oriented so an arbitrary Ada private type cannot hide
+an access value in persistent storage:
+
+| Package | Stored value | Synchronization |
+| --- | --- | --- |
+| `Regions` | No stored object; checked local view and offsets | Application exclusion for view and backing lifetime |
+| `Handles` | 32-bit slot plus 32-bit generation | Validation belongs to the receiving structure |
+| `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
+| `Slab_Pools` | Fixed-size payload slots and generation-stamped free list | Application exclusion across all views |
+| `Byte_Strings` | Bounded variable-length byte sequence | Application exclusion across all views |
+| `Vectors` | Bounded vector of fixed-size byte elements | Application exclusion across all views |
+| `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer, using acquire/release publication |
+| `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers, using bounded CAS attempts |
+| `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Application exclusion across all views |
+
+SPSC and MPMC counters occupy separate 64-byte control lines, and both use
+power-of-two capacities for masked slot selection. MPMC reports bounded
+contention rather than waiting. The other structures cache validated geometry
+in each local view and use fixed-stride contiguous storage with no allocation
+after initialization. None of these operations performs file opening,
+mapping, flushing, peer discovery, descriptor exchange, wake-up signaling, or
+process-lifecycle recovery. A later IPC layer can supply those policies around
+the same layouts.
+
+Each leaf always validates its own 64-bit magic, layout version, and 64-bit
+schema. A consumer that also needs an application-level compatibility boundary
+can instantiate `Envelopes` with the leaf's exported `Identity`, a stable
+nonzero 64-bit contract signature, and a 64-bit contract version, then
+initialize the leaf at the envelope's validated content location. The envelope
+persists and validates that nested magic/version/schema without duplicating
+their numeric literals at the call site. Direct leaf use deliberately opts out
+of this extra boundary, not out of the leaf's structural validation.
+Applications should assign signatures independently and keep them stable; the
+value reduces accidental misidentification but is not authentication or a
+cryptographic integrity check.
+
+Initialization requires exclusive ownership of the target extent. Attachment
+to the externally synchronized structures requires a quiescent layout. Every
+structure view must be detached before its local mapping disappears;
+`Destroy` requires the synchronization stated by the leaf package and marks
+the stored header unusable for every other view. The layouts use the host byte
+order and are currently tested on Flyology's 64-bit Darwin and Linux targets;
+magic/version/schema validation is not a claim of cross-endian portability.
 
 ### Ownership-transfer buffers
 
@@ -2546,6 +2602,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/runtime_observability
 ./showcases/bin/stall_watchdog
 ./showcases/run_synchronization_benchmark.sh 20000 5
+./showcases/run_data_structures_benchmark.sh 50000 5
 ./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
@@ -2565,6 +2622,12 @@ The examples demonstrate:
 - uncontended and shared protected-procedure, protected-entry, and rendezvous
   costs across one lightweight execution group, two lightweight groups, native
   tasks, and mixed lanes;
+- relocatable vector and hash-map operations beside
+  `Ada.Containers.Vectors` and `Ada.Containers.Hashed_Maps`, byte-string
+  operations beside `Ada.Strings.Unbounded`, and direct slab/ring timings with
+  a standard bounded synchronized queue as a differently synchronized queue
+  reference; the runner reports raw medians and does not promise relative
+  performance;
 - fan-out timers and protected aggregation;
 - uncooperative CPU monopolization versus time-budgeted cooperative checkpoints
   on the same event loop;
