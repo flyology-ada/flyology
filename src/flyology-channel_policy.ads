@@ -71,6 +71,43 @@ is
    function Count_After_Receive (Count : Positive) return Natural
    with Post => Count_After_Receive'Result = Count - 1;
 
+   type Enqueue_Transition is record
+      Filled_Position : Positive;
+      Next_Tail       : Positive;
+      Next_Count      : Positive;
+   end record;
+
+   --  Bind the slot filled by one enqueue to the old tail and carry the
+   --  corresponding tail and count updates as one transition.
+   function Next_Enqueue
+     (Tail     : Positive;
+      Count    : Natural;
+      Capacity : Positive) return Enqueue_Transition
+   with Global => null,
+        Pre    => Tail <= Capacity and then Count < Capacity,
+        Post   =>
+          Next_Enqueue'Result.Filled_Position = Tail
+          and then Next_Enqueue'Result.Next_Tail = Advance (Tail, Capacity)
+          and then Next_Enqueue'Result.Next_Count =
+            Count_After_Send (Count, Capacity);
+
+   --  Commit the scalar portion of an enqueue and return the old-tail slot
+   --  that the caller must fill with the transferred value.
+   procedure Apply_Enqueue
+     (Tail            : in out Positive;
+      Count           : in out Natural;
+      Capacity        : Positive;
+      Filled_Position : out Positive)
+   with Global => null,
+        Pre    => Tail <= Capacity and then Count < Capacity,
+        Post   =>
+          Filled_Position =
+            Next_Enqueue (Tail'Old, Count'Old, Capacity).Filled_Position
+          and then Tail =
+            Next_Enqueue (Tail'Old, Count'Old, Capacity).Next_Tail
+          and then Count =
+            Next_Enqueue (Tail'Old, Count'Old, Capacity).Next_Count;
+
    type Dequeue_Transition is record
       Vacated_Position : Positive;
       Next_Head        : Positive;

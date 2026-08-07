@@ -20,13 +20,13 @@ package body Flyology.Buffers.Channels is
         (Value    : in out Unique_Buffer;
          Metadata : Transfer_Metadata)
       is
-         Token : Buffer_Token;
+         Token    : Buffer_Token;
+         Position : Positive;
       begin
          Detach (Value, Token);
          Token.Channel_Metadata := To_Stored_Metadata (Metadata);
-         Values (Tail) := Token;
-         Tail := Policy.Advance (Tail, Capacity);
-         Count := Policy.Count_After_Send (Count, Capacity);
+         Policy.Apply_Enqueue (Tail, Count, Capacity, Position);
+         Values (Position) := Token;
       end Enqueue;
 
       --  Hand the oldest queued token to Target. Attach commits the transfer
@@ -37,14 +37,14 @@ package body Flyology.Buffers.Channels is
         (Target   : in out Unique_Buffer;
          Metadata : out Transfer_Metadata)
       is
-         Token : Buffer_Token := Values (Head);
+         Token    : Buffer_Token := Values (Head);
+         Position : Positive;
       begin
          Metadata := From_Stored_Metadata (Token.Channel_Metadata);
          Token.Channel_Metadata := 0;
          Attach (Target, Token);
-         Values (Head) := No_Token;
-         Head := Policy.Advance (Head, Capacity);
-         Count := Policy.Count_After_Receive (Count);
+         Policy.Apply_Dequeue (Head, Count, Capacity, Position);
+         Values (Position) := No_Token;
       end Deliver;
 
       entry Send
@@ -122,14 +122,15 @@ package body Flyology.Buffers.Channels is
 
       procedure Take_Undelivered
         (Token  : out Buffer_Token;
-         Result : out Try_Receive_Result) is
+         Result : out Try_Receive_Result)
+      is
+         Position : Positive;
       begin
          case Policy.Classify_Receive (Stopped, Count) is
             when Policy.Accept_Receive =>
                Token := Values (Head);
-               Values (Head) := No_Token;
-               Head := Policy.Advance (Head, Capacity);
-               Count := Policy.Count_After_Receive (Count);
+               Policy.Apply_Dequeue (Head, Count, Capacity, Position);
+               Values (Position) := No_Token;
                Result := Item_Received;
             when Policy.Wait_To_Receive =>
                Token := No_Token;

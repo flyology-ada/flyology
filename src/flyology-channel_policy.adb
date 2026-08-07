@@ -46,6 +46,29 @@ is
    function Count_After_Receive (Count : Positive) return Natural is
      (Count - 1);
 
+   function Next_Enqueue
+     (Tail     : Positive;
+      Count    : Natural;
+      Capacity : Positive) return Enqueue_Transition
+   is
+     (Filled_Position => Tail,
+      Next_Tail       => Advance (Tail, Capacity),
+      Next_Count      => Count_After_Send (Count, Capacity));
+
+   procedure Apply_Enqueue
+     (Tail            : in out Positive;
+      Count           : in out Natural;
+      Capacity        : Positive;
+      Filled_Position : out Positive)
+   is
+      Transition : constant Enqueue_Transition :=
+        Next_Enqueue (Tail, Count, Capacity);
+   begin
+      Filled_Position := Transition.Filled_Position;
+      Tail := Transition.Next_Tail;
+      Count := Transition.Next_Count;
+   end Apply_Enqueue;
+
    function Next_Dequeue
      (Head     : Positive;
       Count    : Positive;
