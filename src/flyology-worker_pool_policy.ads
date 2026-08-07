@@ -12,6 +12,12 @@ is
    function Begin_Allowed (Begun : Boolean) return Boolean
    with Post => Begin_Allowed'Result = not Begun;
 
+   --  Terminalize a run only on behalf of the caller that claimed it. A
+   --  refused caller, or one abandoned before its claim completed, must leave
+   --  the claiming caller's pool state alone.
+   function Teardown_Allowed (Claimed : Boolean) return Boolean
+   with Post => Teardown_Allowed'Result = Claimed;
+
    --  Admit callback execution only while a worker slot is available.
    function Job_Start_Allowed
      (Running  : Boolean;
@@ -70,6 +76,14 @@ is
       Expected     : Natural) return Boolean
    with Post => All_Workers_Done'Result =
      (Expected > 0 and then Workers_Done = Expected);
+
+   --  Terminalization zeroes Expected, which closes the join barrier for
+   --  every completion count. A teardown run for an unclaimed caller would
+   --  therefore strand the claiming caller in Await_All_Workers, which is why
+   --  Teardown_Allowed admits only the claimer.
+   procedure Teardown_Closes_Join_Barrier (Workers_Done : Natural)
+   with Ghost,
+        Post => not All_Workers_Done (Workers_Done, 0);
 
    --  Permit terminalization only after callbacks and workers drain.
    function Finish_Allowed

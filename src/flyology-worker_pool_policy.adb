@@ -3,6 +3,14 @@ package body Flyology.Worker_Pool_Policy
 is
    function Begin_Allowed (Begun : Boolean) return Boolean is (not Begun);
 
+   function Teardown_Allowed (Claimed : Boolean) return Boolean is (Claimed);
+
+   procedure Teardown_Closes_Join_Barrier (Workers_Done : Natural) is
+      pragma Unreferenced (Workers_Done);
+   begin
+      null;
+   end Teardown_Closes_Join_Barrier;
+
    function Job_Start_Allowed
      (Running  : Boolean;
       Active   : Natural;

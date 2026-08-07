@@ -257,7 +257,7 @@ package body Flyology.Worker_Pools is
       overriding procedure Finalize (Guard : in out Run_Guard) is
          pragma Unreferenced (Guard);
       begin
-         if not Cleanup_Armed then
+         if not Policy.Teardown_Allowed (Cleanup_Armed) then
             return;
          end if;
 
