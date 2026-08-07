@@ -47,6 +47,7 @@ based on the surviving correspondence.
   - [Relocatable data structures](#relocatable-data-structures)
   - [Shared-memory segments](#shared-memory-segments)
   - [Ownership-transfer buffers](#ownership-transfer-buffers)
+- [Cache-line-aware storage](#cache-line-aware-storage)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
   - [TLS](#tls)
@@ -1290,6 +1291,32 @@ The pool free list is protected once per acquisition and release. Payload
 access and channel transit do not increment a reference count. Immutable
 fan-out and interprocess shared arenas remain separate problems; this primitive
 deliberately implements only single-owner transfer.
+
+## Cache-line-aware storage
+
+This repository also contains the standalone [`flyology_cachelines`](flyology_cachelines)
+Alire crate. Its Ada root package is `Flyology_Cachelines`; it has no dependency
+on the Flyology runtime and can be used by ordinary Ada programs and related
+Flyology packages.
+
+`Flyology_Cachelines.Padded` gives each value its own destructive-interference
+region. `Padded_Groups` places a caller-selected number of same-owner values in
+one region, while `Fitted_Groups` selects the largest group that fits. Both
+group packages offer flat `Grouped_Array` indexing and iteration without
+discarding the physical separation between groups. The root package also
+reports the host cache-line and L1 data-cache sizes when those queries are
+available.
+
+These types control representation only: they do not make access atomic or
+synchronized. Assign independently written values to separate regions, and
+keep the usual atomic, protected, or ownership discipline for access. The
+compile-time interference size is deliberately a spacing policy rather than a
+promise to equal the physical cache-line size.
+
+The crate is currently available on Linux and macOS. Windows support is not
+part of this adoption. See the [cachelines guide](https://flyology.org/guide/cachelines/)
+and the crate's [README](flyology_cachelines/README.md) for selection rules and
+examples.
 
 ## Task-aware I/O
 
@@ -2605,6 +2632,8 @@ rather than hidden behind a claim of universal portability.
   task-primitives integration and its tested-release manifest.
 - [`src`](src): public task-aware I/O packages and the optional dynamic TLS
   provider bridge.
+- [`flyology_cachelines`](flyology_cachelines): standalone cache-line-aware
+  storage and host cache-query crate, with its own tests and benchmarks.
 - [`flyology_http`](https://github.com/flyology-ada/flyology-http): the separate
   HTTP library, tests, documentation, maintained showcases, and comparison
   fixtures built on Flyology.
@@ -2645,6 +2674,14 @@ alr build
 The organization index is a development channel separate from the community
 index. Remove it with `alr index --del flyology` when Flyology is available
 from the community index.
+
+Applications that need only cache-line-aware storage can add the related crate
+without preparing a Flyology RTS:
+
+```sh
+alr with flyology_cachelines
+alr build
+```
 
 Alire makes `flyology.gpr` available to the application and exports
 `FLYOLOGY_ROOT` as the dependency root. Every `alr build` runs Flyology's
@@ -2761,14 +2798,16 @@ Generate the public API reference with:
 
 The [documentation script](scripts/docs.sh) runs GNATdoc with
 undocumented-entity warnings enabled for Flyology Runtime and the standalone
-`flyology_debug` and `flyology_bench` crates. It writes the ignored HTML output
-to `docs/api/index.html`, `docs/api/flyology_debug/index.html`, and
-`docs/api/flyology_bench/index.html`. It also builds
-client-side name indexes for compilation units, declarations, enumeration
-literals, record fields, formal parameters, parameters, and exceptions. Search
-is case-insensitive and tolerates nearby misspellings while ranking exact and
-prefix matches first. Build the complete GitHub Pages artifact, including the
-guide, architecture notes, and all generated API references, with:
+`flyology_debug`, `flyology_bench`, and `flyology_cachelines` crates. It writes
+the ignored HTML output to `docs/api/index.html`,
+`docs/api/flyology_debug/index.html`, `docs/api/flyology_bench/index.html`, and
+`docs/api/flyology_cachelines/index.html`. It also builds client-side name
+indexes for the published API references, covering compilation units,
+declarations, enumeration literals, record fields, formal parameters,
+parameters, and exceptions. Search is case-insensitive and tolerates nearby
+misspellings while ranking exact and prefix matches first. Build the complete
+GitHub Pages artifact, including the guide, architecture notes, and all
+published API references, with:
 
 ```sh
 ./scripts/build-site.sh
@@ -2824,6 +2863,10 @@ Run the complete verification suite with:
 ./scripts/prove.sh
 TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 ```
+
+The root test runner includes the standalone `flyology_cachelines` suite. Its
+focused test and documentation runners remain available under
+`flyology_cachelines/scripts/` for iteration on that crate alone.
 
 Run the bounded, reproducible concurrency and fault campaign with:
 

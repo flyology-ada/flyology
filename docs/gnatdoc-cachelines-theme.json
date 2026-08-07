@@ -1,0 +1,10 @@
+{
+  "pageTitle": "flyology_cachelines API reference",
+  "indexDescription": "Generated public API reference for flyology_cachelines.",
+  "indexTitle": "flyology_cachelines API reference · Flyology",
+  "canonicalUrl": "https://flyology.org/api/flyology_cachelines/",
+  "brandLabel": "flyology_cachelines API",
+  "navigationHtml": "<a href='../../'>Overview</a>\n        <a href='../../guide/cachelines/'>Cachelines guide</a>\n        <a href='../'>Runtime API</a>\n        <a href='https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines'>GitHub</a>",
+  "indexIntroduction": "Generated public contracts for cache spacing, padded values, ownership-aware groups, flat grouped arrays, and host cache queries.",
+  "footerNote": "Generated with GNATdoc. Public API only."
+}

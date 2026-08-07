@@ -15,8 +15,10 @@ Flyology uses the terms "lightweight task" and "native task." Lightweight schedu
 - [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, bounded multi-deadline, and wall-clock timer behavior, including complete due activation batches and backward clock changes.
 - [File-to-socket transfers](https://flyology.org/guide/file-transfers/): Positional regular-file transfer loops, buffer ownership, deadlines, cancellation, native sendfile, Linux lightweight SEND_ZC, fallbacks, and reproducible measurements.
 - [Benchmarking Ada](https://flyology.org/guide/benchmarking/): Adaptive batching, nanosecond-scale measurement semantics, balanced or sequential comparisons of two to sixteen implementations, externally controlled span recording, live terminal telemetry, collection budgets, and CSV or JSON output.
+- [Cache-line-aware storage](https://flyology.org/guide/cachelines/): Standalone padded values, ownership-aware groups, host cache queries, and the Linux/macOS support boundary.
 - [API reference](https://flyology.org/api/): Generated reference for Flyology's public Ada packages.
 - [flyology_bench API reference](https://flyology.org/api/flyology_bench/): Generated reference for the benchmark configuration, measurement, comparison, baseline, metadata, host-control, and reporting APIs.
+- [flyology_cachelines API reference](https://flyology.org/api/flyology_cachelines/): Generated reference for cache spacing, padded values, ownership-aware groups, grouped arrays, and host cache queries.
 
 ## Project sources
 
@@ -24,6 +26,7 @@ Flyology uses the terms "lightweight task" and "native task." Lightweight schedu
 - [Source repository](https://github.com/flyology-ada/flyology): Ada sources, runtime integration, tests, proof model, scripts, showcases, and website sources.
 - [Supported runtime patch matrix](https://raw.githubusercontent.com/flyology-ada/flyology/main/runtime/patches/README.md): Exact verified host, compiler, and GNAT runtime patch families.
 - [Alire crate manifest](https://raw.githubusercontent.com/flyology-ada/flyology/main/alire.toml): Package metadata and dependency constraints; these constraints are broader than the verified runtime matrix.
+- [Flyology Cachelines crate](https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines): Standalone `flyology_cachelines` crate, tests, benchmarks, and public API sources.
 
 ## Optional
 

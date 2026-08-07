@@ -326,6 +326,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 
 - `src/`: public Flyology packages and platform-neutral API policy.
 - `src/platform/{darwin,linux}/`: public-package platform bodies.
+- `flyology_cachelines/`: standalone `flyology_cachelines` Alire crate and
+  `Flyology_Cachelines` Ada packages for cache-line-aware storage. It does not
+  depend on the Flyology runtime and is currently available only on Linux and
+  macOS; do not claim or add Windows support without a separately scoped port.
 - `runtime/ada/`: scheduler, contexts, poller interfaces, and runtime policy.
 - `runtime/platform/{darwin,linux}/`: poller and Ada file-engine bodies.
 - `runtime/native/`: context-switch assembly and narrow C/OS ABI bridges.
@@ -403,7 +407,8 @@ Use the smallest relevant checks while iterating, then run the complete checks
 required by the changed boundary.
 
 - `./scripts/test.sh`: authoritative behavioral suite, both project defaults,
-  runtime preparation validation, and external-consumer test.
+  runtime preparation validation, the nested `flyology_cachelines` tests, and
+  external-consumer test.
 - `./scripts/stress.sh`: bounded deterministic concurrency and fault campaign.
 - `FLYOLOGY_LONG_SOAK=1 ./scripts/stress-soak.sh`: opt-in long campaign.
 - `./scripts/prove.sh`: authoritative SPARK proof run. All reported checks must
@@ -411,7 +416,12 @@ required by the changed boundary.
 - `./scripts/check-tla.sh`: bounded TLC checks for extracted concurrency state
   machines plus required counterexamples for deliberately broken variants.
 - `./scripts/docs.sh`: GNATdoc HTML generation. It must produce
-  `docs/api/index.html` with zero undocumented-entity warnings or errors.
+  `docs/api/index.html` and the nested cachelines API with zero
+  undocumented-entity warnings or errors.
+- `flyology_cachelines/scripts/test.sh`: focused standalone crate suite,
+  including native cache queries, representation checks, architecture-spec
+  consistency, and compile-fail spill checks.
+- `flyology_cachelines/scripts/docs.sh`: standalone cachelines GNATdoc build.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
   Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
   generated traces and reports remain outside version control.
@@ -488,6 +498,8 @@ required by the changed boundary.
 ## Licensing and commits
 
 - Original code, tests, scripts, proof, and artwork are dual MIT/Apache-2.0.
+- `flyology_cachelines/` is also dual MIT/Apache-2.0. Preserve its `NOTICE`
+  attribution for the spacing policy adapted from Crossbeam.
 - Files under `runtime/patches/` contain GNAT-derived context and are
   GPL-3.0-or-later WITH GCC-exception-3.1. Preserve the notice atop every patch
   and the carve-out in `runtime/patches/LICENSE`.

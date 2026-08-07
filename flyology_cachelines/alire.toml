@@ -1,0 +1,25 @@
+name = "flyology_cachelines"
+description = "Cache-line-aware storage and cache information for Ada"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+website = "https://flyology.org/guide/cachelines/"
+tags = ["ada", "cache", "concurrency", "performance", "systems"]
+project-files = ["flyology_cachelines.gpr"]
+
+[[depends-on]]
+gnat = ">=13 & <17"
+
+[available.'case(os)']
+'linux|macos' = true
+'...' = false
+
+[build-switches]
+"*" = { Compile_Checks = "warnings" }
+
+[[actions]]
+type = "test"
+command = ["./scripts/test.sh"]

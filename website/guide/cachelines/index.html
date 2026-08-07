@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Use flyology_cachelines to separate independently written Ada values, group values with one owner, and query host cache geometry on Linux and macOS.">
+    <meta name="theme-color" content="#17213d">
+    <title>Cache-line-aware storage · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/guide/cachelines/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/flyology_cachelines/">Cachelines API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Guide</a></li><li aria-current="page">Cache-line-aware storage</li></ol>
+          <h1>Use cache-line-aware storage.</h1>
+        </div>
+        <p class="doc-hero-copy"><a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html"><code>Flyology_Cachelines</code></a> separates independently written values and groups values that share one owner. The standalone crate does not use the Flyology runtime.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#add">Add the crate</a></li>
+            <li><a href="#spacing">Understand the spacing policy</a></li>
+            <li><a href="#choose">Choose a representation</a></li>
+            <li><a href="#padded">Isolate one value</a></li>
+            <li><a href="#groups">Group values with one owner</a></li>
+            <li><a href="#traversal">Traverse grouped arrays</a></li>
+            <li><a href="#queries">Query the host cache</a></li>
+            <li><a href="#synchronization">Synchronize access</a></li>
+            <li><a href="#verify">Test and measure</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p>False sharing occurs when different tasks update separate values in the same cache-coherence region. The values are logically independent, but each write invalidates the other core's cached copy.</p>
+          </aside>
+
+          <section id="add">
+            <span class="step-label">CACHE 01</span>
+            <h2>Add the standalone crate.</h2>
+            <p>Add the Flyology organization index before the community index. Then add <code>flyology_cachelines</code> as a normal Alire dependency.</p>
+            <figure class="code-panel">
+              <figcaption>Add flyology_cachelines</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology_cachelines
+alr build</code></pre>
+            </figure>
+            <p>The crate accepts GNAT 13 through 16. Its Alire manifest makes it available only on Linux and macOS.</p>
+            <p>The dependency does not prepare a custom runtime. It also does not depend on the <code>flyology</code> crate.</p>
+          </section>
+
+          <section id="spacing">
+            <span class="step-label">CACHE 02</span>
+            <h2>Understand the spacing policy.</h2>
+            <p>A destructive-interference region is the minimum spacing that the crate uses between independent writers. The <a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html#66c32ecd9b7a4601fd8c955f702fc1215ddb2957cb97bc52fd922e345a8d9368"><code>Destructive_Interference_Size</code></a> constant gives this compile-time value in storage elements.</p>
+            <p>The spacing policy is not a runtime cache query. It can exceed the physical cache-line size when adjacent-line prefetch can cause interference. For example, x86-64 uses 128-byte spacing and commonly reports a 64-byte physical line.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Do not use the detected physical line size to change a compiled object's alignment or representation. Runtime queries provide host information only.</p>
+            </aside>
+          </section>
+
+          <section id="choose">
+            <span class="step-label">CACHE 03</span>
+            <h2>Choose a representation from ownership.</h2>
+            <p>Identify which task or shard writes each value before you choose a type. Values with independent writers need separate regions. Values with one owner can share a group.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="../../api/flyology_cachelines/b2be8b8e3634d5a6d328a946d581ab03e5e82ae162dc18259ba221b58469f3dd.html"><code>Flyology_Cachelines.Padded</code></a></dt><dd>Use one complete region for each independently written value.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_cachelines/5539c86309fe1d062e35410cbf13db9c163b8bdf4f0837a636e1534023c85a06.html"><code>Flyology_Cachelines.Padded_Groups</code></a></dt><dd>Put an explicit number of same-owner values in each region.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_cachelines/753da6f5763de4c42b612bcef8c585174a004f9bbbfefc7c4e603da341cd7cf5.html"><code>Flyology_Cachelines.Fitted_Groups</code></a></dt><dd>Compute the largest same-owner group that fits in one region.</dd></div>
+              </dl>
+            </div>
+            <p>Padding consumes more storage and can reduce cache locality. Group values when one task processes them together. Do not group independent writers to reduce memory use.</p>
+          </section>
+
+          <section id="padded">
+            <span class="step-label">CACHE 04</span>
+            <h2>Isolate one value.</h2>
+            <p>Instantiate the <code>Flyology_Cachelines.Padded</code> generic with a definite element type. Its <a href="../../api/flyology_cachelines/b2be8b8e3634d5a6d328a946d581ab03e5e82ae162dc18259ba221b58469f3dd.html#19c95970c5a22f756a4b246600e99300c19af033d4d5822a4b0acb37582613b5"><code>Padded</code></a> type aligns the wrapped value and rounds the object size to complete regions. Adjacent elements in an array therefore start in separate regions.</p>
+            <figure class="code-panel">
+              <figcaption>Store two independently written counters</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology_Cachelines.Padded;
+
+procedure Counters is
+   type Counter is mod 2 ** 64 with Atomic;
+   package Isolated is new Flyology_Cachelines.Padded (Counter);
+
+   Values : array (1 .. 2) of Isolated.Padded :=
+     [others =&gt; Isolated.Create (0)];
+begin
+   Values (1).Value := Values (1).Value + 1;
+end Counters;</code></pre>
+            </figure>
+            <p>The example uses the <a href="../../api/flyology_cachelines/b2be8b8e3634d5a6d328a946d581ab03e5e82ae162dc18259ba221b58469f3dd.html#698e7ac7625cc8a118cb68a2f1a5fa4e0f81622c1c42e7bd1e882d735130e4d2"><code>Create</code></a> constructor to initialize each wrapper.</p>
+            <p><a href="../../api/flyology_cachelines/b2be8b8e3634d5a6d328a946d581ab03e5e82ae162dc18259ba221b58469f3dd.html#2a2a176ba7ea6a0b7ecb55c715b6dd00edcd3faf1c552991080b8ddd98a129af"><code>Padded_Size_In_Storage_Elements</code></a> reports the wrapper's object size. Use it when you calculate the storage cost of padding.</p>
+          </section>
+
+          <section id="groups">
+            <span class="step-label">CACHE 05</span>
+            <h2>Group values with one owner.</h2>
+            <p>Instantiate <code>Padded_Groups</code> when the application defines a fixed group length. The instantiation fails if the payload exceeds one region or the aligned group does not occupy exactly one region.</p>
+            <p>Instantiate <code>Fitted_Groups</code> when the group length must follow the compiled spacing and element representation. <a href="../../api/flyology_cachelines/753da6f5763de4c42b612bcef8c585174a004f9bbbfefc7c4e603da341cd7cf5.html#804103c757af56e156a8aebf3e9a6aafccd2f7a65180a5b9d32074283018ec21"><code>Elements_Per_Group</code></a> reports the selected length. The instantiation fails if one element cannot fit in a region.</p>
+            <figure class="code-panel">
+              <figcaption>Create automatically fitted worker groups</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology_Cachelines.Fitted_Groups;
+
+type Counter is mod 2 ** 64 with Atomic;
+package Worker_Counters is new
+  Flyology_Cachelines.Fitted_Groups (Counter);
+
+Values : aliased Worker_Counters.Grouped_Array :=
+  Worker_Counters.Create
+    (Element_Count =&gt; 10_003,
+     Initial_Value =&gt; 0);
+
+Values (Worker_Counters.Elements_Per_Group + 1) := 1;</code></pre>
+            </figure>
+            <p>The <a href="../../api/flyology_cachelines/753da6f5763de4c42b612bcef8c585174a004f9bbbfefc7c4e603da341cd7cf5.html#829d741c1beaf1f60d9cb58e236e714f859fe4440b98468b6d1a81f88123499b"><code>Create</code></a> overload constructs a <a href="../../api/flyology_cachelines/753da6f5763de4c42b612bcef8c585174a004f9bbbfefc7c4e603da341cd7cf5.html#df52f7dbdfbef0803917131e45ed2bb7c5f45a84493007ea9df3c5e62a188d20"><code>Grouped_Array</code></a> with enough physical groups for <code>Element_Count</code>. It initializes every logical element with <code>Initial_Value</code>.</p>
+            <p>Each physical group can contain values that share cache lines. Assign one owner to each group, or synchronize all access within that group.</p>
+          </section>
+
+          <section id="traversal">
+            <span class="step-label">CACHE 06</span>
+            <h2>Traverse grouped arrays.</h2>
+            <p>Both group generics define a <code>Grouped_Array</code>. The type stores isolated physical groups and presents one flat logical sequence.</p>
+            <p>Flat indexing and standard Ada iteration skip unused elements in the final partial group. The physical group boundaries remain available through the <code>Groups</code> component.</p>
+            <p>Use standard iteration for constant or mutable traversal. The opt-in <a href="../../api/flyology_cachelines/753da6f5763de4c42b612bcef8c585174a004f9bbbfefc7c4e603da341cd7cf5.html#af903a17af01c0c0de49b885f7eda3f814bc52f66653a2ba6b1b693a21c8af04"><code>Fast_View</code></a> uses GNAT's implementation-defined <code>Iterable</code> aspect for mutable traversal.</p>
+            <p>A container used by <code>Fast_View</code> must be <code>aliased</code>. Keep the limited view local to the traversal because its access discriminant refers to that container. Creating the view performs no dynamic allocation and copies no elements.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>Use <code>Fast_View</code> only after a measurement shows that standard iteration is significant in the target loop. Use standard iteration for read-only traversal.</p>
+            </aside>
+          </section>
+
+          <section id="queries">
+            <span class="step-label">CACHE 07</span>
+            <h2>Query the host cache.</h2>
+            <p><a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html#aaa92f8bc58a8b0fa9c20f19fbcf4d7a6cb21e52db8dcee91fda62fca646b081"><code>Hardware_Cache_Line_Size</code></a>, <a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html#f89c311c469b43390baa01a61390b8ee2ea5f21c090c4b896eeb2883c99925e7"><code>L1_Data_Cache_Size</code></a>, and <a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html#cdc8d96e40f5d6d43362ba315ee1c1f94c84a0e771cc174daaa1142f7e4f389e"><code>L1_Data_Cache_Slots</code></a> report host information detected during package elaboration. Later calls reuse those results.</p>
+            <p>Each query returns a <a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html#011aa0ef3b6337f3c39dc03c5526bf39cccb050ee19118f8908bd2e6e10080ac"><code>Cache_Query_Result</code></a>. Check <code>Available</code> before you read <code>Value</code>. A failed or malformed host query does not return a guessed cache size.</p>
+            <figure class="code-panel">
+              <figcaption>Check a detected cache-line size</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Line : constant Flyology_Cachelines.Cache_Query_Result :=
+     Flyology_Cachelines.Hardware_Cache_Line_Size;
+begin
+   if Line.Available then
+      Ada.Text_IO.Put_Line (Line.Value'Image);
+   end if;
+end;</code></pre>
+            </figure>
+            <p>Use <a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html#b1f415849d8506deb3132f08cfff2761ede85bf45941cdee99592bd495927fdb"><code>Value_Or</code></a> only when the application has an explicit fallback policy. The fallback does not become a detected result.</p>
+          </section>
+
+          <section id="synchronization">
+            <span class="step-label">CACHE 08</span>
+            <h2>Synchronize access separately.</h2>
+            <p>Alignment and padding control storage placement only. They do not make an operation atomic, establish memory ordering, or protect a compound update.</p>
+            <p>Use atomic types, protected objects, or exclusive task ownership as required by the stored type and access pattern. Apply the same synchronization that an unpadded value would require.</p>
+          </section>
+
+          <section id="verify">
+            <span class="step-label">CACHE 09</span>
+            <h2>Test the crate and measure the layout.</h2>
+            <p>The focused test script checks native cache queries, representation, alignment, and the five architecture-specific public specifications. It also confirms that groups which exceed one region fail to compile.</p>
+            <figure class="code-panel">
+              <figcaption>Run cachelines verification</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./flyology_cachelines/scripts/test.sh
+./flyology_cachelines/scripts/docs.sh</code></pre>
+            </figure>
+            <p>The benchmark crate compares compact, padded, and grouped layouts. Run it on the intended compiler, hardware, task count, and access pattern. Do not treat one result as a general performance claim.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Windows is outside the current support boundary. The Alire manifest excludes it, and this repository does not claim a Windows cache-query implementation.</p>
+            </aside>
+            <p>Use the <a href="../../api/flyology_cachelines/">generated cachelines API reference</a> for exact declarations. The crate's <a href="https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines">README and source</a> contain the architecture table and benchmark definitions.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Cachelines is experimental. Test the intended ownership pattern and host.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../../api/flyology_cachelines/">Cachelines API</a><a href="../../architecture/">Architecture</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines">Source</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+name = "benchmarks"
+description = "Cache-alignment benchmarks for the flyology_cachelines crate"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["benchmark", "cache", "concurrency", "performance"]
+
+executables = ["benchmarks"]
+
+[[depends-on]]
+flyology_cachelines = "*"
+
+[[pins]]
+flyology_cachelines = { path='..' }

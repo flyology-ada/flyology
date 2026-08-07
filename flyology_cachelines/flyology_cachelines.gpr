@@ -1,0 +1,110 @@
+with "config/flyology_cachelines_config.gpr";
+project Flyology_Cachelines is
+
+   type Host_Arch_Kind is
+     ("x86_64", "aarch64", "arm64ec", "powerpc64",
+      "arm", "mips", "mips32r6", "mips64", "mips64r6", "sparc", "hexagon",
+      "m68k", "s390x", "x86", "wasm32", "wasm64", "riscv32", "riscv64",
+      "sparc64", "avr", "xtensa", "unknown");
+   Host_Arch : Host_Arch_Kind :=
+     external ("FLYOLOGY_CACHELINES_HOST_ARCH", Flyology_Cachelines_Config.Alire_Host_Arch);
+
+   Alignment_Directory := "src/alignment/64/";
+   case Host_Arch is
+      --  Intel Sandy Bridge and later spatially prefetch adjacent 64-byte
+      --  lines, so x86-64 uses 128 bytes to avoid destructive interference.
+      --  AArch64 big.LITTLE systems can have 128-byte lines on their larger
+      --  cores, and PowerPC64 has 128-byte cache lines.
+      when "x86_64" | "aarch64" | "arm64ec" | "powerpc64" =>
+         Alignment_Directory := "src/alignment/128/";
+
+      --  These architectures conventionally use 32-byte cache lines.
+      when "arm" | "mips" | "mips32r6" | "mips64" | "mips64r6"
+         | "sparc" | "hexagon" =>
+         Alignment_Directory := "src/alignment/32/";
+
+      --  Linux defines an L1 cache-line alignment of 16 bytes for m68k.
+      when "m68k" =>
+         Alignment_Directory := "src/alignment/16/";
+
+      --  Linux and Go both define a 256-byte cache-line size for s390x.
+      when "s390x" =>
+         Alignment_Directory := "src/alignment/256/";
+
+      --  x86, WebAssembly, RISC-V, and SPARC64 use 64 bytes.  Unknown
+      --  architectures conservatively receive the same common default.
+      when others =>
+         null;
+   end case;
+
+   type Host_OS_Kind is ("macos", "linux", "unsupported");
+   Host_OS : Host_OS_Kind :=
+     external ("FLYOLOGY_CACHELINES_HOST_OS", Flyology_Cachelines_Config.Alire_Host_OS);
+
+   Platform_Directory := "src/unsupported/";
+   Platform_Common_Directory := "src/platform_common/";
+   case Host_OS is
+      when "macos" =>
+         Platform_Directory := "src/macos/";
+      when "linux" =>
+         Platform_Common_Directory := "src/linux/common/";
+         case Host_Arch is
+            when "x86_64" =>
+               Platform_Directory := "src/linux/x86_64/";
+            when others =>
+               Platform_Directory := "src/linux/generic/";
+         end case;
+      when "unsupported" =>
+         null;
+   end case;
+
+   for Source_Dirs use
+     ("src/", "config/", Alignment_Directory, Platform_Directory,
+      Platform_Common_Directory);
+
+   type Documentation_Mode_Type is ("false", "true");
+   Documentation_Mode : Documentation_Mode_Type :=
+     external ("FLYOLOGY_CACHELINES_DOCUMENTATION", "false");
+   case Documentation_Mode is
+      when "false" =>
+         null;
+      when "true" =>
+         for Source_Files use
+           ("flyology_cachelines.ads",
+            "flyology_cachelines-padded.ads",
+            "flyology_cachelines-padded_groups.ads",
+            "flyology_cachelines-fitted_groups.ads");
+   end case;
+
+   for Library_Name use "flyology_cachelines";
+   for Library_Version use Project'Library_Name & ".so." & Flyology_Cachelines_Config.Crate_Version;
+
+   for Object_Dir use "obj/" & Flyology_Cachelines_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Library_Dir use "lib";
+
+   type Library_Type_Type is ("relocatable", "static", "static-pic");
+   Library_Type : Library_Type_Type :=
+     external ("FLYOLOGY_CACHELINES_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
+   for Library_Kind use Library_Type;
+
+   package Compiler is
+      for Default_Switches ("Ada") use Flyology_Cachelines_Config.Ada_Compiler_Switches;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
+
+   package Install is
+      for Artifacts (".") use ("share");
+   end Install;
+
+   package Documentation is
+      for Excluded_Project_Files use
+        ("config/flyology_cachelines_config.gpr");
+      for Output_Dir ("html") use "docs/api";
+      for Resources_Dir ("html") use "../docs/gnatdoc-cachelines/html";
+   end Documentation;
+
+end Flyology_Cachelines;

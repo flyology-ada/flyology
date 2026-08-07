@@ -1,0 +1,24 @@
+name = "tests"
+description = "Tests for the flyology_cachelines crate"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+licenses = "MIT OR Apache-2.0"
+tags = []
+
+executables = ["tests"]
+
+[[actions]]
+type = "test"
+command = ["sh", "check_alignment_specs.sh"]
+
+[[actions]]
+type = "test"
+command = ["sh", "run_native_tests.sh"]
+
+[[depends-on]]
+flyology_cachelines = "*"
+
+[[pins]]
+flyology_cachelines = { path='..' }

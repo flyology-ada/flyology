@@ -1,0 +1,11 @@
+Flyology Cachelines
+Copyright 2026 Yurii Rashkovskii
+
+The architecture-specific destructive-interference spacing policy and its
+documentation are adapted from CachePadded in crossbeam-utils:
+
+    Copyright (c) 2019 The Crossbeam Project Developers
+    https://github.com/crossbeam-rs/crossbeam
+
+Crossbeam is licensed under the MIT License or the Apache License, Version 2.0,
+at your option.
