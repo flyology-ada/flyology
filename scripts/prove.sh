@@ -44,6 +44,6 @@ cd "$project_root/proof"
   --output-header \
   --report=all \
   -f \
-  -u s-flscpo.adb s-flpopo.adb s-ftrepo.adb
+  -u s-flscpo.adb s-flpopo.adb s-ftrepo.adb s-flstpo.adb
 
 printf '%s\n' "Flyology SPARK proof suite passed"

@@ -1750,6 +1750,18 @@ constant-time, while choosing the next non-empty priority scans only the fixed
 lock ownership, descriptor-generation matching, and the actual context handoff
 remain outside SPARK.
 
+Fiber stack sizing is a separate proved kernel. The context allocator asks it
+which caller-supplied stack size it may accept for the host page size and the
+guard size, and how many bytes an accepted request occupies once rounded up.
+Its contracts keep the rounded size at least as large as the request and less
+than one page above it, and keep the per-slot arena stride and the single-slot
+arena mapping length representable in `size_t`. Stack sizes are carried in the
+modular type `size_t`, so an unchecked oversized request would wrap rather than
+fail; the proved bounds are what make an unrepresentable request a refusal
+instead of a zero-byte stack above a guard page. Page alignment of the rounded
+size, the mapping and protection calls, and arena bookkeeping remain outside
+SPARK and are covered by the stack pool, guard, and sizing tests.
+
 The Linux poller consumes a separate SPARK batch-arbitration policy. Its
 contracts bound the epoll and file-drain budgets, latch a file-drain obligation
 when the shared eventfd is consumed, and make a retained obligation take the
