@@ -534,6 +534,31 @@ procedure Concurrency_Primitives_Smoke is
       Fragile_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Result_Copy_Failure;
 
+   procedure Exercise_Native_Executor_Activation_Failure is
+      --  Instantiating locally makes this subprogram the master of the worker
+      --  collection, so a worker orphaned by a partial activation must
+      --  terminate before the procedure can return.
+      package Local_Executors is new Flyology.Native_Executors
+        (Integer, Integer, Native_Work);
+      Failed : Boolean := False;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Worker_Pool_Test_Control.Fail_Activation_At (2);
+      declare
+         Item : aliased Local_Executors.Executor
+           (Workers => 3, Capacity => 1);
+      begin
+         begin
+            Local_Executors.Start (Item);
+         exception
+            when Tasking_Error | Storage_Error =>
+               Failed := True;
+         end;
+      end;
+      Worker_Pool_Test_Control.Reset;
+      pragma Assert (Failed);
+   end Exercise_Native_Executor_Activation_Failure;
+
    procedure Exercise_Native_Executor_Shutdown_Failure is
       Item     : aliased Native_Executors.Executor
         (Workers => 1, Capacity => 1);
@@ -1153,6 +1178,7 @@ procedure Concurrency_Primitives_Smoke is
 begin
    Exercise_Channel;
    Exercise_Native_Executor_Result_Copy_Failure;
+   Exercise_Native_Executor_Activation_Failure;
    Exercise_Native_Executor_Abandon_Failure;
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;

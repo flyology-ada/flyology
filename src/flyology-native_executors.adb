@@ -393,11 +393,21 @@ package body Flyology.Native_Executors is
    end Shared_State;
 
    task body Worker is
+      Activation_Checked : constant Boolean := Test_Hooks.Check_Activation;
+      pragma Unreferenced (Activation_Checked);
+
       package Conversions is new
         System.Address_To_Access_Conversions (Shared_State);
       State_Ptr : Conversions.Object_Pointer;
       Stopped   : Boolean := False;
    begin
+      --  No worker touches the shared state before Start hands it the
+      --  executor. If activation of a sibling fails, the allocator raises and
+      --  the pool access value is lost, so the workers that did activate can
+      --  never be reached by Shutdown. The terminate alternative lets the
+      --  enclosing master collect them instead of waiting on them forever. It
+      --  cannot be selected while the executor is usable, because Start runs
+      --  inside that same still-incomplete master.
       select
          accept Start (State : System.Address) do
             State_Ptr := Conversions.To_Pointer (State);
@@ -405,6 +415,8 @@ package body Flyology.Native_Executors is
       or
          accept Stop;
          Stopped := True;
+      or
+         terminate;
       end select;
       begin
          while not Stopped loop
