@@ -8,4 +8,5 @@ private package Flyology.Worker_Pool_Test_Hooks is
    procedure Token_Cleanup_Acquire;
    procedure Token_Cleanup_Barrier;
    procedure Token_Cleanup_Release;
+   procedure Capacity_Acquire_Barrier;
 end Flyology.Worker_Pool_Test_Hooks;

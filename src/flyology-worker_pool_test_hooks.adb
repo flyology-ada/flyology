@@ -46,6 +46,16 @@ package body Flyology.Worker_Pool_Test_Hooks is
      with Import,
           Convention => C,
           External_Name => "flyology_test_worker_token_cleanup_release";
+   function Test_Capacity_Acquire_Barrier_Arrive return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_capacity_acquire_barrier_arrive";
+   function Test_Capacity_Acquire_Barrier_Released return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_capacity_acquire_barrier_released";
 
    function Check_Activation return Boolean is
    begin
@@ -88,6 +98,15 @@ package body Flyology.Worker_Pool_Test_Hooks is
    begin
       Test_Token_Cleanup_Release;
    end Token_Cleanup_Release;
+
+   procedure Capacity_Acquire_Barrier is
+   begin
+      if Test_Capacity_Acquire_Barrier_Arrive /= 0 then
+         while Test_Capacity_Acquire_Barrier_Released = 0 loop
+            null;
+         end loop;
+      end if;
+   end Capacity_Acquire_Barrier;
 #else
    function Check_Activation return Boolean is (True);
    function Consume_Failure return Boolean is (False);
@@ -96,5 +115,6 @@ package body Flyology.Worker_Pool_Test_Hooks is
    procedure Token_Cleanup_Acquire is null;
    procedure Token_Cleanup_Barrier is null;
    procedure Token_Cleanup_Release is null;
+   procedure Capacity_Acquire_Barrier is null;
 #end if;
 end Flyology.Worker_Pool_Test_Hooks;

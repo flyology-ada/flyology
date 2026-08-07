@@ -28,4 +28,10 @@ package Worker_Pool_Test_Control is
 
    function Outstanding_Cleanup_Tokens return Natural;
 
+   procedure Arm_Capacity_Acquire_Barrier;
+
+   procedure Wait_Capacity_Acquire_Barrier;
+
+   procedure Release_Capacity_Acquire_Barrier;
+
 end Worker_Pool_Test_Control;

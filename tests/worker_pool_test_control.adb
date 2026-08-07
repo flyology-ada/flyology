@@ -72,6 +72,21 @@ package body Worker_Pool_Test_Control is
           Convention => C,
           External_Name =>
             "flyology_test_worker_token_cleanup_outstanding";
+   procedure C_Arm_Capacity_Acquire_Barrier
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_capacity_acquire_barrier_arm";
+   function C_Capacity_Acquire_Barrier_Reached return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_capacity_acquire_barrier_reached";
+   procedure C_Release_Capacity_Acquire_Barrier
+     with Import,
+          Convention => C,
+          External_Name =>
+            "flyology_test_worker_capacity_acquire_barrier_release";
 
    procedure Reset is
    begin
@@ -154,5 +169,28 @@ package body Worker_Pool_Test_Control is
 
    function Outstanding_Cleanup_Tokens return Natural is
      (Natural (C_Outstanding_Cleanup_Tokens));
+
+   procedure Arm_Capacity_Acquire_Barrier is
+   begin
+      C_Arm_Capacity_Acquire_Barrier;
+   end Arm_Capacity_Acquire_Barrier;
+
+   procedure Wait_Capacity_Acquire_Barrier is
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   begin
+      while C_Capacity_Acquire_Barrier_Reached = 0 loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error with
+              "capacity acquire barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_Capacity_Acquire_Barrier;
+
+   procedure Release_Capacity_Acquire_Barrier is
+   begin
+      C_Release_Capacity_Acquire_Barrier;
+   end Release_Capacity_Acquire_Barrier;
 
 end Worker_Pool_Test_Control;

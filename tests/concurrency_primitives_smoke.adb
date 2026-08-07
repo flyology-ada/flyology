@@ -1,3 +1,4 @@
+with Ada.Finalization;
 with Ada.Real_Time;
 with Flyology;
 with Flyology.Cancellation;
@@ -515,6 +516,72 @@ procedure Concurrency_Primitives_Smoke is
       pragma Assert (Result = 12);
    end Exercise_Native_Executor_Token_Cleanup_Abort;
 
+   --  A timed acquisition must stay abort-safe. The barrier holds the aborted
+   --  caller inside the Gate protected action that counts the permit, so the
+   --  abort takes effect in the window between acquisition and the caller
+   --  recording the permit. Only a cleanup obligation published inside that
+   --  protected action can return the permit.
+   procedure Exercise_Capacity_Timed_Acquire_Abort is
+      Admission : aliased Flyology.Capacity.Gate (Capacity => 1);
+
+      type Permit_Guard (Item : not null access Flyology.Capacity.Gate) is
+        new Ada.Finalization.Limited_Controlled with record
+         Armed : aliased Boolean := False;
+      end record;
+
+      overriding procedure Finalize (Guard : in out Permit_Guard);
+
+      overriding procedure Finalize (Guard : in out Permit_Guard) is
+      begin
+         if Guard.Armed then
+            Guard.Item.Release (Guard.Armed'Access);
+         end if;
+      end Finalize;
+
+      use type Flyology.Capacity.Acquire_Result;
+   begin
+      --  Without an abort the obligation tracks the reported result.
+      declare
+         Guard   : Permit_Guard (Admission'Access);
+         Outcome : Flyology.Capacity.Acquire_Result;
+      begin
+         Flyology.Capacity.Timed_Acquire
+           (Admission, 1.0, Outcome, Guard.Armed'Access);
+         pragma Assert (Outcome = Flyology.Capacity.Permit_Acquired);
+         pragma Assert (Guard.Armed);
+         pragma Assert (Admission.Active = 1);
+      end;
+      pragma Assert (Admission.Active = 0);
+
+      Worker_Pool_Test_Control.Reset;
+      Worker_Pool_Test_Control.Arm_Capacity_Acquire_Barrier;
+      declare
+         task Acquirer is
+            pragma Task_Info (Flyology.Native_Task);
+         end Acquirer;
+
+         task body Acquirer is
+            Guard   : Permit_Guard (Admission'Access);
+            Outcome : Flyology.Capacity.Acquire_Result;
+         begin
+            Flyology.Capacity.Timed_Acquire
+              (Admission, 10.0, Outcome, Guard.Armed'Access);
+            pragma Assert
+              (Guard.Armed =
+                 (Outcome = Flyology.Capacity.Permit_Acquired));
+         end Acquirer;
+      begin
+         Worker_Pool_Test_Control.Wait_Capacity_Acquire_Barrier;
+         abort Acquirer;
+         Worker_Pool_Test_Control.Release_Capacity_Acquire_Barrier;
+      end;
+
+      pragma Assert (Admission.Active = 0);
+      pragma Assert (Admission.Waiting = 0);
+      Admission.Request_Shutdown;
+      Admission.Await_Drained;
+   end Exercise_Capacity_Timed_Acquire_Abort;
+
    procedure Exercise_Native_Executor_Shutdown_Abort is
       Item : aliased Native_Executors.Executor
         (Workers => 1, Capacity => 1);
@@ -828,6 +895,7 @@ begin
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;
    Exercise_Native_Executor_Token_Cleanup_Abort;
+   Exercise_Capacity_Timed_Acquire_Abort;
    Exercise_Lightweight_Waits;
    Exercise_Native_Waits;
    Exercise_Lightweight_Pool;

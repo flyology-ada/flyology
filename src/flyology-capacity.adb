@@ -1,9 +1,11 @@
 with Flyology.Capacity_Policy;
+with Flyology.Worker_Pool_Test_Hooks;
 
 package body Flyology.Capacity is
 
    use type Interfaces.C.int;
    package Policy renames Flyology.Capacity_Policy;
+   package Test_Hooks renames Flyology.Worker_Pool_Test_Hooks;
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
    function Test_Fail_Next_Release_Wake return Interfaces.C.int
@@ -38,6 +40,10 @@ package body Flyology.Capacity is
                   Cleanup_Armed.all := True;
                end if;
                Accepted := True;
+               --  This barrier is inside the protected action: abort stays
+               --  deferred after the permit is counted until the caller's
+               --  cleanup obligation is already authoritative.
+               Test_Hooks.Capacity_Acquire_Barrier;
             when Policy.Reject_Closed =>
                Accepted := False;
             when Policy.Wait_For_Permit =>
@@ -178,17 +184,27 @@ package body Flyology.Capacity is
    end Gate;
 
    procedure Timed_Acquire
-     (Item    : in out Gate;
-      Timeout : Duration;
-      Result  : out Acquire_Result)
+     (Item          : in out Gate;
+      Timeout       : Duration;
+      Result        : out Acquire_Result;
+      Cleanup_Armed : access Boolean := null)
    is
       Accepted : Boolean := False;
    begin
+      --  Reject an already-armed obligation even when the deadline expires
+      --  before the entry is accepted, so the contract does not depend on
+      --  which alternative of the timed call is selected.
+      if Cleanup_Armed /= null and then Cleanup_Armed.all then
+         raise Program_Error with "capacity cleanup is already armed";
+      end if;
+      --  The obligation is published inside the entry's protected action.
+      --  Abort is deferred there, so a caller aborted after acquisition still
+      --  owns a released obligation even though Result is never copied back.
       if Timeout < 0.0 then
-         Item.Acquire (Accepted);
+         Item.Acquire (Accepted, Cleanup_Armed);
       else
          select
-            Item.Acquire (Accepted);
+            Item.Acquire (Accepted, Cleanup_Armed);
          or
             delay Timeout;
             Result := Acquire_Timed_Out;

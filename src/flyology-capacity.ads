@@ -118,11 +118,20 @@ package Flyology.Capacity is
    --  @param Item Gate from which to acquire one permit
    --  @param Timeout Deadline interval in seconds
    --  @param Result Permit_Acquired, Gate_Closed, or Acquire_Timed_Out
-   --  @exception Program_Error A pending admission readiness signal cannot be
-   --     consumed
+   --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
+   --     non-null it must designate False on call. It remains False for
+   --     Gate_Closed or Acquire_Timed_Out and becomes True in the protected
+   --     action that acquires the permit, so an abort after that action still
+   --     leaves the caller's controlled guard responsible for the permit. The
+   --     caller must then release or atomically transfer that obligation.
+   --     Result is not written when the caller is aborted, so an abort-safe
+   --     caller must treat this obligation, not Result, as authoritative.
+   --  @exception Program_Error Cleanup_Armed designates True on call, or a
+   --     pending admission readiness signal cannot be consumed
    procedure Timed_Acquire
-     (Item    : in out Gate;
-      Timeout : Duration;
-      Result  : out Acquire_Result);
+     (Item          : in out Gate;
+      Timeout       : Duration;
+      Result        : out Acquire_Result;
+      Cleanup_Armed : access Boolean := null);
 
 end Flyology.Capacity;

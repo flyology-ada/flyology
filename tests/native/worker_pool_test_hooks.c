@@ -12,6 +12,9 @@ static _Atomic int token_cleanup_barrier_armed;
 static _Atomic int token_cleanup_barrier_reached;
 static _Atomic int token_cleanup_barrier_released;
 static _Atomic int token_cleanup_outstanding;
+static _Atomic int capacity_acquire_barrier_armed;
+static _Atomic int capacity_acquire_barrier_reached;
+static _Atomic int capacity_acquire_barrier_released;
 
 void flyology_test_worker_pool_reset(void)
 {
@@ -36,6 +39,12 @@ void flyology_test_worker_pool_reset(void)
    atomic_store_explicit(&token_cleanup_barrier_released, 1,
                          memory_order_seq_cst);
    atomic_store_explicit(&token_cleanup_outstanding, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&capacity_acquire_barrier_armed, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&capacity_acquire_barrier_reached, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&capacity_acquire_barrier_released, 1,
                          memory_order_seq_cst);
 }
 
@@ -205,4 +214,44 @@ int flyology_test_worker_token_cleanup_outstanding(void)
 {
    return atomic_load_explicit(&token_cleanup_outstanding,
                                memory_order_seq_cst);
+}
+
+void flyology_test_worker_capacity_acquire_barrier_arm(void)
+{
+   atomic_store_explicit(&capacity_acquire_barrier_reached, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&capacity_acquire_barrier_released, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&capacity_acquire_barrier_armed, 1,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_worker_capacity_acquire_barrier_arrive(void)
+{
+   if (atomic_exchange_explicit(&capacity_acquire_barrier_armed, 0,
+                                memory_order_seq_cst) == 0)
+      return 0;
+   atomic_store_explicit(&capacity_acquire_barrier_reached, 1,
+                         memory_order_seq_cst);
+   return 1;
+}
+
+int flyology_test_worker_capacity_acquire_barrier_reached(void)
+{
+   return atomic_load_explicit(&capacity_acquire_barrier_reached,
+                               memory_order_seq_cst);
+}
+
+int flyology_test_worker_capacity_acquire_barrier_released(void)
+{
+   return atomic_load_explicit(&capacity_acquire_barrier_released,
+                               memory_order_seq_cst);
+}
+
+void flyology_test_worker_capacity_acquire_barrier_release(void)
+{
+   atomic_store_explicit(&capacity_acquire_barrier_released, 1,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&capacity_acquire_barrier_armed, 0,
+                         memory_order_seq_cst);
 }
