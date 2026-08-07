@@ -1,8 +1,12 @@
-#include <stdatomic.h>
-
 /* Test-only barriers that widen the TLS ownership-transfer window in
- * Flyology.IO.TLS.Take. They exist only when the library is compiled with
- * FLYOLOGY_TLS_TEST_HOOKS. */
+ * Flyology.IO.TLS.Take. A production build compiles this file to nothing, and
+ * the Ada side compiles its calls away under the same setting. */
+
+typedef int flyology_tls_test_hooks_translation_unit;
+
+#if FLYOLOGY_TLS_TEST_HOOKS
+
+#include <stdatomic.h>
 
 enum {
    barrier_count = 2
@@ -61,3 +65,5 @@ void flyology_test_tls_barrier_release(int point)
    atomic_store_explicit(&released[point], 1, memory_order_seq_cst);
    atomic_store_explicit(&armed[point], 0, memory_order_seq_cst);
 }
+
+#endif
