@@ -51,10 +51,10 @@ package Flyology.Buffers.Channels is
    end record;
 
    --  Fixed-capacity MPMC FIFO tied to one buffer pool. Finalization closes
-   --  the channel and returns any undelivered buffers to Owner. A receive
-   --  commits the dequeue and the ownership transfer in one protected action,
-   --  so aborting or cancelling a receiver leaves an accepted message either
-   --  delivered to its target or still queued, never destroyed.
+   --  the channel and returns any undelivered buffers to Owner. Every
+   --  transfer commits its queue update and its ownership change in one
+   --  protected action, so aborting a sender or a receiver leaves the message
+   --  with exactly one owner: the sender, the channel, or the target.
    type Channel
      (Owner    : not null access Pool;  --  Pool supplying every buffer
       Capacity : Positive)              --  Maximum queued buffer count
@@ -249,7 +249,13 @@ private
    type Token_Array is array (Positive range <>) of Buffer_Token;
 
    protected type Channel_State (Capacity : Positive) is
-      entry Send (Token : Buffer_Token; Accepted : out Boolean);
+      --  Detach and enqueue in one protected action, for the same reason the
+      --  receive side attaches in one: an accepted send must never leave the
+      --  slot owned by both Value and the channel.
+      entry Send
+        (Value    : in out Unique_Buffer;
+         Metadata : Transfer_Metadata;
+         Accepted : out Boolean);
       --  Dequeue and attach in one protected action. Abort is deferred for
       --  its whole duration, so a receiver is either still queued or already
       --  owns the buffer; no window exists in which the token belongs to
@@ -259,9 +265,9 @@ private
          Metadata  : out Transfer_Metadata;
          Available : out Boolean);
       procedure Try_Send
-        (Token    : Buffer_Token;
-         Result   : out Try_Send_Result;
-         Accepted : out Boolean);
+        (Value    : in out Unique_Buffer;
+         Metadata : Transfer_Metadata;
+         Result   : out Try_Send_Result);
       procedure Try_Receive
         (Target   : in out Unique_Buffer;
          Metadata : out Transfer_Metadata;

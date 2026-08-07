@@ -13,6 +13,22 @@ package body Flyology.Buffers.Channels is
      (Transfer_Metadata (Value));
 
    protected body Channel_State is
+      --  Take Value's token into the queue. Detach and the queue update run
+      --  in one protected action, so no abort can leave the slot owned by
+      --  both Value and the channel.
+      procedure Enqueue
+        (Value    : in out Unique_Buffer;
+         Metadata : Transfer_Metadata)
+      is
+         Token : Buffer_Token;
+      begin
+         Detach (Value, Token);
+         Token.Channel_Metadata := To_Stored_Metadata (Metadata);
+         Values (Tail) := Token;
+         Tail := Policy.Advance (Tail, Capacity);
+         Count := Policy.Count_After_Send (Count, Capacity);
+      end Enqueue;
+
       --  Hand the oldest queued token to Target. Attach commits the transfer
       --  before the queue advances, so a rejected token stays queued instead
       --  of being lost, and the caller never holds a dequeued token outside
@@ -31,15 +47,16 @@ package body Flyology.Buffers.Channels is
          Count := Policy.Count_After_Receive (Count);
       end Deliver;
 
-      entry Send (Token : Buffer_Token; Accepted : out Boolean)
+      entry Send
+        (Value    : in out Unique_Buffer;
+         Metadata : Transfer_Metadata;
+         Accepted : out Boolean)
         when Policy.Send_Entry_Open (Stopped, Count, Capacity)
       is
       begin
          case Policy.Classify_Send (Stopped, Count, Capacity) is
             when Policy.Accept_Send =>
-               Values (Tail) := Token;
-               Tail := Policy.Advance (Tail, Capacity);
-               Count := Policy.Count_After_Send (Count, Capacity);
+               Enqueue (Value, Metadata);
                Accepted := True;
             when Policy.Reject_Send =>
                Accepted := False;
@@ -70,23 +87,18 @@ package body Flyology.Buffers.Channels is
       end Receive;
 
       procedure Try_Send
-        (Token    : Buffer_Token;
-         Result   : out Try_Send_Result;
-         Accepted : out Boolean) is
+        (Value    : in out Unique_Buffer;
+         Metadata : Transfer_Metadata;
+         Result   : out Try_Send_Result) is
       begin
          case Policy.Classify_Send (Stopped, Count, Capacity) is
             when Policy.Accept_Send =>
-               Values (Tail) := Token;
-               Tail := Policy.Advance (Tail, Capacity);
-               Count := Policy.Count_After_Send (Count, Capacity);
+               Enqueue (Value, Metadata);
                Result := Item_Sent;
-               Accepted := True;
             when Policy.Wait_To_Send =>
                Result := Channel_Full;
-               Accepted := False;
             when Policy.Reject_Send =>
                Result := Send_Closed;
-               Accepted := False;
          end case;
       end Try_Send;
 
@@ -145,19 +157,6 @@ package body Flyology.Buffers.Channels is
          Waiting_Receivers => Receive'Count);
    end Channel_State;
 
-   type Send_Guard
-     (Target      : not null access Unique_Buffer;
-      Token       : not null access Buffer_Token;
-      Transferred : not null access Boolean) is
-     new Ada.Finalization.Limited_Controlled with null record;
-
-   overriding procedure Finalize (Item : in out Send_Guard) is
-   begin
-      if not Item.Transferred.all and then Item.Token.Slot /= No_Slot then
-         Attach (Item.Target.all, Item.Token.all);
-      end if;
-   end Finalize;
-
    procedure Validate_Pools
      (Item  : Channel;
       Value : Unique_Buffer) is
@@ -172,23 +171,16 @@ package body Flyology.Buffers.Channels is
       Value : in out Unique_Buffer;
       Metadata : Transfer_Metadata := No_Metadata)
    is
-      Token       : aliased Buffer_Token := No_Token;
-      Transferred : aliased Boolean := False;
-      Guard       : Send_Guard
-        (Value'Unchecked_Access, Token'Access, Transferred'Access);
-      pragma Unreferenced (Guard);
+      Accepted : Boolean;
    begin
       Validate_Pools (Item, Value);
       if not Has_Buffer (Value) then
          raise Program_Error with "send of a vacant buffer";
       end if;
-      Detach (Value, Token);
-      Token.Channel_Metadata := To_Stored_Metadata (Metadata);
-      Item.State.Send (Token, Transferred);
-      if not Transferred then
+      Item.State.Send (Value, Metadata, Accepted);
+      if not Accepted then
          raise Channel_Closed with "send on closed buffer channel";
       end if;
-      Token := No_Token;
    end Send_Move;
 
    procedure Receive_Move
@@ -222,24 +214,13 @@ package body Flyology.Buffers.Channels is
      (Item   : in out Channel;
       Value  : in out Unique_Buffer;
       Result : out Try_Send_Result;
-      Metadata : Transfer_Metadata := No_Metadata)
-   is
-      Token       : aliased Buffer_Token := No_Token;
-      Transferred : aliased Boolean := False;
-      Guard       : Send_Guard
-        (Value'Unchecked_Access, Token'Access, Transferred'Access);
-      pragma Unreferenced (Guard);
+      Metadata : Transfer_Metadata := No_Metadata) is
    begin
       Validate_Pools (Item, Value);
       if not Has_Buffer (Value) then
          raise Program_Error with "send of a vacant buffer";
       end if;
-      Detach (Value, Token);
-      Token.Channel_Metadata := To_Stored_Metadata (Metadata);
-      Item.State.Try_Send (Token, Result, Transferred);
-      if Transferred then
-         Token := No_Token;
-      end if;
+      Item.State.Try_Send (Value, Metadata, Result);
    end Try_Send_Move;
 
    procedure Try_Receive_Move
@@ -272,12 +253,8 @@ package body Flyology.Buffers.Channels is
       Timeout : Duration;
       Metadata : Transfer_Metadata := No_Metadata)
    is
-      Token       : aliased Buffer_Token := No_Token;
-      Transferred : aliased Boolean := False;
-      Guard       : Send_Guard
-        (Value'Unchecked_Access, Token'Access, Transferred'Access);
-      pragma Unreferenced (Guard);
-      Result : Try_Send_Result;
+      Accepted : Boolean;
+      Result   : Try_Send_Result;
    begin
       if Timeout < 0.0 then
          Send_Move (Item, Value, Metadata);
@@ -297,14 +274,11 @@ package body Flyology.Buffers.Channels is
       if not Has_Buffer (Value) then
          raise Program_Error with "send of a vacant buffer";
       end if;
-      Detach (Value, Token);
-      Token.Channel_Metadata := To_Stored_Metadata (Metadata);
       select
-         Item.State.Send (Token, Transferred);
-         if not Transferred then
+         Item.State.Send (Value, Metadata, Accepted);
+         if not Accepted then
             raise Channel_Closed with "send on closed buffer channel";
          end if;
-         Token := No_Token;
       or
          delay Timeout;
          raise Timeout_Error with "buffer channel send timed out";

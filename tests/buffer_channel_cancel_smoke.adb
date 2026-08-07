@@ -163,8 +163,88 @@ procedure Buffer_Channel_Cancel_Smoke is
       Account_For_Message (Queue, Target, "aborted receive");
    end Aborted_Receive;
 
+   --  Plain Ada abort of a send that the channel already accepted must not
+   --  hand the slot back to the sender: the channel owns it.
+   procedure Aborted_Send (Observed_Abort : out Boolean) is
+      Queue     : Channels.Channel (Storage'Access, Capacity => 1);
+      Outgoing  : Buffers.Unique_Buffer (Storage'Access);
+      Filler    : Buffers.Unique_Buffer (Storage'Access);
+      Drained   : Buffers.Unique_Buffer (Storage'Access);
+      Completed : Boolean := False;
+      Result    : Channels.Try_Receive_Result;
+   begin
+      Buffers.Acquire (Filler);
+      Channels.Send_Move (Queue, Filler);
+      Buffers.Acquire (Outgoing);
+      Buffers.Copy_From (Outgoing, Payload);
+      declare
+         task Sender with CPU => 1 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Sender;
+
+         task Drainer with CPU => 1 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Drainer;
+
+         task body Sender is
+         begin
+            Channels.Send_Move (Queue, Outgoing);
+            Completed := True;
+         end Sender;
+
+         task body Drainer is
+            Spins : Natural := 0;
+         begin
+            while Channels.Current (Queue).Waiting_Senders = 0 loop
+               Assert (Spins < 100_000_000, "sender never queued");
+               Spins := Spins + 1;
+               delay 0.0;
+            end loop;
+            --  Freeing the single slot lets the queued send entry body run
+            --  inside this protected action; the sender cannot resume before
+            --  the abort request.
+            Channels.Try_Receive_Move (Queue, Drained, Result);
+            abort Sender;
+         end Drainer;
+      begin
+         null;
+      end;
+      Observed_Abort := not Completed;
+      Assert (Result = Channels.Item_Received, "drainer missed the filler");
+      Buffers.Release (Drained);
+
+      if Buffers.Has_Buffer (Outgoing)
+        and then Channels.Current (Queue).Pending = 1
+      then
+         --  The sender and the channel claim the same slot. Undo the
+         --  duplicate before reporting it, so that the pool's stale-release
+         --  diagnostic during finalization cannot mask this failure.
+         Buffers.Release (Outgoing);
+         Channels.Try_Receive_Move (Queue, Drained, Result);
+         begin
+            Buffers.Release (Drained);
+         exception
+            when others => null;
+         end;
+         Assert (False, "aborted send duplicated ownership of one pool slot");
+      end if;
+
+      if Buffers.Has_Buffer (Outgoing) then
+         Buffers.Release (Outgoing);
+      else
+         Channels.Try_Receive_Move (Queue, Drained, Result);
+         Assert (Result = Channels.Item_Received, "accepted send was lost");
+         Check_Payload (Drained);
+         Buffers.Release (Drained);
+      end if;
+      Assert
+        (Buffers.Current (Storage).Outstanding = 0,
+         "aborted send leaked a pool slot");
+   end Aborted_Send;
+
    Cancellations : Natural := 0;
    Aborts        : Natural := 0;
+   Send_Aborts   : Natural := 0;
    Observed      : Boolean;
 
 begin
@@ -188,7 +268,18 @@ begin
          "abort attempt left the pool unbalanced");
    end loop;
 
-   --  The scenarios are worthless if the receive always completed normally.
+   for Attempt in 1 .. Attempts loop
+      Aborted_Send (Observed);
+      if Observed then
+         Send_Aborts := Send_Aborts + 1;
+      end if;
+      Assert
+        (Buffers.Current (Storage).Outstanding = 0,
+         "send attempt left the pool unbalanced");
+   end loop;
+
+   --  The scenarios are worthless if the transfer always completed normally.
    Assert (Cancellations > 0, "no receive observed its cancellation token");
    Assert (Aborts > 0, "no receive was aborted before it completed");
+   Assert (Send_Aborts > 0, "no send was aborted before it completed");
 end Buffer_Channel_Cancel_Smoke;
