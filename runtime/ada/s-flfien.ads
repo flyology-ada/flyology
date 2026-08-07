@@ -31,6 +31,10 @@ package System.Flyology.File_Engine is
 
    procedure Finalize (Item : in out Engine);
 
+   --  True when this platform engine can submit an asynchronous zero-copy
+   --  socket send and retain its buffer through the reuse notification.
+   function Supports_Send_ZC (Item : Engine) return Boolean;
+
    --  False with EAGAIN denotes temporary kernel queue pressure and is safe
    --  for the owning scheduler to retry without releasing Buffer. Linux also
    --  normalizes io_uring EBUSY to this retry contract.
@@ -41,6 +45,18 @@ package System.Flyology.File_Engine is
       Length      : Interfaces.C.size_t;
       Offset      : Interfaces.C.long_long;
       For_Write   : Boolean;
+      Token       : System.Address;
+      Error_Code  : out Interfaces.C.int) return Boolean;
+
+   --  Enqueue one socket send whose buffer remains kernel-owned until the
+   --  terminal completion. False with EAGAIN has the same queue-pressure
+   --  meaning as Submit. False with another error means no request owns
+   --  Buffer. Call only when Supports_Send_ZC is true.
+   function Submit_Send_ZC
+     (Item        : in out Engine;
+      Descriptor  : Interfaces.C.int;
+      Buffer      : System.Address;
+      Length      : Interfaces.C.size_t;
       Token       : System.Address;
       Error_Code  : out Interfaces.C.int) return Boolean;
 

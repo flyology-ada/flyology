@@ -63,3 +63,6 @@ FLYOLOGY_SNAPSHOT_PERIODIC_WINDOW=0.100 \
 
 printf '\n== dormant_stack_pressure ==\n'
 "$project_root/showcases/run_dormant_stack_pressure.sh"
+
+printf '\n== file_transfer_benchmark ==\n'
+"$project_root/showcases/run_file_transfer_benchmark.sh"

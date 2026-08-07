@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <stdint.h>
 #include <string.h>
@@ -15,6 +16,12 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#include "flyology_tls_signal.h"
+
+#if defined(__linux__)
+#include <sys/sendfile.h>
+#endif
 
 #if !defined(MSG_NOSIGNAL)
 #define MSG_NOSIGNAL 0
@@ -598,6 +605,33 @@ long flyology_socket_send(int fd, const void *buffer, size_t length, int *error)
     *error = result < 0 ? errno : 0;
     return (long)result;
 }
+
+#if defined(__linux__)
+long flyology_linux_guarded_sendfile(int socket_fd, int file_fd,
+                                     long long offset, size_t length,
+                                     int *error)
+{
+    if (offset < 0 || length > (size_t)LLONG_MAX) {
+        *error = EINVAL;
+        return -1;
+    }
+
+    struct flyology_sigpipe_guard guard;
+    off_t position = (off_t)offset;
+    ssize_t result;
+    int saved_error;
+
+    if (flyology_sigpipe_begin(&guard) != 0) {
+        *error = EIO;
+        return -1;
+    }
+    result = sendfile(socket_fd, file_fd, &position, length);
+    saved_error = result < 0 ? errno : 0;
+    flyology_sigpipe_end(&guard);
+    *error = saved_error;
+    return (long)result;
+}
+#endif
 
 long flyology_socket_send_to(int fd, const void *buffer, size_t length,
                              int family, const unsigned char *address,

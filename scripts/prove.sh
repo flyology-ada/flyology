@@ -33,6 +33,7 @@ cd "$project_root/proof"
   flyology-worker_pool_policy.adb \
   flyology-native_executor_policy.adb \
   flyology-file_open_policy.adb \
+  flyology-file_transfer_policy.adb \
   flyology-file_timeout_policy.adb \
   flyology-timer_set_policy.adb \
   flyology-socket_policy.adb \
@@ -47,6 +48,6 @@ cd "$project_root/proof"
   --output-header \
   --report=all \
   -f \
-  -u s-flscpo.adb s-flpopo.adb s-ftrepo.adb s-flstpo.adb
+  -u s-flscpo.adb s-flpopo.adb s-ftrepo.adb s-flstpo.adb s-fszcpo.adb
 
 printf '%s\n' "Flyology SPARK proof suite passed"

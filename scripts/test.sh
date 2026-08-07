@@ -12,6 +12,17 @@ test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
 wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
+test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
+FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
+export FLYOLOGY_TEST_TEMP_ROOT
+
+cleanup_test_temp () {
+  rm -f -- "$test_temp_root/file-transfers-smoke.data"
+  rmdir -- "$test_temp_root" 2>/dev/null || true
+}
+
+trap cleanup_test_temp EXIT
+trap 'exit 1' HUP INT TERM
 
 cd "$project_root"
 
@@ -274,8 +285,10 @@ execution_groups_smoke
 exception_traceback_smoke
 fairness_smoke
 file_cancellation_smoke
+file_transfers_smoke
 files_smoke
 flyology-counter_policy_smoke
+flyology-file_transfer_policy-smoke
 flyology-socket_policy-smoke
 flyology-structured_server_policy-smoke
 flyology-wall_clock_policy-smoke

@@ -241,6 +241,7 @@ package body System.Flyology.Scheduler is
       File_Length : C.size_t := 0;
       File_Offset : C.long_long := 0;
       File_For_Write : Boolean := False;
+      File_Send_ZC : Boolean := False;
       File_Cancel_Descriptor : C.int := -1;
       File_Cancel_Requested : Boolean := False;
       File_Cancel_Queued : Boolean := False;
@@ -508,6 +509,18 @@ package body System.Flyology.Scheduler is
      (Group : not null Loop_Group_Access);
    procedure Submit_Pending_Files_Locked
      (Group : not null Loop_Group_Access);
+   function File_Operation
+     (Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Offset      : C.long_long;
+      For_Write   : C.int;
+      For_Send_ZC : Boolean;
+      Cancel_FD   : C.int;
+      Task_Lock   : System.Address;
+      Transferred : access C.long_long;
+      Error_Code  : access C.int;
+      Cancelled   : access C.int) return C.int;
    function Ensure_Timer_Capacity
      (Group : not null Loop_Group_Access) return Boolean;
    function Register_Timer_Locked
@@ -1195,6 +1208,7 @@ package body System.Flyology.Scheduler is
       Item.File_Length := 0;
       Item.File_Offset := 0;
       Item.File_For_Write := False;
+      Item.File_Send_ZC := False;
       Item.File_Cancel_Descriptor := -1;
       Item.File_Cancel_Requested := Cancelled;
       Enqueue (Group, Item);
@@ -1305,15 +1319,23 @@ package body System.Flyology.Scheduler is
             Fatal;
          end if;
 
-         if Pollers.Submit_File
-           (Group.Scheduler_Poller,
-            Item.File_Descriptor,
-            Item.File_Buffer,
-            Item.File_Length,
-            Item.File_Offset,
-            Item.File_For_Write,
-            Fiber_To_Address (Item),
-            Error)
+         if (if Item.File_Send_ZC
+             then Pollers.Submit_Send_ZC
+               (Group.Scheduler_Poller,
+                Item.File_Descriptor,
+                Item.File_Buffer,
+                Item.File_Length,
+                Fiber_To_Address (Item),
+                Error)
+             else Pollers.Submit_File
+               (Group.Scheduler_Poller,
+                Item.File_Descriptor,
+                Item.File_Buffer,
+                Item.File_Length,
+                Item.File_Offset,
+                Item.File_For_Write,
+                Fiber_To_Address (Item),
+                Error))
          then
             Group.Pending_File_Head := Item.Next_File;
             if Group.Pending_File_Head = null then
@@ -3100,12 +3122,13 @@ package body System.Flyology.Scheduler is
       return Item.IO_Result;
    end Wait_IO_Many;
 
-   function File_IO
+   function File_Operation
      (Descriptor  : C.int;
       Buffer      : System.Address;
       Length      : C.size_t;
       Offset      : C.long_long;
       For_Write   : C.int;
+      For_Send_ZC : Boolean;
       Cancel_FD   : C.int;
       Task_Lock   : System.Address;
       Transferred : access C.long_long;
@@ -3131,6 +3154,13 @@ package body System.Flyology.Scheduler is
         or else Task_Lock = System.Null_Address
       then
          return -1;
+      elsif For_Send_ZC
+        and then not Pollers.Supports_Send_ZC (Group.Scheduler_Poller)
+      then
+         Transferred.all := 0;
+         Error_Code.all := 0;
+         Cancelled.all := 0;
+         return 1;
       end if;
 
       --  Test-only gate for the abort race between GNARL's pending-ATC check
@@ -3155,6 +3185,7 @@ package body System.Flyology.Scheduler is
       Item.File_Length := Length;
       Item.File_Offset := Offset;
       Item.File_For_Write := For_Write /= 0;
+      Item.File_Send_ZC := For_Send_ZC;
       Item.File_Cancel_Descriptor := Cancel_FD;
       Item.File_Cancel_Requested := False;
       Item.File_Cancel_Queued := False;
@@ -3187,15 +3218,24 @@ package body System.Flyology.Scheduler is
             Primary_IO,
             0);
       end if;
-      if not Pollers.Submit_File
-        (Group.Scheduler_Poller,
-         Descriptor,
-         Buffer,
-         Length,
-         Offset,
-         For_Write /= 0,
-         Fiber_To_Address (Item),
-         Error)
+      if not
+        (if For_Send_ZC
+         then Pollers.Submit_Send_ZC
+           (Group.Scheduler_Poller,
+            Descriptor,
+            Buffer,
+            Length,
+            Fiber_To_Address (Item),
+            Error)
+         else Pollers.Submit_File
+           (Group.Scheduler_Poller,
+            Descriptor,
+            Buffer,
+            Length,
+            Offset,
+            For_Write /= 0,
+            Fiber_To_Address (Item),
+            Error))
       then
          if Error = C.int (OSI.EAGAIN) then
             Queue_Pending_File_Locked (Group, Item);
@@ -3207,6 +3247,7 @@ package body System.Flyology.Scheduler is
             Item.File_Length := 0;
             Item.File_Offset := 0;
             Item.File_For_Write := False;
+            Item.File_Send_ZC := False;
             Item.File_Cancel_Descriptor := -1;
             Remove_IO_Waits_Locked (Group, Item);
             Item.Active_IO_Links := null;
@@ -3240,6 +3281,36 @@ package body System.Flyology.Scheduler is
       Item.Active_IO_Links := null;
       Item.Active_IO_Link_Count := 0;
       return 0;
+   end File_Operation;
+
+   function File_IO
+     (Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Offset      : C.long_long;
+      For_Write   : C.int;
+      Cancel_FD   : C.int;
+      Task_Lock   : System.Address;
+      Transferred : access C.long_long;
+      Error_Code  : access C.int;
+      Cancelled   : access C.int) return C.int
+   is
+   begin
+      --  Value 2 is an internal extension of the existing GNARL handoff for
+      --  a socket SEND_ZC. Reusing this entry point preserves the task-lock
+      --  abort boundary without adding another platform patch surface.
+      return File_Operation
+        (Descriptor,
+         Buffer,
+         Length,
+         Offset,
+         (if For_Write = 2 then 0 else For_Write),
+         For_Write = 2,
+         Cancel_FD,
+         Task_Lock,
+         Transferred,
+         Error_Code,
+         Cancelled);
    end File_IO;
 
    function Set_Priority

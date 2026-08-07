@@ -105,60 +105,6 @@ struct fly_session {
 
 static _Atomic unsigned live_modules;
 
-struct sigpipe_guard {
-#if !defined(__APPLE__)
-   sigset_t set;
-   sigset_t old_mask;
-   int pending_before;
-   int active;
-#else
-   int unused;
-#endif
-};
-
-static int sigpipe_begin(struct sigpipe_guard *guard)
-{
-#if !defined(__APPLE__)
-   sigset_t pending;
-   int member;
-   memset(guard, 0, sizeof *guard);
-   if (sigemptyset(&guard->set) != 0 ||
-       sigaddset(&guard->set, SIGPIPE) != 0 ||
-       sigpending(&pending) != 0)
-      return -1;
-   member = sigismember(&pending, SIGPIPE);
-   if (member < 0) return -1;
-   guard->pending_before = member == 1;
-   if (pthread_sigmask(SIG_BLOCK, &guard->set, &guard->old_mask) != 0)
-      return -1;
-   guard->active = 1;
-#else
-   (void)guard;
-#endif
-   return 0;
-}
-
-static void sigpipe_end(struct sigpipe_guard *guard)
-{
-#if !defined(__APPLE__)
-   sigset_t pending;
-   int member;
-   if (!guard->active) return;
-   if (sigpending(&pending) != 0) abort();
-   member = sigismember(&pending, SIGPIPE);
-   if (member < 0) abort();
-   if (!guard->pending_before && member == 1) {
-      struct timespec no_wait = { 0, 0 };
-      if (flyology_sigtimedwait_retry
-            (&guard->set, &no_wait, sigtimedwait) != SIGPIPE)
-         abort();
-   }
-   if (pthread_sigmask(SIG_SETMASK, &guard->old_mask, NULL) != 0) abort();
-#else
-   (void)guard;
-#endif
-}
-
 static void set_error(char *buffer, size_t size, const char *message)
 {
    if (buffer == NULL || size == 0) return;
@@ -656,10 +602,10 @@ int flyology_tls_openssl_handshake(void *handle)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct sigpipe_guard guard;
+   struct flyology_sigpipe_guard guard;
    int result;
    int classified;
-   if (sigpipe_begin(&guard) != 0) {
+   if (flyology_sigpipe_begin(&guard) != 0) {
       set_error(session->error, sizeof session->error,
                 "cannot establish scoped SIGPIPE guard");
       return FLY_FAILED;
@@ -667,7 +613,7 @@ int flyology_tls_openssl_handshake(void *handle)
    module->ERR_clear_error();
    result = module->SSL_do_handshake(session->ssl);
    classified = result == 1 ? FLY_COMPLETE : classify(session, result, 0);
-   sigpipe_end(&guard);
+   flyology_sigpipe_end(&guard);
    return classified;
 }
 
@@ -675,10 +621,10 @@ long flyology_tls_openssl_receive(void *handle, void *buffer, int count)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct sigpipe_guard guard;
+   struct flyology_sigpipe_guard guard;
    int result;
    long classified;
-   if (sigpipe_begin(&guard) != 0) {
+   if (flyology_sigpipe_begin(&guard) != 0) {
       set_error(session->error, sizeof session->error,
                 "cannot establish scoped SIGPIPE guard");
       return FLY_FAILED;
@@ -686,7 +632,7 @@ long flyology_tls_openssl_receive(void *handle, void *buffer, int count)
    module->ERR_clear_error();
    result = module->SSL_read(session->ssl, buffer, count);
    classified = result > 0 ? result : classify(session, result, 1);
-   sigpipe_end(&guard);
+   flyology_sigpipe_end(&guard);
    return classified;
 }
 
@@ -694,10 +640,10 @@ long flyology_tls_openssl_send(void *handle, const void *buffer, int count)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct sigpipe_guard guard;
+   struct flyology_sigpipe_guard guard;
    int result;
    long classified;
-   if (sigpipe_begin(&guard) != 0) {
+   if (flyology_sigpipe_begin(&guard) != 0) {
       set_error(session->error, sizeof session->error,
                 "cannot establish scoped SIGPIPE guard");
       return FLY_FAILED;
@@ -705,7 +651,7 @@ long flyology_tls_openssl_send(void *handle, const void *buffer, int count)
    module->ERR_clear_error();
    result = module->SSL_write(session->ssl, buffer, count);
    classified = result > 0 ? result : classify(session, result, 0);
-   sigpipe_end(&guard);
+   flyology_sigpipe_end(&guard);
    return classified;
 }
 
@@ -713,11 +659,11 @@ int flyology_tls_openssl_shutdown(void *handle)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct sigpipe_guard guard;
+   struct flyology_sigpipe_guard guard;
    int result;
    int classified;
    if (session->shutdown_complete) return FLY_COMPLETE;
-   if (sigpipe_begin(&guard) != 0) {
+   if (flyology_sigpipe_begin(&guard) != 0) {
       set_error(session->error, sizeof session->error,
                 "cannot establish scoped SIGPIPE guard");
       return FLY_FAILED;
@@ -732,7 +678,7 @@ int flyology_tls_openssl_shutdown(void *handle)
    } else {
       classified = classify(session, result, 0);
    }
-   sigpipe_end(&guard);
+   flyology_sigpipe_end(&guard);
    return classified;
 }
 

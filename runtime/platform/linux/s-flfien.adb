@@ -3,6 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Interfaces;
 with System.Atomic_Primitives;
 with System.Flyology.Faults;
+with System.Flyology.Send_ZC_Policy;
 with System.Flyology.Time_ABI;
 with System.OS_Interface;
 with System.Storage_Elements;
@@ -11,6 +12,7 @@ package body System.Flyology.File_Engine is
    package AP renames System.Atomic_Primitives;
    package C renames Interfaces.C;
    package Faults renames System.Flyology.Faults;
+   package Send_ZC_Policy renames System.Flyology.Send_ZC_Policy;
    package Time_ABI renames System.Flyology.Time_ABI;
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
@@ -24,6 +26,7 @@ package body System.Flyology.File_Engine is
    use type AP.uint8;
    use type AP.uint16;
    use type AP.uint32;
+   use type Send_ZC_Policy.Completion_Phase;
    use System.Storage_Elements;
 
    subtype U8 is AP.uint8;
@@ -61,6 +64,22 @@ package body System.Flyology.File_Engine is
    IORING_OP_READ                : constant U8 := 22;
    IORING_OP_WRITE               : constant U8 := 23;
    IORING_OP_ASYNC_CANCEL        : constant U8 := 14;
+   IORING_OP_SEND_ZC             : constant U8 := 47;
+   IORING_SEND_ZC_REPORT_USAGE   : constant U16 := 8;
+   IORING_CQE_F_MORE             : constant U32 := 2;
+   IORING_CQE_F_NOTIF            : constant U32 := 8;
+   IORING_NOTIF_USAGE_ZC_COPIED  : constant U32 := 16#8000_0000#;
+
+   function To_U32 is new Ada.Unchecked_Conversion (S32, U32);
+
+   Send_ZC_Copied : C.int := 0 with Atomic;
+
+   function Send_ZC_Copy_Fallback return C.int is (Send_ZC_Copied);
+   pragma Export
+     (C, Send_ZC_Copy_Fallback, "flyology_send_zc_copy_fallback");
+
+   function Linux_MSG_NOSIGNAL return C.int;
+   pragma Import (C, Linux_MSG_NOSIGNAL, "flyology_linux_msg_nosignal");
 
    IOCB_CMD_PREAD  : constant U16 := 0;
    IOCB_CMD_PWRITE : constant U16 := 1;
@@ -144,8 +163,8 @@ package body System.Flyology.File_Engine is
    end record;
 
    --  The probe header is followed by the number of operation records passed
-   --  to io_uring_register.  READ and WRITE are opcodes 22 and 23, so asking
-   --  for the first 24 records is sufficient for Flyology's file engine.
+   --  to io_uring_register. SEND_ZC is opcode 47, so ask for the first 48
+   --  records while treating that operation as an optional acceleration.
    type Probe_Operation is record
       Opcode     : U8;
       Reserved   : U8;
@@ -160,7 +179,7 @@ package body System.Flyology.File_Engine is
       Reserved_2 at 4 range 0 .. 31;
    end record;
 
-   Probe_Operation_Count : constant := 24;
+   Probe_Operation_Count : constant := 48;
    type Probe_Operation_Array is
      array (Natural range 0 .. Probe_Operation_Count - 1) of Probe_Operation
        with Convention => C;
@@ -172,13 +191,13 @@ package body System.Flyology.File_Engine is
       Reserved_2  : Reserved_Array;
       Operation   : Probe_Operation_Array;
    end record
-     with Convention => C, Size => 1_664, Alignment => 4;
+     with Convention => C, Size => 3_200, Alignment => 4;
    for Operation_Probe use record
       Last_Opcode at 0  range 0 .. 7;
       Operations  at 1  range 0 .. 7;
       Reserved    at 2  range 0 .. 15;
       Reserved_2  at 4  range 0 .. 95;
-      Operation   at 16 range 0 .. 1_535;
+      Operation   at 16 range 0 .. 3_071;
    end record;
 
    type Submission_Entry is record
@@ -296,10 +315,17 @@ package body System.Flyology.File_Engine is
    type IO_Uring_Request;
    type IO_Uring_Request_Access is access all IO_Uring_Request;
 
+   type Operation_Kind is (File_Data, Socket_Send_ZC);
+
    type IO_Uring_Request is record
       Token             : System.Address;
+      Kind              : Operation_Kind;
       Cancel_Submitted  : Boolean;
       Operation_Complete : Boolean;
+      Main_Complete     : Boolean;
+      Notification_Expected : Boolean;
+      Stored_Result     : C.long_long;
+      Stored_Error      : C.int;
       Admin_Complete    : Boolean;
       Admin_Submit_Deferred : Boolean;
       Next_Free         : IO_Uring_Request_Access;
@@ -334,8 +360,10 @@ package body System.Flyology.File_Engine is
       CQ_Overflow       : System.Address := System.Null_Address;
       CQEs              : System.Address := System.Null_Address;
       CQ_Capacity       : U32 := 0;
+      Send_ZC_Supported : Boolean := False;
       CQ_Overflow_Seen  : U32 := 0;
-      --  Count every submitted SQE whose CQE has not yet been consumed.
+      --  Count every reserved CQE slot not yet consumed. SEND_ZC reserves
+      --  both its primary completion and its possible notification CQE.
       --  Administrative cancellation SQEs count independently from their
       --  data requests because each produces its own CQE.
       --  The event-loop thread is the only writer. Final reaping reads this
@@ -548,7 +576,8 @@ package body System.Flyology.File_Engine is
    procedure Release_State (State : in out Engine_State_Access);
 
    function Supports_File_Operations
-     (Descriptor : C.int) return Boolean;
+     (Descriptor        : C.int;
+      Send_ZC_Supported : out Boolean) return Boolean;
 
    function Initialize_Native_AIO
      (Item    : in out Engine;
@@ -873,7 +902,8 @@ package body System.Flyology.File_Engine is
    end Release_State;
 
    function Supports_File_Operations
-     (Descriptor : C.int) return Boolean
+     (Descriptor        : C.int;
+      Send_ZC_Supported : out Boolean) return Boolean
    is
       Probe : aliased Operation_Probe :=
         (Last_Opcode => 0,
@@ -891,6 +921,7 @@ package body System.Flyology.File_Engine is
       Write_Supported : Boolean := False;
       Returned        : Natural;
    begin
+      Send_ZC_Supported := False;
       Result :=
         Linux_IO_Uring_Register
           (Descriptor,
@@ -915,6 +946,11 @@ package body System.Flyology.File_Engine is
                 (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
             then
                Write_Supported := True;
+            elsif Probe.Operation (Index).Opcode = IORING_OP_SEND_ZC
+              and then
+                (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
+            then
+               Send_ZC_Supported := True;
             end if;
          end loop;
       end if;
@@ -1001,7 +1037,8 @@ package body System.Flyology.File_Engine is
       end if;
 
       State.Ring_FD := C.int (Result);
-      if not Supports_File_Operations (State.Ring_FD)
+      if not Supports_File_Operations
+        (State.Ring_FD, State.Send_ZC_Supported)
         or else
           (Faults.Enabled
            and then Faults.Fail (Faults.File_Uring_Probe_Unsupported))
@@ -1153,6 +1190,134 @@ package body System.Flyology.File_Engine is
       Item.State := System.Null_Address;
    end Finalize;
 
+   function Supports_Send_ZC (Item : Engine) return Boolean is
+      State : constant Engine_State_Access := To_State (Item.State);
+   begin
+      return State /= null
+        and then State.Backend = IO_Uring
+        and then State.Send_ZC_Supported;
+   end Supports_Send_ZC;
+
+   function Submit_Send_ZC
+     (Item        : in out Engine;
+      Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Token       : System.Address;
+      Error_Code  : out C.int) return Boolean
+   is
+      State         : constant Engine_State_Access := To_State (Item.State);
+      Result        : C.long;
+      Uring_Request : IO_Uring_Request_Access;
+   begin
+      if not Supports_Send_ZC (Item)
+        or else Length = 0
+        or else Length > C.size_t (U32'Last)
+      then
+         Error_Code := EINVAL;
+         return False;
+      end if;
+
+      declare
+         Head       : constant U32 := Load (State.SQ_Head, AP.Acquire);
+         Tail       : constant U32 := Load (State.SQ_Tail, AP.Relaxed);
+         Entries    : constant U32 := Load (State.SQ_Entries, AP.Acquire);
+         Mask       : constant U32 := Load (State.SQ_Mask, AP.Acquire);
+         Index      : U32;
+         Submission : Submission_Entry_Access;
+         Identity   : SSE.Integer_Address;
+      begin
+         --  A successful SEND_ZC may produce a primary CQE and a later
+         --  notification CQE. Reserve both before publication so CQ overflow
+         --  cannot make the buffer-lifetime notification unreachable.
+         if Has_Overflow_Backlog (State)
+           or else State.CQ_Capacity < 2
+           or else State.Uring_In_Flight > State.CQ_Capacity - 2
+           or else Tail - Head >= Entries
+         then
+            Error_Code := EAGAIN;
+            return False;
+         end if;
+
+         Uring_Request := Acquire_Uring_Request (State);
+         Uring_Request.all :=
+           (Token                 => Token,
+            Kind                  => Socket_Send_ZC,
+            Cancel_Submitted      => False,
+            Operation_Complete    => False,
+            Main_Complete         => False,
+            Notification_Expected => False,
+            Stored_Result         => 0,
+            Stored_Error          => 0,
+            Admin_Complete        => False,
+            Admin_Submit_Deferred => False,
+            Next_Free             => null,
+            Next_Active           => null,
+            Next_Deferred         => null);
+         Identity := SSE.To_Integer (Uring_Request.all'Address);
+         if Identity mod 2 /= 0 then
+            Error_Code := EINVAL;
+            Recycle_Uring_Request (State, Uring_Request);
+            return False;
+         end if;
+
+         Index := Tail and Mask;
+         Submission := To_Submission_Entry
+           (State.SQEs
+              + Storage_Offset (Index)
+                  * Storage_Offset (Submission_Entry'Size / 8));
+         Submission.all :=
+           (Opcode       => IORING_OP_SEND_ZC,
+            Flags        => 0,
+            IO_Priority  => IORING_SEND_ZC_REPORT_USAGE,
+            Descriptor   => S32 (Descriptor),
+            Offset       => 0,
+            Buffer       => U64 (SSE.To_Integer (Buffer)),
+            Length       => U32 (Length),
+            Read_Flags   => U32 (Linux_MSG_NOSIGNAL),
+            User_Data    => U64 (Identity),
+            Buffer_Index => 0,
+            Personality  => 0,
+            Input_FD     => 0,
+            Address_3    => 0,
+            Padding      => 0);
+         Store
+           (State.SQ_Array
+              + Storage_Offset (Index) * Storage_Offset (U32'Size / 8),
+            Index,
+            AP.Relaxed);
+         Store (State.SQ_Tail, Tail + 1, AP.Release);
+         loop
+            Result := Linux_IO_Uring_Enter
+              (State.Ring_FD, 1, 0, 0, System.Null_Address, 0);
+            exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+         end loop;
+         if Result /= 1 then
+            Store (State.SQ_Tail, Tail, AP.Release);
+            Error_Code :=
+              (if Result < 0
+               then Retryable_Submit_Error (C.int (OSI.errno))
+               else EAGAIN);
+            Recycle_Uring_Request (State, Uring_Request);
+            return False;
+         end if;
+         Uring_Request.Next_Active := State.Active_Uring_Requests;
+         State.Active_Uring_Requests := Uring_Request;
+         State.Active_Count := State.Active_Count + 1;
+         State.Uring_In_Flight := State.Uring_In_Flight + 2;
+         Uring_Request := null;
+      end;
+      Error_Code := 0;
+      return True;
+   exception
+      when Storage_Error =>
+         if Uring_Request /= null then
+            Recycle_Uring_Request (State, Uring_Request);
+         end if;
+         Error_Code := ENOMEM;
+         return False;
+   end Submit_Send_ZC;
+
    function Submit
      (Item        : in out Engine;
       Descriptor  : C.int;
@@ -1250,8 +1415,13 @@ package body System.Flyology.File_Engine is
          Uring_Request := Acquire_Uring_Request (State);
          Uring_Request.all :=
            (Token              => Token,
+            Kind               => File_Data,
             Cancel_Submitted   => False,
             Operation_Complete => False,
+            Main_Complete      => False,
+            Notification_Expected => False,
+            Stored_Result      => 0,
+            Stored_Error       => 0,
             Admin_Complete     => False,
             Admin_Submit_Deferred => False,
             Next_Free          => null,
@@ -1657,20 +1827,95 @@ package body System.Flyology.File_Engine is
                            Recycle_Uring_Request (State, Request);
                         end if;
                      else
-                        Count := Count + 1;
-                        Values (Values'First + Count - 1) :=
-                          (Token => Request.Token,
-                           Result =>
-                             (if CQ_Item.Result >= 0
-                              then C.long_long (CQ_Item.Result)
-                              else 0),
-                           Error_Code =>
-                             (if CQ_Item.Result < 0
-                              then C.int (-CQ_Item.Result)
-                              else 0));
-                        Request.Operation_Complete := True;
-                        if not Request.Cancel_Submitted
-                          or else Request.Admin_Complete
+                        if Request.Kind = Socket_Send_ZC then
+                           declare
+                              Phase : constant
+                                Send_ZC_Policy.Completion_Phase :=
+                                  (if not Request.Main_Complete then
+                                      Send_ZC_Policy.Waiting_For_Main
+                                   elsif Request.Notification_Expected then
+                                      Send_ZC_Policy.Waiting_For_Notification
+                                   else
+                                      Send_ZC_Policy.Terminal);
+                              Kind : constant
+                                Send_ZC_Policy.Completion_Kind :=
+                                  (if (CQ_Item.Flags
+                                       and IORING_CQE_F_NOTIF) /= 0
+                                   then
+                                      Send_ZC_Policy.Notification_Completion
+                                   else
+                                      Send_ZC_Policy.Main_Completion);
+                              More : constant Boolean :=
+                                (CQ_Item.Flags and IORING_CQE_F_MORE) /= 0;
+                              Kernel_Used_Copy : constant Boolean :=
+                                (To_U32 (CQ_Item.Result)
+                                 and IORING_NOTIF_USAGE_ZC_COPIED) /= 0;
+                              Plan : constant
+                                Send_ZC_Policy.Completion_Plan :=
+                                  Send_ZC_Policy.Plan_Completion
+                                    (Phase,
+                                     Kind,
+                                     More,
+                                     Usage_Reporting  => True,
+                                     Kernel_Used_Copy => Kernel_Used_Copy);
+                           begin
+                              if not Plan.Valid then
+                                 raise Program_Error with
+                                   "unexpected io_uring SEND_ZC completion";
+                              end if;
+                              if Plan.Store_Main_Result then
+                                 Request.Main_Complete := True;
+                                 Request.Stored_Result :=
+                                   (if CQ_Item.Result >= 0
+                                    then C.long_long (CQ_Item.Result)
+                                    else 0);
+                                 Request.Stored_Error :=
+                                   (if CQ_Item.Result < 0
+                                    then C.int (-CQ_Item.Result)
+                                    else 0);
+                              end if;
+                              Request.Notification_Expected :=
+                                Plan.Phase_After =
+                                  Send_ZC_Policy.Waiting_For_Notification;
+                              if Plan.Note_Copy_Fallback then
+                                 Send_ZC_Copied := 1;
+                              end if;
+                              if Plan.Release_Unused_Reservation then
+                                 if State.Uring_In_Flight = 0 then
+                                    raise Program_Error with
+                                      "missing io_uring SEND_ZC reservation";
+                                 end if;
+                                 State.Uring_In_Flight :=
+                                   State.Uring_In_Flight - 1;
+                              end if;
+                              if Plan.Emit_Terminal_Result then
+                                 Count := Count + 1;
+                                 Values (Values'First + Count - 1) :=
+                                   (Token      => Request.Token,
+                                    Result     => Request.Stored_Result,
+                                    Error_Code => Request.Stored_Error);
+                                 Request.Operation_Complete := True;
+                              end if;
+                           end;
+                        else
+                           Count := Count + 1;
+                           Values (Values'First + Count - 1) :=
+                             (Token      => Request.Token,
+                              Result     =>
+                                (if CQ_Item.Result >= 0
+                                 then C.long_long (CQ_Item.Result)
+                                 else 0),
+                              Error_Code =>
+                                (if CQ_Item.Result < 0
+                                 then C.int (-CQ_Item.Result)
+                                 else 0));
+                           Request.Operation_Complete := True;
+                        end if;
+
+                        if Request.Operation_Complete
+                          and then
+                            (not Request.Cancel_Submitted
+                             or else Request.Admin_Complete)
                         then
                            Unlink_Active_Uring (State, Request);
                            State.Active_Count := State.Active_Count - 1;

@@ -60,6 +60,20 @@ package System.Flyology.Poller is
       Token       : System.Address;
       Error_Code  : out Interfaces.C.int) return Boolean;
 
+   --  Report whether the poller's completion engine supports a terminal
+   --  zero-copy socket send.
+   function Supports_Send_ZC (Item : Poller) return Boolean;
+
+   --  Enqueue a zero-copy socket send and arrange for one terminal File_Event
+   --  after the kernel no longer owns Buffer.
+   function Submit_Send_ZC
+     (Item        : in out Poller;
+      Descriptor  : Interfaces.C.int;
+      Buffer      : System.Address;
+      Length      : Interfaces.C.size_t;
+      Token       : System.Address;
+      Error_Code  : out Interfaces.C.int) return Boolean;
+
    --  Invoke the platform cancellation backend. The scheduler calls this
    --  only from the event-loop thread that owns Item.File_State.
    function Cancel_File

@@ -1,4 +1,4 @@
-# Proof Status: Fable 5 prevention coverage
+# Proof Status: Flyology prevention coverage
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
@@ -66,6 +66,15 @@ those transitions for its atomic phase stores. It does not prove GNARL task
 creation/reap locking, release/acquire synchronization, protected-entry wakeup,
 or exception rendering; focused lane-parity and lifecycle tests cover those
 integration boundaries.
+The production file-transfer completion policy proves that valid positive
+progress is returned before concurrent cancellation is classified, while
+unsupported and malformed completions remain distinct. The runtime SEND_ZC
+policy proves the main-CQE/notification state transition, that a main CQE with
+`MORE` cannot release or emit the terminal result, that a main CQE without
+`MORE` releases the unused reservation, and that copy fallback is recorded
+only when usage reporting was requested. Kernel CQE delivery, flag semantics,
+socket byte acceptance, the imported ABI, and Ada asynchronous-transfer races
+remain outside SPARK and require the Linux and lane-parity tests.
 
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
@@ -166,6 +175,11 @@ integration boundaries.
   - [x] `Flyology.Placement_Policy.Group_For_CPU`, including that no CPU
         aspect selects the reserved value
   - [x] Whole `Flyology.Placement_Policy` unit widening
+- [x] Production-used file-transfer completion policies (level 1, mode all)
+  - [x] `Flyology.File_Transfer_Policy.Classify`
+  - [x] `System.Flyology.Send_ZC_Policy.Plan_Completion`
+  - [x] Whole-unit targeted proof for both policies
+  - [x] Application and runtime policy suite widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review

@@ -31,6 +31,7 @@ project Showcases is
       "dormant_stack_pressure.adb",
       "dns_resolution.adb",
       "execution_groups.adb",
+      "file_transfer_benchmark.adb",
       "lightweight_file_io.adb",
       "lightweight_io.adb",
       "event_loop_pool.adb",

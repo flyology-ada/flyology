@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Transfer regular-file regions to connected stream sockets from native and lightweight Flyology tasks, with sendfile, Linux io_uring SEND_ZC, cancellation, deadlines, and measured fallback behavior.">
+    <meta name="theme-color" content="#17213d">
+    <title>File-to-socket transfers · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/file-transfers/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">File transfers</li></ol>
+          <h1>Move file data without changing the calling model.</h1>
+        </div>
+        <p class="doc-hero-copy">Serve downloads, static assets, media segments, and other unchanged file regions without routing every byte through an application-managed read-and-send loop.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#introduction">Why reduced-copy</a></li>
+            <li><a href="#contract">Operation contract</a></li>
+            <li><a href="#loop">Transfer loop</a></li>
+            <li><a href="#lanes">Lanes and platforms</a></li>
+            <li><a href="#ownership">Ownership and cancellation</a></li>
+            <li><a href="#performance">Measure the crossover</a></li>
+            <li><a href="#limits">Operational limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p><code>Flyology.IO.Files.Transfers.Send_Chunk</code> has the same synchronous call semantics in native and lightweight tasks. The selected lane changes how the operation waits, not how callers structure control flow or handle progress.</p>
+          </aside>
+
+          <section id="introduction">
+            <span class="step-label">WHY IT EXISTS</span>
+            <h2>Avoid the read-copy-send detour.</h2>
+            <p>A conventional file server reads a region into an application buffer, then sends that buffer to a socket. The loop is straightforward, but it asks the application to coordinate two operations and moves the payload across the kernel boundary twice. For large or frequent transfers, those copies, syscalls, and buffer passes consume memory bandwidth and calling-task CPU without changing the bytes.</p>
+            <p><code>Send_Chunk</code> keeps the same synchronous Ada control flow while selecting a lane-appropriate data path. The operation is positional and does not disturb the file descriptor's current position.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Read then send</dt><dd>The kernel supplies file data to an application buffer; the application submits that buffer to the socket. This is the portable baseline and remains the fallback.</dd></div>
+                <div class="decision-row"><dt>Native task</dt><dd>The host <code>sendfile</code> operation passes the file region directly to the socket path. The application manages progress and deadlines, but does not receive the payload bytes.</dd></div>
+                <div class="decision-row"><dt>Lightweight task</dt><dd>File input remains completion-driven so the event-loop pthread is not blocked. On Linux, <code>SEND_ZC</code> can reduce copying on the socket side; Flyology waits for the kernel's release notification before allowing the caller to reuse the scratch storage. Unsupported kernels use the ordinary socket-send fallback.</dd></div>
+              </dl>
+            </div>
+            <p>This is most useful for unchanged regular-file regions sent over plain stream sockets: static responses, downloads, cached artifacts, backup streams, replication, and media segments. The benefit usually becomes clearer as transfer size or frequency grows.</p>
+            <p>Use a normal buffered pipeline when the application must inspect or transform the bytes. TLS framing, compression, checksums over transformed data, protocol encoding, and dynamic content all require work above this primitive. Small transfers may also be faster through the simpler fallback, so measure on the target host.</p>
+          </section>
+
+          <section id="contract">
+            <span class="step-label">TRANSFER 01</span>
+            <h2>Advance an explicit positional region.</h2>
+            <p><code>Send_Chunk</code> starts at an explicit file offset and does not change the descriptor position. It returns after sending the available chunk, reaching end of file, or raising an exception. Advance the offset by <code>Sent</code> and call again until the requested region is complete.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>File</code></dt><dd>An open regular-file descriptor that permits reads.</dd></div>
+                <div class="decision-row"><dt><code>Socket</code></dt><dd>An open, connected plain stream socket. The operation does not encode a protocol or pass data through a TLS provider.</dd></div>
+                <div class="decision-row"><dt><code>Offset</code> and <code>Count</code></dt><dd>The first file byte and maximum progress for this call. A zero count returns zero immediately; zero progress with a positive count means end of file.</dd></div>
+                <div class="decision-row"><dt><code>Scratch</code></dt><dd>One acquired <code>Unique_Buffer</code>. It supplies completion-driven file storage in the lightweight lane and the portable fallback path.</dd></div>
+                <div class="decision-row"><dt><code>Timeout</code></dt><dd>One monotonic budget spanning file access, socket progress, and terminal buffer release within this call.</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section id="loop">
+            <span class="step-label">TRANSFER 02</span>
+            <h2>Use one loop in either lane.</h2>
+            <p>The reusable buffer determines the largest completion-driven chunk. The example gives each chunk one five-second budget. For one budget across the complete region, compute a monotonic deadline before the loop and pass its remaining duration to each call.</p>
+            <figure class="code-panel">
+              <figcaption>positional file-region transfer</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.Buffers;
+with Flyology.IO.Files;
+with Flyology.IO.Files.Transfers;
+with Flyology.IO.Sockets;
+
+procedure Send_File_Region
+  (File   : Flyology.IO.Files.File_Descriptor;
+   Socket : Flyology.IO.Sockets.Socket_Type;
+   First  : Flyology.IO.Files.File_Offset;
+   Count  : Flyology.IO.Files.Transfers.Byte_Count)
+is
+   package Buffers   renames Flyology.Buffers;
+   package Files     renames Flyology.IO.Files;
+   package Transfers renames Flyology.IO.Files.Transfers;
+
+   use type Files.File_Offset;
+   use type Transfers.Byte_Count;
+
+   Storage : aliased Buffers.Pool
+     (Block_Size =&gt; 16 * 1_024 * 1_024, Capacity =&gt; 1);
+   Scratch   : Buffers.Unique_Buffer (Storage'Access);
+   Offset    : Files.File_Offset := First;
+   Remaining : Transfers.Byte_Count := Count;
+   Sent      : Transfers.Byte_Count;
+begin
+   Buffers.Acquire (Scratch);
+   while Remaining &gt; 0 loop
+      Transfers.Send_Chunk
+        (File, Socket, Offset, Remaining, Scratch, Sent,
+         Timeout =&gt; 5.0);
+      exit when Sent = 0; -- end of file
+      Offset := Offset + Files.File_Offset (Sent);
+      Remaining := Remaining - Sent;
+   end loop;
+end Send_File_Region;</code></pre>
+            </figure>
+            <p>Both the file and socket must remain open for the call. The caller serializes their lifetime and must not modify the transferred file region concurrently.</p>
+          </section>
+
+          <section id="lanes">
+            <span class="step-label">TRANSFER 03</span>
+            <h2>Know which kernel path is active.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Native task</dt><dd>Darwin and Linux use the host <code>sendfile</code> operation. The call may block only that task's pthread. Retry, deadline, cancellation, and partial-progress policy remain in Ada.</dd></div>
+                <div class="decision-row"><dt>Linux lightweight task</dt><dd>The file read remains on the execution group's completion engine. When the io_uring probe admits <code>SEND_ZC</code>, the socket send uses it and retains the buffer until the notification CQE releases kernel ownership.</dd></div>
+                <div class="decision-row"><dt>Linux fallback</dt><dd>If io_uring or <code>SEND_ZC</code> is unavailable, Flyology uses the completion-driven file read followed by the ordinary socket-send path.</dd></div>
+                <div class="decision-row"><dt>Darwin lightweight task</dt><dd>POSIX AIO and <code>EVFILT_AIO</code> provide completion-driven file input, followed by the ordinary socket-send path. Flyology does not invoke potentially faulting <code>sendfile</code> work on an event-loop pthread.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Opcode support is not proof of reduced copying.</strong> Linux may report that a <code>SEND_ZC</code> request used its kernel copy fallback. The maintained benchmark reads the notification result and labels that case separately.</p>
+            </aside>
+          </section>
+
+          <section id="ownership">
+            <span class="step-label">TRANSFER 04</span>
+            <h2>Keep the scratch buffer uniquely owned.</h2>
+            <p>The caller retains the <code>Unique_Buffer</code> handle throughout the operation. On a lightweight completion path, submitted bytes are kernel-owned until terminal completion. <code>Send_Chunk</code> does not return or raise while the kernel may still read that storage, so the same scratch buffer can be reused immediately afterward. The native host path does not submit <code>Scratch</code>.</p>
+            <p>Pre-cancellation raises <code>Operation_Cancelled</code> before submission. In a lightweight task, cancellation after submission first resolves terminal buffer ownership and then raises. In a native task, cancellation is checked before host <code>sendfile</code> attempts and can interrupt socket-readiness waits, but it cannot preempt a host syscall that is already executing.</p>
+            <p>Each normal return reports the bytes accepted by one socket send. Positive completion wins over cancellation observed in the same completion, because replaying those bytes would duplicate them. Timeout or cancellation can still race with irreversible socket progress that an exceptional return cannot expose through <code>Sent</code>; do not blindly retry the same region when duplicates are unsafe.</p>
+            <figure class="code-panel">
+              <figcaption>one cancellable chunk</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Stop : aliased Flyology.Cancellation.Token;
+
+Transfers.Send_Chunk
+  (File, Socket, Offset, Remaining, Scratch, Sent,
+   Timeout =&gt; 2.0,
+   Token   =&gt; Stop'Access);</code></pre>
+            </figure>
+            <p>Code coordinating shutdown may call <code>Stop.Request</code> from another task. The token must outlive every operation that borrows it.</p>
+          </section>
+
+          <section id="performance">
+            <span class="step-label">TRANSFER 05</span>
+            <h2>Measure on the target host.</h2>
+            <p>The maintained showcase compares <code>Send_Chunk</code> with an optimized <code>Read_At</code> plus <code>Send_All</code> loop. Both paths reuse one 16 MiB buffer and transfer cached file data over TCP loopback at 1, 16, and 64 MiB. Warmups validate the payload; timed samples alternate method order and report median throughput, median calling-thread CPU efficiency, and median paired speedups. On Linux it also reports the file backend and whether SEND_ZC usage reporting observed a kernel copy fallback.</p>
+            <figure class="code-panel">
+              <figcaption>run the maintained comparison</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./showcases/run_file_transfer_benchmark.sh</code></pre>
+            </figure>
+            <p>The runner labels a reduced-copy crossover only when the median paired speedup reaches 1.05×. Re-run it on the target kernel before using the result for a deployment decision.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>These are cached-loopback observations from one host, not universal throughput claims. Buffer size, kernel release, socket type, file cache state, network path, and concurrent load can move the crossover. The runner prints when it measures no wall-throughput crossover.</p>
+            </aside>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">TRANSFER 06</span>
+            <h2>Keep the boundary narrow.</h2>
+            <ul>
+              <li>The source must be a regular file and the destination a connected stream socket.</li>
+              <li>The operation is positional and does not update the file descriptor's current position.</li>
+              <li>It does not perform TLS framing, HTTP range handling, content-length generation, or application-level retries.</li>
+              <li>Concurrent close, descriptor reuse, or mutation of the file region remains a caller synchronization error.</li>
+              <li>For a native task, the deadline governs retries and readiness waits but cannot preempt a host <code>sendfile</code> syscall that is already executing.</li>
+              <li><code>Open</code> and <code>Close</code> remain direct metadata syscalls in both lanes.</li>
+              <li>Use the exact exception and parameter contracts in the <a href="../../api/">generated API reference</a>.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Return to the <a href="../">main guide</a> for task designation and runtime setup, or continue to the <a href="../../architecture/">architecture guide</a> for the completion-engine and scheduler boundaries.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../timers/">Timers</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

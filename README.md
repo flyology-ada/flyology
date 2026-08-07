@@ -753,6 +753,8 @@ Flyology exposes synchronous operations in:
 - The `flyology_http` crate's `Flyology.HTTP.Server`: HTTP/1.1 persistent requests, fixed-length messages,
   server-sent events, WebSocket upgrades and frames, and plain/TLS transports.
 - `Flyology.IO.Files`: open, close, positional read, and positional write.
+- `Flyology.IO.Files.Transfers`: positional regular-file transfer to connected
+  stream sockets with one API for native and lightweight tasks.
 - `Flyology.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
   resolver worker thread.
 - `Flyology.IO`: descriptor waits and task-mode detection used by the packages
@@ -1459,6 +1461,40 @@ request. Ada task abort uses the same cancellation state machine. Native tasks
 retain their direct `pread`/`pwrite` behavior: a token is checked before the
 syscall, but an already-running native syscall is not interrupted by a hidden
 worker or polling thread.
+
+`Flyology.IO.Files.Transfers.Send_Chunk` sends a positional file region without
+changing the file descriptor position. Native tasks use the host `sendfile`
+operation. The Darwin binding imports `sendfile` directly in Ada; the Linux
+binding uses a narrow synchronous wrapper only to scope `SIGPIPE` safely around
+an interface that has no flags argument. Retry, deadline, partial-progress, and
+exception policy remain in Ada.
+
+Lightweight tasks keep regular-file input on the completion engine. On Linux,
+an `io_uring` probe enables `IORING_OP_SEND_ZC`; Flyology retains the unique
+buffer until the notification CQE says that the kernel has released it. The
+engine reserves capacity for both CQEs before submission and falls back to the
+ordinary buffer send when the opcode is unavailable. Darwin currently uses the
+completion-driven read plus ordinary socket-send fallback because its
+`sendfile` call can still fault on file data and is therefore not run on an
+event-loop pthread. The caller owns one reusable `Unique_Buffer`, advances the
+explicit offset by `Sent`, and can use the same loop in either lane.
+
+Each call performs at most one socket send and reports its positive progress on
+normal return. A positive completion wins over cancellation observed in the
+same completion, because those bytes cannot safely be replayed. A timeout or
+cancellation may still race with irreversible socket progress that cannot be
+reported through an `out` parameter on an exceptional return; callers must not
+blindly retry the same region when duplicate bytes would be unsafe.
+
+`./showcases/run_file_transfer_benchmark.sh` compares `Send_Chunk` with an
+16 MiB reusable-buffer `Read_At` plus `Send_All` loop at 1, 16, and 64 MiB in
+both lanes. It validates both paths during warmup, alternates their order in
+paired samples, and reports median loopback wall throughput, median sender CPU
+efficiency, and median paired speedups. On Linux it also reports the selected
+file backend and distinguishes SEND_ZC usage reports from the kernel's copy
+fallback. A crossover is reported only at 1.05x or greater. Results are host-
+and kernel-dependent; the runner prints when no crossover was measured instead
+of treating opcode availability as a performance result.
 
 `Open` and `Close` are still direct metadata syscalls because neither supported
 platform provides an equivalent portable completion operation for them. They
@@ -2419,6 +2455,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_task_lifecycle.sh
 ./showcases/run_task_snapshot_contention.sh
 ./showcases/run_dormant_stack_pressure.sh 128 64
+./showcases/run_file_transfer_benchmark.sh
 ./showcases/run_http_benchmark.sh
 ```
 

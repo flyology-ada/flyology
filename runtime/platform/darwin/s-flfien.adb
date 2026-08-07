@@ -25,6 +25,10 @@ package body System.Flyology.File_Engine is
    ENOENT       : constant C.int := 2;
    EIO          : constant C.int := 5;
 
+   function Send_ZC_Copy_Fallback return C.int is (0);
+   pragma Export
+     (C, Send_ZC_Copy_Fallback, "flyology_send_zc_copy_fallback");
+
    --  A hard EV_DELETE failure is not recoverable enough to permit immediate
    --  aiocb-address reuse. Keep terminal records stable until a stale event
    --  consumes them or the owning poller is destroyed. Bound the exceptional
@@ -296,6 +300,26 @@ package body System.Flyology.File_Engine is
          Item.State := System.Null_Address;
       end if;
    end Finalize;
+
+   function Supports_Send_ZC (Item : Engine) return Boolean is
+   begin
+      pragma Unreferenced (Item);
+      return False;
+   end Supports_Send_ZC;
+
+   function Submit_Send_ZC
+     (Item        : in out Engine;
+      Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Token       : System.Address;
+      Error_Code  : out C.int) return Boolean
+   is
+   begin
+      pragma Unreferenced (Item, Descriptor, Buffer, Length, Token);
+      Error_Code := C.int (OSI.EINVAL);
+      return False;
+   end Submit_Send_ZC;
 
    function Submit
      (Item        : in out Engine;

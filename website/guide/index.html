@@ -74,6 +74,7 @@
             <li><a href="#observe">Observe and adjust</a></li>
             <li><a href="#verify">Verify behavior</a></li>
             <li><a href="#constraints">Constraints</a></li>
+            <li><a href="file-transfers/">File-to-socket transfers</a></li>
             <li><a href="timers/">Timers and clock changes</a></li>
             <li><a href="http/">HTTP clients and applications</a></li>
           </ol>
@@ -82,7 +83,7 @@
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">→</span>
-            <p>Focused guides cover <a href="timers/">timers and clock changes</a> as well as <a href="http/">HTTP clients and applications</a>, including outbound request-body sources, routing, streaming, structured request work, security, and reproducible <code>oha</code> benchmarks.</p>
+            <p>Focused guides cover <a href="file-transfers/">file-to-socket transfers</a>, <a href="timers/">timers and clock changes</a>, and <a href="http/">HTTP clients and applications</a>, including outbound request-body sources, routing, streaming, structured request work, security, and reproducible benchmarks.</p>
           </aside>
           <section id="requirements">
             <span class="step-label">STEP 01</span>
@@ -348,6 +349,7 @@ Flyology.IO.Files.Read_At
   (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
             </figure>
             <p>For relative waits, monotonic deadlines, adjustable wall-clock targets, and backward-clock detection, continue with the <a href="timers/">timers guide</a>.</p>
+            <p>To move positional regular-file regions to connected stream sockets with native <code>sendfile</code>, Linux lightweight <code>SEND_ZC</code>, and completion-driven fallbacks, continue with the <a href="file-transfers/">file-transfer guide</a>.</p>
             <p>Use the ownership-aware connection packages when descriptor lifetime, cancellation, and close races matter. Raw descriptor waits deliberately leave lifetime serialization to the caller.</p>
             <p><a href="../api/">Browse the generated API reference</a></p>
           </section>

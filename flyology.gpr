@@ -126,6 +126,7 @@ project Flyology is
             "flyology-io-dns.ads",
             "flyology-io-dns-testing.ads",
             "flyology-io-files.ads",
+            "flyology-io-files-transfers.ads",
             "flyology-io-sockets.ads",
             "flyology-structured_server_policy.ads",
             "flyology-io-structured_servers.ads",

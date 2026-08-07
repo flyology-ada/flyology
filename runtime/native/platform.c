@@ -817,6 +817,14 @@ int flyology_map_anonymous(void) {
     return MAP_ANONYMOUS;
 }
 
+int flyology_linux_msg_nosignal(void) {
+#if defined(__linux__)
+    return MSG_NOSIGNAL;
+#else
+    return 0;
+#endif
+}
+
 /*
  * Stack-arena policy lives in Ada. These wrappers provide only the two
  * process primitives which are awkward to represent portably in the runtime

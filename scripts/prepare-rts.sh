@@ -554,6 +554,7 @@ fi
   "$generated_include/s-flpopo.adb" \
   "$generated_include/s-flypol.adb" \
   "$generated_include/s-flscpo.adb" \
+  "$generated_include/s-fszcpo.adb" \
   "$generated_include/s-flysch.adb" \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-tassta.adb"
@@ -567,7 +568,7 @@ cp \
   s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-ftrepo.ali s-fltare.ali s-flstpo.ali s-flycon.ali \
   s-flyasa.ali \
   s-flyfau.ali s-flfien.ali s-flpopo.ali s-flypol.ali \
-  s-flscpo.ali s-flysch.ali s-taprop.ali s-tassta.ali \
+  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$compat_family" = gnat-legacy ]; then
   cp a-sytaco.ali "$generated_lib/"
@@ -590,6 +591,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-flpopo.o \
   s-flypol.o \
   s-flscpo.o \
+  s-fszcpo.o \
   s-flysch.o \
   s-taprop.o \
   s-tassta.o \

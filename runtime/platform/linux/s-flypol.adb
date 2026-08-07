@@ -428,6 +428,28 @@ package body System.Flyology.Poller is
          Error_Code);
    end Submit_File;
 
+   function Supports_Send_ZC (Item : Poller) return Boolean is
+     (File_Engines.Supports_Send_ZC (Item.File_State));
+
+   function Submit_Send_ZC
+     (Item        : in out Poller;
+      Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Token       : System.Address;
+      Error_Code  : out C.int) return Boolean
+   is
+   begin
+      if Faults.Enabled
+        and then Faults.Fail (Faults.File_Submission_Full)
+      then
+         Error_Code := EAGAIN;
+         return False;
+      end if;
+      return File_Engines.Submit_Send_ZC
+        (Item.File_State, Descriptor, Buffer, Length, Token, Error_Code);
+   end Submit_Send_ZC;
+
    function Cancel_File
      (Item           : in out Poller;
       Descriptor     : C.int;
