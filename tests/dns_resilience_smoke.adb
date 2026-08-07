@@ -1,10 +1,13 @@
+with Ada.Directories;
 with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Streams;
+with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.DNS;
+with Flyology.IO.Files;
 with Flyology.IO.Sockets;
 
 --  Resolver resilience against hostile or failing name servers. Every check
@@ -18,6 +21,7 @@ procedure DNS_Resilience_Smoke is
    use type Ada.Real_Time.Time;
    use type Streams.Stream_Element;
    use type Streams.Stream_Element_Offset;
+   use type Flyology.IO.Files.File_Descriptor;
 
    Flood_Seconds : constant Duration := 4.0;
    --  A resolver that ignores its deadline stalls for the whole flood, so the
@@ -30,6 +34,8 @@ procedure DNS_Resilience_Smoke is
          procedure Ready (Address : Sockets.Endpoint);
          procedure Failed;
          entry Get_Address (Address : out Sockets.Endpoint);
+         procedure Begin_Client;
+         entry Await_Start;
          procedure Stop_Flood;
          function Flood_Stopped return Boolean;
          procedure Finished (Passed : Boolean);
@@ -38,6 +44,7 @@ procedure DNS_Resilience_Smoke is
          Is_Ready    : Boolean := False;
          Setup_Failed : Boolean := False;
          Server      : Sockets.Endpoint;
+         Can_Start   : Boolean := False;
          Flood_Halted : Boolean := False;
          Is_Finished : Boolean := False;
          All_OK      : Boolean := False;
@@ -61,6 +68,14 @@ procedure DNS_Resilience_Smoke is
             end if;
             Address := Server;
          end Get_Address;
+         procedure Begin_Client is
+         begin
+            Can_Start := True;
+         end Begin_Client;
+         entry Await_Start when Can_Start is
+         begin
+            null;
+         end Await_Start;
          procedure Stop_Flood is
          begin
             Flood_Halted := True;
@@ -76,6 +91,41 @@ procedure DNS_Resilience_Smoke is
             Passed := All_OK;
          end Wait_Finished;
       end Control;
+
+      function Config_Path (Server : Sockets.Endpoint) return String is
+        ("/tmp/flyology-dns-resilience-"
+         & Ada.Strings.Fixed.Trim
+             (Sockets.Port'Image (Server.Port), Ada.Strings.Both)
+         & ".conf");
+
+      procedure Write_Config (Server : Sockets.Endpoint) is
+         File : Flyology.IO.Files.File_Descriptor :=
+           Flyology.IO.Files.Invalid_File;
+         Text : constant String :=
+           "nameserver " & Sockets.Image (Server) & ASCII.LF
+           & "search corp.test lab.test" & ASCII.LF
+           & "options attempts:1 timeout:1" & ASCII.LF;
+         Data : Streams.Stream_Element_Array
+           (1 .. Streams.Stream_Element_Offset (Text'Length));
+         Last : Streams.Stream_Element_Offset;
+      begin
+         for Index in Text'Range loop
+            Data (Streams.Stream_Element_Offset (Index - Text'First + 1)) :=
+              Character'Pos (Text (Index));
+         end loop;
+         File := Flyology.IO.Files.Open
+           (Config_Path (Server), Flyology.IO.Files.Write_Only,
+            Create => True, Truncate => True);
+         Flyology.IO.Files.Write_At (File, 0, Data, Last);
+         Flyology.IO.Files.Close (File);
+         pragma Assert (Last = Data'Last);
+      exception
+         when others =>
+            if File /= Flyology.IO.Files.Invalid_File then
+               Flyology.IO.Files.Close (File);
+            end if;
+            raise;
+      end Write_Config;
 
       procedure Close_Quietly (Socket : in out Sockets.Socket_Type) is
       begin
@@ -142,25 +192,68 @@ procedure DNS_Resilience_Smoke is
             when Sockets.Socket_Error => null;
          end Flood;
 
-         procedure Send_NXDOMAIN is
+         function Question_End return Streams.Stream_Element_Offset is
+            Position : Streams.Stream_Element_Offset := 13;
+         begin
+            while Query (Position) /= 0 loop
+               Position :=
+                 Position + 1 + Streams.Stream_Element_Offset (Query (Position));
+            end loop;
+            return Position + 4;
+         end Question_End;
+
+         --  Echo the question with the requested response code and no answer
+         --  records. Code 3 is NXDOMAIN and code 2 is SERVFAIL.
+         procedure Send_Status (Response_Code : Streams.Stream_Element) is
             Response      : Streams.Stream_Element_Array (1 .. 512) :=
               (others => 0);
-            Question_Last : Streams.Stream_Element_Offset := 13;
+            Question_Last : constant Streams.Stream_Element_Offset :=
+              Question_End;
             Sent          : Streams.Stream_Element_Offset;
          begin
-            while Query (Question_Last) /= 0 loop
-               Question_Last := Question_Last
-                 + 1 + Streams.Stream_Element_Offset (Query (Question_Last));
-            end loop;
-            Question_Last := Question_Last + 4;
             Response (1 .. Question_Last) := Query (1 .. Question_Last);
             Response (3) := 16#81#;
-            Response (4) := 16#83#;
+            Response (4) := 16#80# + Response_Code;
             Response (7) := 0;
             Response (8) := 0;
             Sockets.Send_Socket
               (UDP, Response (1 .. Question_Last), Sent, Peer);
-         end Send_NXDOMAIN;
+         end Send_Status;
+
+         procedure Send_A (Address_Image : String) is
+            Response      : Streams.Stream_Element_Array (1 .. 512) :=
+              (others => 0);
+            Question_Last : constant Streams.Stream_Element_Offset :=
+              Question_End;
+            Position      : Streams.Stream_Element_Offset;
+            Sent          : Streams.Stream_Element_Offset;
+            Address       : constant Sockets.IP_Address :=
+              Sockets.Parse_IP_Address (Address_Image);
+         begin
+            Response (1 .. Question_Last) := Query (1 .. Question_Last);
+            Response (3) := 16#81#;
+            Response (4) := 16#80#;
+            Response (7) := 0;
+            Response (8) := 1;
+            Position := Question_Last + 1;
+            Response (Position) := 16#C0#;
+            Response (Position + 1) := 12;
+            Response (Position + 2) := 0;
+            Response (Position + 3) := 1;
+            Response (Position + 4) := 0;
+            Response (Position + 5) := 1;
+            Response (Position + 6 .. Position + 9) := (others => 0);
+            Response (Position + 9) := 60;
+            Response (Position + 10) := 0;
+            Response (Position + 11) := 4;
+            Position := Position + 12;
+            for Index in Address.V4'Range loop
+               Response (Position) :=
+                 Streams.Stream_Element (Address.V4 (Index));
+               Position := Position + 1;
+            end loop;
+            Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent, Peer);
+         end Send_A;
       begin
          Sockets.Create_Socket (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
          Sockets.Bind_Socket
@@ -175,11 +268,23 @@ procedure DNS_Resilience_Smoke is
               and then Character'Val (Query (2)) = 't'
               and then Character'Val (Query (3)) = 'o'
               and then Character'Val (Query (4)) = 'p';
-            if Query_Name = "flood.test" then
-               Flood;
-            else
-               Send_NXDOMAIN;
-            end if;
+            declare
+               Name : constant String := Query_Name;
+            begin
+               if Name = "flood.test" then
+                  Flood;
+               elsif Name = "walk.lab.test" then
+                  Send_A ("192.0.2.13");
+               elsif Name = "walk.corp.test"
+                 or else Name = "reject.corp.test"
+                 or else Name = "reject.lab.test"
+                 or else Name = "reject"
+               then
+                  Send_Status (2);
+               else
+                  Send_Status (3);
+               end if;
+            end;
          end loop;
          Sockets.Close_Socket (UDP);
       exception
@@ -237,11 +342,76 @@ procedure DNS_Resilience_Smoke is
                OK := False;
             end if;
          end Check_Flood_Deadline;
+
+         --  A server-failure response code for one search candidate must not
+         --  cancel the remaining candidates.
+         procedure Check_Search_Walk_Survives_Failure is
+         begin
+            declare
+               Values : constant DNS.Address_Array := DNS.Resolve
+                 ("walk", DNS.IPv4_Only, Timeout => 3.0,
+                  Configuration_Path => Config_Path (Server));
+            begin
+               if Values'Length /= 1
+                 or else Sockets.Image (Values (Values'First)) /= "192.0.2.13"
+               then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "search walk returned an unexpected address");
+                  OK := False;
+               end if;
+            end;
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "server failure aborted the search walk: "
+                  & Ada.Exceptions.Exception_Name (Error));
+               OK := False;
+         end Check_Search_Walk_Survives_Failure;
+
+         --  When every candidate ends in a server failure the deadline is
+         --  still unspent, so the outcome must not be reported as a timeout.
+         procedure Check_Server_Failure_Category is
+            Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+            Reported : Boolean := False;
+            Elapsed  : Duration;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array := DNS.Resolve
+                    ("reject", DNS.IPv4_Only, Timeout => 3.0,
+                     Configuration_Path => Config_Path (Server));
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Name_Server_Failure => Reported := True;
+               when Error : others =>
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "rejected resolution raised "
+                     & Ada.Exceptions.Exception_Name (Error));
+            end;
+            Elapsed :=
+              Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started);
+            if not Reported or else Elapsed > 1.0 then
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "server failure was misreported: reported="
+                  & Reported'Image & " elapsed=" & Elapsed'Image);
+               OK := False;
+            end if;
+         end Check_Server_Failure_Category;
       begin
+         Control.Await_Start;
          Control.Get_Address (Server);
          Servers (1) := Server;
          DNS.Clear_Cache;
          Check_Flood_Deadline;
+         Check_Search_Walk_Survives_Failure;
+         Check_Server_Failure_Category;
          Control.Finished (OK);
       exception
          when Error : others =>
@@ -262,6 +432,8 @@ procedure DNS_Resilience_Smoke is
       Passed    : Boolean;
    begin
       Control.Get_Address (Address);
+      Write_Config (Address);
+      Control.Begin_Client;
       select
          Control.Wait_Finished (Passed);
       or
@@ -271,6 +443,9 @@ procedure DNS_Resilience_Smoke is
       Sockets.Create_Socket (Stopper, Sockets.IPv4, Sockets.Socket_Datagram);
       Sockets.Send_Socket (Stopper, Stop_Data, Last, Address);
       Sockets.Close_Socket (Stopper);
+      if Ada.Directories.Exists (Config_Path (Address)) then
+         Ada.Directories.Delete_File (Config_Path (Address));
+      end if;
       return Passed;
    end Run;
 

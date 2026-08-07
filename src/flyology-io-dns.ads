@@ -28,6 +28,9 @@ package Flyology.IO.DNS is
    Resolution_Failed  : exception;
    --  Raised when no valid result can be obtained from malformed responses.
    Malformed_Response : exception;
+   --  Raised when every name server answers with a failure response code.
+   --  Unlike Timeout_Error this outcome leaves the caller's deadline unspent.
+   Name_Server_Failure : exception;
    --  Raised when a member of the resolver's interrupt set becomes readable.
    Operation_Cancelled : exception;
 
@@ -36,9 +39,10 @@ package Flyology.IO.DNS is
    --  supported without libc name services. Numeric and localhost names bypass
    --  the file. Negative Timeout means no limit and zero is immediate; one
    --  deadline spans search candidates, family queries, retries, and transport
-   --  fallback. Lightweight tasks suspend on socket readiness; native tasks
-   --  block their threads. Reading Configuration_Path is a direct metadata
-   --  operation and can block the underlying thread.
+   --  fallback. A negative answer or a server-failure response code moves on
+   --  to the next search candidate. Lightweight tasks suspend on socket
+   --  readiness; native tasks block their threads. Reading Configuration_Path
+   --  is a direct metadata operation and can block the underlying thread.
    --  @param Name Host name, numeric address, or localhost
    --  @param Family Requested result family
    --  @param Timeout Overall deadline interval in seconds
@@ -48,8 +52,10 @@ package Flyology.IO.DNS is
    --  @exception Name_Not_Found No address exists for Name and Family
    --  @exception Resolution_Failed Input or resolver configuration is unusable
    --  @exception Malformed_Response Responses are malformed or inconsistent
+   --  @exception Name_Server_Failure Every candidate ends in a server failure
    --  @exception Operation_Cancelled An interrupt descriptor is readable
-   --  @exception Timeout_Error The overall deadline expires
+   --  @exception Timeout_Error The overall deadline expires or every transport
+   --     fails without an answer
    --  @exception Device_Error Descriptor polling or transport setup fails
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
    --     a socket operation fails
@@ -77,8 +83,10 @@ package Flyology.IO.DNS is
    --  @exception Name_Not_Found No address exists for Name and Family
    --  @exception Resolution_Failed Servers or retry interval are unusable
    --  @exception Malformed_Response Responses are malformed or inconsistent
+   --  @exception Name_Server_Failure Every name server reports a failure
    --  @exception Operation_Cancelled An interrupt descriptor is readable
-   --  @exception Timeout_Error The overall deadline expires
+   --  @exception Timeout_Error The overall deadline expires or every transport
+   --     fails without an answer
    --  @exception Device_Error Descriptor polling or transport setup fails
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
    --     a socket operation fails

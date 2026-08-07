@@ -1216,6 +1216,7 @@ package body Flyology.IO.DNS is
       Found, Negative : Boolean;
       Last_Error_Was_Malformed : Boolean := False;
       Last_Transport_Failed : Boolean := False;
+      Last_Server_Failed : Boolean := False;
    begin
       Cache.Lookup
         (Key, Found, Negative, Cached, Cached_Count, Cached_TTL);
@@ -1428,6 +1429,10 @@ package body Flyology.IO.DNS is
                                  raise Malformed_Response with
                                    "truncated TCP DNS response";
                               when Server_Failure =>
+                                 --  The server answered, so the deadline is
+                                 --  still unspent. Record the rejection and
+                                 --  let the next server or attempt run.
+                                 Last_Server_Failed := True;
                                  exit;
                            end case;
                         exception
@@ -1470,6 +1475,8 @@ package body Flyology.IO.DNS is
 
       if Last_Error_Was_Malformed then
          raise Malformed_Response with "no valid DNS response received";
+      elsif Last_Server_Failed then
+         raise Name_Server_Failure with Image (Name);
       elsif Last_Transport_Failed then
          raise Timeout_Error with "DNS transport failed";
       end if;
@@ -1495,6 +1502,7 @@ package body Flyology.IO.DNS is
       Count      : Natural := 0;
       Transport_Failed : Boolean := False;
       Malformed_Failed : Boolean := False;
+      Server_Failed    : Boolean := False;
 
       procedure Append (Parsed : Parse_Result);
       procedure Append (Parsed : Parse_Result) is
@@ -1556,6 +1564,7 @@ package body Flyology.IO.DNS is
                exception
                   when Name_Not_Found => null;
                   when Malformed_Response => Malformed_Failed := True;
+                  when Name_Server_Failure => Server_Failed := True;
                   when Timeout_Error
                      | Device_Error
                      | Sockets.Socket_Error =>
@@ -1569,6 +1578,7 @@ package body Flyology.IO.DNS is
             exception
                when Name_Not_Found => null;
                when Malformed_Response => Malformed_Failed := True;
+               when Name_Server_Failure => Server_Failed := True;
                when Timeout_Error
                   | Device_Error
                   | Sockets.Socket_Error =>
@@ -1579,6 +1589,8 @@ package body Flyology.IO.DNS is
          if Malformed_Failed then
             raise Malformed_Response with
               "no usable address after malformed DNS response";
+         elsif Server_Failed then
+            raise Name_Server_Failure with Name;
          elsif Transport_Failed then
             raise Timeout_Error with "DNS resolution timed out";
          else
@@ -1666,7 +1678,10 @@ package body Flyology.IO.DNS is
          begin
             return Try_Name (Name);
          exception
-            when Name_Not_Found =>
+            --  A negative answer and a server-failure response code are both
+            --  answers about this candidate only. Neither may suppress the
+            --  remaining search domains of a relative name.
+            when Name_Not_Found | Name_Server_Failure =>
                if Absolute then
                   raise;
                end if;
@@ -1685,7 +1700,7 @@ package body Flyology.IO.DNS is
                begin
                   return Try_Name (Name & "." & Suffix);
                exception
-                  when Name_Not_Found => null;
+                  when Name_Not_Found | Name_Server_Failure => null;
                end;
             end if;
          end;
