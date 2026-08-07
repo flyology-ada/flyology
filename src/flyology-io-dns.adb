@@ -501,7 +501,18 @@ package body Flyology.IO.DNS is
             if Result.Length + Length > Max_Name_Length then
                raise Malformed_Response with "decoded DNS name too long";
             end if;
+            --  A wire label may legally carry the presentation separator, but
+            --  the dotted name it decodes to is indistinguishable from a
+            --  multi-label name: it re-encodes as a different wire name and
+            --  compares equal to wire-distinct owners. Reject it here so the
+            --  response is discarded like any other unusable datagram instead
+            --  of failing later as invalid resolver input.
             for Offset in 1 .. Length loop
+               if Natural (Packet (Position + Offset)) = Character'Pos ('.')
+               then
+                  raise Malformed_Response with
+                    "DNS label contains a name separator";
+               end if;
                Result.Length := Result.Length + 1;
                Result.Data (Result.Length) :=
                  Ada.Characters.Handling.To_Lower

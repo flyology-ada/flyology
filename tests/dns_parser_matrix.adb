@@ -367,6 +367,30 @@ procedure DNS_Parser_Matrix is
       Check
         (Value_Of (Buffer, Last), Malformed,
          "CNAME RDATA compression self-cycle");
+
+      --  A wire label may legally carry a dot byte, but the decoded dotted
+      --  name would then re-encode as a different wire name and compare equal
+      --  to wire-distinct owners. Such an alias target is unusable.
+      Start_Response (Buffer, Last, Answers => 1);
+      Put_Record_Header (Buffer, Last, Kind => 5, Data_Length => 11);
+      Put (Buffer, Last, 4);
+      Put (Buffer, Last, Character'Pos ('a'));
+      Put (Buffer, Last, Character'Pos ('.'));
+      Put (Buffer, Last, Character'Pos ('b'));
+      Put (Buffer, Last, Character'Pos ('c'));
+      Put_Name (Buffer, Last, "test");
+      Check
+        (Value_Of (Buffer, Last), Malformed,
+         "CNAME target label contains a name separator");
+
+      Start_Response (Buffer, Last, Answers => 1);
+      Put_Record_Header (Buffer, Last, Kind => 5, Data_Length => 8);
+      Put (Buffer, Last, 1);
+      Put (Buffer, Last, Character'Pos ('.'));
+      Put_Name (Buffer, Last, "test");
+      Check
+        (Value_Of (Buffer, Last), Malformed,
+         "CNAME target label is a bare name separator");
    end Check_Record_Boundaries;
 
    procedure Check_Compression_And_Name_Boundaries is

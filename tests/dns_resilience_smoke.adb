@@ -254,6 +254,45 @@ procedure DNS_Resilience_Smoke is
             end loop;
             Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent, Peer);
          end Send_A;
+
+         --  Answer with an alias whose first wire label begins with a dot
+         --  byte. The label is legal wire format, so a resolver that stores
+         --  decoded names as dotted text cannot re-encode it.
+         procedure Send_Dotted_CNAME is
+            Response      : Streams.Stream_Element_Array (1 .. 512) :=
+              (others => 0);
+            Question_Last : constant Streams.Stream_Element_Offset :=
+              Question_End;
+            Target        : constant Streams.Stream_Element_Array :=
+              (4, Character'Pos ('.'), Character'Pos ('b'),
+               Character'Pos ('a'), Character'Pos ('d'),
+               4, Character'Pos ('t'), Character'Pos ('e'),
+               Character'Pos ('s'), Character'Pos ('t'), 0);
+            Position      : Streams.Stream_Element_Offset;
+            Sent          : Streams.Stream_Element_Offset;
+         begin
+            Response (1 .. Question_Last) := Query (1 .. Question_Last);
+            Response (3) := 16#81#;
+            Response (4) := 16#80#;
+            Response (7) := 0;
+            Response (8) := 1;
+            Position := Question_Last + 1;
+            Response (Position) := 16#C0#;
+            Response (Position + 1) := 12;
+            Response (Position + 2) := 0;
+            Response (Position + 3) := 5;
+            Response (Position + 4) := 0;
+            Response (Position + 5) := 1;
+            Response (Position + 6 .. Position + 9) := (others => 0);
+            Response (Position + 9) := 60;
+            Response (Position + 10) := 0;
+            Response (Position + 11) :=
+              Streams.Stream_Element (Target'Length);
+            Position := Position + 12;
+            Response (Position .. Position + Target'Length - 1) := Target;
+            Position := Position + Target'Length;
+            Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent, Peer);
+         end Send_Dotted_CNAME;
       begin
          Sockets.Create_Socket (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
          Sockets.Bind_Socket
@@ -273,6 +312,8 @@ procedure DNS_Resilience_Smoke is
             begin
                if Name = "flood.test" then
                   Flood;
+               elsif Name = "dotty.test" then
+                  Send_Dotted_CNAME;
                elsif Name = "walk.lab.test" then
                   Send_A ("192.0.2.13");
                elsif Name = "walk.corp.test"
@@ -404,6 +445,33 @@ procedure DNS_Resilience_Smoke is
                OK := False;
             end if;
          end Check_Server_Failure_Category;
+
+         --  A hostile alias target must be discarded like any other unusable
+         --  response instead of reporting the caller's own input as invalid.
+         procedure Check_Hostile_Alias_Is_Discarded is
+            Reported : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array := DNS.Resolve_Using
+                    ("dotty.test", Servers, DNS.IPv4_Only, Timeout => 1.0,
+                     Attempts => 1, Retry_Interval => 0.2);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Malformed_Response => Reported := True;
+               when Error : others =>
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "hostile alias raised "
+                     & Ada.Exceptions.Exception_Name (Error));
+            end;
+            if not Reported then
+               OK := False;
+            end if;
+         end Check_Hostile_Alias_Is_Discarded;
       begin
          Control.Await_Start;
          Control.Get_Address (Server);
@@ -412,6 +480,7 @@ procedure DNS_Resilience_Smoke is
          Check_Flood_Deadline;
          Check_Search_Walk_Survives_Failure;
          Check_Server_Failure_Category;
+         Check_Hostile_Alias_Is_Discarded;
          Control.Finished (OK);
       exception
          when Error : others =>
