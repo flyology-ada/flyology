@@ -678,6 +678,22 @@ then
   exit 1
 fi
 
+#  A supervisor control task must name one exact shared execution group. CPU
+#  value zero means automatic placement in Ada, so require the public generic
+#  subtype to reject it before a manager task can activate.
+control_group_rejection_project="$project_root/tests/fixtures/\
+supervision_control_group/\
+supervision_control_group_rejection.gpr"
+if run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f -c -q -p \
+  -P "$control_group_rejection_project" >/dev/null 2>&1
+then
+  printf '%s\n' \
+    "automatic supervisor control-group placement was accepted" >&2
+  exit 1
+fi
+
 #  Prove that a separate Alire workspace can locate the crate, prepare its own
 #  runtime outside the dependency checkout, and build against only public GPR
 #  and Ada interfaces.

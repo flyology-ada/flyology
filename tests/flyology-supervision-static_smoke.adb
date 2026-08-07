@@ -1,4 +1,5 @@
 with Ada.Real_Time;
+with Ada.Synchronous_Task_Control;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
 with Flyology.Supervision.Children;
@@ -13,6 +14,86 @@ procedure Flyology.Supervision.Static_Smoke is
    use type Flyology.Supervision.Generation;
 
    Test_Failure : exception;
+
+   protected type Invocation_Count is
+      procedure Increment;
+      function Value return Natural;
+   private
+      Count : Natural := 0;
+   end Invocation_Count;
+
+   protected body Invocation_Count is
+      procedure Increment is
+      begin
+         Count := Count + 1;
+      end Increment;
+
+      function Value return Natural is (Count);
+   end Invocation_Count;
+
+   type Configuration_Context is limited record
+      Runs : Invocation_Count;
+   end record;
+
+   type Configuration_Kind is (Configuration_Service);
+
+   Specification_Entered : Ada.Synchronous_Task_Control.Suspension_Object;
+   Continue_Configuration : Ada.Synchronous_Task_Control.Suspension_Object;
+
+   function Configuration_Id
+     (Child : Configuration_Kind) return Flyology.Supervision.Child_Id is
+     (case Child is when Configuration_Service => 4_294_967_290);
+
+   function Blocking_Specification
+     (Child : Configuration_Kind)
+      return Flyology.Supervision.Child_Specification
+   is
+      pragma Unreferenced (Child);
+   begin
+      Ada.Synchronous_Task_Control.Set_True (Specification_Entered);
+      Ada.Synchronous_Task_Control.Suspend_Until_True
+        (Continue_Configuration);
+      return
+        (Restart           => Flyology.Supervision.Never,
+         Impact            => Flyology.Supervision.Escalate,
+         Recovery          => Flyology.Supervision.Default_Recovery_Limits,
+         Stopping          => Flyology.Supervision.Default_Stop_Policy,
+         Readiness_Timeout => Ada.Real_Time.Seconds (1),
+         Restart_Safe      => False,
+         Task_Model        => Flyology.Native_Task,
+         Has_Group         => False,
+         Group             => 0);
+   end Blocking_Specification;
+
+   function No_Configuration_Relationship
+     (Left, Right : Configuration_Kind) return Boolean
+   is
+      pragma Unreferenced (Left, Right);
+   begin
+      return False;
+   end No_Configuration_Relationship;
+
+   procedure Run_Configuration_Generation
+     (Context : aliased in out Configuration_Context;
+      Child   : Configuration_Kind;
+      Control : aliased in out Flyology.Supervision.Generation_Control;
+      Result  : out Flyology.Supervision.Generation_Result)
+   is
+      pragma Unreferenced (Child, Control, Result);
+   begin
+      Context.Runs.Increment;
+      raise Test_Failure with
+        "generation started after preconfiguration shutdown";
+   end Run_Configuration_Generation;
+
+   package Configuration_Supervisors is new Flyology.Supervision.Static
+     (Child_Kind          => Configuration_Kind,
+      Application_Context => Configuration_Context,
+      Logical_Id          => Configuration_Id,
+      Specification       => Blocking_Specification,
+      Depends_On          => No_Configuration_Relationship,
+      Cohort_Member       => No_Configuration_Relationship,
+      Run_One_Generation  => Run_Configuration_Generation);
 
    protected type Restart_State is
       procedure Begin_Generation
@@ -593,7 +674,9 @@ procedure Flyology.Supervision.Static_Smoke is
       Cohort_Member      => Edge_Cohort,
       Run_One_Generation => Run_Activation_Failure);
 
-   type Inner_Context is limited null record;
+   type Inner_Context is limited record
+      Runs : Invocation_Count;
+   end record;
    type Nested_Context is limited record
       Inner : aliased Inner_Context;
    end record;
@@ -642,8 +725,8 @@ procedure Flyology.Supervision.Static_Smoke is
      (Context : in out Inner_Context;
       Control : not null access Flyology.Supervision.Generation_Control)
    is
-      pragma Unreferenced (Context);
    begin
+      Context.Runs.Increment;
       Flyology.Supervision.Mark_Ready (Control.all);
       raise Test_Failure with "nested child failure";
    end Execute_Inner_Failure;
@@ -713,6 +796,34 @@ procedure Flyology.Supervision.Static_Smoke is
 
 begin
    declare
+      Context : aliased Configuration_Context;
+      Item    : aliased Configuration_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Configuration_Supervisors.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+   begin
+      Owner.Start;
+      Ada.Synchronous_Task_Control.Suspend_Until_True
+        (Specification_Entered);
+      Configuration_Supervisors.Request_Shutdown (Item);
+      Ada.Synchronous_Task_Control.Set_True (Continue_Configuration);
+      Owner.Join;
+      pragma Assert (Context.Runs.Value = 0);
+      pragma Assert
+        (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+   end;
+
+   declare
       Context : aliased Restart_Context;
       Item    : aliased Restart_Supervisors.Supervisor;
       Result  : Flyology.Supervision.Supervisor_Result;
@@ -736,6 +847,8 @@ begin
       Count   : Natural;
       Dropped : Flyology.Supervision.Event_Sequence;
       Admitted : Natural := 0;
+      Saw_Direct_Start : Boolean := False;
+      Saw_Restarting : Boolean := False;
       Recovery_Incident : Flyology.Supervision.Incident_Id :=
         Flyology.Supervision.Incident_Id'First;
    begin
@@ -783,6 +896,15 @@ begin
       for Index in 1 .. Count loop
          pragma Assert
            (Events (Index).Task_Model = Flyology.Native_Task);
+         if Events (Index).Kind = Flyology.Supervision.Lifecycle_Changed
+           and then Events (Index).Before /= Events (Index).After
+         then
+            Saw_Direct_Start := Saw_Direct_Start or else
+              (Events (Index).Before = Flyology.Supervision.Backing_Off
+               and then Events (Index).After = Flyology.Supervision.Starting);
+            Saw_Restarting := Saw_Restarting or else
+              Events (Index).After = Flyology.Supervision.Restarting;
+         end if;
          if Events (Index).Kind = Flyology.Supervision.Restart_Admitted then
             Admitted := Admitted + 1;
             if Admitted = 1 then
@@ -818,6 +940,8 @@ begin
       pragma Assert
         (Restart_Supervisors.Current (Item, Service).State =
            Flyology.Supervision.Joined);
+      pragma Assert (not Saw_Direct_Start);
+      pragma Assert (Saw_Restarting);
    end;
 
    declare
@@ -995,6 +1119,22 @@ begin
       pragma Assert (Flyology.Supervision.Active (Result.Incident));
       pragma Assert
         (Flyology.Supervision.Attempt (Result.Incident) = 1);
+      pragma Assert (Context.Inner.Runs.Value = 1);
+   end;
+
+   declare
+      Context : aliased Inner_Context;
+      Item    : aliased Inner_Supervisors.Supervisor;
+      Parent  : Flyology.Supervision.Generation_Control;
+      Result  : Flyology.Supervision.Supervisor_Result;
+   begin
+      begin
+         Inner_Supervisors.Run_Nested (Item, Context, Parent, Result);
+         raise Program_Error with "inactive nested parent was accepted";
+      exception
+         when Program_Error => null;
+      end;
+      pragma Assert (Context.Runs.Value = 0);
    end;
 
    declare
@@ -1047,6 +1187,11 @@ begin
 
       Deadline : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Events  : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor  : Flyology.Supervision.Event_Sequence := 0;
+      Count   : Natural;
+      Dropped : Flyology.Supervision.Event_Sequence;
+      Saw_Escalated_To_Terminated : Boolean := False;
    begin
       Owner.Start;
       loop
@@ -1060,7 +1205,22 @@ begin
       end loop;
       Stuck_Supervisors.Request_Shutdown (Item);
       Owner.Join;
+      Stuck_Supervisors.Read_Events
+        (Item, Cursor, Events, Count, Dropped);
+      pragma Assert (Dropped = 0);
+      for Index in 1 .. Count loop
+         if Events (Index).Kind = Flyology.Supervision.Lifecycle_Changed
+           and then Events (Index).Before /= Events (Index).After
+         then
+            Saw_Escalated_To_Terminated :=
+              Saw_Escalated_To_Terminated or else
+                (Events (Index).Before = Flyology.Supervision.Failed_Escalated
+                 and then Events (Index).After =
+                   Flyology.Supervision.Terminated);
+         end if;
+      end loop;
       pragma Assert (Result.Outcome = Flyology.Supervision.Child_Stuck);
+      pragma Assert (not Saw_Escalated_To_Terminated);
       pragma Assert
         (Stuck_Supervisors.Current (Item, Edge_Service).State =
            Flyology.Supervision.Joined);

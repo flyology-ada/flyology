@@ -1,5 +1,5 @@
 with Ada.Real_Time;
-with System.Multiprocessors;
+with Flyology.Execution_Groups;
 
 --  Runs a typed, fixed static topology as a synchronous structured scope.
 --  Recovery is coordinated as one stop, join, backoff, start, and readiness
@@ -12,7 +12,7 @@ with System.Multiprocessors;
 --  @formal Depends_On Declared startup dependency relation
 --  @formal Cohort_Member Named directed recovery membership
 --  @formal Run_One_Generation Typed synchronous generation factory
---  @formal Control_Group Shared lightweight execution group for managers
+--  @formal Control_Group Exact shared lightweight group for managers
 --  @formal Subtree_Recovery Recovery limits shared by the complete node
 --  @formal Event_Capacity Maximum retained supervisor events
 generic
@@ -44,7 +44,7 @@ generic
       Control : aliased in out Generation_Control;
       Result  : out Generation_Result);
 
-   Control_Group : System.Multiprocessors.CPU_Range := 127;
+   Control_Group : Flyology.Execution_Groups.Group_Selecting_CPU := 127;
    Subtree_Recovery : Recovery_Limits := Default_Recovery_Limits;
    Event_Capacity : Positive := 256;
 
@@ -56,8 +56,9 @@ package Flyology.Supervision.Static is
 
    --  One-shot static supervisor. Run is the ownership boundary and must be
    --  called from one task. Current and Request_Shutdown may be called safely
-   --  by other tasks while Run is active. Storage is fixed by Child_Kind; no
-   --  per-restart allocation is performed by the controller.
+   --  by other tasks. A shutdown requested before or during validation is
+   --  sticky and prevents manager activation. Storage is fixed by Child_Kind;
+   --  no per-restart allocation is performed by the controller.
    type Supervisor is limited private;
 
    --  Validate configuration, create bounded lightweight manager tasks, and
@@ -91,10 +92,12 @@ package Flyology.Supervision.Static is
       Parent  : in out Generation_Control;
       Result  : out Supervisor_Result);
 
-   --  Idempotently begin reverse dependency order shutdown. Each live child
-   --  first receives cooperative cancellation, followed by its configured
-   --  optional abort request. Deadlines classify progress but do not bound
-   --  this call or guarantee termination.
+   --  Idempotently begin reverse dependency order shutdown. A request made
+   --  before Run or while configuration callbacks execute is retained and
+   --  prevents child creation. Each live child first receives cooperative
+   --  cancellation, followed by its configured optional abort request.
+   --  Deadlines classify progress but do not bound this call or guarantee
+   --  termination.
    --  @param Item Supervisor whose Run call should stop
    procedure Request_Shutdown (Item : in out Supervisor);
 
@@ -251,6 +254,7 @@ private
       Phase         : Lifecycle_Phase := Unconfigured;
       Configured    : Boolean := False;
       Run_Used      : Boolean := False;
+      Shutdown_Pending : Boolean := False;
       Child_Specs   : Specification_Array;
       Child_Ids     : Logical_Id_Array;
       Child_Dependencies : Dependency_Matrix;

@@ -138,6 +138,10 @@ and dependent-task joining remain Ada-controlled. Omitting `Request_Shutdown`
 is safe only if another terminal rule ends `Run`; omitting an explicit join is
 safe because `Run` cannot return without one.
 
+Shutdown is sticky across configuration. A request made before `Run`, or while
+static policy callbacks are still being validated, prevents manager activation
+and child admission. Configuration never reopens a family after shutdown.
+
 The primary generation boundary accepts an application-defined task type:
 
 ```ada
@@ -320,7 +324,8 @@ Configuration validates before any task starts:
    cap, and burst/total bounds are nonzero;
 6. a nested node has an unbounded structural join even if its diagnostic stop
    deadline is finite; and
-7. supervised lightweight children cannot use the reserved control group.
+7. the control plane names one exact shared execution group, and supervised
+   lightweight children cannot use that reserved group.
 
 Startup follows topological order. For each child the manager creates a new
 generation, records `Starting`, and waits for either `Mark_Ready`, termination,
@@ -354,6 +359,10 @@ N therefore cannot stop or publish generation N+1. Generation and incident
 identities never wrap. The policy kernel requires an available successor, and
 each live controller fails closed at generation exhaustion instead of making a
 stale handle current again.
+
+`Stop` is authority over one live generation, not over a logical slot. Once a
+generation terminates, its handle cannot cancel an admitted replacement even
+while the slot still reports the old generation during backoff.
 
 Legal scalar transitions are:
 
@@ -559,9 +568,10 @@ dynamic-family join condition. Contracts prove exact isolate and cohort sets;
 they also prove that dependent recovery contains the failed child, excludes
 unconfigured ids, and is closed under every configured dependency edge. The
 lowest-id tie-break and exact minimal dependent set remain executable model
-assertions. The production controllers consume the repeated-attempt and join
-decisions; task construction, protected state, and resource reclamation remain
-outside SPARK.
+assertions. The production controllers consume the transition,
+repeated-attempt, and join decisions; every retained lifecycle, stop, and
+restart-admission edge first passes the proved transition predicate. Task
+construction, protected state, and resource reclamation remain outside SPARK.
 
 ## Worked example: independent restartable service
 

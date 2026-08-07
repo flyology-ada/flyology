@@ -75,7 +75,8 @@ package body Flyology.Supervision.Static is
          Starts := Start_Order;
          Stops := Stop_Order;
          Inherited_Incident := Inherited;
-         Phase := Starting_Children;
+         Phase :=
+           (if Shutdown_Pending then Finished else Starting_Children);
          Start_Position := 0;
          Stop_Position := 0;
          Managers_Done := 0;
@@ -100,7 +101,26 @@ package body Flyology.Supervision.Static is
                Ready       => False,
                Live        => False,
                Escalated   => False);
+            if Shutdown_Pending then
+               Snapshots (Child).State := Joined;
+            end if;
          end loop;
+         if Shutdown_Pending then
+            Terminal :=
+              (Outcome     => Shutdown_Completed,
+               Child       => Child_Ids (Child_Kind'First),
+               Generation  => Generation'First,
+               Termination => Empty_Summary (Supervisor_Shutdown),
+               Incident    => No_Incident);
+            Record_Event
+              (Child_Kind'First,
+               Supervisor_Stopped,
+               Flyology.Supervision.Configured,
+               Joined,
+               Ada.Real_Time.Clock,
+               Supervisor_Shutdown,
+               No_Incident);
+         end if;
       end Configure;
 
       procedure Record_Event
@@ -116,6 +136,14 @@ package body Flyology.Supervision.Static is
       is
          Slot : Positive;
       begin
+         if Before /= After
+           and then Kind in Lifecycle_Changed | Stop_Published |
+             Restart_Admitted
+           and then not Policy.Transition_Allowed (Before, After)
+         then
+            raise Program_Error with
+              "illegal static supervision lifecycle transition";
+         end if;
          if Event_Sequence_Exhausted then
             return;
          elsif Event_Last_Sequence = Event_Sequence'Last then
@@ -342,6 +370,16 @@ package body Flyology.Supervision.Static is
             end if;
             Snapshots (Child).Generation :=
               Policy.Next_Generation (Snapshots (Child).Generation);
+            Before := Snapshots (Child).State;
+            Snapshots (Child).State := Restarting;
+            Record_Event
+              (Child,
+               Lifecycle_Changed,
+               Before,
+               Restarting,
+               Now,
+               No_Termination,
+               Incident);
          else
             Has_Generation (Child) := True;
          end if;
@@ -832,7 +870,6 @@ package body Flyology.Supervision.Static is
            and then Snapshots (Child).Live
            and then Snapshots (Child).Termination.Kind /= Stuck
          then
-            Snapshots (Child).State := Failed_Escalated;
             Snapshots (Child).Ready := False;
             Snapshots (Child).Termination := Empty_Summary (Stuck);
             if Phase = Stopping_Children then
@@ -853,6 +890,7 @@ package body Flyology.Supervision.Static is
       procedure Request_Stop is
       begin
          if Phase = Unconfigured then
+            Shutdown_Pending := True;
             Terminal :=
               (Outcome     => Shutdown_Completed,
                Child       => Child_Id'First,
@@ -1198,6 +1236,11 @@ package body Flyology.Supervision.Static is
          Stop_Order,
          Inherited);
 
+      if Item.State.Manager_Should_Exit then
+         Result := Item.State.Read_Result;
+         return;
+      end if;
+
       declare
          protected type Runner_Completion is
             procedure Store (Value : Generation_Result);
@@ -1519,7 +1562,9 @@ package body Flyology.Supervision.Static is
       Parent  : in out Generation_Control;
       Result  : out Supervisor_Result)
    is
+      Parent_Handle : constant Child_Handle := Handle (Parent);
       Inherited : constant Incident_Context := Recovery_Incident (Parent);
+      pragma Unreferenced (Parent_Handle);
    begin
       Run_Internal (Item, Context, Inherited, Result);
       if Active (Result.Incident)

@@ -62,7 +62,7 @@ package body Flyology.Supervision.Families is
          end if;
          Run_Used := True;
          Configured := True;
-         Admission_Open := True;
+         Admission_Open := not Shutdown;
          Inherited_Incident := Inherited;
          Result :=
            (Outcome     => Shutdown_Completed,
@@ -100,6 +100,15 @@ package body Flyology.Supervision.Families is
       is
          Event_Slot : Positive;
       begin
+         if Before /= After
+           and then Kind in Lifecycle_Changed | Stop_Published |
+             Restart_Admitted
+           and then not Flyology.Supervision_Policy.Transition_Allowed
+             (Before, After)
+         then
+            raise Program_Error with
+              "illegal family supervision lifecycle transition";
+         end if;
          if Event_Sequence_Exhausted then
             return;
          elsif Event_Last_Sequence = Event_Sequence'Last then
@@ -276,7 +285,10 @@ package body Flyology.Supervision.Families is
          Slot := Slot_Index
            (Interfaces.Unsigned_64 (Child (Handle)) -
             Interfaces.Unsigned_64 (First_Child_Id) + 1);
-         Valid := Slots (Slot) /= Free
+         Valid :=
+           (Slots (Slot) = Queued
+            or else
+              (Slots (Slot) = Managed and then Snapshots (Slot).Live))
            and then Is_Current
              (Handle,
               Snapshots (Slot).Id,
@@ -322,6 +334,7 @@ package body Flyology.Supervision.Families is
          Incident : Incident_Context)
       is
          Before : Child_State;
+         Advancing : Boolean;
       begin
          if Slots (Slot) = Managed
            and then Child (Handle) = Snapshots (Slot).Id
@@ -337,8 +350,21 @@ package body Flyology.Supervision.Families is
                      (Snapshots (Slot).Generation)))
          then
             Before := Snapshots (Slot).State;
+            Advancing := Current_Generation (Handle) /=
+              Snapshots (Slot).Generation;
             Active_Incidents (Slot) := Incident;
             Snapshots (Slot).Generation := Current_Generation (Handle);
+            if Advancing then
+               Snapshots (Slot).State := Restarting;
+               Record_Event
+                 (Slot,
+                  Lifecycle_Changed,
+                  Before,
+                  Restarting,
+                  Ada.Real_Time.Clock,
+                  Incident => Incident);
+               Before := Restarting;
+            end if;
             Snapshots (Slot).State := Starting;
             Snapshots (Slot).Live := True;
             Snapshots (Slot).Ready := False;
@@ -394,14 +420,19 @@ package body Flyology.Supervision.Families is
         (Outcome     : Supervisor_Outcome;
          Slot        : Slot_Index;
          Termination : Termination_Summary;
-         Incident    : Incident_Context) is
+         Incident    : Incident_Context)
+      is
+         After : constant Child_State :=
+           (if Snapshots (Slot).Live
+            then Snapshots (Slot).State
+            else Failed_Escalated);
       begin
          if not Terminal then
             Record_Event
               (Slot,
                Recovery_Escalated,
                Snapshots (Slot).State,
-               Failed_Escalated,
+               After,
                Ada.Real_Time.Clock,
                Termination.Kind,
                Incident);
@@ -442,11 +473,10 @@ package body Flyology.Supervision.Families is
               (Slot,
                Child_Became_Stuck,
                Snapshots (Slot).State,
-               Failed_Escalated,
+               Snapshots (Slot).State,
                Ada.Real_Time.Clock,
                Stuck,
                Active_Incidents (Slot));
-            Snapshots (Slot).State := Failed_Escalated;
             Begin_Terminal
               (Child_Stuck,
                Slot,
@@ -1328,7 +1358,9 @@ package body Flyology.Supervision.Families is
       Parent  : in out Generation_Control;
       Result  : out Supervisor_Result)
    is
+      Parent_Handle : constant Child_Handle := Handle (Parent);
       Inherited : constant Incident_Context := Recovery_Incident (Parent);
+      pragma Unreferenced (Parent_Handle);
    begin
       Run_Internal (Item'Access, Context, Inherited, Result);
       if Active (Result.Incident)

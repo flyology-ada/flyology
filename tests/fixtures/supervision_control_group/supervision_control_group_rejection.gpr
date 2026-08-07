@@ -1,0 +1,16 @@
+with "../../../flyology.gpr";
+
+--  Compile-only project for a control-plane placement that must be rejected by
+--  the generic formal subtype. scripts/test.sh fails if the compiler accepts
+--  the fixture.
+project Supervision_Control_Group_Rejection is
+   for Source_Dirs use (".");
+   for Object_Dir use "../../obj/supervision_control_group_rejection";
+   for Main use ("invalid_supervision_control_group.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwe", "-gnatwJ");
+   end Compiler;
+end Supervision_Control_Group_Rejection;

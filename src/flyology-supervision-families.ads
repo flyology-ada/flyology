@@ -1,5 +1,5 @@
 with Ada.Real_Time;
-with System.Multiprocessors;
+with Flyology.Execution_Groups;
 
 --  Runs a bounded homogeneous dynamic child family as one synchronous Ada
 --  scope. Storage is linear in Maximum_Children, no dependency matrix is
@@ -13,7 +13,7 @@ with System.Multiprocessors;
 --  @formal Policy Common restart, stop, readiness, and task-model policy
 --  @formal First_Child_Id First logical id in the family's contiguous range
 --  @formal Maximum_Children Fixed slot and admission capacity
---  @formal Control_Group Shared lightweight execution group for managers
+--  @formal Control_Group Exact shared lightweight group for managers
 --  @formal Event_Capacity Maximum retained supervisor events
 generic
    type Request is private;
@@ -28,7 +28,7 @@ generic
    Policy           : Child_Specification;
    First_Child_Id   : Child_Id;
    Maximum_Children : Positive;
-   Control_Group    : System.Multiprocessors.CPU_Range := 127;
+   Control_Group    : Flyology.Execution_Groups.Group_Selecting_CPU := 127;
    Event_Capacity   : Positive := 256;
 
 package Flyology.Supervision.Families is
@@ -47,6 +47,7 @@ package Flyology.Supervision.Families is
 
    --  Validate and run until explicit shutdown or terminal policy escalation.
    --  Start, Stop, Current, and Request_Shutdown may be called concurrently.
+   --  A shutdown requested before Run is sticky and keeps admission closed.
    --  @param Item One-shot family owner
    --  @param Context Application state retained by every live generation
    --  @param Result Terminal result after every terminable child joins
@@ -87,16 +88,17 @@ package Flyology.Supervision.Families is
       Input  : Request;
       Handle : out Child_Handle);
 
-   --  Cooperatively stop the exact generation. A stale handle cannot stop a
-   --  replacement that reused the same slot.
+   --  Cooperatively stop the exact admitted or live generation. A terminated
+   --  generation awaiting replacement backoff cannot stop its replacement.
    --  @param Item Running family
    --  @param Handle Exact generation to stop
-   --  @exception Stale_Handle Handle no longer identifies the slot
+   --  @exception Stale_Handle Handle does not identify an admitted/live task
    procedure Stop
      (Item   : in out Family;
       Handle : Child_Handle);
 
-   --  Close admission and cooperatively stop every occupied slot. The call is
+   --  Close admission and cooperatively stop every occupied slot. A request
+   --  made before Run is retained through configuration. The call is
    --  nonblocking; Run remains the join boundary.
    --  @param Item Family to shut down
    procedure Request_Shutdown (Item : in out Family);

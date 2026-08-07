@@ -110,8 +110,8 @@ procedure Flyology.Supervision.Families_Smoke is
         (Burst_Attempts    => 3,
          Window            => Ada.Real_Time.Seconds (1),
          Total_Attempts    => 3,
-         Initial_Backoff   => Ada.Real_Time.Time_Span_Zero,
-         Maximum_Backoff   => Ada.Real_Time.Milliseconds (4),
+         Initial_Backoff   => Ada.Real_Time.Milliseconds (50),
+         Maximum_Backoff   => Ada.Real_Time.Milliseconds (50),
          Stability_Reset   => Ada.Real_Time.Seconds (1),
          Recovery_Deadline => Ada.Real_Time.Seconds (2)),
       Stopping          => Flyology.Supervision.Default_Stop_Policy,
@@ -155,6 +155,10 @@ procedure Flyology.Supervision.Families_Smoke is
    Dropped : Flyology.Supervision.Event_Sequence;
    Event_Count : Natural;
    Events : Flyology.Supervision.Supervisor_Event_Array (1 .. 4);
+   Recovery_Cursor : Flyology.Supervision.Event_Sequence := 0;
+   Recovery_Dropped : Flyology.Supervision.Event_Sequence;
+   Recovery_Event_Count : Natural;
+   Recovery_Events : Flyology.Supervision.Supervisor_Event_Array (1 .. 4);
 begin
    Owner.Start;
    loop
@@ -165,17 +169,78 @@ begin
       delay 0.001;
    end loop;
    Families.Start (Item, 1, First);
-   Families.Start (Item, 2, Second);
+   loop
+      exit when Families.Current (Item, First).State =
+        Flyology.Supervision.Backing_Off;
+      if Ada.Real_Time.Clock >= Deadline then
+         Families.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error with "family child did not enter backoff";
+      end if;
+      delay 0.001;
+   end loop;
+   begin
+      Families.Stop (Item, First);
+      Families.Request_Shutdown (Item);
+      Owner.Join;
+      raise Program_Error with
+        "terminated generation handle was accepted during backoff";
+   exception
+      when Families.Stale_Handle => null;
+   end;
    loop
       exit when Families.Current
         (Item, Flyology.Supervision.Child (First)).Ready
         and then Families.Current
-          (Item, Flyology.Supervision.Child (First)).Generation = 2
-        and then Families.Current (Item, Second).Ready;
+          (Item, Flyology.Supervision.Child (First)).Generation = 2;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
          Owner.Join;
-         raise Program_Error with "family children did not become ready";
+         raise Program_Error with "family replacement did not become ready";
+      end if;
+      delay 0.001;
+   end loop;
+   Families.Read_Events
+     (Item,
+      Recovery_Cursor,
+      Recovery_Events,
+      Recovery_Event_Count,
+      Recovery_Dropped);
+   declare
+      Saw_Direct_Start   : Boolean := False;
+      Saw_Restarting     : Boolean := False;
+   begin
+      for Index in 1 .. Recovery_Event_Count loop
+         if Recovery_Events (Index).Kind =
+           Flyology.Supervision.Lifecycle_Changed
+           and then Recovery_Events (Index).Before /=
+             Recovery_Events (Index).After
+         then
+            Saw_Direct_Start := Saw_Direct_Start or else
+              (Recovery_Events (Index).Before =
+                 Flyology.Supervision.Backing_Off
+               and then Recovery_Events (Index).After =
+                 Flyology.Supervision.Starting);
+            Saw_Restarting := Saw_Restarting or else
+              Recovery_Events (Index).After =
+                Flyology.Supervision.Restarting;
+         end if;
+      end loop;
+      if Saw_Direct_Start or else not Saw_Restarting then
+         Families.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error with
+           "family recovery events violate the lifecycle model";
+      end if;
+   end;
+
+   Families.Start (Item, 2, Second);
+   loop
+      exit when Families.Current (Item, Second).Ready;
+      if Ada.Real_Time.Clock >= Deadline then
+         Families.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error with "second family child did not become ready";
       end if;
       delay 0.001;
    end loop;
@@ -254,4 +319,15 @@ begin
    end loop;
    pragma Assert
      (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+
+   declare
+      Pre_Shutdown : aliased Families.Family;
+      Pre_Result   : Flyology.Supervision.Supervisor_Result;
+   begin
+      Families.Request_Shutdown (Pre_Shutdown);
+      Families.Run (Pre_Shutdown, State, Pre_Result);
+      pragma Assert (not Families.Accepting (Pre_Shutdown));
+      pragma Assert
+        (Pre_Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+   end;
 end Flyology.Supervision.Families_Smoke;
