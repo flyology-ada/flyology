@@ -22,6 +22,7 @@ cd "$project_root/proof"
   flyology-channel_policy.adb \
   flyology-counter_policy.adb \
   flyology-connection_policy.adb \
+  flyology-dns_policy.adb \
   flyology-topology_policy.adb \
   flyology-time_math.adb \
   flyology-wall_clock_policy.adb \

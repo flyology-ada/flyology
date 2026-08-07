@@ -4,6 +4,7 @@ with Ada.Strings.Fixed;
 #if FLYOLOGY_DNS_TEST_HOOKS then
 with Flyology.DNS_Test_Observations;
 #end if;
+with Flyology.DNS_Policy;
 with Flyology.IO.Files;
 with Interfaces;
 with Interfaces.C;
@@ -508,7 +509,8 @@ package body Flyology.IO.DNS is
             --  response is discarded like any other unusable datagram instead
             --  of failing later as invalid resolver input.
             for Offset in 1 .. Length loop
-               if Natural (Packet (Position + Offset)) = Character'Pos ('.')
+               if not DNS_Policy.Label_Byte_Is_Usable
+                    (Natural (Packet (Position + Offset)))
                then
                   raise Malformed_Response with
                     "DNS label contains a name separator";
@@ -1273,7 +1275,8 @@ package body Flyology.IO.DNS is
                Selected_Server : constant Sockets.Endpoint :=
                  Name_Servers
                    (Name_Servers'First
-                    + ((Attempt - 1 + Rotation) mod Name_Servers'Length));
+                    + DNS_Policy.Selected_Endpoint
+                        (Attempt, Rotation, Name_Servers'Length));
                Channels    : Socket_Array (1 .. 1);
                Requests    : Wait_Request_Array
                  (1 .. Interrupts'Length + Channels'Length);
@@ -1340,32 +1343,31 @@ package body Flyology.IO.DNS is
                end;
 
                loop
-                  --  Discarded datagrams and uncommitted transport errors
-                  --  both return here. A hostile peer can keep the socket
-                  --  readable forever, so both deadlines are re-checked
-                  --  before every wait rather than relying on Wait_Any
-                  --  reporting a timeout.
-                  exit when Ada.Real_Time.Clock >= Attempt_Deadline
-                    or else (not Infinite
-                             and then Remaining (Deadline, False) <= 0.0);
-#if FLYOLOGY_DNS_TEST_HOOKS then
-                  Flyology.DNS_Test_Observations.Record_Receive_Wait
-                    (After_Close => not Sockets.Is_Open (Channels (1)));
-#end if;
                   declare
+                     Attempt_Left : constant Duration :=
+                       Ada.Real_Time.To_Duration
+                         (Attempt_Deadline - Ada.Real_Time.Clock);
+                     Overall_Left : constant Duration :=
+                       (if Infinite then 0.0
+                        else Remaining (Deadline, False));
                      Wait_For : constant Duration :=
-                       (if Infinite
-                        then Duration'Max
-                          (0.0, Ada.Real_Time.To_Duration
-                             (Attempt_Deadline - Ada.Real_Time.Clock))
-                        else Duration'Max
-                          (0.0, Duration'Min
-                             (Remaining (Deadline, False),
-                              Ada.Real_Time.To_Duration
-                                (Attempt_Deadline - Ada.Real_Time.Clock))));
-                     Ready_Index : constant Natural := Wait_Any
-                       (Requests (1 .. Request_Count), Wait_For);
+                       DNS_Policy.Receive_Window
+                         (Attempt_Left, Overall_Left, Infinite);
+                     Ready_Index : Natural;
                   begin
+                     --  Discarded datagrams and uncommitted transport errors
+                     --  both return here. A hostile peer can keep the socket
+                     --  readable forever, so both deadlines are re-checked
+                     --  before every wait rather than relying on Wait_Any
+                     --  reporting a timeout.
+                     exit when DNS_Policy.Receive_Window_Expired
+                       (Attempt_Left, Overall_Left, Infinite);
+#if FLYOLOGY_DNS_TEST_HOOKS then
+                     Flyology.DNS_Test_Observations.Record_Receive_Wait
+                       (After_Close => not Sockets.Is_Open (Channels (1)));
+#end if;
+                     Ready_Index :=
+                       Wait_Any (Requests (1 .. Request_Count), Wait_For);
                      if Ready_Index = 0 then
                         exit;
                      elsif Ready_Index < Socket_Request_First then
@@ -1489,14 +1491,20 @@ package body Flyology.IO.DNS is
          end;
       end loop;
 
-      if Last_Error_Was_Malformed then
-         raise Malformed_Response with "no valid DNS response received";
-      elsif Last_Server_Failed then
-         raise Name_Server_Failure with Image (Name);
-      elsif Last_Transport_Failed then
-         raise Timeout_Error with "DNS transport failed";
-      end if;
-      raise Timeout_Error with "DNS resolution timed out";
+      case DNS_Policy.Classify_Exhausted
+        (Malformed        => Last_Error_Was_Malformed,
+         Server_Failed    => Last_Server_Failed,
+         Transport_Failed => Last_Transport_Failed)
+      is
+         when DNS_Policy.Report_Malformed =>
+            raise Malformed_Response with "no valid DNS response received";
+         when DNS_Policy.Report_Server_Failure =>
+            raise Name_Server_Failure with Image (Name);
+         when DNS_Policy.Report_Transport_Failure =>
+            raise Timeout_Error with "DNS transport failed";
+         when DNS_Policy.Report_Deadline =>
+            raise Timeout_Error with "DNS resolution timed out";
+      end case;
    end Query_Kind;
 
    function Resolve_Core
