@@ -1,6 +1,7 @@
 with Ada.Streams;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
+private with System;
 
 --  Provides a bounded single-producer/single-consumer ring of fixed-size byte
 --  elements. Exactly one producer may call Try_Push and exactly one consumer
@@ -128,5 +129,7 @@ private
       Element_Value  : Interfaces.Unsigned_32 := 0;
       Mask           : Interfaces.Unsigned_64 := 0;
       Stride         : Byte_Count := 0;
+      Head_Address   : System.Address := System.Null_Address;
+      Tail_Address   : System.Address := System.Null_Address;
    end record;
 end Flyology.Data_Structures.Rings.SPSC;

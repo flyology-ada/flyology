@@ -57,6 +57,8 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Item.Element_Value := Element_Size;
       Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
       Item.Stride := Stride;
+      Item.Head_Address := Layouts.Address_At (Core, Head_Offset, 8, 8);
+      Item.Tail_Address := Layouts.Address_At (Core, Tail_Offset, 8, 8);
    end Set_View;
 
    procedure Initialize
@@ -82,9 +84,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
          8);
       Set_View (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
       Atomic.Store_Release_U64
-        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8), 0);
+        (Item.Head_Address, 0);
       Atomic.Store_Release_U64
-        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8), 0);
+        (Item.Tail_Address, 0);
       Layouts.Publish (Item.Core);
    end Initialize;
 
@@ -116,9 +118,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
       end if;
       Set_View (Item, Core, Header.Capacity, Header.Element_Size, Stride);
       Head := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+        (Item.Head_Address);
       Tail := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+        (Item.Tail_Address);
       if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "SPSC ring indices are corrupt";
       end if;
@@ -131,6 +133,8 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Item.Element_Value := 0;
       Item.Mask := 0;
       Item.Stride := 0;
+      Item.Head_Address := System.Null_Address;
+      Item.Tail_Address := System.Null_Address;
    end Detach;
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
@@ -176,9 +180,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Check_Length (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Tail := Atomic.Load_Relaxed_U64
-        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+        (Item.Tail_Address);
       Head := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+        (Item.Head_Address);
       if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "SPSC ring indices are corrupt";
       elsif Tail - Head = Interfaces.Unsigned_64 (Item.Capacity_Value) then
@@ -189,7 +193,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
         (Element_Address (Item, Tail), Data'Address,
          Interfaces.C.size_t (Data'Length));
       Atomic.Store_Release_U64
-        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8), Tail + 1);
+        (Item.Tail_Address, Tail + 1);
       Pushed := True;
    end Try_Push;
 
@@ -204,9 +208,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Check_Length (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Head := Atomic.Load_Relaxed_U64
-        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+        (Item.Head_Address);
       Tail := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+        (Item.Tail_Address);
       if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "SPSC ring indices are corrupt";
       elsif Tail = Head then
@@ -217,7 +221,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
         (Data'Address, Element_Address (Item, Head),
          Interfaces.C.size_t (Data'Length));
       Atomic.Store_Release_U64
-        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8), Head + 1);
+        (Item.Head_Address, Head + 1);
       Popped := True;
    end Try_Pop;
 
@@ -227,9 +231,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
    begin
       Layouts.Require_Ready (Item.Core);
       Head := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Head_Offset, 8, 8));
+        (Item.Head_Address);
       Tail := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Tail_Offset, 8, 8));
+        (Item.Tail_Address);
       if Head /= Tail then
          raise Program_Error with "cannot destroy a nonempty SPSC ring";
       end if;

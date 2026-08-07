@@ -93,6 +93,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Item.Alignment_Value := Alignment;
       Item.Payload_Offset := Payload_Offset;
       Item.Stride := Stride;
+      Item.Free_Head_Address := Layouts.Address_At (Core, 56, 8, 8);
    end Set_View;
 
    procedure Initialize
@@ -144,7 +145,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Free_Count : Interfaces.Unsigned_32 := 0;
       Walk_Count : Interfaces.Unsigned_32 := 0;
       Current : Interfaces.Unsigned_64 := Bytes.Read_U64
-        (Layouts.Address_At (Item.Core, 56, 8, 8));
+        (Item.Free_Head_Address);
       State : Interfaces.Unsigned_32;
    begin
       if Current > Interfaces.Unsigned_64 (Item.Capacity_Value) then
@@ -230,6 +231,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Item.Alignment_Value := 0;
       Item.Payload_Offset := 0;
       Item.Stride := 0;
+      Item.Free_Head_Address := System.Null_Address;
    end Detach;
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
@@ -278,7 +280,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Generation : Interfaces.Unsigned_32;
    begin
       Layouts.Require_Ready (Item.Core);
-      Head := Bytes.Read_U64 (Layouts.Address_At (Item.Core, 56, 8, 8));
+      Head := Bytes.Read_U64 (Item.Free_Head_Address);
       if Head = 0 then
          Value := Handles.Null_Handle;
          Allocated := False;
@@ -299,8 +301,7 @@ package body Flyology.Data_Structures.Slab_Pools is
          raise Layout_Error with "slab free-list slot is corrupt";
       end if;
       Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, 56, 8, 8),
-         Interfaces.Unsigned_64 (Next));
+        (Item.Free_Head_Address, Interfaces.Unsigned_64 (Next));
       Bytes.Write_U32
         (Field_Address (Item, Slot, State_Offset, 4, 4), Live_State);
       Value :=
@@ -319,7 +320,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Head : Interfaces.Unsigned_64;
    begin
       Check_Handle (Item, Value);
-      Head := Bytes.Read_U64 (Layouts.Address_At (Item.Core, 56, 8, 8));
+      Head := Bytes.Read_U64 (Item.Free_Head_Address);
       if Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "slab free-list head is out of range";
       end if;
@@ -335,8 +336,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Bytes.Write_U32
         (Field_Address (Item, Slot, State_Offset, 4, 4), Free_State);
       Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, 56, 8, 8),
-         Interfaces.Unsigned_64 (Slot));
+        (Item.Free_Head_Address, Interfaces.Unsigned_64 (Slot));
    end Release;
 
    function Payload_Address

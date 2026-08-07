@@ -1,6 +1,7 @@
 with Ada.Streams;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
+private with System;
 
 --  Provides a bounded multi-producer/multi-consumer ring of fixed-size byte
 --  elements. Per-slot sequence counters and acquire/release/CAS operations
@@ -118,11 +119,13 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
 private
    type View is limited record
-      Core           : Layouts.Local_View;
-      Capacity_Value : Interfaces.Unsigned_32 := 0;
-      Element_Value  : Interfaces.Unsigned_32 := 0;
-      Mask           : Interfaces.Unsigned_64 := 0;
-      Payload_Offset : Byte_Count := 0;
-      Stride         : Byte_Count := 0;
+      Core            : Layouts.Local_View;
+      Capacity_Value  : Interfaces.Unsigned_32 := 0;
+      Element_Value   : Interfaces.Unsigned_32 := 0;
+      Mask            : Interfaces.Unsigned_64 := 0;
+      Payload_Offset  : Byte_Count := 0;
+      Stride          : Byte_Count := 0;
+      Enqueue_Address : System.Address := System.Null_Address;
+      Dequeue_Address : System.Address := System.Null_Address;
    end record;
 end Flyology.Data_Structures.Rings.MPMC;

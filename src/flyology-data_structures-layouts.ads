@@ -9,14 +9,12 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    Header_Size : constant Byte_Count := 64;
 
    --  Cached process-local region geometry.
-   --  @field Base Native mapping base, never persisted
-   --  @field Region_Length Complete local mapping length
-   --  @field Location Stored structure offset
+   --  @field Base Validated native structure base, never persisted
+   --  @field Location Stored structure offset retained for nested layouts
    --  @field Extent Validated structure extent
    --  @field Attached Whether the local view remains active
    type Local_View is record
       Base          : System.Address := System.Null_Address;
-      Region_Length : Byte_Count := 0;
       Location      : Region_Offset := Null_Offset;
       Extent        : Byte_Count := 0;
       Attached      : Boolean := False;

@@ -59,6 +59,10 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
       Item.Payload_Offset := Payload_Offset;
       Item.Stride := Stride;
+      Item.Enqueue_Address :=
+        Layouts.Address_At (Core, Enqueue_Offset, 8, 8);
+      Item.Dequeue_Address :=
+        Layouts.Address_At (Core, Dequeue_Offset, 8, 8);
    end Set_View;
 
    function Slot_Relative
@@ -113,9 +117,9 @@ package body Flyology.Data_Structures.Rings.MPMC is
         (Item, Core, Capacity_32, Interfaces.Unsigned_32 (Element_Size),
          Payload_Offset, Stride);
       Atomic.Store_Release_U64
-        (Layouts.Address_At (Item.Core, Enqueue_Offset, 8, 8), 0);
+        (Item.Enqueue_Address, 0);
       Atomic.Store_Release_U64
-        (Layouts.Address_At (Item.Core, Dequeue_Offset, 8, 8), 0);
+        (Item.Dequeue_Address, 0);
       for Slot in Interfaces.Unsigned_32 range 0 .. Capacity_32 - 1 loop
          Atomic.Store_Release_U64
            (Sequence_Address (Item, Interfaces.Unsigned_64 (Slot)),
@@ -154,9 +158,9 @@ package body Flyology.Data_Structures.Rings.MPMC is
         (Item, Core, Header.Capacity, Header.Element_Size,
          Payload_Offset, Stride);
       Enqueue := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Enqueue_Offset, 8, 8));
+        (Item.Enqueue_Address);
       Dequeue := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Dequeue_Offset, 8, 8));
+        (Item.Dequeue_Address);
       Occupancy := Enqueue - Dequeue;
       if Occupancy > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "MPMC ring claim positions are corrupt";
@@ -183,6 +187,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Item.Mask := 0;
       Item.Payload_Offset := 0;
       Item.Stride := 0;
+      Item.Enqueue_Address := System.Null_Address;
+      Item.Dequeue_Address := System.Null_Address;
    end Detach;
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
@@ -207,7 +213,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Position := Atomic.Load_Relaxed_U64
-        (Layouts.Address_At (Item.Core, Enqueue_Offset, 8, 8));
+        (Item.Enqueue_Address);
       for Attempt in 1 .. Contention_Limit loop
          pragma Unreferenced (Attempt);
          Sequence := Atomic.Load_Acquire_U64
@@ -216,8 +222,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
          if Difference = 0 then
             Expected := Position;
             if Atomic.Compare_Exchange_U64
-              (Layouts.Address_At (Item.Core, Enqueue_Offset, 8, 8),
-               Expected, Position + 1)
+              (Item.Enqueue_Address, Expected, Position + 1)
             then
                Bytes.Copy
                  (Payload_Address (Item, Position), Data'Address,
@@ -233,7 +238,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
             return;
          else
             Position := Atomic.Load_Relaxed_U64
-              (Layouts.Address_At (Item.Core, Enqueue_Offset, 8, 8));
+              (Item.Enqueue_Address);
          end if;
       end loop;
       Result := Push_Contended;
@@ -252,7 +257,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Position := Atomic.Load_Relaxed_U64
-        (Layouts.Address_At (Item.Core, Dequeue_Offset, 8, 8));
+        (Item.Dequeue_Address);
       for Attempt in 1 .. Contention_Limit loop
          pragma Unreferenced (Attempt);
          Sequence := Atomic.Load_Acquire_U64
@@ -261,8 +266,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
          if Difference = 0 then
             Expected := Position;
             if Atomic.Compare_Exchange_U64
-              (Layouts.Address_At (Item.Core, Dequeue_Offset, 8, 8),
-               Expected, Position + 1)
+              (Item.Dequeue_Address, Expected, Position + 1)
             then
                Bytes.Copy
                  (Data'Address, Payload_Address (Item, Position),
@@ -279,7 +283,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
             return;
          else
             Position := Atomic.Load_Relaxed_U64
-              (Layouts.Address_At (Item.Core, Dequeue_Offset, 8, 8));
+              (Item.Dequeue_Address);
          end if;
       end loop;
       Result := Pop_Contended;
@@ -290,9 +294,9 @@ package body Flyology.Data_Structures.Rings.MPMC is
    begin
       Layouts.Require_Ready (Item.Core);
       Enqueue := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Enqueue_Offset, 8, 8));
+        (Item.Enqueue_Address);
       Dequeue := Atomic.Load_Acquire_U64
-        (Layouts.Address_At (Item.Core, Dequeue_Offset, 8, 8));
+        (Item.Dequeue_Address);
       if Enqueue /= Dequeue then
          raise Program_Error with "cannot destroy a nonempty MPMC ring";
       end if;

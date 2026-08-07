@@ -2,6 +2,7 @@ with Ada.Streams;
 with Flyology.Data_Structures.Handles;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
+private with System;
 
 --  Provides bounded fixed-size byte-slot allocation in relocatable storage.
 --  Stored slots contain generation, state, free-list index, and payload bytes;
@@ -153,11 +154,12 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
 
 private
    type View is limited record
-      Core           : Layouts.Local_View;
-      Capacity_Value : Interfaces.Unsigned_32 := 0;
-      Element_Value  : Interfaces.Unsigned_32 := 0;
-      Alignment_Value : Interfaces.Unsigned_32 := 0;
-      Payload_Offset : Byte_Count := 0;
-      Stride         : Byte_Count := 0;
+      Core              : Layouts.Local_View;
+      Capacity_Value    : Interfaces.Unsigned_32 := 0;
+      Element_Value     : Interfaces.Unsigned_32 := 0;
+      Alignment_Value   : Interfaces.Unsigned_32 := 0;
+      Payload_Offset    : Byte_Count := 0;
+      Stride            : Byte_Count := 0;
+      Free_Head_Address : System.Address := System.Null_Address;
    end record;
 end Flyology.Data_Structures.Slab_Pools;

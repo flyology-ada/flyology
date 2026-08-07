@@ -1,12 +1,17 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Storage;
+with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Layouts is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Native renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Native.Integer_Address;
+   use type Native.Storage_Offset;
+   use type System.Address;
 
    Initializing : constant Interfaces.Unsigned_32 := 1;
    Ready        : constant Interfaces.Unsigned_32 := 2;
@@ -64,7 +69,6 @@ package body Flyology.Data_Structures.Layouts is
       Alignment : Byte_Count) return Local_View
    is
       Address : System.Address;
-      pragma Unreferenced (Address);
    begin
       if Location = Null_Offset then
          raise Region_Error with "null structure location";
@@ -73,11 +77,10 @@ package body Flyology.Data_Structures.Layouts is
         (Region.Base, Region.Length_Value, Region.Attached,
          Location, Extent, Alignment);
       return
-        (Base          => Region.Base,
-         Region_Length => Region.Length_Value,
-         Location      => Location,
-         Extent        => Extent,
-         Attached      => True);
+        (Base     => Address,
+         Location => Location,
+         Extent   => Extent,
+         Attached => True);
    end Capture;
 
    function Address_At
@@ -86,19 +89,34 @@ package body Flyology.Data_Structures.Layouts is
       Extent    : Byte_Count;
       Alignment : Byte_Count := 1) return System.Address
    is
-      Absolute : Byte_Count;
+      Base_Value : Native.Integer_Address;
+      At_Value   : Native.Integer_Address;
    begin
-      if not Item.Attached then
+      if not Item.Attached or else Item.Base = System.Null_Address then
          raise Region_Error with "detached structure view";
       elsif Relative > Item.Extent
         or else Extent > Item.Extent - Relative
       then
          raise Layout_Error with "structure-relative extent is corrupt";
+      elsif Extent = 0 then
+         raise Region_Error with "zero-sized structure-relative slice";
+      elsif Alignment = 0
+        or else (Alignment and (Alignment - 1)) /= 0
+      then
+         raise Region_Error with "invalid structure-relative alignment";
+      elsif Relative > Byte_Count (Native.Storage_Offset'Last) then
+         raise Region_Error with "structure-relative offset is not native";
       end if;
-      Absolute := Checked_Add (Byte_Count (Item.Location), Relative);
-      return Checked_Address
-        (Item.Base, Item.Region_Length, Item.Attached,
-         Region_Offset (Absolute), Extent, Alignment);
+
+      Base_Value := Native.To_Integer (Item.Base);
+      if Relative > Byte_Count (Native.Integer_Address'Last - Base_Value) then
+         raise Region_Error with "structure-relative address overflows";
+      end if;
+      At_Value := Base_Value + Native.Integer_Address (Relative);
+      if At_Value mod Native.Integer_Address (Alignment) /= 0 then
+         raise Region_Error with "structure-relative slice is misaligned";
+      end if;
+      return Item.Base + Native.Storage_Offset (Relative);
    end Address_At;
 
    procedure Write_Header
