@@ -277,9 +277,17 @@ package body Flyology.Task_Scopes is
       if not Stopped and then Parent_Source /= null then
          select
             Parent_Source.Await_Request;
-            if not Child_Source.Requested then
-               Child_Source.Request;
-            end if;
+            begin
+               if not Child_Source.Requested then
+                  Child_Source.Request;
+               end if;
+            exception
+               --  Cancellation stays recorded when its wake descriptor cannot
+               --  be signalled, and the monitor must survive to answer the
+               --  Stop rendezvous: a terminated monitor turns Join into
+               --  Tasking_Error and strands every completed result.
+               when others => null;
+            end;
          then abort
             Release_Source.Await_Request;
          end select;
@@ -349,6 +357,24 @@ package body Flyology.Task_Scopes is
       Handle := (Owner => Item.Identity, Index => Index);
    end Spawn;
 
+   --  Release the cancellation monitor and take its acknowledgement. The
+   --  release token never lends a wake descriptor, so requesting it cannot
+   --  fail. A monitor that terminated early can no longer be handshaken, and
+   --  it can no longer reach the scope either, so Tasking_Error from that
+   --  rendezvous is a completed stop rather than a failure to report.
+   procedure Stop_Monitor (Item : in out Scope) is
+   begin
+      if Item.Monitor /= null and then not Item.Monitor_Stopped then
+         Item.Monitor_Release.Request;
+         begin
+            Item.Monitor.Stop;
+         exception
+            when Tasking_Error => null;
+         end;
+      end if;
+      Item.Monitor_Stopped := True;
+   end Stop_Monitor;
+
    procedure Join (Item : in out Scope) is
    begin
       if not Item.Is_Configured then
@@ -361,11 +387,7 @@ package body Flyology.Task_Scopes is
       Item.State.Shutdown;
       Item.State.Set_Expected_Workers (Item.Activated_Workers);
       Item.State.Await_Workers;
-      if not Item.Monitor_Stopped then
-         Item.Monitor_Release.Request;
-         Item.Monitor.Stop;
-         Item.Monitor_Stopped := True;
-      end if;
+      Stop_Monitor (Item);
       Item.Is_Joined := True;
       Item.Cleanup_Required := False;
    end Join;
@@ -438,15 +460,7 @@ package body Flyology.Task_Scopes is
          end if;
          Item.State.Set_Expected_Workers (Item.Activated_Workers);
          Item.State.Await_Workers;
-         if Item.Monitor /= null and then not Item.Monitor_Stopped then
-            begin
-               Item.Monitor_Release.Request;
-               Item.Monitor.Stop;
-            exception
-               when Tasking_Error => null;
-            end;
-            Item.Monitor_Stopped := True;
-         end if;
+         Stop_Monitor (Item);
          Item.Is_Joined := True;
          Item.Cleanup_Required := False;
       end if;

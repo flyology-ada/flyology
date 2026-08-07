@@ -3,6 +3,7 @@ with Ada.Real_Time;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Task_Scopes;
+with Interfaces.C;
 with Worker_Pool_Test_Control;
 
 --  Task-scope lifecycle behavior that needs injected faults or timing
@@ -10,6 +11,12 @@ with Worker_Pool_Test_Control;
 --  reproduced on its own.
 procedure Task_Scope_Faults_Smoke is
    use type Ada.Real_Time.Time;
+   use type Interfaces.C.int;
+
+   --  How long a cancelled operation keeps running inside Execute. A scope
+   --  that abandons its workers instead of joining them is observable for
+   --  this long.
+   Hold_After_Cancel : constant Duration := 0.05;
 
    --  Largest accepted parent-to-child cancellation latency. The retired
    --  polling monitor woke every 10 ms, so its latency was spread over
@@ -54,6 +61,66 @@ procedure Task_Scope_Faults_Smoke is
       function Requested_At return Ada.Real_Time.Time is (Instant);
    end Cancel_Timing;
 
+   protected Progress is
+      procedure Reset;
+      procedure Mark_Started;
+      procedure Mark_Finished;
+      entry Await_Started;
+      function Finished return Boolean;
+   private
+      Started  : Boolean := False;
+      Complete : Boolean := False;
+   end Progress;
+
+   protected body Progress is
+      procedure Reset is
+      begin
+         Started := False;
+         Complete := False;
+      end Reset;
+
+      procedure Mark_Started is
+      begin
+         Started := True;
+      end Mark_Started;
+
+      procedure Mark_Finished is
+      begin
+         Complete := True;
+      end Mark_Finished;
+
+      entry Await_Started when Started is
+      begin
+         null;
+      end Await_Started;
+
+      function Finished return Boolean is (Complete);
+   end Progress;
+
+   --  Borrow the scope token's wake descriptor, then stay inside Execute for
+   --  a while after cancellation is recorded.
+   procedure Cancelled_Hold
+     (Input    : Integer;
+      Token    : access Flyology.Cancellation.Token;
+      Deadline : Ada.Real_Time.Time;
+      Result   : out Integer)
+   is
+      pragma Unreferenced (Deadline);
+      Descriptor : Interfaces.C.int;
+      Already    : Boolean;
+   begin
+      --  Only a borrowed descriptor makes Request signal a wake source, so
+      --  this is the precondition of the injected signalling failure.
+      Token.Wait_Source (Descriptor, Already);
+      pragma Assert (not Already);
+      pragma Assert (Descriptor >= 0);
+      Progress.Mark_Started;
+      Token.Await_Request;
+      delay Hold_After_Cancel;
+      Result := Input;
+      Progress.Mark_Finished;
+   end Cancelled_Hold;
+
    procedure Never_Run
      (Input    : Integer;
       Token    : access Flyology.Cancellation.Token;
@@ -81,10 +148,38 @@ procedure Task_Scope_Faults_Smoke is
           (Ada.Real_Time.Clock - Cancel_Timing.Requested_At);
    end Measure_Cancellation;
 
+   package Hold_Scopes is new
+     Flyology.Task_Scopes (Integer, Integer, Cancelled_Hold);
    package Idle_Scopes is new
      Flyology.Task_Scopes (Integer, Integer, Never_Run);
    package Timing_Scopes is new
      Flyology.Task_Scopes (Integer, Duration, Measure_Cancellation);
+
+   --  A cancellation monitor that cannot signal the scope token must stay
+   --  alive for its Stop rendezvous, and Join must complete regardless, so
+   --  the results of completed operations stay reachable.
+   procedure Check_Join_Survives_Monitor_Failure is
+      Parent : aliased Flyology.Cancellation.Token;
+      Item   : Hold_Scopes.Scope (Capacity => 1, Parent => Parent'Access);
+      Handle : Hold_Scopes.Operation_Handle;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Progress.Reset;
+      Hold_Scopes.Configure (Item, Ada.Real_Time.Time_Last);
+      Hold_Scopes.Spawn (Item, 11, Handle);
+      Progress.Await_Started;
+      Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
+      Parent.Request;
+      Hold_Scopes.Join (Item);
+      --  The monitor really did take the failing signalling path.
+      pragma Assert
+        (Worker_Pool_Test_Control
+           .Remaining_Native_Executor_Cancellation_Failures = 0);
+      Worker_Pool_Test_Control.Reset;
+      pragma Assert (Progress.Finished);
+      pragma Assert (Hold_Scopes.Succeeded (Item, Handle));
+      pragma Assert (Hold_Scopes.Result (Item, Handle) = 11);
+   end Check_Join_Survives_Monitor_Failure;
 
    --  A worker whose activation fails must not orphan the workers that were
    --  already created: finalization stops and releases them, so the enclosing
@@ -138,6 +233,9 @@ procedure Task_Scope_Faults_Smoke is
      (if Ada.Command_Line.Argument_Count = 0 then "all"
       else Ada.Command_Line.Argument (1));
 begin
+   if Selection = "all" or else Selection = "monitor" then
+      Check_Join_Survives_Monitor_Failure;
+   end if;
    if Selection = "all" or else Selection = "activation" then
       Check_Activation_Failure_Rollback;
    end if;
