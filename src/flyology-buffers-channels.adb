@@ -13,6 +13,24 @@ package body Flyology.Buffers.Channels is
      (Transfer_Metadata (Value));
 
    protected body Channel_State is
+      --  Hand the oldest queued token to Target. Attach commits the transfer
+      --  before the queue advances, so a rejected token stays queued instead
+      --  of being lost, and the caller never holds a dequeued token outside
+      --  this protected action.
+      procedure Deliver
+        (Target   : in out Unique_Buffer;
+         Metadata : out Transfer_Metadata)
+      is
+         Token : Buffer_Token := Values (Head);
+      begin
+         Metadata := From_Stored_Metadata (Token.Channel_Metadata);
+         Token.Channel_Metadata := 0;
+         Attach (Target, Token);
+         Values (Head) := No_Token;
+         Head := Policy.Advance (Head, Capacity);
+         Count := Policy.Count_After_Receive (Count);
+      end Deliver;
+
       entry Send (Token : Buffer_Token; Accepted : out Boolean)
         when Policy.Send_Entry_Open (Stopped, Count, Capacity)
       is
@@ -32,20 +50,18 @@ package body Flyology.Buffers.Channels is
       end Send;
 
       entry Receive
-        (Token     : out Buffer_Token;
+        (Target    : in out Unique_Buffer;
+         Metadata  : out Transfer_Metadata;
          Available : out Boolean)
         when Policy.Receive_Entry_Open (Stopped, Count)
       is
       begin
          case Policy.Classify_Receive (Stopped, Count) is
             when Policy.Accept_Receive =>
-               Token := Values (Head);
-               Values (Head) := No_Token;
-               Head := Policy.Advance (Head, Capacity);
-               Count := Policy.Count_After_Receive (Count);
+               Deliver (Target, Metadata);
                Available := True;
             when Policy.Reject_Receive =>
-               Token := No_Token;
+               Metadata := No_Metadata;
                Available := False;
             when Policy.Wait_To_Receive =>
                raise Program_Error with
@@ -75,6 +91,24 @@ package body Flyology.Buffers.Channels is
       end Try_Send;
 
       procedure Try_Receive
+        (Target   : in out Unique_Buffer;
+         Metadata : out Transfer_Metadata;
+         Result   : out Try_Receive_Result) is
+      begin
+         case Policy.Classify_Receive (Stopped, Count) is
+            when Policy.Accept_Receive =>
+               Deliver (Target, Metadata);
+               Result := Item_Received;
+            when Policy.Wait_To_Receive =>
+               Metadata := No_Metadata;
+               Result := Channel_Empty;
+            when Policy.Reject_Receive =>
+               Metadata := No_Metadata;
+               Result := Receive_Closed;
+         end case;
+      end Try_Receive;
+
+      procedure Take_Undelivered
         (Token  : out Buffer_Token;
          Result : out Try_Receive_Result) is
       begin
@@ -92,7 +126,7 @@ package body Flyology.Buffers.Channels is
                Token := No_Token;
                Result := Receive_Closed;
          end case;
-      end Try_Receive;
+      end Take_Undelivered;
 
       procedure Close is
       begin
@@ -121,20 +155,6 @@ package body Flyology.Buffers.Channels is
    begin
       if not Item.Transferred.all and then Item.Token.Slot /= No_Slot then
          Attach (Item.Target.all, Item.Token.all);
-      end if;
-   end Finalize;
-
-   type Receive_Guard
-     (Target : not null access Unique_Buffer;
-      Token  : not null access Buffer_Token) is
-     new Ada.Finalization.Limited_Controlled with null record;
-
-   overriding procedure Finalize (Item : in out Receive_Guard) is
-   begin
-      if Item.Token.Slot /= No_Slot
-        and then not Owns (Item.Target.all, Item.Token.all)
-      then
-         Release_Token (Item.Target.Owner, Item.Token.all);
       end if;
    end Finalize;
 
@@ -185,24 +205,17 @@ package body Flyology.Buffers.Channels is
       Target   : in out Unique_Buffer;
       Metadata : out Transfer_Metadata)
    is
-      Token     : aliased Buffer_Token := No_Token;
       Available : Boolean;
-      Guard     : Receive_Guard
-        (Target'Unchecked_Access, Token'Access);
-      pragma Unreferenced (Guard);
    begin
       Metadata := No_Metadata;
       Validate_Pools (Item, Target);
       if Has_Buffer (Target) then
          raise Program_Error with "receive into an occupied buffer";
       end if;
-      Item.State.Receive (Token, Available);
+      Item.State.Receive (Target, Metadata, Available);
       if not Available then
          raise Channel_Closed with "receive from drained buffer channel";
       end if;
-      Metadata := From_Stored_Metadata (Token.Channel_Metadata);
-      Token.Channel_Metadata := 0;
-      Attach (Target, Token);
    end Receive_Move;
 
    procedure Try_Send_Move
@@ -243,23 +256,14 @@ package body Flyology.Buffers.Channels is
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;
       Result   : out Try_Receive_Result;
-      Metadata : out Transfer_Metadata)
-   is
-      Token : aliased Buffer_Token := No_Token;
-      Guard : Receive_Guard (Target'Unchecked_Access, Token'Access);
-      pragma Unreferenced (Guard);
+      Metadata : out Transfer_Metadata) is
    begin
       Metadata := No_Metadata;
       Validate_Pools (Item, Target);
       if Has_Buffer (Target) then
          raise Program_Error with "receive into an occupied buffer";
       end if;
-      Item.State.Try_Receive (Token, Result);
-      if Result = Item_Received then
-         Metadata := From_Stored_Metadata (Token.Channel_Metadata);
-         Token.Channel_Metadata := 0;
-         Attach (Target, Token);
-      end if;
+      Item.State.Try_Receive (Target, Metadata, Result);
    end Try_Receive_Move;
 
    procedure Timed_Send_Move
@@ -334,12 +338,8 @@ package body Flyology.Buffers.Channels is
       Timeout  : Duration;
       Metadata : out Transfer_Metadata)
    is
-      Token     : aliased Buffer_Token := No_Token;
       Available : Boolean;
-      Guard     : Receive_Guard
-        (Target'Unchecked_Access, Token'Access);
-      pragma Unreferenced (Guard);
-      Result : Try_Receive_Result;
+      Result    : Try_Receive_Result;
    begin
       Metadata := No_Metadata;
       if Timeout < 0.0 then
@@ -362,14 +362,11 @@ package body Flyology.Buffers.Channels is
          raise Program_Error with "receive into an occupied buffer";
       end if;
       select
-         Item.State.Receive (Token, Available);
+         Item.State.Receive (Target, Metadata, Available);
          if not Available then
             raise Channel_Closed with
               "receive from drained buffer channel";
          end if;
-         Metadata := From_Stored_Metadata (Token.Channel_Metadata);
-         Token.Channel_Metadata := 0;
-         Attach (Target, Token);
       or
          delay Timeout;
          raise Timeout_Error with "buffer channel receive timed out";
@@ -417,7 +414,7 @@ package body Flyology.Buffers.Channels is
    begin
       Item.State.Close;
       loop
-         Item.State.Try_Receive (Token, Result);
+         Item.State.Take_Undelivered (Token, Result);
          exit when Result /= Item_Received;
          Release_Token (Item.Owner, Token);
       end loop;

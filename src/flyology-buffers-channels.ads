@@ -51,7 +51,10 @@ package Flyology.Buffers.Channels is
    end record;
 
    --  Fixed-capacity MPMC FIFO tied to one buffer pool. Finalization closes
-   --  the channel and returns any undelivered buffers to Owner.
+   --  the channel and returns any undelivered buffers to Owner. A receive
+   --  commits the dequeue and the ownership transfer in one protected action,
+   --  so aborting or cancelling a receiver leaves an accepted message either
+   --  delivered to its target or still queued, never destroyed.
    type Channel
      (Owner    : not null access Pool;  --  Pool supplying every buffer
       Capacity : Positive)              --  Maximum queued buffer count
@@ -213,7 +216,8 @@ package Flyology.Buffers.Channels is
    --  @param Item Channel yielding ownership
    --  @param Target Vacant buffer that receives the oldest payload
    --  @param Timeout Maximum monotonic wait in seconds
-   --  @param Metadata Metadata supplied by the sender
+   --  @param Metadata Metadata supplied by the sender. A cancellation
+   --    observed after delivery completed leaves it unassigned
    --  @param Token Optional one-shot cancellation source
    --  @exception Channel_Closed Closed channel has fully drained
    --  @exception Timeout_Error No buffer arrives before the deadline
@@ -246,14 +250,25 @@ private
 
    protected type Channel_State (Capacity : Positive) is
       entry Send (Token : Buffer_Token; Accepted : out Boolean);
+      --  Dequeue and attach in one protected action. Abort is deferred for
+      --  its whole duration, so a receiver is either still queued or already
+      --  owns the buffer; no window exists in which the token belongs to
+      --  neither the channel nor Target.
       entry Receive
-        (Token     : out Buffer_Token;
+        (Target    : in out Unique_Buffer;
+         Metadata  : out Transfer_Metadata;
          Available : out Boolean);
       procedure Try_Send
         (Token    : Buffer_Token;
          Result   : out Try_Send_Result;
          Accepted : out Boolean);
       procedure Try_Receive
+        (Target   : in out Unique_Buffer;
+         Metadata : out Transfer_Metadata;
+         Result   : out Try_Receive_Result);
+      --  Dequeue without a destination buffer. Only finalization uses this
+      --  operation, and it returns the token directly to the pool.
+      procedure Take_Undelivered
         (Token  : out Buffer_Token;
          Result : out Try_Receive_Result);
       procedure Close;

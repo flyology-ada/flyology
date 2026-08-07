@@ -249,6 +249,7 @@ elif [ "$(uname -s)" = Darwin ]; then
 fi
 
 ordinary_mains='cancellation_wake_smoke
+buffer_channel_cancel_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_retention_smoke
