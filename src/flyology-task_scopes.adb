@@ -1,6 +1,7 @@
 with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
 with Flyology.IO;
+with Flyology.Task_Scope_Policy;
 with Flyology.Worker_Pool_Test_Hooks;
 
 package body Flyology.Task_Scopes is
@@ -385,7 +386,9 @@ package body Flyology.Task_Scopes is
       Item.State.Close_Admission;
       Item.State.Await_All;
       Item.State.Shutdown;
-      Item.State.Set_Expected_Workers (Item.Activated_Workers);
+      Item.State.Set_Expected_Workers
+        (Task_Scope_Policy.Awaited_Workers
+           (Item.Created_Workers, Item.Activated_Workers));
       Item.State.Await_Workers;
       Stop_Monitor (Item);
       Item.Is_Joined := True;
@@ -439,7 +442,13 @@ package body Flyology.Task_Scopes is
         (Cancellation_Monitor, Cancellation_Monitor_Access);
       Cancel_Failed  : Boolean := False;
       Cancel_Failure : Ada.Exceptions.Exception_Occurrence;
+      --  Worker bookkeeping is settled once Configure has returned or
+      --  raised, so this census is stable for the whole cleanup.
+      Created   : constant Natural := Item.Created_Workers;
+      Activated : constant Natural := Item.Activated_Workers;
    begin
+      pragma Assert
+        (Task_Scope_Policy.Accounts_For_Every_Worker (Created, Activated));
       if Item.Cleanup_Required and then not Item.Is_Joined then
          begin
             if not Item.Local_Stop.Requested then
@@ -463,7 +472,9 @@ package body Flyology.Task_Scopes is
             --  Workers created but never started, including the ones a failed
             --  Configure left behind, have no Shared_State pointer and can
             --  only leave their initial select through this rendezvous.
-            for Index in Item.Activated_Workers + 1 .. Item.Created_Workers
+            for Index in
+              Task_Scope_Policy.First_Unstarted (Created, Activated)
+              .. Task_Scope_Policy.Last_Unstarted (Created, Activated)
             loop
                begin
                   Item.Workers (Index).Stop;
@@ -472,7 +483,8 @@ package body Flyology.Task_Scopes is
                end;
             end loop;
          end if;
-         Item.State.Set_Expected_Workers (Item.Activated_Workers);
+         Item.State.Set_Expected_Workers
+           (Task_Scope_Policy.Awaited_Workers (Created, Activated));
          Item.State.Await_Workers;
          Stop_Monitor (Item);
          Item.Is_Joined := True;
