@@ -1835,11 +1835,13 @@ precedence, dependent-recovery closure, exact isolate and cohort sets, restart
 classification and accounting, capped backoff, stability reset,
 incident observation, nonzero generation matching, repeated-incident
 classification, and dynamic-family join admission. Production controllers use
-the last two decisions to prevent one replacement failure from reusing an
-already charged attempt and to keep a family open until every typed-input
-reservation has committed or rolled back. The model smoke test supplies the
-deterministic lowest-id tie-break, exact minimal dependent set, incident,
-stale-generation, and admission examples described in the design document.
+proved generation matching for every generation-qualified publication and
+command. They also consume proved retained-event transition, family admission,
+exact-generation stop, repeated-attempt, and structured-join decisions. Family
+admission is derived from configured, shutdown, and terminal state rather than
+stored in a second mutable flag. The model smoke test supplies the deterministic
+lowest-id tie-break, exact minimal dependent set, incident, stale-generation,
+and admission examples described in the design document.
 Task construction, readiness, stopping, and resource reclamation are
 implemented by the non-SPARK structured controller and covered by live semantic
 smoke tests.

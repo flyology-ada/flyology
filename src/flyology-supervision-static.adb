@@ -12,6 +12,17 @@ package body Flyology.Supervision.Static is
 
    package Policy renames Flyology.Supervision_Policy;
 
+   function Generation_Is_Current
+     (Handle : Child_Handle;
+      Id     : Child_Id;
+      Value  : Generation) return Boolean
+   is
+     (Policy.Generation_Matches
+        (Expected_Id         => Id,
+         Expected_Generation => Value,
+         Supplied_Id         => Child (Handle),
+         Supplied_Generation => Current_Generation (Handle)));
+
    function Empty_Summary
      (Kind : Termination_Kind) return Termination_Summary is
      ((Kind           => Kind,
@@ -136,11 +147,7 @@ package body Flyology.Supervision.Static is
       is
          Slot : Positive;
       begin
-         if Before /= After
-           and then Kind in Lifecycle_Changed | Stop_Published |
-             Restart_Admitted
-           and then not Policy.Transition_Allowed (Before, After)
-         then
+         if not Policy.Recorded_Transition_Allowed (Kind, Before, After) then
             raise Program_Error with
               "illegal static supervision lifecycle transition";
          end if;
@@ -410,7 +417,7 @@ package body Flyology.Supervision.Static is
          Now   : Ada.Real_Time.Time)
       is
       begin
-         if not Is_Current
+         if not Generation_Is_Current
            (Value, Child_Ids (Child), Snapshots (Child).Generation)
            or else not Snapshots (Child).Live
            or else Snapshots (Child).State /= Starting
@@ -461,7 +468,7 @@ package body Flyology.Supervision.Static is
          Spec := Child_Specs (Child).Stopping;
          Stop := False;
          Shutdown := False;
-         if not Is_Current
+         if not Generation_Is_Current
            (Value, Child_Ids (Child), Snapshots (Child).Generation)
            or else not Snapshots (Child).Live
          then
@@ -747,7 +754,7 @@ package body Flyology.Supervision.Static is
 
          Attempts_Exhausted : Boolean;
       begin
-         if not Is_Current
+         if not Generation_Is_Current
            (Value, Child_Ids (Child), Snapshots (Child).Generation)
            or else not Snapshots (Child).Live
          then
@@ -849,7 +856,7 @@ package body Flyology.Supervision.Static is
          Now   : Ada.Real_Time.Time) return Boolean
       is
         (Phase = Running_Children
-         and then Is_Current
+         and then Generation_Is_Current
            (Value, Child_Ids (Child), Snapshots (Child).Generation)
          and then Snapshots (Child).Live
          and then Snapshots (Child).Ready
@@ -865,7 +872,7 @@ package body Flyology.Supervision.Static is
          Value : Child_Handle)
       is
       begin
-         if Is_Current
+         if Generation_Is_Current
            (Value, Child_Ids (Child), Snapshots (Child).Generation)
            and then Snapshots (Child).Live
            and then Snapshots (Child).Termination.Kind /= Stuck

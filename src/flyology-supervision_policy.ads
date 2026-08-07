@@ -10,6 +10,8 @@ private package Flyology.Supervision_Policy
 is
    package Public renames Flyology.Supervision;
    use type Interfaces.Unsigned_64;
+   use type Public.Child_State;
+   use type Public.Event_Kind;
    use type Public.Restart_Impact;
 
    Maximum_Children : constant := 16;
@@ -144,6 +146,21 @@ is
      (From : Public.Child_State;
       To   : Public.Child_State) return Boolean
    with Global => null;
+
+   --  Decide whether an event may retain its before/after edge. Events that
+   --  represent lifecycle, stop, or restart admission must follow the scalar
+   --  lifecycle model; observational events and same-state events carry no
+   --  additional state transition.
+   function Recorded_Transition_Allowed
+     (Kind   : Public.Event_Kind;
+      Before : Public.Child_State;
+      After  : Public.Child_State) return Boolean
+   with Global => null,
+        Post   => Recorded_Transition_Allowed'Result =
+          (Before = After
+           or else Kind not in Public.Lifecycle_Changed |
+             Public.Stop_Published | Public.Restart_Admitted
+           or else Transition_Allowed (Before, After));
 
    --  Classify outcomes that On_Failure treats as restartable failures.
    function Is_Failure
@@ -349,6 +366,30 @@ is
            and then Queued_Children = 0
            and then Live_Managers = 0);
 
+   --  Derive dynamic-family admission from authoritative controller state.
+   --  No separate mutable open flag can disagree with shutdown or terminal
+   --  escalation.
+   function Family_Admission_Open
+     (Configured : Boolean;
+      Shutdown   : Boolean;
+      Terminal   : Boolean) return Boolean
+   with Global => null,
+        Post   => Family_Admission_Open'Result =
+          (Configured and then not Shutdown and then not Terminal);
+
+   --  Decide whether an exact-generation family stop command may be applied.
+   --  A queued generation has not activated yet; a managed generation must
+   --  still own a live task. A terminated generation awaiting replacement is
+   --  deliberately rejected even though its slot remains managed.
+   function Family_Stop_Command_Allowed
+     (Current : Boolean;
+      Queued  : Boolean;
+      Managed : Boolean;
+      Live    : Boolean) return Boolean
+   with Global => null,
+        Post   => Family_Stop_Command_Allowed'Result =
+          (Current and then (Queued or else (Managed and then Live)));
+
    --  Report whether an incident id can advance without reuse.
    function Incident_Can_Advance (Value : Incident_Id) return Boolean is
      (Value < Incident_Id'Last);
@@ -382,5 +423,28 @@ is
         Post   => Generation_Matches'Result =
           (Expected_Id = Supplied_Id
            and then Expected_Generation = Supplied_Generation);
+
+   --  Accept publication for the current generation or exactly its successor
+   --  while replacement is pending. This prevents a stale, skipped, or
+   --  wrapped generation from becoming the live family generation.
+   function Generation_Start_Allowed
+     (Expected_Id         : Public.Child_Id;
+      Expected_Generation : Public.Generation;
+      Supplied_Id         : Public.Child_Id;
+      Supplied_Generation : Public.Generation;
+      Restart_Pending     : Boolean) return Boolean
+   with Global => null,
+        Post   => Generation_Start_Allowed'Result =
+          (Generation_Matches
+             (Expected_Id,
+              Expected_Generation,
+              Supplied_Id,
+              Supplied_Generation)
+           or else
+             (Restart_Pending
+              and then Expected_Id = Supplied_Id
+              and then Generation_Can_Advance (Expected_Generation)
+              and then Supplied_Generation =
+                Next_Generation (Expected_Generation)));
 
 end Flyology.Supervision_Policy;

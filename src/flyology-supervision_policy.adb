@@ -229,6 +229,16 @@ is
             To in Public.Stopping | Public.Joined,
          when Public.Joined => False);
 
+   function Recorded_Transition_Allowed
+     (Kind   : Public.Event_Kind;
+      Before : Public.Child_State;
+      After  : Public.Child_State) return Boolean
+   is
+     (Before = After
+      or else Kind not in Public.Lifecycle_Changed | Public.Stop_Published |
+        Public.Restart_Admitted
+      or else Transition_Allowed (Before, After));
+
    function Is_Failure
      (Kind : Public.Termination_Kind) return Boolean
    is
@@ -385,6 +395,21 @@ is
       and then Queued_Children = 0
       and then Live_Managers = 0);
 
+   function Family_Admission_Open
+     (Configured : Boolean;
+      Shutdown   : Boolean;
+      Terminal   : Boolean) return Boolean
+   is
+     (Configured and then not Shutdown and then not Terminal);
+
+   function Family_Stop_Command_Allowed
+     (Current : Boolean;
+      Queued  : Boolean;
+      Managed : Boolean;
+      Live    : Boolean) return Boolean
+   is
+     (Current and then (Queued or else (Managed and then Live)));
+
    function Next_Incident (Value : Incident_Id) return Incident_Id is
      (Value + 1);
 
@@ -400,5 +425,24 @@ is
    is
      (Expected_Id = Supplied_Id
       and then Expected_Generation = Supplied_Generation);
+
+   function Generation_Start_Allowed
+     (Expected_Id         : Public.Child_Id;
+      Expected_Generation : Public.Generation;
+      Supplied_Id         : Public.Child_Id;
+      Supplied_Generation : Public.Generation;
+      Restart_Pending     : Boolean) return Boolean
+   is
+     (Generation_Matches
+        (Expected_Id,
+         Expected_Generation,
+         Supplied_Id,
+         Supplied_Generation)
+      or else
+        (Restart_Pending
+         and then Expected_Id = Supplied_Id
+         and then Generation_Can_Advance (Expected_Generation)
+         and then Supplied_Generation =
+           Next_Generation (Expected_Generation)));
 
 end Flyology.Supervision_Policy;

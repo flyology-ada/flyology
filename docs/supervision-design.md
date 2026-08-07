@@ -568,10 +568,13 @@ dynamic-family join condition. Contracts prove exact isolate and cohort sets;
 they also prove that dependent recovery contains the failed child, excludes
 unconfigured ids, and is closed under every configured dependency edge. The
 lowest-id tie-break and exact minimal dependent set remain executable model
-assertions. The production controllers consume the transition,
-repeated-attempt, and join decisions; every retained lifecycle, stop, and
-restart-admission edge first passes the proved transition predicate. Task
-construction, protected state, and resource reclamation remain outside SPARK.
+assertions. The production controllers consume proved generation matching for
+every generation-qualified publication and command, plus retained-event
+transition, repeated-attempt, dynamic-family admission, exact-generation stop,
+and structured-join decisions. Family admission is derived from configured,
+shutdown, and terminal state, so no independently mutable open flag can diverge
+from shutdown. Task construction, protected state, and resource reclamation
+remain outside SPARK.
 
 ## Worked example: independent restartable service
 

@@ -94,6 +94,22 @@ begin
    end loop;
 
    pragma Assert
+     (Recorded_Transition_Allowed
+        (Public.Restart_Admitted,
+         Public.Terminated,
+         Public.Backing_Off));
+   pragma Assert
+     (not Recorded_Transition_Allowed
+        (Public.Lifecycle_Changed,
+         Public.Running,
+         Public.Starting));
+   pragma Assert
+     (Recorded_Transition_Allowed
+        (Public.Supervisor_Stopped,
+         Public.Running,
+         Public.Running));
+
+   pragma Assert
      (not Should_Restart (Public.Never, Public.Unhandled_Exception));
    pragma Assert
      (Should_Restart (Public.On_Failure, Public.Unhandled_Exception));
@@ -163,6 +179,18 @@ begin
      (not Generation_Matches
         (High_Id, Generation, High_Id, Public.Generation'First));
    pragma Assert
+     (Generation_Start_Allowed
+        (High_Id, Generation, High_Id, Generation, False));
+   pragma Assert
+     (Generation_Start_Allowed
+        (High_Id, Generation, High_Id, Next_Generation (Generation), True));
+   pragma Assert
+     (not Generation_Start_Allowed
+        (High_Id, Generation, High_Id, Next_Generation (Generation), False));
+   pragma Assert
+     (not Generation_Start_Allowed
+        (High_Id, Generation, High_Id + 1, Next_Generation (Generation), True));
+   pragma Assert
      (not Generation_Can_Advance (Public.Generation'Last));
 
    pragma Assert (Incident_Can_Advance (Incident_Id'First));
@@ -182,4 +210,22 @@ begin
    pragma Assert (not Family_Finished (True, False, 1, 0, 0));
    pragma Assert (not Family_Finished (True, False, 0, 1, 0));
    pragma Assert (not Family_Finished (True, False, 0, 0, 1));
+
+   pragma Assert (Family_Admission_Open (True, False, False));
+   pragma Assert (not Family_Admission_Open (False, False, False));
+   pragma Assert (not Family_Admission_Open (True, True, False));
+   pragma Assert (not Family_Admission_Open (True, False, True));
+
+   pragma Assert
+     (Family_Stop_Command_Allowed
+        (Current => True, Queued => True, Managed => False, Live => False));
+   pragma Assert
+     (Family_Stop_Command_Allowed
+        (Current => True, Queued => False, Managed => True, Live => True));
+   pragma Assert
+     (not Family_Stop_Command_Allowed
+        (Current => True, Queued => False, Managed => True, Live => False));
+   pragma Assert
+     (not Family_Stop_Command_Allowed
+        (Current => False, Queued => True, Managed => False, Live => False));
 end Flyology.Supervision_Policy.Smoke;

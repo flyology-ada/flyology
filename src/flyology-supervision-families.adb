@@ -10,6 +10,19 @@ package body Flyology.Supervision.Families is
    use type Flyology.Execution_Model;
    use type Interfaces.Unsigned_64;
 
+   package Kernel renames Flyology.Supervision_Policy;
+
+   function Generation_Is_Current
+     (Handle : Child_Handle;
+      Id     : Child_Id;
+      Value  : Generation) return Boolean
+   is
+     (Kernel.Generation_Matches
+        (Expected_Id         => Id,
+         Expected_Generation => Value,
+         Supplied_Id         => Child (Handle),
+         Supplied_Generation => Current_Generation (Handle)));
+
    function Empty_Summary
      (Kind : Termination_Kind) return Termination_Summary is
      ((Kind           => Kind,
@@ -62,7 +75,6 @@ package body Flyology.Supervision.Families is
          end if;
          Run_Used := True;
          Configured := True;
-         Admission_Open := not Shutdown;
          Inherited_Incident := Inherited;
          Result :=
            (Outcome     => Shutdown_Completed,
@@ -100,12 +112,7 @@ package body Flyology.Supervision.Families is
       is
          Event_Slot : Positive;
       begin
-         if Before /= After
-           and then Kind in Lifecycle_Changed | Stop_Published |
-             Restart_Admitted
-           and then not Flyology.Supervision_Policy.Transition_Allowed
-             (Before, After)
-         then
+         if not Kernel.Recorded_Transition_Allowed (Kind, Before, After) then
             raise Program_Error with
               "illegal family supervision lifecycle transition";
          end if;
@@ -153,7 +160,9 @@ package body Flyology.Supervision.Families is
          Found : Boolean := False;
          Selected : Slot_Index := Slot_Index'First;
       begin
-         if not Configured or else not Admission_Open then
+         if not Kernel.Family_Admission_Open
+           (Configured, Shutdown, Terminal)
+         then
             raise Program_Error with "family admission is closed";
          end if;
          for Candidate in Slot_Index loop
@@ -207,13 +216,15 @@ package body Flyology.Supervision.Families is
       procedure Commit (Slot : Slot_Index; Handle : Child_Handle) is
       begin
          if Slots (Slot) /= Reserved
-           or else not Is_Current
+           or else not Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
             raise Program_Error with "family reservation is stale";
-         elsif not Admission_Open then
+         elsif not Kernel.Family_Admission_Open
+           (Configured, Shutdown, Terminal)
+         then
             raise Program_Error with "family admission closed during copy";
          end if;
          Reserved_Children := Reserved_Children - 1;
@@ -229,7 +240,7 @@ package body Flyology.Supervision.Families is
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle) is
       begin
          if Slots (Slot) = Reserved
-           and then Is_Current
+           and then Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -285,14 +296,14 @@ package body Flyology.Supervision.Families is
          Slot := Slot_Index
            (Interfaces.Unsigned_64 (Child (Handle)) -
             Interfaces.Unsigned_64 (First_Child_Id) + 1);
-         Valid :=
-           (Slots (Slot) = Queued
-            or else
-              (Slots (Slot) = Managed and then Snapshots (Slot).Live))
-           and then Is_Current
-             (Handle,
-              Snapshots (Slot).Id,
-              Snapshots (Slot).Generation);
+         Valid := Kernel.Family_Stop_Command_Allowed
+           (Current => Generation_Is_Current
+              (Handle,
+               Snapshots (Slot).Id,
+               Snapshots (Slot).Generation),
+            Queued  => Slots (Slot) = Queued,
+            Managed => Slots (Slot) = Managed,
+            Live    => Snapshots (Slot).Live);
          if Valid then
             Stop_Requested (Slot) := True;
          end if;
@@ -308,7 +319,7 @@ package body Flyology.Supervision.Families is
          Stop := False;
          Shutdown := Family_State.Shutdown;
          if Slots (Slot) = Managed
-           and then Is_Current
+           and then Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -337,17 +348,12 @@ package body Flyology.Supervision.Families is
          Advancing : Boolean;
       begin
          if Slots (Slot) = Managed
-           and then Child (Handle) = Snapshots (Slot).Id
-           and then
-             (Current_Generation (Handle) = Snapshots (Slot).Generation
-              or else
-                (Snapshots (Slot).State = Backing_Off
-                 and then
-                   Flyology.Supervision_Policy.Generation_Can_Advance
-                     (Snapshots (Slot).Generation)
-                 and then Current_Generation (Handle) =
-                   Flyology.Supervision_Policy.Next_Generation
-                     (Snapshots (Slot).Generation)))
+           and then Kernel.Generation_Start_Allowed
+             (Expected_Id         => Snapshots (Slot).Id,
+              Expected_Generation => Snapshots (Slot).Generation,
+              Supplied_Id         => Child (Handle),
+              Supplied_Generation => Current_Generation (Handle),
+              Restart_Pending     => Snapshots (Slot).State = Backing_Off)
          then
             Before := Snapshots (Slot).State;
             Advancing := Current_Generation (Handle) /=
@@ -385,7 +391,7 @@ package body Flyology.Supervision.Families is
          Now    : Ada.Real_Time.Time) is
       begin
          if Slots (Slot) = Managed
-           and then Is_Current
+           and then Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -441,7 +447,6 @@ package body Flyology.Supervision.Families is
             end if;
             Terminal := True;
             Shutdown := True;
-            Admission_Open := False;
             Result :=
               (Outcome     => Outcome,
                Child       => Snapshots (Slot).Id,
@@ -462,7 +467,7 @@ package body Flyology.Supervision.Families is
          Handle : Child_Handle) is
       begin
          if Slots (Slot) = Managed
-           and then Is_Current
+           and then Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -506,7 +511,7 @@ package body Flyology.Supervision.Families is
          Next := Handle;
          Recovery := Incident;
          if Slots (Slot) /= Managed
-           or else not Is_Current
+           or else not Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -663,7 +668,7 @@ package body Flyology.Supervision.Families is
          Now    : Ada.Real_Time.Time) return Boolean
       is
         (Slots (Slot) = Managed
-         and then Is_Current
+         and then Generation_Is_Current
            (Handle,
             Snapshots (Slot).Id,
             Snapshots (Slot).Generation)
@@ -676,7 +681,7 @@ package body Flyology.Supervision.Families is
       procedure Manager_Done (Slot : Slot_Index; Handle : Child_Handle) is
       begin
          if Slots (Slot) = Managed
-           and then Is_Current
+           and then Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -702,7 +707,7 @@ package body Flyology.Supervision.Families is
          Termination : Termination_Summary) is
       begin
          if Slots (Slot) = Managed
-           and then Is_Current
+           and then Generation_Is_Current
              (Handle,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
@@ -731,7 +736,6 @@ package body Flyology.Supervision.Families is
                Supervisor_Shutdown,
                Inherited_Incident);
          end if;
-         Admission_Open := False;
          Shutdown := True;
          if not Terminal then
             Result :=
@@ -756,7 +760,8 @@ package body Flyology.Supervision.Families is
             Queue_Length,
             Live_Managers));
 
-      function Admission_Is_Open return Boolean is (Admission_Open);
+      function Admission_Is_Open return Boolean is
+        (Kernel.Family_Admission_Open (Configured, Shutdown, Terminal));
 
       function Read_Result return Supervisor_Result is (Result);
 
@@ -776,7 +781,7 @@ package body Flyology.Supervision.Families is
               (Interfaces.Unsigned_64 (Child (Handle)) -
                Interfaces.Unsigned_64 (First_Child_Id) + 1);
             Valid := Has_Generation (Slot)
-              and then Is_Current
+              and then Generation_Is_Current
                 (Handle,
                  Snapshots (Slot).Id,
                  Snapshots (Slot).Generation);

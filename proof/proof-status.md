@@ -84,6 +84,15 @@ selection and exact minimality of the dependent set remain executable model
 properties. The finite Boolean worklist is not claimed as a separate
 `Always_Terminates` proof.
 
+The production supervision controllers now consume the proved generation
+matching predicate for every generation-qualified publication and command.
+Retained-event transition, dynamic-family admission, exact-generation stop,
+repeated-incident, and structured-join predicates are also production-consumed.
+Family admission is derived from authoritative configured, shutdown, and
+terminal state instead of an independently mutable flag. Protected-object
+serialization and the mapping from protected fields into scalar policy inputs
+remain the live integration boundary.
+
 ## Proved and Finalized
 <!-- Before marking an item complete here, follow the Widen Scope step
      (Strategic Loop Step 5) in workflow.md in the /gnatprove Skill.

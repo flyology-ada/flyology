@@ -253,7 +253,6 @@ private
            Ada.Real_Time.Time_Span_Zero);
       Configured : Boolean := False;
       Run_Used   : Boolean := False;
-      Admission_Open : Boolean := False;
       Shutdown  : Boolean := False;
       Terminal  : Boolean := False;
       Slots     : Slot_State_Array := (others => Free);
