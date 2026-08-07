@@ -135,6 +135,7 @@ project Flyology is
             "flyology-memory_regions.ads",
             "flyology-observability.ads",
             "flyology-observability-stall_watchdogs.ads",
+             "flyology-native_executor_policy.ads",
              "flyology-native_executors.ads",
              "flyology-process_lifecycle.ads",
              "flyology-task_scopes.ads",

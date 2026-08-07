@@ -28,6 +28,7 @@ cd "$project_root/proof"
   flyology-tls_policy.adb \
   flyology-structured_server_policy.adb \
   flyology-worker_pool_policy.adb \
+  flyology-native_executor_policy.adb \
   flyology-file_open_policy.adb \
   flyology-file_timeout_policy.adb \
   flyology-timer_set_policy.adb \

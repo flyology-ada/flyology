@@ -5,6 +5,7 @@ with Ada.Strings.Unbounded;
 with Flyology.Cancellation;
 with Flyology.IO;
 with Flyology.Wake_Sources;
+private with Flyology.Native_Executor_Policy;
 with Interfaces;
 with System;
 
@@ -174,6 +175,13 @@ package Flyology.Native_Executors is
    function Statistics (Item : Executor) return Executor_Statistics;
 
 private
+   package Policy renames Flyology.Native_Executor_Policy;
+   subtype Slot_Status is Policy.Slot_State;
+   Free      : constant Slot_Status := Policy.Free;
+   Queued    : constant Slot_Status := Policy.Queued;
+   Running   : constant Slot_Status := Policy.Running;
+   Completed : constant Slot_Status := Policy.Completed;
+
    type Input_Array is array (Positive range <>) of Input_Type;
    type Result_Array is array (Positive range <>) of Result_Type;
    type Token_Access is access all Flyology.Cancellation.Token;
@@ -194,7 +202,6 @@ private
    type Time_Array is array (Positive range <>) of Ada.Real_Time.Time;
    type Natural_Array is array (Positive range <>) of Natural;
    type Boolean_Array is array (Positive range <>) of Boolean;
-   type Slot_Status is (Free, Queued, Running, Completed);
    type Status_Array is array (Positive range <>) of Slot_Status;
    type Exception_Id_Array is array (Positive range <>) of
      Ada.Exceptions.Exception_Id;

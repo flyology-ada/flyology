@@ -10,6 +10,9 @@ package body Flyology.Native_Executors is
    use type Ada.Exceptions.Exception_Id;
    use type Interfaces.Unsigned_64;
    use type System.Address;
+   --  Slot_Status renames the proved policy state type, whose operators are
+   --  not directly visible from this body without this clause.
+   use type Slot_Status;
 
    procedure Free_Token is new Ada.Unchecked_Deallocation
      (Flyology.Cancellation.Token, Token_Access);
@@ -133,7 +136,8 @@ package body Flyology.Native_Executors is
       end Operation_Data;
 
       procedure Complete (Slot : Positive; Result : Result_Type) is
-         Deliver : constant Boolean := not Detached (Slot);
+         Relinquished : constant Boolean := Detached (Slot);
+         Deliver      : constant Boolean := not Relinquished;
       begin
          if Deliver then
             --  Result_Type assignment is application code and may propagate,
@@ -147,27 +151,29 @@ package body Flyology.Native_Executors is
                Wake_Armed (Slot) := True;
             end if;
          end if;
-         Counters.Running_Operations := Counters.Running_Operations - 1;
+         Counters.Running_Operations :=
+           Policy.Running_After_Report (Counters.Running_Operations);
          Counters.Successful_Executions :=
            Counters.Successful_Executions + 1;
+         Counters.Outstanding_Operations := Policy.Outstanding_After_Report
+           (Counters.Outstanding_Operations, Relinquished);
+         Status (Slot) := Policy.State_After_Report (Relinquished);
          if Deliver then
-            Status (Slot) := Completed;
             if Wake_Armed (Slot) then
                Flyology.Wake_Sources.Signal (Wakes (Slot));
                Wake_Pending (Slot) := True;
             end if;
          else
-            Status (Slot) := Free;
             Detached (Slot) := False;
-            Counters.Outstanding_Operations :=
-              Counters.Outstanding_Operations - 1;
          end if;
       end Complete;
 
       procedure Fail
-        (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence) is
+        (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence)
+      is
+         Relinquished : constant Boolean := Detached (Slot);
       begin
-         if Status (Slot) /= Running then
+         if not Policy.Terminal_Report_Allowed (Status (Slot)) then
             --  Complete already applied this operation's terminal transition
             --  before propagating a later failure, or Operation_Data rejected
             --  a slot this worker never owned. Reporting again would decrement
@@ -175,18 +181,21 @@ package body Flyology.Native_Executors is
             --  caller when a subsequent completion underflows.
             return;
          end if;
-         Counters.Running_Operations := Counters.Running_Operations - 1;
+         Counters.Running_Operations :=
+           Policy.Running_After_Report (Counters.Running_Operations);
          Counters.Failed_Executions := Counters.Failed_Executions + 1;
-         if Detached (Slot) then
-            Status (Slot) := Free;
-            Detached (Slot) := False;
-            Counters.Outstanding_Operations :=
-              Counters.Outstanding_Operations - 1;
-         else
-            --  Make the slot terminal before copying diagnostic text, whose
-            --  allocation is allowed to fail without stranding a waiter.
+         Counters.Outstanding_Operations := Policy.Outstanding_After_Report
+           (Counters.Outstanding_Operations, Relinquished);
+         if not Relinquished then
+            --  Record the failure identity before the slot becomes terminal.
             Error_Ids (Slot) := Ada.Exceptions.Exception_Identity (Error);
-            Status (Slot) := Completed;
+         end if;
+         Status (Slot) := Policy.State_After_Report (Relinquished);
+         if Relinquished then
+            Detached (Slot) := False;
+         else
+            --  The slot is already terminal, so copying diagnostic text is
+            --  allowed to fail without stranding a waiter.
             begin
                Messages (Slot) := Ada.Strings.Unbounded.To_Unbounded_String
                  (Ada.Exceptions.Exception_Message (Error));
