@@ -292,7 +292,12 @@ flyology-file_transfer_policy-smoke
 flyology-socket_policy-smoke
 flyology-structured_server_policy-smoke
 flyology-supervision-static_smoke
+flyology-supervision-handle_smoke
 flyology-supervision-families_smoke
+flyology-supervision-families_shutdown_smoke
+flyology-supervision-adapters_smoke
+flyology-supervision-adapters_exit_smoke
+flyology-supervision-service_slots_smoke
 flyology-supervision-task_generations_smoke
 flyology-supervision_policy-smoke
 flyology-wall_clock_policy-smoke

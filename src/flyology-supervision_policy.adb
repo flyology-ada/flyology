@@ -221,7 +221,7 @@ is
               Public.Failed_Escalated | Public.Joined,
          when Public.Backing_Off =>
             To in Public.Restarting | Public.Stopping |
-              Public.Failed_Escalated,
+              Public.Failed_Escalated | Public.Joined,
          when Public.Restarting =>
             To in Public.Starting | Public.Stopping |
               Public.Failed_Escalated,
@@ -246,6 +246,7 @@ is
               Public.Abnormal_Completion |
               Public.Activation_Failure |
               Public.Readiness_Timeout |
+              Public.Unhealthy |
               Public.Stop_Timeout);
 
    function Should_Restart
@@ -255,6 +256,8 @@ is
      (if Kind in Public.No_Termination | Public.Supervisor_Shutdown |
          Public.Stuck | Public.Policy_Exhaustion
       then False
+      elsif Kind in Public.Restart_Requested
+      then Policy in Public.On_Failure | Public.Always
       else
         (case Policy is
             when Public.Never      => False,
@@ -410,6 +413,51 @@ is
    is
      (Current and then (Queued or else (Managed and then Live)));
 
+   function Family_Intervention_Command_Allowed
+     (Current          : Boolean;
+      Managed          : Boolean;
+      Live             : Boolean;
+      Ready            : Boolean;
+      Stop_Pending     : Boolean;
+      Shutdown         : Boolean;
+      Terminal         : Boolean;
+      Recovery_Pending : Boolean) return Boolean
+   is
+     (Current
+      and then Managed
+      and then Live
+      and then Ready
+      and then not Stop_Pending
+      and then not Shutdown
+      and then not Terminal
+      and then not Recovery_Pending);
+
+   function Family_Generation_Start_Allowed
+     (Generation_Allowed : Boolean;
+      Managed            : Boolean;
+      Stop_Pending       : Boolean;
+      Shutdown           : Boolean;
+      Terminal           : Boolean) return Boolean
+   is
+     (Generation_Allowed
+      and then Managed
+      and then not Stop_Pending
+      and then not Shutdown
+      and then not Terminal);
+
+   function Family_Replacement_Wait_Allowed
+     (Managed      : Boolean;
+      Backing_Off  : Boolean;
+      Stop_Pending : Boolean;
+      Shutdown     : Boolean;
+      Terminal     : Boolean) return Boolean
+   is
+     (Managed
+      and then Backing_Off
+      and then not Stop_Pending
+      and then not Shutdown
+      and then not Terminal);
+
    function Next_Incident (Value : Incident_Id) return Incident_Id is
      (Value + 1);
 
@@ -425,6 +473,23 @@ is
    is
      (Expected_Id = Supplied_Id
       and then Expected_Generation = Supplied_Generation);
+
+   function Authority_Matches
+     (Expected_Owner      : Owner_Token;
+      Expected_Id         : Public.Child_Id;
+      Expected_Generation : Public.Generation;
+      Supplied_Owner      : Owner_Token;
+      Supplied_Id         : Public.Child_Id;
+      Supplied_Generation : Public.Generation) return Boolean
+   is
+     (Expected_Owner /= 0
+      and then Supplied_Owner /= 0
+      and then Expected_Owner = Supplied_Owner
+      and then Generation_Matches
+        (Expected_Id,
+         Expected_Generation,
+         Supplied_Id,
+         Supplied_Generation));
 
    function Generation_Start_Allowed
      (Expected_Id         : Public.Child_Id;

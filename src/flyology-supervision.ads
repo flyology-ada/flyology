@@ -76,6 +76,14 @@ package Flyology.Supervision is
    --  @return Exact child generation
    function Current_Generation (Handle : Child_Handle) return Generation;
 
+   --  Report whether two handles were issued by the same process-local
+   --  controller identity. Controller identities never migrate between
+   --  supervisor objects or survive process restart.
+   --  @param Left First generation-qualified handle
+   --  @param Right Second generation-qualified handle
+   --  @return True only when both handles came from the same controller
+   function Same_Controller (Left, Right : Child_Handle) return Boolean;
+
    --  Test whether Handle names the supplied logical child and generation.
    --  @param Handle Generation-qualified child handle
    --  @param Id Expected logical child identity
@@ -118,6 +126,8 @@ package Flyology.Supervision is
    --  @enum Abnormal_Completion Ada reported abnormal task termination
    --  @enum Activation_Failure Task activation raised Tasking_Error
    --  @enum Readiness_Timeout Activation completed but readiness did not
+   --  @enum Restart_Requested An exact-generation manual restart was requested
+   --  @enum Unhealthy A health probe rejected the running generation
    --  @enum Stop_Timeout The cooperative grace deadline expired
    --  @enum Stuck Abort was omitted, deferred, or could not be observed
    --  @enum Policy_Exhaustion Recovery limits rejected another attempt
@@ -130,6 +140,8 @@ package Flyology.Supervision is
       Abnormal_Completion,
       Activation_Failure,
       Readiness_Timeout,
+      Restart_Requested,
+      Unhealthy,
       Stop_Timeout,
       Stuck,
       Policy_Exhaustion);
@@ -361,6 +373,18 @@ package Flyology.Supervision is
    --  already reported
    procedure Report_Cancellation (Control : in out Generation_Control);
 
+   --  Reject this generation from inside its task after detecting a bounded
+   --  health failure. The diagnostic is copied before cooperative stop is
+   --  requested. On_Failure and Always policies treat this as a recoverable
+   --  failure; the configured impact and recovery budgets still apply.
+   --  @param Control Generation control borrowed by the reporting task
+   --  @param Diagnostic Application health diagnostic copied immediately
+   --  @exception Program_Error No active generation exists or an outcome was
+   --  already reported
+   procedure Report_Unhealthy
+     (Control    : in out Generation_Control;
+      Diagnostic : String);
+
    --  Optionally override automatic task-result classification with an
    --  exception that application code caught and suppressed. Exceptions that
    --  escape the task body are copied automatically after task finalization.
@@ -532,6 +556,9 @@ package Flyology.Supervision is
    end record;
 
 private
+   type Controller_Id is new Interfaces.Unsigned_64 range
+     0 .. Interfaces.Unsigned_64'Last;
+
    type Incident_Context is record
       Is_Active : Boolean := False;
       Id        : Incident_Id := Incident_Id'First;
@@ -546,9 +573,27 @@ private
       Deadline  => Ada.Real_Time.Time_First);
 
    type Child_Handle is record
+      Controller : Controller_Id := 0;
       Id         : Child_Id := Child_Id'First;
       Generation : Supervision.Generation := Supervision.Generation'First;
    end record;
+
+   --  @exclude
+   --  @return Fresh process-local controller identity
+   function New_Controller return Controller_Id;
+
+   --  @exclude
+   --  @param Handle Generation-qualified handle
+   --  @return Controller identity carried by Handle
+   function Controller (Handle : Child_Handle) return Controller_Id;
+
+   --  @exclude
+   --  @param Kind Internal terminal classification
+   --  @param Diagnostic Diagnostic copied into bounded retained storage
+   --  @return Fixed terminal summary without exception or task identity
+   function Diagnostic_Summary
+     (Kind       : Termination_Kind;
+      Diagnostic : String) return Termination_Summary;
 
    protected type Generation_Control_State is
       procedure Open

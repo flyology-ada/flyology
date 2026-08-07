@@ -16,7 +16,10 @@ adapters in `Flyology.Supervision.Children` and
 `Flyology.Supervision.Input_Children`, the heterogeneous static controller in
 `Flyology.Supervision.Static`, the homogeneous fixed-capacity controller in
 `Flyology.Supervision.Families`, and the SPARK policy kernel in
-`Flyology.Supervision_Policy`. Static recovery supports isolated children,
+`Flyology.Supervision_Policy`. Typed generation publication is provided by
+`Flyology.Supervision.Service_Slots`, and
+`Flyology.Supervision.Adapters` bridges structured blocking service owners.
+Static recovery supports isolated children,
 named cohorts, transitive dependents, subtree budgets, nested incident
 propagation, and bounded event rings. Dynamic families provide typed request
 copying, fixed linear slots, generation-safe reuse, nested incident
@@ -30,6 +33,8 @@ The primitive should provide:
 - stable logical child ids distinct from generation and Ada task identity;
 - bounded waits that observe one exact generation without following its
   replacement;
+- controller-qualified handles and typed generation-aware service publication;
+- exact-generation manual restart and failed health-probe commands;
 - dependency-aware deterministic startup, rollback, shutdown, and restart;
 - explicit readiness, cooperative stopping, bounded policy state, and an
   observable `Stuck` outcome;
@@ -61,9 +66,9 @@ contracts should not be silently changed.
 | --- | --- | --- | --- |
 | `Flyology.Cancellation.Token` | one-shot child and subtree stop source; task-aware I/O wake | add no reset; allocate a new token per generation | restart accounting and readiness |
 | `Flyology.Task_Scopes` | scope identity, fixed storage, finalization-triggered cancel and join, retained exception id/message | its owner/generation handle check is a model for stale rejection | it is a one-shot homogeneous operation scope, not a task factory |
-| `Flyology.Worker_Pools` | activation gate, dependent task scope, first bounded failure, cleanup guards | factor common bounded diagnostic-copy helpers later if worthwhile | queue draining is not child restart |
+| `Flyology.Worker_Pools` | activation gate, dependent task scope, first bounded failure, cleanup guards | adapt a freshly constructed pool as one supervised service | queue draining is not child restart |
 | `Flyology.Capacity` | bounded admission and drain when a child owns concurrent work | no supervisor-specific behavior belongs in the gate | permits never transfer implicitly to a replacement |
-| `Flyology.IO.Structured_Servers` | reverse cleanup, exact listener ownership, cancel/drain phases, activation rollback | a future server factory can be supervised as one logical child | `Server` remains one-shot; restart creates a new server and listener |
+| `Flyology.IO.Structured_Servers` | reverse cleanup, exact listener ownership, cancel/drain phases, activation rollback | adapt a fresh server and listener as one supervised service | `Server` remains one-shot; restart creates a new server and listener |
 | `Flyology.Observability` | actual lightweight group and sampled stall evidence | supervision snapshots are an application layer, not a runtime ABI extension | scheduler counters do not determine restart policy |
 | `Flyology.Task_Results` | task-owned normal, exception, or abnormal terminal result published after finalization; a limited monitor may retain that fixed sidecar after task-object reclamation | map the fixed result into generation policy without another runtime callback | it observes one exact task only and contains no restart policy or failure coupling |
 | scheduler create/destroy/reap | evidence that a finished fiber is reaped only after GNARL destroys its task object, with running/migrating destruction deferred | none for the first implementation | supervision composes ordinary Ada task semantics |
@@ -349,22 +354,38 @@ return from failed startup until every terminable generation joins.
 fixes actual static storage and manager count for each instantiation, so
 capacity remains explicit and bounded.
 `Generation` is a nonzero process-local counter advanced for each construction
-attempt. `Ada.Task_Identification.Task_Id` identifies the actual task object
+attempt. A process-local nonwrapping controller identity distinguishes two
+supervisor objects that happen to issue the same child id and generation.
+`Ada.Task_Identification.Task_Id` identifies the actual task object
 while the implementation retains that identity and is diagnostic only; an Ada
 runtime may reuse its representation after the old task object leaves scope.
 It is never used as the logical id and is never applied to a replacement.
 
-Every command, readiness report, terminal observation, and event contains child
-id and generation. Protected state accepts it only if both match the current
-slot. A late termination handler, timeout, or cancellation event from generation
-N therefore cannot stop or publish generation N+1. Generation and incident
-identities never wrap. The policy kernel requires an available successor, and
-each live controller fails closed at generation exhaustion instead of making a
-stale handle current again.
+Every authoritative `Child_Handle` contains controller identity, child id, and
+generation. Protected state accepts it only if all three match the current
+slot. A handle issued by another controller is therefore stale even when its
+visible child and generation values match. A late termination, timeout,
+cancellation, manual restart, or health report from generation N cannot stop or
+publish generation N+1. Controller, generation, and incident identities never
+wrap; each source fails closed at exhaustion. Controller identity zero is
+reserved as invalid authority, so a default-constructed handle cannot match the
+first live controller.
 
 `Stop` is authority over one live generation, not over a logical slot. Once a
 generation terminates, its handle cannot cancel an admitted replacement even
 while the slot still reports the old generation during backoff.
+
+`Service_Slots` applies the same rule to typed service availability. One
+fixed-capacity directory entry stores only a service enumeration and exact
+controller-qualified handle, never an application payload or access-to-task
+value. A controlled `Publication` uses an access discriminant so Ada
+accessibility rules require its directory to outlive it. It revokes only its
+own exact token during normal, exceptional, or abort finalization. Clients
+acquire a copyable lease;
+the application endpoint validates that lease inside the same protected
+operation that uses the endpoint. Publishing the replacement after readiness
+invalidates every old lease without extending the old task or resource
+lifetime.
 
 Legal scalar transitions are:
 
@@ -375,6 +396,7 @@ Configured -> Starting -> Ready -> Running
                     +--------------------> Terminated
 
 Terminated -> Backing_Off -> Restarting -> Starting
+          |              \-> Joined  (shutdown cancels pending construction)
           \-> Restarting
           \-> Failed_Escalated
           \-> Joined
@@ -452,6 +474,8 @@ The public bounded summary represents:
 | abnormal/abort completion | task-owned result | yes |
 | activation failure | allocator or local task activation raises `Tasking_Error` | yes |
 | readiness timeout | monotonic deadline before `Mark_Ready` | yes |
+| manual restart | exact current handle passed to `Restart` | admitted for `On_Failure` or `Always` |
+| unhealthy | generation-local report or exact external failed probe | yes |
 | stop timeout | cooperative grace expired | yes |
 | stuck | task still live after optional abort observation | terminal; no replacement is permitted |
 | policy exhaustion | restart classifier | terminal escalation |
@@ -495,6 +519,20 @@ own termination. Once another child's incident selects it as a cohort member
 or dependent, the coordinated transaction reconstructs it and therefore
 requires `Restart_Safe`.
 
+`Restart` and `Report_Unhealthy` are exact-generation commands. They are
+accepted only for a live ready generation owned by that controller. Manual
+restart additionally requires a restart-safe local impact and a policy other
+than `Never`; an `Escalate` child has no local replacement to request. A stop,
+shutdown, terminal escalation, or earlier intervention that linearizes first
+closes this command gate.
+Generation-local code may call `Report_Unhealthy (Control, Diagnostic)`; the
+diagnostic is copied before its cancellation source is requested. External
+health tasks use the controller operation with the exact handle returned by
+`Latest`. Both paths run the configured stop, impact, budget, backoff, and
+readiness transaction. Manual operation is not an unmetered escape hatch: its
+replacement consumes the same child and subtree incident attempt as automatic
+recovery.
+
 Each node has fixed per-child and subtree accounts:
 
 - maximum attempts in a monotonic sliding window;
@@ -520,9 +558,13 @@ of being cleared by the outer stability observation.
 The decision order is deterministic: total limit, current-window limit,
 deadline fit for the computed delay, then admission. Exhaustion records the
 failed limit, stops locally owned children in reverse order, and escalates the
-same incident. At the root, exhaustion leaves the node `Failed_Escalated`; the
-owner of `Run` receives a typed terminal result after all terminable children
-join. A stuck child prevents that return and remains observable.
+same incident. At the root there is no parent budget to consume. The
+application owner receives `Recovery_Exhausted`, `Failure_Escalated`,
+`Startup_Failed`, or `Shutdown_Completed` exactly once from the one-shot `Run`
+call after every terminable child joins. It consumes that result by choosing
+the process exit status, degraded mode, or an explicitly fresh application
+scope; it must not feed the incident back into the same exhausted root. A stuck
+child prevents `Run` from returning and remains observable through snapshots.
 
 ## Stopping and resource safety
 
@@ -561,6 +603,72 @@ proof: documentation and review must state which shared objects can survive a
 partial operation, how external effects are made idempotent or reconciled, and
 which resources are generation-owned. A child without this acknowledgement can
 use `Never` or `Escalate`, not local automatic restart.
+
+A nominal marker type cannot prove this property either: Ada tasks can reach
+shared state, foreign libraries, and external systems outside the type. The
+stronger implemented boundary is structural and reviewable instead:
+
+- `Create` constructs a fresh limited task or structured service object under
+  the generation's local master;
+- controlled generation-owned resources finalize before terminal publication;
+- a resource-reacquisition semantic test rejects overlapping ownership between
+  old and replacement generations;
+- `Service_Slots.Publication` withdraws the exact old lease during unwinding;
+  and
+- the application records reconciliation and idempotence rules next to the
+  child policy that sets `Restart_Safe => True`.
+
+This deliberately leaves the Boolean as an explicit application assertion
+rather than replacing it with a marker interface that would imply a guarantee
+the Ada type system cannot establish.
+
+### Structured service adapters
+
+`Flyology.Supervision.Adapters` accepts an application-defined limited service
+type plus build-in-place `Create`, blocking `Run_Service`, idempotent
+`Request_Shutdown`, and `Ready` operations. It constructs a fresh service for
+each generation. A dependent service-owner task executes the blocking call
+while the supervisor's generation runner observes readiness and forwards
+cooperative stop. This owner task is intentional: it permits concurrent shutdown without
+changing one-shot APIs such as `Worker_Pools.Run`,
+`IO.Structured_Servers.Serve`, or an application listener loop.
+
+The adapter retains the service owner's actual `Task_Id` and translates its
+automatic task result directly. Normal return, the original escaping exception
+name and message, and abnormal completion therefore keep their classifications;
+they are not replaced by an adapter wrapper exception. Failure to activate the
+service propagates `Tasking_Error` to the controller's activation-failure path.
+
+The application supplies a constrained service subtype or discriminated
+build-in-place result and keeps resource acquisition inside `Create` or
+`Run_Service`. For a worker pool, `Ready` reads `Pool.Current.Running` and
+shutdown calls `Pool.Request_Shutdown`. For a structured server, `Run_Service`
+acquires a new listening socket and transfers it to `Serve`, `Ready` reads
+`Server.Current.Running`, and shutdown calls `Server.Request_Shutdown`. A bare
+listener loop uses the same contract. The adapter does not reuse a one-shot
+pool, server, or listener and does not turn their callback failures into safe
+restarts; the child policy still needs the application restart-safety review.
+
+### Root ownership
+
+The canonical root is owned by the environment task's application scope. That
+scope declares the root context and one-shot supervisor and calls synchronous
+`Run` directly. A dependent shutdown-watcher task translates process shutdown
+notification into `Request_Shutdown`. A low-level signal handler must only wake
+that task through a signal-safe application mechanism; it must not call the
+supervisor or format events directly. When `Run` returns for any reason, the
+environment task cancels and joins the watcher before leaving the scope.
+
+The environment task consumes `Supervisor_Result` before finalizing application
+context. `Shutdown_Completed` is the expected
+operator shutdown. `Startup_Failed`, `Recovery_Exhausted`, and
+`Failure_Escalated` normally map to a failing application exit so an external
+service manager may decide whether to start a fresh process. `Child_Stuck` is
+observable while shutdown remains blocked, but synchronous `Run` cannot return
+it until the dependent task eventually terminates. An application that elects
+in-process root reconstruction must create a fresh context, resource set,
+supervisor object, and service publications in a new nested Ada scope; it does
+not reuse the old controller or incident.
 
 The specification reuses Flyology's existing task vocabulary through
 `Task_Model : Flyology.Execution_Model`. A controller accepts only the stable
@@ -790,10 +898,23 @@ additionally cover:
 
 The dynamic-family smoke test constructs its application-defined input task
 type through `Input_Task_Generations` and covers a logical id above 32 bits,
-typed admission, automatic restart, native-task cancellation, fixed-slot reuse
-with fresh recovery accounting, stale-handle rejection, explicit shutdown, and
-bounded event overwrite reporting. Procedure-body compatibility adapters are
-also exercised by the remaining static child cases.
+typed admission, automatic and manual restart, failed health probes, native-task
+cancellation, nonoverlapping generation-owned resource acquisition,
+fixed-slot reuse with fresh recovery accounting, stale-handle rejection,
+explicit shutdown, and bounded event overwrite reporting. The service-slot
+test covers duplicate publication, replacement leases, controller identity,
+controlled finalization, and abort cleanup. The structured adapter test covers
+readiness, generation-local health failure, stop forwarding, join, exact task
+identity, original exception diagnostics, abnormal completion, and activation
+failure. Separate regressions reject default handle authority and prove that
+family shutdown cancels backoff without invoking another generation factory.
+The family controller test also orders stop and shutdown before manual restart
+and failed-health commands, then requires every later intervention to be
+rejected even while the affected Ada task has not yet completed. The policy
+kernel proves the Boolean authorization rule; the live test confirms that the
+protected controller takes its decision from the same state atomically.
+Procedure-body compatibility adapters are also exercised by the remaining
+static child cases.
 
 Additional semantic hardening is still useful for:
 
@@ -802,7 +923,8 @@ Additional semantic hardening is still useful for:
 3. scope exit or caller abort without explicit shutdown;
 4. a lightweight child monopolizing its non-control group;
 5. a native child stuck in an isolated foreign-call subprocess;
-6. exact socket/buffer/dedicated-group/thread-pin reacquisition; and
+6. exact socket/buffer/dedicated-group/thread-pin reacquisition beyond the
+   generic nonoverlap guard; and
 7. no callback, allocation, log formatting, or finalizing assignment while a
     protected action executes.
 
@@ -823,13 +945,17 @@ observes `Stuck`; it must not wait forever or claim the task was killed.
 4. **Homogeneous dynamic family (implemented).** Fixed linear slots, typed
    input copying, persistent bounded managers, generation-qualified handles,
    nested incidents, deterministic shutdown, and a fixed event ring.
-5. **Semantic hardening.** Add subprocess tests for caller abort, true foreign
-   call stalls, lightweight group monopolization, and resource reacquisition.
-6. **Integration adapters.** Provide opt-in factories for structured servers,
-   worker pools, and other one-shot resources without changing their existing
-   contracts.
+5. **Generation authority and publication (implemented).** Controller-qualified
+   handles, bounded typed service leases, exact manual restart, and failed
+   health-probe recovery.
+6. **Integration adapters (implemented).** One opt-in structured blocking
+   service factory for worker pools, servers, and listener loops without
+   changing their existing contracts.
+7. **Remaining semantic hardening.** Add subprocess tests for caller abort,
+   true foreign-call stalls, lightweight group monopolization, and concrete
+   socket/buffer/dedicated-group/thread-pin reacquisition.
 
 The current production slice supports independent restart-safe services,
 coordinated static trees, nested escalation, and homogeneous dynamic families.
-The remaining work is semantic hardening and opt-in resource adapters, not an
-alternate tasking or scheduler layer.
+The remaining work is platform-isolated stall and concrete resource campaigns,
+not an alternate tasking or scheduler layer.

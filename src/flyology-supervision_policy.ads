@@ -17,6 +17,7 @@ is
    Maximum_Children : constant := 16;
    subtype Child_Id is Positive range 1 .. Maximum_Children;
    subtype Child_Count is Natural range 0 .. Maximum_Children;
+   subtype Owner_Token is Interfaces.Unsigned_64;
 
    type Child_Set is array (Child_Id) of Boolean;
    type Dependency_Matrix is array (Child_Id, Child_Id) of Boolean;
@@ -176,6 +177,9 @@ is
           (if Kind in Public.No_Termination | Public.Supervisor_Shutdown |
               Public.Stuck | Public.Policy_Exhaustion
            then not Should_Restart'Result
+           elsif Kind in Public.Restart_Requested
+           then Should_Restart'Result =
+             (Policy in Public.On_Failure | Public.Always)
            else
              (case Policy is
                  when Public.Never => not Should_Restart'Result,
@@ -390,6 +394,63 @@ is
         Post   => Family_Stop_Command_Allowed'Result =
           (Current and then (Queued or else (Managed and then Live)));
 
+   --  Decide whether a family may accept an exact-generation restart or
+   --  failed-health intervention. A command that linearizes after stop,
+   --  shutdown, terminal escalation, or another intervention is rejected.
+   function Family_Intervention_Command_Allowed
+     (Current          : Boolean;
+      Managed          : Boolean;
+      Live             : Boolean;
+      Ready            : Boolean;
+      Stop_Pending     : Boolean;
+      Shutdown         : Boolean;
+      Terminal         : Boolean;
+      Recovery_Pending : Boolean) return Boolean
+   with Global => null,
+        Post   => Family_Intervention_Command_Allowed'Result =
+          (Current
+           and then Managed
+           and then Live
+           and then Ready
+           and then not Stop_Pending
+           and then not Shutdown
+           and then not Terminal
+           and then not Recovery_Pending);
+
+   --  Decide whether a manager may construct a family generation after its
+   --  protected generation check. Stop and shutdown close this gate before
+   --  application task construction occurs.
+   function Family_Generation_Start_Allowed
+     (Generation_Allowed : Boolean;
+      Managed            : Boolean;
+      Stop_Pending       : Boolean;
+      Shutdown           : Boolean;
+      Terminal           : Boolean) return Boolean
+   with Global => null,
+        Post   => Family_Generation_Start_Allowed'Result =
+          (Generation_Allowed
+           and then Managed
+           and then not Stop_Pending
+           and then not Shutdown
+           and then not Terminal);
+
+   --  Decide whether an admitted family replacement may continue waiting for
+   --  its backoff deadline. This is sampled during the wait and immediately
+   --  before the protected generation-start gate.
+   function Family_Replacement_Wait_Allowed
+     (Managed      : Boolean;
+      Backing_Off  : Boolean;
+      Stop_Pending : Boolean;
+      Shutdown     : Boolean;
+      Terminal     : Boolean) return Boolean
+   with Global => null,
+        Post   => Family_Replacement_Wait_Allowed'Result =
+          (Managed
+           and then Backing_Off
+           and then not Stop_Pending
+           and then not Shutdown
+           and then not Terminal);
+
    --  Report whether an incident id can advance without reuse.
    function Incident_Can_Advance (Value : Incident_Id) return Boolean is
      (Value < Incident_Id'Last);
@@ -423,6 +484,26 @@ is
         Post   => Generation_Matches'Result =
           (Expected_Id = Supplied_Id
            and then Expected_Generation = Supplied_Generation);
+
+   --  Reject a command or observation unless controller identity, logical
+   --  child, and generation all match the current authority.
+   function Authority_Matches
+     (Expected_Owner      : Owner_Token;
+      Expected_Id         : Public.Child_Id;
+      Expected_Generation : Public.Generation;
+      Supplied_Owner      : Owner_Token;
+      Supplied_Id         : Public.Child_Id;
+      Supplied_Generation : Public.Generation) return Boolean
+   with Global => null,
+        Post   => Authority_Matches'Result =
+          (Expected_Owner /= 0
+           and then Supplied_Owner /= 0
+           and then Expected_Owner = Supplied_Owner
+           and then Generation_Matches
+             (Expected_Id,
+              Expected_Generation,
+              Supplied_Id,
+              Supplied_Generation));
 
    --  Accept publication for the current generation or exactly its successor
    --  while replacement is pending. This prevents a stale, skipped, or

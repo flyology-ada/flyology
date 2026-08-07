@@ -100,6 +100,30 @@ package Flyology.Supervision.Families is
      (Item   : in out Family;
       Handle : Child_Handle);
 
+   --  Request bounded replacement of the exact running family generation.
+   --  The common policy must be restart safe, locally recoverable, and not
+   --  Never. Recovery budgets and backoff apply exactly as they do to
+   --  automatic recovery.
+   --  @param Item Running family
+   --  @param Handle Exact current generation
+   --  @exception Stale_Handle Handle is foreign, stale, or not running
+   --  @exception Program_Error The family policy does not permit local
+   --     replacement
+   procedure Restart
+     (Item   : in out Family;
+      Handle : Child_Handle);
+
+   --  Reject the exact running generation after a failed external health
+   --  probe. Diagnostic is copied before entering controller state.
+   --  @param Item Running family
+   --  @param Handle Exact current generation
+   --  @param Diagnostic Bounded application health diagnostic
+   --  @exception Stale_Handle Handle is foreign, stale, or not running
+   procedure Report_Unhealthy
+     (Item       : in out Family;
+      Handle     : Child_Handle;
+      Diagnostic : String);
+
    --  Close admission and cooperatively stop every occupied slot. A request
    --  made before Run is retained through configuration. The call is
    --  nonblocking; Run remains the join boundary.
@@ -181,6 +205,7 @@ private
    type Boolean_Array is array (Slot_Index) of Boolean;
    type Slot_Order is array (Slot_Index) of Slot_Index;
    type Natural_Array is array (Slot_Index) of Natural;
+   type Termination_Array is array (Slot_Index) of Termination_Summary;
    type Time_Array is array (Slot_Index) of Ada.Real_Time.Time;
    type Incident_Id_Array is array (Slot_Index) of Incident_Id;
    type Incident_Attempt_Array is array (Slot_Index) of Incident_Attempt;
@@ -200,7 +225,9 @@ private
    type Slot_State_Array is array (Slot_Index) of Slot_State;
 
    protected type Family_State is
-      procedure Configure (Inherited : Incident_Context);
+      procedure Configure
+        (Identity  : Controller_Id;
+         Inherited : Incident_Context);
       procedure Reserve
         (Slot   : out Slot_Index;
          Handle : out Child_Handle);
@@ -216,11 +243,19 @@ private
         (Slot     : Slot_Index;
          Handle   : Child_Handle;
          Stop     : out Boolean;
-         Shutdown : out Boolean);
+         Shutdown : out Boolean;
+         Override : out Termination_Summary);
+      procedure Request_Intervention
+        (Handle      : Child_Handle;
+         Termination : Termination_Summary;
+         Valid       : out Boolean);
       procedure Publish_Starting
         (Slot   : Slot_Index;
          Handle : Child_Handle;
-         Incident : Incident_Context);
+         Incident : Incident_Context;
+         Accepted : out Boolean);
+      function Replacement_Wait_Allowed
+        (Slot : Slot_Index) return Boolean;
       procedure Publish_Ready
         (Slot   : Slot_Index;
          Handle : Child_Handle;
@@ -303,6 +338,7 @@ private
         (Slot   : Slot_Index;
          Status : Generation_Observation_Status);
       Configured : Boolean := False;
+      Identity   : Controller_Id := Controller_Id'First;
       Run_Used   : Boolean := False;
       Shutdown  : Boolean := False;
       Terminal  : Boolean := False;
@@ -310,6 +346,8 @@ private
       Snapshots : Snapshot_Array;
       Has_Generation : Boolean_Array := (others => False);
       Stop_Requested : Boolean_Array := (others => False);
+      Recovery_Requested : Boolean_Array := (others => False);
+      Intervention : Termination_Array;
       Queue     : Slot_Order := (others => Slot_Index'First);
       Queue_Head : Slot_Index := Slot_Index'First;
       Queue_Tail : Slot_Index := Slot_Index'First;

@@ -2,6 +2,7 @@ with Ada.Exceptions;
 with Flyology.Task_Results;
 
 package body Flyology.Supervision.Task_Generations is
+   use type Ada.Task_Identification.Task_Id;
    use type Flyology.Task_Results.Observation_Status;
 
    function Exception_Summary
@@ -87,6 +88,9 @@ package body Flyology.Supervision.Task_Generations is
       elsif not Reported then
          Summary := From_Task_Result
            (Control, Identity, Automatic_Result);
+      end if;
+      if Summary.Task_Id = Ada.Task_Identification.Null_Task_Id then
+         Summary.Task_Id := Identity;
       end if;
       Result :=
         (Termination    => Summary,

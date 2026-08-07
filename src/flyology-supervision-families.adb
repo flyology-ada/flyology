@@ -14,12 +14,16 @@ package body Flyology.Supervision.Families is
 
    function Generation_Is_Current
      (Handle : Child_Handle;
+      Owner  : Controller_Id;
       Id     : Child_Id;
       Value  : Generation) return Boolean
    is
-     (Kernel.Generation_Matches
-        (Expected_Id         => Id,
+     (Kernel.Authority_Matches
+        (Expected_Owner      => Interfaces.Unsigned_64 (Owner),
+         Expected_Id         => Id,
          Expected_Generation => Value,
+         Supplied_Owner      =>
+           Interfaces.Unsigned_64 (Controller (Handle)),
          Supplied_Id         => Child (Handle),
          Supplied_Generation => Current_Generation (Handle)));
 
@@ -100,6 +104,7 @@ package body Flyology.Supervision.Families is
               and then
                 Generation_Is_Current
                   (Monitor_Handles (Ticket),
+                   Identity,
                    Snapshots (Slot).Id,
                    Snapshots (Slot).Generation)
             then
@@ -112,13 +117,16 @@ package body Flyology.Supervision.Families is
          end loop;
       end Complete_Monitors;
 
-      procedure Configure (Inherited : Incident_Context) is
+      procedure Configure
+        (Identity  : Controller_Id;
+         Inherited : Incident_Context) is
       begin
          if Run_Used then
             raise Program_Error with "supervision family is one-shot";
          end if;
          Run_Used := True;
          Configured := True;
+         Family_State.Identity := Identity;
          Inherited_Incident := Inherited;
          Result :=
            (Outcome     => Shutdown_Completed,
@@ -127,6 +135,8 @@ package body Flyology.Supervision.Families is
             Termination => Empty_Summary (Supervisor_Shutdown),
             Incident    => No_Incident);
          for Slot in Slot_Index loop
+            Recovery_Requested (Slot) := False;
+            Intervention (Slot) := Empty_Summary (No_Termination);
             Snapshots (Slot) :=
               (Id          => Logical_Id (Slot),
                Generation  => Generation'First,
@@ -234,6 +244,8 @@ package body Flyology.Supervision.Families is
          Slots (Selected) := Reserved;
          Reserved_Children := Reserved_Children + 1;
          Stop_Requested (Selected) := False;
+         Recovery_Requested (Selected) := False;
+         Intervention (Selected) := Empty_Summary (No_Termination);
          Snapshots (Selected).State := Flyology.Supervision.Configured;
          Snapshots (Selected).Ready := False;
          Snapshots (Selected).Live := False;
@@ -253,7 +265,8 @@ package body Flyology.Supervision.Families is
          Active_Incidents (Selected) := No_Incident;
          Slot := Selected;
          Handle :=
-           (Id         => Logical_Id (Selected),
+           (Controller => Identity,
+            Id         => Logical_Id (Selected),
             Generation => Snapshots (Selected).Generation);
       end Reserve;
 
@@ -262,6 +275,7 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) /= Reserved
            or else not Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
@@ -286,6 +300,7 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) = Reserved
            and then Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
@@ -304,7 +319,9 @@ package body Flyology.Supervision.Families is
          Available := Queue_Length > 0;
          Slot := Slot_Index'First;
          Handle :=
-           (Id => First_Child_Id, Generation => Generation'First);
+           (Controller => Identity,
+            Id         => First_Child_Id,
+            Generation => Generation'First);
          Incident := No_Incident;
          if not Available then
             return;
@@ -321,7 +338,8 @@ package body Flyology.Supervision.Families is
          Slots (Slot) := Managed;
          Live_Managers := Live_Managers + 1;
          Handle :=
-           (Id         => Snapshots (Slot).Id,
+           (Controller => Identity,
+            Id         => Snapshots (Slot).Id,
             Generation => Snapshots (Slot).Generation);
          Incident := Inherited_Incident;
       end Take_Start;
@@ -343,6 +361,7 @@ package body Flyology.Supervision.Families is
          Valid := Kernel.Family_Stop_Command_Allowed
            (Current => Generation_Is_Current
               (Handle,
+               Identity,
                Snapshots (Slot).Id,
                Snapshots (Slot).Generation),
             Queued  => Slots (Slot) = Queued,
@@ -357,18 +376,26 @@ package body Flyology.Supervision.Families is
         (Slot     : Slot_Index;
          Handle   : Child_Handle;
          Stop     : out Boolean;
-         Shutdown : out Boolean)
+         Shutdown : out Boolean;
+         Override : out Termination_Summary)
       is
       begin
          Stop := False;
          Shutdown := Family_State.Shutdown;
+         Override := Empty_Summary (No_Termination);
          if Slots (Slot) = Managed
            and then Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
-            Stop := Stop_Requested (Slot) or else Family_State.Shutdown;
+            Stop := Stop_Requested (Slot)
+              or else Recovery_Requested (Slot)
+              or else Family_State.Shutdown;
+            if Recovery_Requested (Slot) then
+               Override := Intervention (Slot);
+            end if;
             if Stop and then Snapshots (Slot).State /= Stopping then
                Record_Event
                  (Slot,
@@ -383,22 +410,64 @@ package body Flyology.Supervision.Families is
          end if;
       end Stop_Status;
 
+      procedure Request_Intervention
+        (Handle      : Child_Handle;
+         Termination : Termination_Summary;
+         Valid       : out Boolean)
+      is
+         Slot : Slot_Index;
+      begin
+         Valid := False;
+         if Child (Handle) < First_Child_Id
+           or else Interfaces.Unsigned_64 (Child (Handle)) -
+             Interfaces.Unsigned_64 (First_Child_Id) >=
+               Interfaces.Unsigned_64 (Maximum_Children)
+         then
+            return;
+         end if;
+         Slot := Slot_Index
+           (Interfaces.Unsigned_64 (Child (Handle)) -
+            Interfaces.Unsigned_64 (First_Child_Id) + 1);
+         Valid := Kernel.Family_Intervention_Command_Allowed
+           (Current => Generation_Is_Current
+              (Handle,
+               Identity,
+               Snapshots (Slot).Id,
+               Snapshots (Slot).Generation),
+            Managed          => Slots (Slot) = Managed,
+            Live             => Snapshots (Slot).Live,
+            Ready            => Snapshots (Slot).Ready,
+            Stop_Pending     => Stop_Requested (Slot),
+            Shutdown         => Family_State.Shutdown,
+            Terminal         => Family_State.Terminal,
+            Recovery_Pending => Recovery_Requested (Slot));
+         if Valid then
+            Intervention (Slot) := Termination;
+            Recovery_Requested (Slot) := True;
+         end if;
+      end Request_Intervention;
+
       procedure Publish_Starting
         (Slot   : Slot_Index;
          Handle : Child_Handle;
-         Incident : Incident_Context)
+         Incident : Incident_Context;
+         Accepted : out Boolean)
       is
          Before : Child_State;
          Advancing : Boolean;
       begin
-         if Slots (Slot) = Managed
-           and then Kernel.Generation_Start_Allowed
-             (Expected_Id         => Snapshots (Slot).Id,
-              Expected_Generation => Snapshots (Slot).Generation,
-              Supplied_Id         => Child (Handle),
-              Supplied_Generation => Current_Generation (Handle),
-              Restart_Pending     => Snapshots (Slot).State = Backing_Off)
-         then
+         Accepted := Kernel.Family_Generation_Start_Allowed
+           (Generation_Allowed => Kernel.Generation_Start_Allowed
+              (Expected_Id         => Snapshots (Slot).Id,
+               Expected_Generation => Snapshots (Slot).Generation,
+               Supplied_Id         => Child (Handle),
+               Supplied_Generation => Current_Generation (Handle),
+               Restart_Pending     => Snapshots (Slot).State = Backing_Off),
+            Managed      => Slots (Slot) = Managed,
+            Stop_Pending => Stop_Requested (Slot),
+            Shutdown     => Family_State.Shutdown,
+            Terminal     => Family_State.Terminal);
+         if Accepted then
             Before := Snapshots (Slot).State;
             Advancing := Current_Generation (Handle) /=
               Snapshots (Slot).Generation;
@@ -429,6 +498,16 @@ package body Flyology.Supervision.Families is
          end if;
       end Publish_Starting;
 
+      function Replacement_Wait_Allowed
+        (Slot : Slot_Index) return Boolean
+      is
+        (Kernel.Family_Replacement_Wait_Allowed
+           (Managed      => Slots (Slot) = Managed,
+            Backing_Off  => Snapshots (Slot).State = Backing_Off,
+            Stop_Pending => Stop_Requested (Slot),
+            Shutdown     => Family_State.Shutdown,
+            Terminal     => Family_State.Terminal));
+
       procedure Publish_Ready
         (Slot   : Slot_Index;
          Handle : Child_Handle;
@@ -437,6 +516,7 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) = Managed
            and then Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
            and then Snapshots (Slot).Live
@@ -513,6 +593,7 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) = Managed
            and then Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
            and then Snapshots (Slot).Live
@@ -557,11 +638,13 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) /= Managed
            or else not Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
             return;
          end if;
+         Recovery_Requested (Slot) := False;
          Before := Snapshots (Slot).State;
          Snapshots (Slot).Live := False;
          Snapshots (Slot).Ready := False;
@@ -701,7 +784,8 @@ package body Flyology.Supervision.Families is
             Cascade,
             Backoff);
          Next :=
-           (Id         => Snapshots (Slot).Id,
+           (Controller => Identity,
+            Id         => Snapshots (Slot).Id,
             Generation => Flyology.Supervision_Policy.Next_Generation
               (Snapshots (Slot).Generation));
          Restart := True;
@@ -715,6 +799,7 @@ package body Flyology.Supervision.Families is
         (Slots (Slot) = Managed
          and then Generation_Is_Current
            (Handle,
+            Identity,
             Snapshots (Slot).Id,
             Snapshots (Slot).Generation)
          and then Snapshots (Slot).Live
@@ -728,6 +813,7 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) = Managed
            and then Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
@@ -755,6 +841,7 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) = Managed
            and then Generation_Is_Current
              (Handle,
+              Identity,
               Snapshots (Slot).Id,
               Snapshots (Slot).Generation)
          then
@@ -830,6 +917,7 @@ package body Flyology.Supervision.Families is
             Valid := Has_Generation (Slot)
               and then Generation_Is_Current
                 (Handle,
+                 Identity,
                  Snapshots (Slot).Id,
                  Snapshots (Slot).Generation);
          end if;
@@ -878,7 +966,9 @@ package body Flyology.Supervision.Families is
       is
          Slot : Slot_Index := Slot_Index'First;
          Value : Child_Handle :=
-           (Id => First_Child_Id, Generation => Generation'First);
+           (Controller => Identity,
+            Id         => First_Child_Id,
+            Generation => Generation'First);
       begin
          Valid := False;
          if Child >= First_Child_Id
@@ -892,7 +982,8 @@ package body Flyology.Supervision.Families is
             Valid := Slots (Slot) /= Free and then Has_Generation (Slot);
             if Valid then
                Value :=
-                 (Id         => Snapshots (Slot).Id,
+                 (Controller => Identity,
+                  Id         => Snapshots (Slot).Id,
                   Generation => Snapshots (Slot).Generation);
             end if;
          end if;
@@ -919,7 +1010,8 @@ package body Flyology.Supervision.Families is
          Token := 0;
          Valid := False;
          Snapshot := Snapshots (Slot_Index'First);
-         if Child (Handle) < First_Child_Id
+         if Controller (Handle) /= Identity
+           or else Child (Handle) < First_Child_Id
            or else Interfaces.Unsigned_64 (Child (Handle)) -
              Interfaces.Unsigned_64 (First_Child_Id) >=
                Interfaces.Unsigned_64 (Maximum_Children)
@@ -1146,6 +1238,46 @@ package body Flyology.Supervision.Families is
       end if;
    end Stop;
 
+   procedure Restart
+     (Item   : in out Family;
+      Handle : Child_Handle)
+   is
+      Valid : Boolean;
+   begin
+      if Policy.Restart = Never
+        or else Policy.Impact = Escalate
+        or else not Policy.Restart_Safe
+      then
+         raise Program_Error with
+           "manual restart requires a restart-safe replacement policy";
+      end if;
+      Item.State.Request_Intervention
+        (Handle,
+         Diagnostic_Summary
+           (Restart_Requested, "manual restart requested"),
+         Valid);
+      if not Valid then
+         raise Stale_Handle with
+           "manual restart requires the current running generation";
+      end if;
+   end Restart;
+
+   procedure Report_Unhealthy
+     (Item       : in out Family;
+      Handle     : Child_Handle;
+      Diagnostic : String)
+   is
+      Summary : constant Termination_Summary :=
+        Diagnostic_Summary (Unhealthy, Diagnostic);
+      Valid : Boolean;
+   begin
+      Item.State.Request_Intervention (Handle, Summary, Valid);
+      if not Valid then
+         raise Stale_Handle with
+           "health report requires the current running generation";
+      end if;
+   end Report_Unhealthy;
+
    procedure Request_Shutdown (Item : in out Family) is
    begin
       Item.State.Request_Stop;
@@ -1267,9 +1399,11 @@ package body Flyology.Supervision.Families is
       Inherited : Incident_Context;
       Result  : out Supervisor_Result)
    is
+      Identity : Controller_Id;
    begin
       Validate;
-      Item.State.Configure (Inherited);
+      Identity := New_Controller;
+      Item.State.Configure (Identity, Inherited);
       declare
          task type Manager with CPU => Control_Group is
             pragma Task_Info (Flyology.Lightweight_Task);
@@ -1311,12 +1445,15 @@ package body Flyology.Supervision.Families is
          task body Manager is
             Managed_Slot : Slot_Index := Slot_Index'First;
             Value : Child_Handle :=
-              (Id => First_Child_Id, Generation => Generation'First);
+              (Controller => Controller_Id'First,
+               Id         => First_Child_Id,
+               Generation => Generation'First);
             Input : Request;
 
             procedure Run_Generation
               (Current : Child_Handle;
                Incident : Incident_Context;
+               Started : out Boolean;
                Restart : out Boolean;
                Backoff : out Ada.Real_Time.Time_Span;
                Next    : out Child_Handle;
@@ -1325,9 +1462,16 @@ package body Flyology.Supervision.Families is
                Control : aliased Generation_Control;
                Generation_Value : Generation_Result;
             begin
-               Open (Control, Current, Incident);
                Item.State.Publish_Starting
-                 (Managed_Slot, Current, Incident);
+                 (Managed_Slot, Current, Incident, Started);
+               Restart := False;
+               Backoff := Ada.Real_Time.Time_Span_Zero;
+               Next := Current;
+               Recovery := Incident;
+               if not Started then
+                  return;
+               end if;
+               Open (Control, Current, Incident);
                declare
                   protected type Completion_State is
                      procedure Store (Value : Generation_Result);
@@ -1393,7 +1537,9 @@ package body Flyology.Supervision.Families is
                   Incident_Closed : Boolean := not Active (Incident);
                   Stop_Now : Boolean;
                   Shutdown : Boolean;
-                  Override : Termination_Kind := No_Termination;
+                  Override : Termination_Summary :=
+                    Empty_Summary (No_Termination);
+                  Decision_Override : Termination_Summary;
                   Now : Ada.Real_Time.Time;
                begin
                   loop
@@ -1413,13 +1559,20 @@ package body Flyology.Supervision.Families is
                      end if;
                      exit when Done;
                      Item.State.Stop_Status
-                       (Managed_Slot, Current, Stop_Now, Shutdown);
+                       (Managed_Slot,
+                        Current,
+                        Stop_Now,
+                        Shutdown,
+                        Decision_Override);
+                     if Decision_Override.Kind /= No_Termination then
+                        Override := Decision_Override;
+                     end if;
                      if not Ready
                        and then Now - Started_At >= Policy.Readiness_Timeout
                      then
                         Stop_Now := True;
                         Shutdown := False;
-                        Override := Readiness_Timeout;
+                        Override := Empty_Summary (Readiness_Timeout);
                      end if;
                      if Stop_Now and then not Stop_Published then
                         Stop_Published := True;
@@ -1429,8 +1582,10 @@ package body Flyology.Supervision.Families is
                      if Stop_Published
                        and then Now - Stop_At >= Policy.Stopping.Grace
                      then
-                        if not Shutdown and then Override = No_Termination then
-                           Override := Stop_Timeout;
+                        if not Shutdown
+                          and then Override.Kind = No_Termination
+                        then
+                           Override := Empty_Summary (Stop_Timeout);
                         end if;
                         if Policy.Stopping.Request_Abort
                           and then not Abort_Published
@@ -1452,12 +1607,18 @@ package body Flyology.Supervision.Families is
                   if Generation_Value.Termination.Kind = No_Termination then
                      Generation_Value.Termination :=
                        Empty_Summary (Abnormal_Completion);
-                  elsif Override /= No_Termination
+                  elsif Override.Kind /= No_Termination
                     and then Generation_Value.Termination.Kind in
                       Normal_Return | Cancelled | Supervisor_Shutdown |
                         Abnormal_Completion
                   then
-                     Generation_Value.Termination.Kind := Override;
+                     declare
+                        Task_Id : constant Ada.Task_Identification.Task_Id :=
+                          Generation_Value.Termination.Task_Id;
+                     begin
+                        Generation_Value.Termination := Override;
+                        Generation_Value.Termination.Task_Id := Task_Id;
+                     end;
                   elsif Stop_Published and then Shutdown
                     and then Generation_Value.Termination.Kind in
                       Normal_Return | Cancelled
@@ -1496,6 +1657,7 @@ package body Flyology.Supervision.Families is
             end Run_Generation;
 
             Restart : Boolean;
+            Started : Boolean;
             Backoff : Ada.Real_Time.Time_Span;
             Next : Child_Handle;
             Incident : Incident_Context := No_Incident;
@@ -1522,28 +1684,42 @@ package body Flyology.Supervision.Families is
                   Input := Item.Inputs (Managed_Slot);
                   Incident := Start_Incident;
                   Recovery := No_Incident;
-                  loop
-                     Run_Generation
-                       (Value,
-                        Incident,
-                        Restart,
-                        Backoff,
-                        Next,
-                        Recovery);
-                     exit when not Restart;
-                     declare
-                        Now : constant Ada.Real_Time.Time :=
-                          Ada.Real_Time.Clock;
-                     begin
-                        if Backoff > Ada.Real_Time.Time_Last - Now then
-                           delay until Ada.Real_Time.Time_Last;
-                        else
-                           delay until Now + Backoff;
-                        end if;
-                     end;
-                     Incident := Recovery;
-                     Value := Next;
-                  end loop;
+                  declare
+                     Candidate : Child_Handle := Value;
+                  begin
+                     loop
+                        Run_Generation
+                          (Candidate,
+                           Incident,
+                           Started,
+                           Restart,
+                           Backoff,
+                           Next,
+                           Recovery);
+                        exit when not Started;
+                        Value := Candidate;
+                        exit when not Restart;
+                        declare
+                           Now : constant Ada.Real_Time.Time :=
+                             Ada.Real_Time.Clock;
+                           Due : constant Ada.Real_Time.Time :=
+                             (if Backoff > Ada.Real_Time.Time_Last - Now
+                              then Ada.Real_Time.Time_Last
+                              else Now + Backoff);
+                        begin
+                           while Ada.Real_Time.Clock < Due
+                             and then Item.State.Replacement_Wait_Allowed
+                               (Managed_Slot)
+                           loop
+                              delay 0.001;
+                           end loop;
+                        end;
+                        exit when not Item.State.Replacement_Wait_Allowed
+                          (Managed_Slot);
+                        Incident := Recovery;
+                        Candidate := Next;
+                     end loop;
+                  end;
                exception
                   when Occurrence : others =>
                      Item.State.Manager_Failed

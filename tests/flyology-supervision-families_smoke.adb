@@ -1,3 +1,4 @@
+with Ada.Finalization;
 with Ada.Real_Time;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
@@ -16,6 +17,7 @@ procedure Flyology.Supervision.Families_Smoke is
 
    subtype Request is Positive range 1 .. 8;
    type Count_Array is array (Request) of Natural;
+   type Boolean_Array is array (Request) of Boolean;
 
    protected type Counts is
       procedure Begin_Generation
@@ -38,9 +40,74 @@ procedure Flyology.Supervision.Families_Smoke is
       function Value (Input : Request) return Natural is (Values (Input));
    end Counts;
 
+   protected type Resource_Tracker is
+      procedure Acquire (Input : Request);
+      procedure Release (Input : Request);
+      function Acquisitions (Input : Request) return Natural;
+      function Releases (Input : Request) return Natural;
+   private
+      Active   : Boolean_Array := (others => False);
+      Acquired : Count_Array := (others => 0);
+      Released : Count_Array := (others => 0);
+   end Resource_Tracker;
+
+   protected body Resource_Tracker is
+      procedure Acquire (Input : Request) is
+      begin
+         if Active (Input) then
+            raise Program_Error with
+              "replacement acquired a resource before prior finalization";
+         end if;
+         Active (Input) := True;
+         Acquired (Input) := Acquired (Input) + 1;
+      end Acquire;
+
+      procedure Release (Input : Request) is
+      begin
+         if not Active (Input) then
+            raise Program_Error with "generation resource released twice";
+         end if;
+         Active (Input) := False;
+         Released (Input) := Released (Input) + 1;
+      end Release;
+
+      function Acquisitions (Input : Request) return Natural is
+        (Acquired (Input));
+
+      function Releases (Input : Request) return Natural is
+        (Released (Input));
+   end Resource_Tracker;
+
    type Context is limited record
-      Started : Counts;
+      Started   : Counts;
+      Resources : aliased Resource_Tracker;
    end record;
+
+   type Resource_Guard is
+     limited new Ada.Finalization.Limited_Controlled with record
+      State : access Resource_Tracker := null;
+      Input : Request := Request'First;
+   end record;
+
+   overriding procedure Finalize (Item : in out Resource_Guard);
+
+   procedure Acquire
+     (Item  : in out Resource_Guard;
+      State : not null access Resource_Tracker;
+      Input : Request) is
+   begin
+      State.Acquire (Input);
+      Item.State := State;
+      Item.Input := Input;
+   end Acquire;
+
+   overriding procedure Finalize (Item : in out Resource_Guard) is
+   begin
+      if Item.State /= null then
+         Item.State.Release (Item.Input);
+         Item.State := null;
+      end if;
+   end Finalize;
 
    task type Family_Task
      (State   : not null access Context;
@@ -52,7 +119,9 @@ procedure Flyology.Supervision.Families_Smoke is
 
    task body Family_Task is
       Attempt : Positive;
+      Resource : Resource_Guard;
    begin
+      Acquire (Resource, State.Resources'Access, Input.all);
       State.Started.Begin_Generation (Input.all, Attempt);
       Flyology.Supervision.Mark_Ready (Control.all);
       if Input.all = Request'First and then Attempt = 1 then
@@ -295,6 +364,69 @@ begin
    end loop;
    First := Families.Latest (Item, Flyology.Supervision.Child (First));
 
+   --  Manual restart is an exact-generation recovery command. It consumes
+   --  the same incident budgets and produces a fresh task generation.
+   Families.Restart (Item, First);
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 2.0);
+   begin
+      pragma Assert
+        (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert
+        (Observation.Snapshot.Termination.Kind =
+           Flyology.Supervision.Restart_Requested);
+   end;
+   begin
+      Families.Restart (Item, First);
+      raise Program_Error with "stale manual restart was accepted";
+   exception
+      when Families.Stale_Handle => null;
+   end;
+   loop
+      exit when Families.Current
+        (Item, Flyology.Supervision.Child (First)).Ready
+        and then Families.Current
+          (Item, Flyology.Supervision.Child (First)).Generation = 3;
+      if Ada.Real_Time.Clock >= Deadline then
+         Families.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error with "manual replacement did not become ready";
+      end if;
+      delay 0.001;
+   end loop;
+   First := Families.Latest (Item, Flyology.Supervision.Child (First));
+
+   --  A failed external health probe preserves its bounded diagnostic and
+   --  follows the same generation-safe recovery path.
+   Families.Report_Unhealthy (Item, First, "probe rejected generation");
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 2.0);
+   begin
+      pragma Assert
+        (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert
+        (Observation.Snapshot.Termination.Kind =
+           Flyology.Supervision.Unhealthy);
+      pragma Assert
+        (Flyology.Supervision.Message_Text
+           (Observation.Snapshot.Termination) = "probe rejected generation");
+   end;
+   loop
+      exit when Families.Current
+        (Item, Flyology.Supervision.Child (First)).Ready
+        and then Families.Current
+          (Item, Flyology.Supervision.Child (First)).Generation = 4;
+      if Ada.Real_Time.Clock >= Deadline then
+         Families.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error with "health replacement did not become ready";
+      end if;
+      delay 0.001;
+   end loop;
+   First := Families.Latest (Item, Flyology.Supervision.Child (First));
+
    declare
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, Second, Timeout => 0.0);
@@ -303,7 +435,7 @@ begin
         (Observation.Status = Flyology.Supervision.Observation_Timed_Out);
    end;
 
-   pragma Assert (State.Started.Value (1) = 2);
+   pragma Assert (State.Started.Value (1) = 4);
    pragma Assert
      (Families.Current (Item, First).Task_Model = Flyology.Native_Task);
    Families.Stop (Item, First);
@@ -313,7 +445,7 @@ begin
    begin
       pragma Assert
         (Observation.Status = Flyology.Supervision.Generation_Terminated);
-      pragma Assert (Observation.Snapshot.Generation = 2);
+      pragma Assert (Observation.Snapshot.Generation = 4);
    end;
    loop
       exit when Families.Current (Item, First).State =
@@ -344,7 +476,7 @@ begin
      (Flyology.Supervision.Child (Reused) =
         Flyology.Supervision.Child (First));
    pragma Assert
-     (Flyology.Supervision.Current_Generation (Reused) = 3);
+     (Flyology.Supervision.Current_Generation (Reused) = 5);
    pragma Assert (Families.Current (Item, Reused).Attempts = 0);
    pragma Assert
      (Families.Current (Item, Reused).Backoff =
@@ -372,7 +504,39 @@ begin
    end loop;
    pragma Assert (Families.Current (Item, Reused).Attempts = 0);
 
+   --  Stop linearizes before later intervention commands. The generation can
+   --  still be live until its manager observes the request, but it is no
+   --  longer eligible for a manual restart or failed-health report.
+   Families.Stop (Item, Reused);
+   begin
+      Families.Restart (Item, Reused);
+      raise Program_Error with "restart was accepted after stop";
+   exception
+      when Families.Stale_Handle => null;
+   end;
+   begin
+      Families.Report_Unhealthy (Item, Reused, "too late after stop");
+      raise Program_Error with "health report was accepted after stop";
+   exception
+      when Families.Stale_Handle => null;
+   end;
+
+   --  Shutdown closes the same gate atomically for every still-running slot.
+   --  Second is deliberately left running until this point so the regression
+   --  does not pass merely because the supplied generation already joined.
    Families.Request_Shutdown (Item);
+   begin
+      Families.Restart (Item, Second);
+      raise Program_Error with "restart was accepted after shutdown";
+   exception
+      when Families.Stale_Handle => null;
+   end;
+   begin
+      Families.Report_Unhealthy (Item, Second, "too late after shutdown");
+      raise Program_Error with "health report was accepted after shutdown";
+   exception
+      when Families.Stale_Handle => null;
+   end;
    Owner.Join;
    Families.Read_Events (Item, Cursor, Events, Event_Count, Dropped);
    pragma Assert (Event_Count = Events'Length);
@@ -384,6 +548,11 @@ begin
    end loop;
    pragma Assert
      (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+   for Input in Request loop
+      pragma Assert
+        (State.Resources.Acquisitions (Input) =
+           State.Resources.Releases (Input));
+   end loop;
 
    declare
       Pre_Shutdown : aliased Families.Family;

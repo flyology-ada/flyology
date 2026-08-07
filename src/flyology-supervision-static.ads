@@ -57,6 +57,10 @@ package Flyology.Supervision.Static is
    --  recovery limits, or control-plane placement are invalid.
    Configuration_Error : exception;
 
+   --  Raised when an exact-generation command does not identify the current
+   --  live generation owned by this controller.
+   Stale_Handle : exception;
+
    --  One-shot static supervisor. Run is the ownership boundary and must be
    --  called from one task. Current and Request_Shutdown may be called safely
    --  by other tasks. A shutdown requested before or during validation is
@@ -103,6 +107,34 @@ package Flyology.Supervision.Static is
    --  termination.
    --  @param Item Supervisor whose Run call should stop
    procedure Request_Shutdown (Item : in out Supervisor);
+
+   --  Request bounded recovery of the exact running generation using its
+   --  configured restart impact, stop policy, and recovery budgets. The
+   --  child must be restart safe, locally recoverable, and have a restart
+   --  policy other than Never.
+   --  @param Item Running static supervisor
+   --  @param Child Typed static child
+   --  @param Handle Exact current generation
+   --  @exception Stale_Handle Handle is foreign, stale, or not running
+   --  @exception Program_Error Child is not configured for local replacement
+   procedure Restart
+     (Item   : in out Supervisor;
+      Child  : Child_Kind;
+      Handle : Child_Handle);
+
+   --  Reject the exact running generation after a failed external health
+   --  probe. Diagnostic is copied before entering controller state. Recovery
+   --  follows the child policy; an Escalate impact terminates the node.
+   --  @param Item Running static supervisor
+   --  @param Child Typed static child
+   --  @param Handle Exact current generation
+   --  @param Diagnostic Bounded application health diagnostic
+   --  @exception Stale_Handle Handle is foreign, stale, or not running
+   procedure Report_Unhealthy
+     (Item       : in out Supervisor;
+      Child      : Child_Kind;
+      Handle     : Child_Handle;
+      Diagnostic : String);
 
    --  Sample one logical child. The snapshot contains only fixed copied state
    --  and may describe an immediately adjacent transition. Before Run has
@@ -181,6 +213,7 @@ private
    type Boolean_Array is array (Child_Kind) of Boolean;
    type Time_Array is array (Child_Kind) of Ada.Real_Time.Time;
    type Natural_Array is array (Child_Kind) of Natural;
+   type Termination_Array is array (Child_Kind) of Termination_Summary;
    type Event_Buffer is array (Positive range 1 .. Event_Capacity) of
      Supervisor_Event;
    subtype Monitor_Index is Positive range 1 .. Monitor_Capacity;
@@ -201,10 +234,14 @@ private
       Recovery_Starting,
       Stopping_Children,
       Finished);
+   type Intervention_Result is
+     (Intervention_Accepted, Intervention_Stale,
+      Intervention_Unsupported);
 
    protected type Lifecycle is
       procedure Configure
-        (Specs       : Specification_Array;
+        (Identity    : Controller_Id;
+         Specs       : Specification_Array;
          Ids         : Logical_Id_Array;
          Dependencies : Dependency_Matrix;
          Cohorts     : Cohort_Matrix;
@@ -227,7 +264,13 @@ private
          Value    : Child_Handle;
          Stop     : out Boolean;
          Shutdown : out Boolean;
-         Spec     : out Stop_Policy);
+         Spec     : out Stop_Policy;
+         Override : out Termination_Summary);
+      procedure Request_Intervention
+        (Child       : Child_Kind;
+         Handle      : Child_Handle;
+         Termination : Termination_Summary;
+         Result      : out Intervention_Result);
       procedure Publish_Stuck
         (Child : Child_Kind;
          Value : Child_Handle);
@@ -320,6 +363,7 @@ private
 
       Phase         : Lifecycle_Phase := Unconfigured;
       Configured    : Boolean := False;
+      Identity      : Controller_Id := Controller_Id'First;
       Run_Used      : Boolean := False;
       Shutdown_Pending : Boolean := False;
       Child_Specs   : Specification_Array;
@@ -330,6 +374,8 @@ private
       Stops         : Child_Order;
       Snapshots     : Snapshot_Array;
       Has_Generation : Boolean_Array := (others => False);
+      Intervention_Pending : Boolean_Array := (others => False);
+      Intervention : Termination_Array;
       Ready_Since   : Time_Array := (others => Ada.Real_Time.Time_First);
       Restart_Due   : Time_Array := (others => Ada.Real_Time.Time_First);
       Incident_Since : Time_Array := (others => Ada.Real_Time.Time_First);

@@ -3,6 +3,23 @@ package body Flyology.Supervision is
    use type Interfaces.Unsigned_64;
    use type Flyology.Task_Results.Exit_Cause;
 
+   protected Controller_Source is
+      procedure Next (Value : out Controller_Id);
+   private
+      Last : Interfaces.Unsigned_64 := 0;
+   end Controller_Source;
+
+   protected body Controller_Source is
+      procedure Next (Value : out Controller_Id) is
+      begin
+         if Last = Interfaces.Unsigned_64'Last then
+            raise Program_Error with "supervision controller space exhausted";
+         end if;
+         Last := Last + 1;
+         Value := Controller_Id (Last);
+      end Next;
+   end Controller_Source;
+
    protected Incident_Source is
       procedure Next (Value : out Incident_Id);
    private
@@ -137,6 +154,25 @@ package body Flyology.Supervision is
        Message_Truncated => False,
        Message        => (others => ' ')));
 
+   function Diagnostic_Summary
+     (Kind       : Termination_Kind;
+      Diagnostic : String) return Termination_Summary
+   is
+      Length : constant Diagnostic_Length :=
+        Diagnostic_Length'Min
+          (Diagnostic_Length'Last, Diagnostic'Length);
+      Value : Termination_Summary := Base_Summary (Kind);
+   begin
+      Value.Task_Id := Ada.Task_Identification.Null_Task_Id;
+      Value.Message_Length := Length;
+      Value.Message_Truncated := Diagnostic'Length > Length;
+      if Length > 0 then
+         Value.Message (1 .. Length) :=
+           Diagnostic (Diagnostic'First .. Diagnostic'First + Length - 1);
+      end if;
+      return Value;
+   end Diagnostic_Summary;
+
    function From_Task_Result
      (Control : Generation_Control;
       Task_Id : Ada.Task_Identification.Task_Id;
@@ -229,6 +265,19 @@ package body Flyology.Supervision is
      (Handle : Child_Handle) return Generation is
      (Handle.Generation);
 
+   function Same_Controller (Left, Right : Child_Handle) return Boolean is
+     (Left.Controller = Right.Controller);
+
+   function New_Controller return Controller_Id is
+      Result : Controller_Id;
+   begin
+      Controller_Source.Next (Result);
+      return Result;
+   end New_Controller;
+
+   function Controller (Handle : Child_Handle) return Controller_Id is
+     (Handle.Controller);
+
    function Is_Current
      (Handle : Child_Handle;
       Id     : Child_Id;
@@ -280,6 +329,16 @@ package body Flyology.Supervision is
             then Supervisor_Shutdown
             else Cancelled));
    end Report_Cancellation;
+
+   procedure Report_Unhealthy
+     (Control    : in out Generation_Control;
+      Diagnostic : String)
+   is
+   begin
+      Control.State.Publish_Termination
+        (Diagnostic_Summary (Unhealthy, Diagnostic));
+      Request_Stop (Control, Shutdown => False);
+   end Report_Unhealthy;
 
    procedure Report_Exception
      (Control    : in out Generation_Control;

@@ -68,11 +68,15 @@
             <li><a href="#choose">Choose a controller</a></li>
             <li><a href="#identity">Identity and lifecycle</a></li>
             <li><a href="#monitor">Observe one failure</a></li>
+            <li><a href="#publication">Publish a generation</a></li>
+            <li><a href="#interventions">Restart and health</a></li>
             <li><a href="#static">Static services</a></li>
             <li><a href="#recovery">Dependencies and cohorts</a></li>
             <li><a href="#families">Dynamic families</a></li>
             <li><a href="#budgets">Incidents and budgets</a></li>
             <li><a href="#stopping">Stopping and resources</a></li>
+            <li><a href="#adapters">Structured adapters</a></li>
+            <li><a href="#root">Own the root</a></li>
             <li><a href="#observe">Observe decisions</a></li>
             <li><a href="#limits">What is not promised</a></li>
           </ol>
@@ -373,7 +377,7 @@ end;</code></pre>
               <dl>
                 <div class="decision-row"><dt><code>Child_Id</code></dt><dd>Stable service or slot identity across replacement. Use it for dashboards and logical lookup.</dd></div>
                 <div class="decision-row"><dt><code>Generation</code></dt><dd>Nonzero 64-bit construction identity. It advances on restart and on dynamic slot reuse, never wraps, and fails closed if its successor space is exhausted.</dd></div>
-                <div class="decision-row"><dt><code>Child_Handle</code></dt><dd>The exact pair of logical id and generation. <code>Stop</code> requires that exact generation to remain live, so a terminated generation cannot cancel its replacement during backoff or after reuse.</dd></div>
+                <div class="decision-row"><dt><code>Child_Handle</code></dt><dd>The exact controller, logical id, and generation. A handle from another supervisor is stale even when the displayed id and generation match. A default-constructed handle has invalid controller authority. <code>Stop</code>, manual restart, and health reports require an issued exact handle.</dd></div>
                 <div class="decision-row"><dt><code>Ada.Task_Identification.Task_Id</code></dt><dd>Copied diagnostic identity of the actual task object. It is never used to address a replacement.</dd></div>
               </dl>
             </div>
@@ -445,6 +449,88 @@ end;</code></pre>
                 <p>There is no general wait-any monitor set in this slice. Exact task waits, exact generation waits, and bounded controller event rings cover the current consumers without adding hidden publication fan-out or another lifetime owner.</p>
               </div>
             </aside>
+          </section>
+
+          <section id="publication">
+            <span class="step-label">PUBLICATION</span>
+            <h2>Publish a typed lease, not an access-to-task value.</h2>
+            <p>A task entry may remain part of the application task type, but a long-lived client must not retain an access value to a task object that will be replaced. <code>Service_Slots</code> instead publishes a fixed scalar lease for one typed service and one exact controller-qualified generation. The application endpoint remains in a protected object or bounded channel owned by the surrounding context.</p>
+            <figure class="code-panel">
+              <figcaption>make one ready endpoint generation available</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">type Public_Service is (Metrics_API);
+
+--  Each service key maps to the static child's stable logical id.
+function Logical_Id (Service : Public_Service) return Child_Id is
+  (case Service is when Metrics_API =&gt; 1_001);
+
+--  The directory has one fixed slot per enumeration value. It stores no
+--  endpoint pointer, task access value, callback, or application payload.
+package Published is new Flyology.Supervision.Service_Slots
+  (Service_Kind =&gt; Public_Service,
+   Logical_Id   =&gt; Logical_Id);
+
+Directory : aliased Published.Directory;
+
+task body Metrics_Task is
+   --  Finalization withdraws only this exact publication token. It cannot
+   --  remove a later generation that reused Metrics_API.
+   --  The access discriminant makes Ada reject a Publication whose directory
+   --  could finalize first.
+   Availability : Published.Publication (Directory'Access);
+begin
+   declare
+      Resources : Metrics_Resources := Acquire_Fresh_Resources;
+   begin
+      Initialize_Endpoint (Context.Endpoint, Resources);
+
+      --  Publish_Ready first reserves the typed slot, then reports readiness,
+      --  and only afterward makes the lease acquirable. Duplicate and wrong-
+      --  child errors are rejected before readiness changes.
+      Published.Publish_Ready
+        (Availability, Metrics_API, Control.all);
+
+      Serve (Context.Endpoint, Resources, Stopping (Control.all));
+   end;
+end Metrics_Task;
+
+--  A client copies the current lease. Unavailable is an ordinary handoff
+--  state while no ready generation is published.
+Observation := Published.Acquire (Directory, Metrics_API);
+if Observation.Status = Published.Available then
+   --  Validate Observation.Lease inside the same protected endpoint operation
+   --  that performs the request. A separate Current check would race.
+   Context.Endpoint.Submit (Observation.Lease, Request);
+end if;</code></pre>
+            </figure>
+            <p><code>Current</code> is useful for observation, but check-then-use is not authority. The protected endpoint operation must validate the lease while it performs the mutation. When the old task finalizes, its controlled publication becomes unavailable. A replacement constructs fresh resources, reports readiness, and publishes a different generation; every copied old lease remains stale.</p>
+          </section>
+
+          <section id="interventions">
+            <span class="step-label">OPERATIONS</span>
+            <h2>Manual restart and health failure use the same recovery path.</h2>
+            <p>Operational commands never address a logical service alone. Capture <code>Latest</code>, perform the probe against that generation's endpoint, then submit the same exact handle. If replacement won the race, the controller raises <code>Stale_Handle</code> and leaves the new task untouched.</p>
+            <figure class="code-panel">
+              <figcaption>act on one exact running generation</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Generation := Services.Latest (Supervisor, API);
+
+if Operator_Requested_Restart then
+   --  Requires Restart_Safe, a local impact, and a restart kind other than
+   --  Never. This still consumes the child and subtree incident attempt.
+   Services.Restart (Supervisor, API, Generation);
+elsif not Probe (Context.API, Generation) then
+   --  The diagnostic is copied into bounded storage before the controller
+   --  requests cooperative stop.
+   Services.Report_Unhealthy
+     (Supervisor, API, Generation, "readiness probe failed");
+end if;
+
+--  A task may also reject itself after an internal invariant or liveness
+--  check fails. The call records Unhealthy and requests its own stop token.
+Report_Unhealthy (Control.all, "upstream session cannot be reconciled");</code></pre>
+            </figure>
+            <p>A manual restart, external failed probe, internal failed probe, and automatic exception all pass through configured impact, reverse-order stop, join, backoff, fresh construction, readiness, and bounded event recording. A command is rejected if stop, supervisor shutdown, terminal escalation, or another intervention reached the controller first, even if the old Ada task has not completed yet. Manual restart is not an unmetered maintenance shortcut. Health checks should report actionable service usability, not transient load that ordinary backpressure already represents.</p>
           </section>
 
           <section id="static">
@@ -780,6 +866,105 @@ Latest := Sessions.Latest
             </aside>
           </section>
 
+          <section id="adapters">
+            <span class="step-label">ADAPTERS</span>
+            <h2>Wrap an existing structured blocking service without changing it.</h2>
+            <p><code>Supervision.Adapters</code> accepts a fresh limited service constructor plus its blocking run, shutdown, and readiness operations. One dependent service-owner task executes the blocking call while the supervisor's generation runner observes readiness and forwards supervisor stop. The owner task is the concurrency boundary that leaves <code>Worker_Pools.Run</code>, <code>IO.Structured_Servers.Serve</code>, and application listener-loop APIs unchanged.</p>
+            <figure class="code-panel">
+              <figcaption>adapt a one-shot worker pool</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Constrain the pool discriminants once for this logical child. Every
+--  replacement receives a newly constructed Pool_Service object.
+type Pool_Service is limited record
+   Pool : Jobs.Pool (Worker_Count =&gt; 4, Queue_Capacity =&gt; 128);
+end record;
+
+function Create
+  (Context : not null access Worker_Context) return Pool_Service is
+begin
+   --  Limited build-in-place construction prevents accidental service copies.
+   return Item : Pool_Service;
+end Create;
+
+procedure Run_Service
+  (Item    : in out Pool_Service;
+   Context : aliased in out Worker_Context) is
+begin
+   --  This remains the existing blocking, structured worker-pool call.
+   Jobs.Run (Item.Pool, Context);
+end Run_Service;
+
+procedure Request_Shutdown (Item : in out Pool_Service) is
+begin
+   --  The adapter invokes this once when generation cancellation is observed.
+   Jobs.Request_Shutdown (Item.Pool);
+end Request_Shutdown;
+
+function Ready (Item : Pool_Service) return Boolean is
+  (Jobs.Current (Item.Pool).Running);
+
+package Pool_Generation is new Flyology.Supervision.Adapters
+  (Application_Context =&gt; Worker_Context,
+   Service             =&gt; Pool_Service,
+   --  Create, Run_Service, Request_Shutdown, and Ready are inferred by name.
+   Generation_Model    =&gt; Flyology.Native_Task);
+
+--  Use Pool_Generation.Run as Run_One_Generation for a static child. A server
+--  adapter follows the same shape: Create a fresh Server, acquire a fresh
+--  listener inside Run_Service, call Serve, and read Current.Running in Ready.
+--  A bare listener loop can expose the same four typed operations.
+</code></pre>
+            </figure>
+            <p>The generation result retains the service owner's actual Ada task identity. Normal return, the original escaping exception name and message, and abnormal completion keep their classifications instead of becoming an adapter wrapper exception. Service activation failure reaches the controller as <code>Tasking_Error</code>. The adapter does not assert that retrying jobs, requests, or accepts is safe. It only enforces a fresh one-shot service object, readiness ordering, cooperative stop forwarding, and structured join. The child still needs an explicit restart-safety review.</p>
+          </section>
+
+          <section id="root">
+            <span class="step-label">ROOT</span>
+            <h2>Let the application scope own and consume the root result.</h2>
+            <p>The canonical root context and supervisor live in the environment task's application scope, and the environment task calls synchronous <code>Run</code> directly. A dependent shutdown watcher translates process notification into <code>Request_Shutdown</code>; a low-level signal handler must not call the supervisor, format events, or run application callbacks.</p>
+            <figure class="code-panel">
+              <figcaption>canonical application-main ownership</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">procedure Application_Main is
+   Context    : aliased Application_Context;
+   Supervisor : aliased Application_Supervision.Supervisor;
+   Result     : Supervisor_Result;
+
+   task Shutdown_Watcher;
+
+   task body Shutdown_Watcher is
+   begin
+      --  Wait_For_Shutdown must be an application-provided, cancelable bridge
+      --  from platform notification into an ordinary Ada task context.
+      Wait_For_Shutdown;
+      Application_Supervision.Request_Shutdown (Supervisor);
+   end Shutdown_Watcher;
+begin
+   --  The environment task owns the root Ada master. Run returns only after
+   --  structured join, whether shutdown or terminal escalation ended it.
+   Application_Supervision.Run (Supervisor, Context, Result);
+
+   --  A terminal child result may win before a process shutdown notification.
+   --  Cancel and join the watcher before application context can finalize.
+   abort Shutdown_Watcher;
+
+   --  Consume the one-shot terminal result before Context finalizes.
+   case Result.Outcome is
+      when Shutdown_Completed =&gt;
+         Set_Exit_Status (Success);
+      when Startup_Failed | Recovery_Exhausted | Failure_Escalated =&gt;
+         Render_Root_Failure (Result);
+         Set_Exit_Status (Failure);
+      when Child_Stuck =&gt;
+         --  Run cannot reach this branch while the dependent task is live.
+         Render_Root_Failure (Result);
+         Set_Exit_Status (Failure);
+   end case;
+end Application_Main;</code></pre>
+            </figure>
+            <p>A nested escalation carries one incident and attempt to its parent, so crossing a node does not multiply recovery consumption. The root has no parent budget. It returns one typed outcome after join; the application maps that outcome to shutdown, degraded operation, or process failure. The usual choice for exhausted or escalated recovery is a failing process exit so an external service manager may decide whether to create a fresh process. In-process reconstruction, when application semantics permit it, must use a fresh context, supervisor, resources, publications, and nested Ada scope rather than reusing the exhausted root.</p>
+          </section>
+
           <section id="observe">
             <span class="step-label">EVENTS</span>
             <h2>Copy decisions out, then format them.</h2>
@@ -805,7 +990,7 @@ end loop;</code></pre>
             <p>An event records sequence, monotonic time, logical id, generation, lifecycle transition, task model and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from GNARL's terminal publication path.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">✓</span>
-              <p><strong>Verification boundary.</strong> The fixed policy kernel is SPARK-proved for complete successful start plans, prerequisite precedence, exact isolate and cohort sets, dependent-recovery closure, restart accounting, backoff, incident, generation, and family-join decisions. Static and family controllers consume proved generation matching for generation-qualified publications and commands, and they apply the proved retained-event predicate before recording lifecycle, stop, and restart-admission edges. Family admission is derived from configured, shutdown, and terminal state; the exact-generation stop predicate accepts a queued child or a still-live managed child, never a terminated generation awaiting replacement. The deterministic lowest-id tie-break and exact minimal dependent set remain executable and model-tested. Task activation, readiness, protected state, stopping, finalization, and resource reclamation are covered by live semantic tests rather than claimed as SPARK-proved.</p>
+              <p><strong>Verification boundary.</strong> The fixed policy kernel is SPARK-proved for complete successful start plans, prerequisite precedence, exact isolate and cohort sets, dependent-recovery closure, restart accounting, backoff, incident, generation, and family-join decisions. Static and family controllers consume proved generation matching for generation-qualified publications and commands, and they apply the proved retained-event predicate before recording lifecycle, stop, and restart-admission edges. Family admission is derived from configured, shutdown, and terminal state; proved command gates reject default controller authority, intervention after stop or shutdown, and generation construction after those states. The exact-generation stop predicate accepts a queued child or a still-live managed child, never a terminated generation awaiting replacement. The deterministic lowest-id tie-break and exact minimal dependent set remain executable and model-tested. Task activation, readiness, protected state, cancelable waiting, stopping, finalization, and resource reclamation are covered by live semantic tests rather than claimed as SPARK-proved.</p>
             </aside>
           </section>
 
@@ -819,6 +1004,7 @@ end loop;</code></pre>
               <li>Event storage, child slots, dependency matrices, managers, messages, and attempt accounting are bounded by declared types and generic capacities.</li>
               <li>Flyology is experimental. Validate both lightweight and native tasks, startup rollback, cancellation, finalization, resource reacquisition, and stuck behavior for the exact host and compiler release.</li>
             </ul>
+            <p>A marker interface would not make this boundary stronger: an Ada task may still reach shared memory, foreign libraries, and external systems outside that type. The reviewable evidence is structural. Construct a fresh limited task or service object, keep owned resources in its finalized scope, publish only a controller-qualified ready lease, test that old and replacement ownership never overlap, and place reconciliation rules beside the policy that sets <code>Restart_Safe =&gt; True</code>.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">→</span>
               <p>Use the <a href="../../api/">generated API reference</a> for exact contracts, and the <a href="../../architecture/">architecture guide</a> for task routing, execution groups, scheduling, and runtime lifecycle.</p>

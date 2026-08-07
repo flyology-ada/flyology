@@ -99,8 +99,6 @@ procedure Flyology.Supervision.Static_Smoke is
       procedure Begin_Generation
         (Attempt : out Positive;
          Identity : Ada.Task_Identification.Task_Id);
-      procedure Request_Failure;
-      procedure Take_Failure (Requested : out Boolean);
       function Attempts return Natural;
       function First_Task return Ada.Task_Identification.Task_Id;
       function Second_Task return Ada.Task_Identification.Task_Id;
@@ -110,7 +108,6 @@ procedure Flyology.Supervision.Static_Smoke is
         Ada.Task_Identification.Null_Task_Id;
       Second : Ada.Task_Identification.Task_Id :=
         Ada.Task_Identification.Null_Task_Id;
-      Failure_Pending : Boolean := False;
    end Restart_State;
 
    protected body Restart_State is
@@ -127,17 +124,6 @@ procedure Flyology.Supervision.Static_Smoke is
          end if;
       end Begin_Generation;
 
-      procedure Request_Failure is
-      begin
-         Failure_Pending := True;
-      end Request_Failure;
-
-      procedure Take_Failure (Requested : out Boolean) is
-      begin
-         Requested := Failure_Pending;
-         Failure_Pending := False;
-      end Take_Failure;
-
       function Attempts return Natural is (Count);
       function First_Task return Ada.Task_Identification.Task_Id is (First);
       function Second_Task return Ada.Task_Identification.Task_Id is (Second);
@@ -152,7 +138,6 @@ procedure Flyology.Supervision.Static_Smoke is
       Control : not null access Flyology.Supervision.Generation_Control)
    is
       Attempt : Positive;
-      Fail    : Boolean;
    begin
       Context.State.Begin_Generation
         (Attempt, Ada.Task_Identification.Current_Task);
@@ -161,10 +146,6 @@ procedure Flyology.Supervision.Static_Smoke is
          raise Test_Failure with "replacement generation fails";
       end if;
       loop
-         Context.State.Take_Failure (Fail);
-         if Fail then
-            raise Test_Failure with "stable generation fails";
-         end if;
          if Flyology.Supervision.Stopping (Control.all).Requested then
             raise Flyology.Cancellation.Operation_Cancelled;
          end if;
@@ -887,6 +868,26 @@ begin
         (Stable_Observation.Status =
            Flyology.Supervision.Observation_Timed_Out);
 
+      --  Controller identity is part of authority. A handle with the same
+      --  logical id and generation but a foreign controller is rejected.
+      declare
+         Foreign : constant Flyology.Supervision.Child_Handle :=
+           (Controller => New_Controller,
+            Id         => Child (Stable_Handle),
+            Generation => Current_Generation (Stable_Handle));
+         Rejected : Boolean := False;
+      begin
+         pragma Assert (not Same_Controller (Stable_Handle, Foreign));
+         begin
+            Stable_Observation := Restart_Supervisors.Wait_Termination
+              (Item, Service, Foreign, Timeout => 0.0);
+         exception
+            when Program_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
+
       --  An aborted waiter releases its bounded registration through
       --  controlled finalization. Monitor_Capacity is one, so a leaked slot
       --  would make the post-abort zero-time check raise Constraint_Error.
@@ -928,7 +929,7 @@ begin
         (Stable_Observation.Status =
            Flyology.Supervision.Observation_Timed_Out);
 
-      Context.State.Request_Failure;
+      Restart_Supervisors.Restart (Item, Service, Stable_Handle);
       Stable_Observation := Restart_Supervisors.Wait_Termination
         (Item, Service, Stable_Handle, Timeout => 2.0);
       pragma Assert
@@ -936,6 +937,15 @@ begin
            Flyology.Supervision.Generation_Terminated);
       pragma Assert
         (Stable_Observation.Snapshot.Generation = 3);
+      pragma Assert
+        (Stable_Observation.Snapshot.Termination.Kind =
+           Flyology.Supervision.Restart_Requested);
+      begin
+         Restart_Supervisors.Restart (Item, Service, Stable_Handle);
+         raise Program_Error with "stale static restart was accepted";
+      exception
+         when Restart_Supervisors.Stale_Handle => null;
+      end;
       loop
          exit when Restart_Supervisors.Current (Item, Service).Ready
            and then
@@ -944,7 +954,7 @@ begin
             Restart_Supervisors.Request_Shutdown (Item);
             Owner.Join;
             raise Program_Error with
-              "stable failure did not start a fresh incident";
+              "manual restart did not start a fresh incident";
          end if;
          delay 0.001;
       end loop;

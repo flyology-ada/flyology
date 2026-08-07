@@ -165,8 +165,9 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       Result  : Generation_Result;
    begin
       Open
-        (Control,
-         (Id         => Child_Id (9_000 + Run_Mode'Pos (Mode)),
+         (Control,
+         (Controller => New_Controller,
+          Id         => Child_Id (9_000 + Run_Mode'Pos (Mode)),
           Generation => 1));
       if Mode in Await_Stop | Await_Abort then
          declare
@@ -283,7 +284,9 @@ begin
       Control : aliased Generation_Control;
       Result  : Generation_Result;
    begin
-      Open (Control, (Id => 10_000, Generation => 1));
+      Open
+        (Control,
+         (Controller => New_Controller, Id => 10_000, Generation => 1));
       Input_Generations.Run (State, 7, Control, Result);
       pragma Assert (Result.Termination.Kind = Normal_Return);
       pragma Assert (Result.Reported_Ready);

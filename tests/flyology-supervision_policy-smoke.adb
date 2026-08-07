@@ -86,6 +86,8 @@ begin
    pragma Assert
      (Transition_Allowed (Public.Backing_Off, Public.Restarting));
    pragma Assert
+     (Transition_Allowed (Public.Backing_Off, Public.Joined));
+   pragma Assert
      (Transition_Allowed (Public.Restarting, Public.Starting));
    pragma Assert
      (not Transition_Allowed (Public.Running, Public.Starting));
@@ -113,6 +115,10 @@ begin
      (not Should_Restart (Public.Never, Public.Unhandled_Exception));
    pragma Assert
      (Should_Restart (Public.On_Failure, Public.Unhandled_Exception));
+   pragma Assert
+     (Should_Restart (Public.On_Failure, Public.Unhealthy));
+   pragma Assert
+     (Should_Restart (Public.On_Failure, Public.Restart_Requested));
    pragma Assert
      (not Should_Restart (Public.On_Failure, Public.Normal_Return));
    pragma Assert
@@ -179,6 +185,12 @@ begin
      (not Generation_Matches
         (High_Id, Generation, High_Id, Public.Generation'First));
    pragma Assert
+     (Authority_Matches
+        (7, High_Id, Generation, 7, High_Id, Generation));
+   pragma Assert
+     (not Authority_Matches
+        (7, High_Id, Generation, 8, High_Id, Generation));
+   pragma Assert
      (Generation_Start_Allowed
         (High_Id, Generation, High_Id, Generation, False));
    pragma Assert
@@ -228,4 +240,62 @@ begin
    pragma Assert
      (not Family_Stop_Command_Allowed
         (Current => False, Queued => True, Managed => False, Live => False));
+
+   pragma Assert
+     (Family_Intervention_Command_Allowed
+        (Current          => True,
+         Managed          => True,
+         Live             => True,
+         Ready            => True,
+         Stop_Pending     => False,
+         Shutdown         => False,
+         Terminal         => False,
+         Recovery_Pending => False));
+   pragma Assert
+     (not Family_Intervention_Command_Allowed
+        (Current          => True,
+         Managed          => True,
+         Live             => True,
+         Ready            => True,
+         Stop_Pending     => True,
+         Shutdown         => False,
+         Terminal         => False,
+         Recovery_Pending => False));
+   pragma Assert
+     (not Family_Intervention_Command_Allowed
+        (Current          => True,
+         Managed          => True,
+         Live             => True,
+         Ready            => True,
+         Stop_Pending     => False,
+         Shutdown         => True,
+         Terminal         => False,
+         Recovery_Pending => False));
+
+   pragma Assert
+     (Family_Generation_Start_Allowed
+        (Generation_Allowed => True,
+         Managed            => True,
+         Stop_Pending       => False,
+         Shutdown           => False,
+         Terminal           => False));
+   pragma Assert
+     (not Family_Generation_Start_Allowed
+        (Generation_Allowed => True,
+         Managed            => True,
+         Stop_Pending       => False,
+         Shutdown           => True,
+         Terminal           => False));
+   pragma Assert
+     (not Family_Replacement_Wait_Allowed
+        (Managed      => True,
+         Backing_Off  => True,
+         Stop_Pending => True,
+         Shutdown     => False,
+         Terminal     => False));
+
+   pragma Assert
+     (not Authority_Matches
+        (1, Public.Child_Id'First, Public.Generation'First,
+         0, Public.Child_Id'First, Public.Generation'First));
 end Flyology.Supervision_Policy.Smoke;
