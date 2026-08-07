@@ -101,7 +101,7 @@
           <section id="first-example">
             <span class="step-label">FIRST EXAMPLE</span>
             <h2>Supervise one restartable service.</h2>
-            <p>This is the complete supervision wiring for one polling service. Only the application-defined context, resource, acquisition, and sampling details are omitted. The application declares the actual task type, its entry, lane, execution group, and outer exception handler. Flyology owns each constructed task object through termination and join.</p>
+            <p>This is the complete supervision wiring for one polling service. Only the application-defined context, resource, acquisition, and sampling details are omitted. The application declares the actual task type, its entry, lane, and execution group. Flyology owns each constructed task object through termination and join, and the task-result facility records how it exited.</p>
             <figure class="code-panel">
               <figcaption>declare the task type and its generation owner</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -140,19 +140,8 @@ begin
          Sample (Resources);
          delay 1.0;
       end loop;
-   end;  --  Resources finalize before the terminal report below.
-
-   --  This application-defined task body owns its exception boundary;
-   --  Task_Generations owns the object but cannot catch through that boundary.
-   --  Report only after all generation-owned cleanup completed.
-   Report_Normal_Return (Control.all);
-exception
-   --  Preserve the distinction between cooperative cancellation and failure.
-   when Flyology.Cancellation.Operation_Cancelled =&gt;
-      Report_Cancellation (Control.all);
-   --  Copy bounded exception identity and message while Occurrence is valid.
-   when Occurrence : others =&gt;
-      Report_Exception (Control.all, Occurrence);
+   end;  --  Resources finalize while an exception unwinds or before return.
+         --  GNARL then publishes the bounded task result automatically.
 end Metrics_Task;
 
 procedure Initialize
@@ -209,7 +198,11 @@ end Run_Generation;</code></pre>
             </figure>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><strong>What the generation operations do.</strong> Each formal subprogram is statically tied to <code>Metrics_Task</code>. <code>Create</code> chooses its discriminants and constructs the exact task object by limited build-in-place return. <code>Task_Identity</code> supplies diagnostic identity, and <code>Abort_Task</code> supplies the optional last-resort stop request. Those three operations use the generic's <code>is &lt;&gt;</code> defaults, so compatible directly visible declarations are inferred by name. <code>Initialize</code> stays explicit: omitting it selects the useful null default rather than an inferred startup rendezvous. Together the operations let the generic own a task generation without defining the task's entries, body, or service API. When an application needs only a procedure body, <code>Supervision.Children</code> defines the task wrapper itself and reports normal return, cancellation, and exceptions automatically.</p>
+              <p><strong>What the generation operations do.</strong> Each formal subprogram is statically tied to <code>Metrics_Task</code>. <code>Create</code> chooses its discriminants and constructs the exact task object by limited build-in-place return. <code>Task_Identity</code> supplies the identity used to await its task-owned result, and <code>Abort_Task</code> supplies the optional last-resort stop request. Those three operations use the generic's <code>is &lt;&gt;</code> defaults, so compatible directly visible declarations are inferred by name. <code>Initialize</code> stays explicit: omitting it selects the useful null default rather than an inferred startup rendezvous. Together the operations let the generic own a task generation without defining the task's entries, body, or service API.</p>
+            </aside>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p><strong>Exit reporting is automatic.</strong> After task-body cleanup and dependent-task joining, <code>Flyology.Task_Results</code> publishes normal completion, abnormal completion, or an escaping exception with a bounded fully qualified name and message. <code>Task_Generations</code> maps that immutable result into supervision state while the task object is still alive. Explicit <code>Report_*</code> calls are needed only when application code catches and suppresses an outcome but deliberately wants supervision to classify it differently.</p>
             </aside>
             <figure class="code-panel">
               <figcaption>declare the policy, supervisor type, and owner</figcaption>
@@ -279,7 +272,7 @@ begin
    Metrics_Supervision.Run (Node, Context, Result);
 end;</code></pre>
             </figure>
-            <p>The inner block makes <code>Resources</code> finalize before the outer handler reports a terminal outcome. The policy is explicit: an unexpected exception from <code>Sample</code> is a failure, <code>On_Failure</code> admits replacement, and <code>Isolate_Child</code> limits recovery to this child. The task type itself selects lightweight group 2; the policy declares the same placement for bounded observation but cannot inspect or override the task type's actual aspects. The controller joins the failed task, applies <code>Limits</code>, and invokes <code>Run_Generation</code> for a new <code>Metrics_Task</code>. <code>Run</code> synchronously owns the tree; another task may call <code>Request_Shutdown</code>, and <code>Run</code> returns only after every terminable generation and manager has joined.</p>
+            <p>The inner block makes <code>Resources</code> finalize while an exception unwinds or before a normal return; GNARL publishes the terminal result afterward. The policy is explicit: an unexpected exception from <code>Sample</code> is a failure, <code>On_Failure</code> admits replacement, and <code>Isolate_Child</code> limits recovery to this child. The task type itself selects lightweight group 2; the policy declares the same placement for bounded observation but cannot inspect or override the task type's actual aspects. The controller joins the failed task, applies <code>Limits</code>, and invokes <code>Run_Generation</code> for a new <code>Metrics_Task</code>. <code>Run</code> synchronously owns the tree; another task may call <code>Request_Shutdown</code>, and <code>Run</code> returns only after every terminable generation and manager has joined.</p>
           </section>
 
           <section id="model">
@@ -617,7 +610,7 @@ for Index in 1 .. Count loop
    Render_Outside_The_Controller (Events (Index));
 end loop;</code></pre>
             </figure>
-            <p>An event records sequence, monotonic time, logical id, generation, lifecycle transition, lane and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from a termination handler.</p>
+            <p>An event records sequence, monotonic time, logical id, generation, lifecycle transition, lane and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from GNARL's terminal publication path.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">✓</span>
               <p><strong>Verification boundary.</strong> The fixed policy kernel is SPARK-proved for complete successful start plans, prerequisite precedence, exact isolate and cohort sets, dependent-recovery closure, restart accounting, backoff, incident, generation, and family-join decisions. The deterministic lowest-id tie-break and exact minimal dependent set remain executable and model-tested. Task activation, readiness, protected state, stopping, finalization, and resource reclamation are covered by live semantic tests rather than claimed as SPARK-proved.</p>

@@ -102,12 +102,6 @@ procedure Flyology.Supervision.Static_Smoke is
    begin
       accept Start;
       Execute_Restartable (State.all, Control);
-      Flyology.Supervision.Report_Normal_Return (Control.all);
-   exception
-      when Flyology.Cancellation.Operation_Cancelled =>
-         Flyology.Supervision.Report_Cancellation (Control.all);
-      when Occurrence : others =>
-         Flyology.Supervision.Report_Exception (Control.all, Occurrence);
    end Restart_Task;
 
    function Create_Restart

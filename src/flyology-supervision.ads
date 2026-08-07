@@ -3,6 +3,7 @@ with Ada.Real_Time;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
 with Flyology.Execution_Groups;
+with Flyology.Task_Results;
 with Interfaces;
 
 --  Defines the bounded, generation-safe vocabulary for structured task
@@ -111,7 +112,7 @@ package Flyology.Supervision is
    --  Why one generation ceased to be usable.
    --  @enum No_Termination No generation has terminated
    --  @enum Normal_Return The task body returned normally
-   --  @enum Unhandled_Exception The outer task-body wrapper caught an error
+   --  @enum Unhandled_Exception GNARL observed an exception escaping the task
    --  @enum Cancelled The child observed cooperative cancellation
    --  @enum Supervisor_Shutdown The owning supervisor requested shutdown
    --  @enum Abnormal_Completion Ada reported abnormal task termination
@@ -135,28 +136,61 @@ package Flyology.Supervision is
 
    --  Maximum retained exception or policy diagnostic text.
    Maximum_Diagnostic_Length : constant := 512;
+   --  Maximum retained fully qualified exception-name characters.
+   Maximum_Exception_Name_Length : constant :=
+     Flyology.Task_Results.Exception_Name_Capacity;
    --  Valid used length within a fixed diagnostic buffer.
    subtype Diagnostic_Length is
      Natural range 0 .. Maximum_Diagnostic_Length;
+   --  Valid used length within a fixed exception-name buffer.
+   subtype Exception_Name_Length is
+     Natural range 0 .. Maximum_Exception_Name_Length;
 
    --  Bounded failure information safe after an exception occurrence and task
    --  object are gone. Task_Id is diagnostic only and must not be used to
    --  control a replacement generation.
    --  @field Kind Classified terminal outcome
-   --  @field Exception_Id Retained library-level exception identity
+   --  @field Exception_Id Retained library-level exception identity when an
+   --  occurrence was classified directly; automatic task-exit observation
+   --  retains the portable name and leaves this Null_Id
+   --  @field Exception_Name_Length Used prefix of Exception_Name
+   --  @field Exception_Name_Truncated Whether the source name exceeded its
+   --  fixed task-result capacity
+   --  @field Exception_Name Bounded fully qualified exception name
    --  @field Task_Id Ada identity of the terminated generation
    --  @field Message_Length Used prefix of Message
+   --  @field Message_Truncated Whether the source message exceeded retained
+   --  storage
    --  @field Message Bounded copied diagnostic text
    type Termination_Summary is record
       Kind           : Termination_Kind := No_Termination;
       Exception_Id   : Ada.Exceptions.Exception_Id :=
         Ada.Exceptions.Null_Id;
+      Exception_Name_Length : Supervision.Exception_Name_Length := 0;
+      Exception_Name_Truncated : Boolean := False;
+      Exception_Name : String (1 .. Maximum_Exception_Name_Length) :=
+        (others => ' ');
       Task_Id        : Ada.Task_Identification.Task_Id :=
         Ada.Task_Identification.Null_Task_Id;
       Message_Length : Diagnostic_Length := 0;
+      Message_Truncated : Boolean := False;
       Message        : String (1 .. Maximum_Diagnostic_Length) :=
         (others => ' ');
    end record;
+
+   --  Return the meaningful fully qualified exception name, or the empty
+   --  string when no exception name was retained.
+   --  @param Item Bounded terminal summary
+   --  @return Retained exception name without unused fixed storage
+   function Exception_Name_Text (Item : Termination_Summary) return String is
+     (Item.Exception_Name (1 .. Item.Exception_Name_Length));
+
+   --  Return the meaningful diagnostic message, or the empty string when no
+   --  message was retained.
+   --  @param Item Bounded terminal summary
+   --  @return Retained message without unused fixed storage
+   function Message_Text (Item : Termination_Summary) return String is
+     (Item.Message (1 .. Item.Message_Length));
 
    --  Child-level restart selection.
    --  @enum Never Do not replace a terminated generation
@@ -311,29 +345,31 @@ package Flyology.Supervision is
      (Control : in out Generation_Control;
       Context : Incident_Context);
 
-   --  Report normal completion from the outer body of the generation task,
-   --  after its generation-owned inner resource scope has finalized. A
-   --  generation task must report exactly one terminal outcome. If it
-   --  terminates without reporting, its task-generation owner classifies the
-   --  outcome as Abnormal_Completion.
+   --  Optionally override automatic task-result classification with normal
+   --  completion. Task_Generations already observes an uncaught normal return;
+   --  use this only when an application deliberately needs to publish a
+   --  different semantic result after its owned resource scope finalized.
    --  @param Control Generation control borrowed by the reporting task
    --  @exception Program_Error No active generation exists or an outcome was
    --  already reported
    procedure Report_Normal_Return (Control : in out Generation_Control);
 
-   --  Report cooperative cancellation from the outer body of the generation
-   --  task. Cancellation caused by supervisor shutdown is retained as
-   --  Supervisor_Shutdown rather than Cancelled.
+   --  Optionally override automatic task-result classification with
+   --  cooperative cancellation. An uncaught Cancellation.Operation_Cancelled,
+   --  or a normal return after the supervisor requested stop, is classified
+   --  automatically. This operation remains useful when application code
+   --  catches and suppresses cancellation from another source. Cancellation
+   --  caused by supervisor shutdown is retained as Supervisor_Shutdown.
    --  @param Control Generation control borrowed by the reporting task
    --  @exception Program_Error No active generation exists or an outcome was
    --  already reported
    procedure Report_Cancellation (Control : in out Generation_Control);
 
-   --  Copy an unhandled exception into bounded generation state while its
-   --  occurrence is still valid. Place the handler outside the task's owned
-   --  resource block so cleanup precedes this report. The copied exception
-   --  identity, message, and current Ada task identity remain valid after the
-   --  task object is gone.
+   --  Optionally override automatic task-result classification with an
+   --  exception that application code caught and suppressed. Exceptions that
+   --  escape the task body are copied automatically after task finalization.
+   --  This operation copies the occurrence immediately and remains available
+   --  for source compatibility and deliberate semantic translation.
    --  @param Control Generation control borrowed by the reporting task
    --  @param Occurrence Exception caught by the outer task-body handler
    --  @exception Program_Error No active generation exists or an outcome was
@@ -577,6 +613,17 @@ private
    --  @param Control Internal generation control
    --  @return Whether stop represents supervisor shutdown
    function Shutdown_Stop (Control : Generation_Control) return Boolean;
+
+   --  @exclude
+   --  @param Control Internal generation control used to classify stop
+   --  @param Task_Id Actual task identity of this generation
+   --  @param Result Immutable terminal result observed from GNARL
+   --  @return Supervision termination summary with bounded diagnostics
+   function From_Task_Result
+     (Control : Generation_Control;
+      Task_Id : Ada.Task_Identification.Task_Id;
+      Result  : Flyology.Task_Results.Task_Result)
+      return Termination_Summary;
 
    --  @exclude
    --  @param Control Internal generation control

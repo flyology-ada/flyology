@@ -63,14 +63,15 @@ contracts should not be silently changed.
 | `Flyology.Capacity` | bounded admission and drain when a child owns concurrent work | no supervisor-specific behavior belongs in the gate | permits never transfer implicitly to a replacement |
 | `Flyology.IO.Structured_Servers` | reverse cleanup, exact listener ownership, cancel/drain phases, activation rollback | a future server factory can be supervised as one logical child | `Server` remains one-shot; restart creates a new server and listener |
 | `Flyology.Observability` | actual lightweight group and sampled stall evidence | supervision snapshots are an application layer, not a runtime ABI extension | scheduler counters do not determine restart policy |
+| `Flyology.Task_Results` | task-owned normal, exception, or abnormal terminal result published after finalization | map the fixed result into generation policy without another runtime callback | it observes termination only and contains no restart policy |
 | scheduler create/destroy/reap | evidence that a finished fiber is reaped only after GNARL destroys its task object, with running/migrating destruction deferred | none for the first implementation | supervision composes ordinary Ada task semantics |
 
 The scheduler already distinguishes a task wrapper returning from the later
 fiber-record reap. A supervisor must wait for the Ada task master and task-body
-finalization, not infer resource reclamation from a scheduler snapshot. No
-runtime hook is needed to observe a generation: the generation's outer body
-wrapper reports a bounded terminal value, and the containing Ada master is the
-join boundary.
+finalization, not infer resource reclamation from a scheduler snapshot. The
+shared `Task_Results` runtime facility observes a generation through GNARL's
+existing task wrapper, and the containing Ada master is the join boundary.
+Supervision adds no second runtime hook or task-termination callback.
 
 ## Ada task boundary
 
@@ -169,12 +170,18 @@ returns that exact task object by Ada limited build-in-place return; no copying
 or address-valued payload is involved. The generic declares the result in a
 local block. `Initialize` may make a bounded startup entry call or invoke a
 task-specific package operation after activation; it runs outside controller
-locks and must not retain the task object or execute the service loop. The
-application task body reports exactly one terminal outcome with
-`Report_Normal_Return`, `Report_Cancellation`, or `Report_Exception`.
-Generation-owned resources belong in an inner block and the reporting handler
-belongs outside that block, so controlled cleanup and dependent-task joins
-precede the report. Termination without a report is `Abnormal_Completion`.
+locks and must not retain the task object or execute the service loop.
+`Flyology.Task_Results` automatically records normal return, an exception that
+escapes the task body, or abnormal completion. Generation-owned resources still
+belong inside the task body so their cleanup and dependent-task joins precede
+terminal publication. No application reporting handler is required.
+
+The explicit `Report_Normal_Return`, `Report_Cancellation`, and
+`Report_Exception` operations remain source compatible as semantic overrides.
+They are useful only when application code catches and suppresses an outcome but
+still wants supervision to classify it as that outcome. When present, the
+explicit classification wins; `Task_Generations` still waits for the actual
+task result and finalization before returning.
 
 The generic observes termination, dispatches the configured optional Ada abort
 through the typed `Abort_Task` adapter, and leaves the local master only after
@@ -297,8 +304,8 @@ requests outside the node.
 
 A nested supervisor is a child factory whose one generation runs another
 synchronous supervisor scope. The inner scope completes shutdown and joins
-before its outer generation reports termination. It receives the same incident
-id and active attempt when escalating; it cannot mint an independent retry
+before its outer generation reaches terminal publication. It receives the same
+incident id and active attempt when escalating; it cannot mint an independent retry
 allowance for that cascade.
 
 ## Startup, readiness, and rollback
@@ -340,7 +347,7 @@ while the implementation retains that identity and is diagnostic only; an Ada
 runtime may reuse its representation after the old task object leaves scope.
 It is never used as the logical id and is never applied to a replacement.
 
-Every command, readiness report, termination report, and event contains child
+Every command, readiness report, terminal observation, and event contains child
 id and generation. Protected state accepts it only if both match the current
 slot. A late termination handler, timeout, or cancellation event from generation
 N therefore cannot stop or publish generation N+1. Generation and incident
@@ -388,34 +395,35 @@ The public bounded summary represents:
 
 | Outcome | Source | Restart failure for `On_Failure` |
 | --- | --- | --- |
-| normal return | outer body wrapper | no |
-| unhandled exception | wrapper catches `others` | yes |
-| cancellation | canonical cancellation exception | no, unless policy maps an application cancellation to failure before reporting |
+| normal return | task-owned result | no |
+| unhandled exception | task-owned result retains bounded name and message | yes |
+| cancellation | uncaught canonical cancellation exception, normal return after a stop request, or explicit override | no |
 | supervisor shutdown | manager initiated | no |
-| abnormal/abort completion | wrapper/termination observation | yes |
+| abnormal/abort completion | task-owned result | yes |
 | activation failure | allocator or local task activation raises `Tasking_Error` | yes |
 | readiness timeout | monotonic deadline before `Mark_Ready` | yes |
 | stop timeout | cooperative grace expired | yes |
 | stuck | task still live after optional abort observation | terminal; no replacement is permitted |
 | policy exhaustion | restart classifier | terminal escalation |
 
-Safe retained information is the enumeration, child id, generation, copied
-exception identity, bounded message or exception information, Ada task id for
-diagnostics, and monotonic timestamps. An `Exception_Occurrence`, pointers into
-the task stack, traceback-owned transient storage, or callback context is not
-retained.
+Safe retained information is the enumeration, child id, generation, bounded
+fully qualified exception name, bounded message, Ada task id for diagnostics,
+and monotonic timestamps. A directly classified manager or compatibility
+override may also retain the library-level exception id. Automatic task-body
+observation deliberately retains the portable exception name instead of a
+runtime-owned address. An `Exception_Occurrence`, pointers into the task stack,
+traceback-owned transient storage, or callback context is never retained.
 
-The primary mechanism is the application task's outer exception handler because
-it runs in the failing task context and can copy the exception while the
-occurrence is valid. Its reporting operation copies only fixed data into the
-generation control. The task-generation owner then observes task termination
-before leaving the local master. This avoids retaining an exception occurrence,
-task-local pointer, or access value after task teardown. The procedure-body
-convenience adapters generate this outer handler automatically.
+GNARL's existing task wrapper copies the fixed result before publishing terminal
+state. `Task_Generations` waits on that task-owned sidecar while the task object
+remains alive, maps it into the generation summary, and then leaves the local
+master. The sidecar is attached before activation, so a task that terminates
+before its allocator returns does not create a registration race. Activation
+failure remains Ada's `Tasking_Error`: no task body began and no result exists.
 
-`Ada.Task_Termination` is deliberately not used by this implementation. Its
+`Ada.Task_Termination` is deliberately not used for supervision. Its
 handler context would require a second constrained publication path and is not
-needed for ordinary completion, handled exceptions, or the current optional
+needed for ordinary completion, escaping exceptions, or the current optional
 abort observation. If a future consistency hook uses it, the handler must not
 log, allocate deliberately, invoke callbacks, wait, finalize user values,
 request restart, or take a runtime lock.
@@ -579,13 +587,7 @@ begin
       Bind_Listener (State.Address, Listener);
       Mark_Ready (Control.all); --  Bound and owned by this generation.
       HTTP.Serve (Server, Listener, State.Counters, Drain_Timeout => 2.0);
-   end; --  Server, handlers, and listener finish before the report.
-   Report_Normal_Return (Control.all);
-exception
-   when Flyology.Cancellation.Operation_Cancelled =>
-      Report_Cancellation (Control.all);
-   when Occurrence : others =>
-      Report_Exception (Control.all, Occurrence);
+   end; --  Cleanup completes before GNARL publishes the terminal result.
 end Metrics_Task;
 
 procedure Initialize

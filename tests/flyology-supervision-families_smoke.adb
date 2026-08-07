@@ -63,11 +63,6 @@ procedure Flyology.Supervision.Families_Smoke is
          end if;
          delay 0.001;
       end loop;
-   exception
-      when Flyology.Cancellation.Operation_Cancelled =>
-         Flyology.Supervision.Report_Cancellation (Control.all);
-      when Occurrence : others =>
-         Flyology.Supervision.Report_Exception (Control.all, Occurrence);
    end Family_Task;
 
    function Create_Family_Task

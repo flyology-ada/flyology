@@ -1,6 +1,7 @@
 package body Flyology.Supervision is
    use type Ada.Real_Time.Time;
    use type Interfaces.Unsigned_64;
+   use type Flyology.Task_Results.Exit_Cause;
 
    protected Incident_Source is
       procedure Next (Value : out Incident_Id);
@@ -128,9 +129,70 @@ package body Flyology.Supervision is
      (Kind : Termination_Kind) return Termination_Summary is
      ((Kind           => Kind,
        Exception_Id   => Ada.Exceptions.Null_Id,
+       Exception_Name_Length => 0,
+       Exception_Name_Truncated => False,
+       Exception_Name => (others => ' '),
        Task_Id        => Ada.Task_Identification.Current_Task,
        Message_Length => 0,
+       Message_Truncated => False,
        Message        => (others => ' ')));
+
+   function From_Task_Result
+     (Control : Generation_Control;
+      Task_Id : Ada.Task_Identification.Task_Id;
+      Result  : Flyology.Task_Results.Task_Result)
+      return Termination_Summary
+   is
+      Cancellation_Name : constant String :=
+        Ada.Exceptions.Exception_Name
+          (Flyology.Cancellation.Operation_Cancelled'Identity);
+      Observed_Name : constant String :=
+        Flyology.Task_Results.Text (Result.Exception_Name);
+      Is_Cancellation : constant Boolean :=
+        Result.Cause = Flyology.Task_Results.Unhandled_Exception
+        and then Observed_Name = Cancellation_Name;
+      Kind : constant Termination_Kind :=
+        (if Shutdown_Stop (Control)
+         and then
+           (Result.Cause = Flyology.Task_Results.Normal_Completion
+            or else Is_Cancellation)
+         then Supervisor_Shutdown
+         elsif Is_Cancellation
+           or else
+             (Stop_Requested (Control)
+              and then
+                Result.Cause = Flyology.Task_Results.Normal_Completion)
+         then Cancelled
+         else
+           (case Result.Cause is
+               when Flyology.Task_Results.Normal_Completion => Normal_Return,
+               when Flyology.Task_Results.Unhandled_Exception =>
+                  Unhandled_Exception,
+               when Flyology.Task_Results.Abnormal_Completion =>
+                  Abnormal_Completion));
+      Value : Termination_Summary := Base_Summary (Kind);
+   begin
+      Value.Task_Id := Task_Id;
+      if Kind = Unhandled_Exception then
+         Value.Exception_Name_Length :=
+           Exception_Name_Length (Result.Exception_Name.Length);
+         Value.Exception_Name_Truncated := Result.Exception_Name.Truncated;
+         if Value.Exception_Name_Length > 0 then
+            Value.Exception_Name (1 .. Value.Exception_Name_Length) :=
+              Result.Exception_Name.Data
+                (1 .. Result.Exception_Name.Length);
+         end if;
+         Value.Message_Length :=
+           Diagnostic_Length (Result.Exception_Message.Length);
+         Value.Message_Truncated := Result.Exception_Message.Truncated;
+         if Value.Message_Length > 0 then
+            Value.Message (1 .. Value.Message_Length) :=
+              Result.Exception_Message.Data
+                (1 .. Result.Exception_Message.Length);
+         end if;
+      end if;
+      return Value;
+   end From_Task_Result;
 
    function Active (Context : Incident_Context) return Boolean is
      (Context.Is_Active);
@@ -223,15 +285,28 @@ package body Flyology.Supervision is
      (Control    : in out Generation_Control;
       Occurrence : Ada.Exceptions.Exception_Occurrence)
    is
+      Name : constant String :=
+        Ada.Exceptions.Exception_Name
+          (Ada.Exceptions.Exception_Identity (Occurrence));
       Message : constant String :=
         Ada.Exceptions.Exception_Message (Occurrence);
+      Name_Length : constant Exception_Name_Length :=
+        Exception_Name_Length'Min
+          (Exception_Name_Length'Last, Name'Length);
       Length  : constant Diagnostic_Length :=
         Diagnostic_Length'Min
           (Diagnostic_Length'Last, Message'Length);
       Value   : Termination_Summary := Base_Summary (Unhandled_Exception);
    begin
       Value.Exception_Id := Ada.Exceptions.Exception_Identity (Occurrence);
+      Value.Exception_Name_Length := Name_Length;
+      Value.Exception_Name_Truncated := Name'Length > Name_Length;
+      if Name_Length > 0 then
+         Value.Exception_Name (1 .. Name_Length) :=
+           Name (Name'First .. Name'First + Name_Length - 1);
+      end if;
       Value.Message_Length := Length;
+      Value.Message_Truncated := Message'Length > Length;
       if Length > 0 then
          Value.Message (1 .. Length) :=
            Message (Message'First .. Message'First + Length - 1);

@@ -14,25 +14,36 @@ package body Flyology.Supervision.Static is
    function Empty_Summary
      (Kind : Termination_Kind) return Termination_Summary is
      ((Kind           => Kind,
-       Exception_Id   => Ada.Exceptions.Null_Id,
        Task_Id        => Ada.Task_Identification.Null_Task_Id,
-       Message_Length => 0,
-       Message        => (others => ' ')));
+       others         => <>));
 
    function Failure_Summary
      (Occurrence : Ada.Exceptions.Exception_Occurrence;
       Kind       : Termination_Kind := Unhandled_Exception)
       return Termination_Summary
    is
+      Name : constant String :=
+        Ada.Exceptions.Exception_Name
+          (Ada.Exceptions.Exception_Identity (Occurrence));
       Message : constant String :=
         Ada.Exceptions.Exception_Message (Occurrence);
+      Name_Length : constant Exception_Name_Length :=
+        Exception_Name_Length'Min
+          (Exception_Name_Length'Last, Name'Length);
       Length  : constant Diagnostic_Length :=
         Diagnostic_Length'Min
           (Diagnostic_Length'Last, Message'Length);
       Result  : Termination_Summary := Empty_Summary (Kind);
    begin
       Result.Exception_Id := Ada.Exceptions.Exception_Identity (Occurrence);
+      Result.Exception_Name_Length := Name_Length;
+      Result.Exception_Name_Truncated := Name'Length > Name_Length;
+      if Name_Length > 0 then
+         Result.Exception_Name (1 .. Name_Length) :=
+           Name (Name'First .. Name'First + Name_Length - 1);
+      end if;
       Result.Message_Length := Length;
+      Result.Message_Truncated := Message'Length > Length;
       if Length > 0 then
          Result.Message (1 .. Length) :=
            Message (Message'First .. Message'First + Length - 1);

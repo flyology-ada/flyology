@@ -28,7 +28,9 @@ generic
 
 package Flyology.Supervision.Input_Children is
 
-   --  Create, activate, observe, and join one typed-input generation.
+   --  Create, activate, observe, and join one typed-input generation. Normal
+   --  return, escaping exceptions, and abnormal completion are classified
+   --  automatically from the task-owned terminal result.
    --  @param Context Application state retained through the complete call
    --  @param Input Immutable generation input
    --  @param Control Fresh generation control opened by the supervisor

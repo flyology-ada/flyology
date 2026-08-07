@@ -1,5 +1,4 @@
 with Ada.Task_Identification;
-with Flyology.Cancellation;
 with Flyology.Supervision.Input_Task_Generations;
 
 package body Flyology.Supervision.Input_Children is
@@ -14,15 +13,7 @@ package body Flyology.Supervision.Input_Children is
 
    task body Subject_Task is
    begin
-      begin
-         Execute (Context.all, Input.all, Control);
-         Report_Normal_Return (Control.all);
-      exception
-         when Flyology.Cancellation.Operation_Cancelled =>
-            Report_Cancellation (Control.all);
-         when Occurrence : others =>
-            Report_Exception (Control.all, Occurrence);
-      end;
+      Execute (Context.all, Input.all, Control);
    end Subject_Task;
 
    function Create

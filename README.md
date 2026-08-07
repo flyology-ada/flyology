@@ -631,6 +631,11 @@ rings. Static trees validate dependencies and named cohorts, start in
 deterministic topological order, stop in reverse order, and coordinate isolated,
 cohort, or transitive-dependent recovery. Each restart constructs a fresh Ada
 task object under a local master; stale handles cannot control its replacement.
+`Task_Generations` consumes the task-owned result published by GNARL after
+finalization, so ordinary normal return, an escaping exception, and abnormal
+completion require no application reporting handler. Explicit reporting remains
+available only when application code catches and suppresses an outcome but wants
+supervision to classify it differently.
 The website has a focused [supervision guide](https://flyology.org/guide/supervision/).
 
 `Flyology.Capacity.Gate` admits a fixed number of concurrent holders. It offers

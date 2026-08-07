@@ -55,12 +55,15 @@ generic
 package Flyology.Supervision.Task_Generations is
 
    --  Construct, activate, observe, and join one application-defined task
-   --  object. The task body reports its terminal outcome through Control.
-   --  Tasking_Error from activation propagates because no task body was
-   --  available to report it. Any other Create exception also propagates. An
-   --  Initialize exception is copied as an Unhandled_Exception and requests
-   --  cooperative stop. Abort_Task is called at most once and only after the
-   --  supervisor's configured grace period requests abort.
+   --  object. Flyology.Task_Results automatically classifies normal return,
+   --  an exception escaping the task body, or abnormal completion after task
+   --  finalization; the task body does not need a reporting handler.
+   --  Tasking_Error from activation propagates because no task body began and
+   --  therefore no task result exists. Any other Create exception also
+   --  propagates. An Initialize exception is copied as an
+   --  Unhandled_Exception and requests cooperative stop. Abort_Task is called
+   --  at most once and only after the supervisor's configured grace period
+   --  requests abort.
    --  @param Context Application state retained through task finalization
    --  @param Control Fresh generation readiness, stop, and outcome channel
    --  @param Result Bounded outcome returned only after task termination

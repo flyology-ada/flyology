@@ -56,11 +56,14 @@ generic
 package Flyology.Supervision.Input_Task_Generations is
 
    --  Copy Input, construct the application-defined task, and return only
-   --  after its termination and task-body finalization. The task body reports
-   --  its terminal outcome through Control. Tasking_Error from activation
-   --  propagates, as does any other Create exception. An Initialize exception
-   --  is copied as an Unhandled_Exception and requests cooperative stop.
-   --  Abort_Task is called at most once after an abort request.
+   --  after its termination and task-body finalization. Flyology.Task_Results
+   --  automatically classifies normal return, an exception escaping the task
+   --  body, or abnormal completion; no reporting handler is required.
+   --  Tasking_Error from activation propagates because no task body began and
+   --  therefore no task result exists, as does any other Create exception. An
+   --  Initialize exception is copied as an Unhandled_Exception and requests
+   --  cooperative stop. Abort_Task is called at most once after an abort
+   --  request.
    --  @param Context Application state retained through task finalization
    --  @param Input Immutable value retained until the generation joins
    --  @param Control Fresh generation readiness, stop, and outcome channel

@@ -29,10 +29,11 @@ generic
 package Flyology.Supervision.Children is
 
    --  Create, activate, observe, and join one generation. Unhandled callback
-   --  exceptions are copied into Result rather than propagated. Tasking_Error
-   --  from activation is propagated because no generation body was available
-   --  to report it. An optional abort request is issued only when Control says
-   --  so and remains subject to ordinary Ada abort deferral.
+   --  exceptions are copied automatically into Result rather than propagated.
+   --  Tasking_Error from activation is propagated because no generation body
+   --  began and therefore no task result exists. An optional abort request is
+   --  issued only when Control says so and remains subject to ordinary Ada
+   --  abort deferral.
    --  @param Context Application state kept alive through the complete call
    --  @param Control Fresh generation control opened by the supervisor
    --  @param Result Bounded outcome available after the task has joined

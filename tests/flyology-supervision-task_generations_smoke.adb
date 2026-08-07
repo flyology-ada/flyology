@@ -41,6 +41,7 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    type Run_Mode is
      (Return_Normally,
       Raise_Exception,
+      Override_Exception,
       Initialize_Failure,
       Await_Stop,
       Await_Abort);
@@ -78,6 +79,13 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
                accept Application_Entry;
             when Raise_Exception =>
                raise Test_Failure with "application task failed";
+            when Override_Exception =>
+               begin
+                  raise Test_Failure with "translated application failure";
+               exception
+                  when Occurrence : others =>
+                     Report_Exception (Control.all, Occurrence);
+               end;
             when Initialize_Failure | Await_Stop =>
                loop
                   if Stop_Requested (Control.all) then
@@ -91,12 +99,6 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
                end loop;
          end case;
       end;
-      Report_Normal_Return (Control.all);
-   exception
-      when Flyology.Cancellation.Operation_Cancelled =>
-         Report_Cancellation (Control.all);
-      when Occurrence : others =>
-         Report_Exception (Control.all, Occurrence);
    end Service_Task;
 
    function Create
@@ -181,9 +183,20 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       pragma Assert (Result.Reported_Ready);
       pragma Assert (State.Began.Value = 1);
       pragma Assert (State.Finalized.Value = Expected_Finalizers);
-      if Mode in Raise_Exception | Initialize_Failure then
+      if Mode = Raise_Exception then
+         pragma Assert
+           (Result.Termination.Exception_Id = Ada.Exceptions.Null_Id);
+         pragma Assert
+           (Exception_Name_Text (Result.Termination) =
+              Ada.Exceptions.Exception_Name (Test_Failure'Identity));
+         pragma Assert
+           (Message_Text (Result.Termination) = "application task failed");
+      elsif Mode in Override_Exception | Initialize_Failure then
          pragma Assert
            (Result.Termination.Exception_Id = Test_Failure'Identity);
+         pragma Assert
+           (Exception_Name_Text (Result.Termination) =
+              Ada.Exceptions.Exception_Name (Test_Failure'Identity));
       end if;
    end Check_Service;
 
@@ -221,10 +234,6 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
          State.Observed.Increment;
          Mark_Ready (Control.all);
       end;
-      Report_Normal_Return (Control.all);
-   exception
-      when Occurrence : others =>
-         Report_Exception (Control.all, Occurrence);
    end Input_Task;
 
    function Create
@@ -264,6 +273,7 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
 begin
    Check_Service (Return_Normally, Normal_Return, 1);
    Check_Service (Raise_Exception, Unhandled_Exception, 1);
+   Check_Service (Override_Exception, Unhandled_Exception, 1);
    Check_Service (Initialize_Failure, Unhandled_Exception, 1);
    Check_Service (Await_Stop, Supervisor_Shutdown, 1);
    Check_Service (Await_Abort, Abnormal_Completion, 1);
