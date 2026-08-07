@@ -47,9 +47,9 @@ generic
    --  @return True only when dependents may use the service
    with function Ready (Item : Service) return Boolean is <>;
 
-   --  Concrete execution model for the generation and service-owner tasks.
+   --  Concrete execution model for the service-owner task.
    Generation_Model : Flyology.Execution_Model;
-   --  CPU aspect applied to the generation and service-owner tasks.
+   --  CPU aspect applied to the service-owner task.
    Generation_CPU : System.Multiprocessors.CPU_Range :=
      System.Multiprocessors.Not_A_Specific_CPU;
    --  Positive relative interval for readiness and stop observation.
