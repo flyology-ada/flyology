@@ -255,24 +255,20 @@ package Flyology.Supervision is
       Request_Abort     => False,
       Abort_Observation => Ada.Real_Time.Seconds (1));
 
-   --  Configured execution lane recorded by supervision policy. The task type
-   --  owns its actual CPU aspect and Task_Info designation.
-   --  @enum No_Lane No generation is running
-   --  @enum Lightweight_Lane Generation is a lightweight task
-   --  @enum Native_Lane Generation is a native task
-   type Lane_Kind is (No_Lane, Lightweight_Lane, Native_Lane);
-
    --  Complete static policy for one logical child.
    --  Restart_Safe is an explicit application acknowledgement that a fresh
    --  generation may safely reacquire its owned resources and resume use of
    --  shared state. Local automatic restart is rejected when it is False.
+   --  Task_Model must be explicitly Flyology.Lightweight_Task or
+   --  Flyology.Native_Task; Project_Default is rejected because supervision
+   --  cannot resolve it to a concrete model for placement validation.
    --  @field Restart Child-level replacement selection
    --  @field Impact Children affected by a local recovery incident
    --  @field Recovery Monotonic restart limits and delays
    --  @field Stopping Cooperative and optional abort policy
    --  @field Readiness_Timeout Maximum interval before explicit readiness
    --  @field Restart_Safe Application acknowledgement of restart safety
-   --  @field Lane Configured execution lane reported in snapshots
+   --  @field Task_Model Configured execution model reported in snapshots
    --  @field Has_Group Whether Group applies to a lightweight generation
    --  @field Group Configured lightweight execution group
    type Child_Specification is record
@@ -283,7 +279,7 @@ package Flyology.Supervision is
       Readiness_Timeout : Ada.Real_Time.Time_Span :=
         Ada.Real_Time.Seconds (30);
       Restart_Safe      : Boolean := False;
-      Lane              : Lane_Kind := No_Lane;
+      Task_Model        : Flyology.Execution_Model := Flyology.Project_Default;
       Has_Group         : Boolean := False;
       Group             : Flyology.Execution_Groups.Group_Id :=
         Flyology.Execution_Groups.Group_Id'First;
@@ -451,7 +447,7 @@ package Flyology.Supervision is
    --  @field Generation Exact child generation
    --  @field Before Lifecycle state before the event
    --  @field After Lifecycle state after the event
-   --  @field Lane Configured execution lane
+   --  @field Task_Model Configured execution model
    --  @field Has_Group Whether Group is meaningful
    --  @field Group Configured lightweight execution group
    --  @field Termination Bounded causal termination classification
@@ -465,7 +461,7 @@ package Flyology.Supervision is
       Generation  : Supervision.Generation := Supervision.Generation'First;
       Before      : Child_State := Configured;
       After       : Child_State := Configured;
-      Lane        : Lane_Kind := No_Lane;
+      Task_Model  : Flyology.Execution_Model := Flyology.Project_Default;
       Has_Group   : Boolean := False;
       Group       : Flyology.Execution_Groups.Group_Id :=
         Flyology.Execution_Groups.Group_Id'First;
@@ -483,7 +479,7 @@ package Flyology.Supervision is
    --  @field Id Stable logical identity
    --  @field Generation Current or most recently completed generation
    --  @field State Current lifecycle
-   --  @field Lane Configured task lane
+   --  @field Task_Model Configured task execution model
    --  @field Has_Group Whether Group is meaningful for a lightweight task
    --  @field Group Configured lightweight execution group
    --  @field Termination Last bounded termination information
@@ -496,7 +492,7 @@ package Flyology.Supervision is
       Id          : Child_Id;
       Generation  : Supervision.Generation;
       State       : Child_State;
-      Lane        : Lane_Kind;
+      Task_Model  : Flyology.Execution_Model;
       Has_Group   : Boolean;
       Group       : Flyology.Execution_Groups.Group_Id;
       Termination : Termination_Summary;

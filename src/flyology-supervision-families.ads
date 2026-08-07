@@ -10,7 +10,7 @@ with System.Multiprocessors;
 --  @formal Application_Context Shared family state
 --  @formal Run_One_Generation Typed synchronous generation factory, normally
 --  an instance of Supervision.Input_Task_Generations.Run
---  @formal Policy Common restart, stop, readiness, and lane policy
+--  @formal Policy Common restart, stop, readiness, and task-model policy
 --  @formal First_Child_Id First logical id in the family's contiguous range
 --  @formal Maximum_Children Fixed slot and admission capacity
 --  @formal Control_Group Shared lightweight execution group for managers

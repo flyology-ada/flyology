@@ -512,6 +512,14 @@ partial operation, how external effects are made idempotent or reconciled, and
 which resources are generation-owned. A child without this acknowledgement can
 use `Never` or `Escalate`, not local automatic restart.
 
+The specification reuses Flyology's existing task vocabulary through
+`Task_Model : Flyology.Execution_Model`. A controller accepts only the stable
+`Flyology.Lightweight_Task` and `Flyology.Native_Task` constants. It rejects
+`Project_Default` and foreign `Task_Info` values because it cannot resolve them
+to an unambiguous model for group validation or bounded observations. This is
+configuration metadata; the application task's `Task_Info` and `CPU` aspects
+remain authoritative and must agree with it.
+
 ## Control-plane placement
 
 A failed lightweight child must not starve its manager on the same cooperative
@@ -523,7 +531,7 @@ share that group, so this costs one event-loop pthread per process when first
 used, not one pthread per supervisor. Managers run only bounded policy steps.
 `Run_One_Generation`, `Initialize`, identity, and abort adapters must also be
 bounded or suspend promptly; the service loop and task cleanup run in the
-application task's declared lane and group.
+application task's declared execution model and group.
 
 This is initially an application/runtime-configuration contract. An unrelated
 task could still explicitly select the reserved group. If experience shows that
@@ -535,7 +543,7 @@ for the task lifecycle itself.
 
 Both controllers own one fixed snapshot per logical child and a generic-sized
 event ring. Each event copies a monotonic sequence and timestamp, logical id,
-generation, state before and after, configured lane and group, termination
+generation, state before and after, configured task model and group, termination
 kind, incident and attempt context, and admitted backoff. The snapshot retains
 the bounded termination summary, diagnostic Ada task id, readiness/live flags,
 attempt total, last backoff, and escalation flag.
@@ -630,7 +638,7 @@ function Specification (Id : Service_Id) return Child_Specification is
                   Request_Abort => False,
                   Abort_Observation => Ada.Real_Time.Time_Span_Zero),
    Recovery   => Metrics_Recovery_Limits,
-   Lane       => Lightweight_Lane,
+   Task_Model => Flyology.Lightweight_Task,
    Has_Group  => True,
    Group      => 2,
    others     => <>);

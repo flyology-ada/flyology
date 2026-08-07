@@ -7,6 +7,7 @@ package body Flyology.Supervision.Static is
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
    use type Ada.Exceptions.Exception_Id;
+   use type Flyology.Execution_Model;
    use type Interfaces.Unsigned_64;
 
    package Policy renames Flyology.Supervision_Policy;
@@ -90,7 +91,7 @@ package body Flyology.Supervision.Static is
               (Id          => Child_Ids (Child),
                Generation  => Generation'First,
                State       => Flyology.Supervision.Configured,
-               Lane        => Child_Specs (Child).Lane,
+               Task_Model  => Child_Specs (Child).Task_Model,
                Has_Group   => Child_Specs (Child).Has_Group,
                Group       => Child_Specs (Child).Group,
                Termination => Empty_Summary (No_Termination),
@@ -144,7 +145,7 @@ package body Flyology.Supervision.Static is
             Generation  => Snapshots (Child).Generation,
             Before      => Before,
             After       => After,
-            Lane        => Child_Specs (Child).Lane,
+            Task_Model  => Child_Specs (Child).Task_Model,
             Has_Group   => Child_Specs (Child).Has_Group,
             Group       => Child_Specs (Child).Group,
             Termination => Termination,
@@ -1017,12 +1018,14 @@ package body Flyology.Supervision.Static is
            or else Specs (Child).Stopping.Grace >
              Ada.Real_Time.Time_Span_Last -
                Specs (Child).Stopping.Abort_Observation
-           or else Specs (Child).Lane = No_Lane
            or else
-             (Specs (Child).Lane = Native_Lane
+             (Specs (Child).Task_Model /= Flyology.Lightweight_Task
+              and then Specs (Child).Task_Model /= Flyology.Native_Task)
+           or else
+             (Specs (Child).Task_Model = Flyology.Native_Task
               and then Specs (Child).Has_Group)
            or else
-             (Specs (Child).Lane = Lightweight_Lane
+             (Specs (Child).Task_Model = Flyology.Lightweight_Task
               and then Specs (Child).Has_Group
               and then Integer (Specs (Child).Group) =
                 Integer (Control_Group))
@@ -1150,7 +1153,7 @@ package body Flyology.Supervision.Static is
         (Id          => Logical_Id (Child),
          Generation  => Generation'First,
          State       => Flyology.Supervision.Configured,
-         Lane        => Spec.Lane,
+         Task_Model  => Spec.Task_Model,
          Has_Group   => Spec.Has_Group,
          Group       => Spec.Group,
          Termination => Empty_Summary (No_Termination),

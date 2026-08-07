@@ -9,6 +9,7 @@ with System.Multiprocessors;
 procedure Flyology.Supervision.Static_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Task_Identification.Task_Id;
+   use type Flyology.Execution_Model;
    use type Flyology.Supervision.Generation;
 
    Test_Failure : exception;
@@ -171,7 +172,7 @@ procedure Flyology.Supervision.Static_Smoke is
             Abort_Observation => Ada.Real_Time.Seconds (1)),
          Readiness_Timeout => Ada.Real_Time.Seconds (1),
          Restart_Safe      => True,
-         Lane              => Flyology.Supervision.Native_Lane,
+         Task_Model        => Flyology.Native_Task,
          Has_Group         => False,
          Group             => 0);
    end Restart_Specification;
@@ -366,7 +367,7 @@ procedure Flyology.Supervision.Static_Smoke is
          Stopping          => Flyology.Supervision.Default_Stop_Policy,
          Readiness_Timeout => Ada.Real_Time.Seconds (1),
          Restart_Safe      => True,
-         Lane              => Flyology.Supervision.Native_Lane,
+         Task_Model        => Flyology.Native_Task,
          Has_Group         => False,
          Group             => 0);
    end Dependency_Specification;
@@ -482,7 +483,7 @@ procedure Flyology.Supervision.Static_Smoke is
          Stopping          => Flyology.Supervision.Default_Stop_Policy,
          Readiness_Timeout => Ada.Real_Time.Milliseconds (5),
          Restart_Safe      => False,
-         Lane              => Flyology.Supervision.Native_Lane,
+         Task_Model        => Flyology.Native_Task,
          Has_Group         => False,
          Group             => 0);
    end Readiness_Specification;
@@ -502,10 +503,20 @@ procedure Flyology.Supervision.Static_Smoke is
             Abort_Observation => Ada.Real_Time.Milliseconds (1)),
          Readiness_Timeout => Ada.Real_Time.Seconds (1),
          Restart_Safe      => False,
-         Lane              => Flyology.Supervision.Native_Lane,
+         Task_Model        => Flyology.Native_Task,
          Has_Group         => False,
          Group             => 0);
    end Stuck_Specification;
+
+   function Default_Model_Specification
+     (Child : Edge_Kind) return Flyology.Supervision.Child_Specification
+   is
+      Value : Flyology.Supervision.Child_Specification :=
+        Readiness_Specification (Child);
+   begin
+      Value.Task_Model := Flyology.Project_Default;
+      return Value;
+   end Default_Model_Specification;
 
    function No_Edge_Dependency
      (Child        : Edge_Kind;
@@ -553,6 +564,15 @@ procedure Flyology.Supervision.Static_Smoke is
       Cohort_Member      => Edge_Cohort,
       Run_One_Generation => Run_Edge_Generation);
 
+   package Default_Model_Supervisors is new Flyology.Supervision.Static
+     (Child_Kind         => Edge_Kind,
+      Application_Context => Edge_Context,
+      Logical_Id         => Edge_Id,
+      Specification      => Default_Model_Specification,
+      Depends_On         => No_Edge_Dependency,
+      Cohort_Member      => Edge_Cohort,
+      Run_One_Generation => Run_Edge_Generation);
+
    procedure Run_Activation_Failure
      (Context : aliased in out Edge_Context;
       Child   : Edge_Kind;
@@ -595,7 +615,7 @@ procedure Flyology.Supervision.Static_Smoke is
          Stopping          => Flyology.Supervision.Default_Stop_Policy,
          Readiness_Timeout => Ada.Real_Time.Seconds (1),
          Restart_Safe      => False,
-         Lane              => Flyology.Supervision.Native_Lane,
+         Task_Model        => Flyology.Native_Task,
          Has_Group         => False,
          Group             => 0);
    end Nested_Specification;
@@ -761,6 +781,8 @@ begin
         (Item, Cursor, Events, Count, Dropped);
       pragma Assert (Dropped = 0);
       for Index in 1 .. Count loop
+         pragma Assert
+           (Events (Index).Task_Model = Flyology.Native_Task);
          if Events (Index).Kind = Flyology.Supervision.Restart_Admitted then
             Admitted := Admitted + 1;
             if Admitted = 1 then
@@ -988,6 +1010,22 @@ begin
       pragma Assert
         (Readiness_Supervisors.Current (Item, Edge_Service).State =
            Flyology.Supervision.Joined);
+      pragma Assert
+        (Readiness_Supervisors.Current
+           (Item, Edge_Service).Task_Model = Flyology.Native_Task);
+   end;
+
+   declare
+      Context : aliased Edge_Context (Readiness_Case);
+      Item    : aliased Default_Model_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+   begin
+      begin
+         Default_Model_Supervisors.Run (Item, Context, Result);
+         raise Program_Error with "Project_Default task model was accepted";
+      exception
+         when Default_Model_Supervisors.Configuration_Error => null;
+      end;
    end;
 
    declare

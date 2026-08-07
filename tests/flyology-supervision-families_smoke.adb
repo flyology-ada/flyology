@@ -9,6 +9,7 @@ with System.Multiprocessors;
 procedure Flyology.Supervision.Families_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
+   use type Flyology.Execution_Model;
    use type Interfaces.Unsigned_64;
 
    Test_Failure : exception;
@@ -116,7 +117,7 @@ procedure Flyology.Supervision.Families_Smoke is
       Stopping          => Flyology.Supervision.Default_Stop_Policy,
       Readiness_Timeout => Ada.Real_Time.Seconds (1),
       Restart_Safe      => True,
-      Lane              => Flyology.Supervision.Native_Lane,
+      Task_Model        => Flyology.Native_Task,
       Has_Group         => False,
       Group             => 0);
 
@@ -181,6 +182,8 @@ begin
    First := Families.Latest (Item, Flyology.Supervision.Child (First));
 
    pragma Assert (State.Started.Value (1) = 2);
+   pragma Assert
+     (Families.Current (Item, First).Task_Model = Flyology.Native_Task);
    Families.Stop (Item, First);
    loop
       exit when Families.Current (Item, First).State =
@@ -247,6 +250,7 @@ begin
    for Index in Events'First + 1 .. Events'Last loop
       pragma Assert
         (Events (Index - 1).Sequence < Events (Index).Sequence);
+      pragma Assert (Events (Index).Task_Model = Flyology.Native_Task);
    end loop;
    pragma Assert
      (Result.Outcome = Flyology.Supervision.Shutdown_Completed);

@@ -7,6 +7,7 @@ with Interfaces;
 package body Flyology.Supervision.Families is
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
+   use type Flyology.Execution_Model;
    use type Interfaces.Unsigned_64;
 
    function Empty_Summary
@@ -74,7 +75,7 @@ package body Flyology.Supervision.Families is
               (Id          => Logical_Id (Slot),
                Generation  => Generation'First,
                State       => Flyology.Supervision.Configured,
-               Lane        => Policy.Lane,
+               Task_Model  => Policy.Task_Model,
                Has_Group   => Policy.Has_Group,
                Group       => Policy.Group,
                Termination => Empty_Summary (No_Termination),
@@ -128,7 +129,7 @@ package body Flyology.Supervision.Families is
             Generation  => Snapshots (Slot).Generation,
             Before      => Before,
             After       => After,
-            Lane        => Policy.Lane,
+            Task_Model  => Policy.Task_Model,
             Has_Group   => Policy.Has_Group,
             Group       => Policy.Group,
             Termination => Termination,
@@ -762,7 +763,7 @@ package body Flyology.Supervision.Families is
            (Id          => Child,
             Generation  => Generation'First,
             State       => Flyology.Supervision.Configured,
-            Lane        => Policy.Lane,
+            Task_Model  => Policy.Task_Model,
             Has_Group   => Policy.Has_Group,
             Group       => Policy.Group,
             Termination => Empty_Summary (No_Termination),
@@ -864,7 +865,9 @@ package body Flyology.Supervision.Families is
       if Interfaces.Unsigned_64 (Maximum_Children - 1) >
         Interfaces.Unsigned_64'Last -
           Interfaces.Unsigned_64 (First_Child_Id)
-        or else Policy.Lane = No_Lane
+        or else
+          (Policy.Task_Model /= Flyology.Lightweight_Task
+           and then Policy.Task_Model /= Flyology.Native_Task)
         or else Policy.Impact not in Isolate_Child | Escalate
         or else
           (Policy.Restart /= Never and then not Policy.Restart_Safe)
@@ -884,9 +887,10 @@ package body Flyology.Supervision.Families is
         or else Policy.Stopping.Grace > Ada.Real_Time.Time_Span_Last -
           Policy.Stopping.Abort_Observation
         or else
-          (Policy.Lane = Native_Lane and then Policy.Has_Group)
+          (Policy.Task_Model = Flyology.Native_Task
+           and then Policy.Has_Group)
         or else
-          (Policy.Lane = Lightweight_Lane
+          (Policy.Task_Model = Flyology.Lightweight_Task
            and then Policy.Has_Group
            and then Integer (Policy.Group) = Integer (Control_Group))
       then

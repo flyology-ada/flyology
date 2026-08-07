@@ -631,6 +631,9 @@ rings. Static trees validate dependencies and named cohorts, start in
 deterministic topological order, stop in reverse order, and coordinate isolated,
 cohort, or transitive-dependent recovery. Each restart constructs a fresh Ada
 task object under a local master; stale handles cannot control its replacement.
+Child policies reuse `Flyology.Lightweight_Task` or `Flyology.Native_Task` as
+an explicit `Task_Model` for placement validation and observation; the task
+type's actual `Task_Info` and `CPU` aspects remain authoritative.
 `Task_Generations` consumes the task-owned result published by GNARL after
 finalization, so ordinary normal return, an escaping exception, and abnormal
 completion require no application reporting handler. Explicit reporting remains
