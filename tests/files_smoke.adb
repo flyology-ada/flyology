@@ -3,6 +3,7 @@ with Ada.Environment_Variables;
 with Ada.Streams;
 with Ada.Text_IO;
 with Flyology;
+with Flyology.Buffers;
 with Flyology.IO;
 with Flyology.IO.Files;
 with Interfaces.C;
@@ -32,6 +33,134 @@ procedure Files_Smoke is
       end if;
    end Remove_Test_File;
 
+   --  Outcome codes shared by the zero-timeout readers. They are reported
+   --  through an atomic scalar because the reader may be a lightweight task.
+   Read_Succeeded : constant Natural := 1;
+   Read_Timed_Out : constant Natural := 2;
+   Read_Failed    : constant Natural := 3;
+
+   procedure Report (Outcome : Natural; Description : String) is
+   begin
+      case Outcome is
+         when Read_Succeeded =>
+            null;
+         when Read_Timed_Out =>
+            raise Program_Error with
+              Description & " raised Timeout_Error without attempting the read";
+         when others =>
+            raise Program_Error with Description & " did not return the data";
+      end case;
+   end Report;
+
+   --  A zero Timeout is an immediate attempt everywhere else in the library
+   --  (Flyology.IO.Wait, Flyology.Buffers.Acquire_For, the connection layer's
+   --  zero-remaining paths). A positional read has no readiness wait, so the
+   --  immediate attempt must run and its result must win.
+   procedure Check_Immediate_Array_Read
+     (Lane : String;
+      Kind : Flyology.Execution_Model)
+   is
+      Outcome : Natural := 0 with Atomic;
+
+      task type Reader is
+         pragma Task_Info (Kind);
+      end Reader;
+
+      task body Reader is
+         Buffer : Stream_Element_Array (Data'Range);
+         Stop   : Stream_Element_Offset;
+      begin
+         Flyology.IO.Files.Read_At (File, 0, Buffer, Stop, Timeout => 0.0);
+         Outcome :=
+           (if Stop = Buffer'Last and then Buffer = Data
+            then Read_Succeeded
+            else Read_Failed);
+      exception
+         when Flyology.IO.Files.Timeout_Error => Outcome := Read_Timed_Out;
+         when others => Outcome := Read_Failed;
+      end Reader;
+   begin
+      declare
+         Worker : Reader;
+      begin
+         --  Leaving the block waits for Worker to terminate.
+         null;
+      end;
+      Report (Outcome, "zero-timeout Read_At on " & Lane);
+   end Check_Immediate_Array_Read;
+
+   procedure Check_Immediate_Buffer_Read
+     (Lane : String;
+      Kind : Flyology.Execution_Model)
+   is
+      Outcome : Natural := 0 with Atomic;
+
+      task type Reader is
+         pragma Task_Info (Kind);
+      end Reader;
+
+      task body Reader is
+         Storage : aliased Flyology.Buffers.Pool
+           (Block_Size => Data'Length, Capacity => 1);
+         Item    : Flyology.Buffers.Unique_Buffer (Storage'Access);
+         Count   : Natural;
+
+         procedure Compare (Payload : Stream_Element_Array) is
+         begin
+            Outcome :=
+              (if Payload = Data then Read_Succeeded else Read_Failed);
+         end Compare;
+      begin
+         Flyology.Buffers.Acquire (Item);
+         Flyology.IO.Files.Read_At (File, 0, Item, Count, Timeout => 0.0);
+         if Count /= Data'Length then
+            Outcome := Read_Failed;
+         else
+            Flyology.Buffers.With_Readable_Data (Item, Compare'Access);
+         end if;
+         Flyology.Buffers.Release (Item);
+      exception
+         when Flyology.IO.Files.Timeout_Error => Outcome := Read_Timed_Out;
+         when others => Outcome := Read_Failed;
+      end Reader;
+   begin
+      declare
+         Worker : Reader;
+      begin
+         --  Leaving the block waits for Worker to terminate.
+         null;
+      end;
+      Report (Outcome, "zero-timeout unique-buffer Read_At on " & Lane);
+   end Check_Immediate_Buffer_Read;
+
+   --  Zero remains a deadline value, so the guards that precede any I/O keep
+   --  precedence over the immediate attempt.
+   procedure Check_Immediate_Read_Guards is
+      Token  : aliased Flyology.IO.Files.Cancellation_Token;
+      Buffer : Stream_Element_Array (Data'Range);
+      Empty  : Stream_Element_Array (1 .. 0);
+      Stop   : Stream_Element_Offset;
+      Caught : Boolean := False;
+   begin
+      Flyology.IO.Files.Read_At (File, 0, Empty, Stop, Timeout => 0.0);
+      if Stop /= Empty'First - 1 then
+         raise Program_Error with
+           "zero-length zero-timeout Read_At reported a transfer";
+      end if;
+
+      Token.Request;
+      begin
+         Flyology.IO.Files.Read_At
+           (File, 0, Buffer, Stop, Timeout => 0.0, Token => Token'Access);
+      exception
+         when Flyology.IO.Files.Operation_Cancelled => Caught := True;
+      end;
+      if not Caught then
+         raise Program_Error with
+           "pre-cancelled zero-timeout Read_At was not cancelled";
+      end if;
+   end Check_Immediate_Read_Guards;
+
 begin
    Remove_Test_File;
 
@@ -49,6 +178,14 @@ begin
    if Last /= Incoming'Last or else Incoming /= Data then
       raise Program_Error with "read/write create returned a write-only fd";
    end if;
+
+   Check_Immediate_Array_Read ("a native task", Flyology.Native_Task);
+   Check_Immediate_Array_Read
+     ("a lightweight task", Flyology.Lightweight_Task);
+   Check_Immediate_Buffer_Read ("a native task", Flyology.Native_Task);
+   Check_Immediate_Buffer_Read
+     ("a lightweight task", Flyology.Lightweight_Task);
+   Check_Immediate_Read_Guards;
 
    declare
       Batch_Size : constant Positive := 64;

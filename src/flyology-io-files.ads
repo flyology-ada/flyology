@@ -83,7 +83,12 @@ package Flyology.IO.Files is
    --  requests kernel cancellation and does not return until the kernel has
    --  relinquished Item. A native pread cannot be interrupted after entry, so
    --  timeout delivery may be delayed until that syscall returns. Negative
-   --  Timeout waits without a deadline and zero is immediate.
+   --  Timeout waits without a deadline. Zero is one immediate attempt whose
+   --  result wins, matching Flyology.IO.Wait and Flyology.Buffers.Acquire_For:
+   --  a positional read has no readiness wait, so the attempt runs and returns
+   --  transferred bytes, end of file, or a failure rather than Timeout_Error.
+   --  Zero still bounds only readiness, not device latency, so a page-cache
+   --  miss may occupy the caller for the duration of the disk read.
    --  @param File Open descriptor permitting reads
    --  @param Offset Starting byte position
    --  @param Item Destination buffer
@@ -93,7 +98,8 @@ package Flyology.IO.Files is
    --  @exception Device_Error Submission, completion, or pread reports failure
    --  @exception Operation_Cancelled Token cancellation reaches a terminal
    --     state
-   --  @exception Timeout_Error Deadline cancellation reaches a terminal state
+   --  @exception Timeout_Error Deadline cancellation reaches a terminal state;
+   --     never raised for a zero or negative Timeout
    procedure Read_At
      (File    : File_Descriptor;
       Offset  : File_Offset;
@@ -123,7 +129,7 @@ package Flyology.IO.Files is
 
    --  Read positionally into a unique buffer within one relative deadline.
    --  Timeout, cancellation, and terminal buffer ownership match the array
-   --  overload.
+   --  overload, including the zero-Timeout immediate attempt.
    --  @param File Open descriptor permitting reads
    --  @param Offset Starting byte position
    --  @param Item Acquired destination buffer
@@ -133,7 +139,8 @@ package Flyology.IO.Files is
    --  @exception Device_Error Submission, completion, or pread reports failure
    --  @exception Operation_Cancelled Token cancellation reaches a terminal
    --     state
-   --  @exception Timeout_Error Deadline cancellation reaches a terminal state
+   --  @exception Timeout_Error Deadline cancellation reaches a terminal state;
+   --     never raised for a zero or negative Timeout
    procedure Read_At
      (File    : File_Descriptor;
       Offset  : File_Offset;

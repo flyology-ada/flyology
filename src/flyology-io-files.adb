@@ -1,5 +1,6 @@
 with GNAT.OS_Lib;
 with Flyology.File_Open_Policy;
+with Flyology.File_Timeout_Policy;
 with System;
 with System.OS_Constants;
 
@@ -236,16 +237,24 @@ package body Flyology.IO.Files is
       Item    : out Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration;
-      Token   : access Cancellation_Token := null) is
+      Token   : access Cancellation_Token := null)
+   is
+      use type Flyology.File_Timeout_Policy.Read_Disposition;
    begin
       Last := Item'First - 1;
       if Item'Length = 0 then
          return;
       elsif Token /= null and then Token.Requested then
          raise Operation_Cancelled;
-      elsif Timeout = 0.0 then
-         raise Timeout_Error;
-      elsif Timeout < 0.0 then
+      elsif Flyology.File_Timeout_Policy.Classify (Timeout) =
+        Flyology.File_Timeout_Policy.Read_Immediately
+      then
+         --  A negative Timeout waits without a deadline. Zero is the
+         --  library-wide immediate attempt, and a positional read has no
+         --  readiness wait to abandon: the kernel either transfers bytes or
+         --  reports end of file or an error. Arming a deadline around that
+         --  attempt could only discard a result the caller asked for, so both
+         --  cases run the untimed read and let its outcome win.
          Read_At (File, Offset, Item, Last, Token);
       else
          select
