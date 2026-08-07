@@ -1051,18 +1051,22 @@ package body Flyology.IO.Connections is
          null;
       end;
 
-      if not Outcome.Leader then
-         if Outcome.FD >= 0 then
+      case Policy.Classify_Close
+        (Leader          => Outcome.Leader,
+         Descriptor_Open => Outcome.FD >= 0,
+         Cleanup_Failed  => Outcome.Failed,
+         Provider_Failed => Outcome.Provider_Error)
+      is
+         when Policy.Close_Finished =>
+            null;
+         when Policy.Await_Leader =>
             Item.Controller.Await_Closed;
-         end if;
-         return;
-      end if;
-
-      if Outcome.Failed then
-         Ada.Exceptions.Reraise_Occurrence (Outcome.Failure);
-      elsif Outcome.Provider_Error then
-         raise TLS.TLS_Error with "TLS provider session finalization failed";
-      end if;
+         when Policy.Raise_Cleanup_Failure =>
+            Ada.Exceptions.Reraise_Occurrence (Outcome.Failure);
+         when Policy.Raise_Provider_Error =>
+            raise TLS.TLS_Error with
+              "TLS provider session finalization failed";
+      end case;
    end Close;
 
    function Is_Open (Item : Connection) return Boolean is

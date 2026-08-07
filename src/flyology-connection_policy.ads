@@ -47,6 +47,29 @@ is
       Started : Natural) return Boolean
    with Post => Close_Wake_Required'Result = (Leader and then Started > 0);
 
+   --  Terminal report a Close caller owes its caller once the abort-deferred
+   --  close guard has run. A non-leader either waits for the leader or finds
+   --  the connection already closed; a leader reports the first cleanup
+   --  failure ahead of a provider finalization failure.
+   type Close_Report is
+     (Close_Finished,
+      Await_Leader,
+      Raise_Cleanup_Failure,
+      Raise_Provider_Error);
+
+   function Classify_Close
+     (Leader          : Boolean;
+      Descriptor_Open : Boolean;
+      Cleanup_Failed  : Boolean;
+      Provider_Failed : Boolean) return Close_Report
+   with Post =>
+     (if not Leader
+      then Classify_Close'Result =
+        (if Descriptor_Open then Await_Leader else Close_Finished)
+      elsif Cleanup_Failed then Classify_Close'Result = Raise_Cleanup_Failure
+      elsif Provider_Failed then Classify_Close'Result = Raise_Provider_Error
+      else Classify_Close'Result = Close_Finished);
+
    --  A connection bound to an admission controller may only be admitted
    --  through that controller; an unbound connection accepts any.
    function Binding_Accepted

@@ -39,6 +39,18 @@ is
    is
      (Leader and then Started > 0);
 
+   function Classify_Close
+     (Leader          : Boolean;
+      Descriptor_Open : Boolean;
+      Cleanup_Failed  : Boolean;
+      Provider_Failed : Boolean) return Close_Report
+   is
+     (if not Leader
+      then (if Descriptor_Open then Await_Leader else Close_Finished)
+      elsif Cleanup_Failed then Raise_Cleanup_Failure
+      elsif Provider_Failed then Raise_Provider_Error
+      else Close_Finished);
+
    function Binding_Accepted
      (Bound   : Boolean;
       Matches : Boolean) return Boolean
