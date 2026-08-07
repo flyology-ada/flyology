@@ -16,11 +16,13 @@ project Flyology is
    TLS_Test_Hooks : TLS_Test_Hooks_Type :=
      external ("FLYOLOGY_TLS_TEST_HOOKS", "false");
    TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=0";
+   TLS_Ada_Test_Hook_Switch := "-gnateDFLYOLOGY_TLS_TEST_HOOKS=False";
    case TLS_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
          TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=1";
+         TLS_Ada_Test_Hook_Switch := "-gnateDFLYOLOGY_TLS_TEST_HOOKS=True";
    end case;
 
    type Connection_Test_Hooks_Type is ("false", "true");
@@ -157,7 +159,7 @@ project Flyology is
         Flyology_Config.Ada_Compiler_Switches
         & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
            Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
-           Wall_Clock_Test_Hook_Switch);
+           Wall_Clock_Test_Hook_Switch, TLS_Ada_Test_Hook_Switch);
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
          Wall_Clock_C_Test_Hook_Switch);

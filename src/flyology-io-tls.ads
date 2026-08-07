@@ -168,6 +168,9 @@ package Flyology.IO.TLS is
    --  hostname verification. Provider libraries are selected by Backend and
    --  may differ between connections. If setup fails, Socket keeps ownership,
    --  but its descriptor may already have been changed to nonblocking mode.
+   --  The transfer is atomic with respect to task abort: an abort delivered
+   --  during it leaves either Item owning both the session and the socket or
+   --  Socket keeping ownership with no provider session left behind.
    --  Take must not run concurrently with any other operation on Item.
    --  @param Backend Initialized TLS provider
    --  @param Socket Connected socket transferred on success

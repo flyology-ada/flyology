@@ -28,6 +28,31 @@ package body Flyology.IO.TLS is
    procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
    pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
 
+#if FLYOLOGY_TLS_TEST_HOOKS then
+   --  Test-only barriers that widen the Take ownership-transfer window so a
+   --  test can deliver an abort inside it. Production builds compile every
+   --  call below away.
+   function Test_Barrier_Arrive
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_tls_barrier_arrive";
+   function Test_Barrier_Released
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_tls_barrier_released";
+
+   procedure Test_Barrier (Point : Interfaces.C.int) is
+   begin
+      if Test_Barrier_Arrive (Point) /= 0 then
+         while Test_Barrier_Released (Point) = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Barrier;
+#end if;
+
    type Close_Outcome is record
       FD               : Descriptor := Invalid_Descriptor;
       Generation       : Descriptor_Generation := 0;
@@ -416,12 +441,54 @@ package body Flyology.IO.TLS is
         (FD : Descriptor) return Session_Access;
       Item        : in out Connection)
    is
-      FD          : Descriptor;
-      New_Session : Session_Access := null;
+      FD          : Descriptor := Invalid_Descriptor;
+      Transferred : Boolean := False;
+
+      --  Creating the session and transferring the descriptor, the session,
+      --  and the socket must not be observable in a half-completed state. Ada
+      --  task abort is not an exception, so a handler cannot undo it; RM 9.8
+      --  instead defers abort for the whole of a controlled object's
+      --  Initialize. Running the transfer there makes an abort deliverable
+      --  only before the session exists or after Item owns everything, which
+      --  is the same technique Close uses for its two close transitions.
+      type Transfer_Guard is
+        new Ada.Finalization.Limited_Controlled with null record;
+
+      overriding procedure Initialize (Guard : in out Transfer_Guard);
+
+      overriding procedure Initialize (Guard : in out Transfer_Guard) is
+         pragma Unreferenced (Guard);
+         New_Session : Session_Access := null;
+      begin
+         New_Session := Factory (FD);
+#if FLYOLOGY_TLS_TEST_HOOKS then
+         Test_Barrier (0);
+#end if;
+         if New_Session = null then
+            return;
+         end if;
+
+         begin
+            Item.Controller.Adopt (FD);
+         exception
+            when others =>
+               Free (New_Session);
+               raise;
+         end;
+#if FLYOLOGY_TLS_TEST_HOOKS then
+         Test_Barrier (1);
+#end if;
+         --  Nothing below can fail: Move only rejects an open target, and the
+         --  caller precondition above rejects one. The connection therefore
+         --  never keeps a descriptor it cannot close.
+         Sockets.Move (Socket, Item.Socket);
+         Item.Session := New_Session;
+         Transferred := True;
+      end Initialize;
    begin
       if not Sockets.Is_Open (Socket) then
          raise Program_Error with "cannot give TLS a closed socket";
-      elsif Is_Open (Item) then
+      elsif Is_Open (Item) or else Sockets.Is_Open (Item.Socket) then
          raise Program_Error with "TLS connection already owns a socket";
       elsif Side = Client and then Server_Name'Length = 0 then
          raise Program_Error with "TLS client requires a server name";
@@ -434,20 +501,17 @@ package body Flyology.IO.TLS is
       Flyology.IO.Sockets.Prepare (Socket);
       FD := Flyology.IO.Sockets.Native_Descriptor (Socket);
       Disable_SIGPIPE (Interfaces.C.int (FD));
-      New_Session := Factory (FD);
-      if New_Session = null then
+
+      declare
+         Guard : Transfer_Guard;
+         pragma Unreferenced (Guard);
+      begin
+         null;
+      end;
+
+      if not Transferred then
          raise TLS_Error with Name (Backend) & " returned no TLS session";
       end if;
-
-      begin
-         Item.Controller.Adopt (FD);
-         Item.Session := New_Session;
-         Sockets.Move (Socket, Item.Socket);
-      exception
-         when others =>
-            Free (New_Session);
-            raise;
-      end;
    end Take_With_Factory;
 
    procedure Take

@@ -130,6 +130,7 @@ project Runtime_Smoke is
       "topology_smoke.adb",
       "tls_smoke.adb",
       "tls_alpn_smoke.adb",
+      "tls_take_abort.adb",
       "tls_state_model.adb",
       "tcp_native_smoke.adb",
       "wake_source_state_model.adb",
