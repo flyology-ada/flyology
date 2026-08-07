@@ -400,6 +400,28 @@ static atomic_uint flyology_uring_identity_counts[2];
 static atomic_uint flyology_uring_admin_completions;
 static atomic_uint flyology_uring_cq_capacity;
 
+/* Memory orders an Ada caller actually handed to the atomic-store bridge.
+   Slot FLYOLOGY_MEMORY_MODEL_SLOTS - 1 collects every value outside the
+   __ATOMIC_* range, which is what an import that omits the model argument
+   leaves in the third argument register. */
+#define FLYOLOGY_MEMORY_MODEL_SLOTS 7
+
+static atomic_uint
+    flyology_atomic_store_models[FLYOLOGY_MEMORY_MODEL_SLOTS];
+
+static unsigned flyology_memory_model_slot(int model) {
+    if (model < 0 || model > 5) {
+        return FLYOLOGY_MEMORY_MODEL_SLOTS - 1;
+    }
+    return (unsigned)model;
+}
+
+unsigned flyology_test_atomic_store_model_count(int model) {
+    return atomic_load_explicit(
+        &flyology_atomic_store_models[flyology_memory_model_slot(model)],
+        memory_order_relaxed);
+}
+
 void flyology_test_note_uring_cq_capacity(unsigned capacity) {
     atomic_store_explicit(&flyology_uring_cq_capacity, capacity,
                           memory_order_relaxed);
@@ -491,6 +513,10 @@ void flyology_test_fault_reset(void) {
                           memory_order_relaxed);
     atomic_store_explicit(&flyology_uring_admin_completions, 0,
                           memory_order_relaxed);
+    for (unsigned slot = 0; slot < FLYOLOGY_MEMORY_MODEL_SLOTS; ++slot) {
+        atomic_store_explicit(&flyology_atomic_store_models[slot], 0,
+                              memory_order_relaxed);
+    }
 }
 
 int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
@@ -564,6 +590,11 @@ void flyology_test_release_final_reaper(void) {
     }
 }
 #else
+unsigned flyology_test_atomic_store_model_count(int model) {
+    (void)model;
+    return 0;
+}
+
 void flyology_test_note_uring_identity(int reused) {
     (void)reused;
 }
@@ -790,6 +821,14 @@ int flyology_cold_pages(void *address, size_t length) {
 #endif
 }
 
+/* Production builds contain only the store. Fault-enabled test runtimes also
+   record the memory order the Ada caller supplied, so an import that does not
+   pass one is caught instead of silently degrading publication ordering. */
 void flyology_atomic_store_u32(void *address, uint32_t value, int model) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    atomic_fetch_add_explicit(
+        &flyology_atomic_store_models[flyology_memory_model_slot(model)], 1,
+        memory_order_relaxed);
+#endif
     __atomic_store_n((uint32_t *)address, value, model);
 }

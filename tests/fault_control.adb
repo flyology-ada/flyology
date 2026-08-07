@@ -48,6 +48,11 @@ package body Fault_Control is
               (File_Cancel_Disposition'Enum_Rep (Disposition)),
             Boolean'Pos (Terminal))));
 
+   function Atomic_Store_Model_Count (Model : Memory_Model) return Natural is
+     (Natural
+        (C_Atomic_Store_Model_Count
+           (Interfaces.C.int (Memory_Model'Enum_Rep (Model)))));
+
    function Uring_Identity_Count (Reused : Boolean) return Natural is
      (Natural
         (C_Uring_Identity_Count

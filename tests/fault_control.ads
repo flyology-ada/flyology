@@ -100,6 +100,22 @@ package Fault_Control is
       Disposition : File_Cancel_Disposition;
       Terminal    : Boolean) return Natural;
 
+   --  Memory orders the runtime handed to the C atomic-store bridge. Invalid
+   --  collects every value outside the __ATOMIC_* range, which is what an
+   --  import that omits the model argument leaves in the argument register.
+   type Memory_Model is
+     (Relaxed, Consume, Acquire, Release, Acq_Rel, Seq_Cst, Invalid);
+   for Memory_Model use
+     (Relaxed => 0,
+      Consume => 1,
+      Acquire => 2,
+      Release => 3,
+      Acq_Rel => 4,
+      Seq_Cst => 5,
+      Invalid => 6);
+
+   function Atomic_Store_Model_Count (Model : Memory_Model) return Natural;
+
    function Uring_Identity_Count (Reused : Boolean) return Natural;
    function Uring_Admin_Complete_Count return Natural;
    function Uring_CQ_Capacity return Natural;
@@ -130,6 +146,12 @@ private
       Terminal    : Interfaces.C.int) return Interfaces.C.unsigned;
    pragma Import
      (C, C_File_Cancel_Count, "flyology_test_file_cancel_count");
+
+   function C_Atomic_Store_Model_Count
+     (Model : Interfaces.C.int) return Interfaces.C.unsigned;
+   pragma Import
+     (C, C_Atomic_Store_Model_Count,
+      "flyology_test_atomic_store_model_count");
 
    function C_Uring_Identity_Count
      (Reused : Interfaces.C.int) return Interfaces.C.unsigned;

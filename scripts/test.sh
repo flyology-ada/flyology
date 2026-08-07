@@ -321,7 +321,8 @@ semantic_termination_matrix'
 
 fault_mains='accept_transient_smoke
 connect_transient_smoke
-structured_server_reuse_smoke'
+structured_server_reuse_smoke
+task_result_publication_smoke'
 
 connection_hook_mains='connection_admission_smoke
 connection_state_model
@@ -579,6 +580,8 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
   "$test_bin/connect_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/structured_server_reuse_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/task_result_publication_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$project_root/tests/bin/$structured_server_test_subdir/structured_server_abort_smoke"
 

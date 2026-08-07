@@ -84,9 +84,15 @@ package body System.Flyology.Task_Results is
    Result_Attribute_Index : constant Integer :=
      Task_Attributes.Next_Index (Require_Finalization => False);
 
+   --  The C bridge forwards Model straight to __atomic_store_n, so the import
+   --  must declare all three parameters. Omitting Model leaves the third
+   --  argument register holding unrelated caller data, which selects an
+   --  arbitrary memory order and breaks the pairing between this store and
+   --  Observe_Task's acquire load.
    procedure Release_Store
      (Target : System.Address;
-      Value  : Atomics.uint32);
+      Value  : Atomics.uint32;
+      Model  : Atomics.Mem_Model := Atomics.Release);
    pragma Import
      (C, Release_Store, "flyology_atomic_store_u32");
 
