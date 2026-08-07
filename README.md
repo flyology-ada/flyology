@@ -1432,7 +1432,7 @@ group lock and applies these states:
 | Waiting for kernel queue capacity | Remove the request from the per-group FIFO | Immediate |
 | Darwin POSIX AIO submitted | Call `aio_cancel`; distinguish `AIO_CANCELED`, `AIO_NOTCANCELED`, and `AIO_ALLDONE` | Immediate `EVFILT_AIO` deletion and `aio_return` for `AIO_CANCELED`; otherwise the normal terminal event |
 | Linux `io_uring` submitted | Submit `IORING_OP_ASYNC_CANCEL`; consume its administrative CQE separately | The original operation's terminal CQE |
-| Linux native AIO submitted | Call `io_cancel` | Its returned terminal `io_event` on success, otherwise the normal completion event |
+| Linux native AIO submitted | Call `io_cancel`; positional read and write iocbs have had no kernel cancel handler since Linux 3.11 and report `EINVAL`, which is recorded as not-cancelable | The normal completion event |
 | Cancellation unsupported, already completing, or not cancelable | Record the disposition and retain ownership | The normal completion event |
 
 Completion and cancellation can become ready in the same poll batch. Whichever

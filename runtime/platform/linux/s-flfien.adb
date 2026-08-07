@@ -41,6 +41,7 @@ package body System.Flyology.File_Engine is
    EAGAIN : constant C.int := 11;
    EBUSY  : constant C.int := 16;
    ENOENT : constant C.int := 2;
+   EINPROGRESS : constant C.int := 115;
 
    PROT_READ  : constant C.int := 1;
    PROT_WRITE : constant C.int := 2;
@@ -1386,39 +1387,44 @@ package body System.Flyology.File_Engine is
                return Already_Completing;
             end if;
             loop
+               --  Linux stopped writing the caller's io_event in 3.11 and
+               --  delivers every terminal event through the completion ring
+               --  instead. The buffer is still passed because the syscall
+               --  takes the pointer, but the engine never reads it.
                Result := Linux_IO_Cancel
                  (State.AIO_Context,
                   Request.Control'Address,
                   Event'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
             end loop;
-            if Result = 0 then
-               Value :=
-                 (Token      => Request.Token,
-                  Result     =>
-                    (if Event.Result >= 0
-                     then C.long_long (Event.Result)
-                     else 0),
-                  Error_Code =>
-                    (if Event.Result < 0
-                     then C.int (-Event.Result)
-                     elsif Event.Extra < 0
-                     then C.int (-Event.Extra)
-                     else 0));
-               Unlink_Active (State, Request);
-               State.Active_Count := State.Active_Count - 1;
-               Recycle_Request (State, Request);
-               Has_Completion := True;
-               Note (State, Cancellation_Submitted, True);
+            if Result >= 0 then
+               --  The kernel accepted the cancellation. Its terminal event
+               --  arrives through io_getevents, so the request keeps the
+               --  caller buffer until Drain reports it.
+               Note (State, Cancellation_Submitted, False);
                return Cancellation_Submitted;
-            elsif C.int (OSI.errno) in EAGAIN | ENOENT then
-               Note (State, Already_Completing, False);
-               return Already_Completing;
-            else
-               Error_Code := C.int (OSI.errno);
-               Note (State, Cancellation_Failed, False);
-               return Cancellation_Failed;
             end if;
+            case C.int (OSI.errno) is
+               when EINPROGRESS =>
+                  --  Kernels 3.11 through 6.8 report an accepted cancellation
+                  --  this way rather than with a zero result.
+                  Note (State, Cancellation_Submitted, False);
+                  return Cancellation_Submitted;
+               when EINVAL =>
+                  --  Positional read and write iocbs have no cancel handler,
+                  --  and they are the only opcodes this engine submits. This
+                  --  is the platform's ordinary answer, not a transport
+                  --  failure: the operation runs to its normal completion.
+                  Note (State, Not_Cancelable, False);
+                  return Not_Cancelable;
+               when EAGAIN | ENOENT =>
+                  Note (State, Already_Completing, False);
+                  return Already_Completing;
+               when others =>
+                  Error_Code := C.int (OSI.errno);
+                  Note (State, Cancellation_Failed, False);
+                  return Cancellation_Failed;
+            end case;
          end;
       end if;
 

@@ -46,9 +46,13 @@ package System.Flyology.File_Engine is
 
    --  Ask the kernel to cancel the operation identified by Token. A submitted
    --  cancellation is not normally terminal: callers continue retaining the
-   --  buffer until ordinary completion. Darwin AIO_CANCELED is reaped with
-   --  aio_return here, and native Linux io_cancel returns its terminal event
-   --  directly; Has_Completion identifies either safe-to-resume case. Only
+   --  buffer until ordinary completion, and Has_Completion identifies the
+   --  exception. Darwin AIO_CANCELED is reaped with aio_return here and is
+   --  currently the only backend that produces one. Linux io_uring answers
+   --  through its administrative CQE, and native Linux AIO reports the
+   --  positional read and write opcodes this engine submits as not-cancelable
+   --  because io_cancel(2) has had no cancel handler for them since kernel
+   --  3.11; both keep the buffer until the ordinary completion arrives. Only
    --  the owning event-loop thread may call this operation.
    function Cancel
      (Item           : in out Engine;

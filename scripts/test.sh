@@ -565,11 +565,8 @@ FLYOLOGY_TEST_FAULTS=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 if [ "$(uname -s)" = Linux ]; then
   fault_mains="$fault_mains
-linux_poller_fairness_smoke"
-  if [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]; then
-    fault_mains="$fault_mains
+linux_poller_fairness_smoke
 fault_injection_smoke"
-  fi
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
 FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
@@ -603,6 +600,15 @@ then
   "$project_root/scripts/run-with-timeout.sh" 30 \
     "$test_bin/fault_injection_smoke" \
     file-uring-last-fiber
+fi
+
+#  The two Linux file backends answer cancellation through different kernel
+#  contracts, so the backend cancellation case runs against whichever one this
+#  configuration selected rather than against io_uring alone.
+if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-backend-cancel
 fi
 
 #  Exercise the Linux batch boundary with a queued file completion, socket

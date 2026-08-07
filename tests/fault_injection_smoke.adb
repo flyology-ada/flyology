@@ -1123,6 +1123,28 @@ procedure Fault_Injection_Smoke is
            "io_uring asynchronous cancellation was not submitted";
       end if;
 
+      --  Since Linux 3.11 io_cancel(2) reports EINVAL for iocbs that have no
+      --  cancel handler, and positional read/write iocbs never have one. That
+      --  is the platform's ordinary answer for this engine, so it must be
+      --  classified as not-cancelable rather than as a cancellation transport
+      --  failure. The armed Poller_EINTR keeps the operation in flight, so
+      --  io_cancel is actually reached instead of the already-completing
+      --  shortcut.
+      if Backend = Fault_Control.Linux_Native_AIO then
+         if Fault_Control.File_Cancel_Count
+              (Backend, Fault_Control.Failed, False) /= 0
+         then
+            raise Program_Error with
+              "native AIO cancellation reported a transport failure";
+         end if;
+         if Fault_Control.File_Cancel_Count
+              (Backend, Fault_Control.Not_Cancelable, False) = 0
+         then
+            raise Program_Error with
+              "native AIO cancellation never reported not-cancelable";
+         end if;
+      end if;
+
       Free (Item);
       Fault_Control.Reset;
       Files.Close (File);
