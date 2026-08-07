@@ -77,6 +77,39 @@ package Flyology.IO.Sockets is
    No_Endpoint   : constant Endpoint :=
      (Family => IPv4, Address => Any_IPv4, Port => Any_Port, Scope => 0);
 
+   --  Explicit Congestion Notification value carried by a received IP
+   --  datagram. Unavailable is retained as a narrow extension seam for an
+   --  adopted socket or a future platform backend that cannot expose the IP
+   --  traffic-class ancillary value.
+   --  @enum ECN_Unavailable No traffic-class ancillary value was supplied
+   --  @enum Not_ECT The packet is not ECN-capable
+   --  @enum ECT_One The packet carries the ECT(1) codepoint
+   --  @enum ECT_Zero The packet carries the ECT(0) codepoint
+   --  @enum Congestion_Experienced The packet carries the CE codepoint
+   type ECN_Codepoint is
+     (ECN_Unavailable,
+      Not_ECT,
+      ECT_One,
+      ECT_Zero,
+      Congestion_Experienced);
+
+   --  Addressing and delivery information for one received datagram.
+   --  Source and Destination retain the peer and the local address selected by
+   --  the kernel, including the bound local port. Original_Length is the whole
+   --  datagram length even when only Item'Length bytes were copied.
+   --  @field Source Remote source endpoint
+   --  @field Destination Local destination endpoint selected by the kernel
+   --  @field Original_Length Whole datagram length before caller truncation
+   --  @field Truncated True when Original_Length exceeds the receive buffer
+   --  @field ECN Received Explicit Congestion Notification value
+   type Datagram_Metadata is record
+      Source          : Endpoint;
+      Destination     : Endpoint;
+      Original_Length : Natural := 0;
+      Truncated       : Boolean := False;
+      ECN             : ECN_Codepoint := ECN_Unavailable;
+   end record;
+
    --  Parse a numeric IPv4 or IPv6 address. Name resolution is deliberately
    --  outside this operation.
    --  @param Text Numeric address text
@@ -230,6 +263,14 @@ package Flyology.IO.Sockets is
    --  @param Socket Open socket to configure
    --  @exception Socket_Error Descriptor configuration fails
    procedure Prepare (Socket : Socket_Type);
+
+   --  Enable destination-address and ECN ancillary delivery on an Internet
+   --  datagram socket. Create_Socket does this automatically for
+   --  Socket_Datagram; this idempotent operation is provided for adopted
+   --  datagram descriptors.
+   --  @param Socket Open IPv4 or IPv6 datagram socket
+   --  @exception Socket_Error Address or traffic-class metadata setup fails
+   procedure Enable_Datagram_Metadata (Socket : Socket_Type);
 
    --  Supported socket option names.
    --  @enum Reuse_Address Permit local address reuse
@@ -416,6 +457,33 @@ package Flyology.IO.Sockets is
       Interrupts : Interrupt_Set := No_Interrupts)
      with Pre => Interrupts'Length < Max_Wait_Requests;
 
+   --  Receive one UDP datagram with task-aware readiness and one deadline.
+   --  Source and local destination endpoints are returned atomically with the
+   --  payload. Last denotes bytes copied into Item; Metadata retains the whole
+   --  datagram length and states whether the payload was truncated. A
+   --  zero-length datagram is consumed and returns Last = Item'First - 1.
+   --  Lightweight callers suspend only their task; native callers may block
+   --  only their pthread. Created datagram sockets already have the required
+   --  ancillary options; call Enable_Datagram_Metadata after Adopt.
+   --  @param Socket Open IPv4 or IPv6 datagram socket
+   --  @param Item Destination buffer, which may be empty
+   --  @param Last Last copied element, or Item'First - 1 when none was copied
+   --  @param Metadata Peer, local destination, length, truncation, and ECN
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before a datagram arrives
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails
+   --  @exception Socket_Error Metadata setup or recvmsg fails
+   procedure Receive_Datagram
+     (Socket     : Socket_Type;
+      Item       : out Ada.Streams.Stream_Element_Array;
+      Last       : out Ada.Streams.Stream_Element_Offset;
+      Metadata   : out Datagram_Metadata;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre => Interrupts'Length < Max_Wait_Requests;
+
    --  Receive directly into an acquired unique buffer and replace its readable
    --  length. The buffer remains solely owned by the caller while the kernel
    --  borrows its storage.
@@ -471,6 +539,57 @@ package Flyology.IO.Sockets is
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
      with Pre => Interrupts'Length < Max_Wait_Requests;
+
+   --  Send one UDP datagram to Destination with task-aware readiness and one
+   --  deadline. The kernel selects the local source address. Empty Item sends
+   --  a zero-length datagram. A successful call sends the complete datagram.
+   --  @param Socket Open IPv4 or IPv6 datagram socket
+   --  @param Item Datagram payload, which may be empty
+   --  @param Last Last element sent, or Item'First - 1 for an empty datagram
+   --  @param Destination Remote destination endpoint
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before readiness
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails or a partial send occurs
+   --  @exception Socket_Error Socket setup or sendmsg fails
+   procedure Send_Datagram
+     (Socket      : Socket_Type;
+      Item        : Ada.Streams.Stream_Element_Array;
+      Last        : out Ada.Streams.Stream_Element_Offset;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite;
+      Interrupts  : Interrupt_Set := No_Interrupts)
+     with Pre => Interrupts'Length < Max_Wait_Requests;
+
+   --  Send one UDP datagram while selecting its local source endpoint. Source
+   --  normally comes from received Metadata.Destination. Its address and IPv6
+   --  scope select sendmsg packet information; its port must equal Socket's
+   --  bound local port because a per-datagram port cannot be selected.
+   --  Empty Item sends a zero-length datagram. A successful call sends the
+   --  complete datagram.
+   --  @param Socket Open IPv4 or IPv6 datagram socket
+   --  @param Item Datagram payload, which may be empty
+   --  @param Last Last element sent, or Item'First - 1 for an empty datagram
+   --  @param Destination Remote destination endpoint
+   --  @param Source Local source endpoint and interface selection
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before readiness
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails or a partial send occurs
+   --  @exception Socket_Error Source validation, setup, or sendmsg fails
+   procedure Send_Datagram
+     (Socket      : Socket_Type;
+      Item        : Ada.Streams.Stream_Element_Array;
+      Last        : out Ada.Streams.Stream_Element_Offset;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite;
+      Interrupts  : Interrupt_Set := No_Interrupts)
+     with Pre =>
+       Source.Family = Destination.Family
+         and then Interrupts'Length < Max_Wait_Requests;
 
    --  Send one available chunk directly from a unique buffer. No Flyology
    --  payload copy is made and Item remains owned by the caller.
