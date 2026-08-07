@@ -1,3 +1,4 @@
+with Ada.Real_Time;
 with Ada.Streams;
 with Flyology;
 with Flyology.Buffers;
@@ -13,6 +14,7 @@ procedure Buffer_Channel_Cancel_Smoke is
    package Buffers renames Flyology.Buffers;
    package Channels renames Flyology.Buffers.Channels;
 
+   use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type Channels.Try_Receive_Result;
@@ -47,17 +49,28 @@ procedure Buffer_Channel_Cancel_Smoke is
       Buffers.With_Readable_Data (Item, Check'Access);
    end Check_Payload;
 
-   --  Block the sender until the receiver is queued on the channel entry.
-   --  Both tasks share one execution group, so the poll must yield.
-   procedure Await_Waiting_Receiver (Queue : in out Channels.Channel) is
-      Spins : Natural := 0;
+   --  Block until the peer task is queued on the channel entry. Both tasks
+   --  share one execution group, so the poll must yield cooperatively.
+   procedure Await_Waiter
+     (Queue    : in out Channels.Channel;
+      Receiver : Boolean;
+      Message  : String)
+   is
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (10);
+      Waiting  : Natural;
    begin
-      while Channels.Current (Queue).Waiting_Receivers = 0 loop
-         Assert (Spins < 100_000_000, "receiver never queued on the channel");
-         Spins := Spins + 1;
+      loop
+         if Receiver then
+            Waiting := Channels.Current (Queue).Waiting_Receivers;
+         else
+            Waiting := Channels.Current (Queue).Waiting_Senders;
+         end if;
+         exit when Waiting > 0;
+         Assert (Ada.Real_Time.Clock < Deadline, Message);
          delay 0.0;
       end loop;
-   end Await_Waiting_Receiver;
+   end Await_Waiter;
 
    --  Account for the message after the receive was cancelled: it is either
    --  delivered into Target or still queued, never destroyed.
@@ -113,7 +126,7 @@ procedure Buffer_Channel_Cancel_Smoke is
          begin
             Buffers.Acquire (Outgoing);
             Buffers.Copy_From (Outgoing, Payload);
-            Await_Waiting_Receiver (Queue);
+            Await_Waiter (Queue, True, "receiver never queued");
             --  No suspension between these two calls, so the receiver
             --  observes cancellation with the dequeued token in hand.
             Channels.Send_Move (Queue, Outgoing);
@@ -152,7 +165,7 @@ procedure Buffer_Channel_Cancel_Smoke is
          begin
             Buffers.Acquire (Outgoing);
             Buffers.Copy_From (Outgoing, Payload);
-            Await_Waiting_Receiver (Queue);
+            Await_Waiter (Queue, True, "receiver never queued");
             Channels.Send_Move (Queue, Outgoing);
             abort Receiver;
          end Sender;
@@ -193,13 +206,8 @@ procedure Buffer_Channel_Cancel_Smoke is
          end Sender;
 
          task body Drainer is
-            Spins : Natural := 0;
          begin
-            while Channels.Current (Queue).Waiting_Senders = 0 loop
-               Assert (Spins < 100_000_000, "sender never queued");
-               Spins := Spins + 1;
-               delay 0.0;
-            end loop;
+            Await_Waiter (Queue, False, "sender never queued");
             --  Freeing the single slot lets the queued send entry body run
             --  inside this protected action; the sender cannot resume before
             --  the abort request.
