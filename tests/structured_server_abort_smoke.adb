@@ -314,6 +314,7 @@ procedure Structured_Server_Abort_Smoke is
       begin
          Fault_Control.Reset;
          Test_Control.Reset;
+         Test_Control.Arm (Test_Control.Serving);
          Open_Listener (Listener, Address);
          Old_FD := Sockets.Native_Descriptor (Listener);
 
@@ -337,18 +338,15 @@ procedure Structured_Server_Abort_Smoke is
                      Unexpected := True;
                end Runner;
             begin
-               while not Structured.Current (Item).Running loop
-                  delay 0.0;
-               end loop;
+               --  Running is published before listener acquisition finishes.
+               --  Wait for the worker scope's serving milestone instead of
+               --  inferring readiness from that lifecycle snapshot.
+               Test_Control.Wait_Reached (Test_Control.Serving);
+               pragma Assert (not Sockets.Is_Open (Listener));
+               Test_Control.Release (Test_Control.Serving);
                Sockets.Create_Socket (Client);
                Sockets.Connect (Client, Address, Timeout => 1.0);
-               select
-                  State.Gate.Await_Entered;
-               or
-                  delay 2.0;
-                  raise Program_Error with
-                    "structured server handler was not admitted";
-               end select;
+               State.Gate.Await_Entered;
                pragma Assert
                  (Structured.Current (Item).Active_Handlers = 1);
                pragma Assert
@@ -357,6 +355,7 @@ procedure Structured_Server_Abort_Smoke is
                State.Gate.Release;
             exception
                when others =>
+                  Test_Control.Release (Test_Control.Serving);
                   State.Gate.Release;
                   raise;
             end;
@@ -417,6 +416,7 @@ procedure Structured_Server_Abort_Smoke is
       begin
          Fault_Control.Reset;
          Test_Control.Reset;
+         Test_Control.Arm (Test_Control.After_Acquisition);
          Test_Control.Arm (Test_Control.Listener_Close);
          Open_Listener (Listener);
          Old_FD := Sockets.Native_Descriptor (Listener);
@@ -446,10 +446,12 @@ procedure Structured_Server_Abort_Smoke is
                Structured.Request_Shutdown (Item);
             end Stopper;
          begin
-            while not Structured.Current (Item).Running loop
-               delay 0.0;
-            end loop;
+            --  Running precedes the abort-deferred listener transfer. Observe
+            --  the completed acquisition hook before inspecting the caller's
+            --  handle or beginning shutdown.
+            Test_Control.Wait_Reached (Test_Control.After_Acquisition);
             pragma Assert (not Sockets.Is_Open (Listener));
+            Test_Control.Release (Test_Control.After_Acquisition);
             Start_Control.Start_Shutdown;
             Test_Control.Wait_Reached (Test_Control.Listener_Close);
             abort Runner;
@@ -457,6 +459,7 @@ procedure Structured_Server_Abort_Smoke is
          exception
             when others =>
                Start_Control.Start_Shutdown;
+               Test_Control.Release (Test_Control.After_Acquisition);
                Test_Control.Release (Test_Control.Listener_Close);
                raise;
          end;
@@ -476,6 +479,7 @@ procedure Structured_Server_Abort_Smoke is
       exception
          when others =>
             Start_Control.Start_Shutdown;
+            Test_Control.Release (Test_Control.After_Acquisition);
             Test_Control.Release (Test_Control.Listener_Close);
             Test_Control.Reset;
             Fault_Control.Reset;

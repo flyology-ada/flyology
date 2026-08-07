@@ -1,9 +1,7 @@
-with Ada.Real_Time;
 with Interfaces.C;
 
 package body Structured_Server_Test_Control is
 
-   use type Ada.Real_Time.Time;
    use type Interfaces.C.int;
 
    procedure C_Reset
@@ -39,14 +37,12 @@ package body Structured_Server_Test_Control is
    end Arm;
 
    procedure Wait_Reached (Point : Barrier_Point) is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
+      --  Reaching a hook is a causal test milestone, not a timing property.
+      --  The test runner bounds the complete executable so a missing
+      --  transition still fails without making normal progress host-load
+      --  sensitive.
       while C_Reached (Barrier_Point'Pos (Point)) = 0 loop
-         if Ada.Real_Time.Clock >= Deadline then
-            raise Program_Error with
-              "structured server test barrier was not reached";
-         end if;
          delay 0.001;
       end loop;
    end Wait_Reached;
