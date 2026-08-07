@@ -49,5 +49,11 @@ package System.Flyology.Task_Results is
    --  Wait for T's persistent completion gate. A negative timeout waits
    --  indefinitely, zero only checks, and a positive value is relative.
    --  Ordinary GNARL protected-entry and delay machinery supplies lane-aware
-   --  blocking for both native and lightweight callers.
+   --  blocking for both native and lightweight callers. Return 1 once the
+   --  result is terminal, 0 on timeout, or a negative code. Only a task that
+   --  reaches Task_Wrapper publishes, so a created-but-never-activated task
+   --  keeps its gate closed; reclaiming that task finalizes the gate and any
+   --  queued caller here is reported as -3 rather than an Ada exception
+   --  crossing this Convention-C boundary. Abort is not an exception and
+   --  still propagates to the caller.
 end System.Flyology.Task_Results;

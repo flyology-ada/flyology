@@ -25,4 +25,30 @@ is
              when Complete_Abnormally     => 1,
              when Complete_With_Exception => 2);
 
+   --  Outcomes the Convention-C observation and wait entry points report.
+   --  Runtime_Failure covers a request the runtime could not carry out at all,
+   --  such as a completion gate finalized while this caller was queued on it.
+   --  It exists so those bodies can report a code instead of letting an Ada
+   --  exception cross the language boundary.
+   type Request_Outcome is
+     (Runtime_Failure,
+      Malformed_Request,
+      Unknown_Task,
+      Not_Terminal,
+      Terminal);
+
+   subtype Request_Code is Integer range -3 .. 1;
+
+   function Outcome_Code (Outcome : Request_Outcome) return Request_Code
+   with
+     Contract_Cases =>
+       (Outcome = Runtime_Failure   => Outcome_Code'Result = -3,
+        Outcome = Malformed_Request => Outcome_Code'Result = -2,
+        Outcome = Unknown_Task      => Outcome_Code'Result = -1,
+        Outcome = Not_Terminal      => Outcome_Code'Result = 0,
+        Outcome = Terminal          => Outcome_Code'Result = 1),
+     Post =>
+       (Outcome_Code'Result in 0 .. 1) =
+         (Outcome in Not_Terminal | Terminal);
+
 end System.Flyology.Task_Result_Policy;

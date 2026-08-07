@@ -88,7 +88,9 @@ package Flyology.Task_Results with Preelaborate is
    --  available until the task object is reclaimed. The caller must keep T's
    --  task object alive and obey Ada.Task_Identification's Task_Id lifetime
    --  rules. The operation performs no allocation and invokes no user
-   --  callback.
+   --  callback. Only a task that begins executing its body publishes a
+   --  result, so a task whose activation failed stays Not_Terminal even
+   --  though Ada already reports it as terminated.
    --  @param T Task whose terminal state is observed
    --  @return Terminal with a copied result, or Not_Terminal
    --  @exception Program_Error T is null, lacks Flyology-owned result
@@ -102,7 +104,13 @@ package Flyology.Task_Results with Preelaborate is
    --  through ordinary GNARL protected-entry machinery; a lightweight caller
    --  suspends only its fiber. The operation is abortable, performs no
    --  polling, and must not be called from an Ada protected action. The caller
-   --  must keep T's task object alive throughout the call.
+   --  must keep T's task object alive throughout the call. A task whose
+   --  activation failed never publishes, so waiting on it returns
+   --  Not_Terminal at the timeout and an indefinite wait would not return;
+   --  supply a bounded Timeout when a task may have failed activation. Every
+   --  runtime-level wait failure, including reclamation of T while this call
+   --  is waiting, is reported as Program_Error rather than propagating a
+   --  runtime exception.
    --  @param T Task whose terminal result is awaited
    --  @param Timeout Maximum relative wait; negative means indefinitely
    --  @return Terminal with a copied result, or Not_Terminal on timeout

@@ -99,6 +99,11 @@ package body System.Flyology.Task_Results is
    function To_Task_Id is new Ada.Unchecked_Conversion
      (System.Address, System.Tasking.Task_Id);
 
+   --  Every ABI code the exported entry points return comes from the proved
+   --  policy kernel, so the negative failure codes stay a closed set.
+   function Code (Outcome : Policy.Request_Outcome) return C.int is
+     (C.int (Policy.Outcome_Code (Outcome)));
+
    function Owned (T : System.Tasking.Task_Id) return Owned_Access;
 
    function Owned (T : System.Tasking.Task_Id) return Owned_Access is
@@ -224,19 +229,19 @@ package body System.Flyology.Task_Results is
       State  : Atomics.uint32;
    begin
       if Target = null or else Item_Size /= Runtime_Result'Size / 8 then
-         return -2;
+         return Code (Policy.Malformed_Request);
       elsif ID = null or else Value = null then
-         return -1;
+         return Code (Policy.Unknown_Task);
       end if;
       State := Atomics.Atomic_Load_32 (Value.State'Address, Atomics.Acquire);
       if State /= Atomics.uint32 (Policy.Phase'Pos (Policy.Terminal)) then
-         return 0;
+         return Code (Policy.Not_Terminal);
       end if;
       Target.all := Value.Item;
-      return 1;
+      return Code (Policy.Terminal);
    exception
       when others =>
-         return -3;
+         return Code (Policy.Runtime_Failure);
    end Observe_Task;
 
    function Wait_Task
@@ -248,28 +253,36 @@ package body System.Flyology.Task_Results is
       State : Atomics.uint32;
    begin
       if ID = null or else Value = null then
-         return -1;
+         return Code (Policy.Unknown_Task);
       end if;
       State := Atomics.Atomic_Load_32 (Value.State'Address, Atomics.Acquire);
       if State = Atomics.uint32 (Policy.Phase'Pos (Policy.Terminal)) then
-         return 1;
+         return Code (Policy.Terminal);
       elsif Timeout_Nanoseconds = 0 then
-         return 0;
+         return Code (Policy.Not_Terminal);
       elsif Timeout_Nanoseconds < 0 then
          Value.Gate.Wait;
-         return 1;
+         return Code (Policy.Terminal);
       else
          select
             Value.Gate.Wait;
-            return 1;
+            return Code (Policy.Terminal);
          or
             delay
               Duration (Timeout_Nanoseconds / C.long_long (1_000_000_000))
               + Duration (Timeout_Nanoseconds rem C.long_long (1_000_000_000))
                 * 0.000_000_001;
-            return 0;
+            return Code (Policy.Not_Terminal);
          end select;
       end if;
+   exception
+      --  Convention-C exported bodies must not let an Ada exception reach a
+      --  foreign frame. A sidecar whose gate is finalized while this caller is
+      --  queued raises Program_Error here (RM 9.4), so report the ABI failure
+      --  code instead and let the public wrapper raise its documented
+      --  Program_Error. Abort is not an exception and still propagates.
+      when others =>
+         return -3;
    end Wait_Task;
 
 end System.Flyology.Task_Results;

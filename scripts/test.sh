@@ -299,6 +299,7 @@ stack_size_parity_smoke
 suspension_object_smoke
 task_scopes_smoke
 task_results_smoke
+task_result_abandon_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
 structured_server_smoke

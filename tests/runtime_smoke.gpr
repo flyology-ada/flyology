@@ -108,6 +108,7 @@ project Runtime_Smoke is
       "suspension_object_smoke.adb",
       "task_scopes_smoke.adb",
       "task_results_smoke.adb",
+      "task_result_abandon_smoke.adb",
       "task_result_publication_smoke.adb",
       "stall_watchdog_native_smoke.adb",
       "stall_watchdog_smoke.adb",

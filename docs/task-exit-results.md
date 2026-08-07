@@ -60,6 +60,17 @@ cannot activate returns no task object and therefore no valid `Task_Id`; there
 is intentionally no detached lookup for that failure. Failure before GNARL
 creates and links a task object similarly creates no observable result.
 
+Publication happens only in `Task_Wrapper`, so a task that was created but never
+activated never publishes. Its sidecar stays non-terminal and its completion
+gate stays closed for as long as the task object exists, even though Ada already
+reports the task as terminated. `Observe` therefore returns `Not_Terminal` for
+such a task, and an indefinite `Wait` on it would not return; a bounded timeout
+is the supported way to wait on a task that may have failed activation. When the
+runtime later reclaims the unactivated task, finalizing its gate under a queued
+waiter raises `Program_Error` in that waiter per RM 9.4. The exported wait
+converts that into its ABI failure code, so `Wait` raises its own documented
+`Program_Error` instead of letting a runtime exception cross the boundary.
+
 ## Observation and waiting
 
 `Observe` acquire-loads the sidecar phase. It returns `Not_Terminal` until a
@@ -69,8 +80,8 @@ reclamation cannot change an already returned result.
 
 `Wait` first checks the same atomic phase. An indefinite or positive timed wait
 then calls the sidecar's persistent protected entry. Publication cannot be lost
-between the check and entry call: once terminal, the entry barrier stays open
-for current and later waiters. After wake or timeout, the public body calls
+between the check and entry call: once a task publishes, the entry barrier stays
+open for current and later waiters. After wake or timeout, the public body calls
 `Observe` again so a publication that wins the timeout boundary is returned.
 Zero timeout is an immediate check; any negative timeout waits indefinitely.
 

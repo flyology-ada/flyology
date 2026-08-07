@@ -79,6 +79,8 @@ integration boundaries.
 - [x] Production-used task-result lifecycle policy (level 1, mode all)
   - [x] Completion transition from running to terminal
   - [x] Normal, exceptional, and abnormal cause encoding
+  - [x] Exported observation and wait ABI outcome codes, including the
+        closed negative failure set used by the Convention-C bodies
   - [x] Whole `System.Flyology.Task_Result_Policy` unit widening
   - [x] Application and runtime policy suite widening
 - [x] Production-used bounded timer-set policy (level 1, mode all)
