@@ -611,16 +611,41 @@ package body Flyology.IO.Sockets is
    function Get_Peer_Name (Socket : Socket_Type) return Endpoint is
      (Read_Name (Socket, True));
 
+   --  Wait for a connection the kernel is still establishing and report the
+   --  pending socket error it resolved to. Declared here because both the
+   --  blocking setup path and the task-aware path need it; the body follows
+   --  the readiness helper it uses.
+   procedure Complete_Connection
+     (Socket     : Socket_Type;
+      Started    : Ada.Real_Time.Time;
+      Timeout    : Duration;
+      Interrupts : Interrupt_Set);
+
    procedure Connect_Socket (Socket : Socket_Type; Server : Endpoint) is
-      Error : aliased Interfaces.C.int;
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Error   : aliased Interfaces.C.int;
    begin
       if C_Connect
            (Socket.Value, Family_Code (Server.Family),
             Address_Data (Server.Address), Interfaces.C.unsigned (Server.Port),
-            Interfaces.C.unsigned (Server.Scope), Error'Access) /= 0
+            Interfaces.C.unsigned (Server.Scope), Error'Access) = 0
       then
-         Raise_Error ("connect", Error);
+         return;
       end if;
+      case Flyology.Socket_Policy.Classify_Connect_Error
+        (Policy_Error_Kind (Error))
+      is
+         when Flyology.Socket_Policy.Wait_For_Connection =>
+            --  A signal that interrupts connect(2) does not abort the
+            --  request: the kernel keeps establishing the connection. Await
+            --  its outcome instead of reporting a failure that would make the
+            --  caller close or duplicate a live handshake.
+            Complete_Connection (Socket, Started, Infinite, No_Interrupts);
+         when Flyology.Socket_Policy.Connected =>
+            null;
+         when Flyology.Socket_Policy.Fail_Connect =>
+            Raise_Error ("connect", Error);
+      end case;
    end Connect_Socket;
 
    procedure Receive_Socket
@@ -798,6 +823,23 @@ package body Flyology.IO.Sockets is
             raise Operation_Interrupted with "socket operation interrupted";
       end case;
    end Wait_For;
+
+   procedure Complete_Connection
+     (Socket     : Socket_Type;
+      Started    : Ada.Real_Time.Time;
+      Timeout    : Duration;
+      Interrupts : Interrupt_Set)
+   is
+      Error   : aliased Interfaces.C.int;
+      Pending : aliased Interfaces.C.int;
+   begin
+      Wait_For (Socket, For_Write, Started, Timeout, Interrupts);
+      if C_Pending_Error (Socket.Value, Pending'Access, Error'Access) /= 0 then
+         Raise_Error ("getsockopt(SO_ERROR)", Error);
+      elsif Pending /= 0 then
+         Raise_Error ("connect", Pending);
+      end if;
+   end Complete_Connection;
 
    procedure Receive_Prepared
      (Socket     : Socket_Type;
@@ -1189,18 +1231,7 @@ package body Flyology.IO.Sockets is
             Raise_Error ("connect", Error);
       end case;
 
-      Wait_For (Socket, For_Write, Started, Timeout, Interrupts);
-      declare
-         Pending : aliased Interfaces.C.int;
-      begin
-         if C_Pending_Error
-              (Socket.Value, Pending'Access, Error'Access) /= 0
-         then
-            Raise_Error ("getsockopt(SO_ERROR)", Error);
-         elsif Pending /= 0 then
-            Raise_Error ("connect", Pending);
-         end if;
-      end;
+      Complete_Connection (Socket, Started, Timeout, Interrupts);
    end Connect;
 
 end Flyology.IO.Sockets;

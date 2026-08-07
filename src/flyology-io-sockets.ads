@@ -293,11 +293,17 @@ package Flyology.IO.Sockets is
    --  @exception Socket_Error getpeername fails or is not an Internet address
    function Get_Peer_Name (Socket : Socket_Type) return Endpoint;
 
-   --  Connect without readiness orchestration. Intended for blocking native
-   --  setup and datagram peer selection; use Connect for task-aware streams.
+   --  Connect without readiness orchestration or a deadline. Intended for
+   --  blocking native setup and datagram peer selection; use Connect for
+   --  task-aware streams. A signal that interrupts the attempt does not abort
+   --  it: the kernel keeps establishing the connection, so this call then
+   --  waits for the socket to resolve and reports the pending socket error.
+   --  That wait blocks the calling native pthread, or suspends only the
+   --  calling lightweight task, until the handshake succeeds or fails.
    --  @param Socket Open socket
    --  @param Server Destination endpoint
-   --  @exception Socket_Error connect fails
+   --  @exception Socket_Error connect fails or the connection is refused
+   --  @exception Device_Error Readiness polling fails
    procedure Connect_Socket (Socket : Socket_Type; Server : Endpoint);
 
    --  Receive one immediate chunk without readiness orchestration.
@@ -545,7 +551,9 @@ package Flyology.IO.Sockets is
        Interrupts'Length < Max_Wait_Requests,
        Post => Is_Open (Socket);
 
-   --  Connect Socket to Server with task-aware readiness and one deadline.
+   --  Connect Socket to Server with task-aware readiness and one deadline. An
+   --  attempt that the kernel is still establishing, including one reported as
+   --  interrupted by a signal, resolves through the same deadline.
    --  @param Socket Open unconnected socket; ownership is retained
    --  @param Server Destination endpoint
    --  @param Timeout Deadline interval in seconds

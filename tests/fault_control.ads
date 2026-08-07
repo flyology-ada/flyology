@@ -36,7 +36,8 @@ package Fault_Control is
       File_Uring_Probe_Unsupported,
       File_Uring_Post_Setup_Failure,
       Poller_File_Drain_Pause,
-      File_Uring_Synchronous_Eventfd);
+      File_Uring_Synchronous_Eventfd,
+      Connect_Interrupted);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -72,7 +73,8 @@ package Fault_Control is
       File_Uring_Probe_Unsupported => 31,
       File_Uring_Post_Setup_Failure => 32,
       Poller_File_Drain_Pause        => 33,
-      File_Uring_Synchronous_Eventfd => 34);
+      File_Uring_Synchronous_Eventfd => 34,
+      Connect_Interrupted            => 35);
 
    function Enabled return Boolean;
    procedure Reset;

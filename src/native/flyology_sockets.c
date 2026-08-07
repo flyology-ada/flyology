@@ -14,6 +14,7 @@
 #endif
 
 extern int flyology_accept(int socket, void *address, void *length);
+extern int flyology_connect(int socket, const void *address, unsigned length);
 
 static int flyology_socket_domain(int family)
 {
@@ -323,7 +324,7 @@ int flyology_socket_connect(int fd, int family, const unsigned char *address,
     socklen_t length;
     if (flyology_socket_make_address(family, address, port, scope,
                                      &storage, &length) < 0 ||
-        connect(fd, (struct sockaddr *)&storage, length) < 0) {
+        flyology_connect(fd, &storage, (unsigned)length) < 0) {
         *error = errno;
         return -1;
     }

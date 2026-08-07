@@ -271,6 +271,7 @@ fairness_smoke
 file_cancellation_smoke
 files_smoke
 flyology-counter_policy_smoke
+flyology-socket_policy-smoke
 flyology-structured_server_policy-smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
@@ -319,6 +320,7 @@ semantic_conformance_matrix
 semantic_termination_matrix'
 
 fault_mains='accept_transient_smoke
+connect_transient_smoke
 structured_server_reuse_smoke'
 
 connection_hook_mains='connection_admission_smoke
@@ -573,6 +575,8 @@ link_test_mains \
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/accept_transient_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/connect_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/structured_server_reuse_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \

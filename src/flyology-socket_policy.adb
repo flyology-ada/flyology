@@ -53,7 +53,7 @@ is
    is
    begin
       case Kind is
-         when In_Progress | Already_In_Progress =>
+         when Interrupted | In_Progress | Already_In_Progress =>
             return Wait_For_Connection;
          when Already_Connected =>
             return Connected;

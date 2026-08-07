@@ -74,16 +74,20 @@ is
         else
            Classify_IO_Error'Result = Fail_Operation);
 
+   --  A connect attempt interrupted by a signal is not a failure: POSIX keeps
+   --  the request alive and the connection continues to be established
+   --  asynchronously, exactly like an attempt still in progress. Only the
+   --  pending socket error observed after readiness decides the outcome.
    function Classify_Connect_Error
      (Kind : Error_Kind) return Connect_Error_Action
    with
      Global => null,
-     Post =>
-       (if Kind in In_Progress | Already_In_Progress then
-           Classify_Connect_Error'Result = Wait_For_Connection
-        elsif Kind = Already_Connected then
-           Classify_Connect_Error'Result = Connected
-        else
+     Contract_Cases =>
+       ((Kind in Interrupted | In_Progress | Already_In_Progress) =>
+           Classify_Connect_Error'Result = Wait_For_Connection,
+        Kind = Already_Connected =>
+           Classify_Connect_Error'Result = Connected,
+        others =>
            Classify_Connect_Error'Result = Fail_Connect);
 
 end Flyology.Socket_Policy;

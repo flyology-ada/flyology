@@ -832,6 +832,13 @@ returns ordinary would-block and interrupted results to Ada instead of raising
 and resolving exceptions for expected retry conditions. Native `poll(2)` waits
 retry `EINTR` with a recomputed remaining monotonic deadline.
 
+A `connect(2)` reported as interrupted is not a failure. POSIX keeps the request
+alive and the connection continues to be established asynchronously, so both the
+task-aware `Connect` and the blocking `Connect_Socket` wait for the socket to
+resolve and then report its pending `SO_ERROR`. `Connect` resolves that wait
+within its own deadline; `Connect_Socket` has no deadline and waits until the
+handshake succeeds or fails.
+
 ### TLS
 
 `Flyology.IO.TLS` owns TLS orchestration but not cryptography. An application

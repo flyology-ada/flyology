@@ -375,11 +375,12 @@ int flyology_in_fork_child(void) {
 #define FLYOLOGY_FAULT_ACCEPT_SYSTEM_LIMIT 23
 #define FLYOLOGY_FAULT_ACCEPT_BAD_DESCRIPTOR 24
 #define FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE 25
+#define FLYOLOGY_FAULT_CONNECT_INTERRUPTED 35
 
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 34
+#define FLYOLOGY_FAULT_POINT_COUNT 35
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
@@ -704,6 +705,29 @@ int flyology_accept(int socket, void *address, void *length) {
     }
 #endif
     return accept(socket, (struct sockaddr *)address, (socklen_t *)length);
+}
+
+/* POSIX keeps an interrupted connect(2) alive: "the connection request shall
+   not be aborted, and the connection shall be established asynchronously".
+   Producing that errno for real needs a signal handler installed without
+   SA_RESTART racing an in-flight handshake, so fault-enabled test runtimes
+   report EINTR after issuing the genuine attempt.  A real failure keeps its
+   own errno, and the production path remains one direct connect call. */
+int flyology_connect(int socket, const void *address, unsigned length) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    int inject_interrupt =
+        flyology_test_fault_hit(FLYOLOGY_FAULT_CONNECT_INTERRUPTED);
+    int result = connect(socket, (const struct sockaddr *)address,
+                         (socklen_t)length);
+    if (inject_interrupt && (result == 0 || errno == EINPROGRESS)) {
+        errno = EINTR;
+        return -1;
+    }
+    return result;
+#else
+    return connect(socket, (const struct sockaddr *)address,
+                   (socklen_t)length);
+#endif
 }
 
 int flyology_map_anonymous(void) {
