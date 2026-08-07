@@ -155,7 +155,8 @@ package body Flyology.Data_Structures.Byte_Strings is
             Data'Address, Interfaces.C.size_t (Data'Length));
       end if;
       Bytes.Write_U64
-        (Item.Length_Address, Old_Length + Interfaces.Unsigned_64 (Data'Length));
+        (Item.Length_Address,
+         Old_Length + Interfaces.Unsigned_64 (Data'Length));
    end Append;
 
    procedure Read
