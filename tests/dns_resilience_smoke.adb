@@ -36,6 +36,11 @@ procedure DNS_Resilience_Smoke is
          entry Get_Address (Address : out Sockets.Endpoint);
          procedure Begin_Client;
          entry Await_Start;
+         procedure Secondary_Ready (Address : Sockets.Endpoint);
+         procedure Secondary_Failed;
+         entry Get_Secondary (Address : out Sockets.Endpoint);
+         procedure Rotate_Query;
+         function Rotate_Queries return Natural;
          procedure Stop_Flood;
          function Flood_Stopped return Boolean;
          procedure Finished (Passed : Boolean);
@@ -44,6 +49,10 @@ procedure DNS_Resilience_Smoke is
          Is_Ready    : Boolean := False;
          Setup_Failed : Boolean := False;
          Server      : Sockets.Endpoint;
+         Secondary   : Sockets.Endpoint;
+         Secondary_Is_Ready : Boolean := False;
+         Secondary_Setup_Failed : Boolean := False;
+         Rotate_Count : Natural := 0;
          Can_Start   : Boolean := False;
          Flood_Halted : Boolean := False;
          Is_Finished : Boolean := False;
@@ -68,6 +77,28 @@ procedure DNS_Resilience_Smoke is
             end if;
             Address := Server;
          end Get_Address;
+         procedure Secondary_Ready (Address : Sockets.Endpoint) is
+         begin
+            Secondary := Address;
+            Secondary_Is_Ready := True;
+         end Secondary_Ready;
+         procedure Secondary_Failed is
+         begin
+            Secondary_Setup_Failed := True;
+         end Secondary_Failed;
+         entry Get_Secondary (Address : out Sockets.Endpoint)
+           when Secondary_Is_Ready or else Secondary_Setup_Failed is
+         begin
+            if Secondary_Setup_Failed then
+               raise Program_Error with "secondary DNS server setup failed";
+            end if;
+            Address := Secondary;
+         end Get_Secondary;
+         procedure Rotate_Query is
+         begin
+            Rotate_Count := Rotate_Count + 1;
+         end Rotate_Query;
+         function Rotate_Queries return Natural is (Rotate_Count);
          procedure Begin_Client is
          begin
             Can_Start := True;
@@ -92,19 +123,20 @@ procedure DNS_Resilience_Smoke is
          end Wait_Finished;
       end Control;
 
-      function Config_Path (Server : Sockets.Endpoint) return String is
+      function Config_Path
+        (Server : Sockets.Endpoint; Suffix : String := "") return String is
         ("/tmp/flyology-dns-resilience-"
          & Ada.Strings.Fixed.Trim
              (Sockets.Port'Image (Server.Port), Ada.Strings.Both)
-         & ".conf");
+         & Suffix & ".conf");
 
-      procedure Write_Config (Server : Sockets.Endpoint) is
+      procedure Write_Config
+        (Server : Sockets.Endpoint;
+         Text   : String;
+         Suffix : String := "")
+      is
          File : Flyology.IO.Files.File_Descriptor :=
            Flyology.IO.Files.Invalid_File;
-         Text : constant String :=
-           "nameserver " & Sockets.Image (Server) & ASCII.LF
-           & "search corp.test lab.test" & ASCII.LF
-           & "options attempts:1 timeout:1" & ASCII.LF;
          Data : Streams.Stream_Element_Array
            (1 .. Streams.Stream_Element_Offset (Text'Length));
          Last : Streams.Stream_Element_Offset;
@@ -114,7 +146,7 @@ procedure DNS_Resilience_Smoke is
               Character'Pos (Text (Index));
          end loop;
          File := Flyology.IO.Files.Open
-           (Config_Path (Server), Flyology.IO.Files.Write_Only,
+           (Config_Path (Server, Suffix), Flyology.IO.Files.Write_Only,
             Create => True, Truncate => True);
          Flyology.IO.Files.Write_At (File, 0, Data, Last);
          Flyology.IO.Files.Close (File);
@@ -312,6 +344,9 @@ procedure DNS_Resilience_Smoke is
             begin
                if Name = "flood.test" then
                   Flood;
+               elsif Name = "rotate.test" then
+                  Control.Rotate_Query;
+                  Send_A ("192.0.2.21");
                elsif Name = "dotty.test" then
                   Send_Dotted_CNAME;
                elsif Name = "walk.lab.test" then
@@ -337,6 +372,80 @@ procedure DNS_Resilience_Smoke is
                & Ada.Exceptions.Exception_Information (Error));
             Control.Failed;
       end Hostile_Server;
+
+      --  A second numeric endpoint so a rotated server list can be observed.
+      --  Both endpoints answer rotate.test identically and count the query,
+      --  so the cache must serve the second call whichever one it rotates to.
+      task Rotation_Server;
+
+      task body Rotation_Server is
+         UDP      : Sockets.Socket_Type;
+         Peer     : Sockets.Endpoint;
+         Bound    : Sockets.Endpoint;
+         Query    : Streams.Stream_Element_Array (1 .. 512);
+         Response : Streams.Stream_Element_Array (1 .. 512);
+         Last     : Streams.Stream_Element_Offset;
+
+         procedure Answer is
+            Question_Last : Streams.Stream_Element_Offset := 13;
+            Position      : Streams.Stream_Element_Offset;
+            Sent          : Streams.Stream_Element_Offset;
+            Address       : constant Sockets.IP_Address :=
+              Sockets.Parse_IP_Address ("192.0.2.21");
+         begin
+            while Query (Question_Last) /= 0 loop
+               Question_Last := Question_Last
+                 + 1 + Streams.Stream_Element_Offset (Query (Question_Last));
+            end loop;
+            Question_Last := Question_Last + 4;
+            Response := (others => 0);
+            Response (1 .. Question_Last) := Query (1 .. Question_Last);
+            Response (3) := 16#81#;
+            Response (4) := 16#80#;
+            Response (7) := 0;
+            Response (8) := 1;
+            Position := Question_Last + 1;
+            Response (Position) := 16#C0#;
+            Response (Position + 1) := 12;
+            Response (Position + 3) := 1;
+            Response (Position + 5) := 1;
+            Response (Position + 9) := 60;
+            Response (Position + 11) := 4;
+            Position := Position + 12;
+            for Index in Address.V4'Range loop
+               Response (Position) :=
+                 Streams.Stream_Element (Address.V4 (Index));
+               Position := Position + 1;
+            end loop;
+            Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent, Peer);
+         end Answer;
+      begin
+         Sockets.Create_Socket (UDP, Sockets.IPv4, Sockets.Socket_Datagram);
+         Sockets.Bind_Socket
+           (UDP, Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
+         Bound := Sockets.Get_Socket_Name (UDP);
+         Control.Secondary_Ready (Bound);
+         loop
+            Sockets.Receive_Socket (UDP, Query, Last, Peer);
+            exit when Last = 4
+              and then Character'Val (Query (1)) = 's'
+              and then Character'Val (Query (2)) = 't'
+              and then Character'Val (Query (3)) = 'o'
+              and then Character'Val (Query (4)) = 'p';
+            Control.Rotate_Query;
+            Answer;
+         end loop;
+         Sockets.Close_Socket (UDP);
+      exception
+         when Error : others =>
+            Close_Quietly (UDP);
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "rotation DNS test server failed: "
+               & Ada.Exceptions.Exception_Information (Error));
+            Control.Secondary_Failed;
+      end Rotation_Server;
 
       task Client is
          pragma Task_Info (Model);
@@ -472,6 +581,43 @@ procedure DNS_Resilience_Smoke is
                OK := False;
             end if;
          end Check_Hostile_Alias_Is_Discarded;
+
+         --  Rotation reorders the endpoints tried first. It must not split
+         --  one host into a separate cache entry per rotation offset.
+         procedure Check_Rotation_Shares_Cache is
+            Expected : constant String := "192.0.2.21";
+         begin
+            for Call in 1 .. 2 loop
+               declare
+                  Values : constant DNS.Address_Array := DNS.Resolve
+                    ("rotate.test", DNS.IPv4_Only, Timeout => 3.0,
+                     Configuration_Path => Config_Path (Server, "-rotate"));
+               begin
+                  if Values'Length /= 1
+                    or else Sockets.Image (Values (Values'First)) /= Expected
+                  then
+                     Ada.Text_IO.Put_Line
+                       (Ada.Text_IO.Standard_Error,
+                        "rotated resolution returned an unexpected address");
+                     OK := False;
+                  end if;
+               end;
+            end loop;
+            if Control.Rotate_Queries /= 1 then
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "rotation fragmented the DNS cache: queries="
+                  & Control.Rotate_Queries'Image);
+               OK := False;
+            end if;
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "rotated resolution raised "
+                  & Ada.Exceptions.Exception_Name (Error));
+               OK := False;
+         end Check_Rotation_Shares_Cache;
       begin
          Control.Await_Start;
          Control.Get_Address (Server);
@@ -481,6 +627,7 @@ procedure DNS_Resilience_Smoke is
          Check_Search_Walk_Survives_Failure;
          Check_Server_Failure_Category;
          Check_Hostile_Alias_Is_Discarded;
+         Check_Rotation_Shares_Cache;
          Control.Finished (OK);
       exception
          when Error : others =>
@@ -493,6 +640,7 @@ procedure DNS_Resilience_Smoke is
       end Client;
 
       Address   : Sockets.Endpoint;
+      Secondary : Sockets.Endpoint;
       Stopper   : Sockets.Socket_Type;
       Stop_Data : constant Streams.Stream_Element_Array :=
         (1 => Character'Pos ('s'), 2 => Character'Pos ('t'),
@@ -501,7 +649,18 @@ procedure DNS_Resilience_Smoke is
       Passed    : Boolean;
    begin
       Control.Get_Address (Address);
-      Write_Config (Address);
+      Control.Get_Secondary (Secondary);
+      Write_Config
+        (Address,
+         "nameserver " & Sockets.Image (Address) & ASCII.LF
+         & "search corp.test lab.test" & ASCII.LF
+         & "options attempts:1 timeout:1" & ASCII.LF);
+      Write_Config
+        (Address,
+         "nameserver " & Sockets.Image (Address) & ASCII.LF
+         & "nameserver " & Sockets.Image (Secondary) & ASCII.LF
+         & "options rotate attempts:1 timeout:1" & ASCII.LF,
+         Suffix => "-rotate");
       Control.Begin_Client;
       select
          Control.Wait_Finished (Passed);
@@ -511,9 +670,13 @@ procedure DNS_Resilience_Smoke is
       end select;
       Sockets.Create_Socket (Stopper, Sockets.IPv4, Sockets.Socket_Datagram);
       Sockets.Send_Socket (Stopper, Stop_Data, Last, Address);
+      Sockets.Send_Socket (Stopper, Stop_Data, Last, Secondary);
       Sockets.Close_Socket (Stopper);
       if Ada.Directories.Exists (Config_Path (Address)) then
          Ada.Directories.Delete_File (Config_Path (Address));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-rotate")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-rotate"));
       end if;
       return Passed;
    end Run;

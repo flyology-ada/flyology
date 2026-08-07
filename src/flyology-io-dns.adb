@@ -1217,9 +1217,13 @@ package body Flyology.IO.DNS is
       Deadline      : Ada.Real_Time.Time;
       Infinite      : Boolean;
       Interrupts    : Interrupt_Set;
+      Rotation      : Natural := 0;
       CNAME_Depth   : Natural := 0) return Parse_Result
    is
       type Socket_Array is array (Positive range <>) of Sockets.Socket_Type;
+      --  Rotation only reorders the endpoints an attempt visits; every
+      --  endpoint is still consulted. Keeping it out of the cache key stops
+      --  one host from occupying a separate entry per rotation offset.
       Key      : constant String := Cache_Key (Name, Kind, Name_Servers);
       Cached   : Raw_Address_Array (1 .. Max_Addresses);
       Cached_Count : Natural;
@@ -1269,7 +1273,7 @@ package body Flyology.IO.DNS is
                Selected_Server : constant Sockets.Endpoint :=
                  Name_Servers
                    (Name_Servers'First
-                    + ((Attempt - 1) mod Name_Servers'Length));
+                    + ((Attempt - 1 + Rotation) mod Name_Servers'Length));
                Channels    : Socket_Array (1 .. 1);
                Requests    : Wait_Request_Array
                  (1 .. Interrupts'Length + Channels'Length);
@@ -1420,6 +1424,7 @@ package body Flyology.IO.DNS is
                                             Deadline,
                                             Infinite,
                                             Interrupts,
+                                            Rotation,
                                             CNAME_Depth + 1);
                                        Composed : Parse_Result := Alias_Result;
                                     begin
@@ -1502,7 +1507,8 @@ package body Flyology.IO.DNS is
       Attempts      : Positive;
       Per_Attempt   : Duration;
       Started       : Ada.Real_Time.Time;
-      Interrupts    : Interrupt_Set) return Address_Array
+      Interrupts    : Interrupt_Set;
+      Rotation      : Natural := 0) return Address_Array
    is
       Normalized : constant Name_Buffer := To_Name (Name);
       Infinite   : constant Boolean := Timeout < 0.0;
@@ -1553,11 +1559,11 @@ package body Flyology.IO.DNS is
          when IPv4_Only =>
             Append (Query_Kind
               (Normalized, Type_A, Name_Servers, Attempts, Per_Attempt,
-               Deadline, Infinite, Interrupts));
+               Deadline, Infinite, Interrupts, Rotation));
          when IPv6_Only =>
             Append (Query_Kind
               (Normalized, Type_AAAA, Name_Servers, Attempts, Per_Attempt,
-               Deadline, Infinite, Interrupts));
+               Deadline, Infinite, Interrupts, Rotation));
          when Any_Family =>
             declare
                AAAA_Deadline : constant Ada.Real_Time.Time :=
@@ -1571,7 +1577,7 @@ package body Flyology.IO.DNS is
                   Append (Query_Kind
                     (Normalized, Type_AAAA, Name_Servers, Attempts,
                      Per_Attempt, AAAA_Deadline, Infinite,
-                     Interrupts));
+                     Interrupts, Rotation));
                exception
                   when Name_Not_Found => null;
                   when Malformed_Response => Malformed_Failed := True;
@@ -1585,7 +1591,7 @@ package body Flyology.IO.DNS is
             begin
                Append (Query_Kind
                  (Normalized, Type_A, Name_Servers, Attempts, Per_Attempt,
-                  Deadline, Infinite, Interrupts));
+                  Deadline, Infinite, Interrupts, Rotation));
             exception
                when Name_Not_Found => null;
                when Malformed_Response => Malformed_Failed := True;
@@ -1639,13 +1645,14 @@ package body Flyology.IO.DNS is
       Absolute : constant Boolean :=
         Name'Length > 0 and then Name (Name'Last) = '.';
       Dots : Natural := 0;
+      Rotation : Natural := 0;
 
       function Try_Name (Candidate : String) return Address_Array is
       begin
          return Resolve_Core
            (Candidate, Config.Servers (1 .. Config.Server_Count), Family,
             Timeout, Config.Attempts, Config.Per_Attempt, Started,
-            Interrupts);
+            Interrupts, Rotation);
       end Try_Name;
    begin
       --  Numeric and localhost names need neither resolver configuration nor
@@ -1669,16 +1676,11 @@ package body Flyology.IO.DNS is
            "no numeric name server found in /etc/resolv.conf";
       end if;
       if Config.Rotate and then Config.Server_Count > 1 then
-         declare
-            Original : constant Name_Server_Array := Config.Servers;
-            Offset   : Natural;
-         begin
-            Server_Rotation.Next (Config.Server_Count, Offset);
-            for Index in 1 .. Config.Server_Count loop
-               Config.Servers (Index) := Original
-                 (1 + ((Index - 1 + Offset) mod Config.Server_Count));
-            end loop;
-         end;
+         --  Carry the offset instead of reordering the configured list. The
+         --  list itself identifies the split-DNS policy a cache entry belongs
+         --  to, so rotating it in place would give the same host a distinct
+         --  entry for every offset.
+         Server_Rotation.Next (Config.Server_Count, Rotation);
       end if;
       for Character_Of_Name of Name loop
          if Character_Of_Name = '.' then
