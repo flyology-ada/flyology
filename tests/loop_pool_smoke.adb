@@ -2,6 +2,7 @@ with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.IO;
 with Flyology.Observability;
+with System.Multiprocessors;
 
 procedure Loop_Pool_Smoke is
    package Groups renames Flyology.Execution_Groups;
@@ -112,6 +113,23 @@ procedure Loop_Pool_Smoke is
          Results.Report_Automatic (Groups.Group_Id'Last);
    end Automatic_Worker;
 
+   --  Ada reserves CPU value 0 for Not_A_Specific_CPU, so an explicit
+   --  CPU => 0 aspect names no group and must take an automatic placement
+   --  ticket rather than selecting the first shared group.
+   task type Reserved_CPU_Worker
+     with CPU => System.Multiprocessors.Not_A_Specific_CPU
+   is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Reserved_CPU_Worker;
+
+   task body Reserved_CPU_Worker is
+   begin
+      Results.Report_Automatic (Groups.Current);
+   exception
+      when others =>
+         Results.Report_Automatic (Groups.Group_Id'Last);
+   end Reserved_CPU_Worker;
+
    task type Explicit_Worker with CPU => 2 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Explicit_Worker;
@@ -179,6 +197,7 @@ procedure Loop_Pool_Smoke is
 
    type Native_Access is access Native_Worker;
    type Automatic_Access is access Automatic_Worker;
+   type Reserved_Access is access Reserved_CPU_Worker;
    type Explicit_Access is access Explicit_Worker;
    type Pin_Access is access Pin_Worker;
 
@@ -215,20 +234,24 @@ begin
    end loop;
 
    declare
-      Workers : array (1 .. Worker_Count) of Automatic_Access;
+      Workers  : array (1 .. Worker_Count / 2) of Automatic_Access;
+      Reserved : array (1 .. Worker_Count / 2) of Reserved_Access;
       Explicit : Explicit_Access;
       Pinned   : Pin_Access;
    begin
       for Index in Workers'Range loop
+         --  A task with no CPU aspect and a task with the reserved CPU 0 must
+         --  both draw the next automatic ticket, in activation order.
          Workers (Index) := new Automatic_Worker;
-         if Index = Worker_Count / 2 then
+         Reserved (Index) := new Reserved_CPU_Worker;
+         if Index = Workers'Last - 1 then
             --  Explicit placement bypasses the automatic ticket; the six
-            --  automatic tasks must still distribute two per configured loop.
+            --  ticketed tasks must still distribute two per configured loop.
             Explicit := new Explicit_Worker;
          end if;
       end loop;
       Pinned := new Pin_Worker;
-      pragma Unreferenced (Workers, Explicit, Pinned);
+      pragma Unreferenced (Workers, Reserved, Explicit, Pinned);
       Results.Wait_All;
    end;
 

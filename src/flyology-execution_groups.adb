@@ -1,4 +1,5 @@
 with Interfaces.C;
+with Flyology.Placement_Policy;
 
 package body Flyology.Execution_Groups is
    package C renames Interfaces.C;
@@ -91,10 +92,9 @@ package body Flyology.Execution_Groups is
       Runtime_Current_Thread_Is_Pinned,
       "flyology_runtime_current_thread_is_pinned");
 
-   function For_CPU
-     (CPU : System.Multiprocessors.CPU_Range) return Shared_Group_Id
-   is
-     (Shared_Group_Id (CPU));
+   function For_CPU (CPU : Group_Selecting_CPU) return Shared_Group_Id is
+     (Shared_Group_Id
+        (Flyology.Placement_Policy.Group_For_CPU (Natural (CPU))));
 
    function Pin_To_Current_Thread return Thread_Pin is
       Owner : aliased System.Address := System.Null_Address;

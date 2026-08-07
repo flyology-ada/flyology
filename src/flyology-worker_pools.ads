@@ -41,8 +41,10 @@ generic
    --  Fixed task designation for every worker in this generic instance.
    Worker_Model : Flyology.Execution_Model := Flyology.Project_Default;
 
-   --  CPU aspect for every worker. For lightweight tasks, 0 .. 127 selects an
-   --  execution group; for native tasks it retains Ada affinity semantics.
+   --  CPU aspect for every worker. For lightweight tasks, 1 .. 127 selects an
+   --  execution group and the default Not_A_Specific_CPU distributes workers
+   --  over the configured pool; for native tasks it retains Ada affinity
+   --  semantics.
    Worker_CPU : System.Multiprocessors.CPU_Range :=
      System.Multiprocessors.Not_A_Specific_CPU;
 

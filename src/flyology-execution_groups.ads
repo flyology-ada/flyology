@@ -15,8 +15,17 @@ package Flyology.Execution_Groups with Preelaborate is
    --  Exclusively reserved groups returned by Create_Dedicated.
    subtype Dedicated_Group_Id is Group_Id range 128 .. Group_Id'Last;
 
-   --  First shared group.
+   --  First shared group. Ada reserves CPU 0 as Not_A_Specific_CPU, so no CPU
+   --  aspect names this group; reach it through automatic placement, Migrate,
+   --  or Topology.Cross_To_Shard.
    Default_Group : constant Shared_Group_Id := 0;
+
+   --  Ada CPU aspect values that name a shared execution group. The reserved
+   --  value 0 is excluded because Ada defines it as Not_A_Specific_CPU, which
+   --  requests automatic placement rather than Default_Group.
+   subtype Group_Selecting_CPU is
+     System.Multiprocessors.CPU_Range range
+       1 .. System.Multiprocessors.CPU_Range (Shared_Group_Id'Last);
 
    --  Number of shared groups participating in automatic placement.
    subtype Loop_Pool_Size is Positive range 1 .. 128;
@@ -95,13 +104,13 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @return True for a native task or a lightweight task with a live pin
    function Is_Thread_Pinned return Boolean;
 
-   --  Convert an Ada CPU value in 0 .. 127 to its shared Flyology group.
-   --  @param CPU Ada CPU aspect value
+   --  Convert an Ada CPU value in 1 .. 127 to its shared Flyology group.
+   --  Constraint_Error reports a value outside that range, including the
+   --  reserved Not_A_Specific_CPU, which names no group.
+   --  @param CPU Ada CPU aspect value that names a shared group
    --  @return Shared group with the same numeric value
-   function For_CPU
-     (CPU : System.Multiprocessors.CPU_Range) return Shared_Group_Id
-   with Pre => Integer (CPU) <= Integer (Shared_Group_Id'Last),
-        Post => Integer (For_CPU'Result) = Integer (CPU);
+   function For_CPU (CPU : Group_Selecting_CPU) return Shared_Group_Id
+   with Post => Integer (For_CPU'Result) = Integer (CPU);
 
    --  Return the calling lightweight task's current execution group.
    --  @return Current group identifier

@@ -34,8 +34,10 @@ generic
 
    --  Fixed task designation for all handlers in this generic instance.
    Handler_Model : Flyology.Execution_Model := Flyology.Project_Default;
-   --  CPU aspect for handlers. For lightweight tasks, 0 .. 127 selects a
-   --  shared execution group; for native tasks it retains Ada CPU affinity.
+   --  CPU aspect for handlers. For lightweight tasks, 1 .. 127 selects a
+   --  shared execution group and the default Not_A_Specific_CPU distributes
+   --  handlers over the configured pool; for native tasks it retains Ada CPU
+   --  affinity.
    Handler_CPU   : System.Multiprocessors.CPU_Range :=
      System.Multiprocessors.Not_A_Specific_CPU;
 

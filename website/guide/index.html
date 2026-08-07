@@ -303,7 +303,7 @@ end Memory_Region_Example;</code></pre>
           <section id="groups">
             <span class="step-label">STEP 07</span>
             <h2>Choose an execution group.</h2>
-            <p>A lightweight task without a specific Ada CPU is placed into the configured shared pool by deterministic round robin. A <code>CPU</code> aspect selects an exact Flyology execution group instead.</p>
+            <p>A lightweight task without a specific Ada CPU is placed into the configured shared pool by deterministic round robin. A positive <code>CPU</code> aspect selects an exact Flyology execution group instead. Ada reserves <code>CPU =&gt; 0</code> as <code>Not_A_Specific_CPU</code>, so it stays in the pool exactly as an absent aspect does.</p>
             <figure class="code-panel">
               <figcaption>explicit shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>

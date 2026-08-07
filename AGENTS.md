@@ -57,6 +57,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   A native task’s `CPU` aspect retains stock GNARL affinity meaning.
 - Shared group ids are `0 .. 127`; dedicated ids are `128 .. 255`. Automatic
   pool size is `1 .. 128` and currently uses deterministic round robin.
+- Ada reserves `CPU => 0` as `Not_A_Specific_CPU`, so only `1 .. 127` name a
+  group. `CPU => 0` and an absent aspect both take automatic placement; group
+  0 is reachable only through automatic placement or migration. Do not
+  document `0` as a group selector.
 - Migration is an explicit safe point. The task resumes on the destination
   group’s stable pthread without changing its Ada identity, stack, locals, or
   exception state. Never allow two loops to restore one fiber concurrently.

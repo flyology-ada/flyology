@@ -1,6 +1,7 @@
 with Flyology;
 with Flyology.Execution_Groups;
 with System;
+with System.Multiprocessors;
 
 procedure Execution_Groups_Smoke is
    package Groups renames Flyology.Execution_Groups;
@@ -11,6 +12,24 @@ procedure Execution_Groups_Smoke is
 
    function Current_Thread return System.Address;
    pragma Import (C, Current_Thread, "pthread_self");
+
+   --  Report whether For_CPU refuses to translate CPU into a shared execution
+   --  group. The value arrives as a parameter so the conversion is checked at
+   --  run time.
+   function For_CPU_Rejects
+     (CPU : System.Multiprocessors.CPU_Range) return Boolean
+   is
+   begin
+      declare
+         Selected : constant Groups.Shared_Group_Id := Groups.For_CPU (CPU);
+         pragma Unreferenced (Selected);
+      begin
+         return False;
+      end;
+   exception
+      when Constraint_Error =>
+         return True;
+   end For_CPU_Rejects;
 
    protected Results is
       procedure Static_Observation
@@ -252,6 +271,15 @@ procedure Execution_Groups_Smoke is
    end Native;
 
 begin
+   --  Ada reserves CPU value 0 as Not_A_Specific_CPU. It designates no
+   --  processor, so it names no shared execution group either.
+   if not For_CPU_Rejects (System.Multiprocessors.Not_A_Specific_CPU) then
+      raise Program_Error
+        with "For_CPU accepted the reserved Not_A_Specific_CPU value";
+   end if;
+   if For_CPU_Rejects (1) or else Groups.For_CPU (1) /= 1 then
+      raise Program_Error with "For_CPU rejected a group-selecting CPU";
+   end if;
    Results.Wait;
    if not Results.Passed then
       raise Program_Error with "execution-group migration failed";

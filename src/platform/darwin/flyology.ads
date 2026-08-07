@@ -18,8 +18,10 @@ package Flyology with Preelaborate is
    Project_Default : constant Execution_Model :=
      System.Task_Info.Unspecified_Task_Info;
 
-   --  Run the task cooperatively on an event loop. A CPU aspect in 0 .. 127
-   --  selects that shared execution group; no CPU selects the configured pool.
+   --  Run the task cooperatively on an event loop. A CPU aspect in 1 .. 127
+   --  selects that shared execution group. Ada reserves CPU 0 as
+   --  Not_A_Specific_CPU, so it selects the configured pool exactly as an
+   --  absent aspect does.
    Lightweight_Task : constant Execution_Model :=
      System.Task_Info.Process_Scope;
 

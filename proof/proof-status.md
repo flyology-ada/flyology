@@ -162,6 +162,10 @@ integration boundaries.
   - [x] `Flyology.HTTP.Client_Policy.Next_Informational_Count`
   - [x] `Flyology.HTTP.Client_Policy.Classify_Expectation_Response`
   - [x] Whole `Flyology.HTTP.Client_Policy` unit widening
+- [x] Production-used CPU-aspect shared-group selection (level 1, mode all)
+  - [x] `Flyology.Placement_Policy.Group_For_CPU`, including that no CPU
+        aspect selects the reserved value
+  - [x] Whole `Flyology.Placement_Policy` unit widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
