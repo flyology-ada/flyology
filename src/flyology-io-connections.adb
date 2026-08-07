@@ -791,6 +791,23 @@ package body Flyology.IO.Connections is
       end loop;
    end Reserve_Interruptibly;
 
+   --  A bound Connection borrows exactly the Server named by its
+   --  discriminant, which the compiler has already checked outlives it.
+   --  Admitting it through any other Server would reinstate an unchecked
+   --  borrow, so reject that before any permit is reserved.
+   procedure Check_Binding
+     (Item    : Connection;
+      Manager : Server_Access) is
+   begin
+      if not Policy.Binding_Accepted
+        (Bound   => Item.Manager /= null,
+         Matches => Item.Manager = Manager)
+      then
+         raise Program_Error with
+           "connection is bound to a different admission controller";
+      end if;
+   end Check_Binding;
+
    procedure Take
      (Manager : aliased in out Server;
       Socket  : in out Sockets.Socket_Type;
@@ -798,6 +815,7 @@ package body Flyology.IO.Connections is
    is
       Guard : Admission_Guard (Manager'Unchecked_Access);
    begin
+      Check_Binding (Item, Guard.Owner);
       if not Sockets.Is_Open (Socket) then
          raise Program_Error with "cannot own a closed socket";
       elsif Is_Open (Item) then
@@ -979,6 +997,7 @@ package body Flyology.IO.Connections is
       Interrupt_Count : Natural;
       pragma Unreferenced (Cancellation_Quantum);
    begin
+      Check_Binding (Item, Guard.Owner);
       if Is_Open (Item) then
          raise Program_Error with "connection already owns a socket";
       end if;

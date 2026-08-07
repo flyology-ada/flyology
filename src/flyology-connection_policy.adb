@@ -39,6 +39,12 @@ is
    is
      (Leader and then Started > 0);
 
+   function Binding_Accepted
+     (Bound   : Boolean;
+      Matches : Boolean) return Boolean
+   is
+     (not Bound or else Matches);
+
    function Finish_Close_Allowed
      (Closing            : Boolean;
       Active             : Boolean;

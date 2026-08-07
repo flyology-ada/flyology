@@ -36,9 +36,25 @@ package Flyology.IO.Connections is
    --  idempotent and may run concurrently with all of them: it cancels and
    --  drains the active operation and every registered or queued operation
    --  before closing the socket. The TLS child may replace the plaintext
-   --  transport in place without changing this ownership. Server must outlive
-   --  the Connection.
-   type Connection is new Ada.Finalization.Limited_Controlled with private;
+   --  transport in place without changing this ownership.
+   --
+   --  An admitted Connection borrows its Server for as long as it owns a
+   --  socket: every operation, Close, and Finalize call into that Server, so
+   --  the Server must outlive the Connection. Supply the borrowed Server as
+   --  the Manager discriminant to have the compiler enforce that rule
+   --
+   --     Gate : aliased Flyology.IO.Connections.Server (Capacity => 64);
+   --     Item : Flyology.IO.Connections.Connection (Gate'Access);
+   --
+   --  because an access discriminant may not designate an object of a
+   --  shorter-lived scope than the object it discriminates. Take and
+   --  Accept_Connection then reject any other Manager. The default null
+   --  discriminant keeps older declarations compiling, but leaves the
+   --  lifetime rule unchecked: a Connection that outlives the Server it was
+   --  admitted through has no defined behavior.
+   type Connection
+     (Manager : access Server := null)  --  Bound Server, null when unbound
+   is new Ada.Finalization.Limited_Controlled with private;
 
    --  Wait indefinitely for one Manager permit, then transfer Socket to Item.
    --  This compatibility operation has no timeout or cancellation token;
@@ -48,13 +64,14 @@ package Flyology.IO.Connections is
    --  signalling fails, the permit remains released and Socket remains owned
    --  by the caller. Ada finalization rules determine the observable exception
    --  occurrence when that cleanup failure accompanies another exception.
-   --  @param Manager Admission controller that must outlive Item
+   --  @param Manager Admission controller that must outlive Item, and that
+   --     must be Item's Manager discriminant when Item has one
    --  @param Socket Open socket whose ownership transfers on success
    --  @param Item Closed Connection that receives ownership
    --  @exception Admission_Closed Manager has started shutdown
-   --  @exception Program_Error Socket or Item is invalid, wake setup fails, or
-   --     failed-transfer cleanup releases its permit but cannot signal
-   --     admission readiness
+   --  @exception Program_Error Socket or Item is invalid, Item is bound to a
+   --     different Manager, wake setup fails, or failed-transfer cleanup
+   --     releases its permit but cannot signal admission readiness
    procedure Take
      (Manager : aliased in out Server;
       Socket  : in out Flyology.IO.Sockets.Socket_Type;
@@ -74,7 +91,8 @@ package Flyology.IO.Connections is
    --  the permit remains released. Ada finalization rules determine the
    --  observable exception occurrence when that cleanup failure accompanies
    --  a timeout, cancellation, socket failure, or another exception.
-   --  @param Manager Admission controller that must outlive Item
+   --  @param Manager Admission controller that must outlive Item, and that
+   --     must be Item's Manager discriminant when Item has one
    --  @param Listener Open listening socket; ownership is retained
    --  @param Item Closed Connection that receives the accepted socket
    --  @param Address Accepted peer address
@@ -89,8 +107,9 @@ package Flyology.IO.Connections is
    --  @exception Device_Error Readiness polling fails
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
    --     accept or setup fails
-   --  @exception Program_Error Item is open, a wake source cannot be created,
-   --     or cleanup releases its permit but cannot signal admission readiness
+   --  @exception Program_Error Item is open, Item is bound to a different
+   --     Manager, a wake source cannot be created, or cleanup releases its
+   --     permit but cannot signal admission readiness
    procedure Accept_Connection
      (Manager              : aliased in out Server;
       Listener             : Flyology.IO.Sockets.Socket_Type;
@@ -287,7 +306,8 @@ private
       Current_Transport  : Transport_Kind := No_Transport;
    end Descriptor_Controller;
 
-   type Connection is new Ada.Finalization.Limited_Controlled with record
+   type Connection (Manager : access Server := null) is
+     new Ada.Finalization.Limited_Controlled with record
       Controller            : Descriptor_Controller;
       TLS_Session           : Flyology.IO.TLS.Session_Access := null;
       TLS_Shutdown_Complete : Boolean := False;

@@ -639,6 +639,20 @@ FLYOLOGY_LOOP_POOL_SIZE=1 \
 FLYOLOGY_TEST_FAULTS=0 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 
+#  A Connection that names its Server borrows it under Ada's accessibility
+#  rules. Compile the fixture that outlives its admission controller and fail
+#  if the compiler accepts it; the guarantee is compile-time only, so no
+#  behavioral program can observe it.
+if run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -c -q -p \
+  -P tests/fixtures/lifetime/lifetime_rejection.gpr >/dev/null 2>&1
+then
+  printf '%s\n' \
+    "connection outliving its bound server was accepted" >&2
+  exit 1
+fi
+
 #  Prove that a separate Alire workspace can locate the crate, prepare its own
 #  runtime outside the dependency checkout, and build against only public GPR
 #  and Ada interfaces.

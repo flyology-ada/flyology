@@ -445,6 +445,80 @@ begin
       Flyology.IO.Sockets.Close_Socket (Native_Peer);
    end;
 
+   --  A Connection may name the Server it borrows. The compiler then rejects
+   --  a Connection that outlives that Server, and admission through any other
+   --  Server is refused before a permit or a socket changes hands.
+   declare
+      use type Ada.Streams.Stream_Element_Array;
+      use type Ada.Streams.Stream_Element_Offset;
+
+      Bound_Manager : aliased Connections.Server (Capacity => 1);
+      Other_Manager : aliased Connections.Server (Capacity => 1);
+      Bound         : Connections.Connection (Bound_Manager'Access);
+      Bound_Gate    : constant access Connections.Server :=
+        Bound_Manager'Access;
+      Owned, Peer   : Flyology.IO.Sockets.Socket_Type;
+      Listener      : Flyology.IO.Sockets.Socket_Type;
+      Address       : Flyology.IO.Sockets.Endpoint;
+      Accepted      : Flyology.IO.Sockets.Endpoint;
+      Expected      : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
+        [1 => 16#5A#];
+      Received      : Ada.Streams.Stream_Element_Array (1 .. 1);
+      Sent          : Ada.Streams.Stream_Element_Offset;
+      Take_Refused  : Boolean := False;
+      Accept_Refused : Boolean := False;
+   begin
+      pragma Assert (Bound.Manager = Bound_Gate);
+      Flyology.IO.Sockets.Create_Socket_Pair (Owned, Peer);
+
+      begin
+         Connections.Take (Other_Manager, Owned, Bound);
+      exception
+         when Program_Error =>
+            Take_Refused := True;
+      end;
+      pragma Assert (Take_Refused);
+      pragma Assert (Other_Manager.Active = 0);
+      pragma Assert (Bound_Manager.Active = 0);
+      pragma Assert (Flyology.IO.Sockets.Is_Open (Owned));
+      pragma Assert (not Connections.Is_Open (Bound));
+
+      Flyology.IO.Sockets.Create_Socket (Listener);
+      Flyology.IO.Sockets.Bind_Socket
+        (Listener,
+         Flyology.IO.Sockets.Network_Endpoint
+           (Flyology.IO.Sockets.Loopback_IPv4,
+            Flyology.IO.Sockets.Any_Port));
+      Flyology.IO.Sockets.Listen_Socket (Listener, Length => 1);
+      Address := Flyology.IO.Sockets.Get_Socket_Name (Listener);
+      begin
+         Connections.Accept_Connection
+           (Manager  => Other_Manager,
+            Listener => Listener,
+            Item     => Bound,
+            Address  => Accepted,
+            Timeout  => 0.0);
+      exception
+         when Program_Error =>
+            Accept_Refused := True;
+      end;
+      pragma Assert (Accept_Refused);
+      pragma Assert (Other_Manager.Active = 0);
+      Flyology.IO.Sockets.Close_Socket (Listener);
+
+      Connections.Take (Bound_Manager, Owned, Bound);
+      pragma Assert (Bound_Manager.Active = 1);
+      pragma Assert (not Flyology.IO.Sockets.Is_Open (Owned));
+      Flyology.IO.Sockets.Send_Socket (Peer, Expected, Sent);
+      pragma Assert (Sent = Expected'Last);
+      Bound.Receive_Exactly (Received, Timeout => 1.0);
+      pragma Assert (Received = Expected);
+      Connections.Close (Bound);
+      pragma Assert (Bound_Manager.Active = 0);
+      pragma Assert (not Connections.Is_Open (Bound));
+      Flyology.IO.Sockets.Close_Socket (Peer);
+   end;
+
    Flyology.IO.Sockets.Close_Socket (Peer_One);
    Flyology.IO.Sockets.Close_Socket (Peer_Two);
    Flyology.IO.Sockets.Close_Socket (Peer_Three);

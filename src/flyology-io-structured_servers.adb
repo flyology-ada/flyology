@@ -422,7 +422,10 @@ package body Flyology.IO.Structured_Servers is
                begin
                   while not Stop_Worker loop
                      declare
-                        Connection : Connections.Connection;
+                        --  Binding the connection to Manager makes the
+                        --  borrowed-admission lifetime a compiler-checked
+                        --  property of this handler scope.
+                        Connection : Connections.Connection (Manager'Access);
                         Peer       : Sockets.Endpoint;
                         Admitted   : Boolean := False;
                         Cancelled  : Boolean := False;

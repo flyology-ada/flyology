@@ -47,6 +47,13 @@ is
       Started : Natural) return Boolean
    with Post => Close_Wake_Required'Result = (Leader and then Started > 0);
 
+   --  A connection bound to an admission controller may only be admitted
+   --  through that controller; an unbound connection accepts any.
+   function Binding_Accepted
+     (Bound   : Boolean;
+      Matches : Boolean) return Boolean
+   with Post => Binding_Accepted'Result = (not Bound or else Matches);
+
    function Finish_Close_Allowed
      (Closing            : Boolean;
       Active             : Boolean;

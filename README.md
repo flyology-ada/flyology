@@ -1054,7 +1054,12 @@ A connection admits one socket operation at a time. Additional operations queue
 at the owner rather than registering duplicate waits, which gives
 same-descriptor waiting bounded, exclusive semantics instead of a thundering
 herd. Independent connections remain fully concurrent. The `Server` object
-must outlive its admitted owners.
+must outlive its admitted owners. Name that server as the connection's
+`Manager` discriminant — `Item : Connections.Connection (Gate'Access)` — and
+Ada's accessibility rules enforce the lifetime rule at compile time;
+`Take` and `Accept_Connection` then refuse any other server. The default
+null discriminant keeps existing declarations compiling and leaves the rule
+unchecked.
 
 Operations register both an optional per-operation `Cancellation_Token` and the
 server shutdown source in the same kernel wait as the socket. A token request
