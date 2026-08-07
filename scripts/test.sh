@@ -301,6 +301,7 @@ stack_size_limits_child
 stack_size_limits_smoke
 stack_size_parity_smoke
 suspension_object_smoke
+task_scope_faults_smoke
 task_scopes_smoke
 task_results_smoke
 task_result_abandon_smoke
@@ -334,7 +335,8 @@ connection_state_model
 connection_tls_upgrade_smoke
 descriptor_ownership_smoke'
 
-worker_pool_hook_mains=concurrency_primitives_smoke
+worker_pool_hook_mains='concurrency_primitives_smoke
+task_scope_faults_smoke'
 
 structured_server_hook_mains=structured_server_abort_smoke
 
@@ -343,7 +345,7 @@ wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke)
+    connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -435,7 +437,7 @@ for test_main in $ordinary_mains; do
     connection_admission_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke)
       current_test_bin=$connection_test_bin
       ;;
-    concurrency_primitives_smoke)
+    concurrency_primitives_smoke|task_scope_faults_smoke)
       current_test_bin=$worker_pool_test_bin
       ;;
     *)

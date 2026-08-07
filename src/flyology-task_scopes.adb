@@ -1,10 +1,13 @@
 with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
 with Flyology.IO;
+with Flyology.Worker_Pool_Test_Hooks;
 
 package body Flyology.Task_Scopes is
    use type Ada.Real_Time.Time;
    use type Interfaces.Unsigned_64;
+
+   package Test_Hooks renames Flyology.Worker_Pool_Test_Hooks;
 
    protected Identity_Source is
       procedure Next (Value : out Interfaces.Unsigned_64);
@@ -179,6 +182,10 @@ package body Flyology.Task_Scopes is
    end Shared_State;
 
    task body Worker is
+      --  Activation-phase fault injection. The production hook is a static
+      --  True, so this declaration disappears outside hook builds.
+      Activation_Checked : constant Boolean := Test_Hooks.Check_Activation;
+      pragma Unreferenced (Activation_Checked);
       package Conversions is new
         System.Address_To_Access_Conversions (Shared_State);
       State   : Conversions.Object_Pointer;
@@ -290,8 +297,18 @@ package body Flyology.Task_Scopes is
       Item.Cleanup_Required := True;
       Identity_Source.Next (Item.Identity);
       Item.Workers := new Worker_Array (1 .. Item.Capacity);
-      for Worker of Item.Workers.all loop
-         Worker.Start (Item.State'Address);
+      --  Create one worker per allocator. RM 9.2 completes activation inside
+      --  the allocator, so an array allocator that fails to activate worker K
+      --  would raise with the array value never assigned, leaving workers
+      --  1 .. K-1 running and unreachable. A lone task whose activation fails
+      --  is completed instead, and every earlier worker is already recorded
+      --  in Item.Workers where Finalize can stop and release it.
+      for Index in 1 .. Item.Capacity loop
+         Item.Workers (Index) := new Worker;
+         Item.Created_Workers := Index;
+      end loop;
+      for Index in 1 .. Item.Capacity loop
+         Item.Workers (Index).Start (Item.State'Address);
          Item.Activated_Workers := Item.Activated_Workers + 1;
       end loop;
       if Item.Parent = null then
@@ -378,6 +395,8 @@ package body Flyology.Task_Scopes is
    end Result;
 
    overriding procedure Finalize (Item : in out Scope) is
+      procedure Free_Worker is new Ada.Unchecked_Deallocation
+        (Worker, Worker_Access);
       procedure Free_Workers is new Ada.Unchecked_Deallocation
         (Worker_Array, Worker_Array_Access);
       procedure Free_Monitor is new Ada.Unchecked_Deallocation
@@ -391,7 +410,11 @@ package body Flyology.Task_Scopes is
          Item.State.Await_All;
          Item.State.Shutdown;
          if Item.Workers /= null then
-            for Index in Item.Activated_Workers + 1 .. Item.Capacity loop
+            --  Workers created but never started, including the ones a failed
+            --  Configure left behind, have no Shared_State pointer and can
+            --  only leave their initial select through this rendezvous.
+            for Index in Item.Activated_Workers + 1 .. Item.Created_Workers
+            loop
                begin
                   Item.Workers (Index).Stop;
                exception
@@ -416,6 +439,9 @@ package body Flyology.Task_Scopes is
          Free_Monitor (Item.Monitor);
       end if;
       if Item.Workers /= null then
+         for Index in Item.Workers'Range loop
+            Free_Worker (Item.Workers (Index));
+         end loop;
          Free_Workers (Item.Workers);
       end if;
    end Finalize;

@@ -47,7 +47,9 @@ package Flyology.Task_Scopes is
    --  receive a scope-owned token. Parent cancellation is linked downward
    --  asynchronously, while failure and finalization cancel only this scope.
    --  The call allocates and activates Capacity lightweight workers; it is the
-   --  only operation that may configure Item.
+   --  only operation that may configure Item. When allocation or activation
+   --  fails part way through, finalization of Item still stops and releases
+   --  the workers that were already created.
    --  Parent is the scope's access discriminant, so Ada enforces that the
    --  borrowed token outlives Item.
    --  @param Item Task scope
@@ -179,7 +181,12 @@ private
       entry Start (State_Address : System.Address);
       entry Stop;
    end Worker;
-   type Worker_Array is array (Positive range <>) of Worker;
+   --  Workers are held one access value each. An array of task objects is
+   --  created by a single allocator, so a failed activation would leave the
+   --  successfully activated siblings unreachable and unstoppable; creating
+   --  one task at a time keeps every created worker recorded in the scope.
+   type Worker_Access is access Worker;
+   type Worker_Array is array (Positive range <>) of Worker_Access;
    type Worker_Array_Access is access Worker_Array;
 
    task type Cancellation_Monitor is
@@ -204,7 +211,8 @@ private
       Cleanup_Required : Boolean := False;
       Is_Joined     : Boolean := False;
       Monitor_Stopped : Boolean := False;
-      Activated_Workers : Natural := 0;
+      Created_Workers : Natural := 0;    --  Workers allocated and activated
+      Activated_Workers : Natural := 0;  --  Workers that accepted Start
       Identity : Interfaces.Unsigned_64 := 0;
    end record;
 
