@@ -37,7 +37,8 @@ package System.Flyology.Faults is
       File_Uring_Probe_Unsupported,
       File_Uring_Post_Setup_Failure,
       Poller_File_Drain_Pause,
-      File_Uring_Synchronous_Eventfd);
+      File_Uring_Synchronous_Eventfd,
+      Create_Lifecycle_Window);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -73,7 +74,8 @@ package System.Flyology.Faults is
       File_Uring_Probe_Unsupported => 31,
       File_Uring_Post_Setup_Failure => 32,
       Poller_File_Drain_Pause        => 33,
-      File_Uring_Synchronous_Eventfd => 34);
+      File_Uring_Synchronous_Eventfd => 34,
+      Create_Lifecycle_Window        => 36);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);
@@ -83,4 +85,13 @@ package System.Flyology.Faults is
 
    procedure Release_Final_Reaper;
    pragma Inline_Always (Release_Final_Reaper);
+
+   function Pause_Create_Registration return Boolean;
+   pragma Inline_Always (Pause_Create_Registration);
+
+   procedure Note_Create_Registering;
+   pragma Inline_Always (Note_Create_Registering);
+
+   procedure Release_Create_Registration;
+   pragma Inline_Always (Release_Create_Registration);
 end System.Flyology.Faults;

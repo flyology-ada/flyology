@@ -62,6 +62,7 @@ project Runtime_Smoke is
       "closed_descriptor_wait_smoke.adb",
       "concurrency_primitives_smoke.adb",
       "context_abi_matrix.adb",
+      "create_finalize_race_smoke.adb",
       "descriptor_ownership_smoke.adb",
       "dns_smoke.adb",
       "dns_parser_smoke.adb",

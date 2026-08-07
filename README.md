@@ -1631,6 +1631,16 @@ state to `Running`; successful GNARL process finalization changes it to
 found state it could not safely tear down and deliberately left it to operating
 system process exit.
 
+Task creation and process finalization are mutually exclusive rather than merely
+ordered. A create claims its registry shard before it names an execution group,
+and finalization holds every shard while it decides the runtime is quiescent, so
+a create that arrives during finalization is refused instead of joining a group
+that is being stopped, and finalization destroys pollers, group mutexes, and
+groups only after every claim is released. This matters for threads the Ada
+runtime does not wait for: GNARL admits foreign threads through foreign-thread
+registration, and such a thread can call task creation while the environment
+task is already finalizing.
+
 Shutdown is intentionally not a public application operation. Ada masters,
 task termination, and controlled-object finalization establish the only safe
 global boundary; stopping a group earlier could invalidate a suspended task's

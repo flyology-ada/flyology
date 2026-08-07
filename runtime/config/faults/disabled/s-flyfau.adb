@@ -10,4 +10,10 @@ package body System.Flyology.Faults is
 
    procedure Release_Final_Reaper is null;
 
+   function Pause_Create_Registration return Boolean is (True);
+
+   procedure Note_Create_Registering is null;
+
+   procedure Release_Create_Registration is null;
+
 end System.Flyology.Faults;

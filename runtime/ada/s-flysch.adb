@@ -339,6 +339,8 @@ package body System.Flyology.Scheduler is
      array (Registry_Shard_Index) of Scheduler_Mutex;
    type Registry_Instance_Array is
      array (Registry_Shard_Index) of C.unsigned_long_long;
+   type Registry_Creator_Array is
+     array (Registry_Shard_Index) of Natural;
 
    Placement_Requests : Placement_Request_Array;
    Placement_Platform_Initialized : Boolean := False;
@@ -368,6 +370,10 @@ package body System.Flyology.Scheduler is
    Topology_Lock  : Scheduler_Mutex;
    Registry_Shard_Locks : Registry_Shard_Lock_Array;
    Registry_Instances : Registry_Instance_Array := (others => 0);
+   --  Creates that passed the lifecycle guard and may still name, read, or
+   --  lock an execution group. Guarded by the matching shard lock, so
+   --  Finalize observes every claim while it holds all shards.
+   Registry_Creators : Registry_Creator_Array := (others => 0);
    Initialized    : Boolean := False;
    Event_Runtime_Active : C.int := 0;
    pragma Atomic (Event_Runtime_Active);
@@ -435,6 +441,8 @@ package body System.Flyology.Scheduler is
    procedure Unlock_Registry_Shard (Shard : Registry_Shard_Index);
    procedure Lock_Group (Group : not null Loop_Group_Access);
    procedure Unlock_Group (Group : not null Loop_Group_Access);
+   function Outstanding_Create_Claims return Natural;
+   function Drained_Create_Claims return Natural;
    Scheduler_Invariant : constant C.int := 1;
    Mutex_Failure       : constant C.int := 2;
    Poller_Failure      : constant C.int := 3;
@@ -741,11 +749,18 @@ package body System.Flyology.Scheduler is
    begin
       if not Initialized or else not Scheduling.Valid_Group (Id) then
          return null;
-      elsif Lifecycle_State not in 0 | 1 then
+      elsif not Scheduling.Creation_Admitted (Lifecycle_State) then
          return null;
       end if;
 
       Lock_Topology;
+      --  Revalidate under the lock Finalize holds while it inspects and stops
+      --  the group table, so finalization cannot be restarted into by a
+      --  caller that passed the unlocked guard above.
+      if not Scheduling.Creation_Admitted (Lifecycle_State) then
+         Unlock_Topology;
+         return null;
+      end if;
       Group := Groups (Group_Index (Id));
       if Group /= null then
          if Group.Dedicated /= Dedicated
@@ -1875,6 +1890,35 @@ package body System.Flyology.Scheduler is
       return 0;
    end Initialize;
 
+   --  Count creates that claimed a registry shard and may therefore still
+   --  name, read, or lock an execution group. Reading every shard under its
+   --  own lock keeps this off the topology lock.
+   function Outstanding_Create_Claims return Natural is
+      Total : Natural := 0;
+   begin
+      for Shard in Registry_Shard_Index loop
+         Lock_Registry_Shard (Shard);
+         Total := Total + Registry_Creators (Shard);
+         Unlock_Registry_Shard (Shard);
+      end loop;
+      return Total;
+   end Outstanding_Create_Claims;
+
+   --  Claims are refused once the finalizing state is published, so an
+   --  outstanding one only has to reach its revalidated lifecycle check. The
+   --  wait is bounded; a claim that never drains leaves cleanup to process
+   --  exit instead of destroying a poller or group mutex under a live create.
+   function Drained_Create_Claims return Natural is
+      Claims : Natural := Outstanding_Create_Claims;
+   begin
+      for Attempt in 1 .. 1_000 loop
+         exit when Claims = 0;
+         exit when Micro_Sleep (1_000) /= 0;
+         Claims := Outstanding_Create_Claims;
+      end loop;
+      return Claims;
+   end Drained_Create_Claims;
+
    procedure Finalize is
       Target : Loop_Group_Access;
       Item   : Fiber_Access;
@@ -1907,6 +1951,11 @@ package body System.Flyology.Scheduler is
             Lock_Registry_Shard (Shard);
          end loop;
          Lock_Topology;
+         --  Ensure_Group republishes the running state when it starts a group
+         --  and can have done so between the store above and this lock.
+         --  Restating the finalizing state under the lock that Ensure_Group
+         --  revalidates makes finalization impossible to reopen.
+         Lifecycle_State := 2;
 
          --  Static library-level ATCBs are not passed to Finalize_TCB even
          --  after their wrappers finish. At this final GNARL boundary they
@@ -1986,6 +2035,9 @@ package body System.Flyology.Scheduler is
       for Shard in reverse Registry_Shard_Index loop
          Unlock_Registry_Shard (Shard);
       end loop;
+      --  Test-only: hand the widened create window to a parked creator now
+      --  that the groups are stopped but not yet joined or freed.
+      Faults.Release_Create_Registration;
 
       --  Wake every successful group before joining any one of them. A wake
       --  failure must not turn finalization into an unbounded join.
@@ -2012,8 +2064,19 @@ package body System.Flyology.Scheduler is
          end if;
       end loop;
 
-      --  Joined threads cannot race their group resources. Cleanup remains a
-      --  one-shot process-finalization operation; the runtime is not reset.
+      --  Joined threads cannot race their group resources, but a create that
+      --  claimed a shard before the finalizing state was stored can still be
+      --  holding a group pointer. Destroying group resources is admitted only
+      --  once the registry is quiescent and every claim has been released.
+      if not Scheduling.Teardown_Admitted
+               (Lifecycle_State, Safe, Drained_Create_Claims)
+      then
+         Lifecycle_State := 4;
+         return;
+      end if;
+
+      --  Cleanup remains a one-shot process-finalization operation; the
+      --  runtime is not reset.
       for Index in Group_Index loop
          Target := Groups (Index);
          if Target /= null then
@@ -2064,9 +2127,20 @@ package body System.Flyology.Scheduler is
       Target : Loop_Group_Access;
       Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
       Group_Id : C.int := Group;
+
+      procedure Release_Claim;
+      --  Give back the registry-shard creation claim taken below.
+
+      procedure Release_Claim is
+      begin
+         Lock_Registry_Shard (Shard);
+         Registry_Creators (Shard) := Registry_Creators (Shard) - 1;
+         Unlock_Registry_Shard (Shard);
+      end Release_Claim;
+
    begin
       if not Initialized
-        or else Lifecycle_State not in 0 | 1
+        or else not Scheduling.Creation_Admitted (Lifecycle_State)
         or else T = System.Null_Address
         or else Stack_Size = 0
         or else Wrapper = System.Null_Address
@@ -2083,12 +2157,28 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
 
+      --  Claim the registry shard before naming an execution group. The guard
+      --  above is an unlocked read, so a creator can pass it and then be
+      --  descheduled for the whole of finalization; a claim taken under the
+      --  shard lock is instead visible to Finalize, which refuses to destroy
+      --  a poller, a group mutex, or a group while any claim is outstanding.
+      --  Everything this function reads through Target is therefore live.
+      Lock_Registry_Shard (Shard);
+      if not Scheduling.Creation_Admitted (Lifecycle_State) then
+         Unlock_Registry_Shard (Shard);
+         return -1;
+      end if;
+      Registry_Creators (Shard) := Registry_Creators (Shard) + 1;
+      Unlock_Registry_Shard (Shard);
+
       Target := Ensure_Group (Group_Id, Dedicated => False);
       if Target = null then
+         Release_Claim;
          return -1;
       end if;
 
       if Faults.Enabled and then Faults.Fail (Faults.Fiber_Allocation) then
+         Release_Claim;
          return -1;
       end if;
       Item := new Fiber;
@@ -2104,11 +2194,33 @@ package body System.Flyology.Scheduler is
            Target.Scheduler_Context);
       if Item.Context = null then
          Free_Fiber (Item);
+         Release_Claim;
+         return -1;
+      end if;
+
+      --  Test-only widening of the create window. It parks a creator that
+      --  holds a claim and a started group so a concurrent finalization
+      --  reaches its quiescence decision before this registration.
+      if Faults.Enabled
+        and then Faults.Fail (Faults.Create_Lifecycle_Window)
+        and then not Faults.Pause_Create_Registration
+      then
+         Contexts.Destroy (Item.Context);
+         Free_Fiber (Item);
+         Release_Claim;
          return -1;
       end if;
 
       Lock_Registry_Shard (Shard);
-      if Find (T) /= null then
+      Faults.Note_Create_Registering;
+      Registry_Creators (Shard) := Registry_Creators (Shard) - 1;
+      --  Revalidate the lifecycle now that the shard is held. Finalize stores
+      --  the finalizing state before it acquires any shard, so a creator that
+      --  passed the unlocked guard and then lost the race must refuse rather
+      --  than register into a group Finalize has already stopped.
+      if not Scheduling.Creation_Admitted (Lifecycle_State)
+        or else Find (T) /= null
+      then
          Unlock_Registry_Shard (Shard);
          Contexts.Destroy (Item.Context);
          Free_Fiber (Item);
@@ -2122,6 +2234,16 @@ package body System.Flyology.Scheduler is
         C.unsigned_long_long (Shard) * Instance_Shard_Span
         + Registry_Instances (Shard);
       Lock_Group (Target);
+      --  Fail closed rather than trust the claim alone. A member added to a
+      --  stopped group makes the event loop's stop check an invariant
+      --  violation, which aborts the process.
+      if Target.Stop_Requested then
+         Unlock_Group (Target);
+         Unlock_Registry_Shard (Shard);
+         Contexts.Destroy (Item.Context);
+         Free_Fiber (Item);
+         return -1;
+      end if;
       Register_Locked (Item);
       Link_Group_Head_Locked (Target, Item);
       Target.Member_Count := Target.Member_Count + 1;

@@ -329,6 +329,7 @@ semantic_termination_matrix'
 
 fault_mains='accept_transient_smoke
 connect_transient_smoke
+create_finalize_race_smoke
 structured_server_reuse_smoke
 task_result_publication_smoke'
 
@@ -587,6 +588,11 @@ link_test_mains \
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/accept_transient_smoke"
+#  A foreign thread creating a task while the environment task finalizes must
+#  be refused, not admitted into a stopped group. The unfixed scheduler aborts
+#  here on its stop invariant, so the timeout also bounds a regression.
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/create_finalize_race_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/connect_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \

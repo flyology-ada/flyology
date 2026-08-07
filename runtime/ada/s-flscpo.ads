@@ -46,6 +46,42 @@ is
            else
               Plan_Destroy'Result = Reap_Now);
 
+   --  Published process-lifecycle states: 0 dormant, 1 running, 2 finalizing,
+   --  3 stopped, 4 cleanup deferred. Admitting a create means letting it name,
+   --  read, or lock an execution group.
+   function Creation_Admitted (Lifecycle : C.int) return Boolean
+   with Inline,
+        Post => Creation_Admitted'Result = (Lifecycle in 0 | 1);
+
+   --  Admitting a teardown means destroying pollers, group mutexes, and the
+   --  groups themselves. It requires the published finalizing state, a
+   --  quiescent registry, and no create still holding a claim on a group.
+   function Teardown_Admitted
+     (Lifecycle          : C.int;
+      Registry_Quiescent : Boolean;
+      Outstanding_Claims : Natural) return Boolean
+   with Inline,
+        Post =>
+          Teardown_Admitted'Result =
+            (Lifecycle = 2
+             and then Registry_Quiescent
+             and then Outstanding_Claims = 0);
+
+   --  The two admissions are mutually exclusive for every lifecycle value.
+   --  That is the property the scheduler depends on: while any create can
+   --  still be admitted, no group it may reach can be stopped or freed.
+   procedure Lemma_Creation_Excludes_Teardown
+     (Lifecycle          : C.int;
+      Registry_Quiescent : Boolean;
+      Outstanding_Claims : Natural)
+   with Ghost,
+        Post =>
+          not (Creation_Admitted (Lifecycle)
+               and then Teardown_Admitted
+                          (Lifecycle,
+                           Registry_Quiescent,
+                           Outstanding_Claims));
+
    First_Shared_Group    : constant C.int := 0;
    First_Dedicated_Group : constant C.int := 128;
    Last_Group            : constant C.int := 255;

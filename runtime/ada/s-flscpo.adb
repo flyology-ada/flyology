@@ -18,6 +18,24 @@ is
    function Plan_Destroy (Phase : Fiber_Phase) return Destruction_Plan is
      (if Phase in Running | Migrating then Defer else Reap_Now);
 
+   function Creation_Admitted (Lifecycle : C.int) return Boolean is
+     (Lifecycle in 0 | 1);
+
+   function Teardown_Admitted
+     (Lifecycle          : C.int;
+      Registry_Quiescent : Boolean;
+      Outstanding_Claims : Natural) return Boolean
+   is
+     (Lifecycle = 2
+      and then Registry_Quiescent
+      and then Outstanding_Claims = 0);
+
+   procedure Lemma_Creation_Excludes_Teardown
+     (Lifecycle          : C.int;
+      Registry_Quiescent : Boolean;
+      Outstanding_Claims : Natural)
+   is null;
+
    function Valid_Group (Group : C.int) return Boolean is
      (Group >= First_Shared_Group and then Group <= Last_Group);
 

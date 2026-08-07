@@ -37,7 +37,8 @@ package Fault_Control is
       File_Uring_Post_Setup_Failure,
       Poller_File_Drain_Pause,
       File_Uring_Synchronous_Eventfd,
-      Connect_Interrupted);
+      Connect_Interrupted,
+      Create_Lifecycle_Window);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -74,7 +75,8 @@ package Fault_Control is
       File_Uring_Post_Setup_Failure => 32,
       Poller_File_Drain_Pause        => 33,
       File_Uring_Synchronous_Eventfd => 34,
-      Connect_Interrupted            => 35);
+      Connect_Interrupted            => 35,
+      Create_Lifecycle_Window        => 36);
 
    function Enabled return Boolean;
    procedure Reset;

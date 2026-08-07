@@ -37,7 +37,8 @@ package System.Flyology.Faults is
       File_Uring_Probe_Unsupported,
       File_Uring_Post_Setup_Failure,
       Poller_File_Drain_Pause,
-      File_Uring_Synchronous_Eventfd);
+      File_Uring_Synchronous_Eventfd,
+      Create_Lifecycle_Window);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -73,11 +74,22 @@ package System.Flyology.Faults is
       File_Uring_Probe_Unsupported => 31,
       File_Uring_Post_Setup_Failure => 32,
       Poller_File_Drain_Pause        => 33,
-      File_Uring_Synchronous_Eventfd => 34);
+      File_Uring_Synchronous_Eventfd => 34,
+      Create_Lifecycle_Window        => 36);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);
 
    function Pause_Final_Reaper return Boolean;
    procedure Release_Final_Reaper;
+
+   --  Create/Finalize rendezvous. Pause_Create_Registration parks a creating
+   --  thread that already passed the unlocked lifecycle guard and returns
+   --  False if finalization never arrives. Note_Create_Registering reports
+   --  that the parked thread now owns its registry shard, and
+   --  Release_Create_Registration releases the parked thread and waits for
+   --  that report so the finalizing thread continues in the widened window.
+   function Pause_Create_Registration return Boolean;
+   procedure Note_Create_Registering;
+   procedure Release_Create_Registration;
 end System.Flyology.Faults;

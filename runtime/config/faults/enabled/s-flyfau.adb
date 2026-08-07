@@ -16,6 +16,24 @@ package body System.Flyology.Faults is
    pragma Import
      (C, Test_Release_Final_Reaper, "flyology_test_release_final_reaper");
 
+   function Test_Pause_Create_Registration return Interfaces.C.int;
+   pragma Import
+     (C,
+      Test_Pause_Create_Registration,
+      "flyology_test_pause_create_registration");
+
+   procedure Test_Note_Create_Registering;
+   pragma Import
+     (C,
+      Test_Note_Create_Registering,
+      "flyology_test_note_create_registering");
+
+   procedure Test_Release_Create_Registration;
+   pragma Import
+     (C,
+      Test_Release_Create_Registration,
+      "flyology_test_release_create_registration");
+
    function Fail (Point : Fault_Point) return Boolean is
      (Test_Fault_Hit (Interfaces.C.int (Fault_Point'Enum_Rep (Point))) /= 0);
 
@@ -26,5 +44,18 @@ package body System.Flyology.Faults is
    begin
       Test_Release_Final_Reaper;
    end Release_Final_Reaper;
+
+   function Pause_Create_Registration return Boolean is
+     (Test_Pause_Create_Registration = 0);
+
+   procedure Note_Create_Registering is
+   begin
+      Test_Note_Create_Registering;
+   end Note_Create_Registering;
+
+   procedure Release_Create_Registration is
+   begin
+      Test_Release_Create_Registration;
+   end Release_Create_Registration;
 
 end System.Flyology.Faults;

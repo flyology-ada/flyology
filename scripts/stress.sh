@@ -62,7 +62,8 @@ if [ "$run_faults" = 1 ]; then
   run_gprbuild \
     --RTS="$project_root/build/rts" \
     -f -P tests/runtime_smoke.gpr \
-    fault_injection_smoke.adb reap_finalize_race_smoke.adb
+    fault_injection_smoke.adb reap_finalize_race_smoke.adb \
+    create_finalize_race_smoke.adb
 
   if [ "$(uname -s)" = Linux ]; then
     run_gprbuild \
@@ -76,6 +77,10 @@ if [ "$run_faults" = 1 ]; then
   printf '%s\n' "fault case=final-reap-window"
   run_timed "$case_timeout" \
     "$project_root/tests/bin/reap_finalize_race_smoke"
+
+  printf '%s\n' "fault case=create-lifecycle-window"
+  run_timed "$case_timeout" \
+    "$project_root/tests/bin/create_finalize_race_smoke"
 
   fault_cases='
     fiber-allocation stack-map stack-protect stack-discard group-startup
