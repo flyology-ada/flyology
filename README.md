@@ -758,12 +758,45 @@ an access value in persistent storage:
 | `Regions` | No stored object; checked local view and offsets | Application exclusion for view and backing lifetime |
 | `Handles` | 32-bit slot plus 32-bit generation | Validation belongs to the receiving structure |
 | `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
+| `Arenas` | Fixed managed extent with a persisted buddy tree and generation-stamped variable-size allocations | One process-shared metadata guard; payload lifetime exclusion belongs to the handle user |
 | `Slab_Pools` | Fixed-size payload slots with generation-stamped handles | Per-slot atomic claims; immediate and timed operations |
 | `Byte_Strings` | Bounded variable-length byte sequence | Shared guard; immediate and timed operations |
 | `Vectors` | Bounded vector of fixed-size byte elements | Shared guard; immediate and timed operations |
+| `Dynamic.Byte_Strings` | Growable byte sequence in an `Arenas` allocation | Shared string guard; immediate arena-growth outcomes |
+| `Dynamic.Vectors` | Growable vector of fixed-size byte elements in an `Arenas` allocation | Shared vector guard; immediate arena-growth outcomes |
+| `Dynamic.Hash_Maps` | Growable open-addressed table in an `Arenas` allocation | Shared map guard; immediate arena-growth outcomes |
 | `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer; immediate and timed transfer |
 | `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers; immediate and timed transfer |
 | `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Shared guard; immediate and timed operations |
+
+`Arenas` manages a fixed caller-owned extent; it does not resize a file or
+mapping. Its buddy tree rounds a positive request to the smallest fitting
+power-of-two block, and an allocation handle records the tree node, arena
+initialization epoch, and a nonwrapping 64-bit allocation generation. The
+stored tree and handles contain no native address. `Attach_Allocation` can
+produce a process-local `Regions.View` over a live block without exposing its
+base address, which allows another relocatable layout to be composed inside an
+allocation at a nonzero nested offset. Releasing a handle requires exclusion
+from every payload read, write, copy, or nested region derived from it.
+
+The `Dynamic` leaves keep a fixed 128-byte header in their containing region
+and move only their payload table or byte area between arena blocks. Growth
+allocates and initializes a replacement, copies or rehashes the old content,
+and then publishes its generation-stamped handle while holding the leaf guard.
+The old handle is retained in a deferred-reclamation field until arena release
+succeeds, so arena contention does not make published payload storage
+unreachable. `Initial_Capacity`, element or key/value sizes, arena instance
+identity, and arena incarnation are immutable creation parameters and must
+match on `Create_Or_Attach` and `Attach`. Current capacity and length/count are
+validated mutable state, not creation parameters. "Dynamic" therefore means
+growable within a fixed arena; exhaustion remains a reported outcome, and no
+operation grows or remaps the backing object.
+
+Termination after an arena allocation succeeds but before a dynamic leaf
+publishes its handle can leave an allocation that the leaf cannot identify.
+The core does not infer ownership from a locked header. Applications requiring
+recovery for that window need an external allocation journal or exclusive
+whole-arena reinitialization after establishing quiescence.
 
 The original slab allocation, release, read, and write operations are
 nonblocking across native tasks, processes, and distinct mappings. Timed
@@ -791,9 +824,10 @@ progress. Core does not detect that death; an external recovery authority can
 poison the ring after establishing quiescence, and exclusive initialization
 then restores an empty ring. Destruction validates every slot sequence after
 the enqueue/dequeue equality check, so an abandoned final consumer claim is not
-mistaken for an empty ring. The other structures cache validated geometry in
+mistaken for an empty ring. The bounded structures cache validated geometry in
 each local view and use fixed-stride contiguous storage with no allocation
-after initialization. None of these operations performs file opening,
+after initialization. The dynamic leaves allocate only through an explicitly
+supplied arena. None of these operations performs file opening,
 mapping, flushing, peer discovery, descriptor exchange, wake-up signaling, or
 automatic process-lifecycle recovery. Poison and recycle APIs require an
 external recovery authority; a later IPC layer can supply that policy around
@@ -2723,9 +2757,12 @@ The examples demonstrate:
 - uncontended and shared protected-procedure, protected-entry, and rendezvous
   costs across one lightweight execution group, two lightweight groups, native
   tasks, and mixed lanes;
-- adaptive, position-balanced `flyology_bench` shootouts for relocatable
-  vectors, hash maps, byte strings, SPSC/MPMC rings, and slab pools beside the
-  relevant Ada containers and GPRBuild-compiled C++ standard-library peers;
+- adaptive, position-balanced `flyology_bench` shootouts for bounded
+  relocatable vectors, hash maps, byte strings, SPSC/MPMC rings, and slab pools
+  beside the relevant Ada containers and GPRBuild-compiled C++
+  standard-library peers; a separately labeled section measures steady-state
+  arena-backed vectors, hash maps, and byte strings against their Ada peers,
+  plus one buddy allocate/write/read/release cycle;
   when installed, Boost container/lock-free and Abseil flat-map rows are added
   through a narrow C ABI shim. Raw C++ rows and separately mutex-protected rows
   are labeled because their synchronization contracts differ. A second section

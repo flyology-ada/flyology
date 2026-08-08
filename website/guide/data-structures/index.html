@@ -55,7 +55,7 @@
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Relocatable data structures</li></ol>
           <h1>Store structures in caller-owned regions.</h1>
         </div>
-        <p class="doc-hero-copy">Initialize bounded byte-oriented structures in an arena or mapping, attach process-local views at each virtual address, and select synchronization according to the leaf package.</p>
+        <p class="doc-hero-copy">Initialize byte-oriented structures in a caller-owned region, optionally manage payload growth with a relocatable arena, attach process-local views at each virtual address, and use the synchronization model stated by each leaf.</p>
       </header>
 
       <div class="docs-layout">
@@ -64,6 +64,7 @@
           <ol>
             <li><a href="#contract">Representation contract</a></li>
             <li><a href="#choose">Choose a structure</a></li>
+            <li><a href="#arenas">Allocate growable payloads</a></li>
             <li><a href="#region">Initialize a local arena</a></li>
             <li><a href="#relocation">Attach another mapping</a></li>
             <li><a href="#envelopes">Add an application contract</a></li>
@@ -90,7 +91,7 @@
                 <div class="decision-row"><dt>Stored metadata</dt><dd>Every leaf records a 64-bit magic, layout version, schema, extent, configuration, lifecycle state, and initialization epoch.</dd></div>
                 <div class="decision-row"><dt>Attachment</dt><dd>The expected identity and geometry must match. Null, truncated, misaligned, overflowing, incomplete, stale, or corrupt layouts fail before payload access.</dd></div>
                 <div class="decision-row"><dt>Payload types</dt><dd>Public containers store explicit byte representations. An arbitrary Ada private type may contain hidden access values or compiler metadata and is not accepted as a persistable element.</dd></div>
-                <div class="decision-row"><dt>Allocation</dt><dd>Capacity and element geometry are fixed at initialization. Leaf operations do not grow the backing region.</dd></div>
+                <div class="decision-row"><dt>Allocation</dt><dd>Bounded leaves keep fixed capacity. Dynamic leaves can replace payload allocations inside a fixed managed arena, but no leaf grows or remaps the backing region.</dd></div>
               </dl>
             </div>
             <aside class="callout">
@@ -107,6 +108,10 @@
                 <div class="decision-row"><dt><a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html#97166b56d6d2b4d8a17560db84fd55d8ca3f15a25bb22299f8f091c0fa6768cc"><code>Byte_Strings.View</code></a></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence of fixed-size byte elements. Indexing is one-based at the public API.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/2deb1c418009bddb97baa53a4ddbc4b6934c37124c59528b494223aee6c9b93e.html#597139e2424f6d33451757a2f8ced40f78441f5eb500b45562accefcca7ace75"><code>Hash_Maps.View</code></a></dt><dd>Fixed-size byte keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a></dt><dd>A fixed managed extent with variable-size buddy allocations identified by generations rather than addresses.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/3b065985c3e335db58df8578f6a05aea354fda11d81238c958c208971a819df1.html#fbf4e1d6dac71f7df1df68d21ef9b4fff66873450899a844416728ba100ba4db"><code>Dynamic.Byte_Strings.View</code></a></dt><dd>A byte sequence whose payload capacity grows through an arena allocation.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#ef52ac089f2889eeb8451dfa5315c99f7c50310323efd9fdf07c876da3f43b0d"><code>Dynamic.Vectors.View</code></a></dt><dd>A fixed-element byte vector whose payload capacity grows through an arena allocation.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2019939f291a34570c155cc5667dafe8f3df91d59b699c7b8267808aedfda0a4.html#92733d1c768ad9e91be0684ca99c5ad27e0c8ec9edea14218ed5c541712524e5"><code>Dynamic.Hash_Maps.View</code></a></dt><dd>An open-addressed byte map that allocates and rehashes larger tables inside an arena.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/33f167411312a472530c78e3ac8834c20ea6f0da6342fe4be0ee2d40d126ad93.html#5b49349b2c7da0c385c11838f2c36a9cd39e641106527595e1d473896f25c44e"><code>Slab_Pools.View</code></a></dt><dd>Fixed-size slots returned as generation-stamped handles. Per-slot state separates unrelated accesses and detects stale handles.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/ec218e69c64bef956ed82437a2f13cabd318703df1632430ba2bd9c0c7ad55bd.html#8e3297d1675df4af1359d7698cfb76b42ac24b86c8d149b0f3c329fde238515b"><code>Rings.SPSC.View</code></a></dt><dd>A bounded fixed-element queue with exactly one producer and one consumer.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/4a0642adfe76deb041fd8c62b2947e0ea39a498faf4337de5e0e202cddcf5097.html#4e25fff018a6868d103011af2aeaf39847fc00b1ddab974ca8b213091d56308d"><code>Rings.MPMC.View</code></a></dt><dd>A bounded fixed-element queue with multiple producers and consumers, per-slot sequences, and bounded claim campaigns.</dd></div>
@@ -116,8 +121,44 @@
             <p><a href="../../api/406d17cda42c14faf09bd101e96f3b5bcdc3ca6a383babe76d63bfb2ab6c79d5.html#62bc05b67554ce668c1a0b7a9b463cacd9aab976a202c38ce34502599d0547df"><code>Regions.View</code></a> supplies a checked process-local backing view, while <a href="../../api/03f2d320fb794d315fb0308aee9d015f09a38ee74193c79a1555c97337e54a54.html#67131a4bbd82f6c74291e930859a6f9154206ce32e9b3d3b16b53c7afca18bc0"><code>Handles.Handle</code></a> is the fixed-width slot-and-generation representation used by structures such as slabs. Neither package owns storage.</p>
           </section>
 
-          <section id="region">
+          <section id="arenas">
             <span class="step-label">STORAGE 03</span>
+            <h2>Use an arena when payload capacity must grow.</h2>
+            <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a> manages a fixed region extent with a persisted buddy tree. Each successful allocation returns an <a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#4eddf9f5a1acc9705b6440b934fded8428ef19d5dfe9ed41d0d410b1b0a47224"><code>Arenas.Allocation_Handle</code></a> containing a tree-node index, arena initialization epoch, and nonzero allocation generation. The handle remains the stored relationship; the arena derives a checked process-local address only inside an operation.</p>
+            <p>The managed capacity and minimum block size are powers of two. Allocation rounds a request to the smallest fitting buddy block and reports allocation, exhaustion, or immediate metadata contention. Releasing a handle coalesces free buddies and makes every copy of that generation stale. Payload read, write, and copy do not acquire the metadata guard, so the handle owner must exclude release while payload access or a nested allocation-region view is active.</p>
+            <figure class="code-panel">
+              <figcaption>an arena-backed dynamic vector</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Arenas.Initialize
+  (Arena_View, Region, Location =&gt; 4_096,
+   Usable_Capacity =&gt; 1_048_576,
+   Minimum_Block_Size =&gt; 64,
+   Instance_ID =&gt; 16#A8E4_7B19_2C63_D501#);
+
+Dynamic_Vectors.Initialize
+  (Items, Region, Location =&gt; 128,
+   Arena =&gt; Arena_View,
+   Initial_Capacity =&gt; 16,
+   Element_Size =&gt; 8);
+
+Dynamic_Vectors.Try_Append
+  (Items, Arena_View, Data, Growth);
+
+if Growth = DS.Dynamic.Arena_Exhausted then
+   --  The fixed managed arena has no fitting free block.
+   null;
+end if;</code></pre>
+            </figure>
+            <p>The dynamic leaves keep a fixed 128-byte header at their original region offset and move only the payload allocation. Growth allocates and initializes a replacement before publishing its handle. A deferred old handle remains recorded until reclamation succeeds, so arena contention cannot make a published allocation unreachable. <a href="../../api/b500dc85fb0983f0d2c0528959d9cffac53e84061e5fa4e1d33d8d4056c939c4.html#dee88d8149046a2e463e9537133196c04d4c4b7bc8d66a673d43478c5c43ea24"><code>Dynamic.Growth_Result</code></a> separates completion, arena exhaustion, and arena contention.</p>
+            <p><code>Create_Or_Attach</code> and <code>Attach</code> compare every immutable creation parameter. For an arena this includes managed capacity, minimum block size, and the caller-selected instance identifier. For a dynamic leaf it includes initial capacity, element or key/value sizes, and the arena instance plus initialization incarnation. A ready object with different parameters fails attachment; it is not reinitialized or adapted.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Growable is not an unbounded resource claim.</strong> Dynamic structures grow until allocation geometry or the fixed arena is exhausted. The arena does not extend a mapping, compact live blocks, or recover ownership after process death. Termination after allocation but before handle publication requires an external allocation journal or exclusive whole-arena reinitialization.</p>
+            </aside>
+          </section>
+
+          <section id="region">
+            <span class="step-label">STORAGE 04</span>
             <h2>Initialize a structure in an attached region.</h2>
             <p>The application first obtains contiguous bytes, then attaches a region view. The example uses a local aligned arena; the same leaf calls apply to anonymous, file-backed, persistent, or shared mappings.</p>
             <figure class="code-panel">
@@ -171,7 +212,7 @@ end Local_Vector;</code></pre>
           </section>
 
           <section id="relocation">
-            <span class="step-label">STORAGE 04</span>
+            <span class="step-label">STORAGE 05</span>
             <h2>Attach independently at every mapping address.</h2>
             <p>Mapping creation remains outside these packages. After the application maps the same backing object again, attach another region using that mapping's base and attach the leaf with the expected configuration.</p>
             <figure class="code-panel">
@@ -196,7 +237,7 @@ Vectors.Attach
           </section>
 
           <section id="envelopes">
-            <span class="step-label">STORAGE 05</span>
+            <span class="step-label">STORAGE 06</span>
             <h2>Add an application-level version when needed.</h2>
             <p>Every leaf already validates its own <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#3ef2c359f4a46aa8c6556874ab8796e27c0663966dfe9699bdd02227b814aab3"><code>Layout_Identity</code></a>. An application that assigns additional meaning to the payload can instantiate <code>Envelopes</code> with the leaf's exported <code>Identity</code>, a stable nonzero signature, and an application-controlled contract version.</p>
             <figure class="code-panel">
@@ -224,7 +265,7 @@ Vectors.Initialize
           </section>
 
           <section id="synchronization">
-            <span class="step-label">STORAGE 06</span>
+            <span class="step-label">STORAGE 07</span>
             <h2>Use the synchronization model stated by the leaf.</h2>
             <p>Relocation and concurrency are separate properties. Region attachment and backing lifetime are never internally synchronized. Leaf initialization, attachment, detachment, destruction, and reinitialization require the documented quiescence even when ordinary operations are internally coordinated.</p>
             <div class="decision-list">
@@ -244,7 +285,7 @@ Vectors.Initialize
           </section>
 
           <section id="recovery">
-            <span class="step-label">STORAGE 07</span>
+            <span class="step-label">STORAGE 08</span>
             <h2>Separate corruption detection from owner-death policy.</h2>
             <p>Layouts fail closed on corrupt identity, geometry, state, counters, and handles, but the core packages do not determine whether another task or process has terminated. Poison operations therefore require an independently authorized caller that has already established owner death and the leaf's required quiescence.</p>
             <div class="decision-list">
@@ -259,7 +300,7 @@ Vectors.Initialize
           </section>
 
           <section id="lifetime">
-            <span class="step-label">STORAGE 08</span>
+            <span class="step-label">STORAGE 09</span>
             <h2>Review the complete lifetime sequence.</h2>
             <ol>
               <li>Choose capacity and element geometry, then compute <code>Required_Storage</code>.</li>
@@ -274,7 +315,7 @@ Vectors.Initialize
           </section>
 
           <section id="limits">
-            <span class="step-label">STORAGE 09</span>
+            <span class="step-label">STORAGE 10</span>
             <h2>Keep the core boundary explicit.</h2>
             <ul>
               <li>The packages do not open, name, map, resize, flush, or close backing storage.</li>

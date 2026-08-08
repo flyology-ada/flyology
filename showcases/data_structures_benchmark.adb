@@ -10,7 +10,11 @@ with Ada.Text_IO;
 with Ada.Unchecked_Conversion;
 with Flyology;
 with Flyology.Data_Structures;
+with Flyology.Data_Structures.Arenas;
 with Flyology.Data_Structures.Byte_Strings;
+with Flyology.Data_Structures.Dynamic.Byte_Strings;
+with Flyology.Data_Structures.Dynamic.Hash_Maps;
+with Flyology.Data_Structures.Dynamic.Vectors;
 with Flyology.Data_Structures.Handles;
 with Flyology.Data_Structures.Hash_Maps;
 with Flyology.Data_Structures.Regions;
@@ -29,6 +33,10 @@ procedure Data_Structures_Benchmark is
    package CLI renames Ada.Command_Line;
    package DS renames Flyology.Data_Structures;
    package Byte_Strings renames DS.Byte_Strings;
+   package Arenas renames DS.Arenas;
+   package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
+   package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
+   package Dynamic_Vectors renames DS.Dynamic.Vectors;
    package Handles renames DS.Handles;
    package Hash_Maps renames DS.Hash_Maps;
    package MPMC renames DS.Rings.MPMC;
@@ -48,6 +56,9 @@ procedure Data_Structures_Benchmark is
    use type Ada.Streams.Stream_Element_Array;
    use type Bench.Iteration_Count;
    use type DS.Byte_Count;
+   use type DS.Dynamic.Growth_Result;
+   use type Arenas.Allocation_Result;
+   use type Dynamic_Maps.Put_Result;
    use type Hash_Maps.Put_Result;
    use type Interfaces.C.int;
    use type MPMC.Pop_Result;
@@ -188,8 +199,26 @@ procedure Data_Structures_Benchmark is
      (Align_64 (DS.Byte_Count (Slab_Location) + Slab_Extent));
    String_Extent : constant DS.Byte_Count :=
      Byte_Strings.Required_Storage (8);
+   Dynamic_Vector_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64 (DS.Byte_Count (String_Location) + String_Extent));
+   Dynamic_Vector_Extent : constant DS.Byte_Count :=
+     Dynamic_Vectors.Required_Storage;
+   Dynamic_String_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64
+        (DS.Byte_Count (Dynamic_Vector_Location) + Dynamic_Vector_Extent));
+   Dynamic_String_Extent : constant DS.Byte_Count :=
+     Dynamic_Strings.Required_Storage;
+   Dynamic_Map_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64
+        (DS.Byte_Count (Dynamic_String_Location) + Dynamic_String_Extent));
+   Dynamic_Map_Extent : constant DS.Byte_Count :=
+     Dynamic_Maps.Required_Storage;
+   Arena_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64 (DS.Byte_Count (Dynamic_Map_Location) + Dynamic_Map_Extent));
+   Arena_Extent : constant DS.Byte_Count :=
+     Arenas.Required_Storage (262_144, 64);
    Region_Length : constant DS.Byte_Count := Align_64
-     (DS.Byte_Count (String_Location) + String_Extent + 64);
+     (DS.Byte_Count (Arena_Location) + Arena_Extent + 64);
 
    function Posix_Memalign
      (Result    : access System.Address;
@@ -208,6 +237,10 @@ procedure Data_Structures_Benchmark is
    Fly_MPMC : MPMC.View;
    Fly_Slab : Slab_Pools.View;
    Fly_String : Byte_Strings.View;
+   Fly_Arena : Arenas.View;
+   Fly_Dynamic_Vector : Dynamic_Vectors.View;
+   Fly_Dynamic_Map : Dynamic_Maps.View;
+   Fly_Dynamic_String : Dynamic_Strings.View;
    Standard_Vector : Standard_Vectors.Vector;
    Standard_Map : Standard_Maps.Map;
    Standard_Queue : Standard_Queues.Queue;
@@ -605,6 +638,105 @@ procedure Data_Structures_Benchmark is
       end loop;
       Checksum := Local;
    end Fly_Slab_Batch;
+
+   procedure Fly_Arena_Batch (Iterations : Bench.Iteration_Count) is
+      Handle : Arenas.Allocation_Handle;
+      Data   : Bytes_8;
+      Result : Arenas.Allocation_Result;
+      Local  : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Arenas.Try_Allocate (Fly_Arena, 8, Handle, Result);
+         if Result /= Arenas.Allocated then
+            raise Program_Error with "Flyology arena allocation failed";
+         end if;
+         Arenas.Write
+           (Fly_Arena, Handle, 0, Encode (Payload (Iteration)));
+         Arenas.Read (Fly_Arena, Handle, 0, Data);
+         Local := Local + Decode (Data);
+         Arenas.Release (Fly_Arena, Handle);
+      end loop;
+      Checksum := Local;
+   end Fly_Arena_Batch;
+
+   procedure Fly_Dynamic_Vector_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Data   : Bytes_8;
+      Result : DS.Dynamic.Growth_Result;
+      Count  : Natural := 0;
+      Local  : U64 := 0;
+   begin
+      Dynamic_Vectors.Clear (Fly_Dynamic_Vector);
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         if Count = Working_Capacity then
+            Dynamic_Vectors.Clear (Fly_Dynamic_Vector);
+            Count := 0;
+         end if;
+         Dynamic_Vectors.Try_Append
+           (Fly_Dynamic_Vector, Fly_Arena,
+            Encode (Payload (Iteration)), Result);
+         if Result /= DS.Dynamic.Completed then
+            raise Program_Error with "dynamic vector append failed";
+         end if;
+         Count := Count + 1;
+         Dynamic_Vectors.Read
+           (Fly_Dynamic_Vector, Fly_Arena, Positive (Count), Data);
+         Local := Local + Decode (Data);
+      end loop;
+      Checksum := Local;
+   end Fly_Dynamic_Vector_Batch;
+
+   procedure Fly_Dynamic_Map_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Data    : Bytes_8;
+      Found   : Boolean;
+      Result  : Dynamic_Maps.Put_Result;
+      Key     : U64;
+      Local   : U64 := 0;
+   begin
+      Dynamic_Maps.Clear (Fly_Dynamic_Map, Fly_Arena);
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Key := U64
+           ((Iteration - 1) mod Bench.Iteration_Count (Working_Capacity)) + 1;
+         if Key = 1 then
+            Dynamic_Maps.Clear (Fly_Dynamic_Map, Fly_Arena);
+         end if;
+         Dynamic_Maps.Put
+           (Fly_Dynamic_Map, Fly_Arena, Encode (Key),
+            Encode (Payload (Iteration)), Result);
+         if Result /= Dynamic_Maps.Put_Inserted then
+            raise Program_Error with "dynamic map insert failed";
+         end if;
+         Dynamic_Maps.Get
+           (Fly_Dynamic_Map, Fly_Arena, Encode (Key), Data, Found);
+         if not Found then
+            raise Program_Error with "dynamic map lookup failed";
+         end if;
+         Local := Local + Decode (Data);
+      end loop;
+      Checksum := Local;
+   end Fly_Dynamic_Map_Batch;
+
+   procedure Fly_Dynamic_String_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Data   : constant Bytes_8 := Encode (16#666C_796F_6C6F_6779#);
+      Result : DS.Dynamic.Growth_Result;
+      Local  : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         pragma Unreferenced (Iteration);
+         Dynamic_Strings.Try_Assign
+           (Fly_Dynamic_String, Fly_Arena, Data, Result);
+         if Result /= DS.Dynamic.Completed then
+            raise Program_Error with "dynamic string assignment failed";
+         end if;
+         Local := Local + U64 (Dynamic_Strings.Length (Fly_Dynamic_String));
+      end loop;
+      Checksum := Local;
+   end Fly_Dynamic_String_Batch;
 
    procedure Prepare_Vector_Contention is
       Appended : Boolean;
@@ -1228,6 +1360,61 @@ procedure Data_Structures_Benchmark is
      (MPMC_Core_Case);
 
    procedure Measure_Slab is new Bench.Measure_Batched (Fly_Slab_Batch);
+   procedure Measure_Arena is new Bench.Measure_Batched (Fly_Arena_Batch);
+
+   type Dynamic_Vector_Case is (Flyology_Arena_Backed, Ada_Vector);
+
+   procedure Dynamic_Vector_Batch
+     (Which : Dynamic_Vector_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology_Arena_Backed =>
+            Fly_Dynamic_Vector_Batch (Iterations);
+         when Ada_Vector =>
+            Ada_Vector_Batch (Iterations);
+      end case;
+   end Dynamic_Vector_Batch;
+
+   procedure Compare_Dynamic_Vectors is new Bench.Compare_Many
+     (Case_Id => Dynamic_Vector_Case, Batch => Dynamic_Vector_Batch);
+   procedure Put_Dynamic_Vectors is new
+     Reporters.Put_Multi_Comparison_Console (Dynamic_Vector_Case);
+
+   type Dynamic_Map_Case is (Flyology_Arena_Backed, Ada_Hashed_Map);
+
+   procedure Dynamic_Map_Batch
+     (Which : Dynamic_Map_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology_Arena_Backed =>
+            Fly_Dynamic_Map_Batch (Iterations);
+         when Ada_Hashed_Map =>
+            Ada_Map_Batch (Iterations);
+      end case;
+   end Dynamic_Map_Batch;
+
+   procedure Compare_Dynamic_Maps is new Bench.Compare_Many
+     (Case_Id => Dynamic_Map_Case, Batch => Dynamic_Map_Batch);
+   procedure Put_Dynamic_Maps is new
+     Reporters.Put_Multi_Comparison_Console (Dynamic_Map_Case);
+
+   type Dynamic_String_Case is (Flyology_Arena_Backed, Ada_Unbounded);
+
+   procedure Dynamic_String_Batch
+     (Which : Dynamic_String_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology_Arena_Backed =>
+            Fly_Dynamic_String_Batch (Iterations);
+         when Ada_Unbounded =>
+            Ada_String_Batch (Iterations);
+      end case;
+   end Dynamic_String_Batch;
+
+   procedure Compare_Dynamic_Strings is new Bench.Compare_Many
+     (Case_Id => Dynamic_String_Case, Batch => Dynamic_String_Batch);
+   procedure Put_Dynamic_Strings is new
+     Reporters.Put_Multi_Comparison_Console (Dynamic_String_Case);
 
    type Contended_Vector_Case is
      (Flyology_Try, Flyology_Wait, Std_Mutex, Boost_Mutex);
@@ -1449,6 +1636,7 @@ procedure Data_Structures_Benchmark is
       Practical_Threshold_Percent => 1.0,
       Random_Seed                  => 42,
       Collect_Process_Telemetry    => False,
+      CPU_Quiescence               => (others => <>),
       Progress                     => null,
       Progress_Name                => <>);
 
@@ -1484,6 +1672,18 @@ begin
    Slab_Pools.Initialize
      (Fly_Slab, Region, Slab_Location, Working_Capacity, 8, 8);
    Byte_Strings.Initialize (Fly_String, Region, String_Location, 8);
+   Arenas.Initialize
+     (Fly_Arena, Region, Arena_Location, 262_144, 64,
+      16#B34C_7A91_04D2_EE01#);
+   Dynamic_Vectors.Initialize
+     (Fly_Dynamic_Vector, Region, Dynamic_Vector_Location,
+      Fly_Arena, Working_Capacity, 8);
+   Dynamic_Maps.Initialize
+     (Fly_Dynamic_Map, Region, Dynamic_Map_Location,
+      Fly_Arena, Map_Capacity, 8, 8);
+   Dynamic_Strings.Initialize
+     (Fly_Dynamic_String, Region, Dynamic_String_Location,
+      Fly_Arena, 8);
    Standard_Vector.Reserve_Capacity
      (Ada.Containers.Count_Type (Working_Capacity));
    Standard_Map.Reserve_Capacity
@@ -1575,10 +1775,41 @@ begin
    Reporters.Put_Console
      ("Flyology_Data_Structures_Slab_Pools", Slab_Result);
 
+   TIO.New_Line;
+   TIO.Put_Line ("Allocator-backed steady-state throughput");
+   TIO.Put_Line
+     ("  Flyology rows retain already-grown arena allocations; growth and "
+      & "rehashing are excluded");
+
+   Compare_Dynamic_Vectors
+     (Config => Terminal_Config ("arena-backed vector"),
+      Result => Multi_Result);
+   Put_Dynamic_Vectors (Multi_Result);
+
+   Compare_Dynamic_Maps
+     (Config => Terminal_Config ("arena-backed hash map"),
+      Result => Multi_Result);
+   Put_Dynamic_Maps (Multi_Result);
+
+   Compare_Dynamic_Strings
+     (Config => Terminal_Config ("arena-backed byte string"),
+      Result => Multi_Result);
+   Put_Dynamic_Strings (Multi_Result);
+
+   Measure_Arena
+     (Config => Terminal_Config ("buddy arena allocation cycle"),
+      Result => Slab_Result);
+   Reporters.Put_Console
+     ("Flyology_Arenas_Allocate_Write_Read_Release", Slab_Result);
+
    TIO.Put_Line
      ("checksum=" & Checksum'Image
       & "; preceding results are uncontended amortized throughput");
 
+   Dynamic_Strings.Destroy (Fly_Dynamic_String, Fly_Arena);
+   Dynamic_Maps.Destroy (Fly_Dynamic_Map, Fly_Arena);
+   Dynamic_Vectors.Destroy (Fly_Dynamic_Vector, Fly_Arena);
+   Arenas.Destroy (Fly_Arena);
    Byte_Strings.Destroy (Fly_String);
    Slab_Pools.Destroy (Fly_Slab);
    MPMC.Destroy (Fly_MPMC);
