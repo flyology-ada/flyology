@@ -5,6 +5,9 @@ with Ada.Text_IO;
 with Flyology;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Byte_Strings;
+with Flyology.Data_Structures.Arenas;
+with Flyology.Data_Structures.Dynamic.Hash_Maps;
+with Flyology.Data_Structures.Dynamic.Vectors;
 with Flyology.Data_Structures.Hash_Maps;
 with Flyology.Data_Structures.Handles;
 with Flyology.Data_Structures.Regions;
@@ -19,6 +22,9 @@ with System;
 procedure Data_Structures_Concurrency_Smoke is
    package DS renames Flyology.Data_Structures;
    package Byte_Strings renames DS.Byte_Strings;
+   package Arenas renames DS.Arenas;
+   package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
+   package Dynamic_Vectors renames DS.Dynamic.Vectors;
    package Hash_Maps renames DS.Hash_Maps;
    package Handles renames DS.Handles;
    package Regions renames DS.Regions;
@@ -33,6 +39,8 @@ procedure Data_Structures_Concurrency_Smoke is
    use type Interfaces.Unsigned_64;
    use type DS.Open_Result;
    use type Hash_Maps.Put_Result;
+   use type DS.Dynamic.Growth_Result;
+   use type Dynamic_Maps.Put_Result;
    use type Slabs.Allocation_Result;
    use type System.Address;
 
@@ -44,7 +52,7 @@ procedure Data_Structures_Concurrency_Smoke is
 
    SPSC_Iterations : constant Positive := Argument (1, 250_000);
    MPMC_Per_Producer : constant Positive := Argument (2, 25_000);
-   Mapping_Length : constant C.size_t := 1_048_576;
+   Mapping_Length : constant C.size_t := 4_194_304;
    SPSC_Location : constant DS.Region_Offset := 64;
    MPMC_Location : constant DS.Region_Offset := 131_072;
    Slab_Location : constant DS.Region_Offset := 400_000;
@@ -52,6 +60,9 @@ procedure Data_Structures_Concurrency_Smoke is
    String_Location : constant DS.Region_Offset := 700_000;
    Map_Location : constant DS.Region_Offset := 786_432;
    Open_Location : constant DS.Region_Offset := 950_000;
+   Arena_Location : constant DS.Region_Offset := 1_048_576;
+   Dynamic_Vector_Location : constant DS.Region_Offset := 2_700_000;
+   Dynamic_Map_Location : constant DS.Region_Offset := 2_701_024;
 
    function Mapping_Create
      (Path   : C.char_array;
@@ -797,6 +808,216 @@ procedure Data_Structures_Concurrency_Smoke is
       end loop;
    end Run_Internally_Synchronized_Map;
 
+   procedure Run_Dynamic_Arena is
+      Worker_Count : constant Positive := 4;
+      Per_Worker : constant Positive := 2_000;
+      Total : constant Positive := Worker_Count * Per_Worker;
+      type Arena_Array is array (Positive range <>) of aliased Arenas.View;
+      Arena_Views : Arena_Array (1 .. Worker_Count);
+      type Arena_Access is access all Arenas.View;
+
+      procedure Run_Vector is
+         type View_Array is array (Positive range <>) of aliased
+           Dynamic_Vectors.View;
+         Views : View_Array (1 .. Worker_Count);
+         type View_Access is access all Dynamic_Vectors.View;
+         Finished : Completion (Worker_Count);
+
+         task type Worker_Task
+           (Identifier : Positive;
+            Item       : not null View_Access;
+            Arena      : not null Arena_Access)
+         is
+            pragma Task_Info (Flyology.Native_Task);
+         end Worker_Task;
+
+         task body Worker_Task is
+            Value : Interfaces.Unsigned_64;
+            Result : DS.Dynamic.Growth_Result;
+         begin
+            for Sequence in 1 .. Per_Worker loop
+               Value := Interfaces.Unsigned_64
+                 ((Identifier - 1) * Per_Worker + Sequence);
+               loop
+                  begin
+                     Dynamic_Vectors.Try_Append
+                       (Item.all, Arena.all, Encode (Value), Result);
+                     exit when Result = DS.Dynamic.Completed;
+                     if Result = DS.Dynamic.Arena_Exhausted then
+                        raise Program_Error with
+                          "dynamic vector exhausted its concurrency arena";
+                     end if;
+                  exception
+                     when DS.Busy_Error => null;
+                  end;
+                  delay 0.0;
+               end loop;
+            end loop;
+            Finished.Done (True);
+         exception
+            when others => Finished.Done (False);
+         end Worker_Task;
+
+         type Worker_Access is access Worker_Task;
+         type Worker_Array is array (Positive range <>) of Worker_Access;
+         Workers : Worker_Array (1 .. Worker_Count);
+         Seen : Seen_Array (1 .. Total) := (others => False);
+         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Value : Interfaces.Unsigned_64;
+      begin
+         Dynamic_Vectors.Initialize
+           (Views (1), Region_A, Dynamic_Vector_Location,
+            Arena_Views (1), 2, 8);
+         for Index in 2 .. Worker_Count loop
+            Dynamic_Vectors.Attach
+              (Views (Index),
+               (if Index mod 2 = 0 then Region_B else Region_A),
+               Dynamic_Vector_Location, Arena_Views (Index), 2, 8);
+         end loop;
+         for Index in Workers'Range loop
+            Workers (Index) := new Worker_Task
+              (Index, Views (Index)'Access, Arena_Views (Index)'Access);
+         end loop;
+         select
+            Finished.Await_All;
+         or
+            delay 20.0;
+            for Worker of Workers loop
+               abort Worker.all;
+            end loop;
+            raise Program_Error with
+              "dynamic-vector native-task test timed out";
+         end select;
+         Assert
+           (Finished.Passed
+            and then Dynamic_Vectors.Length (Views (1)) = Total,
+            "dynamic-vector concurrent append lost elements");
+         for Index in 1 .. Total loop
+            Dynamic_Vectors.Read
+              (Views (1), Arena_Views (1), Index, Data);
+            Value := Decode (Data);
+            Assert
+              (Value in 1 .. Interfaces.Unsigned_64 (Total)
+               and then not Seen (Positive (Value)),
+               "dynamic-vector concurrent append duplicated an element");
+            Seen (Positive (Value)) := True;
+         end loop;
+         Dynamic_Vectors.Destroy (Views (1), Arena_Views (1));
+         for Index in 2 .. Worker_Count loop
+            Dynamic_Vectors.Detach (Views (Index));
+         end loop;
+      end Run_Vector;
+
+      procedure Run_Map is
+         type View_Array is array (Positive range <>) of aliased
+           Dynamic_Maps.View;
+         Views : View_Array (1 .. Worker_Count);
+         type View_Access is access all Dynamic_Maps.View;
+         Finished : Completion (Worker_Count);
+
+         task type Worker_Task
+           (Identifier : Positive;
+            Item       : not null View_Access;
+            Arena      : not null Arena_Access)
+         is
+            pragma Task_Info (Flyology.Native_Task);
+         end Worker_Task;
+
+         task body Worker_Task is
+            Value : Interfaces.Unsigned_64;
+            Result : Dynamic_Maps.Put_Result;
+         begin
+            for Sequence in 1 .. Per_Worker loop
+               Value := Interfaces.Unsigned_64
+                 ((Identifier - 1) * Per_Worker + Sequence);
+               loop
+                  begin
+                     Dynamic_Maps.Put
+                       (Item.all, Arena.all, Encode (Value),
+                        Encode (Value * 3), Result);
+                     exit when Result = Dynamic_Maps.Put_Inserted;
+                     if Result = Dynamic_Maps.Put_Replaced then
+                        raise Program_Error with
+                          "dynamic map replaced a supposedly unique key";
+                     elsif Result = Dynamic_Maps.Put_Arena_Exhausted then
+                        raise Program_Error with
+                          "dynamic map exhausted its concurrency arena";
+                     end if;
+                  exception
+                     when DS.Busy_Error => null;
+                  end;
+                  delay 0.0;
+               end loop;
+            end loop;
+            Finished.Done (True);
+         exception
+            when others => Finished.Done (False);
+         end Worker_Task;
+
+         type Worker_Access is access Worker_Task;
+         type Worker_Array is array (Positive range <>) of Worker_Access;
+         Workers : Worker_Array (1 .. Worker_Count);
+         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Found : Boolean;
+      begin
+         Dynamic_Maps.Initialize
+           (Views (1), Region_A, Dynamic_Map_Location,
+            Arena_Views (1), 2, 8, 8);
+         for Index in 2 .. Worker_Count loop
+            Dynamic_Maps.Attach
+              (Views (Index),
+               (if Index mod 2 = 0 then Region_B else Region_A),
+               Dynamic_Map_Location, Arena_Views (Index), 2, 8, 8);
+         end loop;
+         for Index in Workers'Range loop
+            Workers (Index) := new Worker_Task
+              (Index, Views (Index)'Access, Arena_Views (Index)'Access);
+         end loop;
+         select
+            Finished.Await_All;
+         or
+            delay 20.0;
+            for Worker of Workers loop
+               abort Worker.all;
+            end loop;
+            raise Program_Error with
+              "dynamic-map native-task test timed out";
+         end select;
+         Assert
+           (Finished.Passed and then Dynamic_Maps.Length (Views (1)) = Total,
+            "dynamic-map concurrent insert lost keys");
+         for Value in Interfaces.Unsigned_64 range
+           1 .. Interfaces.Unsigned_64 (Total)
+         loop
+            Dynamic_Maps.Get
+              (Views (1), Arena_Views (1), Encode (Value), Data, Found);
+            Assert
+              (Found and then Decode (Data) = Value * 3,
+               "dynamic-map concurrent insert corrupted a value");
+         end loop;
+         Dynamic_Maps.Destroy (Views (1), Arena_Views (1));
+         for Index in 2 .. Worker_Count loop
+            Dynamic_Maps.Detach (Views (Index));
+         end loop;
+      end Run_Map;
+   begin
+      Arenas.Initialize
+        (Arena_Views (1), Region_A, Arena_Location, 1_048_576, 64,
+         16#D4A9_7C31_08E2_B65F#);
+      for Index in 2 .. Worker_Count loop
+         Arenas.Attach
+           (Arena_Views (Index),
+            (if Index mod 2 = 0 then Region_B else Region_A),
+            Arena_Location, 1_048_576, 64, 16#D4A9_7C31_08E2_B65F#);
+      end loop;
+      Run_Vector;
+      Run_Map;
+      Arenas.Destroy (Arena_Views (1));
+      for Index in 2 .. Worker_Count loop
+         Arenas.Detach (Arena_Views (Index));
+      end loop;
+   end Run_Dynamic_Arena;
+
 begin
    Assert
      (Mapping_Create
@@ -812,6 +1033,7 @@ begin
    Run_Internally_Synchronized_Vector;
    Run_Internally_Synchronized_String;
    Run_Internally_Synchronized_Map;
+   Run_Dynamic_Arena;
    Regions.Detach (Region_A);
    Regions.Detach (Region_B);
    Assert (Unmap (Base_A, Mapping_Length) = 0, "failed to unmap view A");

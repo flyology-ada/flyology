@@ -22,6 +22,8 @@ byte copying as explicit trusted boundaries.
     - [x] `Is_Power_Of_Two`, `Alignment_Fits`, and `Slice_Fits`
     - [x] `Within_Capacity`, `Classify_Sequence`, and `Masked_Index`
     - [x] `Allocation_Slot`, `Generation_Can_Advance`, and `Next_Generation`
+    - [x] `Buddy_Node_Count_Fits`, `Buddy_Node_Count`, `Buddy_Parent`, and
+          `Buddy_Sibling`
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -39,6 +41,8 @@ byte copying as explicit trusted boundaries.
 <!-- Whenever a subprogram is added (due to refactoring) or discovered
      during assessment (Strategic Loop Steps 1-2), list it here so it
      is not forgotten. -->
+
+- None.
 
 ## Discovered Obligations
 

@@ -11,6 +11,8 @@ is
 
    subtype Positive_U32 is Interfaces.Unsigned_32 range
      1 .. Interfaces.Unsigned_32'Last;
+   subtype Non_Root_Node is Interfaces.Unsigned_32 range
+     1 .. Interfaces.Unsigned_32'Last - 1;
 
    Lifecycle_Bits : constant := 3;
    Lifecycle_Mask : constant Interfaces.Unsigned_32 := 7;
@@ -87,6 +89,32 @@ is
         Post   => Is_Power_Of_Two'Result =
           (Value > 0 and then (Value and (Value - 1)) = 0);
 
+   function Buddy_Node_Count_Fits (Leaves : Byte_Count) return Boolean
+   with Global => null,
+        Post   => Buddy_Node_Count_Fits'Result =
+          (Leaves > 0
+           and then Leaves <=
+             (Byte_Count (Interfaces.Unsigned_32'Last) + 1) / 2);
+
+   function Buddy_Node_Count (Leaves : Byte_Count) return Positive_U32
+   with Global => null,
+        Pre    => Buddy_Node_Count_Fits (Leaves),
+        Post   => Byte_Count (Buddy_Node_Count'Result) = Leaves * 2 - 1;
+
+   function Buddy_Parent
+     (Node : Non_Root_Node) return Interfaces.Unsigned_32
+   with Global => null,
+        Post   => Buddy_Parent'Result = (Node - 1) / 2
+          and then Buddy_Parent'Result < Node;
+
+   function Buddy_Sibling (Node : Non_Root_Node) return Positive_U32
+   with Global => null,
+        Post   => Buddy_Sibling'Result =
+          (if Node mod 2 = 1 then Node + 1 else Node - 1)
+          and then Buddy_Sibling'Result /= Node
+          and then Buddy_Parent (Buddy_Sibling'Result) =
+            Buddy_Parent (Node);
+
    function Alignment_Fits
      (Value, Alignment : Byte_Count) return Boolean
    with Global => null,
@@ -161,7 +189,8 @@ is
      (Valid_Lifecycle, Make_State, State_Epoch, State_Lifecycle,
       Valid_State, Epoch_Can_Advance, Next_Epoch,
       Addition_Fits, Add, Multiplication_Fits,
-      Is_Power_Of_Two, Alignment_Fits, Slice_Fits,
+      Is_Power_Of_Two, Buddy_Node_Count_Fits, Buddy_Node_Count,
+      Buddy_Parent, Buddy_Sibling, Alignment_Fits, Slice_Fits,
       Within_Capacity, Classify_Sequence, Masked_Index, Allocation_Slot,
       Generation_Can_Advance, Next_Generation);
 end Flyology.Data_Structures.Policy;

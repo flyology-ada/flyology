@@ -2,7 +2,11 @@ with Ada.Environment_Variables;
 with Ada.Streams;
 with Ada.Text_IO;
 with Flyology.Data_Structures;
+with Flyology.Data_Structures.Arenas;
 with Flyology.Data_Structures.Byte_Strings;
+with Flyology.Data_Structures.Dynamic.Byte_Strings;
+with Flyology.Data_Structures.Dynamic.Hash_Maps;
+with Flyology.Data_Structures.Dynamic.Vectors;
 with Flyology.Data_Structures.Envelopes;
 with Flyology.Data_Structures.Handles;
 with Flyology.Data_Structures.Hash_Maps;
@@ -19,9 +23,13 @@ with System.Storage_Elements;
 procedure Data_Structures_Smoke is
    package DS renames Flyology.Data_Structures;
    package Regions renames DS.Regions;
+   package Arenas renames DS.Arenas;
    package Handles renames DS.Handles;
    package Slabs renames DS.Slab_Pools;
    package Strings renames DS.Byte_Strings;
+   package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
+   package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
+   package Dynamic_Vectors renames DS.Dynamic.Vectors;
    package Vectors renames DS.Vectors;
    package SPSC renames DS.Rings.SPSC;
    package MPMC renames DS.Rings.MPMC;
@@ -51,6 +59,10 @@ procedure Data_Structures_Smoke is
    use type DS.Byte_Count;
    use type DS.Open_Result;
    use type Slabs.Allocation_Result;
+   use type Arenas.Allocation_Handle;
+   use type Arenas.Allocation_Result;
+   use type DS.Dynamic.Growth_Result;
+   use type Dynamic_Maps.Put_Result;
    use type Handles.Generation;
    use type Handles.Slot_Index;
    use type Interfaces.Unsigned_32;
@@ -75,6 +87,12 @@ procedure Data_Structures_Smoke is
    Scratch_Slab_Location : constant DS.Region_Offset := 132_000;
    Scratch_Map_Location  : constant DS.Region_Offset := 134_000;
    Scratch_Open_Location : constant DS.Region_Offset := 140_000;
+   Arena_Location : constant DS.Region_Offset := 180_224;
+   Dynamic_Vector_Location : constant DS.Region_Offset := 150_016;
+   Dynamic_String_Location : constant DS.Region_Offset := 151_040;
+   Dynamic_Map_Location : constant DS.Region_Offset := 152_064;
+   Scratch_Arena_Location : constant DS.Region_Offset := 154_112;
+   Scratch_Dynamic_Location : constant DS.Region_Offset := 157_184;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4, 8);
 
@@ -207,6 +225,16 @@ procedure Data_Structures_Smoke is
    FD     : aliased C.int := -1;
 
    Region_A, Region_B, Region_C, Truncated : Regions.View;
+   Arena_A, Arena_B, Arena_C, Arena_Bad : Arenas.View;
+   Scratch_Arena_A, Scratch_Arena_B : Arenas.View;
+   Dynamic_Vector_A, Dynamic_Vector_B, Dynamic_Vector_C :
+     Dynamic_Vectors.View;
+   Dynamic_Vector_Bad : Dynamic_Vectors.View;
+   Scratch_Dynamic_A, Scratch_Dynamic_B : Dynamic_Vectors.View;
+   Dynamic_String_A, Dynamic_String_B, Dynamic_String_C :
+     Dynamic_Strings.View;
+   Dynamic_Map_A, Dynamic_Map_B, Dynamic_Map_C : Dynamic_Maps.View;
+   Dynamic_Map_Bad : Dynamic_Maps.View;
    Slab_A, Slab_B, Slab_C, Slab_Bad : Slabs.View;
    String_A, String_B, String_C : Strings.View;
    Vector_A, Vector_B, Vector_C : Vectors.View;
@@ -218,6 +246,8 @@ procedure Data_Structures_Smoke is
 
    Payload_16 : Ada.Streams.Stream_Element_Array (1 .. 16) :=
      (others => 16#2A#);
+   Arena_Data : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
+     (others => 16#A7#);
    Read_16 : Ada.Streams.Stream_Element_Array (1 .. 16);
    Eight : Ada.Streams.Stream_Element_Array (1 .. 8);
    String_Data : constant Ada.Streams.Stream_Element_Array :=
@@ -234,6 +264,8 @@ procedure Data_Structures_Smoke is
    Value_2 : constant Ada.Streams.Stream_Element_Array := Encode (222);
    type Handle_Array is array (Positive range <>) of Handles.Handle;
    Handle_1 : Handles.Handle;
+   Arena_Handle : Arenas.Allocation_Handle;
+   Arena_Released : Arenas.Allocation_Handle;
    Poison_Handle : Handles.Handle;
    Recovered_Handles : Handle_Array (1 .. 7);
    Bad_Handles : constant Handle_Array :=
@@ -242,6 +274,9 @@ procedure Data_Structures_Smoke is
       (Slot => 1, Stamp => 0)];
    Flag : Boolean;
    Allocation : Slabs.Allocation_Result;
+   Arena_Allocation : Arenas.Allocation_Result;
+   Growth : DS.Dynamic.Growth_Result;
+   Dynamic_Put : Dynamic_Maps.Put_Result;
    Put_Outcome : Maps.Put_Result;
    Push_Outcome : MPMC.Push_Result;
    Pop_Outcome : MPMC.Pop_Result;
@@ -266,6 +301,355 @@ begin
    Assert (Base_A /= Base_B, "two shared mappings used the same address");
    Regions.Attach (Region_A, Base_A, DS.Byte_Count (Mapping_Length));
    Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
+
+   Arenas.Create_Or_Attach
+     (Arena_A, Region_A, Arena_Location, 32_768, 64,
+      16#A8E4_7B19_2C63_D501#, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "arena was not created");
+   Arenas.Create_Or_Attach
+     (Arena_B, Region_B, Arena_Location, 32_768, 64,
+      16#A8E4_7B19_2C63_D501#, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing, "arena was reinitialized");
+
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Arenas.Create_Or_Attach
+           (Arena_Bad, Region_B, Arena_Location, 16_384, 64,
+            16#A8E4_7B19_2C63_D501#, Open_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "arena accepted incompatible creation parameters");
+   end;
+
+   Arenas.Try_Allocate (Arena_A, 33, Arena_Handle, Arena_Allocation);
+   Assert
+     (Arena_Allocation = Arenas.Allocated
+      and then Arenas.Block_Capacity (Arena_B, Arena_Handle) = 64,
+      "arena did not allocate the smallest fitting buddy block");
+   Arenas.Write (Arena_A, Arena_Handle, 0, Arena_Data);
+   Arenas.Read (Arena_B, Arena_Handle, 0, Read_16);
+   Assert (Read_16 = Arena_Data, "arena payload was not shared across views");
+
+   Arenas.Try_Allocate (Arena_B, 5_000, Arena_Released, Arena_Allocation);
+   Assert
+     (Arena_Allocation = Arenas.Allocated
+      and then Arenas.Block_Capacity (Arena_A, Arena_Released) = 8_192,
+      "arena did not round a large allocation to its buddy capacity");
+   Arenas.Release (Arena_A, Arena_Released);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Arenas.Release (Arena_B, Arena_Released);
+      exception
+         when DS.Handle_Error => Failed := True;
+      end;
+      Assert (Failed, "arena accepted a double release");
+   end;
+
+   Dynamic_Vectors.Create_Or_Attach
+     (Dynamic_Vector_A, Region_A, Dynamic_Vector_Location, Arena_A, 2, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "dynamic vector was not created");
+   Dynamic_Vectors.Create_Or_Attach
+     (Dynamic_Vector_B, Region_B, Dynamic_Vector_Location, Arena_B, 2, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "dynamic vector was reinitialized");
+   for Index in 1 .. 20 loop
+      Dynamic_Vectors.Try_Append
+        (Dynamic_Vector_A, Arena_A,
+         Encode (Interfaces.Unsigned_64 (Index)), Growth);
+      Assert
+        (Growth = DS.Dynamic.Completed,
+         "dynamic vector failed to grow in its arena");
+   end loop;
+   Assert
+     (Dynamic_Vectors.Length (Dynamic_Vector_B) = 20
+      and then Dynamic_Vectors.Capacity (Dynamic_Vector_B) >= 20,
+      "dynamic-vector growth metadata was not shared");
+   Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 20, Eight);
+   Assert
+     (Decode (Eight) = 20,
+      "dynamic-vector payload was not shared across mappings");
+
+   Dynamic_Strings.Create_Or_Attach
+     (Dynamic_String_A, Region_A, Dynamic_String_Location, Arena_A, 4,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "dynamic byte string was not created");
+   Dynamic_Strings.Create_Or_Attach
+     (Dynamic_String_B, Region_B, Dynamic_String_Location, Arena_B, 4,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "dynamic byte string was reinitialized");
+   Dynamic_Strings.Try_Append
+     (Dynamic_String_A, Arena_A, String_Data, Growth);
+   Assert (Growth = DS.Dynamic.Completed, "dynamic string append failed");
+   Dynamic_Strings.Try_Append
+     (Dynamic_String_B, Arena_B, String_More, Growth);
+   Assert
+     (Growth = DS.Dynamic.Completed
+      and then Dynamic_Strings.Length (Dynamic_String_A) = 8,
+      "dynamic byte string did not grow across mappings");
+   Dynamic_Strings.Read (Dynamic_String_A, Arena_A, String_Read);
+   Assert
+     (String_Read (1 .. 3) = String_Data
+      and then String_Read (4 .. 8) = String_More,
+      "dynamic byte-string payload order is wrong");
+
+   Dynamic_Maps.Create_Or_Attach
+     (Dynamic_Map_A, Region_A, Dynamic_Map_Location, Arena_A, 2, 8, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New, "dynamic map was not created");
+   Dynamic_Maps.Create_Or_Attach
+     (Dynamic_Map_B, Region_B, Dynamic_Map_Location, Arena_B, 2, 8, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "dynamic map was reinitialized");
+   for Index in Interfaces.Unsigned_64 range 1 .. 20 loop
+      Dynamic_Maps.Put
+        (Dynamic_Map_A, Arena_A, Encode (Index), Encode (Index * 10),
+         Dynamic_Put);
+      Assert
+        (Dynamic_Put = Dynamic_Maps.Put_Inserted,
+         "dynamic map failed to insert while growing");
+   end loop;
+   Dynamic_Maps.Get
+     (Dynamic_Map_B, Arena_B, Encode (20), Eight, Flag);
+   Assert
+     (Flag and then Decode (Eight) = 200
+      and then Dynamic_Maps.Length (Dynamic_Map_B) = 20
+      and then Dynamic_Maps.Capacity (Dynamic_Map_B) >= 32,
+      "dynamic-map growth or lookup was not shared");
+
+   --  A dependent dynamic header records the arena incarnation, not only its
+   --  caller-selected instance id. Reinitializing the arena under exclusive
+   --  authority must therefore make that older header fail closed.
+   Arenas.Initialize
+     (Scratch_Arena_A, Region_A, Scratch_Arena_Location, 1_024, 64,
+      16#C0DE_0110_CAFE_0001#);
+   Arenas.Attach
+     (Scratch_Arena_B, Region_B, Scratch_Arena_Location, 1_024, 64,
+      16#C0DE_0110_CAFE_0001#);
+   declare
+      type Arena_Handle_Array is
+        array (Positive range <>) of Arenas.Allocation_Handle;
+      Values : Arena_Handle_Array (1 .. 16);
+      Extra  : Arenas.Allocation_Handle;
+   begin
+      for Index in Values'Range loop
+         Arenas.Try_Allocate
+           (Scratch_Arena_A, 1, Values (Index), Arena_Allocation);
+         Assert
+           (Arena_Allocation = Arenas.Allocated,
+            "arena rejected an available minimum block");
+         Arenas.Write
+           (Scratch_Arena_A, Values (Index), 0,
+            Encode (Interfaces.Unsigned_64 (Index)));
+      end loop;
+      Arenas.Try_Allocate
+        (Scratch_Arena_A, 1, Extra, Arena_Allocation);
+      Assert
+        (Arena_Allocation = Arenas.Exhausted
+         and then Extra = Arenas.Null_Allocation,
+         "full arena did not report exhaustion");
+      for Index in Values'Range loop
+         Arenas.Read (Scratch_Arena_B, Values (Index), 0, Eight);
+         Assert
+           (Decode (Eight) = Interfaces.Unsigned_64 (Index),
+            "buddy-node payload ranges overlap or are misplaced");
+         Arenas.Release (Scratch_Arena_B, Values (Index));
+      end loop;
+   end;
+   Dynamic_Vectors.Initialize
+     (Scratch_Dynamic_A, Region_A, Scratch_Dynamic_Location,
+      Scratch_Arena_A, 2, 8);
+   Dynamic_Vectors.Try_Append
+     (Scratch_Dynamic_A, Scratch_Arena_A, Encode (77), Growth);
+   Assert
+     (Growth = DS.Dynamic.Completed,
+      "scratch dynamic vector did not allocate from its arena");
+   Dynamic_Vectors.Detach (Scratch_Dynamic_A);
+   Arenas.Detach (Scratch_Arena_B);
+   Arenas.Initialize
+     (Scratch_Arena_A, Region_A, Scratch_Arena_Location, 1_024, 64,
+      16#C0DE_0110_CAFE_0001#);
+   Arenas.Attach
+     (Scratch_Arena_B, Region_B, Scratch_Arena_Location, 1_024, 64,
+      16#C0DE_0110_CAFE_0001#);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Dynamic_Vectors.Attach
+           (Scratch_Dynamic_B, Region_B, Scratch_Dynamic_Location,
+            Scratch_Arena_B, 2, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Dynamic_Vectors.Is_Attached (Scratch_Dynamic_B),
+         "dynamic vector accepted a stale arena incarnation");
+   end;
+   Dynamic_Vectors.Initialize
+     (Scratch_Dynamic_A, Region_A, Scratch_Dynamic_Location,
+      Scratch_Arena_A, 2, 8);
+   Dynamic_Vectors.Destroy (Scratch_Dynamic_A, Scratch_Arena_A);
+   Arenas.Destroy (Scratch_Arena_A);
+   Arenas.Detach (Scratch_Arena_B);
+
+   declare
+      Failed : Boolean := False;
+      Saved_Node : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (Dynamic_Vector_Location, 72));
+      Saved_Vector_Capacity : constant Interfaces.Unsigned_64 := Read_U64
+        (Base_B, Raw_Offset (Dynamic_Vector_Location, 64));
+      Saved_String_Capacity : constant Interfaces.Unsigned_64 := Read_U64
+        (Base_B, Raw_Offset (Dynamic_String_Location, 64));
+      Saved_Map_Capacity : constant Interfaces.Unsigned_64 := Read_U64
+        (Base_B, Raw_Offset (Dynamic_Map_Location, 64));
+      Saved_Map_Node : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (Dynamic_Map_Location, 72));
+      Saved_Reserved : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (Arena_Location, 68));
+   begin
+      begin
+         Dynamic_Vectors.Create_Or_Attach
+           (Dynamic_Vector_Bad, Region_B, Dynamic_Vector_Location,
+            Arena_B, 4, 8, Open_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Dynamic_Vectors.Is_Attached (Dynamic_Vector_Bad),
+         "dynamic vector accepted mismatched creation parameters");
+
+      Write_U64
+        (Base_B, Raw_Offset (Dynamic_Vector_Location, 64),
+         Saved_Vector_Capacity xor 1);
+      Failed := False;
+      begin
+         if Dynamic_Vectors.Length (Dynamic_Vector_B) = Natural'Last then
+            raise Program_Error with "unreachable dynamic-vector length";
+         end if;
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U64
+        (Base_B, Raw_Offset (Dynamic_Vector_Location, 64),
+         Saved_Vector_Capacity);
+      Assert (Failed, "dynamic vector ignored a corrupt capacity field");
+
+      Write_U64
+        (Base_B, Raw_Offset (Dynamic_String_Location, 64),
+         Saved_String_Capacity xor 1);
+      Failed := False;
+      begin
+         if Dynamic_Strings.Length (Dynamic_String_B) = Natural'Last then
+            raise Program_Error with "unreachable dynamic-string length";
+         end if;
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U64
+        (Base_B, Raw_Offset (Dynamic_String_Location, 64),
+         Saved_String_Capacity);
+      Assert (Failed, "dynamic byte string ignored corrupt capacity");
+
+      Write_U64
+        (Base_B, Raw_Offset (Dynamic_Map_Location, 64),
+         Saved_Map_Capacity xor 1);
+      Failed := False;
+      begin
+         if Dynamic_Maps.Length (Dynamic_Map_B) = Natural'Last then
+            raise Program_Error with "unreachable dynamic-map length";
+         end if;
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U64
+        (Base_B, Raw_Offset (Dynamic_Map_Location, 64),
+         Saved_Map_Capacity);
+      Assert (Failed, "dynamic map ignored a corrupt capacity field");
+
+      Write_U32
+        (Base_B, Raw_Offset (Dynamic_Vector_Location, 72),
+         Interfaces.Unsigned_32'Last);
+      Failed := False;
+      begin
+         Dynamic_Vectors.Attach
+           (Dynamic_Vector_Bad, Region_B, Dynamic_Vector_Location,
+            Arena_B, 2, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (Dynamic_Vector_Location, 72), Saved_Node);
+      Assert
+        (Failed and then not Dynamic_Vectors.Is_Attached (Dynamic_Vector_Bad),
+         "dynamic vector accepted a corrupt arena handle");
+
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 68), 1);
+      Failed := False;
+      begin
+         Arenas.Attach
+           (Arena_Bad, Region_B, Arena_Location, 32_768, 64,
+            16#A8E4_7B19_2C63_D501#);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (Arena_Location, 68), Saved_Reserved);
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "arena accepted corrupt buddy-node metadata");
+
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 44), 1);
+      Failed := False;
+      begin
+         Arenas.Attach
+           (Arena_Bad, Region_B, Arena_Location, 32_768, 64,
+            16#A8E4_7B19_2C63_D501#);
+      exception
+         when DS.Busy_Error => Failed := True;
+      end;
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 44), 0);
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "arena attached through an owned metadata guard");
+
+      Write_U32
+        (Base_B, Raw_Offset (Dynamic_Map_Location, 72),
+         Interfaces.Unsigned_32'Last);
+      Failed := False;
+      begin
+         Dynamic_Maps.Attach
+           (Dynamic_Map_Bad, Region_B, Dynamic_Map_Location,
+            Arena_B, 2, 8, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (Dynamic_Map_Location, 72),
+         Saved_Map_Node);
+      Assert
+        (Failed and then not Dynamic_Maps.Is_Attached (Dynamic_Map_Bad),
+         "dynamic map accepted a corrupt arena handle");
+   end;
 
    declare
       Failed : Boolean := False;
@@ -1274,6 +1658,10 @@ begin
    Vectors.Detach (Vector_A);
    SPSC.Detach (Ring_A);
    MPMC.Detach (Multi_A);
+   Dynamic_Vectors.Detach (Dynamic_Vector_A);
+   Dynamic_Strings.Detach (Dynamic_String_A);
+   Dynamic_Maps.Detach (Dynamic_Map_A);
+   Arenas.Detach (Arena_A);
    Maps.Detach (Map_A);
    Vectors.Detach (Wrapped_A);
    Contract_V1.Detach (Envelope_A);
@@ -1298,6 +1686,15 @@ begin
            "third mapping reused an existing virtual base");
    Regions.Attach (Region_C, Base_C, DS.Byte_Count (Mapping_Length));
    Slabs.Attach (Slab_C, Region_C, Slab_Location, 8, 16, 8);
+   Arenas.Attach
+     (Arena_C, Region_C, Arena_Location, 32_768, 64,
+      16#A8E4_7B19_2C63_D501#);
+   Dynamic_Vectors.Attach
+     (Dynamic_Vector_C, Region_C, Dynamic_Vector_Location, Arena_C, 2, 8);
+   Dynamic_Strings.Attach
+     (Dynamic_String_C, Region_C, Dynamic_String_Location, Arena_C, 4);
+   Dynamic_Maps.Attach
+     (Dynamic_Map_C, Region_C, Dynamic_Map_Location, Arena_C, 2, 8, 8);
    Strings.Attach (String_C, Region_C, String_Location, 128);
    Vectors.Attach (Vector_C, Region_C, Vector_Location, 16, 8);
    SPSC.Attach (Ring_C, Region_C, SPSC_Location, 16, 8);
@@ -1315,6 +1712,43 @@ begin
       "third mapping address escaped into stored bytes");
    Slabs.Read (Slab_C, Handle_1, Read_16);
    Assert (Read_16 = Payload_16, "slab did not survive third mapping");
+   Arenas.Read (Arena_C, Arena_Handle, 0, Read_16);
+   Assert (Read_16 = Arena_Data, "arena did not survive third mapping");
+   Arenas.Write (Arena_C, Arena_Handle, 16, Payload_16);
+   Arenas.Read (Arena_B, Arena_Handle, 16, Read_16);
+   Assert
+     (Read_16 = Payload_16,
+      "arena mutation was not visible after the third mapping");
+   Arenas.Release (Arena_B, Arena_Handle);
+   Dynamic_Vectors.Try_Append
+     (Dynamic_Vector_C, Arena_C, Encode (21), Growth);
+   Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 21, Eight);
+   Assert
+     (Growth = DS.Dynamic.Completed and then Decode (Eight) = 21,
+      "dynamic vector did not continue after the third mapping");
+   Dynamic_Strings.Try_Assign
+     (Dynamic_String_C, Arena_C, String_More, Growth);
+   declare
+      Remapped_Dynamic : Ada.Streams.Stream_Element_Array (1 .. 5);
+   begin
+      Dynamic_Strings.Read (Dynamic_String_B, Arena_B, Remapped_Dynamic);
+      Assert
+        (Growth = DS.Dynamic.Completed and then Remapped_Dynamic = String_More,
+         "dynamic byte string did not continue after the third mapping");
+   end;
+   Dynamic_Maps.Put
+     (Dynamic_Map_C, Arena_C, Encode (21), Encode (210), Dynamic_Put);
+   Dynamic_Maps.Get
+     (Dynamic_Map_B, Arena_B, Encode (21), Eight, Flag);
+   Assert
+     (Dynamic_Put = Dynamic_Maps.Put_Inserted
+      and then Flag and then Decode (Eight) = 210,
+      "dynamic map did not continue after the third mapping");
+   Dynamic_Maps.Remove
+     (Dynamic_Map_B, Arena_B, Encode (1), Flag);
+   Assert
+     (Flag and then Dynamic_Maps.Length (Dynamic_Map_C) = 20,
+      "dynamic-map removal was not shared across mappings");
    Slabs.Release (Slab_C, Handle_1);
    declare
       Failed : Boolean := False;
@@ -1505,6 +1939,10 @@ begin
            "versioned envelope did not survive third mapping");
 
    Slabs.Destroy (Slab_C);
+   Dynamic_Maps.Destroy (Dynamic_Map_C, Arena_C);
+   Dynamic_Strings.Destroy (Dynamic_String_C, Arena_C);
+   Dynamic_Vectors.Destroy (Dynamic_Vector_C, Arena_C);
+   Arenas.Destroy (Arena_C);
    Strings.Destroy (String_C);
    Vectors.Destroy (Vector_C);
    SPSC.Destroy (Ring_C);
@@ -1514,6 +1952,10 @@ begin
    Contract_V1.Destroy (Envelope_C);
 
    Slabs.Detach (Slab_B);
+   Dynamic_Vectors.Detach (Dynamic_Vector_B);
+   Dynamic_Strings.Detach (Dynamic_String_B);
+   Dynamic_Maps.Detach (Dynamic_Map_B);
+   Arenas.Detach (Arena_B);
    Strings.Detach (String_B);
    Vectors.Detach (Vector_B);
    SPSC.Detach (Ring_B);

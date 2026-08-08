@@ -41,6 +41,21 @@ is
    function Is_Power_Of_Two (Value : Byte_Count) return Boolean is
      (Value > 0 and then (Value and (Value - 1)) = 0);
 
+   function Buddy_Node_Count_Fits (Leaves : Byte_Count) return Boolean is
+     (Leaves > 0
+      and then Leaves <=
+        (Byte_Count (Interfaces.Unsigned_32'Last) + 1) / 2);
+
+   function Buddy_Node_Count (Leaves : Byte_Count) return Positive_U32 is
+     (Positive_U32 (Leaves * 2 - 1));
+
+   function Buddy_Parent
+     (Node : Non_Root_Node) return Interfaces.Unsigned_32 is
+     ((Node - 1) / 2);
+
+   function Buddy_Sibling (Node : Non_Root_Node) return Positive_U32 is
+     (if Node mod 2 = 1 then Node + 1 else Node - 1);
+
    function Alignment_Fits
      (Value, Alignment : Byte_Count) return Boolean is
      (Is_Power_Of_Two (Alignment)

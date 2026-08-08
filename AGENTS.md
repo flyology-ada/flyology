@@ -128,6 +128,16 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   access value. Persist relationships only as fixed-width offsets, indices,
   generations, counters, hashes, and byte payloads; native bases belong only
   to process-local views.
+- `Arenas` manages a fixed caller-owned extent with a persisted buddy tree.
+  Allocation handles combine a tree-node index, arena incarnation, and
+  nonwrapping generation. Payload access and nested allocation views require
+  the handle owner to exclude release.
+- `Dynamic.Byte_Strings`, `Dynamic.Vectors`, and `Dynamic.Hash_Maps` retain a
+  fixed outer header and replace arena allocations during growth. Publish the
+  new generation-stamped handle only after copying or rehashing completes, and
+  retain the old handle in deferred-reclamation metadata until release
+  succeeds. Dynamic means growable within a fixed arena, not mapping growth or
+  an unbounded resource guarantee.
 - Check null sentinels, overflow, alignment, bounds, and complete object extent
   before every native address conversion. Magic, version, schema, geometry,
   initialization state, and mutable indices fail closed on attachment or use.
