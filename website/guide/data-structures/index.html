@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Use Flyology's relocatable byte-oriented data structures in caller-owned arenas and mappings, with explicit attachment, synchronization, layout contracts, and recovery boundaries.">
+    <meta name="theme-color" content="#17213d">
+    <title>Relocatable data structures · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/data-structures/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Relocatable data structures</li></ol>
+          <h1>Store structures in caller-owned regions.</h1>
+        </div>
+        <p class="doc-hero-copy">Initialize bounded byte-oriented structures in an arena or mapping, attach process-local views at each virtual address, and select synchronization according to the leaf package.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#contract">Representation contract</a></li>
+            <li><a href="#choose">Choose a structure</a></li>
+            <li><a href="#region">Initialize a local arena</a></li>
+            <li><a href="#relocation">Attach another mapping</a></li>
+            <li><a href="#envelopes">Add an application contract</a></li>
+            <li><a href="#synchronization">Synchronization and waiting</a></li>
+            <li><a href="#recovery">Poisoning and recovery</a></li>
+            <li><a href="#lifetime">Lifetime checklist</a></li>
+            <li><a href="#limits">Current limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p>These packages do not create mappings or provide IPC discovery. The application owns the backing bytes, mapping lifetime, descriptor exchange, permissions, flushing policy, and process-lifecycle policy.</p>
+          </aside>
+
+          <section id="contract">
+            <span class="step-label">STORAGE 01</span>
+            <h2>Keep native addresses out of stored bytes.</h2>
+            <p>A stored Flyology data structure contains fixed-width offsets, slot indices, generations, counters, hashes, state fields, and byte payloads. It contains no <code>System.Address</code> or Ada access value. A process-local <code>View</code> may cache the native base and validated field addresses, but those values are not written to the region.</p>
+            <p>This separation allows the same physical bytes to be mapped at different virtual addresses. Each participant attaches a <code>Regions.View</code> to its own base and then attaches the leaf view at the same stored offset. Leaf operations resolve stored relationships through that local view.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Stored metadata</dt><dd>Every leaf records a 64-bit magic, layout version, schema, extent, configuration, lifecycle state, and initialization epoch.</dd></div>
+                <div class="decision-row"><dt>Attachment</dt><dd>The expected identity and geometry must match. Null, truncated, misaligned, overflowing, incomplete, stale, or corrupt layouts fail before payload access.</dd></div>
+                <div class="decision-row"><dt>Payload types</dt><dd>Public containers store explicit byte representations. An arbitrary Ada private type may contain hidden access values or compiler metadata and is not accepted as a persistable element.</dd></div>
+                <div class="decision-row"><dt>Allocation</dt><dd>Capacity and element geometry are fixed at initialization. Leaf operations do not grow the backing region.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Relocatable does not mean cross-format serialization.</strong> Current layouts use host byte order and are tested on Flyology's 64-bit Darwin and Linux targets. Magic and schema checks do not establish cross-endian portability.</p>
+            </aside>
+          </section>
+
+          <section id="choose">
+            <span class="step-label">STORAGE 02</span>
+            <h2>Choose the leaf by ownership and access pattern.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Byte_Strings</code></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
+                <div class="decision-row"><dt><code>Vectors</code></dt><dd>A bounded sequence of fixed-size byte elements. Indexing is one-based at the public API.</dd></div>
+                <div class="decision-row"><dt><code>Hash_Maps</code></dt><dd>Fixed-size byte keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
+                <div class="decision-row"><dt><code>Slab_Pools</code></dt><dd>Fixed-size slots returned as generation-stamped handles. Per-slot state separates unrelated accesses and detects stale handles.</dd></div>
+                <div class="decision-row"><dt><code>Rings.SPSC</code></dt><dd>A bounded fixed-element queue with exactly one producer and one consumer.</dd></div>
+                <div class="decision-row"><dt><code>Rings.MPMC</code></dt><dd>A bounded fixed-element queue with multiple producers and consumers, per-slot sequences, and bounded claim campaigns.</dd></div>
+                <div class="decision-row"><dt><code>Envelopes</code></dt><dd>An optional application signature and contract version around one nested leaf. The nested leaf still validates its own identity and geometry.</dd></div>
+              </dl>
+            </div>
+            <p><code>Regions</code> supplies checked process-local backing views, while <code>Handles</code> defines the fixed-width slot and generation representation used by structures such as slabs. Neither package owns storage.</p>
+          </section>
+
+          <section id="region">
+            <span class="step-label">STORAGE 03</span>
+            <h2>Initialize a structure in an attached region.</h2>
+            <p>The application first obtains contiguous bytes, then attaches a region view. The example uses a local aligned arena; the same leaf calls apply to anonymous, file-backed, persistent, or shared mappings.</p>
+            <figure class="code-panel">
+              <figcaption>a vector in a caller-owned local arena</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Ada.Streams;
+with Flyology.Data_Structures;
+with Flyology.Data_Structures.Regions;
+with Flyology.Data_Structures.Vectors;
+
+procedure Local_Vector is
+   package DS      renames Flyology.Data_Structures;
+   package Regions renames DS.Regions;
+   package Vectors renames DS.Vectors;
+
+   type Arena_Bytes is array
+     (Ada.Streams.Stream_Element_Offset range &lt;&gt;) of
+        Ada.Streams.Stream_Element;
+   for Arena_Bytes'Alignment use 8;
+
+   Arena : aliased Arena_Bytes (1 .. 8_192) := [others =&gt; 0];
+   Region : Regions.View;
+   Items  : Vectors.View;
+   Data   : Ada.Streams.Stream_Element_Array (1 .. 8) := [others =&gt; 0];
+   Added  : Boolean;
+begin
+   Regions.Attach
+     (Region, Arena'Address, DS.Byte_Count (Arena'Length));
+
+   Vectors.Initialize
+     (Items,
+      Region,
+      Location     =&gt; 64,
+      Capacity     =&gt; 128,
+      Element_Size =&gt; Data'Length);
+
+   Vectors.Try_Append (Items, Data, Added);
+
+   --  Detach local views before Arena ceases to exist.
+   Vectors.Detach (Items);
+   Regions.Detach (Region);
+end Local_Vector;</code></pre>
+            </figure>
+            <p><code>Required_Storage</code> computes the complete extent for a chosen capacity and element size. Reserve that extent at a nonzero leaf-aligned <code>Region_Offset</code>; offset zero is the null sentinel. Initialization requires exclusive ownership of the target extent through final ready-state publication.</p>
+            <p><code>Destroy</code> invalidates a stored object when the leaf's quiescence preconditions hold. <code>Detach</code> only clears process-local state and leaves the stored bytes unchanged.</p>
+          </section>
+
+          <section id="relocation">
+            <span class="step-label">STORAGE 04</span>
+            <h2>Attach independently at every mapping address.</h2>
+            <p>Mapping creation remains outside these packages. After the application maps the same backing object again, attach another region using that mapping's base and attach the leaf with the expected configuration.</p>
+            <figure class="code-panel">
+              <figcaption>two local views of the same stored vector</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Regions.Attach (Region_A, Mapping_A_Base, Mapping_Length);
+Regions.Attach (Region_B, Mapping_B_Base, Mapping_Length);
+
+Vectors.Initialize
+  (Vector_A, Region_A, Location =&gt; 64,
+   Capacity =&gt; 128, Element_Size =&gt; 8);
+
+Vectors.Attach
+  (Vector_B, Region_B, Location =&gt; 64,
+   Capacity =&gt; 128, Element_Size =&gt; 8);
+
+--  Operations through Vector_A and Vector_B reach the same stored bytes.
+--  The process-local native bases may differ.</code></pre>
+            </figure>
+            <p>Reinitialization advances a nonwrapping initialization epoch. Every view attached to the earlier epoch becomes stale and fails before using cached geometry or native addresses. Detach those views and attach again. After the final epoch value, retire the extent rather than wrapping it.</p>
+            <p>Before unmapping a range, detach every leaf view derived from it and then detach the region view. A leaf view does not retain or extend the mapping's lifetime.</p>
+          </section>
+
+          <section id="envelopes">
+            <span class="step-label">STORAGE 05</span>
+            <h2>Add an application-level version when needed.</h2>
+            <p>Every leaf already validates its own layout identity. An application that assigns additional meaning to the payload can instantiate <code>Envelopes</code> with the leaf's exported <code>Identity</code>, a stable nonzero signature, and an application-controlled contract version.</p>
+            <figure class="code-panel">
+              <figcaption>a versioned vector contract</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">package Contract_V1 is new DS.Envelopes
+  (Nested_Identity    =&gt; Vectors.Identity,
+   Contract_Signature =&gt; 16#A17E_5B31_92C4_770D#,
+   Contract_Version   =&gt; 1);
+
+Vector_Extent : constant DS.Byte_Count :=
+  Vectors.Required_Storage (Capacity =&gt; 128, Element_Size =&gt; 8);
+
+Contract_V1.Initialize
+  (Envelope, Region, Location =&gt; 64,
+   Content_Extent =&gt; Vector_Extent);
+
+Vectors.Initialize
+  (Items, Region,
+   Location     =&gt; Contract_V1.Content_Location (Envelope),
+   Capacity     =&gt; 128,
+   Element_Size =&gt; 8);</code></pre>
+            </figure>
+            <p>Envelope initialization first marks the nested lifecycle incomplete, publishes the envelope, and leaves nested initialization to the caller. If execution stops between those steps, leaf attachment rejects the incomplete nested object. The 64-bit signature reduces accidental contract confusion; it is not authentication or an integrity checksum.</p>
+          </section>
+
+          <section id="synchronization">
+            <span class="step-label">STORAGE 06</span>
+            <h2>Use the synchronization model stated by the leaf.</h2>
+            <p>Relocation and concurrency are separate properties. Region attachment and backing lifetime are never internally synchronized. Leaf initialization, attachment, detachment, destruction, and reinitialization require the documented quiescence even when ordinary operations are internally coordinated.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Guarded containers</dt><dd>Byte strings, vectors, and hash maps serialize ordinary operations across separate attached views. Immediate operations make one claim and raise <code>Busy_Error</code> on contention.</dd></div>
+                <div class="decision-row"><dt>Timed guarded access</dt><dd>Timed overloads retry through one <code>Wait_Timeout</code> and yield between contended observations. A zero timeout permits one immediate attempt.</dd></div>
+                <div class="decision-row"><dt>Slab pool</dt><dd>Allocation uses a bounded capacity scan; payload access and reclamation claim one slot. Timed overloads retry transient claim contention, but true exhaustion still returns <code>Exhausted</code>.</dd></div>
+                <div class="decision-row"><dt>SPSC ring</dt><dd>Exactly one producer calls push operations and exactly one consumer calls pop operations. Producer and consumer may use different mappings.</dd></div>
+                <div class="decision-row"><dt>MPMC ring</dt><dd>Multiple producers and consumers use process-capable atomics and per-slot sequences. <code>Try</code> operations retain bounded failure outcomes.</dd></div>
+              </dl>
+            </div>
+            <p>A timed operation starts its monotonic deadline at the first failed claim. It uses <code>delay 0.0</code> between attempts: a lightweight caller yields its fiber, while a native caller yields its pthread. It does not allocate a persisted wake object or issue a blocking wait syscall on an event-loop pthread.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Do not race one local view's attachment state.</strong> Internal synchronization coordinates ordinary operations through separate attached views. The application must exclude <code>Attach</code>, <code>Detach</code>, mapping release, and similar local-state changes from every concurrent use of that same view object.</p>
+            </aside>
+          </section>
+
+          <section id="recovery">
+            <span class="step-label">STORAGE 07</span>
+            <h2>Separate corruption detection from owner-death policy.</h2>
+            <p>Layouts fail closed on corrupt identity, geometry, state, counters, and handles, but the core packages do not determine whether another task or process has terminated. Poison operations therefore require an independently authorized caller that has already established owner death and the leaf's required quiescence.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Guard abandoned</dt><dd>A dead owner can leave a byte string, vector, or hash map locked. Timed access eventually raises <code>Timeout_Error</code>; it does not unlock the object. A supervisor may poison only after establishing whole-object quiescence.</dd></div>
+                <div class="decision-row"><dt>Slab operation abandoned</dt><dd>A transitional state affects one slot. Authorized recovery marks that slot poisoned and explicitly recycles it with a new generation. A published live allocation whose returned handle was lost requires an external ownership journal or whole-pool reinitialization.</dd></div>
+                <div class="decision-row"><dt>MPMC claim abandoned</dt><dd>Termination after a position claim and before sequence publication can stop later progress. Recovery requires ring-wide quiescence, poisoning, and exclusive reinitialization.</dd></div>
+                <div class="decision-row"><dt>Mutation exception</dt><dd>If a guarded mutation may have changed stored bytes before raising, the leaf publishes poison rather than returning the object to ready state.</dd></div>
+              </dl>
+            </div>
+            <p>Exclusive <code>Initialize</code> is the unconditional whole-object recovery path. It invalidates earlier views through the lifecycle epoch; every participant must attach again.</p>
+          </section>
+
+          <section id="lifetime">
+            <span class="step-label">STORAGE 08</span>
+            <h2>Review the complete lifetime sequence.</h2>
+            <ol>
+              <li>Choose capacity and element geometry, then compute <code>Required_Storage</code>.</li>
+              <li>Allocate or map a contiguous region with the required extent and alignment.</li>
+              <li>Attach one <code>Regions.View</code> per local mapping.</li>
+              <li>Initialize under exclusive ownership, or attach with the exact expected identity and geometry.</li>
+              <li>Use only the synchronization model documented by that leaf.</li>
+              <li>Before reinitialization, destruction, mapping replacement, or recovery, establish the required quiescence.</li>
+              <li>Detach every leaf view, then detach the region view, before unmapping or releasing the backing bytes.</li>
+            </ol>
+            <p>A failed leaf attachment leaves its output view detached. <code>Is_Attached</code> reports retained local mapping information; it does not promise that a later reinitialization has not made the cached epoch stale.</p>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">STORAGE 09</span>
+            <h2>Keep the core boundary explicit.</h2>
+            <ul>
+              <li>The packages do not open, name, map, resize, flush, or close backing storage.</li>
+              <li>They provide no peer discovery, descriptor transfer, access-control policy, wake channel, or automatic process-death recovery.</li>
+              <li>Persisted payloads are bytes. Applications define encoding, validation, and schema migration for those bytes.</li>
+              <li>Timed operations cooperatively retry; they do not provide a pollable completion descriptor.</li>
+              <li>Crash consistency of an application transaction spanning several structures requires an application protocol.</li>
+              <li>The current implementation is experimental and has not been qualified as a general persistent database or crash-recovery system.</li>
+              <li>Use the <a href="../../api/">generated API reference</a> for exact parameter, exception, and synchronization contracts.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Return to the <a href="../">main guide</a> for runtime setup, or use the <a href="../benchmarking/">benchmarking guide</a> when measuring a chosen structure and contention pattern.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../benchmarking/">Benchmarking</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
