@@ -125,6 +125,24 @@ sub find_program {
     return;
 }
 
+sub print_bounded_sample {
+    my ($sample, $pid) = @_;
+
+    my $sample_pid = open my $sample_output, '-|', $sample, "$pid", '1', '1';
+    return if !defined $sample_pid;
+
+    # Sampling is diagnostic only. Some macOS sample versions can remain
+    # blocked while inspecting a process that deliberately ignores TERM. Do
+    # not let that optional diagnostic disable the controller's own timeout.
+    {
+        local $SIG{ALRM} = sub { kill 'KILL', $sample_pid };
+        alarm 3;
+        print STDERR $_ while <$sample_output>;
+        alarm 0;
+    }
+    close $sample_output;
+}
+
 @ARGV >= 2 or usage();
 my $limit_text = shift @ARGV;
 $limit_text =~ m{\A(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)\z}
@@ -308,10 +326,7 @@ if ($event eq 'timeout') {
     if ($^O eq 'darwin') {
         my $sample = find_program('sample');
         if (defined $sample) {
-            if (open my $sample_output, '-|', $sample, "$child", '1', '1') {
-                print STDERR $_ while <$sample_output>;
-                close $sample_output;
-            }
+            print_bounded_sample($sample, $child);
         }
     }
 } elsif ($event eq 'watchdog_error') {
