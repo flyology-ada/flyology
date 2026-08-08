@@ -83,8 +83,8 @@
           <section id="contract">
             <span class="step-label">STORAGE 01</span>
             <h2>Keep native addresses out of stored bytes.</h2>
-            <p>A stored Flyology data structure contains fixed-width offsets, slot indices, generations, counters, hashes, state fields, and byte payloads. It contains no <code>System.Address</code> or Ada access value. A process-local <code>View</code> may cache the native base and validated field addresses, but those values are not written to the region.</p>
-            <p>This separation allows the same physical bytes to be mapped at different virtual addresses. Each participant attaches a <code>Regions.View</code> to its own base and then attaches the leaf view at the same stored offset. Leaf operations resolve stored relationships through that local view.</p>
+            <p>A stored Flyology data structure contains fixed-width offsets, slot indices, generations, counters, hashes, state fields, and byte payloads. It contains no <code>System.Address</code> or Ada access value. A process-local leaf view, such as <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a>, may cache the native base and validated field addresses, but those values are not written to the region.</p>
+            <p>This separation allows the same physical bytes to be mapped at different virtual addresses. Each participant attaches a <a href="../../api/406d17cda42c14faf09bd101e96f3b5bcdc3ca6a383babe76d63bfb2ab6c79d5.html#62bc05b67554ce668c1a0b7a9b463cacd9aab976a202c38ce34502599d0547df"><code>Regions.View</code></a> to its own base and then attaches the leaf view at the same stored offset. Leaf operations resolve stored relationships through that local view.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Stored metadata</dt><dd>Every leaf records a 64-bit magic, layout version, schema, extent, configuration, lifecycle state, and initialization epoch.</dd></div>
@@ -104,16 +104,16 @@
             <h2>Choose the leaf by ownership and access pattern.</h2>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>Byte_Strings</code></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
-                <div class="decision-row"><dt><code>Vectors</code></dt><dd>A bounded sequence of fixed-size byte elements. Indexing is one-based at the public API.</dd></div>
-                <div class="decision-row"><dt><code>Hash_Maps</code></dt><dd>Fixed-size byte keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
-                <div class="decision-row"><dt><code>Slab_Pools</code></dt><dd>Fixed-size slots returned as generation-stamped handles. Per-slot state separates unrelated accesses and detects stale handles.</dd></div>
-                <div class="decision-row"><dt><code>Rings.SPSC</code></dt><dd>A bounded fixed-element queue with exactly one producer and one consumer.</dd></div>
-                <div class="decision-row"><dt><code>Rings.MPMC</code></dt><dd>A bounded fixed-element queue with multiple producers and consumers, per-slot sequences, and bounded claim campaigns.</dd></div>
-                <div class="decision-row"><dt><code>Envelopes</code></dt><dd>An optional application signature and contract version around one nested leaf. The nested leaf still validates its own identity and geometry.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html#97166b56d6d2b4d8a17560db84fd55d8ca3f15a25bb22299f8f091c0fa6768cc"><code>Byte_Strings.View</code></a></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence of fixed-size byte elements. Indexing is one-based at the public API.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2deb1c418009bddb97baa53a4ddbc4b6934c37124c59528b494223aee6c9b93e.html#597139e2424f6d33451757a2f8ced40f78441f5eb500b45562accefcca7ace75"><code>Hash_Maps.View</code></a></dt><dd>Fixed-size byte keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/33f167411312a472530c78e3ac8834c20ea6f0da6342fe4be0ee2d40d126ad93.html#5b49349b2c7da0c385c11838f2c36a9cd39e641106527595e1d473896f25c44e"><code>Slab_Pools.View</code></a></dt><dd>Fixed-size slots returned as generation-stamped handles. Per-slot state separates unrelated accesses and detects stale handles.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/ec218e69c64bef956ed82437a2f13cabd318703df1632430ba2bd9c0c7ad55bd.html#8e3297d1675df4af1359d7698cfb76b42ac24b86c8d149b0f3c329fde238515b"><code>Rings.SPSC.View</code></a></dt><dd>A bounded fixed-element queue with exactly one producer and one consumer.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/4a0642adfe76deb041fd8c62b2947e0ea39a498faf4337de5e0e202cddcf5097.html#4e25fff018a6868d103011af2aeaf39847fc00b1ddab974ca8b213091d56308d"><code>Rings.MPMC.View</code></a></dt><dd>A bounded fixed-element queue with multiple producers and consumers, per-slot sequences, and bounded claim campaigns.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/ab437ecbee2450a004e2975e535265ec7c799e66225cc0576865134bcd7854dd.html#61c377a30faa2f76d4e0a3d5b1b7d2d92bf86b4c31fa1a400ebc2d21f7fb6890"><code>Envelopes.View</code></a></dt><dd>An optional application signature and contract version around one nested leaf. The nested leaf still validates its own identity and geometry.</dd></div>
               </dl>
             </div>
-            <p><code>Regions</code> supplies checked process-local backing views, while <code>Handles</code> defines the fixed-width slot and generation representation used by structures such as slabs. Neither package owns storage.</p>
+            <p><a href="../../api/406d17cda42c14faf09bd101e96f3b5bcdc3ca6a383babe76d63bfb2ab6c79d5.html#62bc05b67554ce668c1a0b7a9b463cacd9aab976a202c38ce34502599d0547df"><code>Regions.View</code></a> supplies a checked process-local backing view, while <a href="../../api/03f2d320fb794d315fb0308aee9d015f09a38ee74193c79a1555c97337e54a54.html#67131a4bbd82f6c74291e930859a6f9154206ce32e9b3d3b16b53c7afca18bc0"><code>Handles.Handle</code></a> is the fixed-width slot-and-generation representation used by structures such as slabs. Neither package owns storage.</p>
           </section>
 
           <section id="region">
@@ -161,7 +161,7 @@ begin
    Regions.Detach (Region);
 end Local_Vector;</code></pre>
             </figure>
-            <p><code>Required_Storage</code> computes the complete extent for a chosen capacity and element size. Reserve that extent at a nonzero leaf-aligned <code>Region_Offset</code>; offset zero is the null sentinel. Initialization requires exclusive ownership of the target extent through final ready-state publication.</p>
+            <p><code>Required_Storage</code> computes the complete extent for a chosen capacity and element size. Reserve that extent at a nonzero leaf-aligned <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#78be162a1b0646d241594f054dc95f74c1ac181241b9ea8fcbdf29568d19f59f"><code>Region_Offset</code></a>; offset zero is the null sentinel. Initialization requires exclusive ownership of the target extent through final ready-state publication.</p>
             <p><code>Destroy</code> invalidates a stored object when the leaf's quiescence preconditions hold. <code>Detach</code> only clears process-local state and leaves the stored bytes unchanged.</p>
           </section>
 
@@ -193,7 +193,7 @@ Vectors.Attach
           <section id="envelopes">
             <span class="step-label">STORAGE 05</span>
             <h2>Add an application-level version when needed.</h2>
-            <p>Every leaf already validates its own layout identity. An application that assigns additional meaning to the payload can instantiate <code>Envelopes</code> with the leaf's exported <code>Identity</code>, a stable nonzero signature, and an application-controlled contract version.</p>
+            <p>Every leaf already validates its own <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#3ef2c359f4a46aa8c6556874ab8796e27c0663966dfe9699bdd02227b814aab3"><code>Layout_Identity</code></a>. An application that assigns additional meaning to the payload can instantiate <code>Envelopes</code> with the leaf's exported <code>Identity</code>, a stable nonzero signature, and an application-controlled contract version.</p>
             <figure class="code-panel">
               <figcaption>a versioned vector contract</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -224,9 +224,9 @@ Vectors.Initialize
             <p>Relocation and concurrency are separate properties. Region attachment and backing lifetime are never internally synchronized. Leaf initialization, attachment, detachment, destruction, and reinitialization require the documented quiescence even when ordinary operations are internally coordinated.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Guarded containers</dt><dd>Byte strings, vectors, and hash maps serialize ordinary operations across separate attached views. Immediate operations make one claim and raise <code>Busy_Error</code> on contention.</dd></div>
-                <div class="decision-row"><dt>Timed guarded access</dt><dd>Timed overloads retry through one <code>Wait_Timeout</code> and yield between contended observations. A zero timeout permits one immediate attempt.</dd></div>
-                <div class="decision-row"><dt>Slab pool</dt><dd>Allocation uses a bounded capacity scan; payload access and reclamation claim one slot. Timed overloads retry transient claim contention, but true exhaustion still returns <code>Exhausted</code>.</dd></div>
+                <div class="decision-row"><dt>Guarded containers</dt><dd>Byte strings, vectors, and hash maps serialize ordinary operations across separate attached views. Immediate operations make one claim and raise <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#c06bd7eb4c03723a3a0659bc08ba0665ec2f556e5b75c775fb0f6912309e56a4"><code>Busy_Error</code></a> on contention.</dd></div>
+                <div class="decision-row"><dt>Timed guarded access</dt><dd>Timed overloads retry through one <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#5b2af27723d4f176ae4421e1ddc61bbd9efa566ea8277f8768181737542aae47"><code>Wait_Timeout</code></a> and yield between contended observations. A zero timeout permits one immediate attempt.</dd></div>
+                <div class="decision-row"><dt>Slab pool</dt><dd>Allocation reports an <a href="../../api/33f167411312a472530c78e3ac8834c20ea6f0da6342fe4be0ee2d40d126ad93.html#d2e3c0f5e8ec1f9c0caf632a476f58fb199522cf7e8f105bf40fd7ca7a4d1cdc"><code>Allocation_Result</code></a> after a bounded capacity scan; payload access and reclamation claim one slot. Timed overloads retry transient claim contention, but true exhaustion still returns <code>Exhausted</code>.</dd></div>
                 <div class="decision-row"><dt>SPSC ring</dt><dd>Exactly one producer calls push operations and exactly one consumer calls pop operations. Producer and consumer may use different mappings.</dd></div>
                 <div class="decision-row"><dt>MPMC ring</dt><dd>Multiple producers and consumers use process-capable atomics and per-slot sequences. <code>Try</code> operations retain bounded failure outcomes.</dd></div>
               </dl>
@@ -244,7 +244,7 @@ Vectors.Initialize
             <p>Layouts fail closed on corrupt identity, geometry, state, counters, and handles, but the core packages do not determine whether another task or process has terminated. Poison operations therefore require an independently authorized caller that has already established owner death and the leaf's required quiescence.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Guard abandoned</dt><dd>A dead owner can leave a byte string, vector, or hash map locked. Timed access eventually raises <code>Timeout_Error</code>; it does not unlock the object. A supervisor may poison only after establishing whole-object quiescence.</dd></div>
+                <div class="decision-row"><dt>Guard abandoned</dt><dd>A dead owner can leave a byte string, vector, or hash map locked. Timed access eventually raises <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#3d847e9e3814859cfa65dcf34ca97a482f8cbe6a4a2c4d273ddb94f8e6a31bae"><code>Timeout_Error</code></a>; it does not unlock the object. A supervisor may poison only after establishing whole-object quiescence.</dd></div>
                 <div class="decision-row"><dt>Slab operation abandoned</dt><dd>A transitional state affects one slot. Authorized recovery marks that slot poisoned and explicitly recycles it with a new generation. A published live allocation whose returned handle was lost requires an external ownership journal or whole-pool reinitialization.</dd></div>
                 <div class="decision-row"><dt>MPMC claim abandoned</dt><dd>Termination after a position claim and before sequence publication can stop later progress. Recovery requires ring-wide quiescence, poisoning, and exclusive reinitialization.</dd></div>
                 <div class="decision-row"><dt>Mutation exception</dt><dd>If a guarded mutation may have changed stored bytes before raising, the leaf publishes poison rather than returning the object to ready state.</dd></div>
