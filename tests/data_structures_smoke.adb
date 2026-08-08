@@ -3,7 +3,10 @@ with Ada.Streams;
 with Ada.Text_IO;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
+with Flyology.Data_Structures.Allocation_Algorithms.Best_Fit;
+with Flyology.Data_Structures.Allocation_Algorithms.TLSF;
 with Flyology.Data_Structures.Arenas;
+with Flyology.Data_Structures.Allocation_Pools.Adaptive;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Dynamic.Byte_Strings;
 with Flyology.Data_Structures.Dynamic.Hash_Maps;
@@ -29,6 +32,10 @@ procedure Data_Structures_Smoke is
    package Regions renames DS.Regions;
    package Arenas is new DS.Arenas
      (Algorithm => DS.Allocation_Algorithms.Buddy);
+   package Best_Fit_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Best_Fit);
+   package TLSF_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.TLSF);
    package Handles renames DS.Handles;
    package Strings renames DS.Byte_Strings;
    package Dynamic_Strings is new DS.Dynamic.Byte_Strings
@@ -41,6 +48,17 @@ procedure Data_Structures_Smoke is
      (Arena_Provider => Arenas,
       Key            => U64_Elements.Element,
       Element        => U64_Elements.Element);
+   package Best_Fit_Dynamic_Vectors is new DS.Dynamic.Vectors
+     (Arena_Provider => Best_Fit_Arenas,
+      Element        => U64_Elements.Element);
+   package TLSF_Dynamic_Vectors is new DS.Dynamic.Vectors
+     (Arena_Provider => TLSF_Arenas,
+      Element        => U64_Elements.Element);
+   package Adaptive_U64 is new DS.Allocation_Pools.Adaptive
+     (Arena_Provider  => TLSF_Arenas,
+      Element         => U64_Elements.Element,
+      Slots_Per_Chunk => 16,
+      Maximum_Chunks  => 8);
    subtype Bytes_16 is Ada.Streams.Stream_Element_Array (1 .. 16);
    package Bytes_16_Representation is new DS.Storage_Types.Immutable
      (Byte_Size          => 16,
@@ -254,10 +272,12 @@ procedure Data_Structures_Smoke is
    use type C.size_t;
    use type DS.Byte_Count;
    use type DS.Open_Result;
+   use type DS.Allocation_Algorithms.Search_Bound;
    use type Slabs.Allocation_Result;
    use type Arenas.Allocation_Handle;
    use type Arenas.Allocation_Result;
    use type DS.Dynamic.Growth_Result;
+   use type Adaptive_U64.Allocation_Result;
    use type Dynamic_Maps.Put_Result;
    use type Handles.Generation;
    use type Handles.Slot_Index;
@@ -268,7 +288,7 @@ procedure Data_Structures_Smoke is
    use type MPMC.Push_Result;
    use type System.Address;
 
-   Mapping_Length : constant C.size_t := 262_144;
+   Mapping_Length : constant C.size_t := 524_288;
    Slab_Location  : constant DS.Region_Offset := 64;
    String_Location : constant DS.Region_Offset := 4_096;
    Vector_Location : constant DS.Region_Offset := 8_192;
@@ -289,6 +309,19 @@ procedure Data_Structures_Smoke is
    Dynamic_Map_Location : constant DS.Region_Offset := 152_064;
    Scratch_Arena_Location : constant DS.Region_Offset := 154_112;
    Scratch_Dynamic_Location : constant DS.Region_Offset := 157_184;
+   Best_Fit_Dynamic_Location : constant DS.Region_Offset := 245_760;
+   Best_Fit_Arena_Location : constant DS.Region_Offset := 262_144;
+   Best_Fit_Configuration : constant Best_Fit_Arenas.Configuration :=
+     (Usable_Capacity => 65_472, Minimum_Block_Size => 64);
+   Best_Fit_Instance : constant Interfaces.Unsigned_64 :=
+     16#B35F_17A1_10C8_0001#;
+   TLSF_Dynamic_Location : constant DS.Region_Offset := 333_000;
+   TLSF_Arena_Location : constant DS.Region_Offset := 344_064;
+   TLSF_Configuration : constant TLSF_Arenas.Configuration :=
+     (Usable_Capacity => 65_536, Minimum_Block_Size => 64);
+   TLSF_Instance : constant Interfaces.Unsigned_64 :=
+     16#715F_17A1_10C8_0001#;
+   Adaptive_Pool_Location : constant DS.Region_Offset := 420_032;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4);
 
@@ -383,6 +416,101 @@ procedure Data_Structures_Smoke is
       return Result;
    end Decode;
 
+   generic
+      with package Provider is new DS.Arenas (<>);
+   procedure Stress_Variable_Arena
+     (First, Second : in out Provider.View;
+      Region         : Regions.View;
+      Location       : DS.Region_Offset;
+      Configuration  : Provider.Configuration;
+      Instance       : Interfaces.Unsigned_64);
+
+   procedure Stress_Variable_Arena
+     (First, Second : in out Provider.View;
+      Region         : Regions.View;
+      Location       : DS.Region_Offset;
+      Configuration  : Provider.Configuration;
+      Instance       : Interfaces.Unsigned_64)
+   is
+      Slot_Count : constant := 64;
+      type Handle_Array is
+        array (Positive range <>) of Provider.Allocation_Handle;
+      Handles : Handle_Array (1 .. Slot_Count) :=
+        [others => Provider.Null_Allocation];
+      Live : array (Positive range 1 .. Slot_Count) of Boolean :=
+        [others => False];
+      Values : array (Positive range 1 .. Slot_Count) of
+        Interfaces.Unsigned_64 := [others => 0];
+      Seed : Interfaces.Unsigned_64 := 16#91E1_0DA5_C79E_7B1D#;
+      Result : Provider.Allocation_Result;
+      Probe  : Provider.View;
+      Data   : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Index  : Positive;
+      Size   : Positive;
+   begin
+      for Step in 1 .. 20_000 loop
+         Seed := Seed * 6_364_136_223_846_793_005 + 1;
+         Index := Positive
+           (Natural (Seed mod Slot_Count) + 1);
+         if Live (Index) then
+            if Step mod 2 = 0 then
+               Provider.Read (First, Handles (Index), 0, Data);
+               Provider.Release (Second, Handles (Index));
+            else
+               Provider.Read (Second, Handles (Index), 0, Data);
+               Provider.Release (First, Handles (Index));
+            end if;
+            Assert
+              (Decode (Data) = Values (Index),
+               "variable-size allocator stress corrupted a payload");
+            Live (Index) := False;
+         else
+            Size := Positive (Natural
+              (Interfaces.Shift_Right (Seed, 17) mod 2_048) + 1);
+            if Step mod 2 = 0 then
+               Provider.Try_Allocate
+                 (First, Size, Handles (Index), Result);
+            else
+               Provider.Try_Allocate
+                 (Second, Size, Handles (Index), Result);
+            end if;
+            if Result = Provider.Allocated then
+               Values (Index) :=
+                 Interfaces.Unsigned_64 (Index) * 1_000_000
+                 + Interfaces.Unsigned_64 (Step);
+               if Step mod 2 = 0 then
+                  Provider.Write
+                    (Second, Handles (Index), 0, Encode (Values (Index)));
+               else
+                  Provider.Write
+                    (First, Handles (Index), 0, Encode (Values (Index)));
+               end if;
+               Live (Index) := True;
+            elsif Result /= Provider.Exhausted then
+               raise Program_Error with
+                 "single-task allocator stress observed contention";
+            end if;
+         end if;
+         if Step mod 251 = 0 then
+            Provider.Attach
+              (Probe, Region, Location, Configuration, Instance);
+            Provider.Detach (Probe);
+         end if;
+      end loop;
+      for Slot in Live'Range loop
+         if Live (Slot) then
+            Provider.Release (First, Handles (Slot));
+         end if;
+      end loop;
+      Provider.Attach (Probe, Region, Location, Configuration, Instance);
+      Provider.Detach (Probe);
+   end Stress_Variable_Arena;
+
+   procedure Stress_Best_Fit is new Stress_Variable_Arena
+     (Provider => Best_Fit_Arenas);
+   procedure Stress_TLSF is new Stress_Variable_Arena
+     (Provider => TLSF_Arenas);
+
    function Test_Hash
      (Key : Ada.Streams.Stream_Element_Array)
       return Interfaces.Unsigned_64
@@ -422,6 +550,9 @@ procedure Data_Structures_Smoke is
 
    Region_A, Region_B, Region_C, Truncated : Regions.View;
    Arena_A, Arena_B, Arena_C, Arena_Bad : Arenas.View;
+   Best_Fit_A, Best_Fit_B, Best_Fit_C, Best_Fit_Bad :
+     Best_Fit_Arenas.View;
+   TLSF_A, TLSF_B, TLSF_C, TLSF_Bad : TLSF_Arenas.View;
    Scratch_Arena_A, Scratch_Arena_B : Arenas.View;
    Dynamic_Vector_A, Dynamic_Vector_B, Dynamic_Vector_C :
      Dynamic_Vectors.View;
@@ -431,6 +562,11 @@ procedure Data_Structures_Smoke is
      Dynamic_Strings.View;
    Dynamic_Map_A, Dynamic_Map_B, Dynamic_Map_C : Dynamic_Maps.View;
    Dynamic_Map_Bad : Dynamic_Maps.View;
+   Best_Fit_Vector_A, Best_Fit_Vector_B, Best_Fit_Vector_C :
+     Best_Fit_Dynamic_Vectors.View;
+   TLSF_Vector_A, TLSF_Vector_B, TLSF_Vector_C :
+     TLSF_Dynamic_Vectors.View;
+   Adaptive_A, Adaptive_B, Adaptive_C, Adaptive_Bad : Adaptive_U64.View;
    Slab_A, Slab_B, Slab_C, Slab_Bad : Slabs.View;
    String_A, String_B, String_C : Strings.View;
    Vector_A, Vector_B, Vector_C : Vectors.View;
@@ -463,6 +599,11 @@ procedure Data_Structures_Smoke is
    Handle_1 : Handles.Handle;
    Arena_Handle : Arenas.Allocation_Handle;
    Arena_Released : Arenas.Allocation_Handle;
+   Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
+   TLSF_Handle : TLSF_Arenas.Allocation_Handle;
+   type Adaptive_Handle_Array is
+     array (Positive range <>) of Adaptive_U64.Handle;
+   Adaptive_Handles : Adaptive_Handle_Array (1 .. 40);
    Poison_Handle : Handles.Handle;
    Recovered_Handles : Handle_Array (1 .. 7);
    Bad_Handles : constant Handle_Array :=
@@ -686,6 +827,423 @@ begin
       and then Dynamic_Maps.Length (Dynamic_Map_B) = 20
       and then Dynamic_Maps.Capacity (Dynamic_Map_B) >= 32,
       "dynamic-map growth or lookup was not shared");
+
+   Best_Fit_Arenas.Create_Or_Attach
+     (Best_Fit_A, Region_A, Best_Fit_Arena_Location,
+      Best_Fit_Configuration, Best_Fit_Instance, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "best-fit arena was not created");
+   Best_Fit_Arenas.Create_Or_Attach
+     (Best_Fit_B, Region_B, Best_Fit_Arena_Location,
+      Best_Fit_Configuration, Best_Fit_Instance, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "best-fit arena was reinitialized");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Best_Fit_Arenas.Attach
+           (Best_Fit_Bad, Region_B, Best_Fit_Arena_Location,
+            (Usable_Capacity => 65_408, Minimum_Block_Size => 64),
+            Best_Fit_Instance);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Best_Fit_Arenas.Is_Attached (Best_Fit_Bad),
+         "best-fit arena accepted incompatible geometry");
+
+      Failed := False;
+      begin
+         Arenas.Attach
+           (Arena_Bad, Region_B, Best_Fit_Arena_Location,
+            (Usable_Capacity => 65_536, Minimum_Block_Size => 64),
+            Best_Fit_Instance);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "best-fit arena attached through the buddy algorithm");
+   end;
+
+   declare
+      type Best_Fit_Handle_Array is
+        array (Positive range <>) of Best_Fit_Arenas.Allocation_Handle;
+      Handles : Best_Fit_Handle_Array (1 .. 5);
+      Selected : Best_Fit_Arenas.Allocation_Handle;
+      Sizes : constant array (Positive range 1 .. 5) of Positive :=
+        [100, 200, 100, 400, 100];
+   begin
+      for Index in Handles'Range loop
+         Best_Fit_Arenas.Try_Allocate
+           (Best_Fit_A, Sizes (Index), Handles (Index), Arena_Allocation);
+         Assert
+           (Arena_Allocation = Best_Fit_Arenas.Allocated,
+            "best-fit arena rejected an available allocation");
+      end loop;
+      Best_Fit_Arenas.Release (Best_Fit_B, Handles (2));
+      Best_Fit_Arenas.Release (Best_Fit_A, Handles (4));
+
+      Best_Fit_Arenas.Try_Allocate
+        (Best_Fit_B, 180, Selected, Arena_Allocation);
+      Assert
+        (Arena_Allocation = Best_Fit_Arenas.Allocated
+         and then Best_Fit_Arenas.Block_Capacity
+           (Best_Fit_A, Selected) = 256,
+         "best-fit arena did not choose the smallest fitting block");
+      Best_Fit_Arenas.Release (Best_Fit_A, Selected);
+
+      Best_Fit_Arenas.Try_Allocate
+        (Best_Fit_A, 300, Selected, Arena_Allocation);
+      Assert
+        (Arena_Allocation = Best_Fit_Arenas.Allocated
+         and then Best_Fit_Arenas.Block_Capacity
+           (Best_Fit_B, Selected) = 320,
+         "best-fit arena did not split the selected block");
+      Best_Fit_Arenas.Release (Best_Fit_B, Selected);
+
+      Best_Fit_Arenas.Release (Best_Fit_A, Handles (1));
+      Best_Fit_Arenas.Release (Best_Fit_B, Handles (3));
+      Best_Fit_Arenas.Release (Best_Fit_A, Handles (5));
+      Best_Fit_Arenas.Try_Allocate
+        (Best_Fit_B, 65_000, Selected, Arena_Allocation);
+      Assert
+        (Arena_Allocation = Best_Fit_Arenas.Allocated
+         and then Best_Fit_Arenas.Block_Capacity
+           (Best_Fit_A, Selected) = 65_024,
+         "best-fit arena did not coalesce adjacent free blocks");
+      Best_Fit_Arenas.Release (Best_Fit_A, Selected);
+   end;
+
+   Stress_Best_Fit
+     (Best_Fit_A, Best_Fit_B, Region_B, Best_Fit_Arena_Location,
+      Best_Fit_Configuration, Best_Fit_Instance);
+
+   Best_Fit_Arenas.Try_Allocate
+     (Best_Fit_A, 33, Best_Fit_Handle, Arena_Allocation);
+   Assert
+     (Arena_Allocation = Best_Fit_Arenas.Allocated
+      and then Best_Fit_Arenas.Block_Capacity
+        (Best_Fit_B, Best_Fit_Handle) = 64,
+      "best-fit arena did not expose its rounded payload capacity");
+   Best_Fit_Arenas.Write
+     (Best_Fit_A, Best_Fit_Handle, 0, Arena_Data);
+   Best_Fit_Arenas.Read
+     (Best_Fit_B, Best_Fit_Handle, 0, Read_16);
+   Assert
+     (Read_16 = Arena_Data,
+      "best-fit payload was not shared across mappings");
+
+   Best_Fit_Dynamic_Vectors.Create_Or_Attach
+     (Best_Fit_Vector_A, Region_A, Best_Fit_Dynamic_Location,
+      Best_Fit_A, 2, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "best-fit dynamic vector was not created");
+   Best_Fit_Dynamic_Vectors.Create_Or_Attach
+     (Best_Fit_Vector_B, Region_B, Best_Fit_Dynamic_Location,
+      Best_Fit_B, 2, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "best-fit dynamic vector was reinitialized");
+   for Index in 1 .. 40 loop
+      Best_Fit_Dynamic_Vectors.Try_Append
+        (Best_Fit_Vector_A, Best_Fit_A,
+         Interfaces.Unsigned_64 (Index), Growth);
+      Assert
+        (Growth = DS.Dynamic.Completed,
+         "best-fit dynamic vector failed to grow");
+   end loop;
+   Assert
+     (Best_Fit_Dynamic_Vectors.Read
+        (Best_Fit_Vector_B, Best_Fit_B, 40) = 40,
+      "best-fit dynamic vector was not shared across mappings");
+
+   declare
+      Saved : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 164));
+      Failed : Boolean := False;
+   begin
+      Write_U32
+        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 164), 1);
+      begin
+         Best_Fit_Arenas.Attach
+           (Best_Fit_Bad, Region_B, Best_Fit_Arena_Location,
+            Best_Fit_Configuration, Best_Fit_Instance);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 164), Saved);
+      Assert
+        (Failed and then not Best_Fit_Arenas.Is_Attached (Best_Fit_Bad),
+         "best-fit arena accepted corrupt block metadata");
+   end;
+
+   Assert
+     (Best_Fit_Arenas.Capabilities.Search =
+        DS.Allocation_Algorithms.Logarithmic
+      and then TLSF_Arenas.Capabilities.Search =
+        DS.Allocation_Algorithms.Constant_Class_Bound,
+      "allocator search capabilities are not exposed accurately");
+   TLSF_Arenas.Create_Or_Attach
+     (TLSF_A, Region_A, TLSF_Arena_Location,
+      TLSF_Configuration, TLSF_Instance, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "TLSF arena was not created");
+   TLSF_Arenas.Create_Or_Attach
+     (TLSF_B, Region_B, TLSF_Arena_Location,
+      TLSF_Configuration, TLSF_Instance, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "TLSF arena was reinitialized");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         TLSF_Arenas.Attach
+           (TLSF_Bad, Region_B, TLSF_Arena_Location,
+            (Usable_Capacity => 65_472, Minimum_Block_Size => 64),
+            TLSF_Instance);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not TLSF_Arenas.Is_Attached (TLSF_Bad),
+         "TLSF arena accepted incompatible geometry");
+   end;
+
+   declare
+      type TLSF_Handle_Array is
+        array (Positive range <>) of TLSF_Arenas.Allocation_Handle;
+      Handles : TLSF_Handle_Array (1 .. 5);
+      Selected : TLSF_Arenas.Allocation_Handle;
+      Sizes : constant array (Positive range 1 .. 5) of Positive :=
+        [100, 200, 100, 400, 100];
+   begin
+      for Index in Handles'Range loop
+         TLSF_Arenas.Try_Allocate
+           (TLSF_A, Sizes (Index), Handles (Index), Arena_Allocation);
+         Assert
+           (Arena_Allocation = TLSF_Arenas.Allocated,
+            "TLSF arena rejected an available allocation");
+      end loop;
+      TLSF_Arenas.Release (TLSF_B, Handles (2));
+      TLSF_Arenas.Release (TLSF_A, Handles (4));
+      TLSF_Arenas.Try_Allocate
+        (TLSF_B, 180, Selected, Arena_Allocation);
+      Assert
+        (Arena_Allocation = TLSF_Arenas.Allocated
+         and then TLSF_Arenas.Block_Capacity (TLSF_A, Selected) = 256,
+         "TLSF did not select the lowest fitting size class");
+      TLSF_Arenas.Release (TLSF_A, Selected);
+      TLSF_Arenas.Try_Allocate
+        (TLSF_A, 300, Selected, Arena_Allocation);
+      Assert
+        (Arena_Allocation = TLSF_Arenas.Allocated
+         and then TLSF_Arenas.Block_Capacity (TLSF_B, Selected) = 320,
+         "TLSF did not split its selected free block");
+      TLSF_Arenas.Release (TLSF_B, Selected);
+      TLSF_Arenas.Release (TLSF_A, Handles (1));
+      TLSF_Arenas.Release (TLSF_B, Handles (3));
+      TLSF_Arenas.Release (TLSF_A, Handles (5));
+      TLSF_Arenas.Try_Allocate
+        (TLSF_B, 65_400, Selected, Arena_Allocation);
+      Assert
+        (Arena_Allocation = TLSF_Arenas.Allocated
+         and then TLSF_Arenas.Block_Capacity
+           (TLSF_A, Selected) = 65_472,
+         "TLSF did not coalesce its complete managed extent");
+      TLSF_Arenas.Release (TLSF_A, Selected);
+   end;
+
+   Stress_TLSF
+     (TLSF_A, TLSF_B, Region_B, TLSF_Arena_Location,
+      TLSF_Configuration, TLSF_Instance);
+
+   TLSF_Arenas.Try_Allocate
+     (TLSF_A, 33, TLSF_Handle, Arena_Allocation);
+   Assert
+     (Arena_Allocation = TLSF_Arenas.Allocated
+      and then TLSF_Arenas.Block_Capacity (TLSF_B, TLSF_Handle) = 64,
+      "TLSF did not expose its rounded payload capacity");
+   TLSF_Arenas.Write (TLSF_A, TLSF_Handle, 0, Arena_Data);
+   TLSF_Arenas.Read (TLSF_B, TLSF_Handle, 0, Read_16);
+   Assert
+     (Read_16 = Arena_Data,
+      "TLSF payload was not shared across mappings");
+
+   TLSF_Dynamic_Vectors.Create_Or_Attach
+     (TLSF_Vector_A, Region_A, TLSF_Dynamic_Location,
+      TLSF_A, 2, Open_Outcome);
+   TLSF_Dynamic_Vectors.Create_Or_Attach
+     (TLSF_Vector_B, Region_B, TLSF_Dynamic_Location,
+      TLSF_B, 2, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "TLSF dynamic vector was not attached");
+   for Index in 1 .. 40 loop
+      TLSF_Dynamic_Vectors.Try_Append
+        (TLSF_Vector_A, TLSF_A, Interfaces.Unsigned_64 (Index), Growth);
+      Assert
+        (Growth = DS.Dynamic.Completed,
+         "TLSF dynamic vector failed to grow");
+   end loop;
+   Assert
+     (TLSF_Dynamic_Vectors.Read (TLSF_Vector_B, TLSF_B, 40) = 40,
+      "TLSF dynamic vector was not shared across mappings");
+
+   declare
+      Saved : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 64));
+      Failed : Boolean := False;
+   begin
+      Write_U32
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 64), Saved xor 1);
+      begin
+         TLSF_Arenas.Attach
+           (TLSF_Bad, Region_B, TLSF_Arena_Location,
+            TLSF_Configuration, TLSF_Instance);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 64), Saved);
+      Assert
+        (Failed and then not TLSF_Arenas.Is_Attached (TLSF_Bad),
+         "TLSF accepted a corrupt first-level bitmap");
+   end;
+
+   Adaptive_U64.Create_Or_Attach
+     (Adaptive_A, Region_A, Adaptive_Pool_Location,
+      TLSF_A, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "adaptive pool was not created");
+   Adaptive_U64.Create_Or_Attach
+     (Adaptive_B, Region_B, Adaptive_Pool_Location,
+      TLSF_B, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "adaptive pool was reinitialized");
+   for Index in Adaptive_Handles'Range loop
+      declare
+         Result : Adaptive_U64.Allocation_Result;
+      begin
+         Adaptive_U64.Try_Allocate
+           (Adaptive_A, TLSF_A, Interfaces.Unsigned_64 (Index),
+            Adaptive_Handles (Index), Result);
+         Assert
+           (Result = Adaptive_U64.Allocated,
+            "adaptive pool failed to add or allocate a chunk");
+      end;
+   end loop;
+   Adaptive_U64.Read
+     (Adaptive_B, TLSF_B, Adaptive_Handles (40), U64_Value);
+   Assert
+     (U64_Value = 40
+      and then Adaptive_Handles (17).Chunk = 2
+      and then Adaptive_Handles (33).Chunk = 3,
+      "adaptive pool chunk growth or cross-view read is wrong");
+   Adaptive_U64.Release
+     (Adaptive_B, TLSF_B, Adaptive_Handles (1));
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Adaptive_U64.Release
+           (Adaptive_A, TLSF_A, Adaptive_Handles (1));
+      exception
+         when DS.Handle_Error => Failed := True;
+      end;
+      Assert (Failed, "adaptive pool accepted a stale slot handle");
+   end;
+
+   declare
+      Saved : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (Adaptive_Pool_Location, 80));
+      Failed : Boolean := False;
+   begin
+      Write_U32
+        (Base_B, Raw_Offset (Adaptive_Pool_Location, 80), 99);
+      begin
+         Adaptive_U64.Attach
+           (Adaptive_Bad, Region_B, Adaptive_Pool_Location, TLSF_B);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (Adaptive_Pool_Location, 80), Saved);
+      Assert
+        (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
+         "adaptive pool accepted corrupt chunk state");
+   end;
+
+   --  A pool view resolves chunks through arena allocation handles and caches
+   --  their attachments locally, so it must reject an arena that is not the
+   --  instance and incarnation it attached to. Otherwise a caller could read a
+   --  warm cache belonging to another arena, or resolve a chunk token against
+   --  storage that arena has since handed to something else.
+   declare
+      Foreign_Arena_Location : constant DS.Region_Offset := 430_080;
+      Foreign_Pool_Location  : constant DS.Region_Offset := 458_752;
+      Foreign_Configuration  : constant TLSF_Arenas.Configuration :=
+        (Usable_Capacity => 16_384, Minimum_Block_Size => 64);
+      Foreign_Instance : constant Interfaces.Unsigned_64 :=
+        16#715F_17A1_10C8_0002#;
+      Foreign_Arena  : TLSF_Arenas.View;
+      Foreign_Pool   : Adaptive_U64.View;
+      Foreign_Handle : Adaptive_U64.Handle;
+      Foreign_Result : Adaptive_U64.Allocation_Result;
+      Failed : Boolean := False;
+   begin
+      TLSF_Arenas.Initialize
+        (Foreign_Arena, Region_A, Foreign_Arena_Location,
+         Foreign_Configuration, Foreign_Instance);
+      begin
+         Adaptive_U64.Read
+           (Adaptive_A, Foreign_Arena, Adaptive_Handles (40), U64_Value);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "adaptive pool read through a foreign arena instance");
+      Failed := False;
+      begin
+         Adaptive_U64.Try_Allocate
+           (Adaptive_A, Foreign_Arena, 7, Foreign_Handle, Foreign_Result);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "adaptive pool allocated through a foreign arena");
+
+      --  Reinitializing the backing arena keeps its caller-selected instance
+      --  identity but starts a new incarnation, so an older pool view must
+      --  fail closed rather than resolve its recorded chunk allocations.
+      Adaptive_U64.Initialize
+        (Foreign_Pool, Region_A, Foreign_Pool_Location, Foreign_Arena);
+      Adaptive_U64.Try_Allocate
+        (Foreign_Pool, Foreign_Arena, 5, Foreign_Handle, Foreign_Result);
+      Assert
+        (Foreign_Result = Adaptive_U64.Allocated,
+         "scratch adaptive pool did not allocate its first chunk");
+      TLSF_Arenas.Initialize
+        (Foreign_Arena, Region_A, Foreign_Arena_Location,
+         Foreign_Configuration, Foreign_Instance);
+      Failed := False;
+      begin
+         Adaptive_U64.Read
+           (Foreign_Pool, Foreign_Arena, Foreign_Handle, U64_Value);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "adaptive pool accepted a stale arena incarnation");
+      Adaptive_U64.Detach (Foreign_Pool);
+      TLSF_Arenas.Destroy (Foreign_Arena);
+   end;
 
    --  A dependent dynamic header records the arena incarnation, not only its
    --  caller-selected instance id. Reinitializing the arena under exclusive
@@ -2028,6 +2586,11 @@ begin
    Dynamic_Strings.Detach (Dynamic_String_A);
    Dynamic_Maps.Detach (Dynamic_Map_A);
    Arenas.Detach (Arena_A);
+   Best_Fit_Dynamic_Vectors.Detach (Best_Fit_Vector_A);
+   Best_Fit_Arenas.Detach (Best_Fit_A);
+   TLSF_Dynamic_Vectors.Detach (TLSF_Vector_A);
+   Adaptive_U64.Detach (Adaptive_A);
+   TLSF_Arenas.Detach (TLSF_A);
    Maps.Detach (Map_A);
    Vectors.Detach (Wrapped_A);
    Contract_V1.Detach (Envelope_A);
@@ -2056,6 +2619,19 @@ begin
      (Arena_C, Region_C, Arena_Location,
       (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
       16#A8E4_7B19_2C63_D501#);
+   Best_Fit_Arenas.Attach
+     (Best_Fit_C, Region_C, Best_Fit_Arena_Location,
+      Best_Fit_Configuration, Best_Fit_Instance);
+   Best_Fit_Dynamic_Vectors.Attach
+     (Best_Fit_Vector_C, Region_C, Best_Fit_Dynamic_Location,
+      Best_Fit_C, 2);
+   TLSF_Arenas.Attach
+     (TLSF_C, Region_C, TLSF_Arena_Location,
+      TLSF_Configuration, TLSF_Instance);
+   TLSF_Dynamic_Vectors.Attach
+     (TLSF_Vector_C, Region_C, TLSF_Dynamic_Location, TLSF_C, 2);
+   Adaptive_U64.Attach
+     (Adaptive_C, Region_C, Adaptive_Pool_Location, TLSF_C);
    Dynamic_Vectors.Attach
      (Dynamic_Vector_C, Region_C, Dynamic_Vector_Location, Arena_C, 2);
    Dynamic_Strings.Attach
@@ -2087,6 +2663,61 @@ begin
      (Read_16 = Payload_16,
       "arena mutation was not visible after the third mapping");
    Arenas.Release (Arena_B, Arena_Handle);
+   Best_Fit_Arenas.Read
+     (Best_Fit_C, Best_Fit_Handle, 0, Read_16);
+   Assert
+     (Read_16 = Arena_Data,
+      "best-fit arena did not survive the third mapping");
+   Best_Fit_Arenas.Write
+     (Best_Fit_C, Best_Fit_Handle, 16, Payload_16);
+   Best_Fit_Arenas.Read
+     (Best_Fit_B, Best_Fit_Handle, 16, Read_16);
+   Assert
+     (Read_16 = Payload_16,
+      "best-fit mutation was not visible after the third mapping");
+   Best_Fit_Arenas.Release (Best_Fit_B, Best_Fit_Handle);
+   Best_Fit_Dynamic_Vectors.Try_Append
+     (Best_Fit_Vector_C, Best_Fit_C, 41, Growth);
+   Assert
+     (Growth = DS.Dynamic.Completed
+      and then Best_Fit_Dynamic_Vectors.Read
+        (Best_Fit_Vector_B, Best_Fit_B, 41) = 41,
+      "best-fit dynamic vector did not continue after remapping");
+   TLSF_Arenas.Read (TLSF_C, TLSF_Handle, 0, Read_16);
+   Assert
+     (Read_16 = Arena_Data, "TLSF arena did not survive the third mapping");
+   TLSF_Arenas.Write (TLSF_C, TLSF_Handle, 16, Payload_16);
+   TLSF_Arenas.Read (TLSF_B, TLSF_Handle, 16, Read_16);
+   Assert
+     (Read_16 = Payload_16,
+      "TLSF mutation was not visible after the third mapping");
+   TLSF_Arenas.Release (TLSF_B, TLSF_Handle);
+   TLSF_Dynamic_Vectors.Try_Append
+     (TLSF_Vector_C, TLSF_C, 41, Growth);
+   Assert
+     (Growth = DS.Dynamic.Completed
+      and then TLSF_Dynamic_Vectors.Read
+        (TLSF_Vector_B, TLSF_B, 41) = 41,
+      "TLSF dynamic vector did not continue after remapping");
+   declare
+      New_Handle : Adaptive_U64.Handle;
+      Result : Adaptive_U64.Allocation_Result;
+   begin
+      Adaptive_U64.Try_Allocate
+        (Adaptive_C, TLSF_C, 101, New_Handle, Result);
+      Assert
+        (Result = Adaptive_U64.Allocated and then New_Handle.Chunk = 1,
+         "adaptive pool did not reuse a free slot after remapping");
+      Adaptive_U64.Read (Adaptive_B, TLSF_B, New_Handle, U64_Value);
+      Assert
+        (U64_Value = 101,
+         "adaptive-pool allocation was not visible across mappings");
+      Adaptive_U64.Release (Adaptive_B, TLSF_B, New_Handle);
+   end;
+   for Index in 2 .. Adaptive_Handles'Last loop
+      Adaptive_U64.Release
+        (Adaptive_C, TLSF_C, Adaptive_Handles (Index));
+   end loop;
    Dynamic_Vectors.Try_Append
      (Dynamic_Vector_C, Arena_C, 21, Growth);
    U64_Value := Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 21);
@@ -2311,6 +2942,11 @@ begin
    Dynamic_Strings.Destroy (Dynamic_String_C, Arena_C);
    Dynamic_Vectors.Destroy (Dynamic_Vector_C, Arena_C);
    Arenas.Destroy (Arena_C);
+   Best_Fit_Dynamic_Vectors.Destroy (Best_Fit_Vector_C, Best_Fit_C);
+   Best_Fit_Arenas.Destroy (Best_Fit_C);
+   TLSF_Dynamic_Vectors.Destroy (TLSF_Vector_C, TLSF_C);
+   Adaptive_U64.Destroy (Adaptive_C, TLSF_C);
+   TLSF_Arenas.Destroy (TLSF_C);
    Strings.Destroy (String_C);
    Vectors.Destroy (Vector_C);
    SPSC.Destroy (Ring_C);
@@ -2324,6 +2960,11 @@ begin
    Dynamic_Strings.Detach (Dynamic_String_B);
    Dynamic_Maps.Detach (Dynamic_Map_B);
    Arenas.Detach (Arena_B);
+   Best_Fit_Dynamic_Vectors.Detach (Best_Fit_Vector_B);
+   Best_Fit_Arenas.Detach (Best_Fit_B);
+   TLSF_Dynamic_Vectors.Detach (TLSF_Vector_B);
+   Adaptive_U64.Detach (Adaptive_B);
+   TLSF_Arenas.Detach (TLSF_B);
    Strings.Detach (String_B);
    Vectors.Detach (Vector_B);
    SPSC.Detach (Ring_B);

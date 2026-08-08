@@ -6,7 +6,10 @@ with Flyology;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
+with Flyology.Data_Structures.Allocation_Algorithms.Best_Fit;
+with Flyology.Data_Structures.Allocation_Algorithms.TLSF;
 with Flyology.Data_Structures.Arenas;
+with Flyology.Data_Structures.Allocation_Pools.Adaptive;
 with Flyology.Data_Structures.Dynamic.Hash_Maps;
 with Flyology.Data_Structures.Dynamic.Vectors;
 with Flyology.Data_Structures.Hash_Maps;
@@ -26,9 +29,18 @@ procedure Data_Structures_Concurrency_Smoke is
    package Byte_Strings renames DS.Byte_Strings;
    package Arenas is new DS.Arenas
      (Algorithm => DS.Allocation_Algorithms.Buddy);
+   package Best_Fit_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Best_Fit);
+   package TLSF_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.TLSF);
    package Handles renames DS.Handles;
    package Regions renames DS.Regions;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package Adaptive_U64 is new DS.Allocation_Pools.Adaptive
+     (Arena_Provider  => TLSF_Arenas,
+      Element         => U64_Elements.Element,
+      Slots_Per_Chunk => 64,
+      Maximum_Chunks  => 8);
    package SPSC is new DS.Rings.SPSC
      (Element => U64_Elements.Element);
    package MPMC is new DS.Rings.MPMC
@@ -57,6 +69,8 @@ procedure Data_Structures_Concurrency_Smoke is
    use type DS.Dynamic.Growth_Result;
    use type Dynamic_Maps.Put_Result;
    use type Slabs.Allocation_Result;
+   use type Best_Fit_Arenas.Allocation_Result;
+   use type Adaptive_U64.Allocation_Result;
    use type System.Address;
 
    function Argument
@@ -78,6 +92,9 @@ procedure Data_Structures_Concurrency_Smoke is
    Arena_Location : constant DS.Region_Offset := 1_048_576;
    Dynamic_Vector_Location : constant DS.Region_Offset := 2_700_000;
    Dynamic_Map_Location : constant DS.Region_Offset := 2_701_024;
+   Best_Fit_Arena_Location : constant DS.Region_Offset := 3_000_000;
+   TLSF_Arena_Location : constant DS.Region_Offset := 3_400_000;
+   Adaptive_Pool_Location : constant DS.Region_Offset := 3_800_000;
 
    function Mapping_Create
      (Path   : C.char_array;
@@ -1030,6 +1047,298 @@ procedure Data_Structures_Concurrency_Smoke is
       end loop;
    end Run_Dynamic_Arena;
 
+   procedure Run_Best_Fit_Arena is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 10_000;
+      Configuration : constant Best_Fit_Arenas.Configuration :=
+        (Usable_Capacity => 262_080, Minimum_Block_Size => 64);
+      Instance : constant Interfaces.Unsigned_64 :=
+        16#B35F_C0A7_3E11_0001#;
+      Views : array (Positive range 1 .. Worker_Count) of aliased
+        Best_Fit_Arenas.View;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive;
+         Item       : not null access Best_Fit_Arenas.View);
+
+      task body Worker_Task is
+         Handle : Best_Fit_Arenas.Allocation_Handle;
+         Result : Best_Fit_Arenas.Allocation_Result;
+         Data   : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Expected : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Expected := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            loop
+               Best_Fit_Arenas.Try_Allocate
+                 (Item.all, 1 + Sequence mod 511, Handle, Result);
+               exit when Result = Best_Fit_Arenas.Allocated;
+               if Result = Best_Fit_Arenas.Exhausted then
+                  raise Program_Error with
+                    "best-fit concurrency arena unexpectedly exhausted";
+               end if;
+               delay 0.0;
+            end loop;
+            Best_Fit_Arenas.Write (Item.all, Handle, 0, Encode (Expected));
+            Best_Fit_Arenas.Read (Item.all, Handle, 0, Data);
+            if Decode (Data) /= Expected then
+               raise Program_Error with
+                 "best-fit concurrent payload was corrupted";
+            end if;
+            loop
+               begin
+                  Best_Fit_Arenas.Release (Item.all, Handle);
+                  exit;
+               exception
+                  when DS.Busy_Error => delay 0.0;
+               end;
+            end loop;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+   begin
+      Best_Fit_Arenas.Initialize
+        (Views (1), Region_A, Best_Fit_Arena_Location,
+         Configuration, Instance);
+      for Index in 2 .. Worker_Count loop
+         Best_Fit_Arenas.Attach
+           (Views (Index),
+            (if Index mod 2 = 0 then Region_B else Region_A),
+            Best_Fit_Arena_Location, Configuration, Instance);
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task
+           (Index, Views (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 20.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with
+           "best-fit native-task test timed out";
+      end select;
+      Assert
+        (Finished.Passed,
+         "best-fit native-task allocation campaign failed");
+      Best_Fit_Arenas.Destroy (Views (1));
+      for Index in 2 .. Worker_Count loop
+         Best_Fit_Arenas.Detach (Views (Index));
+      end loop;
+   end Run_Best_Fit_Arena;
+
+   procedure Run_TLSF_Arena is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 10_000;
+      Configuration : constant TLSF_Arenas.Configuration :=
+        (Usable_Capacity => 262_144, Minimum_Block_Size => 64);
+      Instance : constant Interfaces.Unsigned_64 :=
+        16#715F_C0A7_3E11_0001#;
+      Views : array (Positive range 1 .. Worker_Count) of aliased
+        TLSF_Arenas.View;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive;
+         Item       : not null access TLSF_Arenas.View);
+
+      task body Worker_Task is
+         Handle : TLSF_Arenas.Allocation_Handle;
+         Result : TLSF_Arenas.Allocation_Result;
+         Data   : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Expected : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Expected := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            loop
+               TLSF_Arenas.Try_Allocate
+                 (Item.all, 1 + Sequence mod 511, Handle, Result);
+               exit when Result = TLSF_Arenas.Allocated;
+               if Result = TLSF_Arenas.Exhausted then
+                  raise Program_Error with
+                    "TLSF concurrency arena unexpectedly exhausted";
+               end if;
+               delay 0.0;
+            end loop;
+            TLSF_Arenas.Write (Item.all, Handle, 0, Encode (Expected));
+            TLSF_Arenas.Read (Item.all, Handle, 0, Data);
+            if Decode (Data) /= Expected then
+               raise Program_Error with
+                 "TLSF concurrent payload was corrupted";
+            end if;
+            loop
+               begin
+                  TLSF_Arenas.Release (Item.all, Handle);
+                  exit;
+               exception
+                  when DS.Busy_Error => delay 0.0;
+               end;
+            end loop;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+   begin
+      TLSF_Arenas.Initialize
+        (Views (1), Region_A, TLSF_Arena_Location,
+         Configuration, Instance);
+      for Index in 2 .. Worker_Count loop
+         TLSF_Arenas.Attach
+           (Views (Index),
+            (if Index mod 2 = 0 then Region_B else Region_A),
+            TLSF_Arena_Location, Configuration, Instance);
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task
+           (Index, Views (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 20.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with "TLSF native-task test timed out";
+      end select;
+      Assert
+        (Finished.Passed, "TLSF native-task allocation campaign failed");
+      TLSF_Arenas.Destroy (Views (1));
+      for Index in 2 .. Worker_Count loop
+         TLSF_Arenas.Detach (Views (Index));
+      end loop;
+   end Run_TLSF_Arena;
+
+   procedure Run_Adaptive_Pool is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 10_000;
+      Configuration : constant TLSF_Arenas.Configuration :=
+        (Usable_Capacity => 262_144, Minimum_Block_Size => 64);
+      Instance : constant Interfaces.Unsigned_64 :=
+        16#ADA7_C0A7_3E11_0001#;
+      Arenas : array (Positive range 1 .. Worker_Count) of aliased
+        TLSF_Arenas.View;
+      Pools : array (Positive range 1 .. Worker_Count) of aliased
+        Adaptive_U64.View;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive;
+         Pool       : not null access Adaptive_U64.View;
+         Arena      : not null access TLSF_Arenas.View);
+
+      task body Worker_Task is
+         Handle : Adaptive_U64.Handle;
+         Result : Adaptive_U64.Allocation_Result;
+         Data   : Interfaces.Unsigned_64;
+         Expected : Interfaces.Unsigned_64;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Expected := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            loop
+               Adaptive_U64.Try_Allocate
+                 (Pool.all, Arena.all, Expected, Handle, Result);
+               exit when Result = Adaptive_U64.Allocated;
+               if Result = Adaptive_U64.Exhausted
+                 or else Result = Adaptive_U64.Arena_Exhausted
+               then
+                  raise Program_Error with
+                    "adaptive concurrency pool unexpectedly exhausted";
+               end if;
+               delay 0.0;
+            end loop;
+            loop
+               begin
+                  Adaptive_U64.Read
+                    (Pool.all, Arena.all, Handle, Data);
+                  exit;
+               exception
+                  when DS.Busy_Error => delay 0.0;
+               end;
+            end loop;
+            if Data /= Expected then
+               raise Program_Error with
+                 "adaptive concurrent payload was corrupted";
+            end if;
+            loop
+               begin
+                  Adaptive_U64.Release (Pool.all, Arena.all, Handle);
+                  exit;
+               exception
+                  when DS.Busy_Error => delay 0.0;
+               end;
+            end loop;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+   begin
+      TLSF_Arenas.Initialize
+        (Arenas (1), Region_A, TLSF_Arena_Location,
+         Configuration, Instance);
+      for Index in 2 .. Worker_Count loop
+         TLSF_Arenas.Attach
+           (Arenas (Index),
+            (if Index mod 2 = 0 then Region_B else Region_A),
+            TLSF_Arena_Location, Configuration, Instance);
+      end loop;
+      Adaptive_U64.Initialize
+        (Pools (1), Region_A, Adaptive_Pool_Location, Arenas (1));
+      for Index in 2 .. Worker_Count loop
+         Adaptive_U64.Attach
+           (Pools (Index),
+            (if Index mod 2 = 0 then Region_B else Region_A),
+            Adaptive_Pool_Location, Arenas (Index));
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task
+           (Index, Pools (Index)'Access, Arenas (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 20.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with
+           "adaptive-pool native-task test timed out";
+      end select;
+      Assert
+        (Finished.Passed,
+         "adaptive-pool native-task allocation campaign failed");
+      for Index in 2 .. Worker_Count loop
+         Adaptive_U64.Detach (Pools (Index));
+      end loop;
+      Adaptive_U64.Destroy (Pools (1), Arenas (1));
+      TLSF_Arenas.Destroy (Arenas (1));
+      for Index in 2 .. Worker_Count loop
+         TLSF_Arenas.Detach (Arenas (Index));
+      end loop;
+   end Run_Adaptive_Pool;
+
 begin
    Assert
      (Mapping_Create
@@ -1046,6 +1355,9 @@ begin
    Run_Internally_Synchronized_String;
    Run_Internally_Synchronized_Map;
    Run_Dynamic_Arena;
+   Run_Best_Fit_Arena;
+   Run_TLSF_Arena;
+   Run_Adaptive_Pool;
    Regions.Detach (Region_A);
    Regions.Detach (Region_B);
    Assert (Unmap (Base_A, Mapping_Length) = 0, "failed to unmap view A");
