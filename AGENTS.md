@@ -164,6 +164,8 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - `tests/`: behavioral, parity, lifecycle, stress, fault, sanitizer, and
   observability programs.
 - `showcases/`: side-by-side demonstrations and reproducible measurements.
+- `flyology_bench/`: independent adaptive and paired-comparison benchmark
+  crate, reporters, smoke tests, and examples.
 - `proof/`: SPARK-only development crate and runtime policy proof model.
 - `scripts/`: all supported build, runtime preparation, test, docs, and proof
   entry points.
@@ -235,6 +237,8 @@ required by the changed boundary.
   generated traces and reports remain outside version control.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
   benchmark before changing a performance table or claim.
+- `cd flyology_bench && alr test`: build and run the standalone benchmark
+  crate's smoke tests and example.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.
   It removes the successfully built test image on success or failure. Set
   `FLYOLOGY_KEEP_LINUX_IMAGE=1` only when retaining it for inspection.

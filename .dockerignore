@@ -12,3 +12,11 @@ showcases/http-comparison/servers/*/config
 showcases/http-comparison/servers/*/obj
 tests/bin
 tests/obj
+flyology_bench/alire
+flyology_bench/config
+flyology_bench/lib
+flyology_bench/obj
+flyology_bench/examples/bin
+flyology_bench/examples/obj
+flyology_bench/tests/bin
+flyology_bench/tests/obj

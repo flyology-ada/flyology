@@ -2038,6 +2038,11 @@ rather than hidden behind a claim of universal portability.
   I/O, lifecycle, stress, fault injection, sanitizers, and observability; the
   detailed scope is listed under [CI and releases](#ci-and-releases).
 - [`showcases`](showcases): side-by-side scheduling and I/O demonstrations.
+- [`flyology_bench`](flyology_bench): an independent adaptive and paired
+  comparison benchmarking crate for Ada and Flyology workloads. The website's
+  [benchmarking guide](https://flyology.org/guide/benchmarking/) covers the
+  runnable API, multi-way comparisons, telemetry, machine output, and the
+  interpretation of fractional nanosecond results.
 - [`scripts`](scripts): custom RTS construction, verification, and test runners.
 - [`docker`](docker): native-architecture Linux validation Dockerfile.
 
@@ -2380,8 +2385,10 @@ Silicon host validates Linux/AArch64 without emulation:
 The default image uses Ubuntu 24.04, the matching official AArch64 or x86-64
 Alire 2.1.0 archive, GNAT 16.1, and GPRbuild 26.0.1. The test run deliberately
 denies `io_uring_setup` at the C bridge and asserts that a real lightweight file
-operation selected Linux native AIO. `FLYOLOGY_LINUX_ARCH=amd64` requests the
-x86-64 compatibility target explicitly; `FLYOLOGY_GNAT_VERSION` and
+operation selected Linux native AIO. It also builds and runs the standalone
+`flyology_bench` crate before the main runtime suite.
+`FLYOLOGY_LINUX_ARCH=amd64` requests the x86-64 compatibility target explicitly;
+`FLYOLOGY_GNAT_VERSION` and
 `FLYOLOGY_GPRBUILD_VERSION` select another pair, and `FLYOLOGY_LINUX_IMAGE`
 overrides its local image name. The script removes its test image when the run
 finishes, including after a test failure. Set `FLYOLOGY_KEEP_LINUX_IMAGE=1` to

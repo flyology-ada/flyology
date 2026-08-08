@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Measure Ada operations with flyology_bench, compare two to sixteen implementations in balanced or sequential runs, read nanosecond-scale results correctly, and emit CSV or JSON for automation.">
+    <meta name="theme-color" content="#17213d">
+    <title>Benchmarking Ada · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/benchmarking/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <style>
+      .benchmark-terminal {
+        margin-block: 1.75rem;
+        margin-inline: 0;
+        overflow: hidden;
+        border: 1px solid oklch(84% 0.025 270);
+        border-radius: var(--radius-md);
+        background: oklch(99.2% 0.004 270);
+        box-shadow: 0 1.2rem 3rem oklch(23% 0.045 270 / 0.08);
+      }
+
+      .benchmark-terminal figcaption {
+        display: flex;
+        min-height: 2.6rem;
+        align-items: center;
+        justify-content: space-between;
+        padding-inline: 1rem;
+        border-bottom: 1px solid oklch(88% 0.02 270);
+        color: oklch(42% 0.035 270);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+      }
+
+      .benchmark-terminal figcaption::after {
+        color: oklch(56% 0.11 185);
+        content: "terminal · light";
+      }
+
+      .terminal-scroll {
+        overflow-x: auto;
+      }
+
+      .benchmark-terminal pre {
+        min-width: 62rem;
+        margin: 0;
+        padding: 1.15rem 1.3rem 1.35rem;
+        color: oklch(27% 0.052 270);
+        font-size: 0.72rem;
+        line-height: 1.7;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .term-heading { color: oklch(54% 0.17 285); font-weight: 700; }
+      .term-good { color: oklch(49% 0.12 152); font-weight: 700; }
+      .term-cpu { color: oklch(58% 0.19 300); }
+      .term-memory { color: oklch(61% 0.16 250); }
+      .term-muted { color: oklch(53% 0.025 270); }
+
+      .comparison-table .faster,
+      .comparison-table .less {
+        color: oklch(49% 0.12 152);
+        font-weight: 650;
+      }
+
+      .comparison-table .slower,
+      .comparison-table .more {
+        color: oklch(52% 0.15 28);
+        font-weight: 650;
+      }
+
+      .comparison-table .uncertain {
+        color: var(--ink-soft);
+        font-weight: 650;
+      }
+
+      .measurement-rail {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-block: 2rem;
+        border-block: 1px solid var(--line);
+      }
+
+      .measurement-rail div {
+        padding: 1rem;
+        border-right: 1px solid var(--line);
+      }
+
+      .measurement-rail div:last-child { border-right: 0; }
+
+      .measurement-rail strong,
+      .measurement-rail span {
+        display: block;
+      }
+
+      .measurement-rail strong {
+        color: var(--ink);
+        font-size: 0.82rem;
+      }
+
+      .measurement-rail span {
+        margin-top: 0.28rem;
+        color: var(--ink-soft);
+        font-size: 0.72rem;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 640px) {
+        .measurement-rail { grid-template-columns: 1fr 1fr; }
+        .measurement-rail div:nth-child(2) { border-right: 0; }
+        .measurement-rail div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+      }
+
+      @media print {
+        .benchmark-terminal { box-shadow: none; }
+        .benchmark-terminal pre { min-width: 0; white-space: pre-wrap; }
+      }
+    </style>
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Benchmarking Ada</li></ol>
+          <h1>High-precision benchmarking.</h1>
+        </div>
+        <p class="doc-hero-copy"><code>flyology_bench</code> adaptively batches short Ada operations, compares up to sixteen implementations in balanced rounds or sequential blocks, and keeps enough clock, sampling, and host context to interpret a nanosecond-scale result without pretending that a sub-nanosecond interval was directly observed.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#scope">What it measures</a></li>
+            <li><a href="#first">Measure one operation</a></li>
+            <li><a href="#read">Read the report</a></li>
+            <li><a href="#compare">Compare implementations</a></li>
+            <li><a href="#budget">Bound collection time</a></li>
+            <li><a href="#telemetry">Use telemetry</a></li>
+            <li><a href="#automation">Emit CSV or JSON</a></li>
+            <li><a href="#correctness">Interpret nanoseconds</a></li>
+            <li><a href="#platforms">Platforms and verification</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p><code>flyology_bench</code> is an independent crate in the Flyology repository. It can benchmark ordinary Ada libraries and does not require the Flyology runtime.</p>
+          </aside>
+
+          <section id="scope">
+            <span class="step-label">BENCH 01</span>
+            <h2>Start with the claim you need to test.</h2>
+            <p>A microbenchmark can estimate throughput, compare implementations under a shared local schedule, or expose unstable behavior. It cannot establish end-to-end service latency, production capacity, or a universal result for another host.</p>
+            <div class="measurement-rail" aria-label="Benchmark measurement sequence">
+              <div><strong>Warm</strong><span>exercise code and data before collection</span></div>
+              <div><strong>Calibrate</strong><span>choose a batch large enough for the native clock</span></div>
+              <div><strong>Sample</strong><span>retain complete per-operation batch means</span></div>
+              <div><strong>Analyze</strong><span>report variation, confidence, and order effects</span></div>
+            </div>
+            <p>The crate uses <code>mach_absolute_time</code> on Darwin and <code>CLOCK_MONOTONIC_RAW</code> on Linux through a narrow C clock bridge. Adaptive calibration aims for useful batch durations while retaining the raw per-operation sample means and the clock characterization needed to audit them.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Keep the work observable.</strong> Use volatile state, return a result through <code>Measure_Result_Batched</code>, or place <code>Do_Not_Optimize</code> outside the timed interval. An optimizer is allowed to remove work whose result cannot affect the program.</p>
+            </aside>
+          </section>
+
+          <section id="first">
+            <span class="step-label">BENCH 02</span>
+            <h2>Measure one statically bound operation.</h2>
+            <p><code>flyology_bench</code> is currently version <code>0.1.0-dev</code> and will be published through the Flyology organization index. Keep the community index for compiler dependencies, add the Flyology development index ahead of it, then add the crate normally.</p>
+            <figure class="code-panel">
+              <figcaption>add the development index and crate</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology_bench</code></pre>
+            </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>The organization index is a development channel until the crate has a community-index release. The source remains available under <code>flyology_bench/</code> in the Flyology repository.</p>
+            </aside>
+            <figure class="code-panel">
+              <figcaption>bench_mix.adb</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology_Bench;
+with Flyology_Bench.Reporters;
+with Interfaces;
+
+procedure Bench_Mix is
+   use type Interfaces.Unsigned_32;
+   Value : Interfaces.Unsigned_32 := 1;
+
+   procedure Mix is
+   begin
+      Value := Value * 1_664_525 + 1_013_904_223;
+   end Mix;
+
+   procedure Run is new Flyology_Bench.Measure (Mix);
+   Result : Flyology_Bench.Measurement;
+   Config : constant Flyology_Bench.Configuration :=
+     Flyology_Bench.Reporters.Terminal_Mode (Name =&gt; "integer mix");
+begin
+   Run (Config =&gt; Config, Result =&gt; Result);
+   Flyology_Bench.Reporters.Put_Console ("integer_mix", Result);
+end Bench_Mix;</code></pre>
+            </figure>
+            <p><code>Measure</code> is generic, so the operation is statically bound. Use <code>Measure_Batched</code> when one timed batch coordinates tasks or owns a fixture that the harness must not recreate per operation. Use setup and teardown hooks when preparation must stay outside each timed interval.</p>
+          </section>
+
+          <section id="read">
+            <span class="step-label">BENCH 03</span>
+            <h2>Read one result as a small instrument panel.</h2>
+            <p>Terminal mode keeps labels and numeric columns stable during progress, then prints one row per kind of evidence. The capture below is from the maintained example on Darwin/AArch64. Results will change with the host, compiler, load, and run policy.</p>
+            <figure class="benchmark-terminal">
+              <figcaption>integer_mix · observed example output</figcaption>
+              <div class="terminal-scroll" tabindex="0" aria-label="Scrollable terminal output">
+                <pre><span class="term-heading">-- integer_mix -----------------------------------------</span>
+   latency    | <span class="term-good">median 1.498 ns/op</span>  mean 1.633 ns
+   tails      | p95 2.225 ns  p99 2.784 ns  range 1.454 ns .. 2.839 ns
+   sampling   | 16777216 iter/sample x 55 samples  median batch 25.13 ms
+   quality    | CV 18.60%  outliers 7  lag-1 correlation 0.47
+   clock      | mach_absolute_time
+   resolution | nominal 42.000 ns  observed 41.000 ns  median read 41.000 ns  floor 0.003 ps/op
+   <span class="term-cpu">cpu</span>        | <span class="term-cpu">▇▇▇▇▇▇▇▇▁▇▇▇▇▇▇▇▇▇▇▇▇▇▁▇▇▇▇▇▇▇▇▇▇▇▇▇▁▇▇▇▇▇▇▇▇▆▃▄</span>
+              | average 96.8%  (1.0 cores)    peak 100.0%  (1.0 cores)
+   <span class="term-memory">memory</span>     | <span class="term-memory">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</span>
+              | RSS change across own batches +0.0 KiB    largest batch +0.0 KiB
+   elapsed    | 00:00:01.5 timed samples <span class="term-muted">(hh:mm:ss)</span></pre>
+              </div>
+            </figure>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Latency</dt><dd>Median and mean of the retained per-operation batch averages. Prefer neither blindly; inspect their separation and the quality row.</dd></div>
+                <div class="decision-row"><dt>Sample tails</dt><dd><code>p95</code> and <code>p99</code> describe batch averages, not the latency distribution of individual operations.</dd></div>
+                <div class="decision-row"><dt>Quality</dt><dd>Coefficient of variation, retained Tukey outliers, and lag-one correlation expose dispersion and sample-order structure.</dd></div>
+                <div class="decision-row"><dt>Resolution</dt><dd>Nominal and observed clock steps, adjacent-read cost, and the step divided by batch iterations show the timer scale behind the estimate.</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section id="compare">
+            <span class="step-label">BENCH 04</span>
+            <h2>Choose balanced rounds or sequential blocks.</h2>
+            <p>Do not infer a comparison by running implementation A for a minute and implementation B later without recording that schedule. <code>Compare</code> alternates which of two implementations runs first. <code>Compare_Many</code> accepts two to sixteen enumeration values and, by default, rotates every implementation through each execution position.</p>
+            <figure class="code-panel">
+              <figcaption>three implementations, one shared shootout</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">type Candidate is (Current, Rewrite, Tasked);
+
+procedure Batch
+  (Which      : Candidate;
+   Iterations : Flyology_Bench.Iteration_Count);
+
+procedure Compare_All is new Flyology_Bench.Compare_Many
+  (Case_Id =&gt; Candidate, Batch =&gt; Batch);
+procedure Put_All is new
+  Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Candidate);
+
+Result : Flyology_Bench.Multi_Comparison;
+Config : Flyology_Bench.Configuration :=
+  Flyology_Bench.Reporters.Terminal_Mode (Name =&gt; "parser shootout");
+begin
+Config.Measurement_Time := 3.0;
+Config.Maximum_Sampling_Time := 2.0;
+Config.Comparison_Batching := Flyology_Bench.Equal_Time;
+Config.Shootout_Scheduling := Flyology_Bench.Sequential_Cases;
+Compare_All (Config =&gt; Config, Result =&gt; Result);
+Put_All (Result, Show_Individual_Details =&gt; True);</code></pre>
+            </figure>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Equal_Time</code></dt><dd>The default. Every implementation calibrates its own iteration count toward an equal share of the timed budget, so faster cases do more operations rather than receiving less observation time.</dd></div>
+                <div class="decision-row"><dt><code>Shared_Iterations</code></dt><dd>Every implementation receives one logical count. Use it for stateful batches that require identical work; elapsed collection time then varies with implementation speed.</dd></div>
+                <div class="decision-row"><dt><code>Balanced_Rounds</code></dt><dd>The default shootout schedule. Cases are interleaved and rotate through execution positions to limit time-order drift.</dd></div>
+                <div class="decision-row"><dt><code>Sequential_Cases</code></dt><dd>One case completes its sample block before the next starts. Telemetry is easier to attribute visually, but thermal and time-order drift can bias separated blocks.</dd></div>
+              </dl>
+            </div>
+            <p>The first enumeration value is the reference. A speedup above <code>1.0x</code> means the contender is faster. The elapsed-time column says the same thing in direct language: less is favorable, more is unfavorable. Color reinforces that verdict in a terminal, but the words and signs carry the meaning independently.</p>
+            <div class="benchmark-table-wrap" tabindex="0" aria-label="Scrollable example multi-way comparison">
+              <table class="benchmark-table comparison-table">
+                <thead><tr><th>Implementation</th><th>Median</th><th>Speedup</th><th>Elapsed time</th><th>95% CI</th><th>Verdict</th></tr></thead>
+                <tbody>
+                  <tr><th>one mix</th><td>1.792 ns</td><td>1.000x</td><td>reference</td><td>reference</td><td>reference</td></tr>
+                  <tr><th>two mixes</th><td>3.358 ns</td><td class="slower">0.537x</td><td class="more">86.24% more</td><td>[0.519, 0.558]</td><td class="slower">reference faster</td></tr>
+                  <tr><th>noisy one mix</th><td>1.776 ns</td><td>0.977x</td><td>2.37% more</td><td>[0.886, 1.072]</td><td class="uncertain">inconclusive</td></tr>
+                  <tr><th>parallel CPU burn</th><td>0.878 ns</td><td class="faster">1.984x</td><td class="less">49.59% less</td><td>[1.850, 2.154]</td><td class="faster">contender faster</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>The confidence interval comes from deterministic circular-block resampling of paired log-ratios. A practical verdict appears only when the complete interval clears the configured effect threshold. <code>Show_Individual_Details</code> appends the full latency, sampling, clock, CPU, memory, and elapsed card for every implementation.</p>
+          </section>
+
+          <section id="budget">
+            <span class="step-label">BENCH 05</span>
+            <h2>Put a wall-time ceiling on collection.</h2>
+            <p><code>Measurement_Time</code> is the target amount of timed work across all cases. <code>Maximum_Sampling_Time</code> is a hard wall-time budget for the collection phase. A value of zero disables the limit.</p>
+            <figure class="code-panel">
+              <figcaption>a three-second target with a two-second ceiling</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config.Measurement_Time := 3.0;
+Config.Maximum_Sampling_Time := 2.0;
+Config.Samples := 75;</code></pre>
+            </figure>
+            <p>The harness always completes at least ten samples and checks the budget only between complete samples, pairs, balanced rounds, or sequential case samples. One in-flight batch can therefore finish slightly after the boundary. A sequential shootout divides the collection ceiling among cases and analyzes the common sample count all cases completed. In every comparison, the measurement target is divided across timed implementations instead of being multiplied by their count.</p>
+          </section>
+
+          <section id="telemetry">
+            <span class="step-label">BENCH 06</span>
+            <h2>Watch the process without timing the probes.</h2>
+            <p><code>Terminal_Mode</code> enables process telemetry and names every live progress line. During a multi-way collection, a fixed-width implementation field appears between the shootout name and phase, so each sample update says which case just ran without moving the progress bar. The line also reports CPU percentage and occupied cores, current RSS and growth, and elapsed wall time. Final cards retain CPU and RSS sparklines.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>CPU percentage</dt><dd><code>100%</code> is approximately one occupied core. A tasking benchmark may exceed it; the example's four-worker case reaches roughly four cores.</dd></div>
+                <div class="decision-row"><dt>Memory</dt><dd>The labeled <code>shootout total</code> footer reports absolute process RSS. Individual implementation cards report RSS change observed around that implementation's own batches.</dd></div>
+                <div class="decision-row"><dt>Elapsed</dt><dd>Individual cards label timed sample duration. The shootout footer labels total wall time. Both use <code>hh:mm:ss</code>.</dd></div>
+                <div class="decision-row"><dt>Probe boundary</dt><dd>CPU and RSS reads occur outside timed regions. They describe how the process behaved; they are not allocation counts or per-operation hardware counters.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>The maintained example includes CPU-heavy, memory-retaining, wait-heavy, and occasionally hiccuping cases so each telemetry signal is visible. Those cases demonstrate observability; they are not equivalent implementations of one algorithm.</p>
+            </aside>
+          </section>
+
+          <section id="automation">
+            <span class="step-label">BENCH 07</span>
+            <h2>Keep machine output clean.</h2>
+            <p>CSV and newline-delimited JSON reporters omit progress and ANSI sequences. The maintained example selects the reporter through one environment variable.</p>
+            <figure class="code-panel">
+              <figcaption>human and script output from the same benchmark</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>FLYOLOGY_BENCH_OUTPUT=terminal ./examples/bin/basic
+FLYOLOGY_BENCH_OUTPUT=csv      ./examples/bin/basic &gt; results.csv
+FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson</code></pre>
+            </figure>
+            <p>Multi-way CSV emits one row per contender. JSON emits one object containing the reference, all contenders, clock data, and host/toolchain metadata. For regression history, <code>Flyology_Bench.Baselines</code> stores raw samples and rejects a comparison when the clock backend or environment fingerprint differs.</p>
+          </section>
+
+          <section id="correctness">
+            <span class="step-label">BENCH 08</span>
+            <h2>Treat fractional nanoseconds as amortized throughput.</h2>
+            <p>A result such as <code>0.878 ns/op</code> does not mean the clock directly resolved one operation in 878 picoseconds. The harness timed a batch lasting milliseconds and divided that duration by the logical operation count. This is useful throughput evidence when the batch performs exactly that many comparable operations.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Clock precision</dt><dd>The native timestamp and observed-step rows characterize the timer. Dividing its step by millions of iterations explains the reported arithmetic floor; it does not improve the physical clock.</dd></div>
+                <div class="decision-row"><dt>Timer subtraction</dt><dd>Timestamp-cost subtraction is off by default. If enabled, one observed adjacent-read interval is removed from each batch, never an invented empty-loop cost.</dd></div>
+                <div class="decision-row"><dt>Outliers</dt><dd>Every sample remains in the statistics and bootstrap. Outlier counts are prompts to investigate host noise, workload phases, or inputs, not permission to delete inconvenient data.</dd></div>
+                <div class="decision-row"><dt>Comparison scope</dt><dd>Balanced order limits one source of drift. It cannot control frequency scaling, thermal state, interrupts, other processes, or a benchmark that mutates unequal state.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Match the metric to the question.</strong> Use an end-to-end workload for service latency, a profiler or hardware-counter provider for CPU events, and allocator instrumentation for allocation counts. The crate does not relabel wall time as any of those measurements.</p>
+            </aside>
+          </section>
+
+          <section id="platforms">
+            <span class="step-label">BENCH 09</span>
+            <h2>Repeat on the host you intend to describe.</h2>
+            <p>The crate is maintained on Darwin and Linux, including native Linux/AArch64 Docker validation. Its default fingerprint records operating system, architecture, and GNAT version. Add compiler switches, revision, CPU placement and power policy, and other conditions that could change the result.</p>
+            <figure class="code-panel">
+              <figcaption>build, test, and run the maintained example</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>cd flyology_bench
+alr test
+./examples/bin/basic</code></pre>
+            </figure>
+            <p>For a shared report, keep the raw machine output, record the exact command and environment, repeat the full run, and describe only the tested host. Direct <code>Compare</code> or <code>Compare_Many</code> is preferable whenever all implementations can run in one process.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Read the crate's <a href="https://github.com/flyology-ada/flyology/tree/main/flyology_bench">source and full measurement notes</a>, return to the <a href="../">runtime guide</a>, or use the <a href="../../api/">generated API reference</a> for Flyology Runtime packages.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime and flyology_bench are experimental. Validate results on the exact host and compiler configuration you report.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_bench">Benchmark source</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
