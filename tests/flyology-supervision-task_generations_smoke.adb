@@ -43,6 +43,7 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       Raise_Exception,
       Override_Exception,
       Initialize_Failure,
+      Initialize_Failure_After_Ready,
       Await_Stop,
       Await_Abort);
 
@@ -60,9 +61,19 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       pragma Task_Info (Flyology.Native_Task);
       entry Begin_Service;
       entry Application_Entry;
+      entry Ready_Acknowledgement;
    end Service_Task;
 
    task body Service_Task is
+      procedure Await_Stop_Request is
+      begin
+         loop
+            if Stop_Requested (Control.all) then
+               raise Flyology.Cancellation.Operation_Cancelled;
+            end if;
+            delay 0.001;
+         end loop;
+      end Await_Stop_Request;
    begin
       accept Begin_Service;
       declare
@@ -73,7 +84,9 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
             raise Test_Failure with "wrong task-specific discriminant";
          end if;
          State.Began.Increment;
-         Mark_Ready (Control.all);
+         if State.Mode /= Initialize_Failure then
+            Mark_Ready (Control.all);
+         end if;
          case State.Mode is
             when Return_Normally =>
                accept Application_Entry;
@@ -86,13 +99,13 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
                   when Occurrence : others =>
                      Report_Exception (Control.all, Occurrence);
                end;
+            when Initialize_Failure_After_Ready =>
+               --  Order readiness before the initializer exception so this
+               --  case cannot race the resulting stop publication.
+               accept Ready_Acknowledgement;
+               Await_Stop_Request;
             when Initialize_Failure | Await_Stop =>
-               loop
-                  if Stop_Requested (Control.all) then
-                     raise Flyology.Cancellation.Operation_Cancelled;
-                  end if;
-                  delay 0.001;
-               end loop;
+               Await_Stop_Request;
             when Await_Abort =>
                loop
                   delay 0.001;
@@ -117,6 +130,9 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    begin
       Subject.Begin_Service;
       if Subject.State.Mode = Initialize_Failure then
+         raise Test_Failure with "task-specific initialization failed";
+      elsif Subject.State.Mode = Initialize_Failure_After_Ready then
+         Subject.Ready_Acknowledgement;
          raise Test_Failure with "task-specific initialization failed";
       end if;
       if Subject.State.Mode = Return_Normally then
@@ -158,6 +174,7 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    procedure Check_Service
      (Mode                : Run_Mode;
       Expected            : Termination_Kind;
+      Expected_Ready      : Boolean;
       Expected_Finalizers : Natural)
    is
       State   : aliased Context := (Mode => Mode, others => <>);
@@ -181,7 +198,7 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       end if;
 
       pragma Assert (Result.Termination.Kind = Expected);
-      pragma Assert (Result.Reported_Ready);
+      pragma Assert (Result.Reported_Ready = Expected_Ready);
       pragma Assert (State.Began.Value = 1);
       pragma Assert (State.Finalized.Value = Expected_Finalizers);
       if Mode = Raise_Exception then
@@ -192,7 +209,10 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
               Ada.Exceptions.Exception_Name (Test_Failure'Identity));
          pragma Assert
            (Message_Text (Result.Termination) = "application task failed");
-      elsif Mode in Override_Exception | Initialize_Failure then
+      elsif Mode in Override_Exception
+         | Initialize_Failure
+         | Initialize_Failure_After_Ready
+      then
          pragma Assert
            (Result.Termination.Exception_Id = Test_Failure'Identity);
          pragma Assert
@@ -272,12 +292,14 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       Initialize          => Initialize_Input);
 
 begin
-   Check_Service (Return_Normally, Normal_Return, 1);
-   Check_Service (Raise_Exception, Unhandled_Exception, 1);
-   Check_Service (Override_Exception, Unhandled_Exception, 1);
-   Check_Service (Initialize_Failure, Unhandled_Exception, 1);
-   Check_Service (Await_Stop, Supervisor_Shutdown, 1);
-   Check_Service (Await_Abort, Abnormal_Completion, 1);
+   Check_Service (Return_Normally, Normal_Return, True, 1);
+   Check_Service (Raise_Exception, Unhandled_Exception, True, 1);
+   Check_Service (Override_Exception, Unhandled_Exception, True, 1);
+   Check_Service (Initialize_Failure, Unhandled_Exception, False, 1);
+   Check_Service
+     (Initialize_Failure_After_Ready, Unhandled_Exception, True, 1);
+   Check_Service (Await_Stop, Supervisor_Shutdown, True, 1);
+   Check_Service (Await_Abort, Abnormal_Completion, True, 1);
 
    declare
       State   : aliased Input_Context;
