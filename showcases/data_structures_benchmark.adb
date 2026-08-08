@@ -227,6 +227,7 @@ procedure Data_Structures_Benchmark is
    procedure Benchmark_Fly_Vector is
       Data : Bytes_8;
       Added : Boolean;
+      Local : U64 := 0;
    begin
       Vectors.Clear (Fly_Vector);
       for Value in 1 .. Rounds loop
@@ -237,25 +238,29 @@ procedure Data_Structures_Benchmark is
       end loop;
       for Index in 1 .. Rounds loop
          Vectors.Read (Fly_Vector, Index, Data);
-         Checksum := Checksum + Decode (Data);
+         Local := Local + Decode (Data);
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Fly_Vector;
 
    procedure Benchmark_Standard_Vector is
+      Local : U64 := 0;
    begin
       Standard_Vector.Clear;
       for Value in 1 .. Rounds loop
          Standard_Vector.Append (U64 (Value));
       end loop;
       for Index in 1 .. Rounds loop
-         Checksum := Checksum + Standard_Vector.Element (Index);
+         Local := Local + Standard_Vector.Element (Index);
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Standard_Vector;
 
    procedure Benchmark_Fly_Map is
       Data : Bytes_8;
       Found : Boolean;
       Outcome : Hash_Maps.Put_Result;
+      Local : U64 := 0;
    begin
       Hash_Maps.Clear (Fly_Map);
       for Key in 1 .. Rounds loop
@@ -271,24 +276,28 @@ procedure Data_Structures_Benchmark is
          if not Found then
             raise Program_Error with "Flyology map lookup failed";
          end if;
-         Checksum := Checksum + Decode (Data);
+         Local := Local + Decode (Data);
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Fly_Map;
 
    procedure Benchmark_Standard_Map is
+      Local : U64 := 0;
    begin
       Standard_Map.Clear;
       for Key in 1 .. Rounds loop
          Standard_Map.Insert (U64 (Key), U64 (Key) xor 16#5A5A#);
       end loop;
       for Key in 1 .. Rounds loop
-         Checksum := Checksum + Standard_Map.Element (U64 (Key));
+         Local := Local + Standard_Map.Element (U64 (Key));
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Standard_Map;
 
    procedure Benchmark_Fly_SPSC is
       Data : Bytes_8;
       Success : Boolean;
+      Local : U64 := 0;
    begin
       for Value in 1 .. Rounds loop
          SPSC.Try_Push (Fly_SPSC, Encode (U64 (Value)), Success);
@@ -299,14 +308,16 @@ procedure Data_Structures_Benchmark is
          if not Success then
             raise Program_Error with "Flyology SPSC pop failed";
          end if;
-         Checksum := Checksum + Decode (Data);
+         Local := Local + Decode (Data);
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Fly_SPSC;
 
    procedure Benchmark_Fly_MPMC is
       Data : Bytes_8;
       Push : MPMC.Push_Result;
       Pop : MPMC.Pop_Result;
+      Local : U64 := 0;
    begin
       for Value in 1 .. Rounds loop
          MPMC.Try_Push (Fly_MPMC, Encode (U64 (Value)), Push);
@@ -317,24 +328,28 @@ procedure Data_Structures_Benchmark is
          if Pop /= MPMC.Popped then
             raise Program_Error with "Flyology MPMC pop failed";
          end if;
-         Checksum := Checksum + Decode (Data);
+         Local := Local + Decode (Data);
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Fly_MPMC;
 
    procedure Benchmark_Standard_Queue is
       Data : U64;
+      Local : U64 := 0;
    begin
       for Value in 1 .. Rounds loop
          Standard_Queue.Enqueue (U64 (Value));
          Standard_Queue.Dequeue (Data);
-         Checksum := Checksum + Data;
+         Local := Local + Data;
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Standard_Queue;
 
    procedure Benchmark_Fly_Slab is
       Handle : Handles.Handle;
       Data : Bytes_8;
       Allocated : Boolean;
+      Local : U64 := 0;
    begin
       for Value in 1 .. Rounds loop
          Slab_Pools.Try_Allocate (Fly_Slab, Handle, Allocated);
@@ -343,28 +358,33 @@ procedure Data_Structures_Benchmark is
          end if;
          Slab_Pools.Write (Fly_Slab, Handle, Encode (U64 (Value)));
          Slab_Pools.Read (Fly_Slab, Handle, Data);
-         Checksum := Checksum + Decode (Data);
+         Local := Local + Decode (Data);
          Slab_Pools.Release (Fly_Slab, Handle);
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Fly_Slab;
 
    procedure Benchmark_Fly_String is
       Data : constant Bytes_8 := Encode (16#666C_796F_6C6F_6779#);
+      Local : U64 := 0;
    begin
       for Iteration in 1 .. Rounds loop
          pragma Unreferenced (Iteration);
          Byte_Strings.Assign (Fly_String, Data);
-         Checksum := Checksum + U64 (Byte_Strings.Length (Fly_String));
+         Local := Local + U64 (Byte_Strings.Length (Fly_String));
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Fly_String;
 
    procedure Benchmark_Standard_String is
+      Local : U64 := 0;
    begin
       for Iteration in 1 .. Rounds loop
          pragma Unreferenced (Iteration);
          US.Set_Unbounded_String (Standard_String, "flyology");
-         Checksum := Checksum + U64 (US.Length (Standard_String));
+         Local := Local + U64 (US.Length (Standard_String));
       end loop;
+      Checksum := Checksum + Local;
    end Benchmark_Standard_String;
 
 begin
@@ -394,6 +414,9 @@ begin
    TIO.Put_Line
      ("vector/map measurements include reset, fill, and lookup/scan; "
       & "queue measurements alternate enqueue/dequeue in one native task");
+   TIO.Put_Line
+     ("checksums accumulate locally and publish once per sample; results are "
+      & "uncontended amortized loop costs, not concurrent scalability");
 
    Measure (Benchmark_Fly_Vector'Access, Timings);
    Report ("Flyology.Data_Structures.Vectors", 2 * Rounds, Timings);
