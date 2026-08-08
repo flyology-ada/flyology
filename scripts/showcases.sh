@@ -70,3 +70,6 @@ printf '\n== file_transfer_benchmark ==\n'
 
 printf '\n== data_structures_benchmark ==\n'
 "$project_root/showcases/run_data_structures_benchmark.sh" 10000 10 100 4
+
+printf '\n== data_structures_allocator_memory ==\n'
+"$project_root/showcases/run_data_structures_allocator_memory.sh"

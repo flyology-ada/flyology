@@ -11,7 +11,10 @@ with Ada.Unchecked_Conversion;
 with Flyology;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
+with Flyology.Data_Structures.Allocation_Algorithms.Best_Fit;
+with Flyology.Data_Structures.Allocation_Algorithms.TLSF;
 with Flyology.Data_Structures.Arenas;
+with Flyology.Data_Structures.Allocation_Pools.Adaptive;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Dynamic.Byte_Strings;
 with Flyology.Data_Structures.Dynamic.Hash_Maps;
@@ -37,11 +40,20 @@ procedure Data_Structures_Benchmark is
    package Byte_Strings renames DS.Byte_Strings;
    package Arenas is new DS.Arenas
      (Algorithm => DS.Allocation_Algorithms.Buddy);
+   package Best_Fit_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Best_Fit);
+   package TLSF_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.TLSF);
    package Dynamic_Strings is new DS.Dynamic.Byte_Strings
      (Arena_Provider => Arenas);
    package Handles renames DS.Handles;
    package Regions renames DS.Regions;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package Adaptive_U64 is new DS.Allocation_Pools.Adaptive
+     (Arena_Provider  => TLSF_Arenas,
+      Element         => U64_Elements.Element,
+      Slots_Per_Chunk => 64,
+      Maximum_Chunks  => 16);
    package SPSC is new DS.Rings.SPSC
      (Element => U64_Elements.Element);
    package MPMC is new DS.Rings.MPMC
@@ -74,6 +86,7 @@ procedure Data_Structures_Benchmark is
    use type DS.Byte_Count;
    use type DS.Dynamic.Growth_Result;
    use type Arenas.Allocation_Result;
+   use type Adaptive_U64.Allocation_Result;
    use type Dynamic_Maps.Put_Result;
    use type Hash_Maps.Put_Result;
    use type Interfaces.C.int;
@@ -234,8 +247,26 @@ procedure Data_Structures_Benchmark is
    Arena_Extent : constant DS.Byte_Count :=
      Arenas.Required_Storage
        ((Usable_Capacity => 262_144, Minimum_Block_Size => 64));
+   Best_Fit_Arena_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64 (DS.Byte_Count (Arena_Location) + Arena_Extent));
+   Best_Fit_Arena_Extent : constant DS.Byte_Count :=
+     Best_Fit_Arenas.Required_Storage
+       ((Usable_Capacity => 262_144, Minimum_Block_Size => 64));
+   TLSF_Arena_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64
+        (DS.Byte_Count (Best_Fit_Arena_Location)
+         + Best_Fit_Arena_Extent));
+   TLSF_Arena_Extent : constant DS.Byte_Count :=
+     TLSF_Arenas.Required_Storage
+       ((Usable_Capacity => 262_144, Minimum_Block_Size => 64));
+   Adaptive_Pool_Location : constant DS.Region_Offset := DS.Region_Offset
+     (Align_64
+        (DS.Byte_Count (TLSF_Arena_Location) + TLSF_Arena_Extent));
+   Adaptive_Pool_Extent : constant DS.Byte_Count :=
+     Adaptive_U64.Required_Storage;
    Region_Length : constant DS.Byte_Count := Align_64
-     (DS.Byte_Count (Arena_Location) + Arena_Extent + 64);
+     (DS.Byte_Count (Adaptive_Pool_Location)
+      + Adaptive_Pool_Extent + 64);
 
    function Posix_Memalign
      (Result    : access System.Address;
@@ -255,6 +286,9 @@ procedure Data_Structures_Benchmark is
    Fly_Slab : Slab_Pools.View;
    Fly_String : Byte_Strings.View;
    Fly_Arena : Arenas.View;
+   Fly_Best_Fit_Arena : Best_Fit_Arenas.View;
+   Fly_TLSF_Arena : TLSF_Arenas.View;
+   Fly_Adaptive_Pool : Adaptive_U64.View;
    Fly_Dynamic_Vector : Dynamic_Vectors.View;
    Fly_Dynamic_Map : Dynamic_Maps.View;
    Fly_Dynamic_String : Dynamic_Strings.View;
@@ -435,6 +469,281 @@ procedure Data_Structures_Benchmark is
          end loop;
          raise;
    end Run_Guard_Contention;
+
+   generic
+      with package Provider is new DS.Arenas (<>);
+   procedure Run_Arena_Contention
+     (Location      : DS.Region_Offset;
+      Configuration : Provider.Configuration;
+      Instance      : U64;
+      Iterations    : Bench.Iteration_Count;
+      Timed         : Boolean;
+      Retries       : out U64);
+
+   procedure Run_Arena_Contention
+     (Location      : DS.Region_Offset;
+      Configuration : Provider.Configuration;
+      Instance      : U64;
+      Iterations    : Bench.Iteration_Count;
+      Timed         : Boolean;
+      Retries       : out U64)
+   is
+      type View_Array is array (Positive range <>) of aliased Provider.View;
+      Views : View_Array (1 .. Contention_Workers);
+      Gate : Start_Gate;
+      Finished : Completion (Contention_Workers);
+      type Result_Array is array (Positive range <>) of U64
+        with Volatile_Components;
+      Values : Result_Array (1 .. Contention_Workers) := (others => 0);
+
+      task type Worker_Task is
+         entry Configure (Identifier : Positive);
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Worker_Id : Positive := 1;
+         First, Last : Bench.Iteration_Count;
+         Handle : Provider.Allocation_Handle;
+         Result : Provider.Allocation_Result;
+         Data   : Bytes_8;
+         Local_Retries : U64 := 0;
+         Local : U64 := 0;
+      begin
+         accept Configure (Identifier : Positive) do
+            Worker_Id := Identifier;
+         end Configure;
+         First := Iterations * Bench.Iteration_Count (Worker_Id - 1)
+           / Bench.Iteration_Count (Contention_Workers) + 1;
+         Last := Iterations * Bench.Iteration_Count (Worker_Id)
+           / Bench.Iteration_Count (Contention_Workers);
+         Gate.Wait;
+         if First <= Last then
+            for Sequence in First .. Last loop
+               if Timed then
+                  Provider.Try_Allocate
+                    (Views (Worker_Id), 8, 5.0, Handle, Result);
+               else
+                  loop
+                     Provider.Try_Allocate
+                       (Views (Worker_Id), 8, Handle, Result);
+                     exit when Result = Provider.Allocated;
+                     if Result = Provider.Exhausted then
+                        raise Program_Error with
+                          "contended allocator unexpectedly exhausted";
+                     end if;
+                     Local_Retries := Local_Retries + 1;
+                     delay 0.0;
+                  end loop;
+               end if;
+               if Result /= Provider.Allocated then
+                  raise Program_Error with
+                    "timed allocator unexpectedly exhausted";
+               end if;
+               Provider.Write
+                 (Views (Worker_Id), Handle, 0,
+                  Encode (Payload (Sequence)));
+               Provider.Read (Views (Worker_Id), Handle, 0, Data);
+               Local := Local + Decode (Data);
+               if Timed then
+                  Provider.Release (Views (Worker_Id), Handle, 5.0);
+               else
+                  loop
+                     begin
+                        Provider.Release (Views (Worker_Id), Handle);
+                        exit;
+                     exception
+                        when DS.Busy_Error =>
+                           Local_Retries := Local_Retries + 1;
+                           delay 0.0;
+                     end;
+                  end loop;
+               end if;
+            end loop;
+         end if;
+         --  One store per worker keeps the payload observation out of the
+         --  measured loop and out of the retry metric.
+         Values (Worker_Id) := Local;
+         Finished.Done (Local_Retries, True);
+      exception
+         when others => Finished.Done (Local_Retries, False);
+      end Worker_Task;
+
+      type Worker_Array is array (Positive range <>) of Worker_Task;
+      Workers : Worker_Array (1 .. Contention_Workers);
+   begin
+      Checksum := 0;
+      Provider.Initialize
+        (Views (1), Region, Location, Configuration, Instance);
+      for Index in 2 .. Contention_Workers loop
+         Provider.Attach
+           (Views (Index), Region, Location, Configuration, Instance);
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index).Configure (Index);
+      end loop;
+      Gate.Release;
+      Finished.Await_All;
+      if not Finished.Passed then
+         raise Program_Error with "allocator contention worker failed";
+      end if;
+      Retries := Finished.Retry_Count;
+      for Index in Values'Range loop
+         Checksum := Checksum + Values (Index);
+      end loop;
+      Provider.Destroy (Views (1));
+      for Index in 2 .. Contention_Workers loop
+         Provider.Detach (Views (Index));
+      end loop;
+   exception
+      when others =>
+         for Worker of Workers loop
+            abort Worker;
+         end loop;
+         raise;
+   end Run_Arena_Contention;
+
+   procedure Run_Buddy_Arena_Contention is new Run_Arena_Contention
+     (Provider => Arenas);
+   procedure Run_Best_Fit_Arena_Contention is new Run_Arena_Contention
+     (Provider => Best_Fit_Arenas);
+   procedure Run_TLSF_Arena_Contention is new Run_Arena_Contention
+     (Provider => TLSF_Arenas);
+
+   --  Four native workers share one adaptive pool and its backing arena
+   --  through distinct local views. The pool exposes no timed overload, so
+   --  this measures only the immediate path: growth-guard contention on the
+   --  first chunk, then per-slot slab claims on the published chunk.
+   procedure Run_Adaptive_Pool_Contention
+     (Iterations : Bench.Iteration_Count;
+      Retries    : out U64)
+   is
+      Configuration : constant TLSF_Arenas.Configuration :=
+        (Usable_Capacity => 262_144, Minimum_Block_Size => 64);
+      Instance : constant U64 := 16#715F_17A1_04D2_EE02#;
+      type Arena_View_Array is
+        array (Positive range <>) of aliased TLSF_Arenas.View;
+      type Pool_View_Array is
+        array (Positive range <>) of aliased Adaptive_U64.View;
+      Arena_Views : Arena_View_Array (1 .. Contention_Workers);
+      Pool_Views  : Pool_View_Array (1 .. Contention_Workers);
+      Gate : Start_Gate;
+      Finished : Completion (Contention_Workers);
+      type Result_Array is array (Positive range <>) of U64
+        with Volatile_Components;
+      Values : Result_Array (1 .. Contention_Workers) := (others => 0);
+
+      task type Worker_Task is
+         entry Configure (Identifier : Positive);
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Worker_Id : Positive := 1;
+         First, Last : Bench.Iteration_Count;
+         Handle : Adaptive_U64.Handle;
+         Result : Adaptive_U64.Allocation_Result;
+         Data   : U64;
+         Local_Retries : U64 := 0;
+         Local : U64 := 0;
+      begin
+         accept Configure (Identifier : Positive) do
+            Worker_Id := Identifier;
+         end Configure;
+         First := Iterations * Bench.Iteration_Count (Worker_Id - 1)
+           / Bench.Iteration_Count (Contention_Workers) + 1;
+         Last := Iterations * Bench.Iteration_Count (Worker_Id)
+           / Bench.Iteration_Count (Contention_Workers);
+         Gate.Wait;
+         if First <= Last then
+            for Sequence in First .. Last loop
+               loop
+                  Adaptive_U64.Try_Allocate
+                    (Pool_Views (Worker_Id), Arena_Views (Worker_Id),
+                     Payload (Sequence), Handle, Result);
+                  exit when Result = Adaptive_U64.Allocated;
+                  if Result /= Adaptive_U64.Allocation_Contended then
+                     raise Program_Error with
+                       "contended adaptive pool did not allocate a slot";
+                  end if;
+                  Local_Retries := Local_Retries + 1;
+                  delay 0.0;
+               end loop;
+               loop
+                  begin
+                     Adaptive_U64.Read
+                       (Pool_Views (Worker_Id), Arena_Views (Worker_Id),
+                        Handle, Data);
+                     exit;
+                  exception
+                     when DS.Busy_Error =>
+                        Local_Retries := Local_Retries + 1;
+                        delay 0.0;
+                  end;
+               end loop;
+               Local := Local + Data;
+               loop
+                  begin
+                     Adaptive_U64.Release
+                       (Pool_Views (Worker_Id), Arena_Views (Worker_Id),
+                        Handle);
+                     exit;
+                  exception
+                     when DS.Busy_Error =>
+                        Local_Retries := Local_Retries + 1;
+                        delay 0.0;
+                  end;
+               end loop;
+            end loop;
+         end if;
+         Values (Worker_Id) := Local;
+         Finished.Done (Local_Retries, True);
+      exception
+         when others => Finished.Done (Local_Retries, False);
+      end Worker_Task;
+
+      type Worker_Array is array (Positive range <>) of Worker_Task;
+      Workers : Worker_Array (1 .. Contention_Workers);
+   begin
+      Checksum := 0;
+      TLSF_Arenas.Initialize
+        (Arena_Views (1), Region, TLSF_Arena_Location, Configuration,
+         Instance);
+      Adaptive_U64.Initialize
+        (Pool_Views (1), Region, Adaptive_Pool_Location, Arena_Views (1));
+      for Index in 2 .. Contention_Workers loop
+         TLSF_Arenas.Attach
+           (Arena_Views (Index), Region, TLSF_Arena_Location, Configuration,
+            Instance);
+         Adaptive_U64.Attach
+           (Pool_Views (Index), Region, Adaptive_Pool_Location,
+            Arena_Views (Index));
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index).Configure (Index);
+      end loop;
+      Gate.Release;
+      Finished.Await_All;
+      if not Finished.Passed then
+         raise Program_Error with "adaptive-pool contention worker failed";
+      end if;
+      Retries := Finished.Retry_Count;
+      for Index in Values'Range loop
+         Checksum := Checksum + Values (Index);
+      end loop;
+      Adaptive_U64.Destroy (Pool_Views (1), Arena_Views (1));
+      TLSF_Arenas.Destroy (Arena_Views (1));
+      for Index in 2 .. Contention_Workers loop
+         Adaptive_U64.Detach (Pool_Views (Index));
+         TLSF_Arenas.Detach (Arena_Views (Index));
+      end loop;
+   exception
+      when others =>
+         for Worker of Workers loop
+            abort Worker;
+         end loop;
+         raise;
+   end Run_Adaptive_Pool_Contention;
 
    procedure Fly_Vector_Batch (Iterations : Bench.Iteration_Count) is
       Added : Boolean;
@@ -672,6 +981,79 @@ procedure Data_Structures_Benchmark is
       end loop;
       Checksum := Local;
    end Fly_Arena_Batch;
+
+   procedure Fly_Best_Fit_Arena_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Handle : Best_Fit_Arenas.Allocation_Handle;
+      Data   : Bytes_8;
+      Result : Best_Fit_Arenas.Allocation_Result;
+      Local  : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Best_Fit_Arenas.Try_Allocate
+           (Fly_Best_Fit_Arena, 8, Handle, Result);
+         if Result /= Best_Fit_Arenas.Allocated then
+            raise Program_Error with
+              "Flyology best-fit allocation failed";
+         end if;
+         Best_Fit_Arenas.Write
+           (Fly_Best_Fit_Arena, Handle, 0,
+            Encode (Payload (Iteration)));
+         Best_Fit_Arenas.Read
+           (Fly_Best_Fit_Arena, Handle, 0, Data);
+         Local := Local + Decode (Data);
+         Best_Fit_Arenas.Release (Fly_Best_Fit_Arena, Handle);
+      end loop;
+      Checksum := Local;
+   end Fly_Best_Fit_Arena_Batch;
+
+   procedure Fly_TLSF_Arena_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Handle : TLSF_Arenas.Allocation_Handle;
+      Data   : Bytes_8;
+      Result : TLSF_Arenas.Allocation_Result;
+      Local  : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         TLSF_Arenas.Try_Allocate (Fly_TLSF_Arena, 8, Handle, Result);
+         if Result /= TLSF_Arenas.Allocated then
+            raise Program_Error with "Flyology TLSF allocation failed";
+         end if;
+         TLSF_Arenas.Write
+           (Fly_TLSF_Arena, Handle, 0, Encode (Payload (Iteration)));
+         TLSF_Arenas.Read (Fly_TLSF_Arena, Handle, 0, Data);
+         Local := Local + Decode (Data);
+         TLSF_Arenas.Release (Fly_TLSF_Arena, Handle);
+      end loop;
+      Checksum := Local;
+   end Fly_TLSF_Arena_Batch;
+
+   procedure Fly_Adaptive_Pool_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Handle : Adaptive_U64.Handle;
+      Data   : U64;
+      Result : Adaptive_U64.Allocation_Result;
+      Local  : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Adaptive_U64.Try_Allocate
+           (Fly_Adaptive_Pool, Fly_TLSF_Arena, Payload (Iteration),
+            Handle, Result);
+         if Result /= Adaptive_U64.Allocated then
+            raise Program_Error with
+              "Flyology adaptive-pool allocation failed";
+         end if;
+         Adaptive_U64.Read
+           (Fly_Adaptive_Pool, Fly_TLSF_Arena, Handle, Data);
+         Local := Local + Data;
+         Adaptive_U64.Release
+           (Fly_Adaptive_Pool, Fly_TLSF_Arena, Handle);
+      end loop;
+      Checksum := Local;
+   end Fly_Adaptive_Pool_Batch;
 
    procedure Fly_Dynamic_Vector_Batch
      (Iterations : Bench.Iteration_Count)
@@ -1371,7 +1753,38 @@ procedure Data_Structures_Benchmark is
      (MPMC_Core_Case);
 
    procedure Measure_Slab is new Bench.Measure_Batched (Fly_Slab_Batch);
-   procedure Measure_Arena is new Bench.Measure_Batched (Fly_Arena_Batch);
+
+   type Pool_Case is (Fixed_Slab, Adaptive_TLSF);
+
+   procedure Pool_Batch
+     (Which : Pool_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Fixed_Slab => Fly_Slab_Batch (Iterations);
+         when Adaptive_TLSF => Fly_Adaptive_Pool_Batch (Iterations);
+      end case;
+   end Pool_Batch;
+
+   procedure Compare_Pools is new Bench.Compare_Many
+     (Case_Id => Pool_Case, Batch => Pool_Batch);
+   procedure Put_Pools is new Reporters.Put_Multi_Comparison_Console
+     (Pool_Case);
+   type Allocator_Case is (Buddy, Best_Fit, TLSF);
+
+   procedure Allocator_Batch
+     (Which : Allocator_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Buddy => Fly_Arena_Batch (Iterations);
+         when Best_Fit => Fly_Best_Fit_Arena_Batch (Iterations);
+         when TLSF => Fly_TLSF_Arena_Batch (Iterations);
+      end case;
+   end Allocator_Batch;
+
+   procedure Compare_Allocators is new Bench.Compare_Many
+     (Case_Id => Allocator_Case, Batch => Allocator_Batch);
+   procedure Put_Allocators is new Reporters.Put_Multi_Comparison_Console
+     (Allocator_Case);
 
    type Dynamic_Vector_Case is (Flyology_Arena_Backed, Ada_Vector);
 
@@ -1634,6 +2047,51 @@ procedure Data_Structures_Benchmark is
    procedure Put_Contended_Slab is new
      Reporters.Put_Multi_Comparison_Console (Contended_Slab_Case);
 
+   --  Adaptive_Pool_Try has no paired _Wait row because Allocation_Pools has
+   --  no timed overload; this change does not invent one.
+   type Contended_Allocator_Case is
+     (Buddy_Try, Buddy_Wait,
+      Best_Fit_Try, Best_Fit_Wait,
+      TLSF_Try, TLSF_Wait,
+      Adaptive_Pool_Try);
+
+   procedure Contended_Allocator_Batch
+     (Which : Contended_Allocator_Case;
+      Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      case Which is
+         when Buddy_Try | Buddy_Wait =>
+            Run_Buddy_Arena_Contention
+              (Arena_Location,
+               (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
+               16#B34C_7A91_04D2_EE01#, Iterations,
+               Which = Buddy_Wait, Retries);
+         when Best_Fit_Try | Best_Fit_Wait =>
+            Run_Best_Fit_Arena_Contention
+              (Best_Fit_Arena_Location,
+               (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
+               16#B35F_17A1_04D2_EE01#, Iterations,
+               Which = Best_Fit_Wait, Retries);
+         when TLSF_Try | TLSF_Wait =>
+            Run_TLSF_Arena_Contention
+              (TLSF_Arena_Location,
+               (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
+               16#715F_17A1_04D2_EE01#, Iterations,
+               Which = TLSF_Wait, Retries);
+         when Adaptive_Pool_Try =>
+            Run_Adaptive_Pool_Contention (Iterations, Retries);
+      end case;
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Contended_Allocator_Batch;
+
+   procedure Compare_Contended_Allocators is new Bench.Compare_Many
+     (Case_Id => Contended_Allocator_Case,
+      Batch   => Contended_Allocator_Batch);
+   procedure Put_Contended_Allocators is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Allocator_Case);
+
    Base_Config : constant Bench.Configuration :=
      (Warmup_Time                  => 0.040,
       Measurement_Time             => Measurement_Time,
@@ -1687,6 +2145,17 @@ begin
      (Fly_Arena, Region, Arena_Location,
       (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
       16#B34C_7A91_04D2_EE01#);
+   Best_Fit_Arenas.Initialize
+     (Fly_Best_Fit_Arena, Region, Best_Fit_Arena_Location,
+      (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
+      16#B35F_17A1_04D2_EE01#);
+   TLSF_Arenas.Initialize
+     (Fly_TLSF_Arena, Region, TLSF_Arena_Location,
+      (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
+      16#715F_17A1_04D2_EE01#);
+   Adaptive_U64.Initialize
+     (Fly_Adaptive_Pool, Region, Adaptive_Pool_Location,
+      Fly_TLSF_Arena);
    Dynamic_Vectors.Initialize
      (Fly_Dynamic_Vector, Region, Dynamic_Vector_Location,
       Fly_Arena, Working_Capacity);
@@ -1787,6 +2256,11 @@ begin
    Reporters.Put_Console
      ("Flyology_Data_Structures_Slab_Pools", Slab_Result);
 
+   Compare_Pools
+     (Config => Terminal_Config ("fixed/adaptive pool shootout"),
+      Result => Multi_Result);
+   Put_Pools (Multi_Result);
+
    TIO.New_Line;
    TIO.Put_Line ("Allocator-backed steady-state throughput");
    TIO.Put_Line
@@ -1808,11 +2282,10 @@ begin
       Result => Multi_Result);
    Put_Dynamic_Strings (Multi_Result);
 
-   Measure_Arena
-     (Config => Terminal_Config ("buddy arena allocation cycle"),
-      Result => Slab_Result);
-   Reporters.Put_Console
-     ("Flyology_Arenas_Allocate_Write_Read_Release", Slab_Result);
+   Compare_Allocators
+     (Config => Terminal_Config ("allocator cycle shootout"),
+      Result => Multi_Result);
+   Put_Allocators (Multi_Result);
 
    TIO.Put_Line
      ("checksum=" & Checksum'Image
@@ -1822,6 +2295,9 @@ begin
    Dynamic_Maps.Destroy (Fly_Dynamic_Map, Fly_Arena);
    Dynamic_Vectors.Destroy (Fly_Dynamic_Vector, Fly_Arena);
    Arenas.Destroy (Fly_Arena);
+   Best_Fit_Arenas.Destroy (Fly_Best_Fit_Arena);
+   Adaptive_U64.Destroy (Fly_Adaptive_Pool, Fly_TLSF_Arena);
+   TLSF_Arenas.Destroy (Fly_TLSF_Arena);
    Byte_Strings.Destroy (Fly_String);
    Slab_Pools.Destroy (Fly_Slab);
    MPMC.Destroy (Fly_MPMC);
@@ -1901,6 +2377,14 @@ begin
      (Config => Terminal_Config ("contended slab"),
       Result => Multi_Result);
    Put_Contended_Slab (Multi_Result);
+
+   Compare_Contended_Allocators
+     (Config => Terminal_Config ("contended allocator cycles"),
+      Result => Multi_Result);
+   Put_Contended_Allocators (Multi_Result);
+   TIO.Put_Line
+     ("  Adaptive_Pool_Try is immediate-only: Allocation_Pools.Adaptive has "
+      & "no timed overload to pair with it.");
 
    TIO.Put_Line
      ("checksum=" & Checksum'Image

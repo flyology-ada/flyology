@@ -131,10 +131,16 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - `Arenas` is generic over a compile-time `Allocation_Algorithms.Contract`
   instance. The selected algorithm owns its persisted metadata,
   synchronization, abandonment, and recovery rules; arena calls introduce no
-  runtime dispatch or stored callback. `Allocation_Algorithms.Buddy` provides
-  the persisted buddy tree. Allocation handles contain an opaque fixed-width
-  token and nonwrapping generation. Payload access and nested allocation views
-  require the handle owner to exclude release.
+  runtime dispatch or stored callback. `Allocation_Algorithms.Buddy`,
+  `Best_Fit`, and `TLSF` provide out-of-band buddy-tree, in-band AVL best-fit,
+  and in-band two-level segregated-fit policies. Allocation handles contain an
+  opaque fixed-width token and nonwrapping generation. Payload access and
+  nested allocation views require the handle owner to exclude release.
+- `Allocation_Pools.Adaptive` grows a bounded table of arena-backed fixed-size
+  slab chunks. Its outer guard covers chunk creation only; published chunks
+  retain per-slot slab synchronization. Recovery after abandoned growth must
+  reinitialize the backing arena before the pool so old chunk allocations are
+  not orphaned.
 - `Dynamic.Byte_Strings`, `Dynamic.Vectors`, and `Dynamic.Hash_Maps` are generic
   over an `Arenas` instance. They retain a fixed outer header and replace arena
   allocations during growth. Publish the

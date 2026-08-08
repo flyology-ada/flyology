@@ -779,6 +779,9 @@ concrete byte-sequence containers rather than element collections.
 | `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
 | `Arenas` | Generic fixed managed extent with a statically selected allocation algorithm | Selected algorithm defines metadata synchronization; payload lifetime exclusion belongs to the handle user |
 | `Allocation_Algorithms.Buddy` | Persisted buddy tree with generation-stamped variable-size allocations | One process-shared metadata guard |
+| `Allocation_Algorithms.Best_Fit` | In-band boundary tags and an offset-based size/address AVL tree | One process-shared metadata guard |
+| `Allocation_Algorithms.TLSF` | In-band boundary tags and fixed two-level bitmap/free-list classes | One process-shared metadata guard |
+| `Allocation_Pools.Adaptive` | Fixed outer chunk table plus arena-backed typed slab chunks | One chunk-growth guard; per-slot slab claims after publication |
 | `Slab_Pools` | Immutable fixed-layout elements in generation-stamped slots | Per-slot atomic claims; immediate and timed operations |
 | `Byte_Strings` | Bounded variable-length byte sequence | Shared guard; immediate and timed operations |
 | `Vectors` | Bounded vector of immutable fixed-layout elements | Shared guard; immediate and timed operations |
@@ -819,15 +822,41 @@ Buddy_Arenas.Create_Or_Attach
    Result        => Arena_Open);
 ```
 
-`Allocation_Algorithms.Buddy` is the provided algorithm. Its configuration
-selects a power-of-two managed capacity and minimum block size. It rounds a
-positive request to the smallest fitting power-of-two block and coalesces free
-siblings. The common allocation handle contains an opaque fixed-width token
-and a nonwrapping 64-bit generation; Buddy encodes its arena incarnation and
-tree node in that token. Stored metadata and handles contain no native address.
+Three allocation algorithms are provided. `Allocation_Algorithms.Buddy`
+selects a power-of-two managed capacity, rounds requests to power-of-two blocks,
+and stores a complete buddy tree outside the managed bytes. Its lookup is
+logarithmic and its metadata size is predictable, at the cost of internal
+fragmentation and a tree that approaches half the managed capacity when the
+minimum block is 64 bytes. `Allocation_Algorithms.Best_Fit` uses in-band
+boundary tags plus an offset-based size/address AVL tree. It accepts a
+quantized non-power-of-two managed capacity, selects the smallest fitting free
+block, and coalesces physical neighbors. `Allocation_Algorithms.TLSF` uses the
+same boundary-tag model with fixed first- and second-level bitmaps and
+offset-linked free lists. Its class lookup has a constant bound, while size
+class rounding can leave small unusable fragments.
+
+`Arenas.Capabilities` exposes each selection's search class, contention scope,
+metadata placement, splitting/coalescing behavior, timed-contention support,
+and release-exclusion rule as compile-time data. All three implementations use
+one persisted process-shared metadata guard, support immediate and timed
+allocation/release, and require external owner-death and quiescence authority
+before poisoning. Exclusive initialization is their only recovery. The common
+allocation handle contains an opaque fixed-width token and a nonwrapping 64-bit
+generation. Stored metadata and handles contain no native address.
 `Attach_Allocation` can produce a process-local `Regions.View` over a live
 block without exposing its base address. Releasing a handle requires exclusion
 from every payload read, write, copy, or nested region derived from it.
+
+`Allocation_Pools.Adaptive` is a separate generic for fixed-size immutable
+elements. Its fixed outer table records generation-stamped arena allocations
+for bounded slab chunks. Allocation scans published chunks first and adds one
+chunk only after acquiring the outer nonblocking growth guard; unrelated live
+slots retain `Slab_Pools` per-slot synchronization. `Slots_Per_Chunk` and
+`Maximum_Chunks` are compile-time bounds, so "adaptive" means growing the
+number of chunks within one fixed arena rather than an unbounded resource. If
+chunk creation is abandoned, recovery requires exclusive reinitialization of
+the backing arena followed by the pool. Reinitializing only the outer pool
+would discard the allocation handles needed to reclaim its old chunks.
 
 The `Dynamic` leaves are generic over an `Arenas` instance and keep a fixed
 128-byte header in their containing region. They move only their payload table
@@ -2800,6 +2829,7 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_synchronization_benchmark.sh 20000 5
 ./showcases/run_data_structures_benchmark.sh 200000 30 800 4
 ./showcases/bin/data_structures_benchmark 200000 30 800 4
+./showcases/run_data_structures_allocator_memory.sh
 ./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
@@ -2824,13 +2854,18 @@ The examples demonstrate:
   beside the relevant Ada containers and GPRBuild-compiled C++
   standard-library peers; a separately labeled section measures steady-state
   arena-backed vectors, hash maps, and byte strings against their Ada peers,
-  plus one buddy allocate/write/read/release cycle;
+  plus Buddy, best-fit, and TLSF allocate/write/read/release cycles and a fixed
+  versus adaptive slab-pool comparison;
   when installed, Boost container/lock-free and Abseil flat-map rows are added
   through a narrow C ABI shim. Raw C++ rows and separately mutex-protected rows
   are labeled because their synchronization contracts differ. A second section
   compares aggregate throughput under synchronized native-task/C++-thread
-  contention, including vector and hash-map guards and matched queue producers
-  and consumers. The runner's arguments are the maximum iterations per sample,
+  contention, including vector and hash-map guards, matched queue producers and
+  consumers, and immediate/timed allocator cycles. A separate deterministic
+  allocator-memory runner reports stored extent, metadata, live requested and
+  block-capacity bytes, exhaustion utilization, and a deliberately fragmented
+  largest-allocation probe without mixing those figures into timing. The
+  timing runner's arguments are the maximum iterations per sample,
   sample count (`10 .. 1000`), target milliseconds per shootout, and an even
   native worker count of at least two. It prints the retained binary path so the
   same colorful terminal report can be rerun without rebuilding;

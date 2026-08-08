@@ -1,0 +1,21 @@
+with "../flyology.gpr";
+with "config/flyology_showcases_config.gpr";
+
+project Data_Structures_Allocator_Memory is
+   for Languages use ("Ada");
+   for Runtime ("Ada") use
+     external ("FLYOLOGY_RTS_DIR", "../build/rts");
+   for Source_Dirs use (".");
+   for Source_Files use ("data_structures_allocator_memory.adb");
+   for Object_Dir use "obj/data_structures_allocator_memory";
+   for Exec_Dir use "bin";
+   for Main use ("data_structures_allocator_memory.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_Showcases_Config.Ada_Compiler_Switches
+        & ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
+           "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+   end Compiler;
+end Data_Structures_Allocator_Memory;
