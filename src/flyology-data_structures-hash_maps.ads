@@ -81,12 +81,13 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Value_Size : Positive);
 
    --  Poison a ready or abandoned-locked map after independently establishing
-   --  that no live owner can still mutate it. This recovery operation validates
-   --  the map identity without attaching mutable contents. Poisoning is
-   --  permanent until exclusive reinitialization.
+   --  that no live owner can still mutate it. This recovery operation
+   --  validates the map identity without attaching mutable contents.
+   --  Poisoning is permanent until exclusive reinitialization.
    --  @param Region Attached backing region
    --  @param Location Stored map offset
-   --  @exception Layout_Error The location is incomplete or has another identity
+   --  @exception Layout_Error The location is incomplete or has another
+   --  identity
    --  @exception Busy_Error The lifecycle changed during the poison attempt
    procedure Poison (Region : Region_View; Location : Region_Offset);
 

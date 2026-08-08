@@ -5,11 +5,11 @@ private with Flyology.Data_Structures.Layouts;
 private with System;
 
 --  Provides bounded fixed-size byte-slot allocation in relocatable storage.
---  Stored slots contain generation, state, reserved metadata, and payload bytes;
---  they contain no address or access value. Allocation, reclamation, and
---  payload access are internally synchronized across native tasks, processes,
---  and distinct mappings. Initialization, attachment, destruction, and
---  backing-region lifetime changes require quiescence across every view.
+--  Stored slots contain generation, state, reserved metadata, and payload
+--  bytes, but no address or access value. Allocation, reclamation, and payload
+--  access are internally synchronized across native tasks,
+--  processes, and distinct mappings. Initialization, attachment, destruction,
+--  and backing-region lifetime changes require quiescence across every view.
 --  Termination during an operation leaves its slot abandoned rather than
 --  silently reusable; an external recovery authority may poison and reclaim
 --  that slot only after establishing owner death and target-slot quiescence.
