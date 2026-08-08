@@ -1,9 +1,11 @@
+with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Vectors is
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Atomic renames Flyology.Data_Structures.Atomics;
    package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
@@ -13,6 +15,9 @@ package body Flyology.Data_Structures.Vectors is
    use type System.Address;
 
    Length_Offset : constant Byte_Count := 48;
+   Guard_Offset  : constant Byte_Count := 44;
+   Unlocked      : constant Interfaces.Unsigned_32 := 0;
+   Locked        : constant Interfaces.Unsigned_32 := 1;
 
    procedure Geometry
      (Capacity     : Positive;
@@ -44,6 +49,7 @@ package body Flyology.Data_Structures.Vectors is
       Item.Core := Core;
       Item.Length_Address := Layouts.Address_At
         (Core, Length_Offset, 8, 8);
+      Item.Guard_Address := Layouts.Address_At (Core, Guard_Offset, 4, 4);
       Item.Payload_Address := Layouts.Address_At
         (Core, Layouts.Header_Size,
          Core.Extent - Layouts.Header_Size, 1);
@@ -109,6 +115,7 @@ package body Flyology.Data_Structures.Vectors is
    procedure Detach (Item : in out View) is
    begin
       Layouts.Detach (Item.Core);
+      Item.Guard_Address := System.Null_Address;
       Item.Length_Address := System.Null_Address;
       Item.Payload_Address := System.Null_Address;
       Item.Payload_Extent := 0;
@@ -127,20 +134,86 @@ package body Flyology.Data_Structures.Vectors is
       return Natural (Item.Capacity_Value);
    end Capacity;
 
-   function Stored_Length (Item : View) return Interfaces.Unsigned_64 is
+   procedure Acquire (Item : View) is
+      Expected : Interfaces.Unsigned_32 := Unlocked;
+   begin
+      if not Item.Core.Attached
+        or else Item.Guard_Address = System.Null_Address
+      then
+         raise Region_Error with "detached vector view";
+      elsif not Atomic.Compare_Exchange_U32
+        (Item.Guard_Address, Expected, Locked)
+      then
+         Layouts.Require_Ready (Item.Core);
+         raise Busy_Error with "vector is busy";
+      end if;
+      begin
+         Layouts.Require_Ready (Item.Core);
+      exception
+         when others =>
+            Atomic.Store_Release_U32 (Item.Guard_Address, Unlocked);
+            raise;
+      end;
+   end Acquire;
+   pragma Inline_Always (Acquire);
+
+   procedure Release (Item : View) is
+   begin
+      Atomic.Store_Release_U32 (Item.Guard_Address, Unlocked);
+   end Release;
+   pragma Inline_Always (Release);
+
+   procedure Finish_Failure (Item : View; Mutated : Boolean) is
+   begin
+      if Mutated then
+         begin
+            Layouts.Poison (Item.Core);
+         exception
+            when others =>
+               Release (Item);
+               raise;
+         end;
+      end if;
+      Release (Item);
+   end Finish_Failure;
+   pragma Inline_Always (Finish_Failure);
+
+   function Stored_Length_Unlocked
+     (Item : View) return Interfaces.Unsigned_64 is
       Result : Interfaces.Unsigned_64;
    begin
-      Layouts.Require_Ready (Item.Core);
       Result := Bytes.Read_U64
         (Item.Length_Address);
       if Result > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "vector length is corrupt";
       end if;
       return Result;
-   end Stored_Length;
+   end Stored_Length_Unlocked;
+   pragma Inline_Always (Stored_Length_Unlocked);
 
    function Length (Item : View) return Natural is
-     (Natural (Stored_Length (Item)));
+      Result : Natural;
+   begin
+      Acquire (Item);
+      begin
+         Result := Natural (Stored_Length_Unlocked (Item));
+      exception
+         when others =>
+            Release (Item);
+            raise;
+      end;
+      Release (Item);
+      return Result;
+   end Length;
+
+   function Is_Poisoned (Item : View) return Boolean is
+     (Layouts.Is_Poisoned (Item.Core));
+
+   procedure Poison
+     (Region : Region_View; Location : Region_Offset) is
+   begin
+      Layouts.Poison_At (Region, Location, Identity, 8);
+   end Poison;
 
    procedure Check_Data (Item : View; Length : Natural) is
    begin
@@ -148,6 +221,7 @@ package body Flyology.Data_Structures.Vectors is
          raise Constraint_Error with "vector element length does not match";
       end if;
    end Check_Data;
+   pragma Inline_Always (Check_Data);
 
    function Element_Address
      (Item : View; Index : Interfaces.Unsigned_64) return System.Address
@@ -181,33 +255,48 @@ package body Flyology.Data_Structures.Vectors is
       end if;
       return Item.Payload_Address + Addressing.Storage_Offset (Relative);
    end Element_Address;
+   pragma Inline_Always (Element_Address);
 
    procedure Try_Append
      (Item     : in out View;
       Data     : Ada.Streams.Stream_Element_Array;
       Appended : out Boolean)
    is
-      Current : constant Interfaces.Unsigned_64 := Stored_Length (Item);
+      Current : Interfaces.Unsigned_64;
+      Mutated : Boolean := False;
+      Target  : System.Address := System.Null_Address;
    begin
       Check_Data (Item, Data'Length);
-      if Current = Interfaces.Unsigned_64 (Item.Capacity_Value) then
-         Appended := False;
-         return;
-      end if;
-      Bytes.Copy
-        (Element_Address (Item, Current), Data'Address,
-         Interfaces.C.size_t (Data'Length));
-      Bytes.Write_U64
-        (Item.Length_Address, Current + 1);
-      Appended := True;
+      Acquire (Item);
+      begin
+         Current := Stored_Length_Unlocked (Item);
+         if Current = Interfaces.Unsigned_64 (Item.Capacity_Value) then
+            Appended := False;
+         else
+            Target := Element_Address (Item, Current);
+            Mutated := True;
+            Bytes.Copy
+              (Target, Data'Address,
+               Interfaces.C.size_t (Data'Length));
+            Bytes.Write_U64
+              (Item.Length_Address, Current + 1);
+            Appended := True;
+         end if;
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated);
+            raise;
+      end;
+      Release (Item);
    end Try_Append;
 
-   procedure Check_Index (Item : View; Index : Positive) is
+   procedure Check_Index_Unlocked (Item : View; Index : Positive) is
    begin
-      if Interfaces.Unsigned_64 (Index) > Stored_Length (Item) then
+      if Interfaces.Unsigned_64 (Index) > Stored_Length_Unlocked (Item) then
          raise Constraint_Error with "vector index is out of range";
       end if;
-   end Check_Index;
+   end Check_Index_Unlocked;
+   pragma Inline_Always (Check_Index_Unlocked);
 
    procedure Read
      (Item  : View;
@@ -215,23 +304,43 @@ package body Flyology.Data_Structures.Vectors is
       Data  : out Ada.Streams.Stream_Element_Array) is
    begin
       Check_Data (Item, Data'Length);
-      Check_Index (Item, Index);
-      Bytes.Copy
-        (Data'Address,
-         Element_Address (Item, Interfaces.Unsigned_64 (Index - 1)),
-         Interfaces.C.size_t (Data'Length));
+      Acquire (Item);
+      begin
+         Check_Index_Unlocked (Item, Index);
+         Bytes.Copy
+           (Data'Address,
+            Element_Address (Item, Interfaces.Unsigned_64 (Index - 1)),
+            Interfaces.C.size_t (Data'Length));
+      exception
+         when others =>
+            Release (Item);
+            raise;
+      end;
+      Release (Item);
    end Read;
 
    procedure Replace
      (Item  : in out View;
       Index : Positive;
       Data  : Ada.Streams.Stream_Element_Array) is
+      Mutated : Boolean := False;
+      Target  : System.Address := System.Null_Address;
    begin
       Check_Data (Item, Data'Length);
-      Check_Index (Item, Index);
-      Bytes.Copy
-        (Element_Address (Item, Interfaces.Unsigned_64 (Index - 1)),
-         Data'Address, Interfaces.C.size_t (Data'Length));
+      Acquire (Item);
+      begin
+         Check_Index_Unlocked (Item, Index);
+         Target := Element_Address
+           (Item, Interfaces.Unsigned_64 (Index - 1));
+         Mutated := True;
+         Bytes.Copy
+           (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated);
+            raise;
+      end;
+      Release (Item);
    end Replace;
 
    procedure Try_Pop
@@ -240,30 +349,57 @@ package body Flyology.Data_Structures.Vectors is
       Popped : out Boolean)
    is
       Current : Interfaces.Unsigned_64;
+      Mutated : Boolean := False;
    begin
       Check_Data (Item, Data'Length);
-      Current := Stored_Length (Item);
-      if Current = 0 then
-         Popped := False;
-         return;
-      end if;
-      Bytes.Copy
-        (Data'Address, Element_Address (Item, Current - 1),
-         Interfaces.C.size_t (Data'Length));
-      Bytes.Write_U64
-        (Item.Length_Address, Current - 1);
-      Popped := True;
+      Acquire (Item);
+      begin
+         Current := Stored_Length_Unlocked (Item);
+         if Current = 0 then
+            Popped := False;
+         else
+            Bytes.Copy
+              (Data'Address, Element_Address (Item, Current - 1),
+               Interfaces.C.size_t (Data'Length));
+            Mutated := True;
+            Bytes.Write_U64
+              (Item.Length_Address, Current - 1);
+            Popped := True;
+         end if;
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated);
+            raise;
+      end;
+      Release (Item);
    end Try_Pop;
 
    procedure Clear (Item : in out View) is
+      Mutated : Boolean := False;
    begin
-      Layouts.Require_Ready (Item.Core);
-      Bytes.Write_U64 (Item.Length_Address, 0);
+      Acquire (Item);
+      begin
+         Mutated := True;
+         Bytes.Write_U64 (Item.Length_Address, 0);
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated);
+            raise;
+      end;
+      Release (Item);
    end Clear;
 
    procedure Destroy (Item : in out View) is
    begin
-      Layouts.Mark_Destroyed (Item.Core);
+      Acquire (Item);
+      begin
+         Layouts.Mark_Destroyed (Item.Core);
+      exception
+         when others =>
+            Release (Item);
+            raise;
+      end;
+      Release (Item);
       Detach (Item);
    end Destroy;
 

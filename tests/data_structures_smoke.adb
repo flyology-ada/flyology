@@ -65,6 +65,8 @@ procedure Data_Structures_Smoke is
    Map_Location   : constant DS.Region_Offset := 65_536;
    Envelope_Location : constant DS.Region_Offset := 100_000;
    Crash_Envelope_Location : constant DS.Region_Offset := 110_000;
+   Poison_String_Location : constant DS.Region_Offset := 120_000;
+   Poison_Vector_Location : constant DS.Region_Offset := 121_000;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4, 8);
 
@@ -306,6 +308,90 @@ begin
    Vectors.Replace (Vector_B, 1, Encode (2));
    Vectors.Read (Vector_A, 1, Eight);
    Assert (Decode (Eight) = 2, "vector B-to-A replace failed");
+
+   declare
+      Recovery_String : Strings.View;
+      Recovery_Peer   : Strings.View;
+      Recovery_Vector : Vectors.View;
+      Recovery_Data   : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Failed          : Boolean;
+   begin
+      Strings.Initialize
+        (Recovery_String, Region_A, Poison_String_Location, 32);
+      Write_U32
+        (Base_B, Raw_Offset (Poison_String_Location, 44), 1);
+      Failed := False;
+      begin
+         if Strings.Length (Recovery_String) /= 0 then
+            raise Program_Error with "unreachable busy string length";
+         end if;
+      exception
+         when DS.Busy_Error => Failed := True;
+      end;
+      Assert (Failed, "abandoned byte-string guard did not report busy");
+
+      Strings.Poison (Region_B, Poison_String_Location);
+      Assert
+        (Strings.Is_Poisoned (Recovery_String),
+         "byte-string recovery poison was not visible across mappings");
+      Failed := False;
+      begin
+         Strings.Append (Recovery_String, String_Data);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned byte string accepted an operation");
+      Failed := False;
+      begin
+         Strings.Attach
+           (Recovery_Peer, Region_B, Poison_String_Location, 32);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned byte string attached as ready");
+
+      Strings.Initialize
+        (Recovery_String, Region_A, Poison_String_Location, 32);
+      Assert
+        (not Strings.Is_Poisoned (Recovery_String),
+         "byte-string reinitialization did not clear poison");
+      Strings.Attach
+        (Recovery_Peer, Region_B, Poison_String_Location, 32);
+      Strings.Assign (Recovery_String, String_Data);
+      Strings.Destroy (Recovery_String);
+      Strings.Detach (Recovery_Peer);
+
+      Vectors.Initialize
+        (Recovery_Vector, Region_A, Poison_Vector_Location, 4, 8);
+      Vectors.Poison (Region_B, Poison_Vector_Location);
+      Assert
+        (Vectors.Is_Poisoned (Recovery_Vector),
+         "vector poison was not visible across mappings");
+      Failed := False;
+      begin
+         Vectors.Try_Append (Recovery_Vector, Encode (1), Flag);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned vector accepted an operation");
+      Failed := False;
+      begin
+         Strings.Poison (Region_B, Poison_Vector_Location);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "recovery poison accepted the wrong leaf identity");
+
+      Vectors.Initialize
+        (Recovery_Vector, Region_A, Poison_Vector_Location, 4, 8);
+      Vectors.Try_Append (Recovery_Vector, Encode (91), Flag);
+      Assert (Flag, "reinitialized vector rejected an append");
+      Vectors.Read (Recovery_Vector, 1, Recovery_Data);
+      Assert
+        (Decode (Recovery_Data) = 91,
+         "reinitialized vector did not restore normal operation");
+      Vectors.Destroy (Recovery_Vector);
+   end;
 
    SPSC.Try_Pop (Ring_B, Eight, Flag);
    Assert (not Flag, "empty SPSC ring produced an element");

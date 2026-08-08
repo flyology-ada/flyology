@@ -121,25 +121,6 @@ procedure Data_Structures_Concurrency_Smoke is
       function Passed return Boolean is (All_OK);
    end Completion;
 
-   protected type Mutex is
-      entry Acquire;
-      procedure Release;
-   private
-      Held : Boolean := False;
-   end Mutex;
-
-   protected body Mutex is
-      entry Acquire when not Held is
-      begin
-         Held := True;
-      end Acquire;
-
-      procedure Release is
-      begin
-         Held := False;
-      end Release;
-   end Mutex;
-
    Temp_Root : constant String := Ada.Environment_Variables.Value
      ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
    Path : constant C.char_array := C.To_C
@@ -392,14 +373,13 @@ procedure Data_Structures_Concurrency_Smoke is
       end loop;
    end Run_MPMC;
 
-   procedure Run_Externally_Synchronized_Vector is
+   procedure Run_Internally_Synchronized_Vector is
       Worker_Count : constant Positive := 4;
       Per_Worker   : constant Positive := 5_000;
       Total        : constant Positive := Worker_Count * Per_Worker;
       type View_Array is array (Positive range <>) of aliased Vectors.View;
       Views : View_Array (1 .. Worker_Count);
       type View_Access is access all Vectors.View;
-      Guard : Mutex;
       Finished : Completion (Worker_Count);
 
       task type Worker_Task
@@ -410,28 +390,28 @@ procedure Data_Structures_Concurrency_Smoke is
 
       task body Worker_Task is
          Appended : Boolean;
-         Owns_Lock : Boolean := False;
          Value : Interfaces.Unsigned_64;
       begin
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            Guard.Acquire;
-            Owns_Lock := True;
-            Vectors.Try_Append (Vector.all, Encode (Value), Appended);
-            Guard.Release;
-            Owns_Lock := False;
+            loop
+               begin
+                  Vectors.Try_Append
+                    (Vector.all, Encode (Value), Appended);
+                  exit;
+               exception
+                  when DS.Busy_Error =>
+                     delay 0.0;
+               end;
+            end loop;
             if not Appended then
-               raise Program_Error with "locked vector append failed";
+               raise Program_Error with "synchronized vector append failed";
             end if;
          end loop;
          Finished.Done (True);
       exception
-         when others =>
-            if Owns_Lock then
-               Guard.Release;
-            end if;
-            Finished.Done (False);
+         when others => Finished.Done (False);
       end Worker_Task;
 
       type Worker_Access is access Worker_Task;
@@ -464,27 +444,27 @@ procedure Data_Structures_Concurrency_Smoke is
             abort Worker.all;
          end loop;
          raise Program_Error with
-           "externally synchronized vector test timed out";
+           "internally synchronized vector test timed out";
       end select;
-      Assert (Finished.Passed, "externally synchronized vector tasks failed");
+      Assert (Finished.Passed, "internally synchronized vector tasks failed");
       Assert (Vectors.Length (Views (1)) = Total,
-              "externally synchronized vector lost elements");
+              "internally synchronized vector lost elements");
       for Index in 1 .. Total loop
          Vectors.Read (Views (1), Index, Data);
          Value := Decode (Data);
          Assert
            (Value in 1 .. Interfaces.Unsigned_64 (Total)
             and then not Seen (Positive (Value)),
-            "externally synchronized vector duplicated/corrupted an element");
+            "internally synchronized vector duplicated/corrupted an element");
          Seen (Positive (Value)) := True;
       end loop;
       Vectors.Destroy (Views (1));
       for Index in 2 .. Worker_Count loop
          Vectors.Detach (Views (Index));
       end loop;
-   end Run_Externally_Synchronized_Vector;
+   end Run_Internally_Synchronized_Vector;
 
-   procedure Run_Externally_Synchronized_String is
+   procedure Run_Internally_Synchronized_String is
       Worker_Count : constant Positive := 4;
       Per_Worker   : constant Positive := 1_000;
       Total        : constant Positive := Worker_Count * Per_Worker;
@@ -492,7 +472,6 @@ procedure Data_Structures_Concurrency_Smoke is
       type View_Array is array (Positive range <>) of aliased Byte_Strings.View;
       Views : View_Array (1 .. Worker_Count);
       type View_Access is access all Byte_Strings.View;
-      Guard : Mutex;
       Finished : Completion (Worker_Count);
 
       task type Worker_Task
@@ -502,25 +481,24 @@ procedure Data_Structures_Concurrency_Smoke is
       end Worker_Task;
 
       task body Worker_Task is
-         Owns_Lock : Boolean := False;
          Value : Interfaces.Unsigned_64;
       begin
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            Guard.Acquire;
-            Owns_Lock := True;
-            Byte_Strings.Append (Item.all, Encode (Value));
-            Guard.Release;
-            Owns_Lock := False;
+            loop
+               begin
+                  Byte_Strings.Append (Item.all, Encode (Value));
+                  exit;
+               exception
+                  when DS.Busy_Error =>
+                     delay 0.0;
+               end;
+            end loop;
          end loop;
          Finished.Done (True);
       exception
-         when others =>
-            if Owns_Lock then
-               Guard.Release;
-            end if;
-            Finished.Done (False);
+         when others => Finished.Done (False);
       end Worker_Task;
 
       type Worker_Access is access Worker_Task;
@@ -553,13 +531,13 @@ procedure Data_Structures_Concurrency_Smoke is
             abort Worker.all;
          end loop;
          raise Program_Error with
-           "externally synchronized byte-string test timed out";
+           "internally synchronized byte-string test timed out";
       end select;
       Assert
-        (Finished.Passed, "externally synchronized byte-string tasks failed");
+        (Finished.Passed, "internally synchronized byte-string tasks failed");
       Assert
         (Byte_Strings.Length (Views (1)) = Capacity,
-         "externally synchronized byte string lost bytes");
+         "internally synchronized byte string lost bytes");
       Byte_Strings.Read (Views (2), Data);
       for Position in 1 .. Total loop
          declare
@@ -574,14 +552,14 @@ procedure Data_Structures_Concurrency_Smoke is
          Assert
            (Value in 1 .. Interfaces.Unsigned_64 (Total)
             and then not Seen (Positive (Value)),
-            "externally synchronized byte string duplicated/corrupted data");
+            "internally synchronized byte string duplicated/corrupted data");
          Seen (Positive (Value)) := True;
       end loop;
       Byte_Strings.Destroy (Views (1));
       for Index in 2 .. Worker_Count loop
          Byte_Strings.Detach (Views (Index));
       end loop;
-   end Run_Externally_Synchronized_String;
+   end Run_Internally_Synchronized_String;
 
    procedure Run_Internally_Synchronized_Map is
       Worker_Count : constant Positive := 4;
@@ -685,8 +663,8 @@ begin
    Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
    Run_SPSC;
    Run_MPMC;
-   Run_Externally_Synchronized_Vector;
-   Run_Externally_Synchronized_String;
+   Run_Internally_Synchronized_Vector;
+   Run_Internally_Synchronized_String;
    Run_Internally_Synchronized_Map;
    Regions.Detach (Region_A);
    Regions.Detach (Region_B);

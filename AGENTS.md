@@ -131,7 +131,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Check null sentinels, overflow, alignment, bounds, and complete object extent
   before every native address conversion. Magic, version, schema, geometry,
   initialization state, and mutable indices fail closed on attachment or use.
-- Byte strings, vectors, slab pools, and hash maps require application-level
+- Byte strings, vectors, and hash maps use a persisted nonblocking guard plus
+  lifecycle poison state and report immediate contention; they never wait or
+  retry internally. A dead owner leaves the object locked until an
+  independently authorized supervisor poisons it, and exclusive
+  reinitialization is the only recovery. Slab pools require application-level
   exclusion across every view. SPSC permits exactly one producer and one
   consumer. MPMC uses per-slot sequence counters and bounded CAS attempts.
 - Leaf magic/version/schema checks are mandatory. The optional `Envelopes`

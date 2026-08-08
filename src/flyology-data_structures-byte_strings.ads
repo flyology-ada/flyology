@@ -4,18 +4,22 @@ private with Flyology.Data_Structures.Layouts;
 
 --  Provides bounded variable-length byte strings in relocatable storage.
 --  Values are byte sequences, not text encodings, and never contain hidden
---  Ada metadata. The package is not internally synchronized; all operations
---  on all views of one string require application-level exclusion.
+--  Ada metadata. Operations use one process-shared nonblocking
+--  guard. Contention raises Busy_Error immediately; no operation waits or
+--  retries. An exception after a mutation may have begun poisons the stored
+--  object; Poison_Error then persists until exclusive reinitialization.
+--  Is_Attached, Capacity, and Is_Poisoned inspect only local or lifecycle
+--  metadata and do not acquire the payload guard.
 package Flyology.Data_Structures.Byte_Strings with Preelaborate is
 
    --  Eight-byte magic stored in every byte-string header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5342_5354_3031#;
 
    --  Schema identifier for the current byte-string layout.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4253_5452_0001#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_4253_5452_0002#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -29,7 +33,8 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @return Required header and payload bytes
    function Required_Storage (Maximum_Length : Positive) return Byte_Count;
 
-   --  Initialize an empty string and attach Item.
+   --  Initialize an empty string and attach Item. Exclusive reinitialization
+   --  is the only recovery from a poisoned lifecycle state.
    --  @param Item View attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero eight-byte-aligned stored offset
@@ -72,40 +77,57 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @return Number of initialized payload bytes
    function Length (Item : View) return Natural;
 
+   --  Report whether an attached string requires reinitialization.
+   --  @param Item Attached view
+   --  @return True only when the persisted lifecycle state is poisoned
+   function Is_Poisoned (Item : View) return Boolean;
+
+   --  Mark a quiescent string poisoned. Before calling, the application must
+   --  independently establish that no operation is active, including that a
+   --  process or task which left the guard locked has terminated. Flyology
+   --  performs no owner-death detection.
+   --  @param Region Attached backing region
+   --  @param Location Stored string offset
+   --  @exception Layout_Error The stored identity or lifecycle is invalid
+   --  @exception Busy_Error The lifecycle changed during the poison attempt
+   procedure Poison (Region : Region_View; Location : Region_Offset);
+
    --  Replace the string with Data.
-   --  @param Item Exclusively synchronized view
+   --  @param Item Internally synchronized attached view
    --  @param Data Replacement bytes
    --  @exception Constraint_Error Data exceeds Capacity
    procedure Assign
      (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
    --  Append Data to the current string.
-   --  @param Item Exclusively synchronized view
+   --  @param Item Internally synchronized attached view
    --  @param Data Bytes appended in order
    --  @exception Constraint_Error The resulting length exceeds Capacity
    procedure Append
      (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
    --  Copy the current string into Data, whose length must equal Length.
-   --  @param Item Exclusively synchronized view
+   --  @param Item Internally synchronized attached view
    --  @param Data Exact-size destination
    --  @exception Constraint_Error Data has the wrong length
    procedure Read
      (Item : View; Data : out Ada.Streams.Stream_Element_Array);
 
    --  Set the current length to zero without rewriting retained payload bytes.
-   --  @param Item Exclusively synchronized view
+   --  @param Item Internally synchronized attached view
    procedure Clear (Item : in out View);
 
    --  Invalidate a quiescent string and detach Item.
-   --  @param Item Exclusively synchronized view
+   --  @param Item Internally synchronized attached view
    procedure Destroy (Item : in out View);
 
-   pragma Inline (Capacity, Length, Assign, Append, Read, Clear);
+   pragma Inline
+     (Capacity, Length, Is_Poisoned, Assign, Append, Read, Clear);
 
 private
    type View is limited record
       Core            : Layouts.Local_View;
+      Guard_Address   : System.Address := System.Null_Address;
       Length_Address  : System.Address := System.Null_Address;
       Payload_Address : System.Address := System.Null_Address;
       Capacity_Value  : Interfaces.Unsigned_32 := 0;

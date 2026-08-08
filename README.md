@@ -732,11 +732,11 @@ an access value in persistent storage:
 | `Handles` | 32-bit slot plus 32-bit generation | Validation belongs to the receiving structure |
 | `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
 | `Slab_Pools` | Fixed-size payload slots and generation-stamped free list | Application exclusion across all views |
-| `Byte_Strings` | Bounded variable-length byte sequence | Application exclusion across all views |
-| `Vectors` | Bounded vector of fixed-size byte elements | Application exclusion across all views |
+| `Byte_Strings` | Bounded variable-length byte sequence | Shared nonblocking guard; immediate `Busy_Error` on contention |
+| `Vectors` | Bounded vector of fixed-size byte elements | Shared nonblocking guard; immediate `Busy_Error` on contention |
 | `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer, using acquire/release publication |
 | `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers, using bounded CAS attempts |
-| `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Application exclusion across all views |
+| `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Shared nonblocking guard; immediate `Busy_Error` on contention |
 
 SPSC and MPMC counters occupy separate 64-byte control lines, and both use
 power-of-two capacities for masked slot selection. MPMC reports bounded
@@ -746,6 +746,18 @@ after initialization. None of these operations performs file opening,
 mapping, flushing, peer discovery, descriptor exchange, wake-up signaling, or
 process-lifecycle recovery. A later IPC layer can supply those policies around
 the same layouts.
+
+Byte strings, vectors, and hash maps serialize ordinary operations with a guard
+persisted beside the shared lifecycle state. Acquisition is one strong
+compare-exchange: an operation either proceeds or raises `Busy_Error` without
+spinning, sleeping, or retrying; release is a release store. If a task or
+process terminates while holding the guard, it remains locked. A supervisor
+may call the leaf's `Poison` only after independently establishing owner death
+or whole-object quiescence; there is no automatic owner-death detection.
+Poisoning makes current and later views fail with `Poison_Error`, and exclusive
+`Initialize` is the only recovery. Likewise, an internal exception after a
+stored mutation may have begun poisons the object rather than publishing
+possibly inconsistent bytes as ready.
 
 Each leaf always validates its own 64-bit magic, layout version, and 64-bit
 schema. A consumer that also needs an application-level compatibility boundary
@@ -764,8 +776,10 @@ value reduces accidental misidentification but is not authentication or a
 cryptographic integrity check.
 
 Initialization requires exclusive ownership of the target extent. Attachment
-to the externally synchronized structures requires a quiescent layout. Every
-structure view must be detached before its local mapping disappears;
+to externally synchronized structures, and attachment of a byte string,
+vector, or hash map while its shared guard might be changing, requires a
+quiescent layout.
+Every structure view must be detached before its local mapping disappears;
 `Destroy` requires the synchronization stated by the leaf package and marks
 the stored header unusable for every other view. The layouts use the host byte
 order and are currently tested on Flyology's 64-bit Darwin and Linux targets;
