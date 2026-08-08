@@ -141,7 +141,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   poison that slot before explicitly recycling it with a new generation, while
   exclusive whole-pool initialization remains unconditional recovery. SPSC
   permits exactly one producer and one consumer. MPMC uses per-slot sequence
-  counters and bounded CAS attempts.
+  counters and bounded CAS attempts; an external authority may poison and
+  exclusively reinitialize a ring only after establishing participant
+  quiescence.
 - Leaf magic/version/schema checks are mandatory. The optional `Envelopes`
   generic adds a stable application-selected 64-bit signature and 64-bit
   contract version without weakening a nested leaf's structural checks.

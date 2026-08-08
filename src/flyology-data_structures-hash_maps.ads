@@ -70,6 +70,8 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Key_Size Expected key size
    --  @param Value_Size Expected value size
    --  @exception Layout_Error Header, geometry, or entries are corrupt
+   --  @exception Busy_Error The map guard is active or abandoned
+   --  @exception Poison_Error The map is poisoned
    procedure Attach
      (Item       : out View;
       Region     : Region_View;
@@ -85,6 +87,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Region Attached backing region
    --  @param Location Stored map offset
    --  @exception Layout_Error The location is incomplete or has another identity
+   --  @exception Busy_Error The lifecycle changed during the poison attempt
    procedure Poison (Region : Region_View; Location : Region_Offset);
 
    --  Detach Item without modifying the map.

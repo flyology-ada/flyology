@@ -179,10 +179,9 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
       Slot : Handles.Slot_Index);
 
    --  Validate immutable slab identity and geometry, then poison a
-   --  transitional slot without attaching or traversing mutable slot contents.
-   --  This is the recovery entry point when normal Attach cannot validate
-   --  abandoned bookkeeping. The caller must establish owner death and
-   --  target-slot quiescence before calling it.
+   --  transitional slot without requiring a retained pre-failure View or
+   --  traversing unrelated mutable slots. The caller must establish owner
+   --  death and target-slot quiescence before calling it.
    --  @param Region Attached backing region
    --  @param Location Stored slab offset
    --  @param Capacity Expected slot count

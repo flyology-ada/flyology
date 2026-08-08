@@ -51,9 +51,9 @@ package Flyology.Data_Structures with Preelaborate is
    --  not spin, sleep, or block an event-loop pthread.
    Busy_Error : exception;
 
-   --  Raised when an object was explicitly poisoned after an interrupted or
-   --  failed mutation. Poisoned bytes are never treated as a valid object;
-   --  exclusive reinitialization is the recovery operation.
+   --  Raised when an object or independently recoverable slot was explicitly
+   --  poisoned after an interrupted or failed mutation. Poisoned bytes are
+   --  never silently treated as ready; the leaf defines explicit recovery.
    Poison_Error : exception;
 
    --  Process-local view of mapped or arena-backed bytes. The type owns no

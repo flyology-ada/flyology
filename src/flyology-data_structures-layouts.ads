@@ -24,7 +24,7 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @field Capacity Primary bounded capacity
    --  @field Element_Size Primary fixed payload size
    --  @field Alignment Primary stored alignment
-   --  @field Auxiliary Structure-specific 32-bit geometry
+   --  @field Auxiliary Structure-specific 32-bit geometry or guard state
    --  @field Word_1 Structure-specific 64-bit state or geometry
    --  @field Word_2 Structure-specific 64-bit state or geometry
    type Header_Values is record

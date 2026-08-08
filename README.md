@@ -750,12 +750,13 @@ SPSC and MPMC counters occupy separate 64-byte control lines, and both use
 power-of-two capacities for masked slot selection. MPMC reports bounded
 contention rather than waiting. A producer or consumer that terminates after
 claiming an MPMC slot but before publishing its sequence can prevent later
-progress; MPMC provides no process-death recovery. The other structures cache
-validated geometry
-in each local view and use fixed-stride contiguous storage with no allocation
+progress. Core does not detect that death; an external recovery authority can
+poison the ring after establishing quiescence, and exclusive initialization
+then restores an empty ring. The other structures cache validated geometry in
+each local view and use fixed-stride contiguous storage with no allocation
 after initialization. None of these operations performs file opening,
 mapping, flushing, peer discovery, descriptor exchange, wake-up signaling, or
-automatic process-lifecycle recovery. The slab poison/recycle API requires an
+automatic process-lifecycle recovery. Poison and recycle APIs require an
 external recovery authority; a later IPC layer can supply that policy around
 the same layouts.
 
@@ -788,9 +789,11 @@ value reduces accidental misidentification but is not authentication or a
 cryptographic integrity check.
 
 Initialization requires exclusive ownership of the target extent. Attachment
-to externally synchronized structures, and attachment of a byte string,
-vector, or hash map while its shared guard might be changing, requires a
-quiescent layout.
+and destruction require the quiescence stated by each leaf; in particular, a
+byte string, vector, or hash map must not be attaching while its shared guard
+or mutable contents can change. Slab attachment accepts valid transitional and
+poisoned slot states only under the same externally established quiescence so a
+new recovery authority does not need a retained pre-failure view.
 Every structure view must be detached before its local mapping disappears;
 `Destroy` requires the synchronization stated by the leaf package and marks
 the stored header unusable for every other view. The layouts use the host byte
