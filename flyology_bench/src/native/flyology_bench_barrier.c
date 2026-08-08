@@ -13,14 +13,17 @@
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/resource.h>
 #include <time.h>
 #include <unistd.h>
 
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#include <mach/processor_info.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
 
@@ -225,6 +228,104 @@ int flyology_bench_process_usage(uint64_t *cpu_nanoseconds,
     *resident_bytes = (uint64_t)resident_pages * (uint64_t)page_size;
 #endif
     return 0;
+}
+
+int flyology_bench_host_cpu_snapshot(uint64_t *busy_ticks,
+                                     uint64_t *total_ticks,
+                                     size_t capacity,
+                                     size_t *cpu_count)
+{
+    if (busy_ticks == NULL || total_ticks == NULL || cpu_count == NULL
+        || capacity == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(__APPLE__)
+    host_t host = mach_host_self();
+    natural_t count = 0;
+    processor_info_array_t raw_info = NULL;
+    mach_msg_type_number_t raw_count = 0;
+    kern_return_t status = host_processor_info(
+        host, PROCESSOR_CPU_LOAD_INFO, &count, &raw_info, &raw_count);
+    processor_cpu_load_info_t load_info;
+
+    if (status != KERN_SUCCESS) {
+        (void)mach_port_deallocate(mach_task_self(), host);
+        errno = EIO;
+        return -1;
+    }
+    if ((size_t)count > capacity) {
+        (void)vm_deallocate(mach_task_self(), (vm_address_t)raw_info,
+                            (vm_size_t)raw_count * sizeof(integer_t));
+        (void)mach_port_deallocate(mach_task_self(), host);
+        errno = ENOSPC;
+        return -1;
+    }
+    load_info = (processor_cpu_load_info_t)raw_info;
+    for (natural_t cpu = 0; cpu < count; ++cpu) {
+        uint64_t user = load_info[cpu].cpu_ticks[CPU_STATE_USER];
+        uint64_t system = load_info[cpu].cpu_ticks[CPU_STATE_SYSTEM];
+        uint64_t nice = load_info[cpu].cpu_ticks[CPU_STATE_NICE];
+        uint64_t idle = load_info[cpu].cpu_ticks[CPU_STATE_IDLE];
+
+        busy_ticks[cpu] = user + system + nice;
+        total_ticks[cpu] = busy_ticks[cpu] + idle;
+    }
+    *cpu_count = (size_t)count;
+    (void)vm_deallocate(mach_task_self(), (vm_address_t)raw_info,
+                        (vm_size_t)raw_count * sizeof(integer_t));
+    (void)mach_port_deallocate(mach_task_self(), host);
+    return 0;
+#else
+    FILE *stat_file = fopen("/proc/stat", "r");
+    char line[1024];
+    size_t seen = 0;
+
+    if (stat_file == NULL) {
+        return -1;
+    }
+    while (fgets(line, sizeof(line), stat_file) != NULL) {
+        unsigned int cpu;
+        unsigned long long user;
+        unsigned long long nice;
+        unsigned long long system;
+        unsigned long long idle;
+        unsigned long long iowait;
+        unsigned long long irq;
+        unsigned long long softirq;
+        unsigned long long steal;
+        int fields;
+
+        if (strncmp(line, "cpu", 3) != 0) {
+            break;
+        }
+        fields = sscanf(line,
+                        "cpu%u %llu %llu %llu %llu %llu %llu %llu %llu",
+                        &cpu, &user, &nice, &system, &idle, &iowait, &irq,
+                        &softirq, &steal);
+        if (fields == 0) {
+            continue;
+        }
+        if (fields != 9 || seen >= capacity) {
+            (void)fclose(stat_file);
+            errno = fields == 9 ? ENOSPC : EIO;
+            return -1;
+        }
+        (void)cpu;
+        busy_ticks[seen] = (uint64_t)user + (uint64_t)nice
+            + (uint64_t)system + (uint64_t)irq + (uint64_t)softirq
+            + (uint64_t)steal;
+        total_ticks[seen] = busy_ticks[seen] + (uint64_t)idle
+            + (uint64_t)iowait;
+        ++seen;
+    }
+    if (fclose(stat_file) != 0 || seen == 0) {
+        errno = EIO;
+        return -1;
+    }
+    *cpu_count = seen;
+    return 0;
+#endif
 }
 
 void flyology_bench_escape(void *value)

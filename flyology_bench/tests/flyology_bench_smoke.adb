@@ -3,6 +3,7 @@
 
 with Ada.Text_IO;
 with Ada.Directories;
+with Ada.Real_Time;
 with Ada.Strings.Fixed;
 with Flyology_Bench;
 with Flyology_Bench.Baselines;
@@ -114,6 +115,20 @@ procedure Flyology_Bench_Smoke is
    Saw_Reference_Progress : Boolean := False;
    Saw_Same_Progress : Boolean := False;
    Saw_Double_Progress : Boolean := False;
+   Saw_Quiescence_Progress : Boolean := False;
+
+   procedure Observe_Quiescence_Progress
+     (Name      : String;
+      Phase     : Flyology_Bench.Progress_Phase;
+      Completed : Natural;
+      Total     : Natural)
+   is
+      pragma Unreferenced (Name, Completed, Total);
+   begin
+      Saw_Quiescence_Progress :=
+        Saw_Quiescence_Progress
+        or else Phase = Flyology_Bench.Waiting_For_CPU_Quiescence;
+   end Observe_Quiescence_Progress;
 
    procedure Observe_Multi_Progress
      (Name      : String;
@@ -148,6 +163,7 @@ procedure Flyology_Bench_Smoke is
       Subtract_Timer_Cost => False,
       Practical_Threshold_Percent => 1.0,
       Random_Seed         => 42,
+      CPU_Quiescence      => (others => <>),
       Collect_Process_Telemetry => False,
       Progress            => null,
       Progress_Name       => <>);
@@ -170,7 +186,63 @@ procedure Flyology_Bench_Smoke is
       end if;
    end Check;
 begin
-   Operation_Benchmark (Config, First);
+   Operation_Benchmark
+     ((Config with delta
+        CPU_Quiescence =>
+          (Enabled                     => True,
+           Maximum_Average_CPU_Percent => 100.0,
+           Maximum_Core_CPU_Percent    => 100.0,
+           Stable_Time                 => 0.020,
+           Poll_Interval               => 0.010,
+           Timeout                     => 0.200),
+        Progress => Observe_Quiescence_Progress'Unrestricted_Access),
+      First);
+   Check
+     (Saw_Quiescence_Progress,
+      "CPU quiescence did not report its preflight phase");
+
+   declare
+      use type Ada.Real_Time.Time;
+
+      Timed_Out : Boolean := False;
+      Discarded : Flyology_Bench.Measurement;
+
+      task CPU_Burner;
+
+      task body CPU_Burner is
+         Deadline : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (300);
+         Spin : Natural := 0 with Volatile;
+      begin
+         while Ada.Real_Time.Clock < Deadline loop
+            if Spin = Natural'Last then
+               Spin := 0;
+            else
+               Spin := Spin + 1;
+            end if;
+         end loop;
+      end CPU_Burner;
+   begin
+      begin
+         Operation_Benchmark
+           ((Config with delta
+              CPU_Quiescence =>
+                (Enabled                     => True,
+                 Maximum_Average_CPU_Percent => 0.0,
+                 Maximum_Core_CPU_Percent    => 0.0,
+                 Stable_Time                 => 0.100,
+                 Poll_Interval               => 0.020,
+                 Timeout                     => 0.100)),
+            Discarded);
+      exception
+         when Flyology_Bench.CPU_Quiescence_Timeout =>
+            Timed_Out := True;
+      end;
+      Check
+        (Timed_Out,
+         "CPU quiescence did not time out while a local task was busy");
+   end;
+
    Check (Counter > 0, "ordinary benchmark did not run the operation");
    Check
      (Flyology_Bench.Samples (First) = Config.Samples,

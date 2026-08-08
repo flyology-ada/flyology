@@ -25,13 +25,16 @@ package Flyology_Bench is
    --  Stage reported by an optional progress callback. Callbacks execute only
    --  outside timed regions.
    --  @enum Starting The run is initializing its clock and state.
+   --  @enum Waiting_For_CPU_Quiescence The harness is waiting for sustained
+   --  low host CPU utilization before warmup.
    --  @enum Warming The operation is executing outside timed sampling.
    --  @enum Calibrating The harness is selecting a batch size.
    --  @enum Sampling Timed samples are being collected.
    --  @enum Analyzing Statistics and confidence intervals are being computed.
    --  @enum Finished The result is complete.
    type Progress_Phase is
-     (Starting, Warming, Calibrating, Sampling, Analyzing, Finished);
+     (Starting, Waiting_For_CPU_Quiescence, Warming, Calibrating, Sampling,
+      Analyzing, Finished);
 
    --  Receives coarse benchmark progress. Total is zero when a phase has no
    --  meaningful bounded work count.
@@ -71,6 +74,31 @@ package Flyology_Bench is
    --  @enum Sequential_Cases Collect one implementation's block at a time.
    type Shootout_Schedule_Policy is (Balanced_Rounds, Sequential_Cases);
 
+   --  Controls the optional host CPU preflight gate. When enabled, the harness
+   --  samples utilization outside timed regions and proceeds only after both
+   --  the host-wide average and busiest logical CPU remain at or below their
+   --  limits for Stable_Time. This detects competing CPU work; it does not
+   --  establish I/O, thermal, frequency, or interrupt quiescence.
+   --  @field Enabled Whether to wait before clock characterization and warmup.
+   --  @field Maximum_Average_CPU_Percent Largest accepted host-wide busy share.
+   --  @field Maximum_Core_CPU_Percent Largest accepted busy share on any one
+   --  logical CPU.
+   --  @field Stable_Time Continuous accepted interval required before starting.
+   --  @field Poll_Interval Delay between host CPU counter snapshots.
+   --  @field Timeout Maximum wall time spent waiting before raising
+   --  CPU_Quiescence_Timeout.
+   type CPU_Quiescence_Policy is record
+      Enabled                       : Boolean := False;
+      Maximum_Average_CPU_Percent   : Long_Float := 20.0;
+      Maximum_Core_CPU_Percent      : Long_Float := 50.0;
+      Stable_Time                   : Duration := 1.0;
+      Poll_Interval                 : Duration := 0.100;
+      Timeout                       : Duration := 15.0;
+   end record;
+
+   --  Raised when enabled CPU quiescence is not observed before its timeout.
+   CPU_Quiescence_Timeout : exception;
+
    --  Controls warmup, calibration, and timed sampling.
    --  @field Warmup_Time Untimed wall time used to warm code and data.
    --  @field Measurement_Time Target wall time across all timed samples.
@@ -89,6 +117,8 @@ package Flyology_Bench is
    --  @field Practical_Threshold_Percent Smallest relative time change treated
    --  as practically meaningful by paired-comparison verdicts.
    --  @field Random_Seed Seed used for order shuffling and bootstrap sampling.
+   --  @field CPU_Quiescence Optional sustained low-host-CPU gate performed
+   --  before clock characterization and workload warmup.
    --  @field Collect_Process_Telemetry Capture process CPU and RSS around each
    --  timed sample using untimed native probes. Terminal_Mode enables this.
    --  @field Progress Optional callback invoked outside timed regions.
@@ -106,6 +136,7 @@ package Flyology_Bench is
       Subtract_Timer_Cost  : Boolean := False;
       Practical_Threshold_Percent : Long_Float := 1.0;
       Random_Seed          : Long_Long_Integer := 1;
+      CPU_Quiescence       : CPU_Quiescence_Policy := (others => <>);
       Collect_Process_Telemetry : Boolean := False;
       Progress             : Progress_Handler := null;
       Progress_Name        : Ada.Strings.Unbounded.Unbounded_String :=

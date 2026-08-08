@@ -175,6 +175,9 @@ procedure Basic is
    Output_Mode : constant String :=
      Ada.Environment_Variables.Value
        ("FLYOLOGY_BENCH_OUTPUT", Default => "terminal");
+   Wait_For_Quiet_CPU : constant Boolean :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_BENCH_QUIESCENCE", Default => "0") = "1";
    Single_Base_Config : constant Flyology_Bench.Configuration :=
      (Warmup_Time                  => 0.200,
       Measurement_Time             => 1.000,
@@ -187,6 +190,13 @@ procedure Basic is
       Subtract_Timer_Cost          => False,
       Practical_Threshold_Percent => 1.0,
       Random_Seed                  => 42,
+      CPU_Quiescence               =>
+        (Enabled                     => Wait_For_Quiet_CPU,
+         Maximum_Average_CPU_Percent => 20.0,
+         Maximum_Core_CPU_Percent    => 50.0,
+         Stable_Time                 => 0.500,
+         Poll_Interval               => 0.100,
+         Timeout                     => 10.0),
       Collect_Process_Telemetry    => False,
       Progress                     => null,
       Progress_Name                => <>);

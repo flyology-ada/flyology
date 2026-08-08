@@ -12,6 +12,7 @@ package body Flyology_Bench is
 
    use type Interfaces.Unsigned_64;
    use type Interfaces.C.int;
+   use type Interfaces.C.size_t;
 
    Bootstrap_Resamples : constant := 2_000;
 
@@ -37,6 +38,20 @@ package body Flyology_Bench is
      (CPU_Nanoseconds : access Interfaces.Unsigned_64;
       Resident_Bytes  : access Interfaces.Unsigned_64) return Interfaces.C.int;
    pragma Import (C, Native_Process_Usage, "flyology_bench_process_usage");
+
+   function Native_Host_CPU_Snapshot
+     (Busy_Ticks  : System.Address;
+      Total_Ticks : System.Address;
+      Capacity    : Interfaces.C.size_t;
+      CPU_Count   : access Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Import
+     (C, Native_Host_CPU_Snapshot, "flyology_bench_host_cpu_snapshot");
+
+   Maximum_Host_CPUs : constant := 1_024;
+   type Host_CPU_Counters is
+     array (Natural range 0 .. Maximum_Host_CPUs - 1)
+       of aliased Interfaces.Unsigned_64
+     with Convention => C;
 
    type Float_Array is array (Positive range <>) of Long_Float;
 
@@ -148,6 +163,149 @@ package body Flyology_Bench is
          Long_Float (RSS_After) - Long_Float (RSS_Before));
    end Record_Process_Telemetry;
 
+   procedure Read_Host_CPU
+     (Busy      : out Host_CPU_Counters;
+      Total     : out Host_CPU_Counters;
+      CPU_Count : out Natural)
+   is
+      Count : aliased Interfaces.C.size_t := 0;
+   begin
+      Busy := (others => 0);
+      Total := (others => 0);
+      if Native_Host_CPU_Snapshot
+          (Busy (Busy'First)'Address,
+           Total (Total'First)'Address,
+           Interfaces.C.size_t (Maximum_Host_CPUs),
+           Count'Access) /= 0
+        or else Count = 0
+        or else Count > Interfaces.C.size_t (Maximum_Host_CPUs)
+      then
+         raise Program_Error with "host CPU utilization query failed";
+      end if;
+      CPU_Count := Natural (Count);
+   end Read_Host_CPU;
+
+   procedure Host_CPU_Utilization
+     (Previous_Busy  : Host_CPU_Counters;
+      Previous_Total : Host_CPU_Counters;
+      Current_Busy   : Host_CPU_Counters;
+      Current_Total  : Host_CPU_Counters;
+      CPU_Count      : Natural;
+      Average        : out Long_Float;
+      Peak           : out Long_Float;
+      Available      : out Boolean)
+   is
+      Busy_Sum  : Long_Float := 0.0;
+      Total_Sum : Long_Float := 0.0;
+   begin
+      Average := 0.0;
+      Peak := 0.0;
+      Available := False;
+      for CPU in 0 .. CPU_Count - 1 loop
+         if Current_Busy (CPU) < Previous_Busy (CPU)
+           or else Current_Total (CPU) < Previous_Total (CPU)
+         then
+            return;
+         end if;
+         declare
+            Busy_Delta : constant Interfaces.Unsigned_64 :=
+              Current_Busy (CPU) - Previous_Busy (CPU);
+            Total_Delta : constant Interfaces.Unsigned_64 :=
+              Current_Total (CPU) - Previous_Total (CPU);
+         begin
+            if Busy_Delta > Total_Delta then
+               return;
+            elsif Total_Delta > 0 then
+               Busy_Sum := Busy_Sum + Long_Float (Busy_Delta);
+               Total_Sum := Total_Sum + Long_Float (Total_Delta);
+               Peak := Long_Float'Max
+                 (Peak,
+                  100.0 * Long_Float (Busy_Delta)
+                    / Long_Float (Total_Delta));
+            end if;
+         end;
+      end loop;
+      if Total_Sum > 0.0 then
+         Average := 100.0 * Busy_Sum / Total_Sum;
+         Available := True;
+      end if;
+   end Host_CPU_Utilization;
+
+   procedure Await_CPU_Quiescence (Config : Configuration) is
+      Previous_Busy  : Host_CPU_Counters := (others => 0);
+      Previous_Total : Host_CPU_Counters := (others => 0);
+      Current_Busy   : Host_CPU_Counters := (others => 0);
+      Current_Total  : Host_CPU_Counters := (others => 0);
+      Previous_Count : Natural;
+      Current_Count  : Natural;
+      Started        : Interfaces.Unsigned_64;
+      Previous_Time  : Interfaces.Unsigned_64;
+      Current_Time   : Interfaces.Unsigned_64;
+      Stable_NS      : Interfaces.Unsigned_64 := 0;
+      Required_NS    : Interfaces.Unsigned_64;
+      Timeout_NS     : Interfaces.Unsigned_64;
+      Average        : Long_Float := 0.0;
+      Peak           : Long_Float := 0.0;
+      Available      : Boolean;
+      Completed      : Natural;
+   begin
+      if not Config.CPU_Quiescence.Enabled then
+         return;
+      end if;
+
+      Required_NS := Duration_Nanoseconds (Config.CPU_Quiescence.Stable_Time);
+      Timeout_NS := Duration_Nanoseconds (Config.CPU_Quiescence.Timeout);
+      Read_Host_CPU (Previous_Busy, Previous_Total, Previous_Count);
+      Started := Clock_Now;
+      Previous_Time := Started;
+      Notify (Config, Waiting_For_CPU_Quiescence, 0, 100);
+
+      loop
+         delay Config.CPU_Quiescence.Poll_Interval;
+         Read_Host_CPU (Current_Busy, Current_Total, Current_Count);
+         Current_Time := Clock_Now;
+         if Current_Count = Previous_Count then
+            Host_CPU_Utilization
+              (Previous_Busy, Previous_Total, Current_Busy, Current_Total,
+               Current_Count, Average, Peak, Available);
+         else
+            Available := False;
+         end if;
+
+         if Available
+           and then Average
+             <= Config.CPU_Quiescence.Maximum_Average_CPU_Percent
+           and then Peak <= Config.CPU_Quiescence.Maximum_Core_CPU_Percent
+         then
+            Stable_NS := Stable_NS + (Current_Time - Previous_Time);
+         else
+            Stable_NS := 0;
+         end if;
+
+         Completed := Natural'Min
+           (100,
+            Natural
+              (Long_Float'Floor
+                 (100.0 * Long_Float (Stable_NS)
+                  / Long_Float (Required_NS))));
+         Notify
+           (Config, Waiting_For_CPU_Quiescence, Completed, 100);
+         exit when Stable_NS >= Required_NS;
+
+         if Current_Time - Started >= Timeout_NS then
+            raise CPU_Quiescence_Timeout with
+              "host CPU did not remain below the configured limits"
+              & " (last average" & Long_Float'Image (Average) & "%, peak"
+              & Long_Float'Image (Peak) & "%)";
+         end if;
+
+         Previous_Busy := Current_Busy;
+         Previous_Total := Current_Total;
+         Previous_Count := Current_Count;
+         Previous_Time := Current_Time;
+      end loop;
+   end Await_CPU_Quiescence;
+
    procedure Sort (Values : in out Float_Array) is
    begin
       for Index in Values'First + 1 .. Values'Last loop
@@ -242,6 +400,42 @@ package body Flyology_Bench is
       then
          raise Constraint_Error with
            "practical threshold must be in the range 0 .. 100 percent";
+      elsif Config.CPU_Quiescence.Enabled
+        and then
+          (Config.CPU_Quiescence.Maximum_Average_CPU_Percent < 0.0
+           or else Config.CPU_Quiescence.Maximum_Average_CPU_Percent > 100.0)
+      then
+         raise Constraint_Error with
+           "maximum average host CPU must be in the range 0 .. 100 percent";
+      elsif Config.CPU_Quiescence.Enabled
+        and then
+          (Config.CPU_Quiescence.Maximum_Core_CPU_Percent < 0.0
+           or else Config.CPU_Quiescence.Maximum_Core_CPU_Percent > 100.0)
+      then
+         raise Constraint_Error with
+           "maximum per-core CPU must be in the range 0 .. 100 percent";
+      elsif Config.CPU_Quiescence.Enabled
+        and then Config.CPU_Quiescence.Stable_Time <= 0.0
+      then
+         raise Constraint_Error with
+           "CPU quiescence stable time must be positive";
+      elsif Config.CPU_Quiescence.Enabled
+        and then Config.CPU_Quiescence.Poll_Interval <= 0.0
+      then
+         raise Constraint_Error with
+           "CPU quiescence poll interval must be positive";
+      elsif Config.CPU_Quiescence.Enabled
+        and then Config.CPU_Quiescence.Timeout
+          < Config.CPU_Quiescence.Stable_Time
+      then
+         raise Constraint_Error with
+           "CPU quiescence timeout must cover the stable interval";
+      elsif Config.CPU_Quiescence.Enabled
+        and then Config.CPU_Quiescence.Poll_Interval
+          > Config.CPU_Quiescence.Timeout
+      then
+         raise Constraint_Error with
+           "CPU quiescence poll interval must not exceed the timeout";
       end if;
    end Validate;
 
@@ -615,6 +809,7 @@ package body Flyology_Bench is
       Result.Sample_Total := Config.Samples;
       Result.Random_Seed_Value := Config.Random_Seed;
       Notify (Config, Starting);
+      Await_CPU_Quiescence (Config);
       Characterize_Clock
         (Backend             => Result.Clock_Backend_Id,
          Nominal_Resolution  => Result.Clock_Resolution,
@@ -875,6 +1070,7 @@ package body Flyology_Bench is
       Validate (Config);
       Result := (others => <>);
       Notify (Config, Starting);
+      Await_CPU_Quiescence (Config);
       Result.Reference_Data.Sample_Total := Config.Samples;
       Result.Contender_Data.Sample_Total := Config.Samples;
       Result.Reference_Data.Random_Seed_Value := Config.Random_Seed;
@@ -1375,6 +1571,7 @@ package body Flyology_Bench is
       Result.Schedule_Policy := Config.Shootout_Scheduling;
       Result.Batch_Policy := Config.Comparison_Batching;
       Notify (Config, Starting);
+      Await_CPU_Quiescence (Config);
       for Index in 1 .. Count loop
          Result.Data (Comparison_Case_Index (Index)).Sample_Total :=
            Config.Samples;

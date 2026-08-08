@@ -62,12 +62,13 @@ package body Flyology_Bench.Reporters is
    function Phase_Name (Phase : Progress_Phase) return String is
    begin
       case Phase is
-         when Starting    => return "preparing clock";
-         when Warming     => return "warming workload";
-         when Calibrating => return "calibrating batch";
-         when Sampling    => return "collecting samples";
-         when Analyzing   => return "analyzing distribution";
-         when Finished    => return "benchmark complete";
+         when Starting                    => return "preparing benchmark";
+         when Waiting_For_CPU_Quiescence => return "waiting for quiet CPU";
+         when Warming                     => return "warming workload";
+         when Calibrating                 => return "calibrating batch";
+         when Sampling                    => return "collecting samples";
+         when Analyzing                   => return "analyzing distribution";
+         when Finished                    => return "benchmark complete";
       end case;
    end Phase_Name;
 
@@ -205,7 +206,12 @@ package body Flyology_Bench.Reporters is
          else
             Ada.Text_IO.Put ("  " & (1 .. 30 => ' '));
          end if;
-         if Usage_Available then
+         if Phase = Waiting_For_CPU_Quiescence then
+            Ada.Text_IO.Put
+              (Dim & "  host CPU gate"
+               & "  elapsed " & Elapsed_Image (Total_Wall_Elapsed)
+               & " (hh:mm:ss)" & Reset);
+         elsif Usage_Available then
             declare
                CPU_Text : constant String :=
                  Ada.Strings.Fixed.Trim

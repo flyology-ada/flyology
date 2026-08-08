@@ -29,6 +29,7 @@ The initial API provides:
 - persisted raw-sample baselines with compatibility fingerprints;
 - host/toolchain metadata and optional strict Linux or advisory Darwin thread
   placement;
+- an optional sustained low-host-CPU gate before warmup;
 - ANSI console result cards, in-place terminal progress, CSV, and
   newline-delimited JSON reporters; and
 - explicit optimization and memory barriers.
@@ -216,6 +217,36 @@ silently multiplied by their count.
 Outliers remain in every statistic and in the raw samples. The outlier counts
 are diagnostics for investigating host noise, input mixtures, or workload
 phase changes; they are not permission to discard inconvenient runs.
+
+## CPU quiescence preflight
+
+An opt-in preflight can wait for sustained low host CPU utilization before
+clock characterization and workload warmup:
+
+```ada
+Config.CPU_Quiescence :=
+  (Enabled                     => True,
+   Maximum_Average_CPU_Percent => 20.0,
+   Maximum_Core_CPU_Percent    => 50.0,
+   Stable_Time                 => 1.0,
+   Poll_Interval               => 0.100,
+   Timeout                     => 15.0);
+```
+
+Both limits must hold continuously for `Stable_Time`. The average limit catches
+broad machine load; the per-core limit prevents one saturated logical CPU from
+being hidden by many idle CPUs. Linux reads cumulative counters from
+`/proc/stat`; Darwin uses `host_processor_info`. The gate runs once per
+top-level measurement or comparison and reports
+`Waiting_For_CPU_Quiescence` through the normal progress callback. If the
+stable interval is not observed before `Timeout`, the run raises
+`CPU_Quiescence_Timeout` instead of silently collecting under known CPU load.
+
+This is a CPU preflight, not a general proof of host quiescence. It does not
+detect storage traffic, thermal state, frequency changes, or later competing
+work. Process telemetry during collection remains relevant. The maintained
+example enables this gate only when `FLYOLOGY_BENCH_QUIESCENCE=1`, so ordinary
+example and CI runs do not acquire a new wait or failure condition.
 
 Wall-clock timing is the default for Flyology waits and cross-task work.
 `Flyology_Bench.Baselines` persists raw samples and refuses a regression

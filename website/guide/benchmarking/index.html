@@ -174,6 +174,7 @@
             <li><a href="#read">Read the report</a></li>
             <li><a href="#compare">Compare implementations</a></li>
             <li><a href="#budget">Bound collection time</a></li>
+            <li><a href="#quiescence">Wait for a quiet CPU</a></li>
             <li><a href="#telemetry">Use telemetry</a></li>
             <li><a href="#automation">Emit CSV or JSON</a></li>
             <li><a href="#correctness">Interpret nanoseconds</a></li>
@@ -345,8 +346,39 @@ Config.Samples := 75;</code></pre>
             <p>The harness always completes at least ten samples and checks the budget only between complete samples, pairs, balanced rounds, or sequential case samples. One in-flight batch can therefore finish slightly after the boundary. A sequential shootout divides the collection ceiling among cases and analyzes the common sample count all cases completed. In every comparison, the measurement target is divided across timed implementations instead of being multiplied by their count.</p>
           </section>
 
-          <section id="telemetry">
+          <section id="quiescence">
             <span class="step-label">BENCH 06</span>
+            <h2>Wait for sustained low CPU load.</h2>
+            <p><code>CPU_Quiescence</code> is an opt-in preflight. Before clock characterization and warmup, it samples host CPU counters until both the host-wide average and the busiest logical CPU remain at or below their limits for one continuous interval. The check runs once for a measurement, comparison, or multi-way shootout.</p>
+            <figure class="code-panel">
+              <figcaption>require one quiet second, but wait no longer than fifteen</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config.CPU_Quiescence :=
+  (Enabled                     =&gt; True,
+   Maximum_Average_CPU_Percent =&gt; 20.0,
+   Maximum_Core_CPU_Percent    =&gt; 50.0,
+   Stable_Time                 =&gt; 1.0,
+   Poll_Interval               =&gt; 0.100,
+   Timeout                     =&gt; 15.0);</code></pre>
+            </figure>
+            <p>The terminal progress bar represents the accepted portion of <code>Stable_Time</code>. It returns to zero when either utilization limit is exceeded. If the complete stable interval is not observed before <code>Timeout</code>, the benchmark raises <code>CPU_Quiescence_Timeout</code> without starting warmup or timed collection.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Host average</dt><dd>Catches load spread across several logical CPUs. A low average alone can hide one saturated core on a large machine.</dd></div>
+                <div class="decision-row"><dt>Busiest core</dt><dd>Rejects an interval when any logical CPU exceeds <code>Maximum_Core_CPU_Percent</code>.</dd></div>
+                <div class="decision-row"><dt>Stable interval</dt><dd>Requires consecutive accepted samples. A single quiet poll is not sufficient.</dd></div>
+                <div class="decision-row"><dt>Timeout</dt><dd>Bounds preflight wall time. The poll interval must not exceed it, and the timeout must cover the requested stable interval.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>This is a CPU preflight only.</strong> It does not establish storage, thermal, frequency, interrupt, or network quiescence, and it cannot prevent new load from arriving after collection begins. Keep process telemetry enabled and repeat important runs.</p>
+            </aside>
+            <p>The maintained example enables the preflight with <code>FLYOLOGY_BENCH_QUIESCENCE=1</code>. It remains disabled by default so unattended runs do not acquire a new wait or failure condition.</p>
+          </section>
+
+          <section id="telemetry">
+            <span class="step-label">BENCH 07</span>
             <h2>Watch the process without timing the probes.</h2>
             <p><code>Terminal_Mode</code> enables process telemetry and names every live progress line. During a multi-way collection, a fixed-width implementation field appears between the shootout name and phase, so each sample update says which case just ran without moving the progress bar. The line also reports CPU percentage and occupied cores, current RSS and growth, and elapsed wall time. Final cards retain CPU and RSS sparklines.</p>
             <div class="decision-list">
@@ -364,7 +396,7 @@ Config.Samples := 75;</code></pre>
           </section>
 
           <section id="automation">
-            <span class="step-label">BENCH 07</span>
+            <span class="step-label">BENCH 08</span>
             <h2>Keep machine output clean.</h2>
             <p>CSV and newline-delimited JSON reporters omit progress and ANSI sequences. The maintained example selects the reporter through one environment variable.</p>
             <figure class="code-panel">
@@ -378,7 +410,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson</code></
           </section>
 
           <section id="correctness">
-            <span class="step-label">BENCH 08</span>
+            <span class="step-label">BENCH 09</span>
             <h2>Treat fractional nanoseconds as amortized throughput.</h2>
             <p>A result such as <code>0.878 ns/op</code> does not mean the clock directly resolved one operation in 878 picoseconds. The harness timed a batch lasting milliseconds and divided that duration by the logical operation count. This is useful throughput evidence when the batch performs exactly that many comparable operations.</p>
             <div class="decision-list">
@@ -396,7 +428,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson</code></
           </section>
 
           <section id="platforms">
-            <span class="step-label">BENCH 09</span>
+            <span class="step-label">BENCH 10</span>
             <h2>Repeat on the host you intend to describe.</h2>
             <p>The crate is maintained on Darwin and Linux, including native Linux/AArch64 Docker validation. Its default fingerprint records operating system, architecture, and GNAT version. Add compiler switches, revision, CPU placement and power policy, and other conditions that could change the result.</p>
             <figure class="code-panel">
