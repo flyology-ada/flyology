@@ -1,11 +1,15 @@
-with Ada.Streams;
+with Flyology.Data_Structures.Storage_Types.Elements;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
 private with System;
 
---  Provides a bounded multi-producer/multi-consumer ring of fixed-size byte
---  elements. Per-slot sequence counters and acquire/release/CAS operations
---  permit concurrent native tasks or processes to use distinct mappings.
+use type Interfaces.Unsigned_64;
+
+--  Provides a bounded multi-producer/multi-consumer ring of immutable
+--  fixed-layout elements. Element creation and observation are bound once by
+--  the generic adapter. Per-slot sequence counters and acquire/release/CAS
+--  operations permit concurrent native tasks or processes to use distinct
+--  mappings.
 --  Try operations perform at most Contention_Limit claims and never wait on a
 --  tasking primitive or syscall; Contended is a bounded failure outcome.
 --  Timed Push and Pop yield between bounded claim campaigns until success or
@@ -19,16 +23,22 @@ private with System;
 --  supported within that horizon.
 --  Attach, Create_Or_Attach, Detach, Initialize, Destroy, and backing-lifetime
 --  changes must not race with any use of the same local View.
+--  @formal Element Immutable byte-backed element adapter stored by this ring
+generic
+   with package Element is new
+     Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
    --  Eight-byte magic stored in every MPMC header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_4D50_4D43_3031#;
 
    --  Schema identifier for the current per-slot-sequence algorithm.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4D50_4D43_0003#;
+   Schema : constant Interfaces.Unsigned_64 :=
+     16#0001_4D50_4D43_0004# xor Element.Signature xor
+     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 3;
+   Layout_Version : constant Interfaces.Unsigned_32 := 4;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -55,12 +65,10 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  Compute the complete MPMC layout extent. Capacity must be a power of
    --  two and at least two so ready and free slot sequences remain distinct.
    --  @param Capacity Number of usable elements
-   --  @param Element_Size Bytes per element
    --  @return Required header, sequence counters, padding, and payload bytes
    --  @exception Constraint_Error Capacity is below two, not a power of two,
    --     or cannot be represented in the stored layout
-   function Required_Storage
-     (Capacity : Positive; Element_Size : Positive) return Byte_Count;
+   function Required_Storage (Capacity : Positive) return Byte_Count;
 
    --  Initialize an empty MPMC ring and attach Item. Every preexisting view
    --  becomes stale and must attach again.
@@ -68,13 +76,11 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  @param Region Attached backing region
    --  @param Location Nonzero eight-byte-aligned stored offset
    --  @param Capacity Power-of-two usable element count
-   --  @param Element_Size Bytes per element
    procedure Initialize
      (Item         : out View;
       Region       : Region_View;
       Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive);
+      Capacity     : Positive);
 
    --  Atomically initialize a known-virgin zeroed extent or attach to a ready
    --  compatible ring. Only the exact zero lifecycle sentinel is eligible for
@@ -87,7 +93,6 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  @param Region Independently attached backing region
    --  @param Location Stored ring offset
    --  @param Capacity Expected power-of-two usable element count
-   --  @param Element_Size Expected bytes per element
    --  @param Result Whether this caller initialized, attached, or observed an
    --     initialization in progress
    procedure Create_Or_Attach
@@ -95,7 +100,6 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
       Region       : Region_View;
       Location     : Region_Offset;
       Capacity     : Positive;
-      Element_Size : Positive;
       Result       : out Open_Result);
 
    --  Attach to a quiescent existing MPMC ring and validate configuration and
@@ -104,14 +108,12 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  @param Region Independently attached backing region
    --  @param Location Stored ring offset
    --  @param Capacity Expected power-of-two element count
-   --  @param Element_Size Expected bytes per element
    --  @exception Layout_Error Header, geometry, or positions are corrupt
    procedure Attach
      (Item         : out View;
       Region       : Region_View;
       Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive);
+      Capacity     : Positive);
 
    --  Poison a ring after independently establishing that every participant
    --  is dead or quiescent. This is the fail-closed response to an abandoned
@@ -137,44 +139,42 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
    --  Attempt to claim and publish Data.
    --  @param Item Any concurrently attached producer view
-   --  @param Data Source whose length must equal Element_Size
+   --  @param Data Application value accepted by the bound creator
    --  @param Result Published, full, or bounded-contention outcome
-   --  @exception Constraint_Error Data has the wrong length
    procedure Try_Push
      (Item   : in out View;
-      Data   : Ada.Streams.Stream_Element_Array;
+      Data   : Element.Source;
       Result : out Push_Result);
 
    --  Wait through full or contended observations until Data is published or
    --  the monotonic timeout expires. The caller yields between campaigns.
    --  @param Item Any concurrently attached producer view
-   --  @param Data Source whose length must equal Element_Size
+   --  @param Data Application value accepted by the bound creator
    --  @param Timeout Maximum wait; zero permits one bounded claim campaign
    --  @exception Timeout_Error No element is published by the deadline
    procedure Push
      (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
+      Data    : Element.Source;
       Timeout : Wait_Timeout);
 
    --  Attempt to claim and consume the oldest published element.
    --  @param Item Any concurrently attached consumer view
-   --  @param Data Destination whose length must equal Element_Size
+   --  @param Data Observation assigned only after a successful claim
    --  @param Result Consumed, empty, or bounded-contention outcome
-   --  @exception Constraint_Error Data has the wrong length
    procedure Try_Pop
      (Item   : in out View;
-      Data   : out Ada.Streams.Stream_Element_Array;
+      Data   : out Element.Observed;
       Result : out Pop_Result);
 
    --  Wait through empty or contended observations until one element is
    --  consumed or the monotonic timeout expires.
    --  @param Item Any concurrently attached consumer view
-   --  @param Data Exact-size destination, assigned only on success
+   --  @param Data Observation assigned only on success
    --  @param Timeout Maximum wait; zero permits one bounded claim campaign
    --  @exception Timeout_Error No element is consumed by the deadline
    procedure Pop
      (Item    : in out View;
-      Data    : out Ada.Streams.Stream_Element_Array;
+      Data    : out Element.Observed;
       Timeout : Wait_Timeout);
 
    --  Invalidate an empty, quiescent ring and detach Item.

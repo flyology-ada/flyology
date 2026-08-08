@@ -138,12 +138,14 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   retain the old handle in deferred-reclamation metadata until release
   succeeds. Dynamic means growable within a fixed arena, not mapping growth or
   an unbounded resource guarantee.
-- `Vectors` is generic over an instance of `Storage_Types.Immutable`. The
-  element instance owns a definite byte-array value, a stable type signature
-  and layout version, scoped read-only references to published bytes, and
-  builders restricted to unpublished slots. Vector attachment validates that
-  identity; read callbacks must not retain their reference, block, reenter the
-  vector, or change backing lifetime.
+- `Vectors`, `Slab_Pools`, both ring leaves, `Hash_Maps`, `Dynamic.Vectors`,
+  and `Dynamic.Hash_Maps` are generic over `Storage_Types.Elements` instances.
+  An instance binds a definite byte-array value, stable type signature and
+  layout version, application source type, and observation type once. Scoped
+  read-only references never escape the bound observer; builders are restricted
+  to unpublished slots. Attachment validates every adapter identity and
+  geometry. `Byte_Strings` and `Dynamic.Byte_Strings` remain concrete byte
+  sequences rather than generic element collections.
 - Check null sentinels, overflow, alignment, bounds, and complete object extent
   before every native address conversion. Magic, version, schema, geometry,
   initialization state, and mutable indices fail closed on attachment or use.

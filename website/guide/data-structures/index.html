@@ -55,7 +55,7 @@
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Relocatable data structures</li></ol>
           <h1>Store structures in caller-owned regions.</h1>
         </div>
-        <p class="doc-hero-copy">Initialize structures in a caller-owned region, optionally manage payload growth with a relocatable arena, attach process-local views at each virtual address, and use the element and synchronization contracts stated by each leaf.</p>
+        <p class="doc-hero-copy">Create or attach structures in a caller-owned region, optionally manage payload growth with a relocatable arena, attach process-local views at each virtual address, and use the element and synchronization contracts stated by each leaf.</p>
       </header>
 
       <div class="docs-layout">
@@ -65,7 +65,7 @@
             <li><a href="#contract">Representation contract</a></li>
             <li><a href="#choose">Choose a structure</a></li>
             <li><a href="#arenas">Allocate growable payloads</a></li>
-            <li><a href="#region">Initialize a local arena</a></li>
+            <li><a href="#region">Create or attach a structure</a></li>
             <li><a href="#relocation">Attach another mapping</a></li>
             <li><a href="#envelopes">Add an application contract</a></li>
             <li><a href="#synchronization">Synchronization and waiting</a></li>
@@ -106,19 +106,19 @@
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html#97166b56d6d2b4d8a17560db84fd55d8ca3f15a25bb22299f8f091c0fa6768cc"><code>Byte_Strings.View</code></a></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence generic over an immutable fixed-layout element representation. Indexing is one-based at the public API.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/2deb1c418009bddb97baa53a4ddbc4b6934c37124c59528b494223aee6c9b93e.html#597139e2424f6d33451757a2f8ced40f78441f5eb500b45562accefcca7ace75"><code>Hash_Maps.View</code></a></dt><dd>Fixed-size byte keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence generic over an immutable element adapter. Indexing is one-based at the public API.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2deb1c418009bddb97baa53a4ddbc4b6934c37124c59528b494223aee6c9b93e.html#597139e2424f6d33451757a2f8ced40f78441f5eb500b45562accefcca7ace75"><code>Hash_Maps.View</code></a></dt><dd>Immutable typed keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a></dt><dd>A fixed managed extent with variable-size buddy allocations identified by generations rather than addresses.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/3b065985c3e335db58df8578f6a05aea354fda11d81238c958c208971a819df1.html#fbf4e1d6dac71f7df1df68d21ef9b4fff66873450899a844416728ba100ba4db"><code>Dynamic.Byte_Strings.View</code></a></dt><dd>A byte sequence whose payload capacity grows through an arena allocation.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#ef52ac089f2889eeb8451dfa5315c99f7c50310323efd9fdf07c876da3f43b0d"><code>Dynamic.Vectors.View</code></a></dt><dd>A fixed-element byte vector whose payload capacity grows through an arena allocation.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/2019939f291a34570c155cc5667dafe8f3df91d59b699c7b8267808aedfda0a4.html#92733d1c768ad9e91be0684ca99c5ad27e0c8ec9edea14218ed5c541712524e5"><code>Dynamic.Hash_Maps.View</code></a></dt><dd>An open-addressed byte map that allocates and rehashes larger tables inside an arena.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/33f167411312a472530c78e3ac8834c20ea6f0da6342fe4be0ee2d40d126ad93.html#5b49349b2c7da0c385c11838f2c36a9cd39e641106527595e1d473896f25c44e"><code>Slab_Pools.View</code></a></dt><dd>Fixed-size slots returned as generation-stamped handles. Per-slot state separates unrelated accesses and detects stale handles.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/ec218e69c64bef956ed82437a2f13cabd318703df1632430ba2bd9c0c7ad55bd.html#8e3297d1675df4af1359d7698cfb76b42ac24b86c8d149b0f3c329fde238515b"><code>Rings.SPSC.View</code></a></dt><dd>A bounded fixed-element queue with exactly one producer and one consumer.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/4a0642adfe76deb041fd8c62b2947e0ea39a498faf4337de5e0e202cddcf5097.html#4e25fff018a6868d103011af2aeaf39847fc00b1ddab974ca8b213091d56308d"><code>Rings.MPMC.View</code></a></dt><dd>A bounded fixed-element queue with multiple producers and consumers, per-slot sequences, and bounded claim campaigns.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#ef52ac089f2889eeb8451dfa5315c99f7c50310323efd9fdf07c876da3f43b0d"><code>Dynamic.Vectors.View</code></a></dt><dd>An immutable typed vector whose payload capacity grows through an arena allocation.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2019939f291a34570c155cc5667dafe8f3df91d59b699c7b8267808aedfda0a4.html#92733d1c768ad9e91be0684ca99c5ad27e0c8ec9edea14218ed5c541712524e5"><code>Dynamic.Hash_Maps.View</code></a></dt><dd>An immutable typed map that allocates and rehashes larger tables inside an arena.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/33f167411312a472530c78e3ac8834c20ea6f0da6342fe4be0ee2d40d126ad93.html#5b49349b2c7da0c385c11838f2c36a9cd39e641106527595e1d473896f25c44e"><code>Slab_Pools.View</code></a></dt><dd>Immutable typed slots returned as generation-stamped handles. Per-slot state separates unrelated accesses and detects stale handles.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/ec218e69c64bef956ed82437a2f13cabd318703df1632430ba2bd9c0c7ad55bd.html#8e3297d1675df4af1359d7698cfb76b42ac24b86c8d149b0f3c329fde238515b"><code>Rings.SPSC.View</code></a></dt><dd>A bounded immutable typed queue with exactly one producer and one consumer.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/4a0642adfe76deb041fd8c62b2947e0ea39a498faf4337de5e0e202cddcf5097.html#4e25fff018a6868d103011af2aeaf39847fc00b1ddab974ca8b213091d56308d"><code>Rings.MPMC.View</code></a></dt><dd>A bounded immutable typed queue with multiple producers and consumers, per-slot sequences, and bounded claim campaigns.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/ab437ecbee2450a004e2975e535265ec7c799e66225cc0576865134bcd7854dd.html#61c377a30faa2f76d4e0a3d5b1b7d2d92bf86b4c31fa1a400ebc2d21f7fb6890"><code>Envelopes.View</code></a></dt><dd>An optional application signature and contract version around one nested leaf. The nested leaf still validates its own identity and geometry.</dd></div>
               </dl>
             </div>
-            <p><a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html"><code>Storage_Types.Immutable</code></a> defines the element protocol used by <code>Vectors</code>. Its <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#3507dcaca62e2b43b1ddb79001053336c3bc5dfba2a0017cce98ca17a5e007af"><code>Value</code></a> owns a fixed byte array, <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#7038f670816d8226fdb0c9cb3f800eea1f92487104cf0c253e55aa2780e16bae"><code>Const_Ref</code></a> borrows published bytes during a read callback, and <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#acd6b1971019e0f740e83eb974d665b101eaa092d6e0ab528c3dd770b24bdfcb"><code>Builder</code></a> can write only an unpublished slot during emplacement. The container copies bytes for an independent value and performs no encode/decode step. <a href="../../api/abf88fe8cdb76cf2e4f264a1a33bfd618d39637c7f3235299790e9ed0bad06fe.html#3794f9b62c2d43f1c918c55eb0f2c41dbd90a51a9a8980912c2353f328cb8567"><code>Storage_Types.Unsigned_64s.Representation</code></a> supplies the built-in eight-byte scalar representation.</p>
+            <p><a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html"><code>Storage_Types.Immutable</code></a> defines the fixed byte-array representation. Its <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#3507dcaca62e2b43b1ddb79001053336c3bc5dfba2a0017cce98ca17a5e007af"><code>Value</code></a> owns bytes, while <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#7038f670816d8226fdb0c9cb3f800eea1f92487104cf0c253e55aa2780e16bae"><code>Const_Ref</code></a> reads published container bytes in place. <a href="../../api/8026a3bcabd73ac7355852435ee8de0d65f0201a9167817e90100a1f7bf33441.html"><code>Storage_Types.Elements</code></a> binds that representation once to an application-facing <a href="../../api/8026a3bcabd73ac7355852435ee8de0d65f0201a9167817e90100a1f7bf33441.html#9639af76913178fb478488788b1d89ba8042ddcc7bfb4a0e1220f7fd69396116"><code>Source</code></a>, <a href="../../api/8026a3bcabd73ac7355852435ee8de0d65f0201a9167817e90100a1f7bf33441.html#e6a102268f87b2cb3beb76945181c088322e7cf2af7ed63b588fbf3bfd166504"><code>Observed</code></a>, creator, and observer. Containers invoke those bound operations; callers do not pass codecs or callbacks on each access. The observer must not leak the scoped reference or alter the container or mapping lifetime. All generic vectors, maps, slabs, and rings—fixed or arena-backed—accept this same adapter contract. <a href="../../api/abf88fe8cdb76cf2e4f264a1a33bfd618d39637c7f3235299790e9ed0bad06fe.html#ad4d3f5aea2c8e09b58cd9026ba17c08d162216fe0a082709cfb1312aee92442"><code>Storage_Types.Unsigned_64s.Element</code></a> is the built-in eight-byte scalar adapter.</p>
             <p><a href="../../api/406d17cda42c14faf09bd101e96f3b5bcdc3ca6a383babe76d63bfb2ab6c79d5.html#62bc05b67554ce668c1a0b7a9b463cacd9aab976a202c38ce34502599d0547df"><code>Regions.View</code></a> supplies a checked process-local backing view, while <a href="../../api/03f2d320fb794d315fb0308aee9d015f09a38ee74193c79a1555c97337e54a54.html#67131a4bbd82f6c74291e930859a6f9154206ce32e9b3d3b16b53c7afca18bc0"><code>Handles.Handle</code></a> is the fixed-width slot-and-generation representation used by structures such as slabs. Neither package owns storage.</p>
           </section>
 
@@ -128,22 +128,32 @@
             <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a> manages a fixed region extent with a persisted buddy tree. Each successful allocation returns an <a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#4eddf9f5a1acc9705b6440b934fded8428ef19d5dfe9ed41d0d410b1b0a47224"><code>Arenas.Allocation_Handle</code></a> containing a tree-node index, arena initialization epoch, and nonzero allocation generation. The handle remains the stored relationship; the arena derives a checked process-local address only inside an operation.</p>
             <p>The managed capacity and minimum block size are powers of two. Allocation rounds a request to the smallest fitting buddy block and reports allocation, exhaustion, or immediate metadata contention. Releasing a handle coalesces free buddies and makes every copy of that generation stale. Payload read, write, and copy do not acquire the metadata guard, so the handle owner must exclude release while payload access or a nested allocation-region view is active.</p>
             <figure class="code-panel">
-              <figcaption>an arena-backed dynamic vector</figcaption>
+              <figcaption>create or attach an arena-backed dynamic vector</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">Arenas.Initialize
+              <pre><code class="language-ada">Arenas.Create_Or_Attach
   (Arena_View, Region, Location =&gt; 4_096,
    Usable_Capacity =&gt; 1_048_576,
    Minimum_Block_Size =&gt; 64,
-   Instance_ID =&gt; 16#A8E4_7B19_2C63_D501#);
+   Instance_ID =&gt; 16#A8E4_7B19_2C63_D501#,
+   Result =&gt; Arena_Open);
 
-Dynamic_Vectors.Initialize
+if Arena_Open = DS.Initialization_In_Progress then
+   --  Another participant owns initialization; this view is detached.
+   return;
+end if;
+
+Dynamic_Vectors.Create_Or_Attach
   (Items, Region, Location =&gt; 128,
    Arena =&gt; Arena_View,
    Initial_Capacity =&gt; 16,
-   Element_Size =&gt; 8);
+   Result =&gt; Vector_Open);
+
+if Vector_Open = DS.Initialization_In_Progress then
+   return;
+end if;
 
 Dynamic_Vectors.Try_Append
-  (Items, Arena_View, Data, Growth);
+  (Items, Arena_View, 42, Growth);
 
 if Growth = DS.Dynamic.Arena_Exhausted then
    --  The fixed managed arena has no fitting free block.
@@ -151,7 +161,7 @@ if Growth = DS.Dynamic.Arena_Exhausted then
 end if;</code></pre>
             </figure>
             <p>The dynamic leaves keep a fixed 128-byte header at their original region offset and move only the payload allocation. Growth allocates and initializes a replacement before publishing its handle. A deferred old handle remains recorded until reclamation succeeds, so arena contention cannot make a published allocation unreachable. <a href="../../api/b500dc85fb0983f0d2c0528959d9cffac53e84061e5fa4e1d33d8d4056c939c4.html#dee88d8149046a2e463e9537133196c04d4c4b7bc8d66a673d43478c5c43ea24"><code>Dynamic.Growth_Result</code></a> separates completion, arena exhaustion, and arena contention.</p>
-            <p><code>Create_Or_Attach</code> and <code>Attach</code> compare every immutable creation parameter. For an arena this includes managed capacity, minimum block size, and the caller-selected instance identifier. For a dynamic leaf it includes initial capacity, element or key/value sizes, and the arena instance plus initialization incarnation. A ready object with different parameters fails attachment; it is not reinitialized or adapted.</p>
+            <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#f536ce6548123e89816d545321a2be05719faa09b816b78faa7c2bb49c0ecf35"><code>Arenas.Create_Or_Attach</code></a> and <a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#6ea28f33a307ccf456ba21620b3a575e068f27e6d91dd821b6add8cf1ca76544"><code>Dynamic.Vectors.Create_Or_Attach</code></a> compare every immutable creation parameter before attaching. For an arena this includes managed capacity, minimum block size, and the caller-selected instance identifier. For a dynamic leaf it includes initial capacity, adapter-derived element or key/value identity and geometry, and the arena instance plus initialization incarnation. A ready object with different parameters raises <code>Layout_Error</code>; it is not reinitialized or adapted.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p><strong>Growable is not an unbounded resource claim.</strong> Dynamic structures grow until allocation geometry or the fixed arena is exhausted. The arena does not extend a mapping, compact live blocks, or recover ownership after process death. Termination after allocation but before handle publication requires an external allocation journal or exclusive whole-arena reinitialization.</p>
@@ -160,23 +170,26 @@ end if;</code></pre>
 
           <section id="region">
             <span class="step-label">STORAGE 04</span>
-            <h2>Initialize a structure in an attached region.</h2>
-            <p>The application first obtains contiguous bytes, then attaches a region view. The example uses a local aligned arena; the same leaf calls apply to anonymous, file-backed, persistent, or shared mappings.</p>
+            <h2>Create or attach through one operation.</h2>
+            <p>The usual entry point is the leaf's <code>Create_Or_Attach</code>. The application first obtains contiguous bytes and attaches a region view. An outer allocation protocol must certify that an exact zero lifecycle means virgin storage. The leaf then either claims and initializes those bytes or validates an already-ready object against the same creation parameters. The example uses a local aligned array; the same calls apply to anonymous, file-backed, persistent, or shared mappings.</p>
             <figure class="code-panel">
-              <figcaption>a vector in a caller-owned local arena</figcaption>
+              <figcaption>create or attach a typed vector</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">with Ada.Streams;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
+with Interfaces;
 
 procedure Local_Vector is
+   use type Interfaces.Unsigned_64;
+
    package DS      renames Flyology.Data_Structures;
    package Regions renames DS.Regions;
    package U64s    renames DS.Storage_Types.Unsigned_64s;
    package Vectors is new DS.Vectors
-     (Element =&gt; U64s.Representation);
+     (Element =&gt; U64s.Element);
 
    type Arena_Bytes is array
      (Ada.Streams.Stream_Element_Offset range &lt;&gt;) of
@@ -186,30 +199,46 @@ procedure Local_Vector is
    Arena : aliased Arena_Bytes (1 .. 8_192) := [others =&gt; 0];
    Region : Regions.View;
    Items  : Vectors.View;
+   Open   : DS.Open_Result;
    Added  : Boolean;
+   Value  : Interfaces.Unsigned_64;
 begin
    Regions.Attach
      (Region, Arena'Address, DS.Byte_Count (Arena'Length));
 
-   Vectors.Initialize
+   Vectors.Create_Or_Attach
      (Items,
       Region,
       Location =&gt; 64,
-      Capacity =&gt; 128);
+      Capacity =&gt; 128,
+      Result =&gt; Open);
 
-   Vectors.Try_Append (Items, U64s.Create (42), Added);
+   case Open is
+      when DS.Initialized_New | DS.Attached_Existing =&gt;
+         Vectors.Try_Append (Items, 42, Added);
+         if Added then
+            Value := Vectors.Read (Items, Vectors.Length (Items));
+            pragma Assert (Value = 42);
+         end if;
+
+      when DS.Initialization_In_Progress =&gt;
+         --  Another participant owns initialization; Items is detached.
+         null;
+   end case;
 
    --  Detach local views before Arena ceases to exist.
-   Vectors.Detach (Items);
+   if Vectors.Is_Attached (Items) then
+      Vectors.Detach (Items);
+   end if;
    Regions.Detach (Region);
 end Local_Vector;</code></pre>
             </figure>
-            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#ec8cb1619bde063cd9e11f33ac2bd515d4bc7804145584ecabe6b4480f54e450"><code>Vectors.Required_Storage</code></a> computes the complete extent from capacity and the generic element's size and alignment. Reserve that extent at a nonzero leaf-aligned <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#78be162a1b0646d241594f054dc95f74c1ac181241b9ea8fcbdf29568d19f59f"><code>Region_Offset</code></a>; offset zero is the null sentinel. Initialization requires exclusive ownership of the target extent through final ready-state publication.</p>
-            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#16531f665a59bd4b57eee1ff9b3bdcc70a7cdeb456d6b18e42718174334b611c"><code>Vectors.Try_Emplace</code></a> passes an unpublished builder to a constructor and publishes the new length only after the constructor returns. A raising constructor may have changed unused bytes, but it does not publish a partial element. Callback <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#62eb10dcd4b26723affd170e04b16c76555e8affaeb367ed641b3472c717391d"><code>Vectors.Read</code></a> passes a zero-copy <code>Const_Ref</code> while holding the vector guard. The callback must consume it synchronously: do not retain it, block, reenter the vector, detach a view, or release the mapping.</p>
-            <p>When an allocation protocol supplies an extent known to have an exact zero lifecycle but several participants may discover it, call <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#68d7334e490088c89ffa1c0813f52860dd0460f318a11ae4f6ccc5bac1b78765"><code>Vectors.Create_Or_Attach</code></a>, or the corresponding operation on another leaf. Its <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#c99756d9b923e013a8b0b249754801974bdbb2d45e2b42a855d82b25789d9ec9"><code>Open_Result</code></a> is <code>Initialized_New</code> for the caller that atomically claims initialization, <code>Attached_Existing</code> for a caller that validates the completed compatible object, or <code>Initialization_In_Progress</code> with a detached view when another caller has not published yet. The operation does not wait. Concurrent calls are permitted while the allocation protocol still guarantees virgin bytes; once a ready object may exist, use the leaf's ordinary attachment-quiescence rule.</p>
+            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#ec8cb1619bde063cd9e11f33ac2bd515d4bc7804145584ecabe6b4480f54e450"><code>Vectors.Required_Storage</code></a> computes the complete extent from capacity and the bound element adapter's size and alignment. Reserve that extent at a nonzero leaf-aligned <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#78be162a1b0646d241594f054dc95f74c1ac181241b9ea8fcbdf29568d19f59f"><code>Region_Offset</code></a>; offset zero is the null sentinel.</p>
+            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#68d7334e490088c89ffa1c0813f52860dd0460f318a11ae4f6ccc5bac1b78765"><code>Vectors.Create_Or_Attach</code></a>, like the corresponding operation on every stored leaf, returns an <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#c99756d9b923e013a8b0b249754801974bdbb2d45e2b42a855d82b25789d9ec9"><code>Open_Result</code></a>. <code>Initialized_New</code> identifies the caller that atomically claimed and completed initialization. <code>Attached_Existing</code> means the ready object passed full identity, adapter, extent, and creation-parameter validation. <code>Initialization_In_Progress</code> means another caller owns initialization; the returned view is detached and the operation does not wait.</p>
+            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#cf5819e4941cf46dbfc4bdb0f072eab8b7fbf0a44d2adb950e694b57e030e090"><code>Vectors.Try_Append</code></a> accepts the adapter's ordinary source type—in this case an <code>Unsigned_64</code> literal. <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#2b47b0ca4b1851d616ae61cfc9f5d754f98c2af7424f08a1a9aa77bc55d7c236"><code>Vectors.Read</code></a> invokes the bound observer against published bytes and returns its ordinary observed type. The caller does not pass creation or observation procedures again.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Creation is not recovery.</strong> Use <code>Create_Or_Attach</code> only when an outer allocation protocol establishes that zero means virgin storage. If corruption zeros the lifecycle word of an older object, the core layout cannot distinguish it from a new extent. Explicit <code>Initialize</code> remains the destructive recovery operation under exclusive authority.</p>
+              <p><strong>Creation is not recovery.</strong> Use <code>Create_Or_Attach</code> only when an outer allocation protocol establishes that zero means virgin storage. If corruption zeros the lifecycle word of an older object, the core layout cannot distinguish it from a new extent. Explicit <code>Initialize</code> is the destructive initialization and recovery operation; it requires exclusive authority and invalidates every earlier attached view.</p>
             </aside>
             <p><code>Destroy</code> invalidates a stored object when the leaf's quiescence preconditions hold. <code>Detach</code> only clears process-local state and leaves the stored bytes unchanged.</p>
           </section>
@@ -217,16 +246,20 @@ end Local_Vector;</code></pre>
           <section id="relocation">
             <span class="step-label">STORAGE 05</span>
             <h2>Attach independently at every mapping address.</h2>
-            <p>Mapping creation remains outside these packages. After the application maps the same backing object again, attach another region using that mapping's base and attach the leaf with the expected configuration.</p>
+            <p>Mapping creation remains outside these packages. The first participant uses <code>Create_Or_Attach</code> after attaching its local region. After the application maps the same backing object again, a later participant attaches another region using that mapping's base and attaches the leaf with the same expected configuration.</p>
             <figure class="code-panel">
               <figcaption>two local views of the same stored vector</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">Regions.Attach (Region_A, Mapping_A_Base, Mapping_Length);
 Regions.Attach (Region_B, Mapping_B_Base, Mapping_Length);
 
-Vectors.Initialize
+Vectors.Create_Or_Attach
   (Vector_A, Region_A, Location =&gt; 64,
-   Capacity =&gt; 128);
+   Capacity =&gt; 128, Result =&gt; Open_A);
+
+if Open_A = DS.Initialization_In_Progress then
+   return;
+end if;
 
 Vectors.Attach
   (Vector_B, Region_B, Location =&gt; 64,
@@ -254,14 +287,29 @@ Vectors.Attach
 Vector_Extent : constant DS.Byte_Count :=
   Vectors.Required_Storage (Capacity =&gt; 128);
 
-Contract_V1.Initialize
+Contract_V1.Create_Or_Attach
   (Envelope, Region, Location =&gt; 64,
-   Content_Extent =&gt; Vector_Extent);
+   Content_Extent =&gt; Vector_Extent,
+   Content_Alignment =&gt; 8,
+   Result =&gt; Envelope_Open);
 
-Vectors.Initialize
-  (Items, Region,
-   Location =&gt; Contract_V1.Content_Location (Envelope),
-   Capacity =&gt; 128);</code></pre>
+case Envelope_Open is
+   when DS.Initialized_New =&gt;
+      --  A new envelope deliberately leaves its nested leaf incomplete.
+      Vectors.Initialize
+        (Items, Region,
+         Location =&gt; Contract_V1.Content_Location (Envelope),
+         Capacity =&gt; 128);
+
+   when DS.Attached_Existing =&gt;
+      Vectors.Attach
+        (Items, Region,
+         Location =&gt; Contract_V1.Content_Location (Envelope),
+         Capacity =&gt; 128);
+
+   when DS.Initialization_In_Progress =&gt;
+      null;
+end case;</code></pre>
             </figure>
             <p>Envelope initialization first marks the nested lifecycle incomplete, publishes the envelope, and leaves nested initialization to the caller. If execution stops between those steps, leaf attachment rejects the incomplete nested object. The 64-bit signature reduces accidental contract confusion; it is not authentication or an integrity checksum.</p>
           </section>
@@ -305,12 +353,13 @@ Vectors.Initialize
             <span class="step-label">STORAGE 09</span>
             <h2>Review the complete lifetime sequence.</h2>
             <ol>
-              <li>Choose capacity and element geometry, then compute <code>Required_Storage</code>.</li>
+              <li>Choose capacity and an element adapter; its identity and geometry contribute to the stored schema and <code>Required_Storage</code>.</li>
               <li>Allocate or map a contiguous region with the required extent and alignment.</li>
               <li>Attach one <code>Regions.View</code> per local mapping.</li>
-              <li>Initialize under exclusive ownership, or attach with the exact expected identity and geometry.</li>
+              <li>Use <code>Create_Or_Attach</code> when the allocation protocol certifies zero as virgin; handle all three <code>Open_Result</code> outcomes.</li>
+              <li>On later mappings, call <code>Attach</code> with the exact expected identity and creation parameters.</li>
               <li>Use only the synchronization model documented by that leaf.</li>
-              <li>Before reinitialization, destruction, mapping replacement, or recovery, establish the required quiescence.</li>
+              <li>Use explicit <code>Initialize</code> only for exclusively authorized destructive creation or recovery. Before reinitialization, destruction, mapping replacement, or recovery, establish the required quiescence.</li>
               <li>Detach every leaf view, then detach the region view, before unmapping or releasing the backing bytes.</li>
             </ol>
             <p>A failed leaf attachment leaves its output view detached. <code>Is_Attached</code> reports retained local mapping information; it does not promise that a later reinitialization has not made the cached epoch stale.</p>
@@ -322,7 +371,7 @@ Vectors.Initialize
             <ul>
               <li>The packages do not open, name, map, resize, flush, or close backing storage.</li>
               <li>They provide no peer discovery, descriptor transfer, access-control policy, wake channel, or automatic process-death recovery.</li>
-              <li>Persisted payloads are bytes. Applications define encoding, validation, and schema migration for those bytes.</li>
+              <li>Persisted elements are immutable fixed-layout bytes. Applications define their adapter's native layout, validation, stable signature, version changes, and schema migration; arbitrary Ada private types are not persisted directly.</li>
               <li>Timed operations cooperatively retry; they do not provide a pollable completion descriptor.</li>
               <li>Crash consistency of an application transaction spanning several structures requires an application protocol.</li>
               <li>The current implementation is experimental and has not been qualified as a general persistent database or crash-recovery system.</li>

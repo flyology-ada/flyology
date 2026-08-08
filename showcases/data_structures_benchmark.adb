@@ -36,17 +36,25 @@ procedure Data_Structures_Benchmark is
    package Byte_Strings renames DS.Byte_Strings;
    package Arenas renames DS.Arenas;
    package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
-   package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
-   package Dynamic_Vectors renames DS.Dynamic.Vectors;
    package Handles renames DS.Handles;
-   package Hash_Maps renames DS.Hash_Maps;
-   package MPMC renames DS.Rings.MPMC;
    package Regions renames DS.Regions;
-   package Slab_Pools renames DS.Slab_Pools;
-   package SPSC renames DS.Rings.SPSC;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package SPSC is new DS.Rings.SPSC
+     (Element => U64_Elements.Element);
+   package MPMC is new DS.Rings.MPMC
+     (Element => U64_Elements.Element);
+   package Slab_Pools is new DS.Slab_Pools
+     (Element => U64_Elements.Element);
    package Vectors is new DS.Vectors
-     (Element => U64_Elements.Representation);
+     (Element => U64_Elements.Element);
+   package Dynamic_Vectors is new DS.Dynamic.Vectors
+     (Element => U64_Elements.Element);
+   package Dynamic_Maps is new DS.Dynamic.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => U64_Elements.Element);
+   package Hash_Maps is new DS.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => U64_Elements.Element);
    package Bench renames Flyology_Bench;
    package Reporters renames Flyology_Bench.Reporters;
    package TIO renames Ada.Text_IO;
@@ -185,19 +193,19 @@ procedure Data_Structures_Benchmark is
    Map_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Vector_Location) + Vector_Extent));
    Map_Extent : constant DS.Byte_Count :=
-     Hash_Maps.Required_Storage (Map_Capacity, 8, 8);
+     Hash_Maps.Required_Storage (Map_Capacity);
    SPSC_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Map_Location) + Map_Extent));
    SPSC_Extent : constant DS.Byte_Count :=
-     SPSC.Required_Storage (Working_Capacity, 8);
+     SPSC.Required_Storage (Working_Capacity);
    MPMC_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (SPSC_Location) + SPSC_Extent));
    MPMC_Extent : constant DS.Byte_Count :=
-     MPMC.Required_Storage (Working_Capacity, 8);
+     MPMC.Required_Storage (Working_Capacity);
    Slab_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (MPMC_Location) + MPMC_Extent));
    Slab_Extent : constant DS.Byte_Count :=
-     Slab_Pools.Required_Storage (Working_Capacity, 8, 8);
+     Slab_Pools.Required_Storage (Working_Capacity);
    String_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Slab_Location) + Slab_Extent));
    String_Extent : constant DS.Byte_Count :=
@@ -249,16 +257,6 @@ procedure Data_Structures_Benchmark is
    Standard_Queue : Standard_Queues.Queue;
    Standard_String : US.Unbounded_String;
    Checksum : U64 := 0 with Volatile;
-   Vector_Observed : U64 := 0;
-
-   procedure Observe_Vector (Item : U64_Elements.Const_Ref) is
-   begin
-      Vector_Observed := U64_Elements.Value_Of (Item);
-   end Observe_Vector;
-
-   procedure Visit_Vector is new Vectors.Visit
-     (Process => Observe_Vector);
-
    type Vector_View_Array is
      array (Positive range <>) of aliased Vectors.View;
    type Map_View_Array is
@@ -444,13 +442,12 @@ procedure Data_Structures_Benchmark is
             Count := 0;
          end if;
          Vectors.Try_Append
-           (Fly_Vector, U64_Elements.Create (Payload (Iteration)), Added);
+           (Fly_Vector, Payload (Iteration), Added);
          if not Added then
             raise Program_Error with "Flyology vector filled early";
          end if;
          Count := Count + 1;
-         Visit_Vector (Fly_Vector, Positive (Count));
-         Local := Local + Vector_Observed;
+         Local := Local + Vectors.Read (Fly_Vector, Positive (Count));
       end loop;
       Checksum := Local;
    end Fly_Vector_Batch;
@@ -483,7 +480,7 @@ procedure Data_Structures_Benchmark is
    end CPP_Vector_Run;
 
    procedure Fly_Map_Batch (Iterations : Bench.Iteration_Count) is
-      Data    : Bytes_8;
+      Data    : U64;
       Found   : Boolean;
       Outcome : Hash_Maps.Put_Result;
       Local   : U64 := 0;
@@ -497,15 +494,15 @@ procedure Data_Structures_Benchmark is
             Hash_Maps.Clear (Fly_Map);
          end if;
          Hash_Maps.Put
-           (Fly_Map, Encode (Key), Encode (Payload (Iteration)), Outcome);
+           (Fly_Map, Key, Payload (Iteration), Outcome);
          if Outcome /= Hash_Maps.Inserted then
             raise Program_Error with "Flyology map insert failed";
          end if;
-         Hash_Maps.Get (Fly_Map, Encode (Key), Data, Found);
+         Hash_Maps.Get (Fly_Map, Key, Data, Found);
          if not Found then
             raise Program_Error with "Flyology map lookup failed";
          end if;
-         Local := Local + Decode (Data);
+         Local := Local + Data;
       end loop;
       Checksum := Local;
    end Fly_Map_Batch;
@@ -571,12 +568,12 @@ procedure Data_Structures_Benchmark is
    end CPP_String_Run;
 
    procedure Fly_SPSC_Batch (Iterations : Bench.Iteration_Count) is
-      Data    : Bytes_8;
+      Data    : U64;
       Success : Boolean;
       Local   : U64 := 0;
    begin
       for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
-         SPSC.Try_Push (Fly_SPSC, Encode (Payload (Iteration)), Success);
+         SPSC.Try_Push (Fly_SPSC, Payload (Iteration), Success);
          if not Success then
             raise Program_Error with "Flyology SPSC push failed";
          end if;
@@ -584,19 +581,19 @@ procedure Data_Structures_Benchmark is
          if not Success then
             raise Program_Error with "Flyology SPSC pop failed";
          end if;
-         Local := Local + Decode (Data);
+         Local := Local + Data;
       end loop;
       Checksum := Local;
    end Fly_SPSC_Batch;
 
    procedure Fly_MPMC_Batch (Iterations : Bench.Iteration_Count) is
-      Data  : Bytes_8;
+      Data  : U64;
       Push  : MPMC.Push_Result;
       Pop   : MPMC.Pop_Result;
       Local : U64 := 0;
    begin
       for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
-         MPMC.Try_Push (Fly_MPMC, Encode (Payload (Iteration)), Push);
+         MPMC.Try_Push (Fly_MPMC, Payload (Iteration), Push);
          if Push /= MPMC.Pushed then
             raise Program_Error with "Flyology MPMC push failed";
          end if;
@@ -604,7 +601,7 @@ procedure Data_Structures_Benchmark is
          if Pop /= MPMC.Popped then
             raise Program_Error with "Flyology MPMC pop failed";
          end if;
-         Local := Local + Decode (Data);
+         Local := Local + Data;
       end loop;
       Checksum := Local;
    end Fly_MPMC_Batch;
@@ -633,18 +630,18 @@ procedure Data_Structures_Benchmark is
 
    procedure Fly_Slab_Batch (Iterations : Bench.Iteration_Count) is
       Handle : Handles.Handle;
-      Data   : Bytes_8;
+      Data   : U64;
       Result : Slab_Pools.Allocation_Result;
       Local  : U64 := 0;
    begin
       for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
-         Slab_Pools.Try_Allocate (Fly_Slab, Handle, Result);
+         Slab_Pools.Try_Allocate
+           (Fly_Slab, Payload (Iteration), Handle, Result);
          if Result /= Slab_Pools.Allocated then
             raise Program_Error with "Flyology slab allocation failed";
          end if;
-         Slab_Pools.Write (Fly_Slab, Handle, Encode (Payload (Iteration)));
          Slab_Pools.Read (Fly_Slab, Handle, Data);
-         Local := Local + Decode (Data);
+         Local := Local + Data;
          Slab_Pools.Release (Fly_Slab, Handle);
       end loop;
       Checksum := Local;
@@ -673,7 +670,7 @@ procedure Data_Structures_Benchmark is
    procedure Fly_Dynamic_Vector_Batch
      (Iterations : Bench.Iteration_Count)
    is
-      Data   : Bytes_8;
+      Data   : U64;
       Result : DS.Dynamic.Growth_Result;
       Count  : Natural := 0;
       Local  : U64 := 0;
@@ -685,15 +682,14 @@ procedure Data_Structures_Benchmark is
             Count := 0;
          end if;
          Dynamic_Vectors.Try_Append
-           (Fly_Dynamic_Vector, Fly_Arena,
-            Encode (Payload (Iteration)), Result);
+           (Fly_Dynamic_Vector, Fly_Arena, Payload (Iteration), Result);
          if Result /= DS.Dynamic.Completed then
             raise Program_Error with "dynamic vector append failed";
          end if;
          Count := Count + 1;
-         Dynamic_Vectors.Read
-           (Fly_Dynamic_Vector, Fly_Arena, Positive (Count), Data);
-         Local := Local + Decode (Data);
+         Data := Dynamic_Vectors.Read
+           (Fly_Dynamic_Vector, Fly_Arena, Positive (Count));
+         Local := Local + Data;
       end loop;
       Checksum := Local;
    end Fly_Dynamic_Vector_Batch;
@@ -701,7 +697,7 @@ procedure Data_Structures_Benchmark is
    procedure Fly_Dynamic_Map_Batch
      (Iterations : Bench.Iteration_Count)
    is
-      Data    : Bytes_8;
+      Data    : U64;
       Found   : Boolean;
       Result  : Dynamic_Maps.Put_Result;
       Key     : U64;
@@ -715,17 +711,16 @@ procedure Data_Structures_Benchmark is
             Dynamic_Maps.Clear (Fly_Dynamic_Map, Fly_Arena);
          end if;
          Dynamic_Maps.Put
-           (Fly_Dynamic_Map, Fly_Arena, Encode (Key),
-            Encode (Payload (Iteration)), Result);
+           (Fly_Dynamic_Map, Fly_Arena, Key, Payload (Iteration), Result);
          if Result /= Dynamic_Maps.Put_Inserted then
             raise Program_Error with "dynamic map insert failed";
          end if;
          Dynamic_Maps.Get
-           (Fly_Dynamic_Map, Fly_Arena, Encode (Key), Data, Found);
+           (Fly_Dynamic_Map, Fly_Arena, Key, Data, Found);
          if not Found then
             raise Program_Error with "dynamic map lookup failed";
          end if;
-         Local := Local + Decode (Data);
+         Local := Local + Data;
       end loop;
       Checksum := Local;
    end Fly_Dynamic_Map_Batch;
@@ -756,7 +751,7 @@ procedure Data_Structures_Benchmark is
         (Contended_Vectors (1), Region, Vector_Location,
          Working_Capacity);
       Vectors.Try_Append
-        (Contended_Vectors (1), U64_Elements.Create (0), Appended);
+        (Contended_Vectors (1), 0, Appended);
       if not Appended then
          raise Program_Error with "unable to seed contended vector";
       end if;
@@ -772,7 +767,7 @@ procedure Data_Structures_Benchmark is
    begin
       Vectors.Replace
         (Contended_Vectors (Worker), 1,
-         U64_Elements.Create (Payload (Sequence) + U64 (Worker)));
+         Payload (Sequence) + U64 (Worker));
    end Attempt_Vector_Contention;
 
    procedure Attempt_Vector_Wait
@@ -780,7 +775,7 @@ procedure Data_Structures_Benchmark is
    begin
       Vectors.Replace
         (Contended_Vectors (Worker), 1,
-         U64_Elements.Create (Payload (Sequence) + U64 (Worker)), 5.0);
+         Payload (Sequence) + U64 (Worker), 5.0);
    end Attempt_Vector_Wait;
 
    procedure Cleanup_Vector_Contention is
@@ -803,11 +798,10 @@ procedure Data_Structures_Benchmark is
    procedure Prepare_Map_Contention is
    begin
       Hash_Maps.Initialize
-        (Contended_Maps (1), Region, Map_Location, Map_Capacity, 8, 8);
+        (Contended_Maps (1), Region, Map_Location, Map_Capacity);
       for Index in 2 .. Contention_Workers loop
          Hash_Maps.Attach
-           (Contended_Maps (Index), Region, Map_Location,
-            Map_Capacity, 8, 8);
+           (Contended_Maps (Index), Region, Map_Location, Map_Capacity);
       end loop;
    end Prepare_Map_Contention;
 
@@ -817,8 +811,7 @@ procedure Data_Structures_Benchmark is
       Outcome : Hash_Maps.Put_Result;
    begin
       Hash_Maps.Put
-        (Contended_Maps (Worker), Encode (U64 (Worker)),
-         Encode (Payload (Sequence)), Outcome);
+        (Contended_Maps (Worker), U64 (Worker), Payload (Sequence), Outcome);
       if Outcome = Hash_Maps.Table_Full then
          raise Program_Error with "contended map filled unexpectedly";
       end if;
@@ -830,8 +823,8 @@ procedure Data_Structures_Benchmark is
       Outcome : Hash_Maps.Put_Result;
    begin
       Hash_Maps.Put
-        (Contended_Maps (Worker), Encode (U64 (Worker)),
-         Encode (Payload (Sequence)), 5.0, Outcome);
+        (Contended_Maps (Worker), U64 (Worker), Payload (Sequence),
+         5.0, Outcome);
       if Outcome = Hash_Maps.Table_Full then
          raise Program_Error with "contended map filled unexpectedly";
       end if;
@@ -902,14 +895,14 @@ procedure Data_Structures_Benchmark is
    begin
       Slab_Pools.Initialize
         (Contended_Slabs (1), Region, Slab_Location,
-         Working_Capacity, 8, 8);
+         Working_Capacity);
       for Index in 2 .. Contention_Workers loop
          Slab_Pools.Attach
            (Contended_Slabs (Index), Region, Slab_Location,
-            Working_Capacity, 8, 8);
+            Working_Capacity);
       end loop;
       Slab_Pools.Try_Allocate
-        (Contended_Slabs (1), Contended_Slab_Handle, Outcome);
+        (Contended_Slabs (1), 0, Contended_Slab_Handle, Outcome);
       if Outcome /= Slab_Pools.Allocated then
          raise Program_Error with "unable to seed contended slab";
       end if;
@@ -918,17 +911,17 @@ procedure Data_Structures_Benchmark is
    procedure Attempt_Slab_Contention
      (Worker : Positive; Sequence : Bench.Iteration_Count) is
    begin
-      Slab_Pools.Write
+      Slab_Pools.Replace
         (Contended_Slabs (Worker), Contended_Slab_Handle,
-         Encode (Payload (Sequence)));
+         Payload (Sequence));
    end Attempt_Slab_Contention;
 
    procedure Attempt_Slab_Wait
      (Worker : Positive; Sequence : Bench.Iteration_Count) is
    begin
-      Slab_Pools.Write
+      Slab_Pools.Replace
         (Contended_Slabs (Worker), Contended_Slab_Handle,
-         Encode (Payload (Sequence)), 5.0);
+         Payload (Sequence), 5.0);
    end Attempt_Slab_Wait;
 
    procedure Cleanup_Slab_Contention is
@@ -973,11 +966,11 @@ procedure Data_Structures_Benchmark is
          for Sequence in Bench.Iteration_Count range 1 .. Iterations loop
             if Timed then
                SPSC.Push
-                 (Contended_SPSC (1), Encode (Payload (Sequence)), 5.0);
+                 (Contended_SPSC (1), Payload (Sequence), 5.0);
             else
                loop
                   SPSC.Try_Push
-                    (Contended_SPSC (1), Encode (Payload (Sequence)), Pushed);
+                    (Contended_SPSC (1), Payload (Sequence), Pushed);
                   exit when Pushed;
                   Local_Retries := Local_Retries + 1;
                   delay 0.0;
@@ -990,7 +983,7 @@ procedure Data_Structures_Benchmark is
       end Producer;
 
       task body Consumer is
-         Data : Bytes_8;
+         Data : U64;
          Popped : Boolean;
          Local_Retries : U64 := 0;
          Local : U64 := 0;
@@ -1008,7 +1001,7 @@ procedure Data_Structures_Benchmark is
                   delay 0.0;
                end loop;
             end if;
-            Local := Local + Decode (Data);
+            Local := Local + Data;
          end loop;
          Checksum := Local;
          Finished.Done (Local_Retries, True);
@@ -1017,9 +1010,9 @@ procedure Data_Structures_Benchmark is
       end Consumer;
    begin
       SPSC.Initialize
-        (Contended_SPSC (1), Region, SPSC_Location, Working_Capacity, 8);
+        (Contended_SPSC (1), Region, SPSC_Location, Working_Capacity);
       SPSC.Attach
-        (Contended_SPSC (2), Region, SPSC_Location, Working_Capacity, 8);
+        (Contended_SPSC (2), Region, SPSC_Location, Working_Capacity);
       Gate.Release;
       Finished.Await_All;
       if not Finished.Passed then
@@ -1069,7 +1062,7 @@ procedure Data_Structures_Benchmark is
          Lane : Natural;
          First : Bench.Iteration_Count;
          Last : Bench.Iteration_Count;
-         Data : Bytes_8;
+         Data : U64;
          Push : MPMC.Push_Result;
          Pop : MPMC.Pop_Result;
          Local_Retries : U64 := 0;
@@ -1090,12 +1083,12 @@ procedure Data_Structures_Benchmark is
                   if Timed then
                      MPMC.Push
                        (Contended_MPMC (Worker_Id),
-                        Encode (Payload (Sequence)), 5.0);
+                        Payload (Sequence), 5.0);
                   else
                      loop
                         MPMC.Try_Push
                           (Contended_MPMC (Worker_Id),
-                           Encode (Payload (Sequence)), Push);
+                           Payload (Sequence), Push);
                         exit when Push = MPMC.Pushed;
                         Local_Retries := Local_Retries + 1;
                         delay 0.0;
@@ -1114,7 +1107,7 @@ procedure Data_Structures_Benchmark is
                         delay 0.0;
                      end loop;
                   end if;
-                  Local := Local + Decode (Data);
+                  Local := Local + Data;
                end if;
             end loop;
          end if;
@@ -1133,11 +1126,11 @@ procedure Data_Structures_Benchmark is
       Checksum := 0;
       MPMC.Initialize
         (Contended_MPMC (1), Region, MPMC_Location,
-         Working_Capacity, 8);
+         Working_Capacity);
       for Index in 2 .. Contention_Workers loop
          MPMC.Attach
            (Contended_MPMC (Index), Region, MPMC_Location,
-            Working_Capacity, 8);
+            Working_Capacity);
       end loop;
       for Index in Workers'Range loop
          Workers (Index).Configure (Index);
@@ -1676,23 +1669,23 @@ begin
    Vectors.Initialize
      (Fly_Vector, Region, Vector_Location, Working_Capacity);
    Hash_Maps.Initialize
-     (Fly_Map, Region, Map_Location, Map_Capacity, 8, 8);
+     (Fly_Map, Region, Map_Location, Map_Capacity);
    SPSC.Initialize
-     (Fly_SPSC, Region, SPSC_Location, Working_Capacity, 8);
+     (Fly_SPSC, Region, SPSC_Location, Working_Capacity);
    MPMC.Initialize
-     (Fly_MPMC, Region, MPMC_Location, Working_Capacity, 8);
+     (Fly_MPMC, Region, MPMC_Location, Working_Capacity);
    Slab_Pools.Initialize
-     (Fly_Slab, Region, Slab_Location, Working_Capacity, 8, 8);
+     (Fly_Slab, Region, Slab_Location, Working_Capacity);
    Byte_Strings.Initialize (Fly_String, Region, String_Location, 8);
    Arenas.Initialize
      (Fly_Arena, Region, Arena_Location, 262_144, 64,
       16#B34C_7A91_04D2_EE01#);
    Dynamic_Vectors.Initialize
      (Fly_Dynamic_Vector, Region, Dynamic_Vector_Location,
-      Fly_Arena, Working_Capacity, 8);
+      Fly_Arena, Working_Capacity);
    Dynamic_Maps.Initialize
      (Fly_Dynamic_Map, Region, Dynamic_Map_Location,
-      Fly_Arena, Map_Capacity, 8, 8);
+      Fly_Arena, Map_Capacity);
    Dynamic_Strings.Initialize
      (Fly_Dynamic_String, Region, Dynamic_String_Location,
       Fly_Arena, 8);

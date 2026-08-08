@@ -2,7 +2,6 @@ with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
-with Interfaces.C;
 
 package body Flyology.Data_Structures.Slab_Pools is
    package Atomic renames Flyology.Data_Structures.Atomics;
@@ -13,7 +12,6 @@ package body Flyology.Data_Structures.Slab_Pools is
    use type Handles.Generation;
    use type Handles.Slot_Index;
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
 
    Slot_Metadata_Size : constant Byte_Count := 16;
    Generation_Offset  : constant Byte_Count := 0;
@@ -28,6 +26,9 @@ package body Flyology.Data_Structures.Slab_Pools is
    Poisoned_State   : constant Interfaces.Unsigned_32 := 5;
    Timed_Contention_Limit : constant Positive := 16;
 
+   function Storage_Alignment return Byte_Count is
+     (Byte_Count'Max (8, Byte_Count (Element.Alignment)));
+
    function U32 (Value : Positive) return Interfaces.Unsigned_32 is
    begin
       return Interfaces.Unsigned_32 (Value);
@@ -35,39 +36,38 @@ package body Flyology.Data_Structures.Slab_Pools is
 
    procedure Geometry
      (Capacity          : Positive;
-      Element_Size      : Positive;
-      Element_Alignment : Positive;
       Payload_Offset    : out Byte_Count;
       Stride            : out Byte_Count;
       Extent            : out Byte_Count)
    is
-      Alignment : constant Byte_Count := Byte_Count (Element_Alignment);
+      Alignment : constant Byte_Count := Byte_Count (Element.Alignment);
       Base_Alignment : constant Byte_Count := Byte_Count'Max (8, Alignment);
    begin
-      if Alignment > Byte_Count (Interfaces.Unsigned_32'Last) then
+      if Element.Signature = 0
+        or else Element.Version = 0
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+      then
+         raise Constraint_Error with "invalid immutable slab element contract";
+      elsif Alignment > Byte_Count (Interfaces.Unsigned_32'Last) then
          raise Constraint_Error with "slab alignment exceeds 32 bits";
       end if;
       Payload_Offset := Layouts.Align_Up (Slot_Metadata_Size, Alignment);
       Stride := Layouts.Align_Up
-        (Layouts.Checked_Add (Payload_Offset, Byte_Count (Element_Size)),
+        (Layouts.Checked_Add (Payload_Offset, Byte_Count (Element.Size)),
          Base_Alignment);
       Extent := Layouts.Checked_Add
         (Layouts.Header_Size,
          Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
    end Geometry;
 
-   function Required_Storage
-     (Capacity          : Positive;
-      Element_Size      : Positive;
-      Element_Alignment : Positive := 1) return Byte_Count
+   function Required_Storage (Capacity : Positive) return Byte_Count
    is
       Payload_Offset : Byte_Count;
       Stride         : Byte_Count;
       Extent         : Byte_Count;
    begin
       Geometry
-        (Capacity, Element_Size, Element_Alignment,
-         Payload_Offset, Stride, Extent);
+        (Capacity, Payload_Offset, Stride, Extent);
       return Extent;
    end Required_Storage;
 
@@ -144,23 +144,20 @@ package body Flyology.Data_Structures.Slab_Pools is
      (Item              : out View;
       Region            : Region_View;
       Location          : Region_Offset;
-      Capacity          : Positive;
-      Element_Size      : Positive;
-      Element_Alignment : Positive := 1)
+      Capacity          : Positive)
    is
       Payload_Offset : Byte_Count;
       Stride         : Byte_Count;
       Extent         : Byte_Count;
       Core           : Layouts.Local_View;
       Capacity_32    : constant Interfaces.Unsigned_32 := U32 (Capacity);
-      Element_32     : constant Interfaces.Unsigned_32 := U32 (Element_Size);
+      Element_32     : constant Interfaces.Unsigned_32 := U32 (Element.Size);
       Alignment_32   : constant Interfaces.Unsigned_32 :=
-        U32 (Element_Alignment);
+        U32 (Element.Alignment);
    begin
       Detach (Item);
       Geometry
-        (Capacity, Element_Size, Element_Alignment,
-         Payload_Offset, Stride, Extent);
+        (Capacity, Payload_Offset, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
          (Capacity     => Capacity_32,
@@ -169,7 +166,7 @@ package body Flyology.Data_Structures.Slab_Pools is
           Auxiliary    => Interfaces.Unsigned_32 (Payload_Offset),
           Word_1       => Interfaces.Unsigned_64 (Stride),
           Word_2       => 0),
-         Byte_Count'Max (8, Byte_Count (Alignment_32)));
+         Storage_Alignment);
       Finish_Initialize
         (Item, Core, Capacity_32, Element_32, Alignment_32,
          Payload_Offset, Stride);
@@ -186,8 +183,6 @@ package body Flyology.Data_Structures.Slab_Pools is
       Region            : Region_View;
       Location          : Region_Offset;
       Capacity          : Positive;
-      Element_Size      : Positive;
-      Element_Alignment : Positive;
       Result            : out Open_Result)
    is
       Payload_Offset : Byte_Count;
@@ -196,14 +191,13 @@ package body Flyology.Data_Structures.Slab_Pools is
       Core           : Layouts.Local_View;
       Claim          : Layouts.Initialization_Claim;
       Capacity_32    : constant Interfaces.Unsigned_32 := U32 (Capacity);
-      Element_32     : constant Interfaces.Unsigned_32 := U32 (Element_Size);
+      Element_32     : constant Interfaces.Unsigned_32 := U32 (Element.Size);
       Alignment_32   : constant Interfaces.Unsigned_32 :=
-        U32 (Element_Alignment);
+        U32 (Element.Alignment);
    begin
       Detach (Item);
       Geometry
-        (Capacity, Element_Size, Element_Alignment,
-         Payload_Offset, Stride, Extent);
+        (Capacity, Payload_Offset, Stride, Extent);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Extent,
          (Capacity     => Capacity_32,
@@ -212,7 +206,7 @@ package body Flyology.Data_Structures.Slab_Pools is
           Auxiliary    => Interfaces.Unsigned_32 (Payload_Offset),
           Word_1       => Interfaces.Unsigned_64 (Stride),
           Word_2       => 0),
-         Byte_Count'Max (8, Byte_Count (Alignment_32)));
+         Storage_Alignment);
       case Claim is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
@@ -221,8 +215,7 @@ package body Flyology.Data_Structures.Slab_Pools is
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
             Attach
-              (Item, Region, Location, Capacity, Element_Size,
-               Element_Alignment);
+              (Item, Region, Location, Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -253,9 +246,7 @@ package body Flyology.Data_Structures.Slab_Pools is
      (Item              : out View;
       Region            : Region_View;
       Location          : Region_Offset;
-      Capacity          : Positive;
-      Element_Size      : Positive;
-      Element_Alignment : Positive := 1)
+      Capacity          : Positive)
    is
       Expected_Payload : Byte_Count;
       Expected_Stride  : Byte_Count;
@@ -265,14 +256,13 @@ package body Flyology.Data_Structures.Slab_Pools is
    begin
       Detach (Item);
       Geometry
-        (Capacity, Element_Size, Element_Alignment,
-         Expected_Payload, Expected_Stride, Expected_Extent);
+        (Capacity, Expected_Payload, Expected_Stride, Expected_Extent);
       Layouts.Attach
         (Core, Header, Region, Location, Identity,
-         Byte_Count'Max (8, Byte_Count (Element_Alignment)));
+         Storage_Alignment);
       if Header.Capacity /= U32 (Capacity)
-        or else Header.Element_Size /= U32 (Element_Size)
-        or else Header.Alignment /= U32 (Element_Alignment)
+        or else Header.Element_Size /= U32 (Element.Size)
+        or else Header.Alignment /= U32 (Element.Alignment)
         or else Header.Auxiliary /= Interfaces.Unsigned_32 (Expected_Payload)
         or else Header.Word_1 /= Interfaces.Unsigned_64 (Expected_Stride)
         or else Core.Extent /= Expected_Extent
@@ -404,8 +394,17 @@ package body Flyology.Data_Structures.Slab_Pools is
       end loop;
    end Acquire_Live;
 
+   function Payload_Address
+     (Item : View; Slot : Interfaces.Unsigned_32) return System.Address;
+
+   function Binding
+     (Item : View;
+      Slot : Interfaces.Unsigned_32;
+      Writable : Boolean) return Immutable_Storage_View;
+
    procedure Try_Allocate
      (Item   : in out View;
+      Data   : Element.Source;
       Value  : out Handles.Handle;
       Result : out Allocation_Result)
    is
@@ -416,6 +415,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       State_Expected : Interfaces.Unsigned_32;
       Generation : Interfaces.Unsigned_32;
       Saw_Free_Contention : Boolean := False;
+      Target : Element.Builder;
    begin
       Layouts.Require_Ready (Item.Core);
       Value := Handles.Null_Handle;
@@ -448,6 +448,25 @@ package body Flyology.Data_Structures.Slab_Pools is
                   end if;
                   raise Layout_Error with "slab allocation generation is zero";
                end if;
+               begin
+                  Element.Bind (Target, Binding (Item, Slot, True));
+                  Element.Construct (Target, Data);
+               exception
+                  when others =>
+                     State_Expected := Allocating_State;
+                     if not Atomic.Compare_Exchange_U32
+                       (State_Address (Item, Slot), State_Expected, Free_State)
+                     then
+                        if State_Expected = Poisoned_State then
+                           raise Poison_Error with
+                             "slab construction was poisoned";
+                        else
+                           raise Layout_Error with
+                             "slab construction state changed";
+                        end if;
+                     end if;
+                     raise;
+               end;
                State_Expected := Allocating_State;
                if not Atomic.Compare_Exchange_U32
                  (State_Address (Item, Slot), State_Expected, Live_State)
@@ -476,6 +495,7 @@ package body Flyology.Data_Structures.Slab_Pools is
 
    procedure Try_Allocate
      (Item    : in out View;
+      Data    : Element.Source;
       Timeout : Wait_Timeout;
       Value   : out Handles.Handle;
       Result  : out Allocation_Result)
@@ -483,7 +503,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Wait : Waiting.Context := Waiting.Start (Timeout);
    begin
       loop
-         Try_Allocate (Item, Value, Result);
+         Try_Allocate (Item, Data, Value, Result);
          exit when Result /= Allocation_Contended;
          Waiting.Retry (Wait);
       end loop;
@@ -574,30 +594,30 @@ package body Flyology.Data_Structures.Slab_Pools is
          Byte_Count (Item.Alignment_Value));
    end Payload_Address;
 
-   procedure Check_Length (Item : View; Length : Natural) is
-   begin
-      if not Item.Core.Attached then
-         raise Region_Error with "detached slab view";
-      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
-         raise Constraint_Error with "slab payload length does not match";
-      end if;
-   end Check_Length;
+   function Binding
+     (Item : View;
+      Slot : Interfaces.Unsigned_32;
+      Writable : Boolean) return Immutable_Storage_View is
+     (Base      => Payload_Address (Item, Slot),
+      Extent    => Byte_Count (Element.Size),
+      Signature => Element.Signature,
+      Version   => Element.Version,
+      Writable  => Writable);
 
    procedure Read
      (Item  : View;
       Value : Handles.Handle;
-      Data  : out Ada.Streams.Stream_Element_Array)
+      Data  : out Element.Observed)
    is
       Slot     : Interfaces.Unsigned_32 := 0;
       Acquired : Boolean := False;
       Expected : Interfaces.Unsigned_32;
+      Source   : Element.Const_Ref;
    begin
-      Check_Length (Item, Data'Length);
       Acquire_Live (Item, Value, Accessing_State, Slot);
       Acquired := True;
-      Bytes.Copy
-        (Data'Address, Payload_Address (Item, Slot),
-         Interfaces.C.size_t (Data'Length));
+      Element.Bind (Source, Binding (Item, Slot, False));
+      Data := Element.Observe (Source);
       Expected := Accessing_State;
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Slot), Expected, Live_State)
@@ -627,19 +647,18 @@ package body Flyology.Data_Structures.Slab_Pools is
    procedure Read
      (Item    : View;
       Value   : Handles.Handle;
-      Data    : out Ada.Streams.Stream_Element_Array;
+      Data    : out Element.Observed;
       Timeout : Wait_Timeout)
    is
       Slot     : Interfaces.Unsigned_32 := 0;
       Acquired : Boolean := False;
       Expected : Interfaces.Unsigned_32;
+      Source   : Element.Const_Ref;
    begin
-      Check_Length (Item, Data'Length);
       Acquire_Live (Item, Value, Accessing_State, Timeout, Slot);
       Acquired := True;
-      Bytes.Copy
-        (Data'Address, Payload_Address (Item, Slot),
-         Interfaces.C.size_t (Data'Length));
+      Element.Bind (Source, Binding (Item, Slot, False));
+      Data := Element.Observe (Source);
       Expected := Accessing_State;
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Slot), Expected, Live_State)
@@ -666,25 +685,21 @@ package body Flyology.Data_Structures.Slab_Pools is
          raise;
    end Read;
 
-   procedure Write
+   procedure Replace
      (Item  : in out View;
       Value : Handles.Handle;
-      Data  : Ada.Streams.Stream_Element_Array)
+      Data  : Element.Source)
    is
+      Stored   : constant Element.Value := Element.Create (Data);
       Slot     : Interfaces.Unsigned_32 := 0;
-      Target   : System.Address := System.Null_Address;
       Acquired : Boolean := False;
       Mutated  : Boolean := False;
       Expected : Interfaces.Unsigned_32;
    begin
-      Check_Length (Item, Data'Length);
       Acquire_Live (Item, Value, Accessing_State, Slot);
       Acquired := True;
-      Target := Payload_Address (Item, Slot);
       Mutated := True;
-      Bytes.Copy
-        (Target, Data'Address,
-         Interfaces.C.size_t (Data'Length));
+      Element.Copy_To (Stored, Binding (Item, Slot, True));
       Expected := Accessing_State;
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Slot), Expected, Live_State)
@@ -710,27 +725,24 @@ package body Flyology.Data_Structures.Slab_Pools is
             end if;
          end if;
          raise;
-   end Write;
+   end Replace;
 
-   procedure Write
+   procedure Replace
      (Item    : in out View;
       Value   : Handles.Handle;
-      Data    : Ada.Streams.Stream_Element_Array;
+      Data    : Element.Source;
       Timeout : Wait_Timeout)
    is
+      Stored   : constant Element.Value := Element.Create (Data);
       Slot     : Interfaces.Unsigned_32 := 0;
-      Target   : System.Address := System.Null_Address;
       Acquired : Boolean := False;
       Mutated  : Boolean := False;
       Expected : Interfaces.Unsigned_32;
    begin
-      Check_Length (Item, Data'Length);
       Acquire_Live (Item, Value, Accessing_State, Timeout, Slot);
       Acquired := True;
-      Target := Payload_Address (Item, Slot);
       Mutated := True;
-      Bytes.Copy
-        (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+      Element.Copy_To (Stored, Binding (Item, Slot, True));
       Expected := Accessing_State;
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Slot), Expected, Live_State)
@@ -756,7 +768,7 @@ package body Flyology.Data_Structures.Slab_Pools is
             end if;
          end if;
          raise;
-   end Write;
+   end Replace;
 
    procedure Poison_Abandoned
      (Item : in out View;
@@ -791,8 +803,6 @@ package body Flyology.Data_Structures.Slab_Pools is
      (Region            : Region_View;
       Location          : Region_Offset;
       Capacity          : Positive;
-      Element_Size      : Positive;
-      Element_Alignment : Positive;
       Slot              : Handles.Slot_Index)
    is
       Expected_Payload : Byte_Count;
@@ -803,14 +813,13 @@ package body Flyology.Data_Structures.Slab_Pools is
       Item             : View;
    begin
       Geometry
-        (Capacity, Element_Size, Element_Alignment,
-         Expected_Payload, Expected_Stride, Expected_Extent);
+        (Capacity, Expected_Payload, Expected_Stride, Expected_Extent);
       Layouts.Attach
         (Core, Header, Region, Location, Identity,
-         Byte_Count'Max (8, Byte_Count (Element_Alignment)));
+         Storage_Alignment);
       if Header.Capacity /= U32 (Capacity)
-        or else Header.Element_Size /= U32 (Element_Size)
-        or else Header.Alignment /= U32 (Element_Alignment)
+        or else Header.Element_Size /= U32 (Element.Size)
+        or else Header.Alignment /= U32 (Element.Alignment)
         or else Header.Auxiliary /= Interfaces.Unsigned_32 (Expected_Payload)
         or else Header.Word_1 /= Interfaces.Unsigned_64 (Expected_Stride)
         or else Core.Extent /= Expected_Extent

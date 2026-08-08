@@ -1,10 +1,12 @@
-with Ada.Streams;
 with Flyology.Data_Structures.Arenas;
+with Flyology.Data_Structures.Storage_Types.Elements;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
 private with System;
 
---  Provides growable vectors of fixed-size byte representations. The vector
+use type Interfaces.Unsigned_64;
+
+--  Provides growable vectors of immutable fixed-layout elements. The vector
 --  header remains at one relocatable region offset while payload storage is a
 --  generation-stamped arena allocation. Growth allocates and copies before
 --  publishing the replacement handle. Operations are serialized across
@@ -13,16 +15,22 @@ private with System;
 --  Callers must exclude lifecycle operations and local View detachment from
 --  ordinary use of that same View, and must keep the supplied arena attached.
 --  A vector and its arena may be mapped at different native addresses.
+--  @formal Element Immutable element adapter bound once for this vector type
+generic
+   with package Element is new
+     Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
 
    --  Eight-byte magic stored in every dynamic-vector header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_4456_4543_3031#;
 
    --  Schema identifier for the arena-backed vector layout and growth policy.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4456_4543_0001#;
+   Schema : constant Interfaces.Unsigned_64 :=
+     16#0001_4456_4543_0002# xor Element.Signature xor
+     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelopes and tooling.
    Identity : constant Layout_Identity :=
@@ -44,24 +52,21 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Location Nonzero eight-byte-aligned vector-header offset
    --  @param Arena Attached arena used for all future payload allocations
    --  @param Initial_Capacity First element capacity requested on growth
-   --  @param Element_Size Bytes in every explicit element representation
    procedure Initialize
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Element_Size     : Positive);
+      Initial_Capacity : Positive);
 
    --  Initialize allocation-certified virgin bytes or attach to a compatible
-   --  ready vector. Initial capacity, element size, and arena instance
+   --  ready vector. Initial capacity, element contract, and arena instance
    --  identity must exactly match an existing header.
    --  @param Item Attached view or detached view during another initialization
    --  @param Region Region containing the fixed vector header
    --  @param Location Stored vector-header offset
    --  @param Arena Expected attached arena instance
    --  @param Initial_Capacity Expected first-growth capacity
-   --  @param Element_Size Expected fixed element bytes
    --  @param Result Creation, attachment, or in-progress outcome
    procedure Create_Or_Attach
      (Item             : out View;
@@ -69,7 +74,6 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
       Location         : Region_Offset;
       Arena            : Arenas.View;
       Initial_Capacity : Positive;
-      Element_Size     : Positive;
       Result           : out Open_Result);
 
    --  Attach to a quiescent vector and validate its header plus every current
@@ -79,7 +83,6 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Location Stored vector-header offset
    --  @param Arena Expected attached arena instance and incarnation
    --  @param Initial_Capacity Expected first-growth capacity
-   --  @param Element_Size Expected element representation size
    --  @exception Layout_Error Configuration or mutable state is incompatible
    --  @exception Busy_Error The vector guard is active or abandoned
    procedure Attach
@@ -87,8 +90,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Element_Size     : Positive);
+      Initial_Capacity : Positive);
 
    --  Detach Item without modifying its header or arena allocations.
    --  @param Item Local view to detach
@@ -124,47 +126,46 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  Append one element, growing through Arena when required.
    --  @param Item Internally synchronized vector view
    --  @param Arena Matching attached arena view
-   --  @param Data Source whose length must equal Element_Size
+   --  @param Data Application element value
    --  @param Result Completion, arena exhaustion, or arena contention
    --  @exception Busy_Error Another caller owns the vector guard
    procedure Try_Append
      (Item   : in out View;
       Arena  : in out Arenas.View;
-      Data   : Ada.Streams.Stream_Element_Array;
+      Data   : Element.Source;
       Result : out Growth_Result);
 
-   --  Copy the one-based initialized element at Index into Data.
+   --  Observe the one-based initialized element at Index.
    --  @param Item Internally synchronized vector view
    --  @param Arena Matching attached arena view
    --  @param Index One-based initialized element position
-   --  @param Data Destination whose length must equal Element_Size
-   procedure Read
+   --  @return Bound immutable observation
+   function Read
      (Item  : View;
       Arena : Arenas.View;
-      Index : Positive;
-      Data  : out Ada.Streams.Stream_Element_Array);
+      Index : Positive) return Element.Observed;
 
    --  Replace the one-based initialized element at Index.
    --  @param Item Internally synchronized vector view
    --  @param Arena Matching attached arena view
    --  @param Index One-based initialized element position
-   --  @param Data Source whose length must equal Element_Size
+   --  @param Data Application element value
    procedure Replace
      (Item  : in out View;
       Arena : Arenas.View;
       Index : Positive;
-      Data  : Ada.Streams.Stream_Element_Array);
+      Data  : Element.Source);
 
    --  Copy and remove the last element. Empty vectors return Popped false and
    --  do not assign Data or release their retained allocation.
    --  @param Item Internally synchronized vector view
    --  @param Arena Matching attached arena view
-   --  @param Data Destination whose length must equal Element_Size
+   --  @param Data Observation assigned only when Popped is true
    --  @param Popped True only when an element was removed
    procedure Try_Pop
      (Item   : in out View;
       Arena  : Arenas.View;
-      Data   : out Ada.Streams.Stream_Element_Array;
+      Data   : out Element.Observed;
       Popped : out Boolean);
 
    --  Set Length to zero without releasing current payload capacity.
@@ -189,6 +190,7 @@ private
       Retired_Address  : System.Address := System.Null_Address;
       Initial_Value    : Interfaces.Unsigned_32 := 0;
       Element_Value    : Interfaces.Unsigned_32 := 0;
+      Stride_Value     : Byte_Count := 0;
       Arena_ID_Value   : Interfaces.Unsigned_64 := 0;
       Arena_Epoch_Value : Interfaces.Unsigned_32 := 0;
    end record;

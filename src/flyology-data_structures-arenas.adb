@@ -756,7 +756,8 @@ package body Flyology.Data_Structures.Arenas is
      (Item        : View;
       Description : Block_Description;
       Offset      : Byte_Count;
-      Extent      : Byte_Count) return System.Address
+      Extent      : Byte_Count;
+      Alignment   : Byte_Count := 1) return System.Address
    is
       Relative : Byte_Count;
    begin
@@ -770,8 +771,38 @@ package body Flyology.Data_Structures.Arenas is
       end if;
       Relative := Layouts.Checked_Add
         (Item.Data_Offset, Layouts.Checked_Add (Description.Offset, Offset));
-      return Layouts.Address_At (Item.Core, Relative, Extent, 1);
+      return Layouts.Address_At
+        (Item.Core, Relative, Extent, Alignment);
    end Payload_Address;
+
+   function Bind_Allocation
+     (Item      : View;
+      Value     : Allocation_Handle;
+      Offset    : Byte_Count;
+      Extent    : Byte_Count;
+      Alignment : Byte_Count;
+      Signature : Interfaces.Unsigned_64;
+      Version   : Interfaces.Unsigned_32;
+      Writable  : Boolean) return Immutable_Storage_View
+   is
+      Description : constant Block_Description :=
+        Validate_Handle (Item, Value);
+   begin
+      if Signature = 0
+        or else Version = 0
+        or else Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+      then
+         raise Constraint_Error with
+           "invalid immutable arena binding contract";
+      end if;
+      return
+        (Base      => Payload_Address
+           (Item, Description, Offset, Extent, Alignment),
+         Extent    => Extent,
+         Signature => Signature,
+         Version   => Version,
+         Writable  => Writable);
+   end Bind_Allocation;
 
    procedure Read
      (Item   : View;

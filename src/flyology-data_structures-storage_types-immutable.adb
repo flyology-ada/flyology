@@ -8,6 +8,7 @@ package body Flyology.Data_Structures.Storage_Types.Immutable is
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Addressing.Integer_Address;
    use type System.Address;
 
    procedure Check_Contract (Storage : Immutable_Storage_View) is
@@ -19,6 +20,8 @@ package body Flyology.Data_Structures.Storage_Types.Immutable is
         or else Storage.Extent /= Byte_Count (Byte_Size)
         or else Storage.Signature /= Type_Signature
         or else Storage.Version /= Layout_Version
+        or else Addressing.To_Integer (Storage.Base) mod
+          Addressing.Integer_Address (Required_Alignment) /= 0
       then
          raise Layout_Error with "immutable element storage contract mismatch";
       end if;
@@ -29,7 +32,6 @@ package body Flyology.Data_Structures.Storage_Types.Immutable is
      (Base : System.Address;
       Offset, Extent, Alignment : Natural) return System.Address
    is
-      use type Addressing.Integer_Address;
       Address : Addressing.Integer_Address;
    begin
       if Base = System.Null_Address
@@ -183,6 +185,26 @@ package body Flyology.Data_Structures.Storage_Types.Immutable is
         (Target.Base, Item'Address, Interfaces.C.size_t (Byte_Size));
    end Copy_To;
 
+   procedure Assign (Item : in out Builder; Data : Value) is
+   begin
+      Require (Item);
+      Bytes.Copy
+        (Item.Base, Data'Address, Interfaces.C.size_t (Byte_Size));
+   end Assign;
+
+   procedure Copy
+     (Source : Immutable_Storage_View;
+      Target : Immutable_Storage_View) is
+   begin
+      Check_Contract (Source);
+      Check_Contract (Target);
+      if not Target.Writable then
+         raise Program_Error with "immutable element target is read-only";
+      end if;
+      Bytes.Copy
+        (Target.Base, Source.Base, Interfaces.C.size_t (Byte_Size));
+   end Copy;
+
    function Copy_From (Source : Immutable_Storage_View) return Value is
       Result : Value := (others => 0);
    begin
@@ -210,5 +232,43 @@ package body Flyology.Data_Structures.Storage_Types.Immutable is
       Item.Base := Target.Base;
       Item.Active := True;
    end Bind;
+
+   function Hash (Item : Value) return Interfaces.Unsigned_64 is
+      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+   begin
+      for Byte of Item loop
+         Result := (Result xor Interfaces.Unsigned_64 (Byte)) *
+           16#0000_0100_0000_01B3#;
+      end loop;
+      return Result;
+   end Hash;
+
+   function Hash (Item : Const_Ref) return Interfaces.Unsigned_64 is
+      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+   begin
+      Require (Item);
+      for Offset in Natural range 0 .. Byte_Size - 1 loop
+         Result := (Result xor Interfaces.Unsigned_64
+           (Bytes.Read_U8 (Field_Address (Item.Base, Offset, 1, 1)))) *
+             16#0000_0100_0000_01B3#;
+      end loop;
+      return Result;
+   end Hash;
+
+   function Equivalent (Left : Value; Right : Const_Ref) return Boolean is
+   begin
+      Require (Right);
+      return Bytes.Equal
+        (Left'Address, Right.Base, Interfaces.C.size_t (Byte_Size));
+   end Equivalent;
+
+   function Equivalent
+     (Left : Const_Ref; Right : Const_Ref) return Boolean is
+   begin
+      Require (Left);
+      Require (Right);
+      return Bytes.Equal
+        (Left.Base, Right.Base, Interfaces.C.size_t (Byte_Size));
+   end Equivalent;
 
 end Flyology.Data_Structures.Storage_Types.Immutable;

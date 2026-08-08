@@ -17,8 +17,10 @@ package body Flyology.Data_Structures.Storage_Types.Unsigned_64s is
      (To_Unsigned_64 (Item));
 
    procedure Set
-     (Item : in out Builder; Value : Interfaces.Unsigned_64) is
+     (Item : in out Representation.Builder;
+      Value : Interfaces.Unsigned_64) is
    begin
       Representation.Store_U64 (Item, 0, Value);
    end Set;
+
 end Flyology.Data_Structures.Storage_Types.Unsigned_64s;

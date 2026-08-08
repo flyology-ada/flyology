@@ -235,6 +235,29 @@ package Flyology.Data_Structures.Arenas with Preelaborate is
       Item   : View;
       Value  : Allocation_Handle);
 
+   --  Bind one checked allocation slice for an immutable element adapter.
+   --  This hierarchy-internal operation returns no inspectable native address;
+   --  release of Value must remain excluded for the binding's complete use.
+   --  @param Item Attached arena view
+   --  @param Value Live allocation handle
+   --  @param Offset Byte offset within the allocation
+   --  @param Extent Exact immutable representation bytes
+   --  @param Alignment Required power-of-two native alignment
+   --  @param Signature Stable immutable representation signature
+   --  @param Version Immutable representation layout version
+   --  @param Writable Whether an unpublished builder may bind the slice
+   --  @return Opaque checked immutable-storage binding
+   --  @exclude
+   function Bind_Allocation
+     (Item      : View;
+      Value     : Allocation_Handle;
+      Offset    : Byte_Count;
+      Extent    : Byte_Count;
+      Alignment : Byte_Count;
+      Signature : Interfaces.Unsigned_64;
+      Version   : Interfaces.Unsigned_32;
+      Writable  : Boolean) return Immutable_Storage_View;
+
    --  Copy a checked allocation slice into Data. Release of Value must not
    --  race with this operation.
    --  @param Item Attached arena view

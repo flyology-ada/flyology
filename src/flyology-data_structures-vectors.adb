@@ -381,9 +381,10 @@ package body Flyology.Data_Structures.Vectors is
 
    procedure Try_Append
      (Item     : in out View;
-      Data     : Element.Value;
+      Data     : Element.Source;
       Appended : out Boolean)
    is
+      Stored  : constant Element.Value := Element.Create (Data);
       Current : Interfaces.Unsigned_64;
       Mutated : Boolean := False;
    begin
@@ -394,7 +395,7 @@ package body Flyology.Data_Structures.Vectors is
             Appended := False;
          else
             Mutated := True;
-            Element.Copy_To (Data, Binding (Item, Current, True));
+            Element.Copy_To (Stored, Binding (Item, Current, True));
             Bytes.Write_U64 (Item.Length_Address, Current + 1);
             Appended := True;
          end if;
@@ -408,10 +409,11 @@ package body Flyology.Data_Structures.Vectors is
 
    procedure Try_Append
      (Item     : in out View;
-      Data     : Element.Value;
+      Data     : Element.Source;
       Timeout  : Wait_Timeout;
       Appended : out Boolean)
    is
+      Stored  : constant Element.Value := Element.Create (Data);
       Current : Interfaces.Unsigned_64;
       Mutated : Boolean := False;
    begin
@@ -422,7 +424,7 @@ package body Flyology.Data_Structures.Vectors is
             Appended := False;
          else
             Mutated := True;
-            Element.Copy_To (Data, Binding (Item, Current, True));
+            Element.Copy_To (Stored, Binding (Item, Current, True));
             Bytes.Write_U64 (Item.Length_Address, Current + 1);
             Appended := True;
          end if;
@@ -436,7 +438,7 @@ package body Flyology.Data_Structures.Vectors is
 
    procedure Try_Emplace
      (Item        : in out View;
-      Constructor : Construct_Action;
+      Data        : Element.Source;
       Appended    : out Boolean)
    is
       Current : Interfaces.Unsigned_64;
@@ -450,7 +452,7 @@ package body Flyology.Data_Structures.Vectors is
             Appended := False;
          else
             Element.Bind (Slot, Binding (Item, Current, True));
-            Constructor (Slot);
+            Element.Construct (Slot, Data);
             Mutated := True;
             Bytes.Write_U64 (Item.Length_Address, Current + 1);
             Appended := True;
@@ -471,12 +473,12 @@ package body Flyology.Data_Structures.Vectors is
    end Check_Index_Unlocked;
    pragma Inline_Always (Check_Index_Unlocked);
 
-   procedure Read
-     (Item    : View;
-      Index   : Positive;
-      Process : Read_Action)
+   function Read
+     (Item  : View;
+      Index : Positive) return Element.Observed
    is
       Reference : Element.Const_Ref;
+      Result : Element.Observed;
    begin
       Acquire (Item);
       begin
@@ -484,16 +486,18 @@ package body Flyology.Data_Structures.Vectors is
          Element.Bind
            (Reference,
             Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
-         Process (Reference);
+         Result := Element.Observe (Reference);
       exception
          when others =>
             Release (Item);
             raise;
       end;
       Release (Item);
+      return Result;
    end Read;
 
-   function Read (Item : View; Index : Positive) return Element.Value is
+   function Read_Value
+     (Item : View; Index : Positive) return Element.Value is
       Result : Element.Value;
    begin
       Acquire (Item);
@@ -508,33 +512,15 @@ package body Flyology.Data_Structures.Vectors is
       end;
       Release (Item);
       return Result;
-   end Read;
+   end Read_Value;
 
-   procedure Visit (Item : View; Index : Positive) is
-      Reference : Element.Const_Ref;
-   begin
-      Acquire (Item);
-      begin
-         Check_Index_Unlocked (Item, Index);
-         Element.Bind
-           (Reference,
-            Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
-         Process (Reference);
-      exception
-         when others =>
-            Release (Item);
-            raise;
-      end;
-      Release (Item);
-   end Visit;
-
-   procedure Read
+   function Read
      (Item    : View;
       Index   : Positive;
-      Timeout : Wait_Timeout;
-      Process : Read_Action)
+      Timeout : Wait_Timeout) return Element.Observed
    is
       Reference : Element.Const_Ref;
+      Result : Element.Observed;
    begin
       Acquire (Item, Timeout);
       begin
@@ -542,20 +528,22 @@ package body Flyology.Data_Structures.Vectors is
          Element.Bind
            (Reference,
             Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
-         Process (Reference);
+         Result := Element.Observe (Reference);
       exception
          when others =>
             Release (Item);
             raise;
       end;
       Release (Item);
+      return Result;
    end Read;
 
    procedure Replace
-     (Item  : in out View;
+      (Item  : in out View;
       Index : Positive;
-      Data  : Element.Value)
+      Data  : Element.Source)
    is
+      Stored : constant Element.Value := Element.Create (Data);
       Mutated : Boolean := False;
    begin
       Acquire (Item);
@@ -563,7 +551,7 @@ package body Flyology.Data_Structures.Vectors is
          Check_Index_Unlocked (Item, Index);
          Mutated := True;
          Element.Copy_To
-           (Data, Binding
+           (Stored, Binding
               (Item, Interfaces.Unsigned_64 (Index - 1), True));
       exception
          when others =>
@@ -576,9 +564,10 @@ package body Flyology.Data_Structures.Vectors is
    procedure Replace
      (Item    : in out View;
       Index   : Positive;
-      Data    : Element.Value;
+      Data    : Element.Source;
       Timeout : Wait_Timeout)
    is
+      Stored : constant Element.Value := Element.Create (Data);
       Mutated : Boolean := False;
    begin
       Acquire (Item, Timeout);
@@ -586,7 +575,7 @@ package body Flyology.Data_Structures.Vectors is
          Check_Index_Unlocked (Item, Index);
          Mutated := True;
          Element.Copy_To
-           (Data, Binding
+           (Stored, Binding
               (Item, Interfaces.Unsigned_64 (Index - 1), True));
       exception
          when others =>
@@ -598,7 +587,7 @@ package body Flyology.Data_Structures.Vectors is
 
    procedure Try_Pop
      (Item    : in out View;
-      Process : Read_Action;
+      Data    : out Element.Observed;
       Popped  : out Boolean)
    is
       Current : Interfaces.Unsigned_64;
@@ -612,7 +601,7 @@ package body Flyology.Data_Structures.Vectors is
          if Current /= 0 then
             Element.Bind
               (Reference, Binding (Item, Current - 1, False));
-            Process (Reference);
+            Data := Element.Observe (Reference);
             Mutated := True;
             Bytes.Write_U64 (Item.Length_Address, Current - 1);
             Popped := True;

@@ -35,11 +35,12 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    type Value is private;
 
    --  Read-only process-local reference to one published stored value. A
-   --  reference is valid only during the container callback that supplied it.
+   --  reference is valid only during the bound observer invocation that
+   --  received it.
    type Const_Ref is limited private;
 
    --  Mutable process-local reference to an unpublished container slot. A
-   --  builder is valid only during the construction callback that supplied it.
+   --  builder is valid only during the container operation that bound it.
    type Builder is limited private;
 
    --  Local builder for constructing an independent immutable Value.
@@ -135,6 +136,21 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    --  @exclude
    procedure Copy_To (Item : Value; Target : Immutable_Storage_View);
 
+   --  Assign an independent immutable value through an unpublished builder.
+   --  @param Item Active unpublished builder
+   --  @param Data Independent immutable representation
+   --  @exclude
+   procedure Assign (Item : in out Builder; Data : Value);
+   pragma Inline_Always (Assign);
+
+   --  Copy one validated immutable storage binding to unpublished storage.
+   --  @param Source Validated published element storage
+   --  @param Target Validated unpublished element storage
+   --  @exclude
+   procedure Copy
+     (Source : Immutable_Storage_View;
+      Target : Immutable_Storage_View);
+
    --  Copy a validated published storage binding into an independent value.
    --  @param Source Validated published element storage
    --  @return Independent immutable value
@@ -154,6 +170,33 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    --  @exclude
    procedure Bind
      (Item : out Builder; Target : Immutable_Storage_View);
+
+   --  Compute the stable FNV-1a hash of an independent representation.
+   --  @param Item Immutable bytes to hash
+   --  @return 64-bit representation hash
+   --  @exclude
+   function Hash (Item : Value) return Interfaces.Unsigned_64;
+
+   --  Compute the stable FNV-1a hash of published bytes in place.
+   --  @param Item Active read-only reference
+   --  @return 64-bit representation hash
+   --  @exclude
+   function Hash (Item : Const_Ref) return Interfaces.Unsigned_64;
+
+   --  Compare an independent representation with published bytes.
+   --  @param Left Independent immutable bytes
+   --  @param Right Active published reference
+   --  @return True when every representation byte matches
+   --  @exclude
+   function Equivalent (Left : Value; Right : Const_Ref) return Boolean;
+
+   --  Compare two published representations in place.
+   --  @param Left First active published reference
+   --  @param Right Second active published reference
+   --  @return True when every representation byte matches
+   --  @exclude
+   function Equivalent
+     (Left : Const_Ref; Right : Const_Ref) return Boolean;
 
 private
    subtype Byte_Index is Natural range 0 .. Byte_Size - 1;

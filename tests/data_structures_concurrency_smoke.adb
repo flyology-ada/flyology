@@ -24,17 +24,25 @@ procedure Data_Structures_Concurrency_Smoke is
    package DS renames Flyology.Data_Structures;
    package Byte_Strings renames DS.Byte_Strings;
    package Arenas renames DS.Arenas;
-   package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
-   package Dynamic_Vectors renames DS.Dynamic.Vectors;
-   package Hash_Maps renames DS.Hash_Maps;
    package Handles renames DS.Handles;
    package Regions renames DS.Regions;
-   package SPSC renames DS.Rings.SPSC;
-   package MPMC renames DS.Rings.MPMC;
-   package Slabs renames DS.Slab_Pools;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package SPSC is new DS.Rings.SPSC
+     (Element => U64_Elements.Element);
+   package MPMC is new DS.Rings.MPMC
+     (Element => U64_Elements.Element);
+   package Slabs is new DS.Slab_Pools
+     (Element => U64_Elements.Element);
    package Vectors is new DS.Vectors
-     (Element => U64_Elements.Representation);
+     (Element => U64_Elements.Element);
+   package Dynamic_Vectors is new DS.Dynamic.Vectors
+     (Element => U64_Elements.Element);
+   package Dynamic_Maps is new DS.Dynamic.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => U64_Elements.Element);
+   package Hash_Maps is new DS.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => U64_Elements.Element);
    package C renames Interfaces.C;
 
    use type C.int;
@@ -276,7 +284,7 @@ procedure Data_Structures_Concurrency_Smoke is
          for Value in Interfaces.Unsigned_64 range
            1 .. Interfaces.Unsigned_64 (SPSC_Iterations)
          loop
-            SPSC.Push (Producer_View, Encode (Value), 5.0);
+            SPSC.Push (Producer_View, Value, 5.0);
          end loop;
          Finished.Done (True);
       exception
@@ -284,14 +292,14 @@ procedure Data_Structures_Concurrency_Smoke is
       end Producer;
 
       task body Consumer is
-         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Data : Interfaces.Unsigned_64;
       begin
          accept Start;
          for Expected in Interfaces.Unsigned_64 range
            1 .. Interfaces.Unsigned_64 (SPSC_Iterations)
          loop
             SPSC.Pop (Consumer_View, Data, 5.0);
-            if Decode (Data) /= Expected then
+            if Data /= Expected then
                raise Program_Error with "SPSC sequence mismatch";
             end if;
          end loop;
@@ -301,9 +309,9 @@ procedure Data_Structures_Concurrency_Smoke is
       end Consumer;
    begin
       SPSC.Initialize
-        (Producer_View, Region_A, SPSC_Location, 1_024, 8);
+        (Producer_View, Region_A, SPSC_Location, 1_024);
       SPSC.Attach
-        (Consumer_View, Region_B, SPSC_Location, 1_024, 8);
+        (Consumer_View, Region_B, SPSC_Location, 1_024);
       Producer.Start;
       Consumer.Start;
       select
@@ -316,7 +324,7 @@ procedure Data_Structures_Concurrency_Smoke is
       end select;
       Assert (Finished.Passed, "SPSC native-task sequence test failed");
       declare
-         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Data : Interfaces.Unsigned_64;
          Popped : Boolean;
       begin
          SPSC.Try_Pop (Consumer_View, Data, Popped);
@@ -401,7 +409,7 @@ procedure Data_Structures_Concurrency_Smoke is
          for Sequence in 1 .. MPMC_Per_Producer loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * MPMC_Per_Producer + Sequence);
-            MPMC.Push (Ring.all, Encode (Value), 5.0);
+            MPMC.Push (Ring.all, Value, 5.0);
          end loop;
          Results.Done (True);
       exception
@@ -409,12 +417,12 @@ procedure Data_Structures_Concurrency_Smoke is
       end Producer_Task;
 
       task body Consumer_Task is
-         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Data : Interfaces.Unsigned_64;
       begin
          loop
             begin
                MPMC.Pop (Ring.all, Data, 0.010);
-               Results.Observe (Decode (Data));
+               Results.Observe (Data);
             exception
                when DS.Timeout_Error =>
                   exit when Results.Complete;
@@ -433,14 +441,14 @@ procedure Data_Structures_Concurrency_Smoke is
       Consumers : Consumer_Array (1 .. Consumer_Count);
    begin
       MPMC.Initialize
-        (Producer_Views (1), Region_A, MPMC_Location, 1_024, 8);
+        (Producer_Views (1), Region_A, MPMC_Location, 1_024);
       for Index in 2 .. Producer_Count loop
          MPMC.Attach
-           (Producer_Views (Index), Region_A, MPMC_Location, 1_024, 8);
+           (Producer_Views (Index), Region_A, MPMC_Location, 1_024);
       end loop;
       for Index in Consumer_Views'Range loop
          MPMC.Attach
-           (Consumer_Views (Index), Region_B, MPMC_Location, 1_024, 8);
+           (Consumer_Views (Index), Region_B, MPMC_Location, 1_024);
       end loop;
       for Index in Producers'Range loop
          Producers (Index) := new Producer_Task
@@ -490,19 +498,18 @@ procedure Data_Structures_Concurrency_Smoke is
       task body Worker_Task is
          Handle : Handles.Handle;
          Outcome : Slabs.Allocation_Result;
-         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Data : Interfaces.Unsigned_64;
          Value : Interfaces.Unsigned_64;
       begin
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            Slabs.Try_Allocate (Item.all, 5.0, Handle, Outcome);
+            Slabs.Try_Allocate (Item.all, Value, 5.0, Handle, Outcome);
             if Outcome /= Slabs.Allocated then
                raise Program_Error with "timed slab allocation exhausted";
             end if;
-            Slabs.Write (Item.all, Handle, Encode (Value), 5.0);
             Slabs.Read (Item.all, Handle, Data, 5.0);
-            if Decode (Data) /= Value then
+            if Data /= Value then
                raise Program_Error with "concurrent slab payload mismatch";
             end if;
             Slabs.Release (Item.all, Handle, 5.0);
@@ -524,14 +531,14 @@ procedure Data_Structures_Concurrency_Smoke is
       Workers : Worker_Array (1 .. Worker_Count);
    begin
       Slabs.Initialize
-        (Views (1), Region_A, Slab_Location, Capacity, 8, 8);
+        (Views (1), Region_A, Slab_Location, Capacity);
       for Index in 2 .. Worker_Count loop
          if Index mod 2 = 0 then
             Slabs.Attach
-              (Views (Index), Region_B, Slab_Location, Capacity, 8, 8);
+              (Views (Index), Region_B, Slab_Location, Capacity);
          else
             Slabs.Attach
-              (Views (Index), Region_A, Slab_Location, Capacity, 8, 8);
+              (Views (Index), Region_A, Slab_Location, Capacity);
          end if;
       end loop;
       for Index in Workers'Range loop
@@ -578,7 +585,7 @@ procedure Data_Structures_Concurrency_Smoke is
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
             Vectors.Try_Append
-              (Vector.all, U64_Elements.Create (Value), 5.0, Appended);
+              (Vector.all, Value, 5.0, Appended);
             if not Appended then
                raise Program_Error with "synchronized vector append failed";
             end if;
@@ -623,7 +630,7 @@ procedure Data_Structures_Concurrency_Smoke is
       Assert (Vectors.Length (Views (1)) = Total,
               "internally synchronized vector lost elements");
       for Index in 1 .. Total loop
-         Value := U64_Elements.Value_Of (Vectors.Read (Views (1), Index));
+         Value := Vectors.Read (Views (1), Index);
          Assert
            (Value in 1 .. Interfaces.Unsigned_64 (Total)
             and then not Seen (Positive (Value)),
@@ -749,7 +756,7 @@ procedure Data_Structures_Concurrency_Smoke is
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
             Hash_Maps.Put
-              (Item.all, Encode (Value), Encode (Value xor 16#A5A5#),
+              (Item.all, Value, Value xor 16#A5A5#,
                5.0, Outcome);
             if Outcome /= Hash_Maps.Inserted then
                raise Program_Error with "internally guarded map insert failed";
@@ -763,18 +770,18 @@ procedure Data_Structures_Concurrency_Smoke is
       type Worker_Access is access Worker_Task;
       type Worker_Array is array (Positive range <>) of Worker_Access;
       Workers : Worker_Array (1 .. Worker_Count);
-      Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Data : Interfaces.Unsigned_64;
       Found : Boolean;
    begin
       Hash_Maps.Initialize
-        (Views (1), Region_A, Map_Location, Capacity, 8, 8);
+        (Views (1), Region_A, Map_Location, Capacity);
       for Index in 2 .. Worker_Count loop
          if Index mod 2 = 0 then
             Hash_Maps.Attach
-              (Views (Index), Region_B, Map_Location, Capacity, 8, 8);
+              (Views (Index), Region_B, Map_Location, Capacity);
          else
             Hash_Maps.Attach
-              (Views (Index), Region_A, Map_Location, Capacity, 8, 8);
+              (Views (Index), Region_A, Map_Location, Capacity);
          end if;
       end loop;
       for Index in Workers'Range loop
@@ -798,9 +805,9 @@ procedure Data_Structures_Concurrency_Smoke is
         1 .. Interfaces.Unsigned_64 (Total)
       loop
          Hash_Maps.Get
-           (Views (2), Encode (Value), Data, Found);
+           (Views (2), Value, Data, Found);
          Assert
-           (Found and then Decode (Data) = (Value xor 16#A5A5#),
+           (Found and then Data = (Value xor 16#A5A5#),
             "internally synchronized hash map returned a wrong value");
       end loop;
       Hash_Maps.Destroy (Views (1));
@@ -842,7 +849,7 @@ procedure Data_Structures_Concurrency_Smoke is
                loop
                   begin
                      Dynamic_Vectors.Try_Append
-                       (Item.all, Arena.all, Encode (Value), Result);
+                       (Item.all, Arena.all, Value, Result);
                      exit when Result = DS.Dynamic.Completed;
                      if Result = DS.Dynamic.Arena_Exhausted then
                         raise Program_Error with
@@ -863,17 +870,16 @@ procedure Data_Structures_Concurrency_Smoke is
          type Worker_Array is array (Positive range <>) of Worker_Access;
          Workers : Worker_Array (1 .. Worker_Count);
          Seen : Seen_Array (1 .. Total) := (others => False);
-         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
          Value : Interfaces.Unsigned_64;
       begin
          Dynamic_Vectors.Initialize
            (Views (1), Region_A, Dynamic_Vector_Location,
-            Arena_Views (1), 2, 8);
+            Arena_Views (1), 2);
          for Index in 2 .. Worker_Count loop
             Dynamic_Vectors.Attach
               (Views (Index),
                (if Index mod 2 = 0 then Region_B else Region_A),
-               Dynamic_Vector_Location, Arena_Views (Index), 2, 8);
+               Dynamic_Vector_Location, Arena_Views (Index), 2);
          end loop;
          for Index in Workers'Range loop
             Workers (Index) := new Worker_Task
@@ -894,9 +900,8 @@ procedure Data_Structures_Concurrency_Smoke is
             and then Dynamic_Vectors.Length (Views (1)) = Total,
             "dynamic-vector concurrent append lost elements");
          for Index in 1 .. Total loop
-            Dynamic_Vectors.Read
-              (Views (1), Arena_Views (1), Index, Data);
-            Value := Decode (Data);
+            Value := Dynamic_Vectors.Read
+              (Views (1), Arena_Views (1), Index);
             Assert
               (Value in 1 .. Interfaces.Unsigned_64 (Total)
                and then not Seen (Positive (Value)),
@@ -934,8 +939,7 @@ procedure Data_Structures_Concurrency_Smoke is
                loop
                   begin
                      Dynamic_Maps.Put
-                       (Item.all, Arena.all, Encode (Value),
-                        Encode (Value * 3), Result);
+                       (Item.all, Arena.all, Value, Value * 3, Result);
                      exit when Result = Dynamic_Maps.Put_Inserted;
                      if Result = Dynamic_Maps.Put_Replaced then
                         raise Program_Error with
@@ -958,17 +962,17 @@ procedure Data_Structures_Concurrency_Smoke is
          type Worker_Access is access Worker_Task;
          type Worker_Array is array (Positive range <>) of Worker_Access;
          Workers : Worker_Array (1 .. Worker_Count);
-         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Data : Interfaces.Unsigned_64;
          Found : Boolean;
       begin
          Dynamic_Maps.Initialize
            (Views (1), Region_A, Dynamic_Map_Location,
-            Arena_Views (1), 2, 8, 8);
+            Arena_Views (1), 2);
          for Index in 2 .. Worker_Count loop
             Dynamic_Maps.Attach
               (Views (Index),
                (if Index mod 2 = 0 then Region_B else Region_A),
-               Dynamic_Map_Location, Arena_Views (Index), 2, 8, 8);
+               Dynamic_Map_Location, Arena_Views (Index), 2);
          end loop;
          for Index in Workers'Range loop
             Workers (Index) := new Worker_Task
@@ -991,9 +995,9 @@ procedure Data_Structures_Concurrency_Smoke is
            1 .. Interfaces.Unsigned_64 (Total)
          loop
             Dynamic_Maps.Get
-              (Views (1), Arena_Views (1), Encode (Value), Data, Found);
+              (Views (1), Arena_Views (1), Value, Data, Found);
             Assert
-              (Found and then Decode (Data) = Value * 3,
+              (Found and then Data = Value * 3,
                "dynamic-map concurrent insert corrupted a value");
          end loop;
          Dynamic_Maps.Destroy (Views (1), Arena_Views (1));

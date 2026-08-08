@@ -752,12 +752,25 @@ object may exist, the leaf's ordinary attachment-quiescence rule also applies.
 
 Value-bearing containers do not accept arbitrary Ada private types, because a
 private type may hide an access value, task, controlled component, or compiler
-metadata. `Vectors` is generic over an instance of `Storage_Types.Immutable`:
-the instance owns a definite byte-array `Value`, supplies scoped zero-copy
-`Const_Ref` and unpublished `Builder` types, and exports a stable 64-bit type
-signature plus layout version. `Storage_Types.Unsigned_64s` is the built-in
-eight-byte scalar twin. The remaining first-generation leaves retain their
-explicit byte-array APIs while the same typed contract is applied to them.
+metadata. `Storage_Types.Immutable` owns a definite byte-array `Value`, scoped
+zero-copy `Const_Ref` and unpublished `Builder` types, plus a stable 64-bit type
+signature and layout version. `Storage_Types.Elements` binds that representation
+once to application-facing `Source` and `Observed` types. `Create` and `Observe`
+are supplied once when the adapter is instantiated. Callers then pass ordinary
+source values to container operations and receive ordinary observations; they
+do not supply a codec or callback per operation. Creation produces the exact
+native-layout bytes owned by `Value`; observation reads a scoped reference to
+published bytes without first copying the representation. An adapter may also
+bind an optional direct constructor for unpublished slots; a missing hook
+safely falls back to `Create` plus one representation copy.
+
+`Vectors`, `Slab_Pools`, `Rings.SPSC`, `Rings.MPMC`, `Hash_Maps`,
+`Dynamic.Vectors`, and `Dynamic.Hash_Maps` are generic over these element
+adapters. Each leaf incorporates the element signature and layout version into
+its persisted schema and rejects an equal-sized but differently identified
+adapter on attachment. `Storage_Types.Unsigned_64s.Element` is the built-in
+eight-byte scalar adapter. `Byte_Strings` and `Dynamic.Byte_Strings` remain
+concrete byte-sequence containers rather than element collections.
 
 | Package | Stored value | Synchronization |
 | --- | --- | --- |
@@ -765,15 +778,15 @@ explicit byte-array APIs while the same typed contract is applied to them.
 | `Handles` | 32-bit slot plus 32-bit generation | Validation belongs to the receiving structure |
 | `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
 | `Arenas` | Fixed managed extent with a persisted buddy tree and generation-stamped variable-size allocations | One process-shared metadata guard; payload lifetime exclusion belongs to the handle user |
-| `Slab_Pools` | Fixed-size payload slots with generation-stamped handles | Per-slot atomic claims; immediate and timed operations |
+| `Slab_Pools` | Immutable fixed-layout elements in generation-stamped slots | Per-slot atomic claims; immediate and timed operations |
 | `Byte_Strings` | Bounded variable-length byte sequence | Shared guard; immediate and timed operations |
 | `Vectors` | Bounded vector of immutable fixed-layout elements | Shared guard; immediate and timed operations |
 | `Dynamic.Byte_Strings` | Growable byte sequence in an `Arenas` allocation | Shared string guard; immediate arena-growth outcomes |
-| `Dynamic.Vectors` | Growable vector of fixed-size byte elements in an `Arenas` allocation | Shared vector guard; immediate arena-growth outcomes |
-| `Dynamic.Hash_Maps` | Growable open-addressed table in an `Arenas` allocation | Shared map guard; immediate arena-growth outcomes |
-| `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer; immediate and timed transfer |
-| `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers; immediate and timed transfer |
-| `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Shared guard; immediate and timed operations |
+| `Dynamic.Vectors` | Growable vector of immutable fixed-layout elements in an `Arenas` allocation | Shared vector guard; immediate arena-growth outcomes |
+| `Dynamic.Hash_Maps` | Growable immutable key/value table in an `Arenas` allocation | Shared map guard; immediate arena-growth outcomes |
+| `Rings.SPSC` | Bounded immutable fixed-layout elements | One producer and one consumer; immediate and timed transfer |
+| `Rings.MPMC` | Bounded immutable fixed-layout elements with per-slot sequences | Multiple producers and consumers; immediate and timed transfer |
+| `Hash_Maps` | Immutable fixed-layout keys and values in open-addressed slots | Shared guard; immediate and timed operations |
 
 `Arenas` manages a fixed caller-owned extent; it does not resize a file or
 mapping. Its buddy tree rounds a positive request to the smallest fitting
@@ -791,12 +804,13 @@ allocates and initializes a replacement, copies or rehashes the old content,
 and then publishes its generation-stamped handle while holding the leaf guard.
 The old handle is retained in a deferred-reclamation field until arena release
 succeeds, so arena contention does not make published payload storage
-unreachable. `Initial_Capacity`, element or key/value sizes, arena instance
-identity, and arena incarnation are immutable creation parameters and must
-match on `Create_Or_Attach` and `Attach`. Current capacity and length/count are
-validated mutable state, not creation parameters. "Dynamic" therefore means
-growable within a fixed arena; exhaustion remains a reported outcome, and no
-operation grows or remaps the backing object.
+unreachable. `Initial_Capacity`, the adapter-derived element or key/value
+geometry and identity, arena instance identity, and arena incarnation are
+immutable creation parameters and must match on `Create_Or_Attach` and
+`Attach`. Current capacity and length/count are validated mutable state, not
+creation parameters. "Dynamic" therefore means growable within a fixed arena;
+exhaustion remains a reported outcome, and no operation grows or remaps the
+backing object.
 
 Termination after an arena allocation succeeds but before a dynamic leaf
 publishes its handle can leave an allocation that the leaf cannot identify.
@@ -804,7 +818,7 @@ The core does not infer ownership from a locked header. Applications requiring
 recovery for that window need an external allocation journal or exclusive
 whole-arena reinitialization after establishing quiescence.
 
-The original slab allocation, release, read, and write operations are
+The slab allocation, release, read, and replacement operations are
 nonblocking across native tasks, processes, and distinct mappings. Timed
 overloads wait only through transient claim contention; a complete scan that
 finds no free slot still reports `Exhausted`. A task or process that terminates

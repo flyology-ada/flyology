@@ -10,7 +10,6 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
    use type Arenas.Allocation_Handle;
    use type Arenas.Allocation_Result;
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
    use type Native.Storage_Offset;
    use type System.Address;
 
@@ -36,6 +35,10 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
    Locked   : constant Interfaces.Unsigned_32 := 1;
 
    function Required_Storage return Byte_Count is (Header_Extent);
+
+   function Element_Stride return Byte_Count is
+     (Layouts.Align_Up
+        (Byte_Count (Element.Size), Byte_Count (Element.Alignment)));
 
    function Field_At
      (Address : System.Address; Offset : Native.Storage_Offset)
@@ -63,14 +66,22 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
    procedure Validate_Configuration
      (Arena            : Arenas.View;
       Initial_Capacity : Positive;
-      Element_Size     : Positive;
       Metadata         : out Arenas.Metadata)
    is
       Bytes_Required : Byte_Count;
    begin
       Metadata := Arena_Metadata (Arena);
+      if Element.Signature = 0
+        or else Element.Version = 0
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+        or else Metadata.Minimum_Block_Size <
+          Interfaces.Unsigned_32 (Element.Alignment)
+      then
+         raise Constraint_Error with
+           "arena cannot satisfy the immutable vector element contract";
+      end if;
       Bytes_Required := Layouts.Checked_Multiply
-        (Byte_Count (Initial_Capacity), Byte_Count (Element_Size));
+        (Byte_Count (Initial_Capacity), Element_Stride);
       if Bytes_Required > Byte_Count (Metadata.Usable_Capacity)
       then
          raise Constraint_Error with
@@ -99,6 +110,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
         (Core, Retired_Offset, 16, 8);
       Item.Initial_Value := Initial_Capacity;
       Item.Element_Value := Element_Size;
+      Item.Stride_Value := Element_Stride;
       Item.Arena_ID_Value := Arena_ID;
       Item.Arena_Epoch_Value := Arena_Epoch;
    end Set_View;
@@ -114,6 +126,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Item.Retired_Address := System.Null_Address;
       Item.Initial_Value := 0;
       Item.Element_Value := 0;
+      Item.Stride_Value := 0;
       Item.Arena_ID_Value := 0;
       Item.Arena_Epoch_Value := 0;
    end Detach;
@@ -146,27 +159,26 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Element_Size     : Positive)
+      Initial_Capacity : Positive)
    is
       Metadata : Arenas.Metadata;
       Core : Layouts.Local_View;
    begin
       Validate_Configuration
-        (Arena, Initial_Capacity, Element_Size, Metadata);
+        (Arena, Initial_Capacity, Metadata);
       Detach (Item);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Header_Extent,
          (Capacity     => Interfaces.Unsigned_32 (Initial_Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Element_Size),
-          Alignment    => 1,
+          Element_Size => Interfaces.Unsigned_32 (Element.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Alignment),
           Auxiliary    => Unlocked,
           Word_1       => Metadata.Instance_ID,
           Word_2       => 0),
          8);
       Finish_Initialize
-        (Item, Core, Interfaces.Unsigned_32 (Initial_Capacity),
-         Interfaces.Unsigned_32 (Element_Size), Metadata.Instance_ID,
+         (Item, Core, Interfaces.Unsigned_32 (Initial_Capacity),
+         Interfaces.Unsigned_32 (Element.Size), Metadata.Instance_ID,
          Metadata.Incarnation);
    exception
       when others =>
@@ -182,7 +194,6 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Location         : Region_Offset;
       Arena            : Arenas.View;
       Initial_Capacity : Positive;
-      Element_Size     : Positive;
       Result           : out Open_Result)
    is
       Metadata : Arenas.Metadata;
@@ -190,13 +201,13 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Claim : Layouts.Initialization_Claim;
    begin
       Validate_Configuration
-        (Arena, Initial_Capacity, Element_Size, Metadata);
+        (Arena, Initial_Capacity, Metadata);
       Detach (Item);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Header_Extent,
          (Capacity     => Interfaces.Unsigned_32 (Initial_Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Element_Size),
-          Alignment    => 1,
+          Element_Size => Interfaces.Unsigned_32 (Element.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Alignment),
           Auxiliary    => Unlocked,
           Word_1       => Metadata.Instance_ID,
           Word_2       => 0),
@@ -205,12 +216,12 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
               (Item, Core, Interfaces.Unsigned_32 (Initial_Capacity),
-               Interfaces.Unsigned_32 (Element_Size), Metadata.Instance_ID,
+               Interfaces.Unsigned_32 (Element.Size), Metadata.Instance_ID,
                Metadata.Incarnation);
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
             Attach
-              (Item, Region, Location, Arena, Initial_Capacity, Element_Size);
+              (Item, Region, Location, Arena, Initial_Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -261,9 +272,9 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
               "dynamic-vector allocation handle is stale";
       end;
       Payload := Layouts.Checked_Multiply
-        (Byte_Count (Capacity), Byte_Count (Item.Element_Value));
+        (Byte_Count (Capacity), Item.Stride_Value);
       if Payload > Block
-        or else Block - Payload >= Byte_Count (Item.Element_Value)
+        or else Block - Payload >= Item.Stride_Value
       then
          raise Layout_Error with
            "dynamic-vector allocation capacity is inconsistent";
@@ -275,8 +286,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Element_Size     : Positive)
+      Initial_Capacity : Positive)
    is
       Metadata : Arenas.Metadata;
       Core     : Layouts.Local_View;
@@ -286,14 +296,14 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Current, Retired : Arenas.Allocation_Handle;
    begin
       Validate_Configuration
-        (Arena, Initial_Capacity, Element_Size, Metadata);
+        (Arena, Initial_Capacity, Metadata);
       Detach (Item);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
       Stored_Epoch := Bytes.Read_U32
         (Layouts.Address_At (Core, Arena_Epoch_Offset, 4, 4));
       if Header.Capacity /= Interfaces.Unsigned_32 (Initial_Capacity)
-        or else Header.Element_Size /= Interfaces.Unsigned_32 (Element_Size)
-        or else Header.Alignment /= 1
+        or else Header.Element_Size /= Interfaces.Unsigned_32 (Element.Size)
+        or else Header.Alignment /= Interfaces.Unsigned_32 (Element.Alignment)
         or else Header.Word_1 /= Metadata.Instance_ID
         or else Stored_Epoch /= Metadata.Incarnation
         or else Core.Extent /= Header_Extent
@@ -528,7 +538,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
          return;
       end if;
       Requested_Bytes := Layouts.Checked_Multiply
-        (Target, Byte_Count (Item.Element_Value));
+        (Target, Item.Stride_Value);
       if Requested_Bytes > Byte_Count (Positive'Last) then
          Result := Arena_Exhausted;
          return;
@@ -548,7 +558,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
 
       begin
          Block := Arenas.Block_Capacity (Arena, New_Handle);
-         New_Capacity := Block / Byte_Count (Item.Element_Value);
+         New_Capacity := Block / Item.Stride_Value;
          if New_Capacity < Byte_Count (Required)
            or else New_Capacity > Byte_Count (Natural'Last)
          then
@@ -557,7 +567,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
          end if;
          Copy_Length := Layouts.Checked_Multiply
            (Byte_Count (Stored_Length (Item)),
-            Byte_Count (Item.Element_Value));
+            Item.Stride_Value);
          if Copy_Length /= 0 then
             Arenas.Copy
               (Arena, Current, 0, New_Handle, 0, Copy_Length);
@@ -599,24 +609,26 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       end if;
    end Ensure_Capacity;
 
-   procedure Check_Element_Length
-     (Item : View; Length : Byte_Count) is
-   begin
-      if Length /= Byte_Count (Item.Element_Value) then
-         raise Constraint_Error with
-           "dynamic-vector element has the wrong length";
-      end if;
-   end Check_Element_Length;
-
    function Element_Offset
      (Item : View; Index : Interfaces.Unsigned_64) return Byte_Count is
      (Layouts.Checked_Multiply
-        (Byte_Count (Index), Byte_Count (Item.Element_Value)));
+        (Byte_Count (Index), Item.Stride_Value));
+
+   function Element_Binding
+     (Item     : View;
+      Arena    : Arenas.View;
+      Handle   : Arenas.Allocation_Handle;
+      Index    : Interfaces.Unsigned_64;
+      Writable : Boolean) return Immutable_Storage_View is
+     (Arenas.Bind_Allocation
+        (Arena, Handle, Element_Offset (Item, Index),
+         Byte_Count (Element.Size), Byte_Count (Element.Alignment),
+         Element.Signature, Element.Version, Writable));
 
    procedure Try_Append
      (Item   : in out View;
       Arena  : in out Arenas.View;
-      Data   : Ada.Streams.Stream_Element_Array;
+      Data   : Element.Source;
       Result : out Growth_Result)
    is
       Current_Length : Interfaces.Unsigned_64;
@@ -626,7 +638,6 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Element_Length (Item, Byte_Count (Data'Length));
          Current_Length := Stored_Length (Item);
          if Current_Length >= Interfaces.Unsigned_64 (Natural'Last) then
             Result := Arena_Exhausted;
@@ -635,9 +646,20 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
               (Item, Arena, Positive (Current_Length + 1), Mutated, Result);
             if Result = Completed then
                Current := Read_Handle (Item.Current_Address);
+               --  Growth has completed coherently. Creation targets an
+               --  unpublished slot, so a creator exception leaves Length
+               --  unchanged and does not poison otherwise valid state.
+               Mutated := False;
+               declare
+                  Builder : Element.Builder;
+               begin
+                  Element.Bind
+                    (Builder,
+                     Element_Binding
+                       (Item, Arena, Current, Current_Length, True));
+                  Element.Construct (Builder, Data);
+               end;
                Mutated := True;
-               Arenas.Write
-                 (Arena, Current, Element_Offset (Item, Current_Length), Data);
                Bytes.Write_U64
                  (Item.Length_Address, Current_Length + 1);
             end if;
@@ -650,42 +672,49 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Release_Guard (Item);
    end Try_Append;
 
-   procedure Read
+   function Read
      (Item  : View;
       Arena : Arenas.View;
-      Index : Positive;
-      Data  : out Ada.Streams.Stream_Element_Array)
+      Index : Positive) return Element.Observed
    is
       Current_Length : Interfaces.Unsigned_64;
       Current : Arenas.Allocation_Handle;
+      Reference : Element.Const_Ref;
    begin
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Element_Length (Item, Byte_Count (Data'Length));
          Current_Length := Stored_Length (Item);
          if Interfaces.Unsigned_64 (Index) > Current_Length then
             raise Constraint_Error with
               "dynamic-vector index is out of range";
          end if;
          Current := Read_Handle (Item.Current_Address);
-         Arenas.Read
-           (Arena, Current,
-            Element_Offset (Item, Interfaces.Unsigned_64 (Index - 1)), Data);
+         Element.Bind
+           (Reference,
+            Element_Binding
+              (Item, Arena, Current,
+               Interfaces.Unsigned_64 (Index - 1), False));
+         declare
+            Result : constant Element.Observed := Element.Observe (Reference);
+         begin
+            Release_Guard (Item);
+            return Result;
+         end;
       exception
          when others =>
             Release_Guard (Item);
             raise;
       end;
-      Release_Guard (Item);
    end Read;
 
    procedure Replace
      (Item  : in out View;
       Arena : Arenas.View;
       Index : Positive;
-      Data  : Ada.Streams.Stream_Element_Array)
+      Data  : Element.Source)
    is
+      Stored : constant Element.Value := Element.Create (Data);
       Current_Length : Interfaces.Unsigned_64;
       Current : Arenas.Allocation_Handle;
       Mutated : Boolean := False;
@@ -693,7 +722,6 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Element_Length (Item, Byte_Count (Data'Length));
          Current_Length := Stored_Length (Item);
          if Interfaces.Unsigned_64 (Index) > Current_Length then
             raise Constraint_Error with
@@ -701,9 +729,11 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
          end if;
          Current := Read_Handle (Item.Current_Address);
          Mutated := True;
-         Arenas.Write
-           (Arena, Current,
-            Element_Offset (Item, Interfaces.Unsigned_64 (Index - 1)), Data);
+         Element.Copy_To
+           (Stored,
+            Element_Binding
+              (Item, Arena, Current,
+               Interfaces.Unsigned_64 (Index - 1), True));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -715,7 +745,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
    procedure Try_Pop
      (Item   : in out View;
       Arena  : Arenas.View;
-      Data   : out Ada.Streams.Stream_Element_Array;
+      Data   : out Element.Observed;
       Popped : out Boolean)
    is
       Current_Length : Interfaces.Unsigned_64;
@@ -726,13 +756,18 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Element_Length (Item, Byte_Count (Data'Length));
          Current_Length := Stored_Length (Item);
          if Current_Length /= 0 then
             Current := Read_Handle (Item.Current_Address);
-            Arenas.Read
-              (Arena, Current,
-               Element_Offset (Item, Current_Length - 1), Data);
+            declare
+               Reference : Element.Const_Ref;
+            begin
+               Element.Bind
+                 (Reference,
+                  Element_Binding
+                    (Item, Arena, Current, Current_Length - 1, False));
+               Data := Element.Observe (Reference);
+            end;
             Mutated := True;
             Bytes.Write_U64 (Item.Length_Address, Current_Length - 1);
             Popped := True;

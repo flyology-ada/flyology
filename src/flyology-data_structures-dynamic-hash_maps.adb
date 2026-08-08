@@ -1,7 +1,6 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
-with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Dynamic.Hash_Maps is
@@ -13,7 +12,6 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    use type Arenas.Allocation_Handle;
    use type Arenas.Allocation_Result;
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
    use type Native.Storage_Offset;
    use type System.Address;
 
@@ -38,7 +36,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    Slot_State_Offset : constant Byte_Count := 0;
    Slot_Reserved_Offset : constant Byte_Count := 4;
    Hash_Offset : constant Byte_Count := 8;
-   Key_Offset : constant Byte_Count := 16;
+   Entry_Data_Offset : constant Byte_Count := 16;
 
    Empty_State : constant Interfaces.Unsigned_32 := 0;
    Occupied_State : constant Interfaces.Unsigned_32 := 1;
@@ -53,6 +51,11 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    end record;
 
    function Required_Storage return Byte_Count is (Header_Extent);
+
+   function Storage_Alignment return Byte_Count is
+     (Byte_Count'Max
+        (8, Byte_Count'Max
+           (Byte_Count (Key.Alignment), Byte_Count (Element.Alignment))));
 
    function Field_At
      (Address : System.Address; Offset : Native.Storage_Offset)
@@ -75,21 +78,23 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    end Write_Handle;
 
    procedure Slot_Geometry
-     (Key_Size, Value_Size : Positive;
-      Value_Offset, Stride : out Byte_Count) is
+     (Key_Offset, Value_Offset, Stride : out Byte_Count) is
    begin
+      Key_Offset := Layouts.Align_Up
+        (Entry_Data_Offset, Byte_Count (Key.Alignment));
       Value_Offset := Layouts.Align_Up
-        (Layouts.Checked_Add (Key_Offset, Byte_Count (Key_Size)), 8);
+        (Layouts.Checked_Add (Key_Offset, Byte_Count (Key.Size)),
+         Byte_Count (Element.Alignment));
       Stride := Layouts.Align_Up
-        (Layouts.Checked_Add (Value_Offset, Byte_Count (Value_Size)), 8);
+        (Layouts.Checked_Add (Value_Offset, Byte_Count (Element.Size)),
+         Storage_Alignment);
    end Slot_Geometry;
 
    procedure Validate_Configuration
-     (Arena            : Arenas.View;
+      (Arena            : Arenas.View;
       Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive;
       Metadata         : out Arenas.Metadata;
+      Key_Offset       : out Byte_Count;
       Value_Offset     : out Byte_Count;
       Stride           : out Byte_Count)
    is
@@ -102,7 +107,19 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
            "dynamic-map initial capacity must be a power of two at least two";
       end if;
       Metadata := Arenas.Current_Metadata (Arena);
-      Slot_Geometry (Key_Size, Value_Size, Value_Offset, Stride);
+      if Key.Signature = 0
+        or else Key.Version = 0
+        or else Element.Signature = 0
+        or else Element.Version = 0
+        or else Key.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+        or else Metadata.Minimum_Block_Size <
+          Interfaces.Unsigned_32 (Storage_Alignment)
+      then
+         raise Constraint_Error with
+           "arena cannot satisfy the immutable map element contract";
+      end if;
+      Slot_Geometry (Key_Offset, Value_Offset, Stride);
       Initial_Bytes := Layouts.Checked_Multiply
         (Byte_Count (Initial_Capacity), Stride);
       if Initial_Bytes > Byte_Count (Metadata.Usable_Capacity) then
@@ -119,6 +136,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Value_Size       : Interfaces.Unsigned_32;
       Arena_ID         : Interfaces.Unsigned_64;
       Arena_Epoch      : Interfaces.Unsigned_32;
+      Key_Offset       : Byte_Count;
       Value_Offset     : Byte_Count;
       Stride           : Byte_Count) is
    begin
@@ -138,6 +156,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Item.Value_Value := Value_Size;
       Item.Arena_ID_Value := Arena_ID;
       Item.Arena_Epoch_Value := Arena_Epoch;
+      Item.Key_Offset := Key_Offset;
       Item.Value_Offset := Value_Offset;
       Item.Stride := Stride;
    end Set_View;
@@ -156,6 +175,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Item.Value_Value := 0;
       Item.Arena_ID_Value := 0;
       Item.Arena_Epoch_Value := 0;
+      Item.Key_Offset := 0;
       Item.Value_Offset := 0;
       Item.Stride := 0;
    end Detach;
@@ -168,12 +188,13 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Value_Size       : Interfaces.Unsigned_32;
       Arena_ID         : Interfaces.Unsigned_64;
       Arena_Epoch      : Interfaces.Unsigned_32;
+      Key_Offset       : Byte_Count;
       Value_Offset     : Byte_Count;
       Stride           : Byte_Count) is
    begin
       Set_View
         (Item, Core, Initial_Capacity, Key_Size, Value_Size, Arena_ID,
-         Arena_Epoch, Value_Offset, Stride);
+         Arena_Epoch, Key_Offset, Value_Offset, Stride);
       Bytes.Write_U64 (Item.Capacity_Address, 0);
       Bytes.Write_U64 (Item.Capacity_Check_Address, Capacity_Check (0));
       Write_Handle (Item.Current_Address, Arenas.Null_Allocation);
@@ -192,32 +213,30 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive)
+      Initial_Capacity : Positive)
    is
       Metadata : Arenas.Metadata;
-      Value_Offset, Stride : Byte_Count;
+      Key_Offset, Value_Offset, Stride : Byte_Count;
       Core : Layouts.Local_View;
    begin
       Validate_Configuration
-        (Arena, Initial_Capacity, Key_Size, Value_Size, Metadata,
-         Value_Offset, Stride);
+        (Arena, Initial_Capacity, Metadata,
+         Key_Offset, Value_Offset, Stride);
       Detach (Item);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Header_Extent,
          (Capacity     => Interfaces.Unsigned_32 (Initial_Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Key_Size),
-          Alignment    => Interfaces.Unsigned_32 (Value_Size),
+          Element_Size => Interfaces.Unsigned_32 (Key.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Size),
           Auxiliary    => Unlocked,
           Word_1       => Metadata.Instance_ID,
           Word_2       => 0),
          8);
       Finish_Initialize
-        (Item, Core, Interfaces.Unsigned_32 (Initial_Capacity),
-         Interfaces.Unsigned_32 (Key_Size),
-         Interfaces.Unsigned_32 (Value_Size), Metadata.Instance_ID,
-         Metadata.Incarnation, Value_Offset, Stride);
+         (Item, Core, Interfaces.Unsigned_32 (Initial_Capacity),
+         Interfaces.Unsigned_32 (Key.Size),
+         Interfaces.Unsigned_32 (Element.Size), Metadata.Instance_ID,
+         Metadata.Incarnation, Key_Offset, Value_Offset, Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -232,24 +251,22 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Location         : Region_Offset;
       Arena            : Arenas.View;
       Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive;
       Result           : out Open_Result)
    is
       Metadata : Arenas.Metadata;
-      Value_Offset, Stride : Byte_Count;
+      Key_Offset, Value_Offset, Stride : Byte_Count;
       Core : Layouts.Local_View;
       Claim : Layouts.Initialization_Claim;
    begin
       Validate_Configuration
-        (Arena, Initial_Capacity, Key_Size, Value_Size, Metadata,
-         Value_Offset, Stride);
+        (Arena, Initial_Capacity, Metadata,
+         Key_Offset, Value_Offset, Stride);
       Detach (Item);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Header_Extent,
          (Capacity     => Interfaces.Unsigned_32 (Initial_Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Key_Size),
-          Alignment    => Interfaces.Unsigned_32 (Value_Size),
+          Element_Size => Interfaces.Unsigned_32 (Key.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Size),
           Auxiliary    => Unlocked,
           Word_1       => Metadata.Instance_ID,
           Word_2       => 0),
@@ -258,14 +275,13 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
               (Item, Core, Interfaces.Unsigned_32 (Initial_Capacity),
-               Interfaces.Unsigned_32 (Key_Size),
-               Interfaces.Unsigned_32 (Value_Size), Metadata.Instance_ID,
-               Metadata.Incarnation, Value_Offset, Stride);
+               Interfaces.Unsigned_32 (Key.Size),
+               Interfaces.Unsigned_32 (Element.Size), Metadata.Instance_ID,
+               Metadata.Incarnation, Key_Offset, Value_Offset, Stride);
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
             Attach
-              (Item, Region, Location, Arena, Initial_Capacity, Key_Size,
-               Value_Size);
+              (Item, Region, Location, Arena, Initial_Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -366,20 +382,33 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    end Slot_Field;
    pragma Inline_Always (Slot_Field);
 
+   function Key_Binding
+     (Item : View; Slot : System.Address; Writable : Boolean)
+      return Immutable_Storage_View is
+     (Base      => Slot_Field
+        (Item, Slot, Item.Key_Offset, Byte_Count (Key.Size)),
+      Extent    => Byte_Count (Key.Size),
+      Signature => Key.Signature,
+      Version   => Key.Version,
+      Writable  => Writable);
+
+   function Value_Binding
+     (Item : View; Slot : System.Address; Writable : Boolean)
+      return Immutable_Storage_View is
+     (Base      => Slot_Field
+        (Item, Slot, Item.Value_Offset, Byte_Count (Element.Size)),
+      Extent    => Byte_Count (Element.Size),
+      Signature => Element.Signature,
+      Version   => Element.Version,
+      Writable  => Writable);
+
    function Stored_Key_Hash
      (Item : View; Slot : System.Address) return Interfaces.Unsigned_64
    is
-      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+      Reference : Key.Const_Ref;
    begin
-      for Offset in Interfaces.Unsigned_32 range 0 .. Item.Key_Value - 1 loop
-         Result := (Result xor Interfaces.Unsigned_64
-           (Bytes.Read_U8
-              (Slot_Field
-                 (Item, Slot,
-                  Layouts.Checked_Add (Key_Offset, Byte_Count (Offset)),
-                  1)))) * 16#0000_0100_0000_01B3#;
-      end loop;
-      return Result;
+      Key.Bind (Reference, Key_Binding (Item, Slot, False));
+      return Key.Hash (Reference);
    end Stored_Key_Hash;
 
    procedure Validate_Table
@@ -446,18 +475,21 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
                elsif Candidate_State = Occupied_State then
                   Candidate_Hash := Bytes.Read_U64
                     (Slot_Field (Item, Candidate_Entry, Hash_Offset, 8));
-                  if Candidate_Hash = Stored_Hash
-                    and then Bytes.Equal
-                      (Slot_Field
-                         (Item, Candidate_Entry, Key_Offset,
-                          Byte_Count (Item.Key_Value)),
-                       Slot_Field
-                         (Item, Slot, Key_Offset,
-                          Byte_Count (Item.Key_Value)),
-                       Interfaces.C.size_t (Item.Key_Value))
-                  then
-                     raise Layout_Error with
-                       "dynamic-map contains duplicate keys";
+                  if Candidate_Hash = Stored_Hash then
+                     declare
+                        Candidate_Key : Key.Const_Ref;
+                        Stored_Key    : Key.Const_Ref;
+                     begin
+                        Key.Bind
+                          (Candidate_Key,
+                           Key_Binding (Item, Candidate_Entry, False));
+                        Key.Bind
+                          (Stored_Key, Key_Binding (Item, Slot, False));
+                        if Key.Equivalent (Candidate_Key, Stored_Key) then
+                           raise Layout_Error with
+                             "dynamic-map contains duplicate keys";
+                        end if;
+                     end;
                   end if;
                end if;
             end loop;
@@ -474,12 +506,10 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive)
+      Initial_Capacity : Positive)
    is
       Metadata : Arenas.Metadata;
-      Value_Offset, Stride : Byte_Count;
+      Key_Offset, Value_Offset, Stride : Byte_Count;
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
       Arena_Epoch : Interfaces.Unsigned_32;
@@ -488,15 +518,15 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Table, Retired_Table : Table_View;
    begin
       Validate_Configuration
-        (Arena, Initial_Capacity, Key_Size, Value_Size, Metadata,
-         Value_Offset, Stride);
+        (Arena, Initial_Capacity, Metadata,
+         Key_Offset, Value_Offset, Stride);
       Detach (Item);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
       Arena_Epoch := Bytes.Read_U32
         (Layouts.Address_At (Core, Arena_Epoch_Offset, 4, 4));
       if Header.Capacity /= Interfaces.Unsigned_32 (Initial_Capacity)
-        or else Header.Element_Size /= Interfaces.Unsigned_32 (Key_Size)
-        or else Header.Alignment /= Interfaces.Unsigned_32 (Value_Size)
+        or else Header.Element_Size /= Interfaces.Unsigned_32 (Key.Size)
+        or else Header.Alignment /= Interfaces.Unsigned_32 (Element.Size)
         or else Header.Word_1 /= Metadata.Instance_ID
         or else Arena_Epoch /= Metadata.Incarnation
         or else Core.Extent /= Header_Extent
@@ -515,7 +545,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       end if;
       Set_View
         (Item, Core, Header.Capacity, Header.Element_Size, Header.Alignment,
-         Header.Word_1, Arena_Epoch, Value_Offset, Stride);
+         Header.Word_1, Arena_Epoch, Key_Offset, Value_Offset, Stride);
       Current_Capacity := Bytes.Read_U64 (Item.Capacity_Address);
       if Bytes.Read_U64 (Item.Capacity_Check_Address) /=
            Capacity_Check (Current_Capacity)
@@ -657,51 +687,29 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       return Natural (Value);
    end Length;
 
-   procedure Check_Key_Value
-     (Item : View;
-      Key_Length : Byte_Count;
-      Value_Length : Byte_Count := 0;
-      Check_Value : Boolean := False) is
-   begin
-      if Key_Length /= Byte_Count (Item.Key_Value) then
-         raise Constraint_Error with "dynamic-map key length does not match";
-      elsif Check_Value
-        and then Value_Length /= Byte_Count (Item.Value_Value)
-      then
-         raise Constraint_Error with
-           "dynamic-map value length does not match";
-      end if;
-   end Check_Key_Value;
-
-   function Hash
-     (Key : Ada.Streams.Stream_Element_Array) return Interfaces.Unsigned_64
-   is
-      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
-   begin
-      for Byte of Key loop
-         Result := (Result xor Interfaces.Unsigned_64 (Byte)) *
-           16#0000_0100_0000_01B3#;
-      end loop;
-      return Result;
-   end Hash;
-
    function Key_Matches
      (Item : View; Slot : System.Address;
       Hash_Value : Interfaces.Unsigned_64;
-      Key : Ada.Streams.Stream_Element_Array) return Boolean is
-     (Bytes.Read_U64 (Slot_Field (Item, Slot, Hash_Offset, 8)) = Hash_Value
-      and then Bytes.Equal
-        (Slot_Field
-           (Item, Slot, Key_Offset, Byte_Count (Item.Key_Value)),
-         Key'Address, Interfaces.C.size_t (Key'Length)));
+      Stored_Key : Key.Value) return Boolean
+   is
+      Reference : Key.Const_Ref;
+   begin
+      if Bytes.Read_U64 (Slot_Field (Item, Slot, Hash_Offset, 8)) /=
+        Hash_Value
+      then
+         return False;
+      end if;
+      Key.Bind (Reference, Key_Binding (Item, Slot, False));
+      return Key.Equivalent (Stored_Key, Reference);
+   end Key_Matches;
 
    procedure Find
      (Item : View; Table : Table_View;
-      Key : Ada.Streams.Stream_Element_Array;
+      Stored_Key : Key.Value;
       Found : out Boolean; Index : out Interfaces.Unsigned_64;
       Insertion : out Interfaces.Unsigned_64)
    is
-      Hash_Value : constant Interfaces.Unsigned_64 := Hash (Key);
+      Hash_Value : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
       Candidate : Interfaces.Unsigned_64;
       State : Interfaces.Unsigned_32;
       First_Deleted : Interfaces.Unsigned_64 := Interfaces.Unsigned_64'Last;
@@ -716,7 +724,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          State := Bytes.Read_U32
            (Slot_Field (Item, Slot, Slot_State_Offset, 4));
          if State = Occupied_State
-           and then Key_Matches (Item, Slot, Hash_Value, Key)
+           and then Key_Matches (Item, Slot, Hash_Value, Stored_Key)
          then
             Found := True;
             Index := Candidate;
@@ -775,20 +783,12 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          then
             Bytes.Write_U64
               (Slot_Field (Item, Target, Hash_Offset, 8), Hash_Value);
-            Bytes.Copy
-              (Slot_Field
-                 (Item, Target, Key_Offset, Byte_Count (Item.Key_Value)),
-               Slot_Field
-                 (Item, Source, Key_Offset, Byte_Count (Item.Key_Value)),
-               Interfaces.C.size_t (Item.Key_Value));
-            Bytes.Copy
-              (Slot_Field
-                 (Item, Target, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Slot_Field
-                 (Item, Source, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Interfaces.C.size_t (Item.Value_Value));
+            Key.Copy
+              (Key_Binding (Item, Source, False),
+               Key_Binding (Item, Target, True));
+            Element.Copy
+              (Value_Binding (Item, Source, False),
+               Value_Binding (Item, Target, True));
             Bytes.Write_U32
               (Slot_Field (Item, Target, Slot_State_Offset, 4),
                Occupied_State);
@@ -923,10 +923,12 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    procedure Put
      (Item   : in out View;
       Arena  : in out Arenas.View;
-      Key    : Ada.Streams.Stream_Element_Array;
-      Value  : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value  : Element.Source;
       Result : out Put_Result)
    is
+      Stored_Key   : constant Key.Value := Key.Create (Key_Data);
+      Stored_Value : constant Element.Value := Element.Create (Value);
       Current_Capacity : Interfaces.Unsigned_64;
       Count : Interfaces.Unsigned_64;
       Current : Arenas.Allocation_Handle;
@@ -940,8 +942,6 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Key_Value
-           (Item, Byte_Count (Key'Length), Byte_Count (Value'Length), True);
          Count := Stored_Count (Item);
          Current_Capacity := Stored_Capacity (Item);
          if Current_Capacity = 0 then
@@ -956,15 +956,12 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          end if;
          Current := Read_Handle (Item.Current_Address);
          Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-         Find (Item, Table, Key, Found, Index, Insertion);
+         Find (Item, Table, Stored_Key, Found, Index, Insertion);
          if Found then
             Slot := Slot_Address (Item, Table, Index);
             Mutated := True;
-            Bytes.Copy
-              (Slot_Field
-                 (Item, Slot, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Value'Address, Interfaces.C.size_t (Value'Length));
+            Element.Copy_To
+              (Stored_Value, Value_Binding (Item, Slot, True));
             Result := Put_Replaced;
          else
             if (Count + 1) * 4 > Current_Capacity * 3
@@ -981,26 +978,20 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
                Current := Read_Handle (Item.Current_Address);
                Attach_Table
                  (Item, Arena, Current, Current_Capacity, Table);
-               Find (Item, Table, Key, Found, Index, Insertion);
+               Find (Item, Table, Stored_Key, Found, Index, Insertion);
                if Found or else Insertion = Interfaces.Unsigned_64'Last then
                   raise Layout_Error with
                     "dynamic-map rehash did not produce an insertion slot";
                end if;
             end if;
             Slot := Slot_Address (Item, Table, Insertion);
-            Hash_Value := Hash (Key);
+            Hash_Value := Key.Hash (Stored_Key);
             Mutated := True;
             Bytes.Write_U64
               (Slot_Field (Item, Slot, Hash_Offset, 8), Hash_Value);
-            Bytes.Copy
-              (Slot_Field
-                 (Item, Slot, Key_Offset, Byte_Count (Item.Key_Value)),
-               Key'Address, Interfaces.C.size_t (Key'Length));
-            Bytes.Copy
-              (Slot_Field
-                 (Item, Slot, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Value'Address, Interfaces.C.size_t (Value'Length));
+            Key.Copy_To (Stored_Key, Key_Binding (Item, Slot, True));
+            Element.Copy_To
+              (Stored_Value, Value_Binding (Item, Slot, True));
             Bytes.Write_U32
               (Slot_Field (Item, Slot, Slot_State_Offset, 4),
                Occupied_State);
@@ -1018,10 +1009,11 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    procedure Get
      (Item  : View;
       Arena : Arenas.View;
-      Key   : Ada.Streams.Stream_Element_Array;
-      Value : out Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value : out Element.Observed;
       Found : out Boolean)
    is
+      Stored_Key : constant Key.Value := Key.Create (Key_Data);
       Current_Capacity : Interfaces.Unsigned_64;
       Current : Arenas.Allocation_Handle;
       Table : Table_View;
@@ -1032,21 +1024,20 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Key_Value
-           (Item, Byte_Count (Key'Length), Byte_Count (Value'Length), True);
          Current_Capacity := Stored_Capacity (Item);
          if Current_Capacity /= 0 then
             Current := Read_Handle (Item.Current_Address);
             Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-            Find (Item, Table, Key, Found, Index, Insertion);
+            Find (Item, Table, Stored_Key, Found, Index, Insertion);
             if Found then
                Slot := Slot_Address (Item, Table, Index);
-               Bytes.Copy
-                 (Value'Address,
-                  Slot_Field
-                    (Item, Slot, Item.Value_Offset,
-                     Byte_Count (Item.Value_Value)),
-                  Interfaces.C.size_t (Value'Length));
+               declare
+                  Reference : Element.Const_Ref;
+               begin
+                  Element.Bind
+                    (Reference, Value_Binding (Item, Slot, False));
+                  Value := Element.Observe (Reference);
+               end;
             end if;
          end if;
       exception
@@ -1060,9 +1051,10 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    procedure Remove
      (Item    : in out View;
       Arena   : Arenas.View;
-      Key     : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
       Removed : out Boolean)
    is
+      Stored_Key : constant Key.Value := Key.Create (Key_Data);
       Current_Capacity : Interfaces.Unsigned_64;
       Current : Arenas.Allocation_Handle;
       Table : Table_View;
@@ -1076,13 +1068,12 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
-         Check_Key_Value (Item, Byte_Count (Key'Length));
          Count := Stored_Count (Item);
          Current_Capacity := Stored_Capacity (Item);
          if Current_Capacity /= 0 then
             Current := Read_Handle (Item.Current_Address);
             Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-            Find (Item, Table, Key, Found, Index, Insertion);
+            Find (Item, Table, Stored_Key, Found, Index, Insertion);
             if Found then
                if Count = 0 then
                   raise Layout_Error with

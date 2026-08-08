@@ -15,6 +15,7 @@ with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
 with Flyology.Data_Structures.Slab_Pools;
 with Flyology.Data_Structures.Storage_Types.Immutable;
+with Flyology.Data_Structures.Storage_Types.Elements;
 with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
 with Interfaces;
@@ -27,30 +28,201 @@ procedure Data_Structures_Smoke is
    package Regions renames DS.Regions;
    package Arenas renames DS.Arenas;
    package Handles renames DS.Handles;
-   package Slabs renames DS.Slab_Pools;
    package Strings renames DS.Byte_Strings;
    package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
-   package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
-   package Dynamic_Vectors renames DS.Dynamic.Vectors;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package Dynamic_Vectors is new DS.Dynamic.Vectors
+     (Element => U64_Elements.Element);
+   package Dynamic_Maps is new DS.Dynamic.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => U64_Elements.Element);
+   subtype Bytes_16 is Ada.Streams.Stream_Element_Array (1 .. 16);
+   package Bytes_16_Representation is new DS.Storage_Types.Immutable
+     (Byte_Size          => 16,
+      Required_Alignment => 8,
+      Type_Signature     => 16#5445_5354_4231_3601#,
+      Layout_Version     => 1);
+
+   function Create_Bytes_16
+     (Data : Bytes_16) return Bytes_16_Representation.Value
+   is
+      Item : Bytes_16_Representation.Value_Builder :=
+        Bytes_16_Representation.Start;
+   begin
+      for Index in Data'Range loop
+         Bytes_16_Representation.Store_U8
+           (Item, Natural (Index) - Natural (Data'First),
+            Interfaces.Unsigned_8 (Data (Index)));
+      end loop;
+      return Bytes_16_Representation.Freeze (Item);
+   end Create_Bytes_16;
+
+   procedure Construct_Bytes_16
+     (Item : in out Bytes_16_Representation.Builder;
+      Data : Bytes_16) is
+   begin
+      for Index in Data'Range loop
+         Bytes_16_Representation.Store_U8
+           (Item, Natural (Index) - Natural (Data'First),
+            Interfaces.Unsigned_8 (Data (Index)));
+      end loop;
+   end Construct_Bytes_16;
+
+   function Observe_Bytes_16
+     (Item : Bytes_16_Representation.Const_Ref) return Bytes_16
+   is
+      Result : Bytes_16;
+   begin
+      for Index in Result'Range loop
+         Result (Index) := Ada.Streams.Stream_Element
+           (Bytes_16_Representation.Load_U8
+              (Item, Natural (Index) - Natural (Result'First)));
+      end loop;
+      return Result;
+   end Observe_Bytes_16;
+
+   package Bytes_16_Element is new DS.Storage_Types.Elements
+     (Representation     => Bytes_16_Representation,
+      Source_Type        => Bytes_16,
+      Observed_Type      => Bytes_16,
+      Create_Value       => Create_Bytes_16,
+      Observe_Value      => Observe_Bytes_16,
+      Direct_Constructor => Construct_Bytes_16'Access);
+   package Slabs is new DS.Slab_Pools (Element => Bytes_16_Element);
+
+   procedure Test_U64_Construct
+     (Item : in out U64_Elements.Representation.Builder;
+      Data : Interfaces.Unsigned_64) is
+   begin
+      U64_Elements.Set (Item, Data);
+      if Interfaces."=" (Data, 16#DEAD_BEEF#) then
+         raise Constraint_Error with "deliberate constructor failure";
+      end if;
+   end Test_U64_Construct;
+
+   package Test_U64_Element is new DS.Storage_Types.Elements
+     (Representation     => U64_Elements.Representation,
+      Source_Type        => Interfaces.Unsigned_64,
+      Observed_Type      => Interfaces.Unsigned_64,
+      Create_Value       => U64_Elements.Create,
+      Observe_Value      => U64_Elements.Value_Of,
+      Direct_Constructor => Test_U64_Construct'Access);
    package Vectors is new DS.Vectors
-     (Element => U64_Elements.Representation);
+     (Element => Test_U64_Element);
    package Alternate_U64 is new DS.Storage_Types.Immutable
      (Byte_Size          => 8,
       Required_Alignment => 8,
       Type_Signature     => 16#5445_5354_5536_3402#,
       Layout_Version     => 1);
-   package Wrong_Vectors is new DS.Vectors (Element => Alternate_U64);
+
+   function Alternate_Create
+     (Item : Interfaces.Unsigned_64) return Alternate_U64.Value
+   is
+      Builder : Alternate_U64.Value_Builder := Alternate_U64.Start;
+   begin
+      Alternate_U64.Store_U64 (Builder, 0, Item);
+      return Alternate_U64.Freeze (Builder);
+   end Alternate_Create;
+
+   function Alternate_Observe
+     (Item : Alternate_U64.Const_Ref) return Interfaces.Unsigned_64 is
+     (Alternate_U64.Load_U64 (Item, 0));
+
+   package Alternate_Element is new DS.Storage_Types.Elements
+     (Representation  => Alternate_U64,
+      Source_Type     => Interfaces.Unsigned_64,
+      Observed_Type   => Interfaces.Unsigned_64,
+      Create_Value    => Alternate_Create,
+      Observe_Value   => Alternate_Observe);
+   package Wrong_Vectors is new DS.Vectors (Element => Alternate_Element);
+   package Alternate_Bytes_16 is new DS.Storage_Types.Immutable
+     (Byte_Size          => 16,
+      Required_Alignment => 8,
+      Type_Signature     => 16#5445_5354_4231_3602#,
+      Layout_Version     => 1);
+
+   function Alternate_Bytes_16_Create
+     (Data : Bytes_16) return Alternate_Bytes_16.Value
+   is
+      Item : Alternate_Bytes_16.Value_Builder := Alternate_Bytes_16.Start;
+   begin
+      for Index in Data'Range loop
+         Alternate_Bytes_16.Store_U8
+           (Item, Natural (Index) - Natural (Data'First),
+            Interfaces.Unsigned_8 (Data (Index)));
+      end loop;
+      return Alternate_Bytes_16.Freeze (Item);
+   end Alternate_Bytes_16_Create;
+
+   function Alternate_Bytes_16_Observe
+     (Item : Alternate_Bytes_16.Const_Ref) return Bytes_16
+   is
+      Result : Bytes_16;
+   begin
+      for Index in Result'Range loop
+         Result (Index) := Ada.Streams.Stream_Element
+           (Alternate_Bytes_16.Load_U8
+              (Item, Natural (Index) - Natural (Result'First)));
+      end loop;
+      return Result;
+   end Alternate_Bytes_16_Observe;
+
+   package Alternate_Bytes_16_Element is new DS.Storage_Types.Elements
+     (Representation  => Alternate_Bytes_16,
+      Source_Type     => Bytes_16,
+      Observed_Type   => Bytes_16,
+      Create_Value    => Alternate_Bytes_16_Create,
+      Observe_Value   => Alternate_Bytes_16_Observe);
    package Alternate_U64_Version is new DS.Storage_Types.Immutable
      (Byte_Size          => 8,
       Required_Alignment => 8,
       Type_Signature     => U64_Elements.Representation.Signature,
       Layout_Version     => 2);
+
+   function Alternate_Version_Create
+     (Item : Interfaces.Unsigned_64) return Alternate_U64_Version.Value
+   is
+      Builder : Alternate_U64_Version.Value_Builder :=
+        Alternate_U64_Version.Start;
+   begin
+      Alternate_U64_Version.Store_U64 (Builder, 0, Item);
+      return Alternate_U64_Version.Freeze (Builder);
+   end Alternate_Version_Create;
+
+   function Alternate_Version_Observe
+     (Item : Alternate_U64_Version.Const_Ref)
+      return Interfaces.Unsigned_64 is
+     (Alternate_U64_Version.Load_U64 (Item, 0));
+
+   package Alternate_Version_Element is new DS.Storage_Types.Elements
+     (Representation  => Alternate_U64_Version,
+      Source_Type     => Interfaces.Unsigned_64,
+      Observed_Type   => Interfaces.Unsigned_64,
+      Create_Value    => Alternate_Version_Create,
+      Observe_Value   => Alternate_Version_Observe);
    package Wrong_Version_Vectors is new DS.Vectors
-     (Element => Alternate_U64_Version);
-   package SPSC renames DS.Rings.SPSC;
-   package MPMC renames DS.Rings.MPMC;
-   package Maps renames DS.Hash_Maps;
+     (Element => Alternate_Version_Element);
+   package Wrong_Slabs is new DS.Slab_Pools
+     (Element => Alternate_Bytes_16_Element);
+   package Wrong_SPSC is new DS.Rings.SPSC
+     (Element => Alternate_Element);
+   package Wrong_MPMC is new DS.Rings.MPMC
+     (Element => Alternate_Element);
+   package Wrong_Maps is new DS.Hash_Maps
+     (Key     => Alternate_Element,
+      Element => U64_Elements.Element);
+   package Wrong_Dynamic_Vectors is new DS.Dynamic.Vectors
+     (Element => Alternate_Element);
+   package Wrong_Dynamic_Maps is new DS.Dynamic.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => Alternate_Element);
+   package SPSC is new DS.Rings.SPSC
+     (Element => U64_Elements.Element);
+   package MPMC is new DS.Rings.MPMC
+     (Element => U64_Elements.Element);
+   package Maps is new DS.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => U64_Elements.Element);
    package Contract_V1 is new DS.Envelopes
      (Nested_Identity    => Vectors.Identity,
       Contract_Signature => 16#A17E_5B31_92C4_770D#,
@@ -204,27 +376,6 @@ procedure Data_Structures_Smoke is
       return Result;
    end Decode;
 
-   Vector_Construction_Value : Interfaces.Unsigned_64 := 0;
-   Vector_Observed_Value     : Interfaces.Unsigned_64 := 0;
-
-   procedure Construct_Vector_Element
-     (Item : in out U64_Elements.Builder) is
-   begin
-      U64_Elements.Set (Item, Vector_Construction_Value);
-   end Construct_Vector_Element;
-
-   procedure Fail_Vector_Construction
-     (Item : in out U64_Elements.Builder) is
-   begin
-      U64_Elements.Set (Item, 16#DEAD_BEEF#);
-      raise Constraint_Error with "deliberate constructor failure";
-   end Fail_Vector_Construction;
-
-   procedure Observe_Vector_Element (Item : U64_Elements.Const_Ref) is
-   begin
-      Vector_Observed_Value := U64_Elements.Value_Of (Item);
-   end Observe_Vector_Element;
-
    function Test_Hash
      (Key : Ada.Streams.Stream_Element_Array)
       return Interfaces.Unsigned_64
@@ -288,6 +439,7 @@ procedure Data_Structures_Smoke is
      (others => 16#A7#);
    Read_16 : Ada.Streams.Stream_Element_Array (1 .. 16);
    Eight : Ada.Streams.Stream_Element_Array (1 .. 8);
+   U64_Value : Interfaces.Unsigned_64 := 0;
    String_Data : constant Ada.Streams.Stream_Element_Array :=
      [1 => Character'Pos ('f'), 2 => Character'Pos ('l'),
       3 => Character'Pos ('y')];
@@ -339,6 +491,32 @@ begin
    Assert (Base_A /= Base_B, "two shared mappings used the same address");
    Regions.Attach (Region_A, Base_A, DS.Byte_Count (Mapping_Length));
    Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
+
+   --  An adapter may omit the optional direct constructor. The container then
+   --  creates one independent immutable value and copies it before publishing.
+   declare
+      Local_Storage : aliased SSE.Storage_Array (1 .. 512) := [others => 0]
+        with Alignment => 64;
+      Local_Region  : Regions.View;
+      Local_Vector  : Wrong_Vectors.View;
+      Outcome       : DS.Open_Result;
+      Appended      : Boolean;
+   begin
+      Regions.Attach
+        (Local_Region, Local_Storage'Address,
+         DS.Byte_Count (Local_Storage'Length));
+      Wrong_Vectors.Create_Or_Attach
+        (Local_Vector, Local_Region, 64, 4, Outcome);
+      Assert
+        (Outcome = DS.Initialized_New,
+         "fallback-adapter vector was not created");
+      Wrong_Vectors.Try_Emplace (Local_Vector, 42, Appended);
+      Assert
+        (Appended and then Wrong_Vectors.Read (Local_Vector, 1) = 42,
+         "fallback adapter did not preserve its value");
+      Wrong_Vectors.Detach (Local_Vector);
+      Regions.Detach (Local_Region);
+   end;
 
    Arenas.Create_Or_Attach
      (Arena_A, Region_A, Arena_Location, 32_768, 64,
@@ -392,21 +570,20 @@ begin
    end;
 
    Dynamic_Vectors.Create_Or_Attach
-     (Dynamic_Vector_A, Region_A, Dynamic_Vector_Location, Arena_A, 2, 8,
+     (Dynamic_Vector_A, Region_A, Dynamic_Vector_Location, Arena_A, 2,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Initialized_New,
       "dynamic vector was not created");
    Dynamic_Vectors.Create_Or_Attach
-     (Dynamic_Vector_B, Region_B, Dynamic_Vector_Location, Arena_B, 2, 8,
+     (Dynamic_Vector_B, Region_B, Dynamic_Vector_Location, Arena_B, 2,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing,
       "dynamic vector was reinitialized");
    for Index in 1 .. 20 loop
       Dynamic_Vectors.Try_Append
-        (Dynamic_Vector_A, Arena_A,
-         Encode (Interfaces.Unsigned_64 (Index)), Growth);
+        (Dynamic_Vector_A, Arena_A, Interfaces.Unsigned_64 (Index), Growth);
       Assert
         (Growth = DS.Dynamic.Completed,
          "dynamic vector failed to grow in its arena");
@@ -415,9 +592,9 @@ begin
      (Dynamic_Vectors.Length (Dynamic_Vector_B) = 20
       and then Dynamic_Vectors.Capacity (Dynamic_Vector_B) >= 20,
       "dynamic-vector growth metadata was not shared");
-   Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 20, Eight);
+   U64_Value := Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 20);
    Assert
-     (Decode (Eight) = 20,
+     (U64_Value = 20,
       "dynamic-vector payload was not shared across mappings");
 
    Dynamic_Strings.Create_Or_Attach
@@ -448,28 +625,28 @@ begin
       "dynamic byte-string payload order is wrong");
 
    Dynamic_Maps.Create_Or_Attach
-     (Dynamic_Map_A, Region_A, Dynamic_Map_Location, Arena_A, 2, 8, 8,
+     (Dynamic_Map_A, Region_A, Dynamic_Map_Location, Arena_A, 2,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Initialized_New, "dynamic map was not created");
    Dynamic_Maps.Create_Or_Attach
-     (Dynamic_Map_B, Region_B, Dynamic_Map_Location, Arena_B, 2, 8, 8,
+     (Dynamic_Map_B, Region_B, Dynamic_Map_Location, Arena_B, 2,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing,
       "dynamic map was reinitialized");
    for Index in Interfaces.Unsigned_64 range 1 .. 20 loop
       Dynamic_Maps.Put
-        (Dynamic_Map_A, Arena_A, Encode (Index), Encode (Index * 10),
+        (Dynamic_Map_A, Arena_A, Index, Index * 10,
          Dynamic_Put);
       Assert
         (Dynamic_Put = Dynamic_Maps.Put_Inserted,
          "dynamic map failed to insert while growing");
    end loop;
    Dynamic_Maps.Get
-     (Dynamic_Map_B, Arena_B, Encode (20), Eight, Flag);
+     (Dynamic_Map_B, Arena_B, 20, U64_Value, Flag);
    Assert
-     (Flag and then Decode (Eight) = 200
+     (Flag and then U64_Value = 200
       and then Dynamic_Maps.Length (Dynamic_Map_B) = 20
       and then Dynamic_Maps.Capacity (Dynamic_Map_B) >= 32,
       "dynamic-map growth or lookup was not shared");
@@ -515,9 +692,9 @@ begin
    end;
    Dynamic_Vectors.Initialize
      (Scratch_Dynamic_A, Region_A, Scratch_Dynamic_Location,
-      Scratch_Arena_A, 2, 8);
+      Scratch_Arena_A, 2);
    Dynamic_Vectors.Try_Append
-     (Scratch_Dynamic_A, Scratch_Arena_A, Encode (77), Growth);
+     (Scratch_Dynamic_A, Scratch_Arena_A, 77, Growth);
    Assert
      (Growth = DS.Dynamic.Completed,
       "scratch dynamic vector did not allocate from its arena");
@@ -535,7 +712,7 @@ begin
       begin
          Dynamic_Vectors.Attach
            (Scratch_Dynamic_B, Region_B, Scratch_Dynamic_Location,
-            Scratch_Arena_B, 2, 8);
+            Scratch_Arena_B, 2);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -545,7 +722,7 @@ begin
    end;
    Dynamic_Vectors.Initialize
      (Scratch_Dynamic_A, Region_A, Scratch_Dynamic_Location,
-      Scratch_Arena_A, 2, 8);
+      Scratch_Arena_A, 2);
    Dynamic_Vectors.Destroy (Scratch_Dynamic_A, Scratch_Arena_A);
    Arenas.Destroy (Scratch_Arena_A);
    Arenas.Detach (Scratch_Arena_B);
@@ -568,7 +745,7 @@ begin
       begin
          Dynamic_Vectors.Create_Or_Attach
            (Dynamic_Vector_Bad, Region_B, Dynamic_Vector_Location,
-            Arena_B, 4, 8, Open_Outcome);
+            Arena_B, 4, Open_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -631,7 +808,7 @@ begin
       begin
          Dynamic_Vectors.Attach
            (Dynamic_Vector_Bad, Region_B, Dynamic_Vector_Location,
-            Arena_B, 2, 8);
+            Arena_B, 2);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -677,7 +854,7 @@ begin
       begin
          Dynamic_Maps.Attach
            (Dynamic_Map_Bad, Region_B, Dynamic_Map_Location,
-            Arena_B, 2, 8, 8);
+            Arena_B, 2);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -703,7 +880,7 @@ begin
 
       Failed := False;
       begin
-         if MPMC.Required_Storage (1, 8) = 0 then
+         if MPMC.Required_Storage (1) = 0 then
             raise Program_Error with "unreachable MPMC extent";
          end if;
       exception
@@ -713,10 +890,10 @@ begin
    end;
 
    Slabs.Create_Or_Attach
-     (Slab_A, Region_A, Slab_Location, 8, 16, 8, Open_Outcome);
+     (Slab_A, Region_A, Slab_Location, 8, Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "slab was not created");
    Slabs.Create_Or_Attach
-     (Slab_B, Region_B, Slab_Location, 8, 16, 8, Open_Outcome);
+     (Slab_B, Region_B, Slab_Location, 8, Open_Outcome);
    Assert (Open_Outcome = DS.Attached_Existing, "slab was reinitialized");
    Strings.Create_Or_Attach
      (String_A, Region_A, String_Location, 128, Open_Outcome);
@@ -731,25 +908,90 @@ begin
      (Vector_B, Region_B, Vector_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Attached_Existing, "vector was reinitialized");
    SPSC.Create_Or_Attach
-     (Ring_A, Region_A, SPSC_Location, 16, 8, Open_Outcome);
+     (Ring_A, Region_A, SPSC_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "SPSC ring was not created");
    SPSC.Create_Or_Attach
-     (Ring_B, Region_B, SPSC_Location, 16, 8, Open_Outcome);
+     (Ring_B, Region_B, SPSC_Location, 16, Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing, "SPSC ring was reinitialized");
    MPMC.Create_Or_Attach
-     (Multi_A, Region_A, MPMC_Location, 16, 8, Open_Outcome);
+     (Multi_A, Region_A, MPMC_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "MPMC ring was not created");
    MPMC.Create_Or_Attach
-     (Multi_B, Region_B, MPMC_Location, 16, 8, Open_Outcome);
+     (Multi_B, Region_B, MPMC_Location, 16, Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing, "MPMC ring was reinitialized");
    Maps.Create_Or_Attach
-     (Map_A, Region_A, Map_Location, 16, 8, 8, Open_Outcome);
+     (Map_A, Region_A, Map_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "map was not created");
    Maps.Create_Or_Attach
-     (Map_B, Region_B, Map_Location, 16, 8, 8, Open_Outcome);
+     (Map_B, Region_B, Map_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Attached_Existing, "map was reinitialized");
+
+   --  Every generic leaf incorporates its immutable adapter identities into
+   --  the persisted schema. Equal byte sizes are deliberately used here so
+   --  attachment cannot succeed merely because physical geometry matches.
+   declare
+      Bad_Slab    : Wrong_Slabs.View;
+      Bad_SPSC    : Wrong_SPSC.View;
+      Bad_MPMC    : Wrong_MPMC.View;
+      Bad_Map     : Wrong_Maps.View;
+      Bad_Vector  : Wrong_Dynamic_Vectors.View;
+      Bad_Dynamic_Map : Wrong_Dynamic_Maps.View;
+      Failed : Boolean;
+   begin
+      Failed := False;
+      begin
+         Wrong_Slabs.Attach (Bad_Slab, Region_B, Slab_Location, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "slab accepted another element signature");
+
+      Failed := False;
+      begin
+         Wrong_SPSC.Attach (Bad_SPSC, Region_B, SPSC_Location, 16);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "SPSC ring accepted another element signature");
+
+      Failed := False;
+      begin
+         Wrong_MPMC.Attach (Bad_MPMC, Region_B, MPMC_Location, 16);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "MPMC ring accepted another element signature");
+
+      Failed := False;
+      begin
+         Wrong_Maps.Attach (Bad_Map, Region_B, Map_Location, 16);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "hash map accepted another key signature");
+
+      Failed := False;
+      begin
+         Wrong_Dynamic_Vectors.Attach
+           (Bad_Vector, Region_B, Dynamic_Vector_Location, Arena_B, 2);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed, "dynamic vector accepted another element signature");
+
+      Failed := False;
+      begin
+         Wrong_Dynamic_Maps.Attach
+           (Bad_Dynamic_Map, Region_B, Dynamic_Map_Location, Arena_B, 2);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed, "dynamic map accepted another value signature");
+   end;
    Contract_V1.Create_Or_Attach
      (Envelope_A, Region_A, Envelope_Location, Envelope_Content_Extent, 8,
       Open_Outcome);
@@ -854,10 +1096,10 @@ begin
       Failed : Boolean := False;
    begin
       MPMC.Initialize
-        (Small_A, Region_A, Scratch_MPMC_Location, 2, 8);
+        (Small_A, Region_A, Scratch_MPMC_Location, 2);
       MPMC.Attach
-        (Small_B, Region_B, Scratch_MPMC_Location, 2, 8);
-      MPMC.Try_Push (Small_A, Encode (99), Push_Outcome);
+        (Small_B, Region_B, Scratch_MPMC_Location, 2);
+      MPMC.Try_Push (Small_A, 99, Push_Outcome);
       Assert (Push_Outcome = MPMC.Pushed,
               "capacity-two MPMC setup push failed");
 
@@ -874,46 +1116,46 @@ begin
       Assert (Failed, "MPMC destroy accepted an abandoned consumer claim");
 
       MPMC.Initialize
-        (Small_A, Region_A, Scratch_MPMC_Location, 2, 8);
+        (Small_A, Region_A, Scratch_MPMC_Location, 2);
       MPMC.Detach (Small_B);
       MPMC.Attach
-        (Small_B, Region_B, Scratch_MPMC_Location, 2, 8);
+        (Small_B, Region_B, Scratch_MPMC_Location, 2);
       for Round in Interfaces.Unsigned_64 range 1 .. 128 loop
-         MPMC.Try_Push (Small_A, Encode (Round * 2 - 1), Push_Outcome);
+         MPMC.Try_Push (Small_A, Round * 2 - 1, Push_Outcome);
          Assert (Push_Outcome = MPMC.Pushed,
                  "capacity-two MPMC rejected its first slot");
-         MPMC.Try_Push (Small_B, Encode (Round * 2), Push_Outcome);
+         MPMC.Try_Push (Small_B, Round * 2, Push_Outcome);
          Assert (Push_Outcome = MPMC.Pushed,
                  "capacity-two MPMC rejected its second slot");
-         MPMC.Try_Push (Small_A, Encode (0), Push_Outcome);
+         MPMC.Try_Push (Small_A, 0, Push_Outcome);
          Assert (Push_Outcome = MPMC.Full,
                  "capacity-two MPMC did not report full");
          if Round = 1 then
             Failed := False;
             begin
-               MPMC.Push (Small_A, Encode (0), 0.0);
+               MPMC.Push (Small_A, 0, 0.0);
             exception
                when DS.Timeout_Error => Failed := True;
             end;
             Assert (Failed, "timed MPMC push ignored a full ring");
          end if;
-         MPMC.Try_Pop (Small_B, Eight, Pop_Outcome);
+         MPMC.Try_Pop (Small_B, U64_Value, Pop_Outcome);
          Assert
            (Pop_Outcome = MPMC.Popped
-            and then Decode (Eight) = Round * 2 - 1,
+            and then U64_Value = Round * 2 - 1,
             "capacity-two MPMC lost FIFO order at wraparound");
-         MPMC.Try_Pop (Small_A, Eight, Pop_Outcome);
+         MPMC.Try_Pop (Small_A, U64_Value, Pop_Outcome);
          Assert
            (Pop_Outcome = MPMC.Popped
-            and then Decode (Eight) = Round * 2,
+            and then U64_Value = Round * 2,
             "capacity-two MPMC duplicated or reordered an element");
-         MPMC.Try_Pop (Small_B, Eight, Pop_Outcome);
+         MPMC.Try_Pop (Small_B, U64_Value, Pop_Outcome);
          Assert (Pop_Outcome = MPMC.Empty,
                  "capacity-two MPMC did not return to empty");
          if Round = 1 then
             Failed := False;
             begin
-               MPMC.Pop (Small_B, Eight, 0.0);
+               MPMC.Pop (Small_B, U64_Value, 0.0);
             exception
                when DS.Timeout_Error => Failed := True;
             end;
@@ -947,7 +1189,7 @@ begin
       Failed := False;
       begin
          MPMC.Initialize
-           (Small_A, Region_A, Scratch_MPMC_Location, 2, 8);
+           (Small_A, Region_A, Scratch_MPMC_Location, 2);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -961,11 +1203,11 @@ begin
       Last_Handle : Handles.Handle;
       Failed : Boolean := False;
    begin
-      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1, 16, 8);
+      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1);
       Write_U32
         (Base_B, Raw_Offset (Scratch_Slab_Location, 64),
          Interfaces.Unsigned_32'Last);
-      Slabs.Try_Allocate (One, Last_Handle, Allocation);
+      Slabs.Try_Allocate (One, Payload_16, Last_Handle, Allocation);
       Assert
         (Allocation = Slabs.Allocated
          and then Last_Handle.Stamp = Handles.Generation'Last,
@@ -995,7 +1237,7 @@ begin
          when DS.Poison_Error => Failed := True;
       end;
       Assert (Failed, "slab recovered an exhausted generation");
-      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1, 16, 8);
+      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1);
       Slabs.Destroy (One);
    end;
 
@@ -1006,14 +1248,14 @@ begin
       Failed : Boolean := False;
    begin
       Maps.Initialize
-        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+        (Scratch, Region_A, Scratch_Map_Location, 2);
       Maps.Attach
-        (Peer, Region_B, Scratch_Map_Location, 2, 8, 8);
+        (Peer, Region_B, Scratch_Map_Location, 2);
       Home := Test_Hash (Key_1) and 1;
       Write_U32
         (Base_B, Map_Entry_Offset_At (Scratch_Map_Location, Home, 0), 9);
       begin
-         Maps.Put (Scratch, Key_1, Value_1, Put_Outcome);
+         Maps.Put (Scratch, Decode (Key_1), Decode (Value_1), Put_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1022,13 +1264,13 @@ begin
          "hash-map operation did not poison an invalid entry state");
 
       Maps.Initialize
-        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
-      Maps.Put (Scratch, Key_1, Value_1, Put_Outcome);
+        (Scratch, Region_A, Scratch_Map_Location, 2);
+      Maps.Put (Scratch, Decode (Key_1), Decode (Value_1), Put_Outcome);
       Write_U64
         (Base_B, Raw_Offset (Scratch_Map_Location, 48), 0);
       Failed := False;
       begin
-         Maps.Remove (Scratch, Key_1, Flag);
+         Maps.Remove (Scratch, Decode (Key_1), Flag);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1037,12 +1279,12 @@ begin
          "hash-map removal underflow did not fail closed");
 
       Maps.Initialize
-        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+        (Scratch, Region_A, Scratch_Map_Location, 2);
       Write_U64
         (Base_B, Raw_Offset (Scratch_Map_Location, 48), 2);
       Failed := False;
       begin
-         Maps.Put (Scratch, Key_1, Value_1, Put_Outcome);
+         Maps.Put (Scratch, Decode (Key_1), Decode (Value_1), Put_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1054,15 +1296,15 @@ begin
       --  cached map geometry. The new initialization epoch is checked before
       --  any cached count, guard, entry, or payload address is dereferenced.
       Maps.Initialize
-        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+        (Scratch, Region_A, Scratch_Map_Location, 2);
       Maps.Detach (Peer);
       Maps.Attach
-        (Peer, Region_B, Scratch_Map_Location, 2, 8, 8);
+        (Peer, Region_B, Scratch_Map_Location, 2);
       Vectors.Initialize
         (Replacement, Region_A, Scratch_Map_Location, 2);
       Failed := False;
       begin
-         Maps.Get (Peer, Key_1, Eight, Flag);
+         Maps.Get (Peer, Decode (Key_1), U64_Value, Flag);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1071,19 +1313,18 @@ begin
       Vectors.Destroy (Replacement);
    end;
 
-   Slabs.Try_Allocate (Slab_A, Handle_1, Allocation);
+   Slabs.Try_Allocate (Slab_A, Payload_16, Handle_1, Allocation);
    Assert (Allocation = Slabs.Allocated
            and then not Handles.Is_Null (Handle_1),
            "slab allocation failed");
-   Slabs.Write (Slab_A, Handle_1, Payload_16);
    Slabs.Read (Slab_B, Handle_1, Read_16);
    Assert (Read_16 = Payload_16, "slab A-to-B payload was not visible");
    Payload_16 := (others => 16#55#);
-   Slabs.Write (Slab_B, Handle_1, Payload_16);
+   Slabs.Replace (Slab_B, Handle_1, Payload_16);
    Slabs.Read (Slab_A, Handle_1, Read_16);
    Assert (Read_16 = Payload_16, "slab B-to-A mutation was not visible");
 
-   Slabs.Try_Allocate (Slab_A, Poison_Handle, Allocation);
+   Slabs.Try_Allocate (Slab_A, Payload_16, Poison_Handle, Allocation);
    Assert (Allocation = Slabs.Allocated, "poison test allocation failed");
    Write_U32
      (Base_A,
@@ -1110,9 +1351,9 @@ begin
    Slabs.Detach (Slab_A);
    Slabs.Detach (Slab_B);
    Slabs.Poison_Abandoned_At
-     (Region_B, Slab_Location, 8, 16, 8, Poison_Handle.Slot);
-   Slabs.Attach (Slab_A, Region_A, Slab_Location, 8, 16, 8);
-   Slabs.Attach (Slab_B, Region_B, Slab_Location, 8, 16, 8);
+     (Region_B, Slab_Location, 8, Poison_Handle.Slot);
+   Slabs.Attach (Slab_A, Region_A, Slab_Location, 8);
+   Slabs.Attach (Slab_B, Region_B, Slab_Location, 8);
    declare
       Failed : Boolean := False;
    begin
@@ -1136,7 +1377,8 @@ begin
    end;
    Flag := False;
    for Index in Recovered_Handles'Range loop
-      Slabs.Try_Allocate (Slab_A, Recovered_Handles (Index), Allocation);
+      Slabs.Try_Allocate
+        (Slab_A, Payload_16, Recovered_Handles (Index), Allocation);
       Assert (Allocation = Slabs.Allocated,
               "recovery verification allocation failed");
       if Recovered_Handles (Index).Slot = Poison_Handle.Slot then
@@ -1147,7 +1389,7 @@ begin
       end if;
    end loop;
    Assert (Flag, "poisoned slab slot was not explicitly recycled");
-   Slabs.Try_Allocate (Slab_A, Poison_Handle, Allocation);
+   Slabs.Try_Allocate (Slab_A, Payload_16, Poison_Handle, Allocation);
    Assert
      (Allocation = Slabs.Exhausted and then Handles.Is_Null (Poison_Handle),
       "full slab did not report an exhausted allocation outcome");
@@ -1187,24 +1429,20 @@ begin
       Strings.Append (String_A, String_More);
    end;
 
-   Vector_Construction_Value := 1;
-   Vectors.Try_Emplace
-     (Vector_A, Construct_Vector_Element'Access, Flag);
+   Vectors.Try_Emplace (Vector_A, 1, Flag);
    Assert (Flag, "vector append failed");
-   Vectors.Read (Vector_B, 1, Observe_Vector_Element'Access);
    Assert
-     (Vector_Observed_Value = 1,
+     (Vectors.Read (Vector_B, 1) = 1,
       "zero-copy vector A-to-B read failed");
-   Vectors.Replace (Vector_B, 1, U64_Elements.Create (2));
+   Vectors.Replace (Vector_B, 1, 2);
    Assert
-     (U64_Elements.Value_Of (Vectors.Read (Vector_A, 1)) = 2,
+     (Vectors.Read (Vector_A, 1) = 2,
       "vector B-to-A replace failed");
    declare
       Failed : Boolean := False;
    begin
       begin
-         Vectors.Try_Emplace
-           (Vector_A, Fail_Vector_Construction'Access, Flag);
+         Vectors.Try_Emplace (Vector_A, 16#DEAD_BEEF#, Flag);
       exception
          when Constraint_Error => Failed := True;
       end;
@@ -1302,7 +1540,7 @@ begin
       Failed := False;
       begin
          Vectors.Try_Append
-           (Recovery_Vector, U64_Elements.Create (1), 0.0, Flag);
+           (Recovery_Vector, 1, 0.0, Flag);
       exception
          when DS.Timeout_Error => Failed := True;
       end;
@@ -1316,7 +1554,7 @@ begin
       Failed := False;
       begin
          Vectors.Try_Append
-           (Recovery_Vector, U64_Elements.Create (1), Flag);
+           (Recovery_Vector, 1, Flag);
       exception
          when DS.Poison_Error => Failed := True;
       end;
@@ -1332,64 +1570,64 @@ begin
       Vectors.Initialize
         (Recovery_Vector, Region_A, Poison_Vector_Location, 4);
       Vectors.Try_Append
-        (Recovery_Vector, U64_Elements.Create (91), Flag);
+        (Recovery_Vector, 91, Flag);
       Assert (Flag, "reinitialized vector rejected an append");
       Assert
-        (U64_Elements.Value_Of (Vectors.Read (Recovery_Vector, 1)) = 91,
+        (Vectors.Read (Recovery_Vector, 1) = 91,
          "reinitialized vector did not restore normal operation");
       Vectors.Destroy (Recovery_Vector);
    end;
 
-   SPSC.Try_Pop (Ring_B, Eight, Flag);
+   SPSC.Try_Pop (Ring_B, U64_Value, Flag);
    Assert (not Flag, "empty SPSC ring produced an element");
    declare
       Failed : Boolean := False;
    begin
       begin
-         SPSC.Pop (Ring_B, Eight, 0.0);
+         SPSC.Pop (Ring_B, U64_Value, 0.0);
       exception
          when DS.Timeout_Error => Failed := True;
       end;
       Assert (Failed, "timed SPSC pop ignored an empty ring");
    end;
    for Value in Interfaces.Unsigned_64 range 1 .. 16 loop
-      SPSC.Try_Push (Ring_A, Encode (Value), Flag);
+      SPSC.Try_Push (Ring_A, Value, Flag);
       Assert (Flag, "SPSC ring rejected available capacity");
    end loop;
-   SPSC.Try_Push (Ring_A, Encode (17), Flag);
+   SPSC.Try_Push (Ring_A, 17, Flag);
    Assert (not Flag, "full SPSC ring accepted an element");
    declare
       Failed : Boolean := False;
    begin
       begin
-         SPSC.Push (Ring_A, Encode (17), 0.0);
+         SPSC.Push (Ring_A, 17, 0.0);
       exception
          when DS.Timeout_Error => Failed := True;
       end;
       Assert (Failed, "timed SPSC push ignored a full ring");
    end;
    for Value in Interfaces.Unsigned_64 range 1 .. 16 loop
-      SPSC.Try_Pop (Ring_B, Eight, Flag);
-      Assert (Flag and then Decode (Eight) = Value,
+      SPSC.Try_Pop (Ring_B, U64_Value, Flag);
+      Assert (Flag and then U64_Value = Value,
               "SPSC ordering or exactly-once delivery failed");
    end loop;
 
-   MPMC.Try_Push (Multi_A, Encode (41), Push_Outcome);
+   MPMC.Try_Push (Multi_A, 41, Push_Outcome);
    Assert (Push_Outcome = MPMC.Pushed, "MPMC push failed");
-   MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
+   MPMC.Try_Pop (Multi_B, U64_Value, Pop_Outcome);
    Assert
-     (Pop_Outcome = MPMC.Popped and then Decode (Eight) = 41,
+     (Pop_Outcome = MPMC.Popped and then U64_Value = 41,
       "MPMC cross-view pop failed");
 
-   Maps.Put (Map_A, Key_1, Value_1, Put_Outcome);
+   Maps.Put (Map_A, Decode (Key_1), Decode (Value_1), Put_Outcome);
    Assert (Put_Outcome = Maps.Inserted, "hash-map insert failed");
-   Maps.Get (Map_B, Key_1, Eight, Flag);
-   Assert (Flag and then Decode (Eight) = 111,
+   Maps.Get (Map_B, Decode (Key_1), U64_Value, Flag);
+   Assert (Flag and then U64_Value = 111,
            "hash-map A-to-B lookup failed");
-   Maps.Put (Map_B, Key_1, Value_2, Put_Outcome);
+   Maps.Put (Map_B, Decode (Key_1), Decode (Value_2), Put_Outcome);
    Assert (Put_Outcome = Maps.Replaced, "hash-map replacement failed");
-   Maps.Get (Map_A, Key_1, Eight, Flag);
-   Assert (Flag and then Decode (Eight) = 222,
+   Maps.Get (Map_A, Decode (Key_1), U64_Value, Flag);
+   Assert (Flag and then U64_Value = 222,
       "hash-map B-to-A replacement was not visible");
 
    declare
@@ -1401,7 +1639,7 @@ begin
       Write_U64
         (Base_B, Map_Entry_Offset (Home, 8), Saved_Hash xor 1);
       begin
-         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1412,7 +1650,7 @@ begin
          "failed hash-map attach retained a usable local view");
       Failed := False;
       begin
-         Maps.Get (Map_Bad, Key_1, Eight, Flag);
+         Maps.Get (Map_Bad, Decode (Key_1), U64_Value, Flag);
       exception
          when DS.Region_Error => Failed := True;
       end;
@@ -1449,7 +1687,7 @@ begin
       Write_U64 (Base_B, Map_Entry_Offset (Target, 24), Home_Value);
       Write_U32 (Base_B, Map_Entry_Offset (Target, 0), 1);
       begin
-         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1486,7 +1724,7 @@ begin
       Write_U32 (Base_B, Map_Entry_Offset (Target, 0), 1);
       Write_U64 (Base_B, Raw_Offset (Map_Location, 48), 2);
       begin
-         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1498,10 +1736,10 @@ begin
       Assert (Failed, "duplicate occupied hash-map keys were accepted");
    end;
 
-   Vectors.Try_Append (Wrapped_A, U64_Elements.Create (909), Flag);
+   Vectors.Try_Append (Wrapped_A, 909, Flag);
    Assert
      (Flag and then
-      U64_Elements.Value_Of (Vectors.Read (Wrapped_B, 1)) = 909,
+      Vectors.Read (Wrapped_B, 1) = 909,
            "versioned envelope content did not relocate");
    declare
       Wrong : Contract_V2.View;
@@ -1552,7 +1790,7 @@ begin
       Crash_Content := Contract_V1.Content_Location (First_Envelope);
       Vectors.Initialize (Stale_Leaf, Region_A, Crash_Content, 4);
       Vectors.Try_Append
-        (Stale_Leaf, U64_Elements.Create (707), Flag);
+        (Stale_Leaf, 707, Flag);
       Assert
         (Flag and then
          (Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) and 7) = 2,
@@ -1593,7 +1831,7 @@ begin
       Failed : Boolean := False;
    begin
       begin
-         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 7, 16, 8);
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 7);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1607,7 +1845,7 @@ begin
    begin
       Write_U32 (Base_B, Raw_Offset (Slab_Location, 72), 1);
       begin
-         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8, 16, 8);
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1625,7 +1863,7 @@ begin
    begin
       Write_U64 (Base_B, Raw_Offset (Slab_Location, 8), Saved xor 1);
       begin
-         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8, 16, 8);
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1640,7 +1878,7 @@ begin
    begin
       Write_U32 (Base_B, Raw_Offset (Slab_Location, 4), Saved + 1);
       begin
-         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8, 16, 8);
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1655,7 +1893,7 @@ begin
    begin
       Write_U32 (Base_B, Raw_Offset (Slab_Location, 0), 1);
       begin
-         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8, 16, 8);
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1670,7 +1908,7 @@ begin
       Failed : Boolean := False;
    begin
       begin
-         Slabs.Attach (Slab_Bad, Truncated, Slab_Location, 8, 16, 8);
+         Slabs.Attach (Slab_Bad, Truncated, Slab_Location, 8);
       exception
          when DS.Region_Error => Failed := True;
       end;
@@ -1710,7 +1948,7 @@ begin
    begin
       Write_U64 (Base_B, Raw_Offset (SPSC_Location, 128), Saved + 17);
       begin
-         SPSC.Attach (Ring_Bad, Region_B, SPSC_Location, 16, 8);
+         SPSC.Attach (Ring_Bad, Region_B, SPSC_Location, 16);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1728,7 +1966,7 @@ begin
    begin
       Write_U64 (Base_B, Raw_Offset (MPMC_Location, 192), Saved + 1);
       begin
-         MPMC.Attach (Multi_Bad, Region_B, MPMC_Location, 16, 8);
+         MPMC.Attach (Multi_Bad, Region_B, MPMC_Location, 16);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1757,7 +1995,7 @@ begin
       Dummy : Handles.Handle;
    begin
       begin
-         Slabs.Try_Allocate (Slab_A, Dummy, Allocation);
+         Slabs.Try_Allocate (Slab_A, Payload_16, Dummy, Allocation);
       exception
          when DS.Region_Error => Failed := True;
       end;
@@ -1771,21 +2009,21 @@ begin
    Assert (Base_C /= Base_A and then Base_C /= Base_B,
            "third mapping reused an existing virtual base");
    Regions.Attach (Region_C, Base_C, DS.Byte_Count (Mapping_Length));
-   Slabs.Attach (Slab_C, Region_C, Slab_Location, 8, 16, 8);
+   Slabs.Attach (Slab_C, Region_C, Slab_Location, 8);
    Arenas.Attach
      (Arena_C, Region_C, Arena_Location, 32_768, 64,
       16#A8E4_7B19_2C63_D501#);
    Dynamic_Vectors.Attach
-     (Dynamic_Vector_C, Region_C, Dynamic_Vector_Location, Arena_C, 2, 8);
+     (Dynamic_Vector_C, Region_C, Dynamic_Vector_Location, Arena_C, 2);
    Dynamic_Strings.Attach
      (Dynamic_String_C, Region_C, Dynamic_String_Location, Arena_C, 4);
    Dynamic_Maps.Attach
-     (Dynamic_Map_C, Region_C, Dynamic_Map_Location, Arena_C, 2, 8, 8);
+     (Dynamic_Map_C, Region_C, Dynamic_Map_Location, Arena_C, 2);
    Strings.Attach (String_C, Region_C, String_Location, 128);
    Vectors.Attach (Vector_C, Region_C, Vector_Location, 16);
-   SPSC.Attach (Ring_C, Region_C, SPSC_Location, 16, 8);
-   MPMC.Attach (Multi_C, Region_C, MPMC_Location, 16, 8);
-   Maps.Attach (Map_C, Region_C, Map_Location, 16, 8, 8);
+   SPSC.Attach (Ring_C, Region_C, SPSC_Location, 16);
+   MPMC.Attach (Multi_C, Region_C, MPMC_Location, 16);
+   Maps.Attach (Map_C, Region_C, Map_Location, 16);
    Contract_V1.Attach
      (Envelope_C, Region_C, Envelope_Location, Envelope_Content_Extent, 8);
    Vectors.Attach
@@ -1807,10 +2045,10 @@ begin
       "arena mutation was not visible after the third mapping");
    Arenas.Release (Arena_B, Arena_Handle);
    Dynamic_Vectors.Try_Append
-     (Dynamic_Vector_C, Arena_C, Encode (21), Growth);
-   Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 21, Eight);
+     (Dynamic_Vector_C, Arena_C, 21, Growth);
+   U64_Value := Dynamic_Vectors.Read (Dynamic_Vector_B, Arena_B, 21);
    Assert
-     (Growth = DS.Dynamic.Completed and then Decode (Eight) = 21,
+     (Growth = DS.Dynamic.Completed and then U64_Value = 21,
       "dynamic vector did not continue after the third mapping");
    Dynamic_Strings.Try_Assign
      (Dynamic_String_C, Arena_C, String_More, Growth);
@@ -1823,15 +2061,15 @@ begin
          "dynamic byte string did not continue after the third mapping");
    end;
    Dynamic_Maps.Put
-     (Dynamic_Map_C, Arena_C, Encode (21), Encode (210), Dynamic_Put);
+     (Dynamic_Map_C, Arena_C, 21, 210, Dynamic_Put);
    Dynamic_Maps.Get
-     (Dynamic_Map_B, Arena_B, Encode (21), Eight, Flag);
+     (Dynamic_Map_B, Arena_B, 21, U64_Value, Flag);
    Assert
      (Dynamic_Put = Dynamic_Maps.Put_Inserted
-      and then Flag and then Decode (Eight) = 210,
+      and then Flag and then U64_Value = 210,
       "dynamic map did not continue after the third mapping");
    Dynamic_Maps.Remove
-     (Dynamic_Map_B, Arena_B, Encode (1), Flag);
+     (Dynamic_Map_B, Arena_B, 1, Flag);
    Assert
      (Flag and then Dynamic_Maps.Length (Dynamic_Map_C) = 20,
       "dynamic-map removal was not shared across mappings");
@@ -1875,19 +2113,19 @@ begin
       and then String_Read (6 .. 8) = String_Data,
       "byte string did not continue across the third mapping");
 
-   Vectors.Try_Append (Vector_C, U64_Elements.Create (3), Flag);
+   Vectors.Try_Append (Vector_C, 3, Flag);
    Assert (Flag and then Vectors.Length (Vector_B) = 2,
            "vector did not continue after remap");
-   SPSC.Try_Push (Ring_C, Encode (77), Flag);
-   SPSC.Try_Pop (Ring_B, Eight, Flag);
-   Assert (Flag and then Decode (Eight) = 77,
+   SPSC.Try_Push (Ring_C, 77, Flag);
+   SPSC.Try_Pop (Ring_B, U64_Value, Flag);
+   Assert (Flag and then U64_Value = 77,
            "SPSC did not continue after remap");
-   MPMC.Try_Push (Multi_C, Encode (88), Push_Outcome);
-   MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
+   MPMC.Try_Push (Multi_C, 88, Push_Outcome);
+   MPMC.Try_Pop (Multi_B, U64_Value, Pop_Outcome);
    Assert
      (Push_Outcome = MPMC.Pushed
       and then Pop_Outcome = MPMC.Popped
-      and then Decode (Eight) = 88,
+      and then U64_Value = 88,
       "MPMC did not continue after remap");
 
    SPSC.Poison (Region_B, SPSC_Location);
@@ -1896,28 +2134,28 @@ begin
       Failed : Boolean := False;
    begin
       begin
-         SPSC.Try_Push (Ring_C, Encode (89), Flag);
+         SPSC.Try_Push (Ring_C, 89, Flag);
       exception
          when DS.Poison_Error => Failed := True;
       end;
       Assert (Failed, "poisoned SPSC ring accepted an operation");
    end;
-   SPSC.Initialize (Ring_C, Region_C, SPSC_Location, 16, 8);
-   SPSC.Try_Push (Ring_C, Encode (90), Flag);
+   SPSC.Initialize (Ring_C, Region_C, SPSC_Location, 16);
+   SPSC.Try_Push (Ring_C, 90, Flag);
    declare
       Failed : Boolean := False;
    begin
       begin
-         SPSC.Try_Pop (Ring_B, Eight, Flag);
+         SPSC.Try_Pop (Ring_B, U64_Value, Flag);
       exception
          when DS.Layout_Error => Failed := True;
       end;
       Assert (Failed, "stale SPSC view revived after reinitialization");
    end;
-   SPSC.Attach (Ring_B, Region_B, SPSC_Location, 16, 8);
-   SPSC.Try_Pop (Ring_B, Eight, Flag);
+   SPSC.Attach (Ring_B, Region_B, SPSC_Location, 16);
+   SPSC.Try_Pop (Ring_B, U64_Value, Flag);
    Assert
-     (Flag and then Decode (Eight) = 90,
+     (Flag and then U64_Value = 90,
       "SPSC did not recover through exclusive reinitialization");
 
    MPMC.Poison (Region_B, MPMC_Location);
@@ -1926,37 +2164,37 @@ begin
       Failed : Boolean := False;
    begin
       begin
-         MPMC.Try_Push (Multi_C, Encode (91), Push_Outcome);
+         MPMC.Try_Push (Multi_C, 91, Push_Outcome);
       exception
          when DS.Poison_Error => Failed := True;
       end;
       Assert (Failed, "poisoned MPMC ring accepted an operation");
    end;
-   MPMC.Initialize (Multi_C, Region_C, MPMC_Location, 16, 8);
-   MPMC.Try_Push (Multi_C, Encode (92), Push_Outcome);
+   MPMC.Initialize (Multi_C, Region_C, MPMC_Location, 16);
+   MPMC.Try_Push (Multi_C, 92, Push_Outcome);
    declare
       Failed : Boolean := False;
    begin
       begin
-         MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
+         MPMC.Try_Pop (Multi_B, U64_Value, Pop_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
       Assert (Failed, "stale MPMC view revived after reinitialization");
    end;
-   MPMC.Attach (Multi_B, Region_B, MPMC_Location, 16, 8);
-   MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
+   MPMC.Attach (Multi_B, Region_B, MPMC_Location, 16);
+   MPMC.Try_Pop (Multi_B, U64_Value, Pop_Outcome);
    Assert
      (Push_Outcome = MPMC.Pushed
       and then Pop_Outcome = MPMC.Popped
-      and then Decode (Eight) = 92,
+      and then U64_Value = 92,
       "MPMC did not recover through exclusive reinitialization");
 
-   Maps.Put (Map_C, Key_2, Value_1, Put_Outcome);
-   Maps.Get (Map_B, Key_2, Eight, Flag);
+   Maps.Put (Map_C, Decode (Key_2), Decode (Value_1), Put_Outcome);
+   Maps.Get (Map_B, Decode (Key_2), U64_Value, Flag);
    Assert (Put_Outcome = Maps.Inserted and then Flag,
            "hash map did not continue after remap");
-   Maps.Remove (Map_C, Key_1, Flag);
+   Maps.Remove (Map_C, Decode (Key_1), Flag);
    Assert (Flag and then Maps.Length (Map_B) = 1,
       "hash-map removal failed across mappings");
 
@@ -1970,14 +2208,15 @@ begin
       Failed : Boolean := False;
    begin
       begin
-         Maps.Put (Map_C, Key_1, Value_1, Put_Outcome);
+         Maps.Put (Map_C, Decode (Key_1), Decode (Value_1), Put_Outcome);
       exception
          when DS.Busy_Error => Failed := True;
       end;
       Assert (Failed, "busy hash map did not fail without waiting");
       Failed := False;
       begin
-         Maps.Put (Map_C, Key_1, Value_1, 0.0, Put_Outcome);
+         Maps.Put
+           (Map_C, Decode (Key_1), Decode (Value_1), 0.0, Put_Outcome);
       exception
          when DS.Timeout_Error => Failed := True;
       end;
@@ -1989,39 +2228,39 @@ begin
       Failed : Boolean := False;
    begin
       begin
-         Maps.Get (Map_B, Key_2, Eight, Flag);
+         Maps.Get (Map_B, Decode (Key_2), U64_Value, Flag);
       exception
          when DS.Poison_Error => Failed := True;
       end;
       Assert (Failed, "poisoned hash map accepted an operation");
       Failed := False;
       begin
-         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16);
       exception
          when DS.Poison_Error => Failed := True;
       end;
       Assert (Failed, "poisoned hash map attached as healthy");
    end;
-   Maps.Initialize (Map_C, Region_C, Map_Location, 16, 8, 8);
-   Maps.Put (Map_C, Key_1, Value_1, Put_Outcome);
+   Maps.Initialize (Map_C, Region_C, Map_Location, 16);
+   Maps.Put (Map_C, Decode (Key_1), Decode (Value_1), Put_Outcome);
    declare
       Failed : Boolean := False;
    begin
       begin
-         Maps.Get (Map_B, Key_1, Eight, Flag);
+         Maps.Get (Map_B, Decode (Key_1), U64_Value, Flag);
       exception
          when DS.Layout_Error => Failed := True;
       end;
       Assert (Failed, "stale hash-map view revived after reinitialization");
    end;
-   Maps.Attach (Map_B, Region_B, Map_Location, 16, 8, 8);
-   Maps.Get (Map_B, Key_1, Eight, Flag);
+   Maps.Attach (Map_B, Region_B, Map_Location, 16);
+   Maps.Get (Map_B, Decode (Key_1), U64_Value, Flag);
    Assert
-     (Put_Outcome = Maps.Inserted and then Flag and then Eight = Value_1,
+     (Put_Outcome = Maps.Inserted and then Flag and then U64_Value = 111,
       "exclusive hash-map reinitialization did not recover poison");
 
    Assert
-     (U64_Elements.Value_Of (Vectors.Read (Wrapped_C, 1)) = 909,
+     (Vectors.Read (Wrapped_C, 1) = 909,
            "versioned envelope did not survive third mapping");
 
    Slabs.Destroy (Slab_C);

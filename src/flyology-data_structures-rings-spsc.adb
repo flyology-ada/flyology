@@ -1,21 +1,19 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
-with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
-with Interfaces.C;
 
 package body Flyology.Data_Structures.Rings.SPSC is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
-   package Bytes renames Flyology.Data_Structures.Storage;
    package Waiting renames Flyology.Data_Structures.Waits;
 
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
 
    Head_Offset : constant Byte_Count := 64;
    Tail_Offset : constant Byte_Count := 128;
    Slots_Offset : constant Byte_Count := 192;
+   function Storage_Alignment return Byte_Count is
+     (Byte_Count'Max (8, Byte_Count (Element.Alignment)));
 
    function U32 (Value : Positive) return Interfaces.Unsigned_32 is
    begin
@@ -24,27 +22,31 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    procedure Geometry
      (Capacity     : Positive;
-      Element_Size : Positive;
       Stride       : out Byte_Count;
       Extent       : out Byte_Count) is
    begin
-      if not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
+      if Element.Signature = 0
+        or else Element.Version = 0
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+      then
+         raise Constraint_Error with "invalid immutable SPSC element contract";
+      elsif not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
       then
          raise Constraint_Error with "SPSC capacity must be a power of two";
       end if;
-      Stride := Layouts.Align_Up (Byte_Count (Element_Size), 8);
+      Stride := Layouts.Align_Up
+        (Byte_Count (Element.Size), Storage_Alignment);
       Extent := Layouts.Checked_Add
         (Slots_Offset,
          Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
    end Geometry;
 
-   function Required_Storage
-     (Capacity : Positive; Element_Size : Positive) return Byte_Count
+   function Required_Storage (Capacity : Positive) return Byte_Count
    is
       Stride : Byte_Count;
       Extent : Byte_Count;
    begin
-      Geometry (Capacity, Element_Size, Stride, Extent);
+      Geometry (Capacity, Stride, Extent);
       return Extent;
    end Required_Storage;
 
@@ -52,12 +54,11 @@ package body Flyology.Data_Structures.Rings.SPSC is
      (Item         : out View;
       Core         : Layouts.Local_View;
       Capacity     : Interfaces.Unsigned_32;
-      Element_Size : Interfaces.Unsigned_32;
       Stride       : Byte_Count) is
    begin
       Item.Core := Core;
       Item.Capacity_Value := Capacity;
-      Item.Element_Value := Element_Size;
+      Item.Element_Value := Interfaces.Unsigned_32 (Element.Size);
       Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
       Item.Stride := Stride;
       Item.Head_Address := Layouts.Address_At (Core, Head_Offset, 8, 8);
@@ -68,10 +69,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
      (Item         : out View;
       Core         : Layouts.Local_View;
       Capacity     : Interfaces.Unsigned_32;
-      Element_Size : Interfaces.Unsigned_32;
       Stride       : Byte_Count) is
    begin
-      Set_View (Item, Core, Capacity, Element_Size, Stride);
+      Set_View (Item, Core, Capacity, Stride);
       Atomic.Store_Release_U64 (Item.Head_Address, 0);
       Atomic.Store_Release_U64 (Item.Tail_Address, 0);
       Layouts.Publish (Item.Core);
@@ -81,26 +81,25 @@ package body Flyology.Data_Structures.Rings.SPSC is
      (Item         : out View;
       Region       : Region_View;
       Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive)
+      Capacity     : Positive)
    is
       Stride : Byte_Count;
       Extent : Byte_Count;
       Core   : Layouts.Local_View;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Stride, Extent);
+      Geometry (Capacity, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
          (Capacity     => U32 (Capacity),
-          Element_Size => U32 (Element_Size),
-          Alignment    => 8,
+          Element_Size => U32 (Element.Size),
+          Alignment    => U32 (Element.Alignment),
           Auxiliary    => 0,
           Word_1       => 0,
-          Word_2       => 0),
-         8);
+          Word_2       => Element.Signature),
+         Storage_Alignment);
       Finish_Initialize
-        (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
+        (Item, Core, U32 (Capacity), Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -114,7 +113,6 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Region       : Region_View;
       Location     : Region_Offset;
       Capacity     : Positive;
-      Element_Size : Positive;
       Result       : out Open_Result)
    is
       Stride : Byte_Count;
@@ -123,23 +121,23 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Claim  : Layouts.Initialization_Claim;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Stride, Extent);
+      Geometry (Capacity, Stride, Extent);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Extent,
          (Capacity     => U32 (Capacity),
-          Element_Size => U32 (Element_Size),
-          Alignment    => 8,
+          Element_Size => U32 (Element.Size),
+          Alignment    => U32 (Element.Alignment),
           Auxiliary    => 0,
           Word_1       => 0,
-          Word_2       => 0),
-         8);
+          Word_2       => Element.Signature),
+         Storage_Alignment);
       case Claim is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
-              (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
+              (Item, Core, U32 (Capacity), Stride);
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
-            Attach (Item, Region, Location, Capacity, Element_Size);
+            Attach (Item, Region, Location, Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -156,8 +154,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
      (Item         : out View;
       Region       : Region_View;
       Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive)
+      Capacity     : Positive)
    is
       Core   : Layouts.Local_View;
       Header : Layouts.Header_Values;
@@ -167,19 +164,20 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Tail   : Interfaces.Unsigned_64;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Stride, Extent);
-      Layouts.Attach (Core, Header, Region, Location, Identity, 8);
+      Geometry (Capacity, Stride, Extent);
+      Layouts.Attach
+        (Core, Header, Region, Location, Identity, Storage_Alignment);
       if Header.Capacity /= U32 (Capacity)
-        or else Header.Element_Size /= U32 (Element_Size)
-        or else Header.Alignment /= 8
+        or else Header.Element_Size /= U32 (Element.Size)
+        or else Header.Alignment /= U32 (Element.Alignment)
         or else Header.Auxiliary /= 0
         or else Header.Word_1 /= 0
-        or else Header.Word_2 /= 0
+        or else Header.Word_2 /= Element.Signature
         or else Core.Extent /= Extent
       then
          raise Layout_Error with "SPSC ring configuration does not match";
       end if;
-      Set_View (Item, Core, Header.Capacity, Header.Element_Size, Stride);
+      Set_View (Item, Core, Header.Capacity, Stride);
       Head := Atomic.Load_Acquire_U64
         (Item.Head_Address);
       Tail := Atomic.Load_Acquire_U64
@@ -212,7 +210,8 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
-      Layouts.Poison_At (Region, Location, Identity, 8);
+      Layouts.Poison_At
+        (Region, Location, Identity, Storage_Alignment);
    end Poison;
 
    function Is_Poisoned (Item : View) return Boolean is
@@ -227,17 +226,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
       return
         (Capacity     => Item.Capacity_Value,
          Element_Size => Item.Element_Value,
+         Element_Alignment => Interfaces.Unsigned_32 (Element.Alignment),
          Extent       => Item.Core.Extent);
    end Current_Metadata;
-
-   procedure Check_Length (Item : View; Length : Natural) is
-   begin
-      if not Item.Core.Attached then
-         raise Region_Error with "detached SPSC ring view";
-      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
-         raise Constraint_Error with "SPSC element length does not match";
-      end if;
-   end Check_Length;
 
    function Element_Address
      (Item : View; Position : Interfaces.Unsigned_64) return System.Address
@@ -250,18 +241,30 @@ package body Flyology.Data_Structures.Rings.SPSC is
          Layouts.Checked_Multiply (Index, Item.Stride));
    begin
       return Layouts.Address_At
-        (Item.Core, Relative, Byte_Count (Item.Element_Value), 1);
+        (Item.Core, Relative, Byte_Count (Element.Size),
+         Byte_Count (Element.Alignment));
    end Element_Address;
+
+   function Binding
+     (Item : View;
+      Position : Interfaces.Unsigned_64;
+      Writable : Boolean) return Immutable_Storage_View is
+     (Base      => Element_Address (Item, Position),
+      Extent    => Byte_Count (Element.Size),
+      Signature => Element.Signature,
+      Version   => Element.Version,
+      Writable  => Writable);
+   pragma Inline_Always (Binding);
 
    procedure Try_Push
      (Item   : in out View;
-      Data   : Ada.Streams.Stream_Element_Array;
+      Data   : Element.Source;
       Pushed : out Boolean)
    is
       Head : Interfaces.Unsigned_64;
       Tail : Interfaces.Unsigned_64;
+      Target : Element.Builder;
    begin
-      Check_Length (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Tail := Atomic.Load_Relaxed_U64
         (Item.Tail_Address);
@@ -275,9 +278,8 @@ package body Flyology.Data_Structures.Rings.SPSC is
          Pushed := False;
          return;
       end if;
-      Bytes.Copy
-        (Element_Address (Item, Tail), Data'Address,
-         Interfaces.C.size_t (Data'Length));
+      Element.Bind (Target, Binding (Item, Tail, True));
+      Element.Construct (Target, Data);
       Atomic.Store_Release_U64
         (Item.Tail_Address, Tail + 1);
       Pushed := True;
@@ -285,7 +287,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    procedure Push
      (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
+      Data    : Element.Source;
       Timeout : Wait_Timeout)
    is
       Wait   : Waiting.Context := Waiting.Start (Timeout);
@@ -300,13 +302,13 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    procedure Try_Pop
      (Item   : in out View;
-      Data   : out Ada.Streams.Stream_Element_Array;
+      Data   : out Element.Observed;
       Popped : out Boolean)
    is
       Head : Interfaces.Unsigned_64;
       Tail : Interfaces.Unsigned_64;
+      Source : Element.Const_Ref;
    begin
-      Check_Length (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Head := Atomic.Load_Relaxed_U64
         (Item.Head_Address);
@@ -320,9 +322,8 @@ package body Flyology.Data_Structures.Rings.SPSC is
          Popped := False;
          return;
       end if;
-      Bytes.Copy
-        (Data'Address, Element_Address (Item, Head),
-         Interfaces.C.size_t (Data'Length));
+      Element.Bind (Source, Binding (Item, Head, False));
+      Data := Element.Observe (Source);
       Atomic.Store_Release_U64
         (Item.Head_Address, Head + 1);
       Popped := True;
@@ -330,7 +331,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    procedure Pop
      (Item    : in out View;
-      Data    : out Ada.Streams.Stream_Element_Array;
+      Data    : out Element.Observed;
       Timeout : Wait_Timeout)
    is
       Wait   : Waiting.Context := Waiting.Start (Timeout);

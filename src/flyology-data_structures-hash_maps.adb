@@ -2,7 +2,6 @@ with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
-with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Hash_Maps is
@@ -13,7 +12,6 @@ package body Flyology.Data_Structures.Hash_Maps is
    package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
    use type Addressing.Storage_Offset;
 
    Count_Offset : constant Byte_Count := 48;
@@ -22,55 +20,69 @@ package body Flyology.Data_Structures.Hash_Maps is
      Layouts.Header_Size + 8;
    State_Offset : constant Byte_Count := 0;
    Hash_Offset  : constant Byte_Count := 8;
-   Key_Offset   : constant Byte_Count := 16;
+   Entry_Data_Offset : constant Byte_Count := 16;
    Empty_State    : constant Interfaces.Unsigned_32 := 0;
    Occupied_State : constant Interfaces.Unsigned_32 := 1;
    Deleted_State  : constant Interfaces.Unsigned_32 := 2;
 
+   function Storage_Alignment return Byte_Count is
+     (Byte_Count'Max
+        (8, Byte_Count'Max
+           (Byte_Count (Key.Alignment), Byte_Count (Element.Alignment))));
+
    procedure Geometry
      (Capacity     : Positive;
-      Key_Size     : Positive;
-      Value_Size   : Positive;
+      Key_Offset   : out Byte_Count;
       Value_Offset : out Byte_Count;
       Stride       : out Byte_Count;
       Extent       : out Byte_Count) is
    begin
-      if not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
+      if Key.Signature = 0
+        or else Key.Version = 0
+        or else Element.Signature = 0
+        or else Element.Version = 0
+        or else Key.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+      then
+         raise Constraint_Error with "invalid immutable map element contract";
+      elsif not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
       then
          raise Constraint_Error with
            "hash-map capacity must be a power of two";
       end if;
+      Key_Offset := Layouts.Align_Up
+        (Entry_Data_Offset, Byte_Count (Key.Alignment));
       Value_Offset := Layouts.Align_Up
-        (Layouts.Checked_Add (Key_Offset, Byte_Count (Key_Size)), 8);
+        (Layouts.Checked_Add (Key_Offset, Byte_Count (Key.Size)),
+         Byte_Count (Element.Alignment));
       Stride := Layouts.Align_Up
-        (Layouts.Checked_Add (Value_Offset, Byte_Count (Value_Size)), 8);
+        (Layouts.Checked_Add (Value_Offset, Byte_Count (Element.Size)),
+         Storage_Alignment);
       Extent := Layouts.Checked_Add
         (Entries_Offset,
          Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
    end Geometry;
 
-   function Required_Storage
-     (Capacity   : Positive;
-      Key_Size   : Positive;
-      Value_Size : Positive) return Byte_Count
+   function Required_Storage (Capacity : Positive) return Byte_Count
    is
-      Value_Offset, Stride, Extent : Byte_Count;
+      Key_Offset, Value_Offset, Stride, Extent : Byte_Count;
    begin
       Geometry
-        (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
+        (Capacity, Key_Offset, Value_Offset, Stride, Extent);
       return Extent;
    end Required_Storage;
 
    procedure Set_View
      (Item : out View; Core : Layouts.Local_View;
-      Capacity, Key_Size, Value_Size : Interfaces.Unsigned_32;
-      Value_Offset, Stride : Byte_Count) is
+      Capacity : Interfaces.Unsigned_32;
+      Key_Offset, Value_Offset, Stride : Byte_Count) is
    begin
       Item.Core := Core;
       Item.Capacity_Value := Capacity;
-      Item.Key_Value := Key_Size;
-      Item.Value_Value := Value_Size;
+      Item.Key_Value := Interfaces.Unsigned_32 (Key.Size);
+      Item.Value_Value := Interfaces.Unsigned_32 (Element.Size);
       Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
+      Item.Key_Offset := Key_Offset;
       Item.Value_Offset := Value_Offset;
       Item.Stride := Stride;
 
@@ -103,17 +115,36 @@ package body Flyology.Data_Structures.Hash_Maps is
       return Slot_Address + Addressing.Storage_Offset (Offset);
    end Field_Address;
 
+   function Key_Binding
+     (Item : View; Slot_Address : System.Address; Writable : Boolean)
+      return Immutable_Storage_View is
+     (Base      => Field_Address
+        (Item, Slot_Address, Item.Key_Offset, Byte_Count (Key.Size)),
+      Extent    => Byte_Count (Key.Size),
+      Signature => Key.Signature,
+      Version   => Key.Version,
+      Writable  => Writable);
+
+   function Value_Binding
+     (Item : View; Slot_Address : System.Address; Writable : Boolean)
+      return Immutable_Storage_View is
+     (Base      => Field_Address
+        (Item, Slot_Address, Item.Value_Offset, Byte_Count (Element.Size)),
+      Extent    => Byte_Count (Element.Size),
+      Signature => Element.Signature,
+      Version   => Element.Version,
+      Writable  => Writable);
+
    procedure Finish_Initialize
      (Item         : out View;
       Core         : Layouts.Local_View;
       Capacity     : Interfaces.Unsigned_32;
-      Key_Size     : Interfaces.Unsigned_32;
-      Value_Size   : Interfaces.Unsigned_32;
+      Key_Offset   : Byte_Count;
       Value_Offset : Byte_Count;
       Stride       : Byte_Count) is
    begin
       Set_View
-        (Item, Core, Capacity, Key_Size, Value_Size, Value_Offset, Stride);
+        (Item, Core, Capacity, Key_Offset, Value_Offset, Stride);
       Bytes.Write_U32 (Item.Guard_Address, 0);
       for Index in Interfaces.Unsigned_64 range
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
@@ -126,54 +157,40 @@ package body Flyology.Data_Structures.Hash_Maps is
       Layouts.Publish (Item.Core);
    end Finish_Initialize;
 
-   function Hash
-     (Key : Ada.Streams.Stream_Element_Array) return Interfaces.Unsigned_64;
-
    function Entry_Key_Hash
      (Item : View; Slot_Address : System.Address)
       return Interfaces.Unsigned_64
    is
-      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+      Reference : Key.Const_Ref;
    begin
-      for Offset in Interfaces.Unsigned_32 range 0 .. Item.Key_Value - 1 loop
-         Result := (Result xor Interfaces.Unsigned_64
-           (Bytes.Read_U8
-              (Field_Address
-                 (Item, Slot_Address,
-                  Layouts.Checked_Add
-                    (Key_Offset, Byte_Count (Offset)),
-                  1)))) * 16#0000_0100_0000_01B3#;
-      end loop;
-      return Result;
+      Key.Bind (Reference, Key_Binding (Item, Slot_Address, False));
+      return Key.Hash (Reference);
    end Entry_Key_Hash;
 
    procedure Initialize
      (Item       : out View;
       Region     : Region_View;
       Location   : Region_Offset;
-      Capacity   : Positive;
-      Key_Size   : Positive;
-      Value_Size : Positive)
+      Capacity   : Positive)
    is
       Core : Layouts.Local_View;
-      Value_Offset, Stride, Extent : Byte_Count;
+      Key_Offset, Value_Offset, Stride, Extent : Byte_Count;
    begin
       Detach (Item);
       Geometry
-        (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
+        (Capacity, Key_Offset, Value_Offset, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
          (Capacity     => Interfaces.Unsigned_32 (Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Key_Size),
-          Alignment    => 8,
-          Auxiliary    => Interfaces.Unsigned_32 (Value_Size),
+          Element_Size => Interfaces.Unsigned_32 (Key.Size),
+          Alignment    => Interfaces.Unsigned_32 (Storage_Alignment),
+          Auxiliary    => Interfaces.Unsigned_32 (Element.Size),
           Word_1       => 0,
           Word_2       => Interfaces.Unsigned_64 (Stride)),
-         8);
+         Storage_Alignment);
       Finish_Initialize
         (Item, Core, Interfaces.Unsigned_32 (Capacity),
-         Interfaces.Unsigned_32 (Key_Size),
-         Interfaces.Unsigned_32 (Value_Size), Value_Offset, Stride);
+         Key_Offset, Value_Offset, Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -187,36 +204,32 @@ package body Flyology.Data_Structures.Hash_Maps is
       Region     : Region_View;
       Location   : Region_Offset;
       Capacity   : Positive;
-      Key_Size   : Positive;
-      Value_Size : Positive;
       Result     : out Open_Result)
    is
       Core : Layouts.Local_View;
       Claim : Layouts.Initialization_Claim;
-      Value_Offset, Stride, Extent : Byte_Count;
+      Key_Offset, Value_Offset, Stride, Extent : Byte_Count;
    begin
       Detach (Item);
       Geometry
-        (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
+        (Capacity, Key_Offset, Value_Offset, Stride, Extent);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Extent,
          (Capacity     => Interfaces.Unsigned_32 (Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Key_Size),
-          Alignment    => 8,
-          Auxiliary    => Interfaces.Unsigned_32 (Value_Size),
+          Element_Size => Interfaces.Unsigned_32 (Key.Size),
+          Alignment    => Interfaces.Unsigned_32 (Storage_Alignment),
+          Auxiliary    => Interfaces.Unsigned_32 (Element.Size),
           Word_1       => 0,
           Word_2       => Interfaces.Unsigned_64 (Stride)),
-         8);
+         Storage_Alignment);
       case Claim is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
               (Item, Core, Interfaces.Unsigned_32 (Capacity),
-               Interfaces.Unsigned_32 (Key_Size),
-               Interfaces.Unsigned_32 (Value_Size), Value_Offset, Stride);
+               Key_Offset, Value_Offset, Stride);
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
-            Attach
-              (Item, Region, Location, Capacity, Key_Size, Value_Size);
+            Attach (Item, Region, Location, Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -233,13 +246,11 @@ package body Flyology.Data_Structures.Hash_Maps is
      (Item       : out View;
       Region     : Region_View;
       Location   : Region_Offset;
-      Capacity   : Positive;
-      Key_Size   : Positive;
-      Value_Size : Positive)
+      Capacity   : Positive)
    is
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
-      Value_Offset, Stride, Extent : Byte_Count;
+      Key_Offset, Value_Offset, Stride, Extent : Byte_Count;
       Occupied : Interfaces.Unsigned_64 := 0;
       State, Candidate_State : Interfaces.Unsigned_32;
       Stored_Hash, Candidate_Hash : Interfaces.Unsigned_64;
@@ -249,12 +260,13 @@ package body Flyology.Data_Structures.Hash_Maps is
    begin
       Detach (Item);
       Geometry
-        (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
-      Layouts.Attach (Core, Header, Region, Location, Identity, 8);
+        (Capacity, Key_Offset, Value_Offset, Stride, Extent);
+      Layouts.Attach
+        (Core, Header, Region, Location, Identity, Storage_Alignment);
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
-        or else Header.Element_Size /= Interfaces.Unsigned_32 (Key_Size)
-        or else Header.Alignment /= 8
-        or else Header.Auxiliary /= Interfaces.Unsigned_32 (Value_Size)
+        or else Header.Element_Size /= Interfaces.Unsigned_32 (Key.Size)
+        or else Header.Alignment /= Interfaces.Unsigned_32 (Storage_Alignment)
+        or else Header.Auxiliary /= Interfaces.Unsigned_32 (Element.Size)
         or else Header.Word_2 /= Interfaces.Unsigned_64 (Stride)
         or else Header.Word_1 > Interfaces.Unsigned_64 (Header.Capacity)
         or else Core.Extent /= Extent
@@ -262,8 +274,7 @@ package body Flyology.Data_Structures.Hash_Maps is
          raise Layout_Error with "hash-map layout does not match";
       end if;
       Set_View
-        (Item, Core, Header.Capacity, Header.Element_Size, Header.Auxiliary,
-         Value_Offset, Stride);
+        (Item, Core, Header.Capacity, Key_Offset, Value_Offset, Stride);
       declare
          Guard : constant Interfaces.Unsigned_32 :=
            Atomic.Load_Acquire_U32 (Item.Guard_Address);
@@ -324,18 +335,22 @@ package body Flyology.Data_Structures.Hash_Maps is
                   Candidate_Hash := Bytes.Read_U64
                     (Field_Address
                        (Item, Candidate_Address, Hash_Offset, 8));
-                  if Candidate_Hash = Stored_Hash
-                    and then Bytes.Equal
-                      (Field_Address
-                         (Item, Candidate_Address, Key_Offset,
-                          Byte_Count (Item.Key_Value)),
-                       Field_Address
-                         (Item, Slot_Address, Key_Offset,
-                          Byte_Count (Item.Key_Value)),
-                       Interfaces.C.size_t (Item.Key_Value))
-                  then
-                     raise Layout_Error with
-                       "hash-map contains duplicate occupied keys";
+                  if Candidate_Hash = Stored_Hash then
+                     declare
+                        Candidate_Key : Key.Const_Ref;
+                        Stored_Key    : Key.Const_Ref;
+                     begin
+                        Key.Bind
+                          (Candidate_Key,
+                           Key_Binding (Item, Candidate_Address, False));
+                        Key.Bind
+                          (Stored_Key,
+                           Key_Binding (Item, Slot_Address, False));
+                        if Key.Equivalent (Candidate_Key, Stored_Key) then
+                           raise Layout_Error with
+                             "hash-map contains duplicate occupied keys";
+                        end if;
+                     end;
                   end if;
                end if;
             end loop;
@@ -360,6 +375,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Item.Key_Value := 0;
       Item.Value_Value := 0;
       Item.Mask := 0;
+      Item.Key_Offset := 0;
       Item.Value_Offset := 0;
       Item.Stride := 0;
       Item.Count_Address := System.Null_Address;
@@ -369,7 +385,7 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
-      Layouts.Poison_At (Region, Location, Identity, 8);
+      Layouts.Poison_At (Region, Location, Identity, Storage_Alignment);
    end Poison;
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
@@ -476,57 +492,29 @@ package body Flyology.Data_Structures.Hash_Maps is
       end;
    end Length;
 
-   procedure Check_Key
-     (Item : View; Key : Ada.Streams.Stream_Element_Array) is
-   begin
-      if not Item.Core.Attached then
-         raise Region_Error with "detached hash-map view";
-      elsif Byte_Count (Key'Length) /= Byte_Count (Item.Key_Value) then
-         raise Constraint_Error with "hash-map key length does not match";
-      end if;
-   end Check_Key;
-
-   procedure Check_Value (Item : View; Length : Natural) is
-   begin
-      if not Item.Core.Attached then
-         raise Region_Error with "detached hash-map view";
-      elsif Byte_Count (Length) /= Byte_Count (Item.Value_Value) then
-         raise Constraint_Error with "hash-map value length does not match";
-      end if;
-   end Check_Value;
-
-   function Hash
-     (Key : Ada.Streams.Stream_Element_Array) return Interfaces.Unsigned_64
-   is
-      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
-   begin
-      for Byte of Key loop
-         Result := (Result xor Interfaces.Unsigned_64 (Byte)) *
-           16#0000_0100_0000_01B3#;
-      end loop;
-      return Result;
-   end Hash;
-
    function Key_Matches
      (Item : View; Slot_Address : System.Address;
       Hash_Value : Interfaces.Unsigned_64;
-      Key : Ada.Streams.Stream_Element_Array) return Boolean is
+      Stored_Key : Key.Value) return Boolean
+   is
+      Reference : Key.Const_Ref;
    begin
-      return Bytes.Read_U64
-        (Field_Address (Item, Slot_Address, Hash_Offset, 8)) = Hash_Value
-        and then Bytes.Equal
-          (Field_Address
-             (Item, Slot_Address, Key_Offset, Byte_Count (Item.Key_Value)),
-           Key'Address, Interfaces.C.size_t (Key'Length));
+      if Bytes.Read_U64
+        (Field_Address (Item, Slot_Address, Hash_Offset, 8)) /= Hash_Value
+      then
+         return False;
+      end if;
+      Key.Bind (Reference, Key_Binding (Item, Slot_Address, False));
+      return Key.Equivalent (Stored_Key, Reference);
    end Key_Matches;
 
    procedure Put_Unlocked
      (Item   : in out View;
-      Key    : Ada.Streams.Stream_Element_Array;
-      Value  : Ada.Streams.Stream_Element_Array;
+      Stored_Key   : Key.Value;
+      Stored_Value : Element.Value;
       Result : out Put_Result)
    is
-      Hash_Value : constant Interfaces.Unsigned_64 := Hash (Key);
+      Hash_Value : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
       First_Deleted : Interfaces.Unsigned_64 := Interfaces.Unsigned_64'Last;
       Index, Target : Interfaces.Unsigned_64;
       State : Interfaces.Unsigned_32;
@@ -546,13 +534,11 @@ package body Flyology.Data_Structures.Hash_Maps is
             raise Layout_Error with
               "hash-map occupied entry contradicts zero count";
          elsif State = Occupied_State
-           and then Key_Matches (Item, Slot_Address, Hash_Value, Key)
+           and then Key_Matches
+             (Item, Slot_Address, Hash_Value, Stored_Key)
          then
-            Bytes.Copy
-              (Field_Address
-                 (Item, Slot_Address, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Value'Address, Interfaces.C.size_t (Value'Length));
+            Element.Copy_To
+              (Stored_Value, Value_Binding (Item, Slot_Address, True));
             Result := Replaced;
             return;
          elsif State = Deleted_State
@@ -571,16 +557,10 @@ package body Flyology.Data_Structures.Hash_Maps is
             Bytes.Write_U64
               (Field_Address (Item, Target_Address, Hash_Offset, 8),
                Hash_Value);
-            Bytes.Copy
-              (Field_Address
-                 (Item, Target_Address, Key_Offset,
-                  Byte_Count (Item.Key_Value)),
-               Key'Address, Interfaces.C.size_t (Key'Length));
-            Bytes.Copy
-              (Field_Address
-                 (Item, Target_Address, Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Value'Address, Interfaces.C.size_t (Value'Length));
+            Key.Copy_To
+              (Stored_Key, Key_Binding (Item, Target_Address, True));
+            Element.Copy_To
+              (Stored_Value, Value_Binding (Item, Target_Address, True));
             Bytes.Write_U32
               (Field_Address (Item, Target_Address, State_Offset, 4),
                Occupied_State);
@@ -600,15 +580,10 @@ package body Flyology.Data_Structures.Hash_Maps is
          Target_Address := Entry_Address (Item, Target);
          Bytes.Write_U64
            (Field_Address (Item, Target_Address, Hash_Offset, 8), Hash_Value);
-         Bytes.Copy
-           (Field_Address
-              (Item, Target_Address, Key_Offset, Byte_Count (Item.Key_Value)),
-            Key'Address, Interfaces.C.size_t (Key'Length));
-         Bytes.Copy
-           (Field_Address
-              (Item, Target_Address, Item.Value_Offset,
-               Byte_Count (Item.Value_Value)),
-            Value'Address, Interfaces.C.size_t (Value'Length));
+         Key.Copy_To
+           (Stored_Key, Key_Binding (Item, Target_Address, True));
+         Element.Copy_To
+           (Stored_Value, Value_Binding (Item, Target_Address, True));
          Bytes.Write_U32
            (Field_Address (Item, Target_Address, State_Offset, 4),
             Occupied_State);
@@ -621,15 +596,16 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Put
      (Item   : in out View;
-      Key    : Ada.Streams.Stream_Element_Array;
-      Value  : Ada.Streams.Stream_Element_Array;
-      Result : out Put_Result) is
+      Key_Data : Key.Source;
+      Value    : Element.Source;
+      Result   : out Put_Result)
+   is
+      Stored_Key   : constant Key.Value := Key.Create (Key_Data);
+      Stored_Value : constant Element.Value := Element.Create (Value);
    begin
-      Check_Key (Item, Key);
-      Check_Value (Item, Value'Length);
       Acquire (Item);
       begin
-         Put_Unlocked (Item, Key, Value, Result);
+         Put_Unlocked (Item, Stored_Key, Stored_Value, Result);
          Release (Item);
       exception
          when others =>
@@ -640,16 +616,17 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Put
      (Item    : in out View;
-      Key     : Ada.Streams.Stream_Element_Array;
-      Value   : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value   : Element.Source;
       Timeout : Wait_Timeout;
-      Result  : out Put_Result) is
+      Result  : out Put_Result)
+   is
+      Stored_Key   : constant Key.Value := Key.Create (Key_Data);
+      Stored_Value : constant Element.Value := Element.Create (Value);
    begin
-      Check_Key (Item, Key);
-      Check_Value (Item, Value'Length);
       Acquire (Item, Timeout);
       begin
-         Put_Unlocked (Item, Key, Value, Result);
+         Put_Unlocked (Item, Stored_Key, Stored_Value, Result);
          Release (Item);
       exception
          when others =>
@@ -659,10 +636,10 @@ package body Flyology.Data_Structures.Hash_Maps is
    end Put;
 
    procedure Find_Index_Unlocked
-     (Item : View; Key : Ada.Streams.Stream_Element_Array;
+     (Item : View; Stored_Key : Key.Value;
       Found : out Boolean; Index : out Interfaces.Unsigned_64)
    is
-      Hash_Value : constant Interfaces.Unsigned_64 := Hash (Key);
+      Hash_Value : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
       Candidate : Interfaces.Unsigned_64;
       State : Interfaces.Unsigned_32;
       Slot_Address : System.Address;
@@ -680,7 +657,8 @@ package body Flyology.Data_Structures.Hash_Maps is
             Index := 0;
             return;
          elsif State = Occupied_State
-           and then Key_Matches (Item, Slot_Address, Hash_Value, Key)
+           and then Key_Matches
+             (Item, Slot_Address, Hash_Value, Stored_Key)
          then
             Found := True;
             Index := Candidate;
@@ -695,24 +673,25 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Get
      (Item  : View;
-      Key   : Ada.Streams.Stream_Element_Array;
-      Value : out Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value : out Element.Observed;
       Found : out Boolean)
    is
-      Index : Interfaces.Unsigned_64;
+      Stored_Key : constant Key.Value := Key.Create (Key_Data);
+      Index      : Interfaces.Unsigned_64;
    begin
-      Check_Value (Item, Value'Length);
-      Check_Key (Item, Key);
       Acquire (Item);
       begin
-         Find_Index_Unlocked (Item, Key, Found, Index);
+         Find_Index_Unlocked (Item, Stored_Key, Found, Index);
          if Found then
-            Bytes.Copy
-              (Value'Address,
-               Field_Address
-                 (Item, Entry_Address (Item, Index), Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Interfaces.C.size_t (Value'Length));
+            declare
+               Reference : Element.Const_Ref;
+            begin
+               Element.Bind
+                 (Reference,
+                  Value_Binding (Item, Entry_Address (Item, Index), False));
+               Value := Element.Observe (Reference);
+            end;
          end if;
          Release (Item);
       exception
@@ -724,25 +703,26 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Get
      (Item    : View;
-      Key     : Ada.Streams.Stream_Element_Array;
-      Value   : out Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value   : out Element.Observed;
       Timeout : Wait_Timeout;
       Found   : out Boolean)
    is
-      Index : Interfaces.Unsigned_64;
+      Stored_Key : constant Key.Value := Key.Create (Key_Data);
+      Index      : Interfaces.Unsigned_64;
    begin
-      Check_Value (Item, Value'Length);
-      Check_Key (Item, Key);
       Acquire (Item, Timeout);
       begin
-         Find_Index_Unlocked (Item, Key, Found, Index);
+         Find_Index_Unlocked (Item, Stored_Key, Found, Index);
          if Found then
-            Bytes.Copy
-              (Value'Address,
-               Field_Address
-                 (Item, Entry_Address (Item, Index), Item.Value_Offset,
-                  Byte_Count (Item.Value_Value)),
-               Interfaces.C.size_t (Value'Length));
+            declare
+               Reference : Element.Const_Ref;
+            begin
+               Element.Bind
+                 (Reference,
+                  Value_Binding (Item, Entry_Address (Item, Index), False));
+               Value := Element.Observe (Reference);
+            end;
          end if;
          Release (Item);
       exception
@@ -754,16 +734,16 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Remove
      (Item    : in out View;
-      Key     : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
       Removed : out Boolean)
    is
-      Index : Interfaces.Unsigned_64;
-      Count : Interfaces.Unsigned_64;
+      Stored_Key : constant Key.Value := Key.Create (Key_Data);
+      Index      : Interfaces.Unsigned_64;
+      Count      : Interfaces.Unsigned_64;
    begin
-      Check_Key (Item, Key);
       Acquire (Item);
       begin
-         Find_Index_Unlocked (Item, Key, Removed, Index);
+         Find_Index_Unlocked (Item, Stored_Key, Removed, Index);
          if Removed then
             Count := Stored_Count (Item);
             if Count = 0 then
@@ -786,17 +766,17 @@ package body Flyology.Data_Structures.Hash_Maps is
 
    procedure Remove
      (Item    : in out View;
-      Key     : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
       Timeout : Wait_Timeout;
       Removed : out Boolean)
    is
-      Index : Interfaces.Unsigned_64;
-      Count : Interfaces.Unsigned_64;
+      Stored_Key : constant Key.Value := Key.Create (Key_Data);
+      Index      : Interfaces.Unsigned_64;
+      Count      : Interfaces.Unsigned_64;
    begin
-      Check_Key (Item, Key);
       Acquire (Item, Timeout);
       begin
-         Find_Index_Unlocked (Item, Key, Removed, Index);
+         Find_Index_Unlocked (Item, Stored_Key, Removed, Index);
          if Removed then
             Count := Stored_Count (Item);
             if Count = 0 then

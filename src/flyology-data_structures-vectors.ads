@@ -1,4 +1,4 @@
-with Flyology.Data_Structures.Storage_Types.Immutable;
+with Flyology.Data_Structures.Storage_Types.Elements;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
 private with System;
@@ -6,23 +6,22 @@ private with System;
 use type Interfaces.Unsigned_64;
 
 --  Provides bounded vectors of immutable fixed-layout values in relocatable
---  storage. Element values own exact byte arrays, so append and replacement
---  copy bytes without encoding. Read operations invoke a caller-supplied
---  action with a zero-copy Const_Ref while the vector guard keeps the element
---  and backing allocation stable. Emplacement constructs directly in an
---  unpublished slot and publishes the new length only after successful
---  construction. Actions and constructors must not block, retain references,
---  reenter this vector, or change its backing lifetime.
+--  storage. Element creation and observation are selected once by the generic
+--  adapter. Append creates independent immutable bytes before acquiring the
+--  guard, observation reads a scoped Const_Ref without an intermediate
+--  representation copy, and emplacement delays creation until capacity is
+--  known to be available. Adapter operations must not block, retain
+--  references, reenter this vector, or change its backing lifetime.
 --
 --  Immediate operations make one process-shared guard attempt and raise
 --  Busy_Error on contention. Timed overloads yield between attempts. The
 --  application must exclude lifecycle operations and local-view detachment
 --  from every use of that same View; separate attached views may perform
 --  ordinary operations concurrently.
---  @formal Element Immutable byte-backed value type stored by this vector
+--  @formal Element Immutable byte-backed element adapter stored by this vector
 generic
    with package Element is new
-     Flyology.Data_Structures.Storage_Types.Immutable (<>);
+     Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Vectors is
 
    --  Eight-byte magic stored in every vector header.
@@ -42,17 +41,6 @@ package Flyology.Data_Structures.Vectors is
 
    --  Process-local attached vector view.
    type View is limited private;
-
-   --  Read-only action invoked synchronously with a published element. Item
-   --  is valid only until the action returns.
-   --  @param Item Active read-only reference
-   type Read_Action is not null access procedure (Item : Element.Const_Ref);
-
-   --  Constructor invoked synchronously with one unpublished element slot.
-   --  The slot becomes immutable and visible only after the action returns.
-   --  @param Item Active unpublished builder
-   type Construct_Action is not null access procedure
-     (Item : in out Element.Builder);
 
    --  Compute the complete fixed-capacity vector extent.
    --  @param Capacity Maximum element count
@@ -135,106 +123,92 @@ package Flyology.Data_Structures.Vectors is
    --  @param Location Stored vector offset
    procedure Poison (Region : Region_View; Location : Region_Offset);
 
-   --  Append an immutable value without representation conversion.
+   --  Create and append an immutable value. Creation completes before guard
+   --  acquisition, so a raising creator cannot mutate shared storage.
    --  @param Item Internally synchronized vector view
-   --  @param Data Independent immutable value
+   --  @param Data Application value accepted by the element adapter
    --  @param Appended True only when capacity was available
    procedure Try_Append
      (Item     : in out View;
-      Data     : Element.Value;
+      Data     : Element.Source;
       Appended : out Boolean);
 
    --  Append after waiting for the shared guard.
    --  @param Item Internally synchronized vector view
-   --  @param Data Independent immutable value
+   --  @param Data Application value accepted by the element adapter
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @param Appended True only when capacity was available
    procedure Try_Append
      (Item     : in out View;
-      Data     : Element.Value;
+      Data     : Element.Source;
       Timeout  : Wait_Timeout;
       Appended : out Boolean);
 
-   --  Construct an immutable value directly in an unpublished tail slot.
-   --  Constructor is not called when the vector is full.
+   --  Create an immutable value only after finding an unpublished tail slot.
+   --  The bound creator is not called when the vector is full.
    --  @param Item Internally synchronized vector view
-   --  @param Constructor Nonblocking construction action
-   --  @param Appended True only when construction completed and was published
+   --  @param Data Application value accepted by the bound creator
+   --  @param Appended True only when creation completed and was published
    procedure Try_Emplace
      (Item        : in out View;
-      Constructor : Construct_Action;
+      Data        : Element.Source;
       Appended    : out Boolean);
 
-   --  Invoke Process on the indexed element without copying it.
+   --  Observe the indexed element without copying its representation.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
-   --  @param Process Nonblocking read-only action
+   --  @return Application observation returned by the bound observer
    --  @exception Constraint_Error Index is outside the initialized range
-   procedure Read
-     (Item    : View;
-      Index   : Positive;
-      Process : Read_Action);
+   function Read
+     (Item  : View;
+      Index : Positive) return Element.Observed;
 
-   --  Copy the indexed element into an independent immutable value. Prefer
-   --  callback Read when the caller can consume the value synchronously.
+   --  Copy the indexed element into an independent immutable representation.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
    --  @return Independent immutable value
-   function Read (Item : View; Index : Positive) return Element.Value;
+   function Read_Value (Item : View; Index : Positive) return Element.Value;
 
-   --  Instantiate a statically dispatched zero-copy reader for a hot path.
-   --  Process must obey the same nonblocking and reference-lifetime rules as
-   --  callback Read. GNAT may inline Process into the guarded operation.
-   --  @exclude
-   generic
-      --  Read-only action invoked synchronously.
-      --  @param Item Active read-only reference
-      with procedure Process (Item : Element.Const_Ref);
-   --  Invoke the statically selected Process on one element without copying.
-   --  @param Item Internally synchronized vector view
-   --  @param Index One-based initialized element position
-   procedure Visit (Item : View; Index : Positive);
-
-   --  Invoke Process after waiting for the shared guard.
+   --  Observe one element after waiting for the shared guard.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
    --  @param Timeout Maximum wait; zero permits one immediate attempt
-   --  @param Process Nonblocking read-only action
-   procedure Read
+   --  @return Application observation returned by the bound observer
+   function Read
      (Item    : View;
       Index   : Positive;
-      Timeout : Wait_Timeout;
-      Process : Read_Action);
+      Timeout : Wait_Timeout) return Element.Observed;
 
    --  Replace one element with another immutable value. No mutable reference
    --  to the published element is exposed.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
-   --  @param Data Replacement immutable value
+   --  @param Data Application value accepted by the element adapter
    procedure Replace
      (Item  : in out View;
       Index : Positive;
-      Data  : Element.Value);
+      Data  : Element.Source);
 
    --  Replace after waiting for the shared guard.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
-   --  @param Data Replacement immutable value
+   --  @param Data Application value accepted by the element adapter
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    procedure Replace
      (Item    : in out View;
       Index   : Positive;
-      Data    : Element.Value;
+      Data    : Element.Source;
       Timeout : Wait_Timeout);
 
-   --  Observe and remove the last element without copying it. Process is not
-   --  called for an empty vector; a raising Process leaves the element live.
+   --  Observe and remove the last element without copying its representation.
+   --  The bound observer is not called for an empty vector; a raising observer
+   --  leaves the element live.
    --  @param Item Internally synchronized vector view
-   --  @param Process Nonblocking read-only action
-   --  @param Popped True only when Process returned and length was decremented
+   --  @param Data Observation assigned only when an element is consumed
+   --  @param Popped True only when observation returned and length decremented
    procedure Try_Pop
      (Item    : in out View;
-      Process : Read_Action;
+      Data    : out Element.Observed;
       Popped  : out Boolean);
 
    --  Set Length to zero without rewriting immutable payload bytes.

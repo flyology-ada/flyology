@@ -1,27 +1,41 @@
-with Ada.Streams;
 with Flyology.Data_Structures.Arenas;
+with Flyology.Data_Structures.Storage_Types.Elements;
 with Interfaces;
 private with Flyology.Data_Structures.Layouts;
 private with System;
 
---  Provides growable open-addressed maps from fixed-size byte keys to
---  fixed-size byte values. The fixed map header stores an arena incarnation,
---  current table geometry, and generation-stamped allocation handles. Linear
+use type Interfaces.Unsigned_64;
+
+--  Provides growable open-addressed maps from immutable fixed-layout keys to
+--  immutable fixed-layout values. The fixed map header stores an arena
+--  incarnation, current table geometry, and generation-stamped allocation
+--  handles. Linear
 --  probing uses cached native addresses only for the duration of one checked
 --  process-local allocation view. Insertion grows and rehashes before
 --  publishing a replacement table. One persisted nonblocking map guard
 --  serializes operations across mappings; arena contention is reported in the
 --  insertion result. Lifecycle operations and detachment require exclusion.
+--  @formal Key Immutable key adapter bound once for this map type
+--  @formal Element Immutable mapped-value adapter bound once for this map type
+generic
+   with package Key is new
+     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new
+     Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
 
    --  Eight-byte magic stored in every dynamic-map header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_4448_4D41_3031#;
 
    --  Schema for the FNV-1a, linear-probe, arena-backed map contract.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4448_4D41_0001#;
+   Schema : constant Interfaces.Unsigned_64 :=
+     16#0001_4448_4D41_0002# xor Key.Signature xor
+     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Key.Version), 32) xor
+     Interfaces.Rotate_Left (Element.Signature, 17) xor
+     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelopes and tooling.
    Identity : constant Layout_Identity :=
@@ -49,26 +63,21 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Location Nonzero eight-byte-aligned map-header offset
    --  @param Arena Attached arena used for table allocations
    --  @param Initial_Capacity Power-of-two first table capacity, at least two
-   --  @param Key_Size Fixed bytes in every key
-   --  @param Value_Size Fixed bytes in every value
    procedure Initialize
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive);
+      Initial_Capacity : Positive);
 
    --  Initialize virgin bytes or attach to an exact compatible map. Initial
-   --  capacity, key/value sizes, and arena identity/incarnation must match.
+   --  capacity, key/value contracts, and arena identity/incarnation must
+   --  match.
    --  @param Item Attached view or detached view during another initialization
    --  @param Region Region containing the fixed map header
    --  @param Location Stored map-header offset
    --  @param Arena Expected attached arena
    --  @param Initial_Capacity Expected first table capacity
-   --  @param Key_Size Expected fixed key bytes
-   --  @param Value_Size Expected fixed value bytes
    --  @param Result Creation, attachment, or in-progress outcome
    procedure Create_Or_Attach
      (Item             : out View;
@@ -76,8 +85,6 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
       Location         : Region_Offset;
       Arena            : Arenas.View;
       Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive;
       Result           : out Open_Result);
 
    --  Attach to a quiescent map and validate its complete probe table and any
@@ -87,8 +94,6 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Location Stored map-header offset
    --  @param Arena Expected attached arena and incarnation
    --  @param Initial_Capacity Expected first table capacity
-   --  @param Key_Size Expected fixed key bytes
-   --  @param Value_Size Expected fixed value bytes
    --  @exception Layout_Error Configuration or table contents are corrupt
    --  @exception Busy_Error The map guard is active or abandoned
    procedure Attach
@@ -96,9 +101,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
       Region           : Region_View;
       Location         : Region_Offset;
       Arena            : Arenas.View;
-      Initial_Capacity : Positive;
-      Key_Size         : Positive;
-      Value_Size       : Positive);
+      Initial_Capacity : Positive);
 
    --  Detach Item without changing its header or allocations.
    --  @param Item Local view to detach
@@ -134,38 +137,38 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  growth before the table exceeds three-quarters occupancy.
    --  @param Item Internally synchronized map view
    --  @param Arena Matching attached arena view
-   --  @param Key Fixed-size key bytes
-   --  @param Value Fixed-size value bytes
+   --  @param Key_Data Application key value
+   --  @param Value Application mapped value
    --  @param Result Insert, replacement, exhaustion, or arena contention
    procedure Put
      (Item   : in out View;
       Arena  : in out Arenas.View;
-      Key    : Ada.Streams.Stream_Element_Array;
-      Value  : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value  : Element.Source;
       Result : out Put_Result);
 
    --  Look up Key and copy its value when present.
    --  @param Item Internally synchronized map view
    --  @param Arena Matching attached arena view
-   --  @param Key Fixed-size key bytes
-   --  @param Value Fixed-size destination assigned only when Found is true
+   --  @param Key_Data Application key value
+   --  @param Value Observation assigned only when Found is true
    --  @param Found True only when Key is present
    procedure Get
      (Item  : View;
       Arena : Arenas.View;
-      Key   : Ada.Streams.Stream_Element_Array;
-      Value : out Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
+      Value : out Element.Observed;
       Found : out Boolean);
 
    --  Remove Key while retaining a tombstone for probe continuity.
    --  @param Item Internally synchronized map view
    --  @param Arena Matching attached arena view
-   --  @param Key Fixed-size key bytes
+   --  @param Key_Data Application key value
    --  @param Removed True only when Key was present
    procedure Remove
      (Item    : in out View;
       Arena   : Arenas.View;
-      Key     : Ada.Streams.Stream_Element_Array;
+      Key_Data : Key.Source;
       Removed : out Boolean);
 
    --  Reset every current slot to empty without releasing table capacity.
@@ -193,6 +196,7 @@ private
       Value_Value      : Interfaces.Unsigned_32 := 0;
       Arena_ID_Value   : Interfaces.Unsigned_64 := 0;
       Arena_Epoch_Value : Interfaces.Unsigned_32 := 0;
+      Key_Offset       : Byte_Count := 0;
       Value_Offset     : Byte_Count := 0;
       Stride           : Byte_Count := 0;
    end record;

@@ -1,19 +1,15 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
-with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
-with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Rings.MPMC is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
-   package Bytes renames Flyology.Data_Structures.Storage;
    package Waiting renames Flyology.Data_Structures.Waits;
    package Native renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
    use type Policy.Sequence_Relation;
 
    Enqueue_Offset : constant Byte_Count := 64;
@@ -21,44 +17,53 @@ package body Flyology.Data_Structures.Rings.MPMC is
    Slots_Offset   : constant Byte_Count := 192;
    Sequence_Size  : constant Byte_Count := 8;
 
+   function Storage_Alignment return Byte_Count is
+     (Byte_Count'Max (8, Byte_Count (Element.Alignment)));
+
    procedure Geometry
      (Capacity       : Positive;
-      Element_Size   : Positive;
       Payload_Offset : out Byte_Count;
       Stride         : out Byte_Count;
       Extent         : out Byte_Count) is
    begin
-      if Capacity < 2 then
+      if Element.Signature = 0
+        or else Element.Version = 0
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+      then
+         raise Constraint_Error with "invalid immutable MPMC element contract";
+      elsif Capacity < 2 then
          raise Constraint_Error with "MPMC capacity must be at least two";
       elsif not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
       then
          raise Constraint_Error with "MPMC capacity must be a power of two";
       end if;
-      Payload_Offset := Sequence_Size;
+      Payload_Offset := Layouts.Align_Up
+        (Sequence_Size, Byte_Count (Element.Alignment));
       Stride := Layouts.Align_Up
-        (Layouts.Checked_Add (Payload_Offset, Byte_Count (Element_Size)), 8);
+        (Layouts.Checked_Add
+           (Payload_Offset, Byte_Count (Element.Size)),
+         Storage_Alignment);
       Extent := Layouts.Checked_Add
         (Slots_Offset,
          Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
    end Geometry;
 
-   function Required_Storage
-     (Capacity : Positive; Element_Size : Positive) return Byte_Count
+   function Required_Storage (Capacity : Positive) return Byte_Count
    is
       Payload_Offset, Stride, Extent : Byte_Count;
    begin
-      Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
+      Geometry (Capacity, Payload_Offset, Stride, Extent);
       return Extent;
    end Required_Storage;
 
    procedure Set_View
      (Item : out View; Core : Layouts.Local_View;
-      Capacity, Element_Size : Interfaces.Unsigned_32;
+      Capacity : Interfaces.Unsigned_32;
       Payload_Offset, Stride : Byte_Count) is
    begin
       Item.Core := Core;
       Item.Capacity_Value := Capacity;
-      Item.Element_Value := Element_Size;
+      Item.Element_Value := Interfaces.Unsigned_32 (Element.Size);
       Item.Mask := Interfaces.Unsigned_64 (Capacity) - 1;
       Item.Payload_Offset := Payload_Offset;
       Item.Stride := Stride;
@@ -84,7 +89,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
      (Item : View; Position : Interfaces.Unsigned_64) return System.Address is
    begin
       return Layouts.Address_At
-        (Item.Core, Slot_Relative (Item, Position), Item.Stride, 8);
+        (Item.Core, Slot_Relative (Item, Position), Item.Stride,
+         Storage_Alignment);
    end Slot_Address;
 
    function Payload_Address
@@ -93,7 +99,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
    begin
       --  Slot_Address has checked the null sentinel, complete slot extent,
       --  alignment, and native conversion. Initialize or Attach has checked
-      --  that Payload_Offset and Element_Value fit within the validated stride,
+      --  that Payload_Offset and Element_Value fit within the validated
+      --  stride,
       --  so this process-local subaddress cannot escape that slot.
       return Native."+"
         (Slot, Native.Storage_Offset (Item.Payload_Offset));
@@ -106,12 +113,11 @@ package body Flyology.Data_Structures.Rings.MPMC is
      (Item           : out View;
       Core           : Layouts.Local_View;
       Capacity       : Interfaces.Unsigned_32;
-      Element_Size   : Interfaces.Unsigned_32;
       Payload_Offset : Byte_Count;
       Stride         : Byte_Count) is
    begin
       Set_View
-        (Item, Core, Capacity, Element_Size, Payload_Offset, Stride);
+        (Item, Core, Capacity, Payload_Offset, Stride);
       Atomic.Store_Release_U64 (Item.Enqueue_Address, 0);
       Atomic.Store_Release_U64 (Item.Dequeue_Address, 0);
       for Slot in Interfaces.Unsigned_32 range 0 .. Capacity - 1 loop
@@ -151,8 +157,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
      (Item         : out View;
       Region       : Region_View;
       Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive)
+      Capacity     : Positive)
    is
       Core : Layouts.Local_View;
       Payload_Offset, Stride, Extent : Byte_Count;
@@ -160,19 +165,18 @@ package body Flyology.Data_Structures.Rings.MPMC is
         Interfaces.Unsigned_32 (Capacity);
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
+      Geometry (Capacity, Payload_Offset, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
          (Capacity     => Capacity_32,
-          Element_Size => Interfaces.Unsigned_32 (Element_Size),
-          Alignment    => 8,
+          Element_Size => Interfaces.Unsigned_32 (Element.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Alignment),
           Auxiliary    => Interfaces.Unsigned_32 (Payload_Offset),
           Word_1       => 0,
-          Word_2       => 0),
-         8);
+          Word_2       => Element.Signature),
+         Storage_Alignment);
       Finish_Initialize
-        (Item, Core, Capacity_32, Interfaces.Unsigned_32 (Element_Size),
-         Payload_Offset, Stride);
+        (Item, Core, Capacity_32, Payload_Offset, Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -186,7 +190,6 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Region       : Region_View;
       Location     : Region_Offset;
       Capacity     : Positive;
-      Element_Size : Positive;
       Result       : out Open_Result)
    is
       Core : Layouts.Local_View;
@@ -196,25 +199,23 @@ package body Flyology.Data_Structures.Rings.MPMC is
         Interfaces.Unsigned_32 (Capacity);
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
+      Geometry (Capacity, Payload_Offset, Stride, Extent);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Extent,
          (Capacity     => Capacity_32,
-          Element_Size => Interfaces.Unsigned_32 (Element_Size),
-          Alignment    => 8,
+          Element_Size => Interfaces.Unsigned_32 (Element.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Alignment),
           Auxiliary    => Interfaces.Unsigned_32 (Payload_Offset),
           Word_1       => 0,
-          Word_2       => 0),
-         8);
+          Word_2       => Element.Signature),
+         Storage_Alignment);
       case Claim is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
-              (Item, Core, Capacity_32,
-               Interfaces.Unsigned_32 (Element_Size),
-               Payload_Offset, Stride);
+              (Item, Core, Capacity_32, Payload_Offset, Stride);
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
-            Attach (Item, Region, Location, Capacity, Element_Size);
+            Attach (Item, Region, Location, Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -231,8 +232,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
      (Item         : out View;
       Region       : Region_View;
       Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive)
+      Capacity     : Positive)
    is
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
@@ -240,21 +240,22 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Enqueue, Dequeue : Interfaces.Unsigned_64;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
-      Layouts.Attach (Core, Header, Region, Location, Identity, 8);
+      Geometry (Capacity, Payload_Offset, Stride, Extent);
+      Layouts.Attach
+        (Core, Header, Region, Location, Identity, Storage_Alignment);
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
-        or else Header.Element_Size /= Interfaces.Unsigned_32 (Element_Size)
-        or else Header.Alignment /= 8
+        or else Header.Element_Size /= Interfaces.Unsigned_32 (Element.Size)
+        or else Header.Alignment /=
+          Interfaces.Unsigned_32 (Element.Alignment)
         or else Header.Auxiliary /= Interfaces.Unsigned_32 (Payload_Offset)
         or else Header.Word_1 /= 0
-        or else Header.Word_2 /= 0
+        or else Header.Word_2 /= Element.Signature
         or else Core.Extent /= Extent
       then
          raise Layout_Error with "MPMC ring layout does not match";
       end if;
       Set_View
-        (Item, Core, Header.Capacity, Header.Element_Size,
-         Payload_Offset, Stride);
+        (Item, Core, Header.Capacity, Payload_Offset, Stride);
       Enqueue := Atomic.Load_Acquire_U64
         (Item.Enqueue_Address);
       Dequeue := Atomic.Load_Acquire_U64
@@ -284,33 +285,36 @@ package body Flyology.Data_Structures.Rings.MPMC is
 
    procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
-      Layouts.Poison_At (Region, Location, Identity, 8);
+      Layouts.Poison_At
+        (Region, Location, Identity, Storage_Alignment);
    end Poison;
 
    function Is_Poisoned (Item : View) return Boolean is
      (Layouts.Is_Poisoned (Item.Core));
 
-   procedure Check_Data (Item : View; Length : Natural) is
-   begin
-      if not Item.Core.Attached then
-         raise Region_Error with "detached MPMC ring view";
-      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
-         raise Constraint_Error with "MPMC element length does not match";
-      end if;
-   end Check_Data;
+   function Binding
+     (Item : View;
+      Slot : System.Address;
+      Writable : Boolean) return Immutable_Storage_View is
+     (Base      => Payload_Address (Item, Slot),
+      Extent    => Byte_Count (Element.Size),
+      Signature => Element.Signature,
+      Version   => Element.Version,
+      Writable  => Writable);
+   pragma Inline_Always (Binding);
 
    procedure Try_Push
      (Item   : in out View;
-      Data   : Ada.Streams.Stream_Element_Array;
+      Data   : Element.Source;
       Result : out Push_Result)
    is
+      Stored   : constant Element.Value := Element.Create (Data);
       Position : Interfaces.Unsigned_64;
       Sequence : Interfaces.Unsigned_64;
       Expected : Interfaces.Unsigned_64;
       Relation : Policy.Sequence_Relation;
       Slot     : System.Address;
    begin
-      Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Position := Atomic.Load_Relaxed_U64
         (Item.Enqueue_Address);
@@ -324,9 +328,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
             if Atomic.Compare_Exchange_U64
               (Item.Enqueue_Address, Expected, Position + 1)
             then
-               Bytes.Copy
-                 (Payload_Address (Item, Slot), Data'Address,
-                  Interfaces.C.size_t (Data'Length));
+               Element.Copy_To (Stored, Binding (Item, Slot, True));
                Atomic.Store_Release_U64
                  (Slot, Position + 1);
                Result := Pushed;
@@ -346,7 +348,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
 
    procedure Push
      (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
+      Data    : Element.Source;
       Timeout : Wait_Timeout)
    is
       Wait   : Waiting.Context := Waiting.Start (Timeout);
@@ -361,7 +363,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
 
    procedure Try_Pop
      (Item   : in out View;
-      Data   : out Ada.Streams.Stream_Element_Array;
+      Data   : out Element.Observed;
       Result : out Pop_Result)
    is
       Position : Interfaces.Unsigned_64;
@@ -369,8 +371,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Expected : Interfaces.Unsigned_64;
       Relation : Policy.Sequence_Relation;
       Slot     : System.Address;
+      Source   : Element.Const_Ref;
    begin
-      Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
       Position := Atomic.Load_Relaxed_U64
         (Item.Dequeue_Address);
@@ -384,9 +386,14 @@ package body Flyology.Data_Structures.Rings.MPMC is
             if Atomic.Compare_Exchange_U64
               (Item.Dequeue_Address, Expected, Position + 1)
             then
-               Bytes.Copy
-                 (Data'Address, Payload_Address (Item, Slot),
-                  Interfaces.C.size_t (Data'Length));
+               Element.Bind (Source, Binding (Item, Slot, False));
+               begin
+                  Data := Element.Observe (Source);
+               exception
+                  when others =>
+                     Layouts.Poison (Item.Core);
+                     raise;
+               end;
                Atomic.Store_Release_U64
                  (Slot,
                   Position + Interfaces.Unsigned_64 (Item.Capacity_Value));
@@ -407,7 +414,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
 
    procedure Pop
      (Item    : in out View;
-      Data    : out Ada.Streams.Stream_Element_Array;
+      Data    : out Element.Observed;
       Timeout : Wait_Timeout)
    is
       Wait   : Waiting.Context := Waiting.Start (Timeout);
