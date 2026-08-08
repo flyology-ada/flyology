@@ -48,6 +48,7 @@ procedure Data_Structures_Benchmark is
    use type Interfaces.C.int;
    use type MPMC.Pop_Result;
    use type MPMC.Push_Result;
+   use type Slab_Pools.Allocation_Result;
    use type RT.Time;
    use type System.Address;
    use type U64;
@@ -348,12 +349,12 @@ procedure Data_Structures_Benchmark is
    procedure Benchmark_Fly_Slab is
       Handle : Handles.Handle;
       Data : Bytes_8;
-      Allocated : Boolean;
+      Result : Slab_Pools.Allocation_Result;
       Local : U64 := 0;
    begin
       for Value in 1 .. Rounds loop
-         Slab_Pools.Try_Allocate (Fly_Slab, Handle, Allocated);
-         if not Allocated then
+         Slab_Pools.Try_Allocate (Fly_Slab, Handle, Result);
+         if Result /= Slab_Pools.Allocated then
             raise Program_Error with "Flyology slab allocation failed";
          end if;
          Slab_Pools.Write (Fly_Slab, Handle, Encode (U64 (Value)));

@@ -135,9 +135,13 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   lifecycle poison state and report immediate contention; they never wait or
   retry internally. A dead owner leaves the object locked until an
   independently authorized supervisor poisons it, and exclusive
-  reinitialization is the only recovery. Slab pools require application-level
-  exclusion across every view. SPSC permits exactly one producer and one
-  consumer. MPMC uses per-slot sequence counters and bounded CAS attempts.
+  reinitialization is the only recovery. Slab allocation, release, read, and
+  write use per-slot atomic states and a bounded capacity scan. A dead slab
+  owner leaves only its slot transitional; externally authorized recovery must
+  poison that slot before explicitly recycling it with a new generation, while
+  exclusive whole-pool initialization remains unconditional recovery. SPSC
+  permits exactly one producer and one consumer. MPMC uses per-slot sequence
+  counters and bounded CAS attempts.
 - Leaf magic/version/schema checks are mandatory. The optional `Envelopes`
   generic adds a stable application-selected 64-bit signature and 64-bit
   contract version without weakening a nested leaf's structural checks.
@@ -145,7 +149,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   consumer counters on separate 64-byte control lines and use power-of-two
   capacities for masked slot selection.
 - These packages own no mapping and provide no peer discovery, descriptor
-  exchange, wake channel, permissions, flushing, or process-death recovery.
+  exchange, wake channel, permissions, flushing, or automatic process-death
+  recovery. Slab poison/recycle requires external owner-death and quiescence
+  authority.
   Detach every local structure view before releasing its backing mapping.
 
 ## Runtime and ABI boundaries

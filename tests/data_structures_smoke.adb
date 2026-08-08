@@ -49,6 +49,9 @@ procedure Data_Structures_Smoke is
    use type C.int;
    use type C.size_t;
    use type DS.Byte_Count;
+   use type Slabs.Allocation_Result;
+   use type Handles.Generation;
+   use type Handles.Slot_Index;
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
    use type Maps.Put_Result;
@@ -218,13 +221,16 @@ procedure Data_Structures_Smoke is
    Key_2 : constant Ada.Streams.Stream_Element_Array := Encode (22);
    Value_1 : constant Ada.Streams.Stream_Element_Array := Encode (111);
    Value_2 : constant Ada.Streams.Stream_Element_Array := Encode (222);
-   Handle_1 : Handles.Handle;
    type Handle_Array is array (Positive range <>) of Handles.Handle;
+   Handle_1 : Handles.Handle;
+   Poison_Handle : Handles.Handle;
+   Recovered_Handles : Handle_Array (1 .. 7);
    Bad_Handles : constant Handle_Array :=
      [Handles.Null_Handle,
       (Slot => 99, Stamp => 1),
       (Slot => 1, Stamp => 0)];
-   Allocated, Flag : Boolean;
+   Flag : Boolean;
+   Allocation : Slabs.Allocation_Result;
    Put_Outcome : Maps.Put_Result;
    Push_Outcome : MPMC.Push_Result;
    Pop_Outcome : MPMC.Pop_Result;
@@ -281,8 +287,9 @@ begin
          Interfaces.Unsigned_64 (SSE.To_Integer (Base_B))) = 0,
       "mapping B address escaped into stored bytes");
 
-   Slabs.Try_Allocate (Slab_A, Handle_1, Allocated);
-   Assert (Allocated and then not Handles.Is_Null (Handle_1),
+   Slabs.Try_Allocate (Slab_A, Handle_1, Allocation);
+   Assert (Allocation = Slabs.Allocated
+           and then not Handles.Is_Null (Handle_1),
            "slab allocation failed");
    Slabs.Write (Slab_A, Handle_1, Payload_16);
    Slabs.Read (Slab_B, Handle_1, Read_16);
@@ -291,6 +298,62 @@ begin
    Slabs.Write (Slab_B, Handle_1, Payload_16);
    Slabs.Read (Slab_A, Handle_1, Read_16);
    Assert (Read_16 = Payload_16, "slab B-to-A mutation was not visible");
+
+   Slabs.Try_Allocate (Slab_A, Poison_Handle, Allocation);
+   Assert (Allocation = Slabs.Allocated, "poison test allocation failed");
+   Write_U32
+     (Base_A,
+      Raw_Offset
+        (Slab_Location,
+         64 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4),
+      3);
+   Slabs.Detach (Slab_A);
+   Slabs.Detach (Slab_B);
+   Slabs.Poison_Abandoned_At
+     (Region_B, Slab_Location, 8, 16, 8, Poison_Handle.Slot);
+   Slabs.Attach (Slab_A, Region_A, Slab_Location, 8, 16, 8);
+   Slabs.Attach (Slab_B, Region_B, Slab_Location, 8, 16, 8);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Slabs.Read (Slab_A, Poison_Handle, Read_16);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned slab slot remained readable");
+   end;
+   Slabs.Recover_Poisoned (Slab_B, Poison_Handle.Slot);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Slabs.Read (Slab_A, Poison_Handle, Read_16);
+      exception
+         when DS.Handle_Error => Failed := True;
+      end;
+      Assert (Failed, "recovery did not stale the abandoned handle");
+   end;
+   Flag := False;
+   for Index in Recovered_Handles'Range loop
+      Slabs.Try_Allocate (Slab_A, Recovered_Handles (Index), Allocation);
+      Assert (Allocation = Slabs.Allocated,
+              "recovery verification allocation failed");
+      if Recovered_Handles (Index).Slot = Poison_Handle.Slot then
+         Assert
+           (Recovered_Handles (Index).Stamp /= Poison_Handle.Stamp,
+            "recovery did not advance the poisoned generation");
+         Flag := True;
+      end if;
+   end loop;
+   Assert (Flag, "poisoned slab slot was not explicitly recycled");
+   Slabs.Try_Allocate (Slab_A, Poison_Handle, Allocation);
+   Assert
+     (Allocation = Slabs.Exhausted and then Handles.Is_Null (Poison_Handle),
+      "full slab did not report an exhausted allocation outcome");
+   for Handle of Recovered_Handles loop
+      Slabs.Release (Slab_A, Handle);
+   end loop;
 
    Strings.Assign (String_A, String_Data);
    Strings.Append (String_B, String_More);
@@ -761,7 +824,7 @@ begin
       Dummy : Handles.Handle;
    begin
       begin
-         Slabs.Try_Allocate (Slab_A, Dummy, Flag);
+         Slabs.Try_Allocate (Slab_A, Dummy, Allocation);
       exception
          when DS.Region_Error => Failed := True;
       end;
@@ -837,8 +900,8 @@ begin
    Assert (Flag and then Vectors.Length (Vector_B) = 2,
            "vector did not continue after remap");
    SPSC.Try_Push (Ring_C, Encode (77), Flag);
-   SPSC.Try_Pop (Ring_B, Eight, Allocated);
-   Assert (Flag and then Allocated and then Decode (Eight) = 77,
+   SPSC.Try_Pop (Ring_B, Eight, Flag);
+   Assert (Flag and then Decode (Eight) = 77,
            "SPSC did not continue after remap");
    MPMC.Try_Push (Multi_C, Encode (88), Push_Outcome);
    MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
@@ -862,9 +925,9 @@ begin
    end;
    SPSC.Initialize (Ring_C, Region_C, SPSC_Location, 16, 8);
    SPSC.Try_Push (Ring_C, Encode (90), Flag);
-   SPSC.Try_Pop (Ring_B, Eight, Allocated);
+   SPSC.Try_Pop (Ring_B, Eight, Flag);
    Assert
-     (Flag and then Allocated and then Decode (Eight) = 90,
+     (Flag and then Decode (Eight) = 90,
       "SPSC did not recover through exclusive reinitialization");
 
    MPMC.Poison (Region_B, MPMC_Location);

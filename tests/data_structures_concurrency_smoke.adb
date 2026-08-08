@@ -6,9 +6,11 @@ with Flyology;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Hash_Maps;
+with Flyology.Data_Structures.Handles;
 with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
+with Flyology.Data_Structures.Slab_Pools;
 with Flyology.Data_Structures.Vectors;
 with Interfaces;
 with Interfaces.C;
@@ -18,9 +20,11 @@ procedure Data_Structures_Concurrency_Smoke is
    package DS renames Flyology.Data_Structures;
    package Byte_Strings renames DS.Byte_Strings;
    package Hash_Maps renames DS.Hash_Maps;
+   package Handles renames DS.Handles;
    package Regions renames DS.Regions;
    package SPSC renames DS.Rings.SPSC;
    package MPMC renames DS.Rings.MPMC;
+   package Slabs renames DS.Slab_Pools;
    package Vectors renames DS.Vectors;
    package C renames Interfaces.C;
 
@@ -30,6 +34,7 @@ procedure Data_Structures_Concurrency_Smoke is
    use type Hash_Maps.Put_Result;
    use type MPMC.Pop_Result;
    use type MPMC.Push_Result;
+   use type Slabs.Allocation_Result;
    use type System.Address;
 
    function Argument
@@ -43,6 +48,7 @@ procedure Data_Structures_Concurrency_Smoke is
    Mapping_Length : constant C.size_t := 1_048_576;
    SPSC_Location : constant DS.Region_Offset := 64;
    MPMC_Location : constant DS.Region_Offset := 131_072;
+   Slab_Location : constant DS.Region_Offset := 400_000;
    Vector_Location : constant DS.Region_Offset := 524_288;
    String_Location : constant DS.Region_Offset := 700_000;
    Map_Location : constant DS.Region_Offset := 786_432;
@@ -101,6 +107,7 @@ procedure Data_Structures_Concurrency_Smoke is
       procedure Done (Success : Boolean);
       entry Await_All;
       function Passed return Boolean;
+      function Completed return Natural;
    private
       Count : Natural := 0;
       All_OK : Boolean := True;
@@ -119,6 +126,8 @@ procedure Data_Structures_Concurrency_Smoke is
       end Await_All;
 
       function Passed return Boolean is (All_OK);
+
+      function Completed return Natural is (Count);
    end Completion;
 
    Temp_Root : constant String := Ada.Environment_Variables.Value
@@ -372,6 +381,102 @@ procedure Data_Structures_Concurrency_Smoke is
          MPMC.Detach (Consumer_Views (Index));
       end loop;
    end Run_MPMC;
+
+   procedure Run_Slab is
+      Worker_Count : constant Positive := 4;
+      Per_Worker   : constant Positive := 10_000;
+      Capacity     : constant Positive := 128;
+      type View_Array is array (Positive range <>) of aliased Slabs.View;
+      Views : View_Array (1 .. Worker_Count);
+      type View_Access is access all Slabs.View;
+      Finished : Completion (Worker_Count);
+
+      task type Worker_Task
+        (Identifier : Positive; Item : not null View_Access)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Handle : Handles.Handle;
+         Outcome : Slabs.Allocation_Result;
+         Data : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Value : Interfaces.Unsigned_64;
+         Released : Boolean;
+      begin
+         for Sequence in 1 .. Per_Worker loop
+            Value := Interfaces.Unsigned_64
+              ((Identifier - 1) * Per_Worker + Sequence);
+            loop
+               Slabs.Try_Allocate (Item.all, Handle, Outcome);
+               exit when Outcome = Slabs.Allocated;
+               delay 0.0;
+            end loop;
+            Slabs.Write (Item.all, Handle, Encode (Value));
+            Slabs.Read (Item.all, Handle, Data);
+            if Decode (Data) /= Value then
+               raise Program_Error with "concurrent slab payload mismatch";
+            end if;
+            Released := False;
+            while not Released loop
+               begin
+                  Slabs.Release (Item.all, Handle);
+                  Released := True;
+               exception
+                  when DS.Busy_Error => delay 0.0;
+               end;
+            end loop;
+         end loop;
+         loop
+            begin
+               Slabs.Read (Item.all, Handle, Data);
+               raise Program_Error with
+                 "concurrent slab accepted a released handle";
+            exception
+               when DS.Busy_Error => delay 0.0;
+               when DS.Handle_Error => exit;
+            end;
+         end loop;
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Worker_Task;
+
+      type Worker_Access is access Worker_Task;
+      type Worker_Array is array (Positive range <>) of Worker_Access;
+      Workers : Worker_Array (1 .. Worker_Count);
+   begin
+      Slabs.Initialize
+        (Views (1), Region_A, Slab_Location, Capacity, 8, 8);
+      for Index in 2 .. Worker_Count loop
+         if Index mod 2 = 0 then
+            Slabs.Attach
+              (Views (Index), Region_B, Slab_Location, Capacity, 8, 8);
+         else
+            Slabs.Attach
+              (Views (Index), Region_A, Slab_Location, Capacity, 8, 8);
+         end if;
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker_Task (Index, Views (Index)'Access);
+      end loop;
+      select
+         Finished.Await_All;
+      or
+         delay 20.0;
+         for Worker of Workers loop
+            abort Worker.all;
+         end loop;
+         raise Program_Error with
+           "slab native-task test timed out, completed="
+           & Finished.Completed'Image;
+      end select;
+      Assert (Finished.Passed, "slab concurrent allocation/access failed");
+      Slabs.Destroy (Views (1));
+      for Index in 2 .. Worker_Count loop
+         Slabs.Detach (Views (Index));
+      end loop;
+   end Run_Slab;
 
    procedure Run_Internally_Synchronized_Vector is
       Worker_Count : constant Positive := 4;
@@ -663,6 +768,7 @@ begin
    Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
    Run_SPSC;
    Run_MPMC;
+   Run_Slab;
    Run_Internally_Synchronized_Vector;
    Run_Internally_Synchronized_String;
    Run_Internally_Synchronized_Map;

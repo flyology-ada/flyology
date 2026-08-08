@@ -731,20 +731,32 @@ an access value in persistent storage:
 | `Regions` | No stored object; checked local view and offsets | Application exclusion for view and backing lifetime |
 | `Handles` | 32-bit slot plus 32-bit generation | Validation belongs to the receiving structure |
 | `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
-| `Slab_Pools` | Fixed-size payload slots and generation-stamped free list | Application exclusion across all views |
+| `Slab_Pools` | Fixed-size payload slots with generation-stamped handles | Per-slot atomic claims and a shared allocation cursor |
 | `Byte_Strings` | Bounded variable-length byte sequence | Shared nonblocking guard; immediate `Busy_Error` on contention |
 | `Vectors` | Bounded vector of fixed-size byte elements | Shared nonblocking guard; immediate `Busy_Error` on contention |
 | `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer, using acquire/release publication |
 | `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers, using bounded CAS attempts |
 | `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Shared nonblocking guard; immediate `Busy_Error` on contention |
 
+Slab allocation, release, read, and write are nonblocking across native tasks,
+processes, and distinct mappings. A task or process that terminates while it
+owns a slot leaves a persisted transitional state. An external recovery
+authority must establish owner death and target-slot quiescence before marking
+that slot poisoned and explicitly recycling it; recycling advances the
+generation, while exclusive whole-pool initialization remains the unconditional
+recovery path. A poisoned or transitional slot is never silently reused.
+
 SPSC and MPMC counters occupy separate 64-byte control lines, and both use
 power-of-two capacities for masked slot selection. MPMC reports bounded
-contention rather than waiting. The other structures cache validated geometry
+contention rather than waiting. A producer or consumer that terminates after
+claiming an MPMC slot but before publishing its sequence can prevent later
+progress; MPMC provides no process-death recovery. The other structures cache
+validated geometry
 in each local view and use fixed-stride contiguous storage with no allocation
 after initialization. None of these operations performs file opening,
 mapping, flushing, peer discovery, descriptor exchange, wake-up signaling, or
-process-lifecycle recovery. A later IPC layer can supply those policies around
+automatic process-lifecycle recovery. The slab poison/recycle API requires an
+external recovery authority; a later IPC layer can supply that policy around
 the same layouts.
 
 Byte strings, vectors, and hash maps serialize ordinary operations with a guard
