@@ -225,6 +225,11 @@ is
             then
                Child := Child + 1;
             end if;
+            pragma Assert
+              (for all Sibling in 2 .. Item.Count =>
+                 (if Sibling / 2 = Current then
+                     not Precedes
+                       (Item, Item.Heap (Sibling), Item.Heap (Child))));
             exit when not Precedes
               (Item, Item.Heap (Child), Item.Heap (Current));
             Swap (Item, Current, Child);
