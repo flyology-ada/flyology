@@ -267,11 +267,23 @@ begin
       end loop;
    end;
 
+   Ada.Text_IO.Put_Line ("file transfer smoke: BEGIN native payload");
    Run (Flyology.Native_Task, "native");
+   Ada.Text_IO.Put_Line ("file transfer smoke: PASS native payload");
+   Ada.Text_IO.Put_Line ("file transfer smoke: BEGIN lightweight payload");
    Run (Flyology.Lightweight_Task, "lightweight");
+   Ada.Text_IO.Put_Line ("file transfer smoke: PASS lightweight payload");
    for Mode in Edge_Mode loop
+      Ada.Text_IO.Put_Line
+        ("file transfer smoke: BEGIN native " & Mode'Image);
       Run_Edge (Flyology.Native_Task, "native", Mode);
+      Ada.Text_IO.Put_Line
+        ("file transfer smoke: PASS native " & Mode'Image);
+      Ada.Text_IO.Put_Line
+        ("file transfer smoke: BEGIN lightweight " & Mode'Image);
       Run_Edge (Flyology.Lightweight_Task, "lightweight", Mode);
+      Ada.Text_IO.Put_Line
+        ("file transfer smoke: PASS lightweight " & Mode'Image);
    end loop;
    Files.Close (File);
    Remove_Test_File;
