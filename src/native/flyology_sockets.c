@@ -390,9 +390,17 @@ int flyology_socket_accept(int listener, unsigned char *family,
         *error = errno;
         return FLYOLOGY_ACCEPT_FAILED;
     }
-    if (flyology_socket_configure(fd, 1) < 0 ||
-        flyology_socket_split_address((struct sockaddr *)&storage, length,
+    if (flyology_socket_split_address((struct sockaddr *)&storage, length,
                                       family, address, port, scope) < 0) {
+        int address_error = errno;
+
+        /* An unsupported or malformed peer address indicates that the
+           listener does not satisfy the Internet-socket contract. */
+        close(fd);
+        *error = address_error;
+        return FLYOLOGY_ACCEPT_FAILED;
+    }
+    if (flyology_socket_configure(fd, 1) < 0) {
         int setup_error = errno;
 
         /* The listener accepted successfully.  A reset peer can make later

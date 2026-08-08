@@ -120,7 +120,7 @@ package body Flyology.IO.Sockets is
    pragma Import (C, C_Accept, "flyology_socket_accept");
    --  A nonnegative result is the accepted descriptor, -1 means accept(2)
    --  failed, and -2 means C_Accept closed a descriptor that accept(2)
-   --  returned but post-accept setup could not make usable.
+   --  returned but descriptor configuration could not make usable.
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
    procedure Test_Raw_Accept_Return_Barrier
@@ -1364,9 +1364,9 @@ package body Flyology.IO.Sockets is
                Result);
             if Result = Accept_Discarded then
                --  accept(2) succeeded, but the peer became unusable before
-               --  descriptor setup completed.  The C boundary has already
-               --  closed that connection; retry without classifying the
-               --  setup errno as a listener failure.
+               --  descriptor configuration completed.  The C boundary has
+               --  already closed that connection; retry without classifying
+               --  the setup errno as a listener failure.
                Pause_Before_Retry (0.0);
             elsif Result < 0 then
                case Wait_Policy.Classify_Accept_Error

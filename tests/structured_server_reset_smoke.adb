@@ -28,6 +28,12 @@ procedure Structured_Server_Reset_Smoke is
           Convention => C,
           External_Name => "flyology_test_queue_tcp_resets";
 
+   function Create_Unix_Listener
+     (Error : access Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_unix_listener";
+
    protected type Tracker is
       procedure Healthy_Connection;
       function Healthy_Count return Natural;
@@ -158,4 +164,39 @@ begin
    pragma Assert
      (Open_FD_Count = Before,
       "reset clients changed the process descriptor count");
+
+   declare
+      Before_Address : constant Interfaces.C.int := Open_FD_Count;
+      Error          : aliased Interfaces.C.int;
+      Result         : Interfaces.C.int;
+      Descriptor     : Flyology.IO.Descriptor;
+      Listener       : Sockets.Socket_Type;
+      Accepted       : Sockets.Socket_Type;
+      Address        : Sockets.Endpoint;
+      Rejected       : Boolean := False;
+   begin
+      Result := Create_Unix_Listener (Error'Access);
+      pragma Assert
+        (Result >= 0,
+         "could not create AF_UNIX listener [errno="
+         & Interfaces.C.int'Image (Error) & "]");
+      Descriptor := Flyology.IO.Descriptor (Result);
+      Sockets.Adopt (Descriptor, Listener);
+      begin
+         Sockets.Accept_Connection
+           (Listener, Accepted, Address, Timeout => 0.1);
+      exception
+         when Sockets.Socket_Error =>
+            Rejected := True;
+      end;
+      if Sockets.Is_Open (Accepted) then
+         Sockets.Close_Socket (Accepted);
+      end if;
+      Sockets.Close_Socket (Listener);
+      pragma Assert
+        (Rejected, "unsupported accepted address was silently retried");
+      pragma Assert
+        (Open_FD_Count = Before_Address,
+         "unsupported accepted address leaked a descriptor");
+   end;
 end Structured_Server_Reset_Smoke;
