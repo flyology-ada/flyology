@@ -344,16 +344,24 @@ package body Flyology.Data_Structures.Hash_Maps is
       Expected : Interfaces.Unsigned_32;
    begin
       Layouts.Require_Ready (Item.Core);
-      loop
+      Outer : loop
          Expected := 0;
-         exit when Atomic.Compare_Exchange_U32
+         exit Outer when Atomic.Compare_Exchange_U32
            (Item.Guard_Address, Expected, 1);
-         Layouts.Require_Ready (Item.Core);
-         if Expected /= 1 then
-            raise Layout_Error with "hash-map guard is corrupt";
-         end if;
-         Waiting.Retry (Wait);
-      end loop;
+         --  Once contention is established, observe with acquire loads between
+         --  yields and issue another read-modify-write only after the guard
+         --  appears free. This avoids repeated read-modify-write traffic
+         --  against the owner's cache line.
+         Inner : loop
+            Layouts.Require_Ready (Item.Core);
+            if Expected /= 1 then
+               raise Layout_Error with "hash-map guard is corrupt";
+            end if;
+            Waiting.Retry (Wait);
+            Expected := Atomic.Load_Acquire_U32 (Item.Guard_Address);
+            exit Inner when Expected = 0;
+         end loop Inner;
+      end loop Outer;
       begin
          Layouts.Require_Ready (Item.Core);
       exception

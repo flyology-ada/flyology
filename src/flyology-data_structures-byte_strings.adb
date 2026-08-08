@@ -150,16 +150,24 @@ package body Flyology.Data_Structures.Byte_Strings is
       then
          raise Region_Error with "detached byte-string view";
       end if;
-      loop
+      Outer : loop
          Expected := Unlocked;
-         exit when Atomic.Compare_Exchange_U32
+         exit Outer when Atomic.Compare_Exchange_U32
            (Item.Guard_Address, Expected, Locked);
-         Layouts.Require_Ready (Item.Core);
-         if Expected /= Locked then
-            raise Layout_Error with "byte-string guard is corrupt";
-         end if;
-         Waiting.Retry (Wait);
-      end loop;
+         --  Once contention is established, observe with acquire loads between
+         --  yields and issue another read-modify-write only after the guard
+         --  appears free. This avoids repeated read-modify-write traffic
+         --  against the owner's cache line.
+         Inner : loop
+            Layouts.Require_Ready (Item.Core);
+            if Expected /= Locked then
+               raise Layout_Error with "byte-string guard is corrupt";
+            end if;
+            Waiting.Retry (Wait);
+            Expected := Atomic.Load_Acquire_U32 (Item.Guard_Address);
+            exit Inner when Expected = Unlocked;
+         end loop Inner;
+      end loop Outer;
       begin
          Layouts.Require_Ready (Item.Core);
       exception
