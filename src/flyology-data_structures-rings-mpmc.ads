@@ -9,18 +9,19 @@ private with System;
 --  Try operations perform at most Contention_Limit claims and never wait on a
 --  tasking primitive or syscall; Contended is a bounded failure outcome.
 --  A participant that terminates after claiming a slot but before publishing
---  it can prevent later progress, so this package provides no process-death
---  recovery. Attachment and destruction require quiescence.
+--  it can prevent later progress. Core does not detect participant death; an
+--  external recovery authority may poison the ring and reinitialize it after
+--  establishing quiescence. Attachment and destruction require quiescence.
 package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
    --  Eight-byte magic stored in every MPMC header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_4D50_4D43_3031#;
 
    --  Schema identifier for the current per-slot-sequence algorithm.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4D50_4D43_0001#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_4D50_4D43_0002#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -81,6 +82,13 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
       Capacity     : Positive;
       Element_Size : Positive);
 
+   --  Poison a ring after independently establishing that every participant
+   --  is dead or quiescent. This is the fail-closed response to an abandoned
+   --  slot claim; exclusive reinitialization is the recovery operation.
+   --  @param Region Attached backing region
+   --  @param Location Stored ring offset
+   procedure Poison (Region : Region_View; Location : Region_Offset);
+
    --  Detach Item without modifying the ring.
    --  @param Item View to detach
    procedure Detach (Item : in out View);
@@ -89,6 +97,11 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  @param Item View to inspect
    --  @return True only while local mapping information is retained
    function Is_Attached (Item : View) return Boolean;
+
+   --  Report whether Item's backing ring was explicitly poisoned.
+   --  @param Item Attached ring view
+   --  @return True only when the shared lifecycle state is Poisoned
+   function Is_Poisoned (Item : View) return Boolean;
 
    --  Attempt to claim and publish Data.
    --  @param Item Any concurrently attached producer view

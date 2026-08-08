@@ -750,6 +750,47 @@ begin
       and then Pop_Outcome = MPMC.Popped
       and then Decode (Eight) = 88,
       "MPMC did not continue after remap");
+
+   SPSC.Poison (Region_B, SPSC_Location);
+   Assert (SPSC.Is_Poisoned (Ring_C), "SPSC poison was not shared");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         SPSC.Try_Push (Ring_C, Encode (89), Flag);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned SPSC ring accepted an operation");
+   end;
+   SPSC.Initialize (Ring_C, Region_C, SPSC_Location, 16, 8);
+   SPSC.Try_Push (Ring_C, Encode (90), Flag);
+   SPSC.Try_Pop (Ring_B, Eight, Allocated);
+   Assert
+     (Flag and then Allocated and then Decode (Eight) = 90,
+      "SPSC did not recover through exclusive reinitialization");
+
+   MPMC.Poison (Region_B, MPMC_Location);
+   Assert (MPMC.Is_Poisoned (Multi_C), "MPMC poison was not shared");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         MPMC.Try_Push (Multi_C, Encode (91), Push_Outcome);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned MPMC ring accepted an operation");
+   end;
+   MPMC.Initialize (Multi_C, Region_C, MPMC_Location, 16, 8);
+   MPMC.Try_Push (Multi_C, Encode (92), Push_Outcome);
+   MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
+   Assert
+     (Push_Outcome = MPMC.Pushed
+      and then Pop_Outcome = MPMC.Popped
+      and then Decode (Eight) = 92,
+      "MPMC did not recover through exclusive reinitialization");
+
    Maps.Put (Map_C, Key_2, Value_1, Put_Outcome);
    Maps.Get (Map_B, Key_2, Eight, Flag);
    Assert (Put_Outcome = Maps.Inserted and then Flag,

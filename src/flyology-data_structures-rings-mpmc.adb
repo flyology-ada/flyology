@@ -193,6 +193,14 @@ package body Flyology.Data_Structures.Rings.MPMC is
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
 
+   procedure Poison (Region : Region_View; Location : Region_Offset) is
+   begin
+      Layouts.Poison_At (Region, Location, Identity, 8);
+   end Poison;
+
+   function Is_Poisoned (Item : View) return Boolean is
+     (Layouts.Is_Poisoned (Item.Core));
+
    procedure Check_Data (Item : View; Length : Natural) is
    begin
       if Byte_Count (Length) /= Byte_Count (Item.Element_Value) then

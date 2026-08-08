@@ -15,10 +15,10 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5350_5343_3031#;
 
    --  Schema identifier for the current SPSC layout and memory ordering.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_5350_5343_0001#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_5350_5343_0002#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -75,6 +75,13 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
       Capacity     : Positive;
       Element_Size : Positive);
 
+   --  Poison a ready ring after independently establishing that its producer
+   --  and consumer are dead or quiescent. Operations and attachment then fail
+   --  closed until exclusive reinitialization.
+   --  @param Region Attached backing region
+   --  @param Location Stored ring offset
+   procedure Poison (Region : Region_View; Location : Region_Offset);
+
    --  Detach Item without changing the ring.
    --  @param Item Local view to detach
    procedure Detach (Item : in out View);
@@ -83,6 +90,11 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Item View to inspect
    --  @return True only while local mapping information is retained
    function Is_Attached (Item : View) return Boolean;
+
+   --  Report whether Item's backing ring was explicitly poisoned.
+   --  @param Item Attached ring view
+   --  @return True only when the shared lifecycle state is Poisoned
+   function Is_Poisoned (Item : View) return Boolean;
 
    --  Return immutable validated configuration.
    --  @param Item Attached ring view

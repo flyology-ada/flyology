@@ -139,6 +139,14 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
 
+   procedure Poison (Region : Region_View; Location : Region_Offset) is
+   begin
+      Layouts.Poison_At (Region, Location, Identity, 8);
+   end Poison;
+
+   function Is_Poisoned (Item : View) return Boolean is
+     (Layouts.Is_Poisoned (Item.Core));
+
    function Current_Metadata (Item : View) return Metadata is
    begin
       if not Item.Core.Attached then
