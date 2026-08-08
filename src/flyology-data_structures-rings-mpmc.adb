@@ -1,12 +1,14 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
+with Flyology.Data_Structures.Waits;
 with Interfaces.C;
 
 package body Flyology.Data_Structures.Rings.MPMC is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Waiting renames Flyology.Data_Structures.Waits;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
@@ -278,6 +280,21 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Result := Push_Contended;
    end Try_Push;
 
+   procedure Push
+     (Item    : in out View;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout)
+   is
+      Wait   : Waiting.Context := Waiting.Start (Timeout);
+      Result : Push_Result;
+   begin
+      loop
+         Try_Push (Item, Data, Result);
+         exit when Result = Pushed;
+         Waiting.Retry (Wait);
+      end loop;
+   end Push;
+
    procedure Try_Pop
      (Item   : in out View;
       Data   : out Ada.Streams.Stream_Element_Array;
@@ -322,6 +339,21 @@ package body Flyology.Data_Structures.Rings.MPMC is
       end loop;
       Result := Pop_Contended;
    end Try_Pop;
+
+   procedure Pop
+     (Item    : in out View;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout)
+   is
+      Wait   : Waiting.Context := Waiting.Start (Timeout);
+      Result : Pop_Result;
+   begin
+      loop
+         Try_Pop (Item, Data, Result);
+         exit when Result = Popped;
+         Waiting.Retry (Wait);
+      end loop;
+   end Pop;
 
    procedure Destroy (Item : in out View) is
       Enqueue, Dequeue : Interfaces.Unsigned_64;

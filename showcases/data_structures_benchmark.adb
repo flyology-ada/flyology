@@ -631,6 +631,14 @@ procedure Data_Structures_Benchmark is
          Encode (Payload (Sequence) + U64 (Worker)));
    end Attempt_Vector_Contention;
 
+   procedure Attempt_Vector_Wait
+     (Worker : Positive; Sequence : Bench.Iteration_Count) is
+   begin
+      Vectors.Replace
+        (Contended_Vectors (Worker), 1,
+         Encode (Payload (Sequence) + U64 (Worker)), 5.0);
+   end Attempt_Vector_Wait;
+
    procedure Cleanup_Vector_Contention is
    begin
       for Index in Contended_Vectors'Range loop
@@ -641,6 +649,11 @@ procedure Data_Structures_Benchmark is
    procedure Run_Vector_Contention is new Run_Guard_Contention
      (Prepare => Prepare_Vector_Contention,
       Attempt => Attempt_Vector_Contention,
+      Cleanup => Cleanup_Vector_Contention);
+
+   procedure Run_Vector_Wait is new Run_Guard_Contention
+     (Prepare => Prepare_Vector_Contention,
+      Attempt => Attempt_Vector_Wait,
       Cleanup => Cleanup_Vector_Contention);
 
    procedure Prepare_Map_Contention is
@@ -667,6 +680,19 @@ procedure Data_Structures_Benchmark is
       end if;
    end Attempt_Map_Contention;
 
+   procedure Attempt_Map_Wait
+     (Worker : Positive; Sequence : Bench.Iteration_Count)
+   is
+      Outcome : Hash_Maps.Put_Result;
+   begin
+      Hash_Maps.Put
+        (Contended_Maps (Worker), Encode (U64 (Worker)),
+         Encode (Payload (Sequence)), 5.0, Outcome);
+      if Outcome = Hash_Maps.Table_Full then
+         raise Program_Error with "contended map filled unexpectedly";
+      end if;
+   end Attempt_Map_Wait;
+
    procedure Cleanup_Map_Contention is
    begin
       for Index in Contended_Maps'Range loop
@@ -677,6 +703,11 @@ procedure Data_Structures_Benchmark is
    procedure Run_Map_Contention is new Run_Guard_Contention
      (Prepare => Prepare_Map_Contention,
       Attempt => Attempt_Map_Contention,
+      Cleanup => Cleanup_Map_Contention);
+
+   procedure Run_Map_Wait is new Run_Guard_Contention
+     (Prepare => Prepare_Map_Contention,
+      Attempt => Attempt_Map_Wait,
       Cleanup => Cleanup_Map_Contention);
 
    procedure Prepare_String_Contention is
@@ -697,6 +728,14 @@ procedure Data_Structures_Benchmark is
         (Contended_Strings (Worker), Encode (U64 (Worker)));
    end Attempt_String_Contention;
 
+   procedure Attempt_String_Wait
+     (Worker : Positive; Sequence : Bench.Iteration_Count) is
+      pragma Unreferenced (Sequence);
+   begin
+      Byte_Strings.Assign
+        (Contended_Strings (Worker), Encode (U64 (Worker)), 5.0);
+   end Attempt_String_Wait;
+
    procedure Cleanup_String_Contention is
    begin
       for Index in Contended_Strings'Range loop
@@ -707,6 +746,11 @@ procedure Data_Structures_Benchmark is
    procedure Run_String_Contention is new Run_Guard_Contention
      (Prepare => Prepare_String_Contention,
       Attempt => Attempt_String_Contention,
+      Cleanup => Cleanup_String_Contention);
+
+   procedure Run_String_Wait is new Run_Guard_Contention
+     (Prepare => Prepare_String_Contention,
+      Attempt => Attempt_String_Wait,
       Cleanup => Cleanup_String_Contention);
 
    procedure Prepare_Slab_Contention is
@@ -735,6 +779,14 @@ procedure Data_Structures_Benchmark is
          Encode (Payload (Sequence)));
    end Attempt_Slab_Contention;
 
+   procedure Attempt_Slab_Wait
+     (Worker : Positive; Sequence : Bench.Iteration_Count) is
+   begin
+      Slab_Pools.Write
+        (Contended_Slabs (Worker), Contended_Slab_Handle,
+         Encode (Payload (Sequence)), 5.0);
+   end Attempt_Slab_Wait;
+
    procedure Cleanup_Slab_Contention is
    begin
       Slab_Pools.Release (Contended_Slabs (1), Contended_Slab_Handle);
@@ -748,8 +800,15 @@ procedure Data_Structures_Benchmark is
       Attempt => Attempt_Slab_Contention,
       Cleanup => Cleanup_Slab_Contention);
 
+   procedure Run_Slab_Wait is new Run_Guard_Contention
+     (Prepare => Prepare_Slab_Contention,
+      Attempt => Attempt_Slab_Wait,
+      Cleanup => Cleanup_Slab_Contention);
+
    procedure Run_SPSC_Contention
-     (Iterations : Bench.Iteration_Count; Retries : out U64)
+     (Iterations : Bench.Iteration_Count;
+      Timed      : Boolean;
+      Retries    : out U64)
    is
       Gate : Start_Gate;
       Finished : Completion (2);
@@ -768,13 +827,18 @@ procedure Data_Structures_Benchmark is
       begin
          Gate.Wait;
          for Sequence in Bench.Iteration_Count range 1 .. Iterations loop
-            loop
-               SPSC.Try_Push
-                 (Contended_SPSC (1), Encode (Payload (Sequence)), Pushed);
-               exit when Pushed;
-               Local_Retries := Local_Retries + 1;
-               delay 0.0;
-            end loop;
+            if Timed then
+               SPSC.Push
+                 (Contended_SPSC (1), Encode (Payload (Sequence)), 5.0);
+            else
+               loop
+                  SPSC.Try_Push
+                    (Contended_SPSC (1), Encode (Payload (Sequence)), Pushed);
+                  exit when Pushed;
+                  Local_Retries := Local_Retries + 1;
+                  delay 0.0;
+               end loop;
+            end if;
          end loop;
          Finished.Done (Local_Retries, True);
       exception
@@ -790,12 +854,16 @@ procedure Data_Structures_Benchmark is
          Gate.Wait;
          for Sequence in Bench.Iteration_Count range 1 .. Iterations loop
             pragma Unreferenced (Sequence);
-            loop
-               SPSC.Try_Pop (Contended_SPSC (2), Data, Popped);
-               exit when Popped;
-               Local_Retries := Local_Retries + 1;
-               delay 0.0;
-            end loop;
+            if Timed then
+               SPSC.Pop (Contended_SPSC (2), Data, 5.0);
+            else
+               loop
+                  SPSC.Try_Pop (Contended_SPSC (2), Data, Popped);
+                  exit when Popped;
+                  Local_Retries := Local_Retries + 1;
+                  delay 0.0;
+               end loop;
+            end if;
             Local := Local + Decode (Data);
          end loop;
          Checksum := Local;
@@ -823,8 +891,22 @@ procedure Data_Structures_Benchmark is
          raise;
    end Run_SPSC_Contention;
 
+   procedure Run_SPSC_Try
+     (Iterations : Bench.Iteration_Count; Retries : out U64) is
+   begin
+      Run_SPSC_Contention (Iterations, False, Retries);
+   end Run_SPSC_Try;
+
+   procedure Run_SPSC_Wait
+     (Iterations : Bench.Iteration_Count; Retries : out U64) is
+   begin
+      Run_SPSC_Contention (Iterations, True, Retries);
+   end Run_SPSC_Wait;
+
    procedure Run_MPMC_Contention
-     (Iterations : Bench.Iteration_Count; Retries : out U64)
+     (Iterations : Bench.Iteration_Count;
+      Timed      : Boolean;
+      Retries    : out U64)
    is
       Half : constant Positive := Contention_Workers / 2;
       Gate : Start_Gate;
@@ -861,22 +943,33 @@ procedure Data_Structures_Benchmark is
          if First <= Last then
             for Sequence in First .. Last loop
                if Worker_Id <= Half then
-                  loop
-                     MPMC.Try_Push
+                  if Timed then
+                     MPMC.Push
                        (Contended_MPMC (Worker_Id),
-                        Encode (Payload (Sequence)), Push);
-                     exit when Push = MPMC.Pushed;
-                     Local_Retries := Local_Retries + 1;
-                     delay 0.0;
-                  end loop;
+                        Encode (Payload (Sequence)), 5.0);
+                  else
+                     loop
+                        MPMC.Try_Push
+                          (Contended_MPMC (Worker_Id),
+                           Encode (Payload (Sequence)), Push);
+                        exit when Push = MPMC.Pushed;
+                        Local_Retries := Local_Retries + 1;
+                        delay 0.0;
+                     end loop;
+                  end if;
                else
-                  loop
-                     MPMC.Try_Pop
-                       (Contended_MPMC (Worker_Id), Data, Pop);
-                     exit when Pop = MPMC.Popped;
-                     Local_Retries := Local_Retries + 1;
-                     delay 0.0;
-                  end loop;
+                  if Timed then
+                     MPMC.Pop
+                       (Contended_MPMC (Worker_Id), Data, 5.0);
+                  else
+                     loop
+                        MPMC.Try_Pop
+                          (Contended_MPMC (Worker_Id), Data, Pop);
+                        exit when Pop = MPMC.Popped;
+                        Local_Retries := Local_Retries + 1;
+                        delay 0.0;
+                     end loop;
+                  end if;
                   Local := Local + Decode (Data);
                end if;
             end loop;
@@ -925,6 +1018,18 @@ procedure Data_Structures_Benchmark is
          end loop;
          raise;
    end Run_MPMC_Contention;
+
+   procedure Run_MPMC_Try
+     (Iterations : Bench.Iteration_Count; Retries : out U64) is
+   begin
+      Run_MPMC_Contention (Iterations, False, Retries);
+   end Run_MPMC_Try;
+
+   procedure Run_MPMC_Wait
+     (Iterations : Bench.Iteration_Count; Retries : out U64) is
+   begin
+      Run_MPMC_Contention (Iterations, True, Retries);
+   end Run_MPMC_Wait;
 
    type Vector_Case is
      (Flyology,
@@ -1125,17 +1230,19 @@ procedure Data_Structures_Benchmark is
    procedure Measure_Slab is new Bench.Measure_Batched (Fly_Slab_Batch);
 
    type Contended_Vector_Case is
-     (Flyology, Std_Mutex, Boost_Mutex);
+     (Flyology_Try, Flyology_Wait, Std_Mutex, Boost_Mutex);
    subtype Contended_Vector_Core is
-     Contended_Vector_Case range Flyology .. Std_Mutex;
+     Contended_Vector_Case range Flyology_Try .. Std_Mutex;
    procedure Contended_Vector_Batch
      (Which : Contended_Vector_Case; Iterations : Bench.Iteration_Count)
    is
       Retries : U64;
    begin
       case Which is
-         when Flyology =>
+         when Flyology_Try =>
             Run_Vector_Contention (Iterations, Retries);
+         when Flyology_Wait =>
+            Run_Vector_Wait (Iterations, Retries);
          when Std_Mutex =>
             CPP_Contention_Run
               (0, 0, Iterations, Contention_Workers, Retries);
@@ -1163,19 +1270,22 @@ procedure Data_Structures_Benchmark is
      Reporters.Put_Multi_Comparison_Console (Contended_Vector_Core);
 
    type Contended_Map_Case is
-     (Flyology, Std_Mutex, Boost_Mutex, Abseil_Mutex);
+     (Flyology_Try, Flyology_Wait,
+      Std_Mutex, Boost_Mutex, Abseil_Mutex);
    subtype Contended_Map_Core is
-     Contended_Map_Case range Flyology .. Std_Mutex;
+     Contended_Map_Case range Flyology_Try .. Std_Mutex;
    subtype Contended_Map_Boost is
-     Contended_Map_Case range Flyology .. Boost_Mutex;
+     Contended_Map_Case range Flyology_Try .. Boost_Mutex;
    procedure Contended_Map_Batch
      (Which : Contended_Map_Case; Iterations : Bench.Iteration_Count)
    is
       Retries : U64;
    begin
       case Which is
-         when Flyology =>
+         when Flyology_Try =>
             Run_Map_Contention (Iterations, Retries);
+         when Flyology_Wait =>
+            Run_Map_Wait (Iterations, Retries);
          when Std_Mutex =>
             CPP_Contention_Run
               (1, 0, Iterations, Contention_Workers, Retries);
@@ -1214,15 +1324,18 @@ procedure Data_Structures_Benchmark is
    procedure Put_Contended_Map_Boost is new
      Reporters.Put_Multi_Comparison_Console (Contended_Map_Boost);
 
-   type Contended_String_Case is (Flyology, Std_Mutex);
+   type Contended_String_Case is
+     (Flyology_Try, Flyology_Wait, Std_Mutex);
    procedure Contended_String_Batch
      (Which : Contended_String_Case; Iterations : Bench.Iteration_Count)
    is
       Retries : U64;
    begin
       case Which is
-         when Flyology =>
+         when Flyology_Try =>
             Run_String_Contention (Iterations, Retries);
+         when Flyology_Wait =>
+            Run_String_Wait (Iterations, Retries);
          when Std_Mutex =>
             CPP_Contention_Run
               (2, 0, Iterations, Contention_Workers, Retries);
@@ -1236,17 +1349,19 @@ procedure Data_Structures_Benchmark is
      Reporters.Put_Multi_Comparison_Console (Contended_String_Case);
 
    type Contended_Queue_Case is
-     (Flyology, Std_Deque_Mutex, Boost_Lockfree);
+     (Flyology_Try, Flyology_Wait, Std_Deque_Mutex, Boost_Lockfree);
    subtype Contended_Queue_Core is
-     Contended_Queue_Case range Flyology .. Std_Deque_Mutex;
+     Contended_Queue_Case range Flyology_Try .. Std_Deque_Mutex;
    procedure Contended_SPSC_Batch
      (Which : Contended_Queue_Case; Iterations : Bench.Iteration_Count)
    is
       Retries : U64;
    begin
       case Which is
-         when Flyology =>
-            Run_SPSC_Contention (Iterations, Retries);
+         when Flyology_Try =>
+            Run_SPSC_Try (Iterations, Retries);
+         when Flyology_Wait =>
+            Run_SPSC_Wait (Iterations, Retries);
          when Std_Deque_Mutex =>
             CPP_Contention_Run (3, 0, Iterations, 2, Retries);
          when Boost_Lockfree =>
@@ -1267,8 +1382,10 @@ procedure Data_Structures_Benchmark is
       Retries : U64;
    begin
       case Which is
-         when Flyology =>
-            Run_MPMC_Contention (Iterations, Retries);
+         when Flyology_Try =>
+            Run_MPMC_Try (Iterations, Retries);
+         when Flyology_Wait =>
+            Run_MPMC_Wait (Iterations, Retries);
          when Std_Deque_Mutex =>
             CPP_Contention_Run
               (4, 0, Iterations, Contention_Workers, Retries);
@@ -1298,17 +1415,26 @@ procedure Data_Structures_Benchmark is
    procedure Put_Contended_Queue_Core is new
      Reporters.Put_Multi_Comparison_Console (Contended_Queue_Core);
 
-   procedure Fly_Slab_Contention_Batch
-     (Iterations : Bench.Iteration_Count)
+   type Contended_Slab_Case is (Flyology_Try, Flyology_Wait);
+
+   procedure Contended_Slab_Batch
+     (Which : Contended_Slab_Case; Iterations : Bench.Iteration_Count)
    is
       Retries : U64;
    begin
-      Run_Slab_Contention (Iterations, Retries);
+      case Which is
+         when Flyology_Try =>
+            Run_Slab_Contention (Iterations, Retries);
+         when Flyology_Wait =>
+            Run_Slab_Wait (Iterations, Retries);
+      end case;
       Checksum := Checksum xor Retries xor U64 (Iterations);
-   end Fly_Slab_Contention_Batch;
+   end Contended_Slab_Batch;
 
-   procedure Measure_Slab_Contention is new Bench.Measure_Batched
-     (Fly_Slab_Contention_Batch);
+   procedure Compare_Contended_Slab is new Bench.Compare_Many
+     (Case_Id => Contended_Slab_Case, Batch => Contended_Slab_Batch);
+   procedure Put_Contended_Slab is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Slab_Case);
 
    Base_Config : constant Bench.Configuration :=
      (Warmup_Time                  => 0.040,
@@ -1528,9 +1654,10 @@ begin
       Put_Contended_Queue_Core (Multi_Result);
    end if;
 
-   Measure_Slab_Contention
-     (Config => Terminal_Config ("contended slab"), Result => Slab_Result);
-   Reporters.Put_Console ("Flyology_Slab_Contended", Slab_Result);
+   Compare_Contended_Slab
+     (Config => Terminal_Config ("contended slab"),
+      Result => Multi_Result);
+   Put_Contended_Slab (Multi_Result);
 
    TIO.Put_Line
      ("checksum=" & Checksum'Image

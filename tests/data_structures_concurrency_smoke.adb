@@ -32,8 +32,6 @@ procedure Data_Structures_Concurrency_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_64;
    use type Hash_Maps.Put_Result;
-   use type MPMC.Pop_Result;
-   use type MPMC.Push_Result;
    use type Slabs.Allocation_Result;
    use type System.Address;
 
@@ -164,17 +162,12 @@ procedure Data_Structures_Concurrency_Smoke is
       end Consumer;
 
       task body Producer is
-         Pushed : Boolean;
       begin
          accept Start;
          for Value in Interfaces.Unsigned_64 range
            1 .. Interfaces.Unsigned_64 (SPSC_Iterations)
          loop
-            loop
-               SPSC.Try_Push (Producer_View, Encode (Value), Pushed);
-               exit when Pushed;
-               delay 0.0;
-            end loop;
+            SPSC.Push (Producer_View, Encode (Value), 5.0);
          end loop;
          Finished.Done (True);
       exception
@@ -183,17 +176,12 @@ procedure Data_Structures_Concurrency_Smoke is
 
       task body Consumer is
          Data : Ada.Streams.Stream_Element_Array (1 .. 8);
-         Popped : Boolean;
       begin
          accept Start;
          for Expected in Interfaces.Unsigned_64 range
            1 .. Interfaces.Unsigned_64 (SPSC_Iterations)
          loop
-            loop
-               SPSC.Try_Pop (Consumer_View, Data, Popped);
-               exit when Popped;
-               delay 0.0;
-            end loop;
+            SPSC.Pop (Consumer_View, Data, 5.0);
             if Decode (Data) /= Expected then
                raise Program_Error with "SPSC sequence mismatch";
             end if;
@@ -299,17 +287,12 @@ procedure Data_Structures_Concurrency_Smoke is
       end Consumer_Task;
 
       task body Producer_Task is
-         Outcome : MPMC.Push_Result;
          Value : Interfaces.Unsigned_64;
       begin
          for Sequence in 1 .. MPMC_Per_Producer loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * MPMC_Per_Producer + Sequence);
-            loop
-               MPMC.Try_Push (Ring.all, Encode (Value), Outcome);
-               exit when Outcome = MPMC.Pushed;
-               delay 0.0;
-            end loop;
+            MPMC.Push (Ring.all, Encode (Value), 5.0);
          end loop;
          Results.Done (True);
       exception
@@ -317,18 +300,16 @@ procedure Data_Structures_Concurrency_Smoke is
       end Producer_Task;
 
       task body Consumer_Task is
-         Outcome : MPMC.Pop_Result;
          Data : Ada.Streams.Stream_Element_Array (1 .. 8);
       begin
          loop
-            MPMC.Try_Pop (Ring.all, Data, Outcome);
-            if Outcome = MPMC.Popped then
+            begin
+               MPMC.Pop (Ring.all, Data, 0.010);
                Results.Observe (Decode (Data));
-            elsif Results.Complete then
-               exit;
-            else
-               delay 0.0;
-            end if;
+            exception
+               when DS.Timeout_Error =>
+                  exit when Results.Complete;
+            end;
          end loop;
          Results.Done (True);
       exception
@@ -402,41 +383,28 @@ procedure Data_Structures_Concurrency_Smoke is
          Outcome : Slabs.Allocation_Result;
          Data : Ada.Streams.Stream_Element_Array (1 .. 8);
          Value : Interfaces.Unsigned_64;
-         Released : Boolean;
       begin
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            loop
-               Slabs.Try_Allocate (Item.all, Handle, Outcome);
-               exit when Outcome = Slabs.Allocated;
-               delay 0.0;
-            end loop;
-            Slabs.Write (Item.all, Handle, Encode (Value));
-            Slabs.Read (Item.all, Handle, Data);
+            Slabs.Try_Allocate (Item.all, 5.0, Handle, Outcome);
+            if Outcome /= Slabs.Allocated then
+               raise Program_Error with "timed slab allocation exhausted";
+            end if;
+            Slabs.Write (Item.all, Handle, Encode (Value), 5.0);
+            Slabs.Read (Item.all, Handle, Data, 5.0);
             if Decode (Data) /= Value then
                raise Program_Error with "concurrent slab payload mismatch";
             end if;
-            Released := False;
-            while not Released loop
-               begin
-                  Slabs.Release (Item.all, Handle);
-                  Released := True;
-               exception
-                  when DS.Busy_Error => delay 0.0;
-               end;
-            end loop;
+            Slabs.Release (Item.all, Handle, 5.0);
          end loop;
-         loop
-            begin
-               Slabs.Read (Item.all, Handle, Data);
-               raise Program_Error with
-                 "concurrent slab accepted a released handle";
-            exception
-               when DS.Busy_Error => delay 0.0;
-               when DS.Handle_Error => exit;
-            end;
-         end loop;
+         begin
+            Slabs.Read (Item.all, Handle, Data, 5.0);
+            raise Program_Error with
+              "concurrent slab accepted a released handle";
+         exception
+            when DS.Handle_Error => null;
+         end;
          Finished.Done (True);
       exception
          when others => Finished.Done (False);
@@ -500,16 +468,8 @@ procedure Data_Structures_Concurrency_Smoke is
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            loop
-               begin
-                  Vectors.Try_Append
-                    (Vector.all, Encode (Value), Appended);
-                  exit;
-               exception
-                  when DS.Busy_Error =>
-                     delay 0.0;
-               end;
-            end loop;
+            Vectors.Try_Append
+              (Vector.all, Encode (Value), 5.0, Appended);
             if not Appended then
                raise Program_Error with "synchronized vector append failed";
             end if;
@@ -591,15 +551,7 @@ procedure Data_Structures_Concurrency_Smoke is
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            loop
-               begin
-                  Byte_Strings.Append (Item.all, Encode (Value));
-                  exit;
-               exception
-                  when DS.Busy_Error =>
-                     delay 0.0;
-               end;
-            end loop;
+            Byte_Strings.Append (Item.all, Encode (Value), 5.0);
          end loop;
          Finished.Done (True);
       exception
@@ -689,17 +641,9 @@ procedure Data_Structures_Concurrency_Smoke is
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            loop
-               begin
-                  Hash_Maps.Put
-                    (Item.all, Encode (Value), Encode (Value xor 16#A5A5#),
-                     Outcome);
-                  exit;
-               exception
-                  when DS.Busy_Error =>
-                     delay 0.0;
-               end;
-            end loop;
+            Hash_Maps.Put
+              (Item.all, Encode (Value), Encode (Value xor 16#A5A5#),
+               5.0, Outcome);
             if Outcome /= Hash_Maps.Inserted then
                raise Program_Error with "internally guarded map insert failed";
             end if;

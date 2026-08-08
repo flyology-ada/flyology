@@ -358,6 +358,15 @@ begin
          MPMC.Try_Push (Small_A, Encode (0), Push_Outcome);
          Assert (Push_Outcome = MPMC.Full,
                  "capacity-two MPMC did not report full");
+         if Round = 1 then
+            Failed := False;
+            begin
+               MPMC.Push (Small_A, Encode (0), 0.0);
+            exception
+               when DS.Timeout_Error => Failed := True;
+            end;
+            Assert (Failed, "timed MPMC push ignored a full ring");
+         end if;
          MPMC.Try_Pop (Small_B, Eight, Pop_Outcome);
          Assert
            (Pop_Outcome = MPMC.Popped
@@ -371,6 +380,15 @@ begin
          MPMC.Try_Pop (Small_B, Eight, Pop_Outcome);
          Assert (Pop_Outcome = MPMC.Empty,
                  "capacity-two MPMC did not return to empty");
+         if Round = 1 then
+            Failed := False;
+            begin
+               MPMC.Pop (Small_B, Eight, 0.0);
+            exception
+               when DS.Timeout_Error => Failed := True;
+            end;
+            Assert (Failed, "timed MPMC pop ignored an empty ring");
+         end if;
       end loop;
       declare
          Saved_State : constant Interfaces.Unsigned_32 :=
@@ -422,6 +440,17 @@ begin
         (Allocation = Slabs.Allocated
          and then Last_Handle.Stamp = Handles.Generation'Last,
          "slab did not expose the generation-exhaustion fixture");
+      Write_U32
+        (Base_B, Raw_Offset (Scratch_Slab_Location, 68), 3);
+      begin
+         Slabs.Read (One, Last_Handle, Read_16, 0.0);
+      exception
+         when DS.Timeout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (Scratch_Slab_Location, 68), 1);
+      Assert (Failed, "timed slab access ignored an owned slot");
+      Failed := False;
       begin
          Slabs.Release (One, Last_Handle);
       exception
@@ -667,6 +696,15 @@ begin
          when DS.Busy_Error => Failed := True;
       end;
       Assert (Failed, "abandoned byte-string guard did not report busy");
+      Failed := False;
+      begin
+         if Strings.Length (Recovery_String, 0.0) /= 0 then
+            raise Program_Error with "unreachable timed string length";
+         end if;
+      exception
+         when DS.Timeout_Error => Failed := True;
+      end;
+      Assert (Failed, "timed byte-string access ignored an owned guard");
 
       Strings.Poison (Region_B, Poison_String_Location);
       Assert
@@ -701,6 +739,18 @@ begin
 
       Vectors.Initialize
         (Recovery_Vector, Region_A, Poison_Vector_Location, 4, 8);
+      Write_U32
+        (Base_B, Raw_Offset (Poison_Vector_Location, 44), 1);
+      Failed := False;
+      begin
+         Vectors.Try_Append
+           (Recovery_Vector, Encode (1), 0.0, Flag);
+      exception
+         when DS.Timeout_Error => Failed := True;
+      end;
+      Assert (Failed, "timed vector access ignored an owned guard");
+      Write_U32
+        (Base_B, Raw_Offset (Poison_Vector_Location, 44), 0);
       Vectors.Poison (Region_B, Poison_Vector_Location);
       Assert
         (Vectors.Is_Poisoned (Recovery_Vector),
@@ -733,12 +783,32 @@ begin
 
    SPSC.Try_Pop (Ring_B, Eight, Flag);
    Assert (not Flag, "empty SPSC ring produced an element");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         SPSC.Pop (Ring_B, Eight, 0.0);
+      exception
+         when DS.Timeout_Error => Failed := True;
+      end;
+      Assert (Failed, "timed SPSC pop ignored an empty ring");
+   end;
    for Value in Interfaces.Unsigned_64 range 1 .. 16 loop
       SPSC.Try_Push (Ring_A, Encode (Value), Flag);
       Assert (Flag, "SPSC ring rejected available capacity");
    end loop;
    SPSC.Try_Push (Ring_A, Encode (17), Flag);
    Assert (not Flag, "full SPSC ring accepted an element");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         SPSC.Push (Ring_A, Encode (17), 0.0);
+      exception
+         when DS.Timeout_Error => Failed := True;
+      end;
+      Assert (Failed, "timed SPSC push ignored a full ring");
+   end;
    for Value in Interfaces.Unsigned_64 range 1 .. 16 loop
       SPSC.Try_Pop (Ring_B, Eight, Flag);
       Assert (Flag and then Decode (Eight) = Value,
@@ -1294,6 +1364,13 @@ begin
          when DS.Busy_Error => Failed := True;
       end;
       Assert (Failed, "busy hash map did not fail without waiting");
+      Failed := False;
+      begin
+         Maps.Put (Map_C, Key_1, Value_1, 0.0, Put_Outcome);
+      exception
+         when DS.Timeout_Error => Failed := True;
+      end;
+      Assert (Failed, "timed hash-map access ignored an owned guard");
    end;
    Maps.Poison (Region_B, Map_Location);
    Assert (Maps.Is_Poisoned (Map_C), "hash-map poison was not shared");

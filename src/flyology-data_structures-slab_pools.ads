@@ -11,6 +11,8 @@ private with System;
 --  processes, and distinct mappings. Initialization, attachment, destruction,
 --  and backing-region lifetime changes require quiescence across every view.
 --  They must also be excluded from ordinary use of the same local View.
+--  Immediate operations retain bounded contention outcomes or Busy_Error;
+--  timed overloads yield through one explicit timeout.
 --  Termination during an operation leaves its slot abandoned rather than
 --  silently reusable; an external recovery authority may poison and reclaim
 --  that slot only after establishing owner death and target-slot quiescence.
@@ -135,6 +137,19 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
       Value     : out Handles.Handle;
       Result    : out Allocation_Result);
 
+   --  Retry bounded allocation contention through one timeout. A genuinely
+   --  exhausted slab still returns Exhausted immediately after a full scan.
+   --  @param Item Any concurrently attached slab view
+   --  @param Timeout Maximum wait; zero permits one bounded scan
+   --  @param Value New generation-stamped handle or Null_Handle
+   --  @param Result Allocated or exhausted outcome
+   --  @exception Timeout_Error Free-slot claims contend through the deadline
+   procedure Try_Allocate
+     (Item    : in out View;
+      Timeout : Wait_Timeout;
+      Value   : out Handles.Handle;
+      Result  : out Allocation_Result);
+
    --  Reclaim Value and advance its generation so every copy becomes stale.
    --  Releasing the maximum generation permanently poisons that slot until
    --  exclusive whole-pool initialization instead of wrapping to an old stamp.
@@ -149,6 +164,16 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
      (Item  : in out View;
       Value : Handles.Handle);
 
+   --  Reclaim Value after waiting through transient same-slot contention.
+   --  @param Item Any concurrently attached slab view
+   --  @param Value Live handle returned by this slab
+   --  @param Timeout Maximum wait; zero permits one bounded claim campaign
+   --  @exception Timeout_Error Slot contention persists through the deadline
+   procedure Release
+     (Item    : in out View;
+      Value   : Handles.Handle;
+      Timeout : Wait_Timeout);
+
    --  Copy exactly one slot payload into Data.
    --  @param Item Any concurrently attached slab view
    --  @param Value Live handle returned by this slab
@@ -162,6 +187,18 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
       Value : Handles.Handle;
       Data  : out Ada.Streams.Stream_Element_Array);
 
+   --  Read one slot after waiting through transient same-slot contention.
+   --  @param Item Any concurrently attached slab view
+   --  @param Value Live handle returned by this slab
+   --  @param Data Exact-size destination
+   --  @param Timeout Maximum wait; zero permits one bounded claim campaign
+   --  @exception Timeout_Error Slot contention persists through the deadline
+   procedure Read
+     (Item    : View;
+      Value   : Handles.Handle;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Replace exactly one slot payload from Data.
    --  @param Item Any concurrently attached slab view
    --  @param Value Live handle returned by this slab
@@ -174,6 +211,18 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
      (Item  : in out View;
       Value : Handles.Handle;
       Data  : Ada.Streams.Stream_Element_Array);
+
+   --  Write one slot after waiting through transient same-slot contention.
+   --  @param Item Any concurrently attached slab view
+   --  @param Value Live handle returned by this slab
+   --  @param Data Exact-size source
+   --  @param Timeout Maximum wait; zero permits one bounded claim campaign
+   --  @exception Timeout_Error Slot contention persists through the deadline
+   procedure Write
+     (Item    : in out View;
+      Value   : Handles.Handle;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
 
    --  Mark a transitional slot abandoned. The caller is the recovery
    --  authority and must first establish that its owner has terminated and

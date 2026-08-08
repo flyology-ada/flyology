@@ -56,6 +56,17 @@ package Flyology.Data_Structures with Preelaborate is
    --  not spin, sleep, or block an event-loop pthread.
    Busy_Error : exception;
 
+   --  Raised when an explicitly waiting data-structure operation cannot
+   --  complete before its nonnegative monotonic timeout expires. Waiting
+   --  operations yield the calling Ada task between attempts; their leaf
+   --  contracts describe which resource conditions are retried.
+   Timeout_Error : exception;
+
+   --  Nonnegative relative timeout accepted by explicitly waiting operations,
+   --  limited to 24 hours. Zero permits one immediate attempt and then times
+   --  out. Time starts with the first unsuccessful claim.
+   subtype Wait_Timeout is Duration range 0.0 .. 86_400.0;
+
    --  Raised when an object or independently recoverable slot was explicitly
    --  poisoned after an interrupted or failed mutation. Poisoned bytes are
    --  never silently treated as ready; the leaf defines explicit recovery.

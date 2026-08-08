@@ -742,16 +742,18 @@ an access value in persistent storage:
 | `Regions` | No stored object; checked local view and offsets | Application exclusion for view and backing lifetime |
 | `Handles` | 32-bit slot plus 32-bit generation | Validation belongs to the receiving structure |
 | `Envelopes` | Optional application signature/version around one nested extent | Application exclusion for initialization, destruction, and contract changes |
-| `Slab_Pools` | Fixed-size payload slots with generation-stamped handles | Per-slot atomic claims and a shared allocation cursor |
-| `Byte_Strings` | Bounded variable-length byte sequence | Shared nonblocking guard; immediate `Busy_Error` on contention |
-| `Vectors` | Bounded vector of fixed-size byte elements | Shared nonblocking guard; immediate `Busy_Error` on contention |
-| `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer, using acquire/release publication |
-| `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers, using bounded CAS attempts |
-| `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Shared nonblocking guard; immediate `Busy_Error` on contention |
+| `Slab_Pools` | Fixed-size payload slots with generation-stamped handles | Per-slot atomic claims; immediate and timed operations |
+| `Byte_Strings` | Bounded variable-length byte sequence | Shared guard; immediate and timed operations |
+| `Vectors` | Bounded vector of fixed-size byte elements | Shared guard; immediate and timed operations |
+| `Rings.SPSC` | Bounded fixed-size byte elements | One producer and one consumer; immediate and timed transfer |
+| `Rings.MPMC` | Bounded fixed-size byte elements with per-slot sequences | Multiple producers and consumers; immediate and timed transfer |
+| `Hash_Maps` | Fixed-size byte keys and values in open-addressed slots | Shared guard; immediate and timed operations |
 
-Slab allocation, release, read, and write are nonblocking across native tasks,
-processes, and distinct mappings. A task or process that terminates while it
-owns a slot leaves a persisted transitional state. An external recovery
+The original slab allocation, release, read, and write operations are
+nonblocking across native tasks, processes, and distinct mappings. Timed
+overloads wait only through transient claim contention; a complete scan that
+finds no free slot still reports `Exhausted`. A task or process that terminates
+while it owns a slot leaves a persisted transitional state. An external recovery
 authority must establish owner death and target-slot quiescence before marking
 that slot poisoned and explicitly recycling it; recycling advances the
 generation, while exclusive whole-pool initialization remains the unconditional
@@ -764,8 +766,10 @@ reinitialize the whole pool under exclusive authority.
 
 SPSC and MPMC counters occupy separate 64-byte control lines, and both use
 power-of-two capacities for masked slot selection. MPMC capacity is at least
-two so a slot's ready and free sequence phases cannot alias. MPMC reports bounded
-contention rather than waiting. A producer or consumer that terminates after
+two so a slot's ready and free sequence phases cannot alias. MPMC `Try`
+operations report bounded contention rather than waiting; `Push` and `Pop`
+retry full, empty, or contended observations through an explicit timeout. A
+producer or consumer that terminates after
 claiming an MPMC slot but before publishing its sequence can prevent later
 progress. Core does not detect that death; an external recovery authority can
 poison the ring after establishing quiescence, and exclusive initialization
@@ -790,6 +794,17 @@ Poisoning makes current and later views fail with `Poison_Error`, and exclusive
 `Initialize` is the only recovery. Likewise, an internal exception after a
 stored mutation may have begun poisons the object rather than publishing
 possibly inconsistent bytes as ready.
+
+Timed overloads are opt-in and leave the immediate fast path unchanged. Their
+nonnegative `Wait_Timeout` is at most 24 hours; zero permits one immediate
+attempt. The monotonic deadline begins with the first failed claim, not before
+an uncontended operation, and every retry yields the calling Ada task. Under a
+Flyology runtime that is a fiber yield for a lightweight task and a pthread
+yield for a native task, so a timed data-structure operation does not hide a
+blocking syscall on an event-loop pthread. No kernel wake object is persisted
+and there is no owner-death detection: an abandoned guard or slot remains
+unavailable until the timeout raises `Timeout_Error` and an external recovery
+authority applies the leaf's documented poison policy.
 
 Each leaf always validates its own 64-bit magic, layout version, and 64-bit
 schema. A consumer that also needs an application-level compatibility boundary

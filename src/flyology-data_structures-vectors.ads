@@ -4,9 +4,10 @@ private with Flyology.Data_Structures.Layouts;
 
 --  Provides bounded vectors of fixed-size byte elements in relocatable
 --  storage. Elements are explicit byte representations rather than arbitrary
---  Ada private values. Operations use one process-shared nonblocking
---  guard. Contention raises Busy_Error immediately; no operation waits or
---  retries. An exception after a mutation may have begun poisons the stored
+--  Ada private values. Immediate operations use one process-shared
+--  nonblocking guard and raise Busy_Error on contention. Timed overloads
+--  yield and retry that guard through one explicit timeout. An exception
+--  after a mutation may have begun poisons the stored
 --  object; Poison_Error then persists until exclusive reinitialization.
 --  Is_Attached, Capacity, and Is_Poisoned inspect only local or lifecycle
 --  metadata and do not acquire the payload guard.
@@ -87,6 +88,13 @@ package Flyology.Data_Structures.Vectors with Preelaborate is
    --  @return Number of initialized elements
    function Length (Item : View) return Natural;
 
+   --  Return Length after waiting for the shared guard.
+   --  @param Item Attached synchronized view
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @return Number of initialized elements
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   function Length (Item : View; Timeout : Wait_Timeout) return Natural;
+
    --  Report whether an attached vector requires reinitialization.
    --  @param Item Attached view
    --  @return True only when the persisted lifecycle state is poisoned
@@ -112,6 +120,19 @@ package Flyology.Data_Structures.Vectors with Preelaborate is
       Data     : Ada.Streams.Stream_Element_Array;
       Appended : out Boolean);
 
+   --  Wait for the shared guard and then attempt one append. Capacity
+   --  exhaustion still returns Appended false immediately after acquisition.
+   --  @param Item Internally synchronized attached vector view
+   --  @param Data Source whose length must equal Element_Size
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @param Appended True only when capacity was available
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Try_Append
+     (Item     : in out View;
+      Data     : Ada.Streams.Stream_Element_Array;
+      Timeout  : Wait_Timeout;
+      Appended : out Boolean);
+
    --  Copy the one-based element at Index into Data.
    --  @param Item Internally synchronized attached vector view
    --  @param Index One-based initialized element position
@@ -121,6 +142,18 @@ package Flyology.Data_Structures.Vectors with Preelaborate is
      (Item  : View;
       Index : Positive;
       Data  : out Ada.Streams.Stream_Element_Array);
+
+   --  Read one element after waiting for the shared guard.
+   --  @param Item Internally synchronized attached vector view
+   --  @param Index One-based initialized element position
+   --  @param Data Destination whose length must equal Element_Size
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Read
+     (Item    : View;
+      Index   : Positive;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
 
    --  Replace the one-based element at Index.
    --  @param Item Internally synchronized attached vector view
@@ -132,6 +165,18 @@ package Flyology.Data_Structures.Vectors with Preelaborate is
       Index : Positive;
       Data  : Ada.Streams.Stream_Element_Array);
 
+   --  Replace one element after waiting for the shared guard.
+   --  @param Item Internally synchronized attached vector view
+   --  @param Index One-based initialized element position
+   --  @param Data Source whose length must equal Element_Size
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Replace
+     (Item    : in out View;
+      Index   : Positive;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Copy and remove the last element without waiting. Empty vectors return
    --  Popped false and do not assign Data.
    --  @param Item Internally synchronized attached vector view
@@ -142,9 +187,28 @@ package Flyology.Data_Structures.Vectors with Preelaborate is
       Data   : out Ada.Streams.Stream_Element_Array;
       Popped : out Boolean);
 
+   --  Wait for the shared guard and then attempt one pop. An empty vector
+   --  still returns Popped false immediately after acquisition.
+   --  @param Item Internally synchronized attached vector view
+   --  @param Data Destination whose length must equal Element_Size
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @param Popped True only when an element was removed
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Try_Pop
+     (Item    : in out View;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Popped  : out Boolean);
+
    --  Set Length to zero without rewriting payload bytes.
    --  @param Item Internally synchronized attached vector view
    procedure Clear (Item : in out View);
+
+   --  Clear the vector after waiting for the shared guard.
+   --  @param Item Internally synchronized attached vector view
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Clear (Item : in out View; Timeout : Wait_Timeout);
 
    --  Invalidate a quiescent vector and detach Item.
    --  @param Item Exclusively synchronized vector view

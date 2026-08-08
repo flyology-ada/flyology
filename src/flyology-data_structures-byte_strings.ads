@@ -4,9 +4,10 @@ private with Flyology.Data_Structures.Layouts;
 
 --  Provides bounded variable-length byte strings in relocatable storage.
 --  Values are byte sequences, not text encodings, and never contain hidden
---  Ada metadata. Operations use one process-shared nonblocking
---  guard. Contention raises Busy_Error immediately; no operation waits or
---  retries. An exception after a mutation may have begun poisons the stored
+--  Ada metadata. Immediate operations use one process-shared nonblocking
+--  guard and raise Busy_Error on contention. Timed overloads yield and retry
+--  that guard through one explicit timeout. An exception after a mutation may
+--  have begun poisons the stored
 --  object; Poison_Error then persists until exclusive reinitialization.
 --  Is_Attached, Capacity, and Is_Poisoned inspect only local or lifecycle
 --  metadata and do not acquire the payload guard.
@@ -82,6 +83,14 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @return Number of initialized payload bytes
    function Length (Item : View) return Natural;
 
+   --  Return the retained length after waiting for the shared guard. The
+   --  caller yields between attempts and one monotonic deadline spans them.
+   --  @param Item Attached synchronized view
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @return Number of initialized payload bytes
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   function Length (Item : View; Timeout : Wait_Timeout) return Natural;
+
    --  Report whether an attached string requires reinitialization.
    --  @param Item Attached view
    --  @return True only when the persisted lifecycle state is poisoned
@@ -105,6 +114,17 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    procedure Assign
      (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
+   --  Replace the string after waiting for the shared guard.
+   --  @param Item Internally synchronized attached view
+   --  @param Data Replacement bytes; payload overlap is supported
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   --  @exception Constraint_Error Data exceeds Capacity
+   procedure Assign
+     (Item    : in out View;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Append Data to the current string. Overlap between Data and the stored
    --  payload is supported.
    --  @param Item Internally synchronized attached view
@@ -113,6 +133,17 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    procedure Append
      (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
+   --  Append Data after waiting for the shared guard.
+   --  @param Item Internally synchronized attached view
+   --  @param Data Bytes appended in order; payload overlap is supported
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   --  @exception Constraint_Error The resulting length exceeds Capacity
+   procedure Append
+     (Item    : in out View;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Copy the current string into Data, whose length must equal Length.
    --  @param Item Internally synchronized attached view
    --  @param Data Exact-size destination
@@ -120,9 +151,26 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    procedure Read
      (Item : View; Data : out Ada.Streams.Stream_Element_Array);
 
+   --  Copy the string after waiting for the shared guard.
+   --  @param Item Internally synchronized attached view
+   --  @param Data Exact-size destination
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   --  @exception Constraint_Error Data has the wrong length
+   procedure Read
+     (Item    : View;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Set the current length to zero without rewriting retained payload bytes.
    --  @param Item Internally synchronized attached view
    procedure Clear (Item : in out View);
+
+   --  Clear the string after waiting for the shared guard.
+   --  @param Item Internally synchronized attached view
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Clear (Item : in out View; Timeout : Wait_Timeout);
 
    --  Invalidate a quiescent string and detach Item.
    --  @param Item Internally synchronized attached view

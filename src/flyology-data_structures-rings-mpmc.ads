@@ -8,6 +8,8 @@ private with System;
 --  permit concurrent native tasks or processes to use distinct mappings.
 --  Try operations perform at most Contention_Limit claims and never wait on a
 --  tasking primitive or syscall; Contended is a bounded failure outcome.
+--  Timed Push and Pop yield between bounded claim campaigns until success or
+--  one explicit timeout.
 --  A participant that terminates after claiming a slot but before publishing
 --  it can prevent later progress. Core does not detect participant death; an
 --  external recovery authority may poison the ring and reinitialize it after
@@ -121,6 +123,17 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
       Data   : Ada.Streams.Stream_Element_Array;
       Result : out Push_Result);
 
+   --  Wait through full or contended observations until Data is published or
+   --  the monotonic timeout expires. The caller yields between campaigns.
+   --  @param Item Any concurrently attached producer view
+   --  @param Data Source whose length must equal Element_Size
+   --  @param Timeout Maximum wait; zero permits one bounded claim campaign
+   --  @exception Timeout_Error No element is published by the deadline
+   procedure Push
+     (Item    : in out View;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Attempt to claim and consume the oldest published element.
    --  @param Item Any concurrently attached consumer view
    --  @param Data Destination whose length must equal Element_Size
@@ -130,6 +143,17 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
      (Item   : in out View;
       Data   : out Ada.Streams.Stream_Element_Array;
       Result : out Pop_Result);
+
+   --  Wait through empty or contended observations until one element is
+   --  consumed or the monotonic timeout expires.
+   --  @param Item Any concurrently attached consumer view
+   --  @param Data Exact-size destination, assigned only on success
+   --  @param Timeout Maximum wait; zero permits one bounded claim campaign
+   --  @exception Timeout_Error No element is consumed by the deadline
+   procedure Pop
+     (Item    : in out View;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
 
    --  Invalidate an empty, quiescent ring and detach Item.
    --  @param Item Exclusively synchronized view

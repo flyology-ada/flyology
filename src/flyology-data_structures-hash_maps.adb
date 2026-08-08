@@ -1,6 +1,7 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
+with Flyology.Data_Structures.Waits;
 with Interfaces.C;
 with System.Storage_Elements;
 
@@ -8,6 +9,7 @@ package body Flyology.Data_Structures.Hash_Maps is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Waiting renames Flyology.Data_Structures.Waits;
    package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
@@ -337,6 +339,30 @@ package body Flyology.Data_Structures.Hash_Maps is
       end;
    end Acquire;
 
+   procedure Acquire (Item : View; Timeout : Wait_Timeout) is
+      Wait     : Waiting.Context := Waiting.Start (Timeout);
+      Expected : Interfaces.Unsigned_32;
+   begin
+      Layouts.Require_Ready (Item.Core);
+      loop
+         Expected := 0;
+         exit when Atomic.Compare_Exchange_U32
+           (Item.Guard_Address, Expected, 1);
+         Layouts.Require_Ready (Item.Core);
+         if Expected /= 1 then
+            raise Layout_Error with "hash-map guard is corrupt";
+         end if;
+         Waiting.Retry (Wait);
+      end loop;
+      begin
+         Layouts.Require_Ready (Item.Core);
+      exception
+         when others =>
+            Atomic.Store_Release_U32 (Item.Guard_Address, 0);
+            raise;
+      end;
+   end Acquire;
+
    procedure Release (Item : View) is
    begin
       Atomic.Store_Release_U32 (Item.Guard_Address, 0);
@@ -356,6 +382,21 @@ package body Flyology.Data_Structures.Hash_Maps is
       Result : Natural;
    begin
       Acquire (Item);
+      begin
+         Result := Natural (Stored_Count (Item));
+         Release (Item);
+         return Result;
+      exception
+         when others =>
+            Layouts.Poison (Item.Core);
+            raise;
+      end;
+   end Length;
+
+   function Length (Item : View; Timeout : Wait_Timeout) return Natural is
+      Result : Natural;
+   begin
+      Acquire (Item, Timeout);
       begin
          Result := Natural (Stored_Count (Item));
          Release (Item);
@@ -529,6 +570,26 @@ package body Flyology.Data_Structures.Hash_Maps is
       end;
    end Put;
 
+   procedure Put
+     (Item    : in out View;
+      Key     : Ada.Streams.Stream_Element_Array;
+      Value   : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Result  : out Put_Result) is
+   begin
+      Check_Key (Item, Key);
+      Check_Value (Item, Value'Length);
+      Acquire (Item, Timeout);
+      begin
+         Put_Unlocked (Item, Key, Value, Result);
+         Release (Item);
+      exception
+         when others =>
+            Layouts.Poison (Item.Core);
+            raise;
+      end;
+   end Put;
+
    procedure Find_Index_Unlocked
      (Item : View; Key : Ada.Streams.Stream_Element_Array;
       Found : out Boolean; Index : out Interfaces.Unsigned_64)
@@ -593,6 +654,36 @@ package body Flyology.Data_Structures.Hash_Maps is
       end;
    end Get;
 
+   procedure Get
+     (Item    : View;
+      Key     : Ada.Streams.Stream_Element_Array;
+      Value   : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Found   : out Boolean)
+   is
+      Index : Interfaces.Unsigned_64;
+   begin
+      Check_Value (Item, Value'Length);
+      Check_Key (Item, Key);
+      Acquire (Item, Timeout);
+      begin
+         Find_Index_Unlocked (Item, Key, Found, Index);
+         if Found then
+            Bytes.Copy
+              (Value'Address,
+               Field_Address
+                 (Item, Entry_Address (Item, Index), Item.Value_Offset,
+                  Byte_Count (Item.Value_Value)),
+               Interfaces.C.size_t (Value'Length));
+         end if;
+         Release (Item);
+      exception
+         when others =>
+            Layouts.Poison (Item.Core);
+            raise;
+      end;
+   end Get;
+
    procedure Remove
      (Item    : in out View;
       Key     : Ada.Streams.Stream_Element_Array;
@@ -625,11 +716,78 @@ package body Flyology.Data_Structures.Hash_Maps is
       end;
    end Remove;
 
+   procedure Remove
+     (Item    : in out View;
+      Key     : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Removed : out Boolean)
+   is
+      Index : Interfaces.Unsigned_64;
+      Count : Interfaces.Unsigned_64;
+   begin
+      Check_Key (Item, Key);
+      Acquire (Item, Timeout);
+      begin
+         Find_Index_Unlocked (Item, Key, Removed, Index);
+         if Removed then
+            Count := Stored_Count (Item);
+            if Count = 0 then
+               raise Layout_Error with
+                 "hash-map occupied entry contradicts zero count";
+            end if;
+            Bytes.Write_U32
+              (Field_Address
+                 (Item, Entry_Address (Item, Index), State_Offset, 4),
+               Deleted_State);
+            Bytes.Write_U64 (Item.Count_Address, Count - 1);
+         end if;
+         Release (Item);
+      exception
+         when others =>
+            Layouts.Poison (Item.Core);
+            raise;
+      end;
+   end Remove;
+
    procedure Clear (Item : in out View) is
       Occupied : Interfaces.Unsigned_64 := 0;
       State    : Interfaces.Unsigned_32;
    begin
       Acquire (Item);
+      begin
+         for Index in Interfaces.Unsigned_64 range
+           0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
+         loop
+            State := Bytes.Read_U32
+              (Field_Address
+                 (Item, Entry_Address (Item, Index), State_Offset, 4));
+            if State = Occupied_State then
+               Occupied := Occupied + 1;
+            elsif State /= Empty_State and then State /= Deleted_State then
+               raise Layout_Error with "hash-map entry state is corrupt";
+            end if;
+            Bytes.Write_U32
+              (Field_Address
+                 (Item, Entry_Address (Item, Index), State_Offset, 4),
+               Empty_State);
+         end loop;
+         if Occupied /= Stored_Count (Item) then
+            raise Layout_Error with "hash-map occupied count is corrupt";
+         end if;
+         Bytes.Write_U64 (Item.Count_Address, 0);
+         Release (Item);
+      exception
+         when others =>
+            Layouts.Poison (Item.Core);
+            raise;
+      end;
+   end Clear;
+
+   procedure Clear (Item : in out View; Timeout : Wait_Timeout) is
+      Occupied : Interfaces.Unsigned_64 := 0;
+      State    : Interfaces.Unsigned_32;
+   begin
+      Acquire (Item, Timeout);
       begin
          for Index in Interfaces.Unsigned_64 range
            0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1

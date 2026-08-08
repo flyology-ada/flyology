@@ -7,8 +7,8 @@ private with System;
 --  elements. Exactly one producer may call Try_Push and exactly one consumer
 --  may call Try_Pop at a time; they may be native tasks or processes using
 --  different mappings. Acquire/release publication makes payload transfer
---  explicit. Attachment and destruction require quiescence. Operations never
---  wait, allocate, enter the Flyology scheduler, or invoke a blocking syscall.
+--  explicit. Attachment and destruction require quiescence. Try operations
+--  never wait; timed Push and Pop yield without invoking a blocking syscall.
 --  Attach, Detach, Initialize, Destroy, and backing-lifetime changes must not
 --  race with any use of the same local View.
 package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
@@ -118,6 +118,17 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
       Data   : Ada.Streams.Stream_Element_Array;
       Pushed : out Boolean);
 
+   --  Wait until Data is published or the monotonic timeout expires. The sole
+   --  producer yields between full-ring observations.
+   --  @param Item Producer's attached view
+   --  @param Data Source whose length must equal Element_Size
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The ring remains full through the deadline
+   procedure Push
+     (Item    : in out View;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
+
    --  Acquire and copy the next element into Data. The sole consumer calls
    --  this operation. An empty ring returns immediately with Popped false and
    --  does not assign Data.
@@ -130,6 +141,17 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
      (Item   : in out View;
       Data   : out Ada.Streams.Stream_Element_Array;
       Popped : out Boolean);
+
+   --  Wait until one element is consumed or the monotonic timeout expires.
+   --  The sole consumer yields between empty-ring observations.
+   --  @param Item Consumer's attached view
+   --  @param Data Exact-size destination, assigned only on success
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The ring remains empty through the deadline
+   procedure Pop
+     (Item    : in out View;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout);
 
    --  Invalidate an empty, quiescent ring and detach Item.
    --  @param Item Exclusively synchronized ring view

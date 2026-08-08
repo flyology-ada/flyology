@@ -7,9 +7,10 @@ private with System;
 --  fixed-size byte values. Capacity is a power of two and probing is linear
 --  over cached fixed-stride entries. Stored data contains only state scalars,
 --  hashes, keys, and values. Ordinary operations are internally serialized
---  across mappings by one process-capable stored guard. They make one
---  acquisition attempt and raise Busy_Error rather than waiting. Lifecycle
---  operations still require whole-object quiescence.
+--  across mappings by one process-capable stored guard. Immediate operations
+--  make one acquisition attempt and raise Busy_Error; timed overloads yield
+--  and retry through one explicit timeout. Lifecycle operations still require
+--  whole-object quiescence.
 --  The application must exclude Attach, Detach, Initialize, Destroy, and
 --  backing-lifetime changes from every use of the same local View. Separate
 --  attached views may perform ordinary operations concurrently.
@@ -118,6 +119,13 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @exception Poison_Error The map is poisoned
    function Length (Item : View) return Natural;
 
+   --  Return Length after waiting for the shared map guard.
+   --  @param Item Attached map view
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @return Number of keys currently present
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   function Length (Item : View; Timeout : Wait_Timeout) return Natural;
+
    --  Insert Key and Value, or replace the value for an existing key.
    --  @param Item Attached map view
    --  @param Key Fixed-size key bytes
@@ -131,6 +139,20 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Key    : Ada.Streams.Stream_Element_Array;
       Value  : Ada.Streams.Stream_Element_Array;
       Result : out Put_Result);
+
+   --  Insert or replace after waiting for the shared guard.
+   --  @param Item Attached map view
+   --  @param Key Fixed-size key bytes
+   --  @param Value Fixed-size value bytes
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @param Result Insert, replacement, or full-table outcome
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Put
+     (Item    : in out View;
+      Key     : Ada.Streams.Stream_Element_Array;
+      Value   : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Result  : out Put_Result);
 
    --  Look up Key and copy its value when present.
    --  @param Item Attached map view
@@ -146,6 +168,20 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Value : out Ada.Streams.Stream_Element_Array;
       Found : out Boolean);
 
+   --  Look up Key after waiting for the shared guard.
+   --  @param Item Attached map view
+   --  @param Key Fixed-size key bytes
+   --  @param Value Fixed-size destination
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @param Found True only when Key is present
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Get
+     (Item    : View;
+      Key     : Ada.Streams.Stream_Element_Array;
+      Value   : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Found   : out Boolean);
+
    --  Remove Key when present, retaining a tombstone for probe continuity.
    --  @param Item Attached map view
    --  @param Key Fixed-size key bytes
@@ -158,11 +194,29 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Key     : Ada.Streams.Stream_Element_Array;
       Removed : out Boolean);
 
+   --  Remove Key after waiting for the shared guard.
+   --  @param Item Attached map view
+   --  @param Key Fixed-size key bytes
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @param Removed True only when Key was present
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Remove
+     (Item    : in out View;
+      Key     : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout;
+      Removed : out Boolean);
+
    --  Reset every entry to empty and set Length to zero.
    --  @param Item Attached map view
    --  @exception Busy_Error Another operation owns the guard
    --  @exception Poison_Error The map is poisoned
    procedure Clear (Item : in out View);
+
+   --  Clear the map after waiting for the shared guard.
+   --  @param Item Attached map view
+   --  @param Timeout Maximum wait; zero permits one immediate attempt
+   --  @exception Timeout_Error The guard remains owned through the deadline
+   procedure Clear (Item : in out View; Timeout : Wait_Timeout);
 
    --  Invalidate a quiescent map and detach Item.
    --  @param Item Exclusively synchronized map view

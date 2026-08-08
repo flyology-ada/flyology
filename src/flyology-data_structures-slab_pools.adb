@@ -1,12 +1,14 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
+with Flyology.Data_Structures.Waits;
 with Interfaces.C;
 
 package body Flyology.Data_Structures.Slab_Pools is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
+   package Waiting renames Flyology.Data_Structures.Waits;
 
    use type Handles.Generation;
    use type Handles.Slot_Index;
@@ -311,6 +313,26 @@ package body Flyology.Data_Structures.Slab_Pools is
       raise Busy_Error with "slab slot claim budget exhausted";
    end Acquire_Live;
 
+   procedure Acquire_Live
+     (Item          : View;
+      Value         : Handles.Handle;
+      Desired_State : Interfaces.Unsigned_32;
+      Timeout       : Wait_Timeout;
+      Slot          : out Interfaces.Unsigned_32)
+   is
+      Wait : Waiting.Context := Waiting.Start (Timeout);
+   begin
+      loop
+         begin
+            Acquire_Live (Item, Value, Desired_State, Slot);
+            return;
+         exception
+            when Busy_Error =>
+               Waiting.Retry (Wait);
+         end;
+      end loop;
+   end Acquire_Live;
+
    procedure Try_Allocate
      (Item   : in out View;
       Value  : out Handles.Handle;
@@ -381,6 +403,21 @@ package body Flyology.Data_Structures.Slab_Pools is
         (if Saw_Free_Contention then Allocation_Contended else Exhausted);
    end Try_Allocate;
 
+   procedure Try_Allocate
+     (Item    : in out View;
+      Timeout : Wait_Timeout;
+      Value   : out Handles.Handle;
+      Result  : out Allocation_Result)
+   is
+      Wait : Waiting.Context := Waiting.Start (Timeout);
+   begin
+      loop
+         Try_Allocate (Item, Value, Result);
+         exit when Result /= Allocation_Contended;
+         Waiting.Retry (Wait);
+      end loop;
+   end Try_Allocate;
+
    procedure Release
      (Item  : in out View;
       Value : Handles.Handle)
@@ -390,6 +427,45 @@ package body Flyology.Data_Structures.Slab_Pools is
       Generation : Interfaces.Unsigned_32;
    begin
       Acquire_Live (Item, Value, Releasing_State, Slot);
+      if not Policy.Generation_Can_Advance
+        (Interfaces.Unsigned_32 (Value.Stamp))
+      then
+         if not Atomic.Compare_Exchange_U32
+           (State_Address (Item, Slot), Expected, Poisoned_State)
+         then
+            if Expected = Poisoned_State then
+               raise Poison_Error with "slab generation was retired";
+            else
+               raise Layout_Error with "slab retirement state changed";
+            end if;
+         end if;
+         raise Poison_Error with
+           "slab generation is exhausted; exclusive reinitialization required";
+      end if;
+      Generation := Policy.Next_Generation
+        (Interfaces.Unsigned_32 (Value.Stamp));
+      Bytes.Write_U32 (Generation_Address (Item, Slot), Generation);
+      if not Atomic.Compare_Exchange_U32
+        (State_Address (Item, Slot), Expected, Free_State)
+      then
+         if Expected = Poisoned_State then
+            raise Poison_Error with "slab release was poisoned";
+         else
+            raise Layout_Error with "slab release state changed";
+         end if;
+      end if;
+   end Release;
+
+   procedure Release
+     (Item    : in out View;
+      Value   : Handles.Handle;
+      Timeout : Wait_Timeout)
+   is
+      Slot : Interfaces.Unsigned_32;
+      Expected : Interfaces.Unsigned_32 := Releasing_State;
+      Generation : Interfaces.Unsigned_32;
+   begin
+      Acquire_Live (Item, Value, Releasing_State, Timeout, Slot);
       if not Policy.Generation_Can_Advance
         (Interfaces.Unsigned_32 (Value.Stamp))
       then
@@ -477,6 +553,48 @@ package body Flyology.Data_Structures.Slab_Pools is
          raise;
    end Read;
 
+   procedure Read
+     (Item    : View;
+      Value   : Handles.Handle;
+      Data    : out Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout)
+   is
+      Slot     : Interfaces.Unsigned_32 := 0;
+      Acquired : Boolean := False;
+      Expected : Interfaces.Unsigned_32;
+   begin
+      Check_Length (Item, Data'Length);
+      Acquire_Live (Item, Value, Accessing_State, Timeout, Slot);
+      Acquired := True;
+      Bytes.Copy
+        (Data'Address, Payload_Address (Item, Slot),
+         Interfaces.C.size_t (Data'Length));
+      Expected := Accessing_State;
+      if not Atomic.Compare_Exchange_U32
+        (State_Address (Item, Slot), Expected, Live_State)
+      then
+         if Expected = Poisoned_State then
+            raise Poison_Error with "slab read was poisoned";
+         else
+            raise Layout_Error with "slab read state changed";
+         end if;
+      end if;
+   exception
+      when others =>
+         if Acquired
+           and then Atomic.Load_Acquire_U32 (State_Address (Item, Slot)) =
+             Accessing_State
+         then
+            Expected := Accessing_State;
+            if Atomic.Compare_Exchange_U32
+              (State_Address (Item, Slot), Expected, Live_State)
+            then
+               null;
+            end if;
+         end if;
+         raise;
+   end Read;
+
    procedure Write
      (Item  : in out View;
       Value : Handles.Handle;
@@ -496,6 +614,52 @@ package body Flyology.Data_Structures.Slab_Pools is
       Bytes.Copy
         (Target, Data'Address,
          Interfaces.C.size_t (Data'Length));
+      Expected := Accessing_State;
+      if not Atomic.Compare_Exchange_U32
+        (State_Address (Item, Slot), Expected, Live_State)
+      then
+         if Expected = Poisoned_State then
+            raise Poison_Error with "slab write was poisoned";
+         else
+            raise Layout_Error with "slab write state changed";
+         end if;
+      end if;
+   exception
+      when others =>
+         if Acquired
+           and then Atomic.Load_Acquire_U32 (State_Address (Item, Slot)) =
+             Accessing_State
+         then
+            Expected := Accessing_State;
+            if Atomic.Compare_Exchange_U32
+              (State_Address (Item, Slot), Expected,
+               (if Mutated then Poisoned_State else Live_State))
+            then
+               null;
+            end if;
+         end if;
+         raise;
+   end Write;
+
+   procedure Write
+     (Item    : in out View;
+      Value   : Handles.Handle;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Timeout : Wait_Timeout)
+   is
+      Slot     : Interfaces.Unsigned_32 := 0;
+      Target   : System.Address := System.Null_Address;
+      Acquired : Boolean := False;
+      Mutated  : Boolean := False;
+      Expected : Interfaces.Unsigned_32;
+   begin
+      Check_Length (Item, Data'Length);
+      Acquire_Live (Item, Value, Accessing_State, Timeout, Slot);
+      Acquired := True;
+      Target := Payload_Address (Item, Slot);
+      Mutated := True;
+      Bytes.Copy
+        (Target, Data'Address, Interfaces.C.size_t (Data'Length));
       Expected := Accessing_State;
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Slot), Expected, Live_State)
