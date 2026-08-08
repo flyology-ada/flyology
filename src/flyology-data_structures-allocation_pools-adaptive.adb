@@ -28,7 +28,22 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    Unlocked           : constant Interfaces.Unsigned_32 := 0;
    Locked             : constant Interfaces.Unsigned_32 := 1;
 
-   Chunk_Location : constant Region_Offset := 64;
+   Chunk_Location : constant Region_Offset :=
+     Region_Offset (Minimum_Arena_Alignment);
+
+   function Has_Compatible_Alignment
+     (Arena_Metadata : Arena_Provider.Metadata) return Boolean is
+     (Byte_Count (Arena_Metadata.Minimum_Block_Size) >=
+        Minimum_Arena_Alignment);
+
+   procedure Require_Creation_Alignment
+     (Arena_Metadata : Arena_Provider.Metadata) is
+   begin
+      if not Has_Compatible_Alignment (Arena_Metadata) then
+         raise Constraint_Error with
+           "adaptive pool requires 64-byte arena allocation alignment";
+      end if;
+   end Require_Creation_Alignment;
 
    function Chunk_Storage return Byte_Count is
      (Layouts.Checked_Add
@@ -156,11 +171,12 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Location : Region_Offset;
       Arena    : Arena_Provider.View)
    is
-      Arena_Metadata : constant Arena_Provider.Metadata :=
-        Arena_Provider.Current_Metadata (Arena);
+      Arena_Metadata : Arena_Provider.Metadata;
       Core : Layouts.Local_View;
    begin
       Detach (Item);
+      Arena_Metadata := Arena_Provider.Current_Metadata (Arena);
+      Require_Creation_Alignment (Arena_Metadata);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Required_Storage,
          (Capacity     => Interfaces.Unsigned_32 (Maximum_Chunks),
@@ -250,12 +266,16 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Location : Region_Offset;
       Arena    : Arena_Provider.View)
    is
-      Arena_Metadata : constant Arena_Provider.Metadata :=
-        Arena_Provider.Current_Metadata (Arena);
+      Arena_Metadata : Arena_Provider.Metadata;
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
    begin
       Detach (Item);
+      Arena_Metadata := Arena_Provider.Current_Metadata (Arena);
+      if not Has_Compatible_Alignment (Arena_Metadata) then
+         raise Layout_Error with
+           "adaptive pool requires 64-byte arena allocation alignment";
+      end if;
       Layouts.Attach (Core, Header, Region, Location, Identity, 64);
       if Header.Capacity /= Interfaces.Unsigned_32 (Maximum_Chunks)
         or else Header.Element_Size /= Interfaces.Unsigned_32 (Element.Size)
@@ -289,12 +309,13 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Arena    : Arena_Provider.View;
       Result   : out Open_Result)
    is
-      Arena_Metadata : constant Arena_Provider.Metadata :=
-        Arena_Provider.Current_Metadata (Arena);
+      Arena_Metadata : Arena_Provider.Metadata;
       Core  : Layouts.Local_View;
       Claim : Layouts.Initialization_Claim;
    begin
       Detach (Item);
+      Arena_Metadata := Arena_Provider.Current_Metadata (Arena);
+      Require_Creation_Alignment (Arena_Metadata);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Required_Storage,
          (Capacity     => Interfaces.Unsigned_32 (Maximum_Chunks),

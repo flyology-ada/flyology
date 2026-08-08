@@ -22,7 +22,10 @@ use type Interfaces.Unsigned_64;
 --  must be detached before the arena mapping disappears. Every operation
 --  taking an arena rejects an arena whose instance identity or incarnation
 --  differs from the one the view attached to.
---  @formal Arena_Provider Compile-time backing allocator instance
+--  Arena_Provider must be configured with a Minimum_Block_Size of at least
+--  Minimum_Arena_Alignment so every nested slab has its required alignment.
+--  @formal Arena_Provider Compile-time backing allocator instance whose
+--    minimum block size is at least Minimum_Arena_Alignment
 --  @formal Element Immutable byte-backed element stored in each slot
 --  @formal Slots_Per_Chunk Fixed slot count in every allocated slab chunk
 --  @formal Maximum_Chunks Maximum number of arena-backed chunks
@@ -35,6 +38,9 @@ generic
    Maximum_Chunks  : Positive;
 package Flyology.Data_Structures.Allocation_Pools.Adaptive
   with Preelaborate is
+
+   --  Smallest backing-arena allocation alignment accepted by this pool.
+   Minimum_Arena_Alignment : constant Byte_Count := 64;
 
    --  Eight-byte magic stored in every adaptive-pool header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5341_504F_4F31#;
@@ -101,6 +107,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @param Region Caller-owned outer backing region
    --  @param Location Nonzero 64-byte-aligned outer location
    --  @param Arena Attached backing arena
+   --  @exception Constraint_Error Arena allocation alignment is insufficient
    procedure Initialize
      (Item     : out View;
       Region   : Region_View;
@@ -115,6 +122,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @param Location Stored pool location
    --  @param Arena Attached backing arena
    --  @param Result Creation, attachment, or in-progress outcome
+   --  @exception Constraint_Error Arena allocation alignment is insufficient
    procedure Create_Or_Attach
      (Item     : out View;
       Region   : Region_View;
@@ -127,7 +135,8 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @param Region Independently attached outer region
    --  @param Location Stored pool location
    --  @param Arena Independently attached matching arena
-   --  @exception Layout_Error Identity, geometry, table, or chunk is corrupt
+   --  @exception Layout_Error Identity, geometry, arena alignment, table, or
+   --    chunk is incompatible or corrupt
    --  @exception Busy_Error A chunk creation was active or abandoned
    procedure Attach
      (Item     : out View;

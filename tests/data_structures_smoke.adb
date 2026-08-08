@@ -1181,6 +1181,22 @@ begin
       Assert
         (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
          "adaptive pool accepted corrupt chunk state");
+
+      --  Arena validation can fail before the outer header is inspected. A
+      --  reused output view must still be detached before that failure so the
+      --  caller cannot accidentally continue through its earlier attachment.
+      Adaptive_U64.Attach
+        (Adaptive_Bad, Region_B, Adaptive_Pool_Location, TLSF_B);
+      Failed := False;
+      begin
+         Adaptive_U64.Attach
+           (Adaptive_Bad, Region_B, Adaptive_Pool_Location, TLSF_Bad);
+      exception
+         when DS.Region_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
+         "adaptive pool retained a view after arena validation failed");
    end;
 
    --  A pool view resolves chunks through arena allocation handles and caches
@@ -1243,6 +1259,34 @@ begin
       Assert (Failed, "adaptive pool accepted a stale arena incarnation");
       Adaptive_U64.Detach (Foreign_Pool);
       TLSF_Arenas.Destroy (Foreign_Arena);
+
+      --  The nested slab begins 64 bytes into each arena allocation. Reject a
+      --  smaller arena quantum before initialization can overwrite even an
+      --  unrelated pre-existing outer header.
+      declare
+         Low_Alignment_Configuration : constant TLSF_Arenas.Configuration :=
+           (Usable_Capacity => 16_384, Minimum_Block_Size => 32);
+         Saved_State : constant Interfaces.Unsigned_32 := Read_U32
+           (Base_A, Raw_Offset (Foreign_Pool_Location, 0));
+      begin
+         TLSF_Arenas.Initialize
+           (Foreign_Arena, Region_A, Foreign_Arena_Location,
+            Low_Alignment_Configuration, Foreign_Instance);
+         Failed := False;
+         begin
+            Adaptive_U64.Initialize
+              (Foreign_Pool, Region_A, Foreign_Pool_Location, Foreign_Arena);
+         exception
+            when Constraint_Error => Failed := True;
+         end;
+         Assert
+           (Failed
+            and then not Adaptive_U64.Is_Attached (Foreign_Pool)
+            and then Read_U32
+              (Base_A, Raw_Offset (Foreign_Pool_Location, 0)) = Saved_State,
+            "adaptive pool modified storage for insufficient alignment");
+         TLSF_Arenas.Destroy (Foreign_Arena);
+      end;
    end;
 
    --  A dependent dynamic header records the arena incarnation, not only its
