@@ -6,6 +6,8 @@
 /build/
 /tests/bin/
 /tests/obj/
+/benchmarks/bin/
+/benchmarks/obj/
 /showcases/bin/
 /showcases/obj/
 /showcases/alire/

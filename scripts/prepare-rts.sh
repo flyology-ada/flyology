@@ -531,6 +531,11 @@ cc -O2 -c "$project_root/runtime/native/context_switch.S" \
 cc -O2 $fault_cflags $io_uring_test_cflags \
   -c "$project_root/runtime/native/platform.c" \
   -o "$build_root/obj/platform.o"
+#  The scheduler imports this object's release entry point unconditionally, so
+#  the archive member is always extracted and its strong nested-subprogram
+#  trampoline helpers take precedence over libgcc's weak definitions.
+cc -O2 -c "$project_root/runtime/native/heap_trampoline.c" \
+  -o "$build_root/obj/heap_trampoline.o"
 cd "$build_root/obj"
 if [ "$platform" = linux ]; then
   "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
@@ -596,7 +601,8 @@ ar -r "$generated_lib/libgnarl.a" \
   s-taprop.o \
   s-tassta.o \
   context_switch.o \
-  platform.o
+  platform.o \
+  heap_trampoline.o
 if [ "$compat_family" = gnat-legacy ]; then
   ar -r "$generated_lib/libgnarl.a" a-sytaco.o
 fi

@@ -50,6 +50,17 @@ package System.Flyology.Scheduler is
       Current_Task_Instance,
       "flyology_runtime_current_task_instance");
 
+   --  Internal compiler-runtime ABI. GNAT releases off-stack nested-subprogram
+   --  trampolines in stack order, an order that holds within a fiber but not
+   --  within an event-loop thread that several fibers share. The native bridge
+   --  keeps each fiber's live trampolines through this slot and falls back to
+   --  thread-local storage when no fiber is running.
+   function Current_Trampoline_Control_Slot return System.Address;
+   pragma Export
+     (C,
+      Current_Trampoline_Control_Slot,
+      "flyology_runtime_current_trampoline_control_slot");
+
    function Configured_Pool_Size return Interfaces.C.int;
    pragma Export
      (C, Configured_Pool_Size, "flyology_runtime_configured_pool_size");

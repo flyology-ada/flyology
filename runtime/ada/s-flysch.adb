@@ -216,6 +216,12 @@ package body System.Flyology.Scheduler is
    type Fiber is record
       T          : System.Address := System.Null_Address;
       Instance   : C.unsigned_long_long := 0;
+      --  This fiber's most recent live nested-subprogram trampoline, which
+      --  links back through the ones it still holds. The compiler's helper
+      --  releases trampolines in stack order, an order that holds within a
+      --  fiber but not within an event-loop thread shared by several. The
+      --  scheduler releases whatever remains when the fiber is reaped.
+      Trampoline_Control : aliased System.Address := System.Null_Address;
       Context    : Contexts.Context_Access;
       Wrapper    : System.Address := System.Null_Address;
       Priority   : C.int := 0;
@@ -296,6 +302,11 @@ package body System.Flyology.Scheduler is
       Scheduler_Context : Contexts.Context_Access;
       Scheduler_Poller  : Pollers.Poller;
       Current_Fiber     : Fiber_Access;
+      --  The fiber this group's event thread has handed control to. Unlike
+      --  Current_Fiber it is cleared the moment the fiber suspends, so
+      --  scheduler work is never charged to a fiber's trampoline cursor. Only
+      --  the group's own event thread touches it.
+      Trampoline_Fiber  : Fiber_Access;
       Ready_Buckets     : Ready_Bucket_Array :=
         (others => (Head => null, Tail => null));
       Ready_Count       : Natural := 0;
@@ -425,6 +436,13 @@ package body System.Flyology.Scheduler is
    function Thread_Current_Processor return C.int;
    pragma Import
      (C, Thread_Current_Processor, "flyology_thread_current_processor");
+
+   --  Return every trampoline a reaped fiber still holds to the pool it came
+   --  from. The host bridge owns nothing on platforms where GNAT does not
+   --  allocate trampolines off the stack, where this is a no-op.
+   procedure Release_Heap_Trampolines (Control : System.Address);
+   pragma Import
+     (C, Release_Heap_Trampolines, "flyology_heap_trampoline_release");
 
    procedure Scheduler_Main (Argument : System.Address);
    pragma Convention (C, Scheduler_Main);
@@ -1688,6 +1706,10 @@ package body System.Flyology.Scheduler is
          Item.Reserved_Group.Reserved_For := System.Null_Address;
          Item.Reserved_Group := null;
       end if;
+      --  Execution left this fiber's stack before the scheduler reached its
+      --  final reap, so no trampoline it owns can still be in use.
+      Release_Heap_Trampolines (Item.Trampoline_Control);
+      Item.Trampoline_Control := System.Null_Address;
       Contexts.Destroy (Item.Context);
       Free_Fiber (Victim);
    exception
@@ -2325,6 +2347,13 @@ package body System.Flyology.Scheduler is
      (if Is_Event_Thread and then Thread_Group.Current_Fiber /= null
       then Thread_Group.Current_Fiber.Instance
       else 0);
+
+   --  Native tasks and the environment task never set Thread_Group, so they
+   --  keep the compiler's ordinary per-thread cursor.
+   function Current_Trampoline_Control_Slot return System.Address is
+     (if Thread_Group /= null and then Thread_Group.Trampoline_Fiber /= null
+      then Thread_Group.Trampoline_Fiber.Trampoline_Control'Address
+      else System.Null_Address);
 
    function Set_Current_Dormancy
      (Policy                   : C.int;
@@ -3718,7 +3747,12 @@ package body System.Flyology.Scheduler is
               Scheduling.After_Dispatch
                 (Positive (Dispatches_Until_Timer_Check));
             Unlock_Group (Group);
+            --  Own the trampoline cursor only while the fiber holds the
+            --  thread. Control returns here from every suspension point, so
+            --  scheduler work below runs on the thread's own cursor again.
+            Group.Trampoline_Fiber := Next;
             Contexts.Switch (Group.Scheduler_Context, Next.Context);
+            Group.Trampoline_Fiber := null;
             Consider_Dormant_Stack (Group, Next);
 
             if Next.Migration_Target /= null then

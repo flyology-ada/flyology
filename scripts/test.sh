@@ -286,6 +286,8 @@ dormancy_smoke
 execution_groups_smoke
 exception_traceback_smoke
 fairness_smoke
+fiber_trampoline_abort_smoke
+fiber_trampoline_smoke
 file_cancellation_smoke
 file_transfers_smoke
 files_smoke
@@ -437,6 +439,29 @@ FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 native_mains="default_policy_smoke
 $ordinary_unhooked_mains"
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+
+#  On Darwin/AArch64 GNAT routes nested-subprogram callbacks through libgcc's
+#  heap trampolines, whose per-pthread cursor corrupts callbacks that outlive a
+#  fiber suspension. Flyology's strong definitions must reach the executable
+#  instead of libgcc's weak ones, so confirm the linked helper reaches the
+#  scheduler's per-fiber cursor rather than silently reverting.
+if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
+  trampoline_binary="$test_bin/fiber_trampoline_smoke"
+  if ! trampoline_text=$(objdump -d --macho "$trampoline_binary"); then
+    printf '%s\n' \
+      "failed to inspect trampoline helpers: $trampoline_binary" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$trampoline_text" |
+    awk '/^___gcc_nested_func_ptr_created:/, /^___gcc_nested_func_ptr_deleted:/' |
+    grep 'flyology_runtime_current_trampoline_control_slot' >/dev/null
+  then
+    printf '%s\n' \
+      "linked __gcc_nested_func_ptr_created is not Flyology's definition" \
+      "lightweight-task callbacks would share one cursor per event thread" >&2
+    exit 1
+  fi
+fi
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
 export FLYOLOGY_CONNECTION_TEST_HOOKS

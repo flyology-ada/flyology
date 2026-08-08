@@ -1,0 +1,28 @@
+--  Copyright (c) 2026 Yurii Rashkovskii
+--  SPDX-License-Identifier: MIT OR Apache-2.0
+
+with "../flyology.gpr";
+with "../flyology_bench/flyology_bench.gpr";
+
+--  Benchmarks that need the Flyology runtime itself, so they are built against
+--  a prepared RTS rather than living in the standalone benchmarking crate.
+project Flyology_Runtime_Bench is
+   for Languages use ("Ada", "C");
+   for Source_Dirs use (".", "native");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use
+     ("runtime_callback_bench.adb",
+      "fiber_trampoline_memory.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-O2", "-gnat2022", "-gnatwa", "-gnatwJ");
+      for Default_Switches ("C") use ("-O2", "-std=c11", "-Wall", "-Wextra");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+end Flyology_Runtime_Bench;
