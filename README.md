@@ -45,6 +45,7 @@ based on the surviving correspondence.
 - [Concurrency primitives](#concurrency-primitives)
   - [Structured supervision](#structured-supervision)
   - [Relocatable data structures](#relocatable-data-structures)
+  - [Shared-memory segments](#shared-memory-segments)
   - [Ownership-transfer buffers](#ownership-transfer-buffers)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
@@ -998,6 +999,106 @@ Every structure view must be detached before its local mapping disappears;
 the stored header unusable for every other view. The layouts use the host byte
 order and are currently tested on Flyology's 64-bit Darwin and Linux targets;
 magic/version/schema validation is not a claim of cross-endian portability.
+
+### Shared-memory segments
+
+`Flyology.Shared_Memory` supplies the backing and mapping layer deliberately
+left outside `Data_Structures.Regions`. Anonymous storage is a sealed,
+size-immutable `memfd` on Linux and an unpredictable exclusive mode-0600 POSIX
+shared-memory object unlinked before return on Darwin. Named POSIX objects and
+regular files have separate create/open operations, exact-size validation,
+`FD_CLOEXEC`, explicit unlinking, and no implicit resize or repair. File opens
+use no-symlink-following where the host supports it. Mappings are shared,
+read/write, operating-system placed, and never executable.
+Linux memfd access is capability-based rather than pathname-permission-based;
+its reported inode mode bits are not treated as an owner-only access claim.
+
+`Flyology.Shared_Memory.Segments` puts a fixed-capacity named-extent registry
+inside those bytes. Its header persists magic, layout version, application
+schema, complete mapping extent, capacity, maximum name length, slot geometry,
+allocation alignment, and a nonwrapping generation counter. Lookups compare
+the hash, length, and every name byte, so hash collisions do not alias names.
+One persisted nonblocking guard serializes exact-name lookup, extent allocation,
+removal, and reuse across processes and native tasks.
+
+The winner of `Try_Find_Or_Create` receives a limited `Creation_Claim` and an
+unpublished extent. It initializes a relocatable arena, ring, map, string, or
+other fixed-layout object there, then calls `Publish` or `Publish_Failure`.
+Other participants receive an explicit initialization-in-progress or failure
+outcome and cannot resolve partial bytes. Removal is explicit. A reused slot
+gets a new generation, so old handles fail closed. Removed extents are reused
+only when their stored reservation fits; otherwise allocation advances a
+bounded frontier and reports exhaustion.
+
+```ada
+with Interfaces;
+with Flyology.Data_Structures.Byte_Strings;
+with Flyology.Data_Structures.Regions;
+with Flyology.Shared_Memory;
+with Flyology.Shared_Memory.Segments;
+
+Backing : Flyology.Shared_Memory.Backing_Object;
+Map     : Flyology.Shared_Memory.Mapping;
+Segment : Flyology.Shared_Memory.Segments.View;
+Region  : Flyology.Data_Structures.Regions.View;
+Claim   : Flyology.Shared_Memory.Segments.Creation_Claim;
+Handle  : Flyology.Shared_Memory.Segments.Named_Handle;
+Open    : Flyology.Shared_Memory.Segments.Segment_Open_Result;
+Found   : Flyology.Shared_Memory.Segments.Find_Or_Create_Result;
+Failure : Interfaces.Unsigned_32;
+Location : Flyology.Data_Structures.Region_Offset;
+Extent  : Flyology.Shared_Memory.Byte_Length;
+Value   : Flyology.Data_Structures.Byte_Strings.View;
+
+Flyology.Shared_Memory.Create_Anonymous (Backing, 1_048_576);
+Flyology.Shared_Memory.Map (Map, Backing);
+Flyology.Shared_Memory.Segments.Create_Or_Attach
+  (Segment, Map,
+   (Schema                 => 16#4D59_4150_5000_0001#,
+    Registry_Capacity      => 64,
+    Maximum_Name_Length    => 96,
+    Allocation_Alignment   => 64),
+   Open);
+Flyology.Shared_Memory.Segments.Attach_Region (Segment, Region);
+Flyology.Shared_Memory.Segments.Try_Find_Or_Create
+  (Segment, "status",
+   Flyology.Data_Structures.Byte_Strings.Required_Storage (256),
+   Handle, Claim, Found, Failure);
+
+if Found = Flyology.Shared_Memory.Segments.Created then
+   Flyology.Shared_Memory.Segments.Claimed_Extent
+     (Segment, Claim, Location, Extent);
+   Flyology.Data_Structures.Byte_Strings.Initialize
+     (Value, Region, Location, 256);
+   Flyology.Shared_Memory.Segments.Publish (Segment, Claim);
+end if;
+
+--  Detach Value, Region, and Segment before unmapping. Closing Backing may
+--  happen earlier: an established mapping has an independent lifetime.
+```
+
+Only a mapping derived from exclusive backing creation may claim an exact-zero
+segment lifecycle. An opener or received descriptor that sees zero reports
+initialization in progress; it never treats an abandoned named object as fresh.
+If a creator dies with the registry guard or a creation claim, that state stays
+abandoned. Flyology does not detect process death, steal the guard, or infer
+quiescence. Recovery requires an independently authorized supervisor and an
+application policy, commonly replacement of the whole backing object.
+
+`Flyology.Shared_Memory.Unix_Sockets` transfers exactly one backing descriptor
+with `SCM_RIGHTS`. Receive establishes `FD_CLOEXEC`, rejects malformed or
+truncated ancillary data while closing every received descriptor, and validates
+type, exact size, and optionally Linux immutable-size seals before mapping.
+Its `sendmsg` and `recvmsg` calls are synchronous: use a native-task boundary
+unless the application has independently established nonblocking readiness.
+The same caution applies to create, open, unlink, map, unmap, and flush metadata
+syscalls, which may occupy a lightweight task's event-loop pthread.
+
+`Flush` provides `msync` and `fsync` control for file-backed segments. It does
+not turn several registry or leaf mutations into a crash-consistent application
+transaction. Applications needing durable transactions, authentication,
+permissions beyond the selected OS mode, peer discovery, owner-death detection,
+or schema migration must supply those protocols explicitly.
 
 ### Ownership-transfer buffers
 

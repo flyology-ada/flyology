@@ -8,10 +8,17 @@ batches=${FLYOLOGY_STRESS_BATCHES:-8}
 width=${FLYOLOGY_STRESS_WIDTH:-24}
 case_timeout=${FLYOLOGY_STRESS_TIMEOUT:-120}
 run_faults=${FLYOLOGY_STRESS_FAULTS:-1}
+registry_rounds=${FLYOLOGY_REGISTRY_STRESS_ROUNDS:-8}
 
 case "$run_faults" in
   0|1) ;;
   *) printf '%s\n' "FLYOLOGY_STRESS_FAULTS must be 0 or 1" >&2; exit 2 ;;
+esac
+case "$registry_rounds" in
+  ''|*[!0-9]*|0)
+    printf '%s\n' "FLYOLOGY_REGISTRY_STRESS_ROUNDS must be positive" >&2
+    exit 2
+    ;;
 esac
 
 cd "$project_root"
@@ -53,10 +60,22 @@ run_gprbuild \
 run_gprbuild \
   --RTS="$project_root/build/rts" \
   -f -P tests/runtime_smoke.gpr data_structures_concurrency_smoke.adb
+run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f -P tests/runtime_smoke.gpr \
+  shared_memory_child.adb shared_memory_smoke.adb
 
 printf '%s\n' "stress case=relocatable-rings"
 run_timed "$case_timeout" \
   "$project_root/tests/bin/data_structures_concurrency_smoke" 1000000 100000
+
+registry_round=1
+while [ "$registry_round" -le "$registry_rounds" ]; do
+  printf '%s\n' "stress case=shared-memory-registry round=$registry_round"
+  run_timed "$case_timeout" \
+    "$project_root/tests/bin/shared_memory_smoke"
+  registry_round=$((registry_round + 1))
+done
 
 for seed in $seeds; do
   printf '%s\n' "stress seed=$seed"

@@ -129,6 +129,8 @@ project Runtime_Smoke is
       "semantic_termination_matrix.adb",
       "stress_randomized.adb",
       "semantic_parity_smoke.adb",
+      "shared_memory_smoke.adb",
+      "shared_memory_child.adb",
       "stack_guard_smoke.adb",
       "stack_guard_violation_child.adb",
       "stack_size_parity_smoke.adb",
