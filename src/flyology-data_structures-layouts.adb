@@ -16,7 +16,6 @@ package body Flyology.Data_Structures.Layouts is
    Initializing : constant Interfaces.Unsigned_32 := 1;
    Ready        : constant Interfaces.Unsigned_32 := 2;
    Destroyed    : constant Interfaces.Unsigned_32 := 3;
-   Locked         : constant Interfaces.Unsigned_32 := 4;
    Poisoned_State : constant Interfaces.Unsigned_32 := 5;
 
    State_Offset      : constant Byte_Count := 0;
@@ -205,9 +204,7 @@ package body Flyology.Data_Structures.Layouts is
          State : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
            (Address_At (Initial, State_Offset, 4, 4));
       begin
-         if State = Locked then
-            raise Busy_Error with "structure is being mutated";
-         elsif State = Poisoned_State then
+         if State = Poisoned_State then
             raise Poison_Error with "structure is poisoned";
          elsif State /= Ready then
             raise Layout_Error with "structure initialization is incomplete";
@@ -254,50 +251,12 @@ package body Flyology.Data_Structures.Layouts is
       end if;
       State := Atomic.Load_Acquire_U32
         (Address_At (Item, State_Offset, 4, 4));
-      if State = Locked then
-         raise Busy_Error with "structure is being mutated";
-      elsif State = Poisoned_State then
+      if State = Poisoned_State then
          raise Poison_Error with "structure is poisoned";
       elsif State /= Ready then
          raise Layout_Error with "structure is not active";
       end if;
    end Require_Ready;
-
-   function Try_Acquire (Item : Local_View) return Lock_Result is
-      Expected : Interfaces.Unsigned_32 := Ready;
-   begin
-      if not Item.Attached then
-         raise Region_Error with "detached structure view";
-      end if;
-      if Atomic.Compare_Exchange_U32
-        (Address_At (Item, State_Offset, 4, 4), Expected, Locked)
-      then
-         return Acquired;
-      elsif Expected = Locked then
-         return Busy;
-      elsif Expected = Poisoned_State then
-         return Poisoned;
-      else
-         raise Layout_Error with "structure is not active";
-      end if;
-   end Try_Acquire;
-
-   procedure Release (Item : Local_View) is
-      Expected : Interfaces.Unsigned_32 := Locked;
-   begin
-      if not Item.Attached then
-         raise Region_Error with "detached structure view";
-      end if;
-      if Atomic.Compare_Exchange_U32
-        (Address_At (Item, State_Offset, 4, 4), Expected, Ready)
-      then
-         return;
-      elsif Expected = Poisoned_State then
-         raise Poison_Error with "structure was poisoned while guarded";
-      else
-         raise Layout_Error with "structure guard is not owned";
-      end if;
-   end Release;
 
    procedure Poison (Item : Local_View) is
       Expected : Interfaces.Unsigned_32;
@@ -311,7 +270,7 @@ package body Flyology.Data_Structures.Layouts is
          pragma Unreferenced (Attempt);
          if Expected = Poisoned_State then
             return;
-         elsif Expected /= Ready and then Expected /= Locked then
+         elsif Expected /= Ready then
             raise Layout_Error with "inactive structure cannot be poisoned";
          elsif Atomic.Compare_Exchange_U32
            (Address_At (Item, State_Offset, 4, 4), Expected, Poisoned_State)
@@ -334,7 +293,6 @@ package body Flyology.Data_Structures.Layouts is
         (Address_At (Item, State_Offset, 4, 4));
    begin
       if State /= Ready
-        and then State /= Locked
         and then State /= Poisoned_State
       then
          raise Layout_Error with
@@ -368,9 +326,7 @@ package body Flyology.Data_Structures.Layouts is
       elsif not Atomic.Compare_Exchange_U32
         (Address_At (Item, State_Offset, 4, 4), Expected, Destroyed)
       then
-         if Expected = Locked then
-            raise Busy_Error with "structure is being mutated";
-         elsif Expected = Poisoned_State then
+         if Expected = Poisoned_State then
             raise Poison_Error with "structure is poisoned";
          else
             raise Layout_Error with "structure is not active";

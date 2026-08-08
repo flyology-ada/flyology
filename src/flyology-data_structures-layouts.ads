@@ -20,12 +20,6 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
       Attached      : Boolean := False;
    end record;
 
-   --  Result of one nonblocking stored-guard acquisition attempt.
-   --  @enum Acquired The caller exclusively owns the object mutation guard
-   --  @enum Busy Another caller currently owns the guard
-   --  @enum Poisoned An interrupted mutation invalidated the object
-   type Lock_Result is (Acquired, Busy, Poisoned);
-
    --  Structure-specific fields in the shared header.
    --  @field Capacity Primary bounded capacity
    --  @field Element_Size Primary fixed payload size
@@ -132,19 +126,7 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Item Local view to validate
    procedure Require_Ready (Item : Local_View);
 
-   --  Attempt once to acquire the process-capable guard in the shared
-   --  lifecycle word. The operation never spins or waits.
-   --  @param Item Attached local view
-   --  @return Acquired, Busy, or Poisoned
-   function Try_Acquire (Item : Local_View) return Lock_Result;
-
-   --  Publish completion of a guarded operation. A concurrently established
-   --  poison is preserved rather than overwritten.
-   --  @param Item Attached local view whose guard the caller owns
-   --  @exception Poison_Error A recovery authority poisoned the object
-   procedure Release (Item : Local_View);
-
-   --  Atomically poison a Ready or Locked object. The caller must have
+   --  Atomically poison a ready object. The caller must have
    --  independently established exclusive recovery authority, such as known
    --  owner death or whole-region quiescence.
    --  @param Item Attached local view to invalidate
@@ -177,5 +159,5 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    procedure Detach (Item : in out Local_View);
    pragma Inline_Always
      (Checked_Add, Checked_Multiply, Align_Up, Address_At, Require_Ready,
-      Invalidate_Nested, Try_Acquire, Release, Is_Poisoned);
+      Invalidate_Nested, Is_Poisoned);
 end Flyology.Data_Structures.Layouts;
