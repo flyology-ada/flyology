@@ -4,12 +4,11 @@ with Ada.Containers.Bounded_Synchronized_Queues;
 with Ada.Containers.Hashed_Maps;
 with Ada.Containers.Synchronized_Queue_Interfaces;
 with Ada.Containers.Vectors;
-with Ada.Long_Float_Text_IO;
-with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Ada.Unchecked_Conversion;
+with Flyology;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Handles;
@@ -19,8 +18,11 @@ with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
 with Flyology.Data_Structures.Slab_Pools;
 with Flyology.Data_Structures.Vectors;
+with Flyology_Bench;
+with Flyology_Bench.Reporters;
 with Interfaces;
 with Interfaces.C;
+with Interfaces.C.Strings;
 with System;
 
 procedure Data_Structures_Benchmark is
@@ -34,7 +36,8 @@ procedure Data_Structures_Benchmark is
    package Slab_Pools renames DS.Slab_Pools;
    package SPSC renames DS.Rings.SPSC;
    package Vectors renames DS.Vectors;
-   package RT renames Ada.Real_Time;
+   package Bench renames Flyology_Bench;
+   package Reporters renames Flyology_Bench.Reporters;
    package TIO renames Ada.Text_IO;
    package US renames Ada.Strings.Unbounded;
 
@@ -43,13 +46,13 @@ procedure Data_Structures_Benchmark is
 
    use type Ada.Containers.Count_Type;
    use type Ada.Streams.Stream_Element_Array;
+   use type Bench.Iteration_Count;
    use type DS.Byte_Count;
    use type Hash_Maps.Put_Result;
    use type Interfaces.C.int;
    use type MPMC.Pop_Result;
    use type MPMC.Push_Result;
    use type Slab_Pools.Allocation_Result;
-   use type RT.Time;
    use type System.Address;
    use type U64;
 
@@ -69,24 +72,24 @@ procedure Data_Structures_Benchmark is
            "benchmark arguments must be positive integers";
    end Positive_Argument;
 
-   Rounds  : constant Positive := Positive_Argument (1, 50_000);
-   Samples : constant Positive := Positive_Argument (2, 5);
+   Maximum_Iterations_Argument : constant Positive :=
+     Positive_Argument (1, 200_000);
+   Samples_Argument : constant Positive := Positive_Argument (2, 30);
+   Measurement_Milliseconds : constant Positive := Positive_Argument (3, 800);
+   Contention_Workers : constant Positive := Positive_Argument (4, 4);
 
-   function Map_Capacity return Positive is
-      Result : Positive := 1;
-   begin
-      if Rounds > 1_000_000 then
-         raise Program_Error with "benchmark rounds exceed 1000000";
-      end if;
-      while Result < 2 * Rounds loop
-         Result := 2 * Result;
-      end loop;
-      return Result;
-   end Map_Capacity;
+   Maximum_Iterations : constant Bench.Iteration_Count :=
+     Bench.Iteration_Count (Maximum_Iterations_Argument);
+   Samples : constant Bench.Sample_Count :=
+     Bench.Sample_Count (Samples_Argument);
+   Measurement_Time : constant Duration :=
+     Duration (Long_Float (Measurement_Milliseconds) / 1_000.0);
 
-   Table_Capacity : constant Positive := Map_Capacity;
-   Ring_Capacity  : constant Positive := 1_024;
-   Slab_Capacity  : constant Positive := 1_024;
+   Working_Capacity : constant Positive := 1_024;
+   Map_Capacity     : constant Positive := 2 * Working_Capacity;
+
+   function Payload (Iteration : Bench.Iteration_Count) return U64 is
+     (U64 (Iteration) * 16#9E37_79B9_7F4A_7C15# + 16#5A5A#);
 
    function Standard_Hash (Key : U64) return Ada.Containers.Hash_Type is
       Work : U64 := Key;
@@ -112,88 +115,75 @@ procedure Data_Structures_Benchmark is
      Ada.Containers.Synchronized_Queue_Interfaces (U64);
    package Standard_Queues is new Ada.Containers.Bounded_Synchronized_Queues
      (Queue_Interfaces => Queue_Interfaces,
-      Default_Capacity => Ada.Containers.Count_Type (Ring_Capacity));
+      Default_Capacity => Ada.Containers.Count_Type (Working_Capacity));
 
-   type Duration_Array is array (Positive range <>) of Duration;
+   function CPP_Have_Boost return Interfaces.C.int;
+   pragma Import (C, CPP_Have_Boost, "flyology_ds_cpp_have_boost");
 
-   procedure Sort (Values : in out Duration_Array) is
-   begin
-      for Index in Values'First + 1 .. Values'Last loop
-         declare
-            Value : constant Duration := Values (Index);
-            Position : Positive := Index;
-         begin
-            while Position > Values'First
-              and then Values (Position - 1) > Value
-            loop
-               Values (Position) := Values (Position - 1);
-               Position := Position - 1;
-            end loop;
-            Values (Position) := Value;
-         end;
-      end loop;
-   end Sort;
+   function CPP_Have_Abseil return Interfaces.C.int;
+   pragma Import (C, CPP_Have_Abseil, "flyology_ds_cpp_have_abseil");
 
-   function Median (Values : Duration_Array) return Duration is
-      Ordered : Duration_Array := Values;
-      Middle : constant Positive :=
-        Ordered'First + (Ordered'Length - 1) / 2;
-   begin
-      Sort (Ordered);
-      if Ordered'Length mod 2 = 0 then
-         return (Ordered (Middle) + Ordered (Middle + 1)) / 2;
-      end if;
-      return Ordered (Middle);
-   end Median;
+   function CPP_Compiler return Interfaces.C.Strings.chars_ptr;
+   pragma Import (C, CPP_Compiler, "flyology_ds_cpp_compiler");
 
-   procedure Measure
-     (Action : not null access procedure; Results : out Duration_Array) is
-      Started : RT.Time;
-   begin
-      for Sample in Results'Range loop
-         Started := RT.Clock;
-         Action.all;
-         Results (Sample) := RT.To_Duration (RT.Clock - Started);
-      end loop;
-   end Measure;
+   function CPP_Vector_Batch
+     (Provider   : Interfaces.C.int;
+      Iterations : U64;
+      Checksum   : access U64) return Interfaces.C.int;
+   pragma Import
+     (C, CPP_Vector_Batch, "flyology_ds_cpp_vector_batch");
 
-   procedure Report
-     (Name       : String;
-      Operations : Positive;
-      Results    : Duration_Array)
-   is
-      Elapsed : constant Duration := Median (Results);
-      Ns_Per_Operation : constant Long_Float :=
-        Long_Float (Elapsed) * 1_000_000_000.0 / Long_Float (Operations);
-   begin
-      TIO.Put (Name & ": median=" & Elapsed'Image & " s, ns/op=");
-      Ada.Long_Float_Text_IO.Put
-        (Ns_Per_Operation, Fore => 1, Aft => 2, Exp => 0);
-      TIO.Put_Line (", operations=" & Operations'Image);
-   end Report;
+   function CPP_Map_Batch
+     (Provider   : Interfaces.C.int;
+      Iterations : U64;
+      Checksum   : access U64) return Interfaces.C.int;
+   pragma Import (C, CPP_Map_Batch, "flyology_ds_cpp_map_batch");
+
+   function CPP_String_Batch
+     (Provider   : Interfaces.C.int;
+      Iterations : U64;
+      Checksum   : access U64) return Interfaces.C.int;
+   pragma Import
+     (C, CPP_String_Batch, "flyology_ds_cpp_string_batch");
+
+   function CPP_Queue_Batch
+     (Provider   : Interfaces.C.int;
+      Iterations : U64;
+      Checksum   : access U64) return Interfaces.C.int;
+   pragma Import (C, CPP_Queue_Batch, "flyology_ds_cpp_queue_batch");
+
+   function CPP_Contention_Batch
+     (Structure  : Interfaces.C.int;
+      Provider   : Interfaces.C.int;
+      Iterations : U64;
+      Workers    : Interfaces.C.unsigned;
+      Retries    : access U64;
+      Value      : access U64) return Interfaces.C.int;
+   pragma Import
+     (C, CPP_Contention_Batch, "flyology_ds_cpp_contention_batch");
 
    function Align_64 (Value : DS.Byte_Count) return DS.Byte_Count is
      (((Value + 63) / 64) * 64);
 
    Vector_Location : constant DS.Region_Offset := 64;
    Vector_Extent : constant DS.Byte_Count :=
-     Vectors.Required_Storage (Rounds, 8);
+     Vectors.Required_Storage (Working_Capacity, 8);
    Map_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Vector_Location) + Vector_Extent));
    Map_Extent : constant DS.Byte_Count :=
-     Hash_Maps.Required_Storage (Table_Capacity, 8, 8);
+     Hash_Maps.Required_Storage (Map_Capacity, 8, 8);
    SPSC_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Map_Location) + Map_Extent));
    SPSC_Extent : constant DS.Byte_Count :=
-     SPSC.Required_Storage (Ring_Capacity, 8);
+     SPSC.Required_Storage (Working_Capacity, 8);
    MPMC_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (SPSC_Location) + SPSC_Extent));
    MPMC_Extent : constant DS.Byte_Count :=
-     MPMC.Required_Storage (Ring_Capacity, 8);
+     MPMC.Required_Storage (Working_Capacity, 8);
    Slab_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (MPMC_Location) + MPMC_Extent));
    Slab_Extent : constant DS.Byte_Count :=
-     Slab_Pools.Required_Storage (Slab_Capacity, 8, 8);
+     Slab_Pools.Required_Storage (Working_Capacity, 8, 8);
    String_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Slab_Location) + Slab_Extent));
    String_Extent : constant DS.Byte_Count :=
@@ -222,86 +212,327 @@ procedure Data_Structures_Benchmark is
    Standard_Map : Standard_Maps.Map;
    Standard_Queue : Standard_Queues.Queue;
    Standard_String : US.Unbounded_String;
-   Timings : Duration_Array (1 .. Samples);
    Checksum : U64 := 0 with Volatile;
 
-   procedure Benchmark_Fly_Vector is
-      Data : Bytes_8;
+   type Vector_View_Array is
+     array (Positive range <>) of aliased Vectors.View;
+   type Map_View_Array is
+     array (Positive range <>) of aliased Hash_Maps.View;
+   type String_View_Array is
+     array (Positive range <>) of aliased Byte_Strings.View;
+   type Slab_View_Array is
+     array (Positive range <>) of aliased Slab_Pools.View;
+   type SPSC_View_Array is
+     array (Positive range <>) of aliased SPSC.View;
+   type MPMC_View_Array is
+     array (Positive range <>) of aliased MPMC.View;
+   Contended_Vectors : Vector_View_Array (1 .. Contention_Workers);
+   Contended_Maps    : Map_View_Array (1 .. Contention_Workers);
+   Contended_Strings : String_View_Array (1 .. Contention_Workers);
+   Contended_Slabs   : Slab_View_Array (1 .. Contention_Workers);
+   Contended_SPSC    : SPSC_View_Array (1 .. 2);
+   Contended_MPMC    : MPMC_View_Array (1 .. Contention_Workers);
+   Contended_Slab_Handle : Handles.Handle;
+
+   protected type Start_Gate is
+      entry Wait;
+      procedure Release;
+   private
+      Open : Boolean := False;
+   end Start_Gate;
+
+   protected body Start_Gate is
+      entry Wait when Open is
+      begin
+         null;
+      end Wait;
+
+      procedure Release is
+      begin
+         Open := True;
+      end Release;
+   end Start_Gate;
+
+   protected type Completion (Expected : Positive) is
+      procedure Done (Retries : U64; Success : Boolean);
+      entry Await_All;
+      function Retry_Count return U64;
+      function Passed return Boolean;
+   private
+      Completed : Natural := 0;
+      Retry_Total : U64 := 0;
+      All_Passed : Boolean := True;
+   end Completion;
+
+   protected body Completion is
+      procedure Done (Retries : U64; Success : Boolean) is
+      begin
+         Completed := Completed + 1;
+         Retry_Total := Retry_Total + Retries;
+         All_Passed := All_Passed and Success;
+      end Done;
+
+      entry Await_All when Completed = Expected is
+      begin
+         null;
+      end Await_All;
+
+      function Retry_Count return U64 is (Retry_Total);
+      function Passed return Boolean is (All_Passed);
+   end Completion;
+
+   procedure Publish_CPP
+     (Status : Interfaces.C.int; Value : U64; Name : String) is
+   begin
+      if Status /= 0 then
+         raise Program_Error with
+           Name & " C++ shim failed with status" & Status'Image;
+      end if;
+      Checksum := Value;
+   end Publish_CPP;
+
+   procedure CPP_Contention_Run
+     (Structure  : Interfaces.C.int;
+      Provider   : Interfaces.C.int;
+      Iterations : Bench.Iteration_Count;
+      Workers    : Positive;
+      Retries    : out U64)
+   is
+      Local_Retries : aliased U64 := 0;
+      Local_Value   : aliased U64 := 0;
+      Status : constant Interfaces.C.int :=
+        CPP_Contention_Batch
+          (Structure, Provider, U64 (Iterations),
+           Interfaces.C.unsigned (Workers), Local_Retries'Access,
+           Local_Value'Access);
+   begin
+      Publish_CPP (Status, Local_Value, "contention");
+      Retries := Local_Retries;
+   end CPP_Contention_Run;
+
+   generic
+      with procedure Prepare;
+      with procedure Attempt
+        (Worker : Positive; Sequence : Bench.Iteration_Count);
+      with procedure Cleanup;
+   procedure Run_Guard_Contention
+     (Iterations : Bench.Iteration_Count; Retries : out U64);
+
+   procedure Run_Guard_Contention
+     (Iterations : Bench.Iteration_Count; Retries : out U64)
+   is
+      Gate : Start_Gate;
+      Finished : Completion (Contention_Workers);
+
+      task type Worker_Task is
+         entry Configure (Identifier : Positive);
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Worker_Id : Positive := 1;
+         First : Bench.Iteration_Count;
+         Last  : Bench.Iteration_Count;
+         Local_Retries : U64 := 0;
+      begin
+         accept Configure (Identifier : Positive) do
+            Worker_Id := Identifier;
+         end Configure;
+         First := Iterations
+           * Bench.Iteration_Count (Worker_Id - 1)
+           / Bench.Iteration_Count (Contention_Workers) + 1;
+         Last := Iterations * Bench.Iteration_Count (Worker_Id)
+           / Bench.Iteration_Count (Contention_Workers);
+         Gate.Wait;
+         if First <= Last then
+            for Sequence in First .. Last loop
+               loop
+                  begin
+                     Attempt (Worker_Id, Sequence);
+                     exit;
+                  exception
+                     when DS.Busy_Error =>
+                        Local_Retries := Local_Retries + 1;
+                  end;
+               end loop;
+            end loop;
+         end if;
+         Finished.Done (Local_Retries, True);
+      exception
+         when others =>
+            Finished.Done (Local_Retries, False);
+      end Worker_Task;
+
+      type Worker_Array is
+        array (Positive range <>) of Worker_Task;
+      Workers : Worker_Array (1 .. Contention_Workers);
+   begin
+      Prepare;
+      for Index in Workers'Range loop
+         Workers (Index).Configure (Index);
+      end loop;
+      Gate.Release;
+      Finished.Await_All;
+      if not Finished.Passed then
+         raise Program_Error with "Flyology contention worker failed";
+      end if;
+      Retries := Finished.Retry_Count;
+      Checksum := U64 (Iterations);
+      Cleanup;
+   exception
+      when others =>
+         for Worker of Workers loop
+            abort Worker;
+         end loop;
+         raise;
+   end Run_Guard_Contention;
+
+   procedure Fly_Vector_Batch (Iterations : Bench.Iteration_Count) is
+      Data  : Bytes_8;
       Added : Boolean;
+      Count : Natural := 0;
       Local : U64 := 0;
    begin
       Vectors.Clear (Fly_Vector);
-      for Value in 1 .. Rounds loop
-         Vectors.Try_Append (Fly_Vector, Encode (U64 (Value)), Added);
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         if Count = Working_Capacity then
+            Vectors.Clear (Fly_Vector);
+            Count := 0;
+         end if;
+         Vectors.Try_Append
+           (Fly_Vector, Encode (Payload (Iteration)), Added);
          if not Added then
             raise Program_Error with "Flyology vector filled early";
          end if;
-      end loop;
-      for Index in 1 .. Rounds loop
-         Vectors.Read (Fly_Vector, Index, Data);
+         Count := Count + 1;
+         Vectors.Read (Fly_Vector, Positive (Count), Data);
          Local := Local + Decode (Data);
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Fly_Vector;
+      Checksum := Local;
+   end Fly_Vector_Batch;
 
-   procedure Benchmark_Standard_Vector is
+   procedure Ada_Vector_Batch (Iterations : Bench.Iteration_Count) is
+      Count : Natural := 0;
       Local : U64 := 0;
    begin
       Standard_Vector.Clear;
-      for Value in 1 .. Rounds loop
-         Standard_Vector.Append (U64 (Value));
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         if Count = Working_Capacity then
+            Standard_Vector.Clear;
+            Count := 0;
+         end if;
+         Standard_Vector.Append (Payload (Iteration));
+         Count := Count + 1;
+         Local := Local + Standard_Vector.Element (Positive (Count));
       end loop;
-      for Index in 1 .. Rounds loop
-         Local := Local + Standard_Vector.Element (Index);
-      end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Standard_Vector;
+      Checksum := Local;
+   end Ada_Vector_Batch;
 
-   procedure Benchmark_Fly_Map is
-      Data : Bytes_8;
-      Found : Boolean;
+   procedure CPP_Vector_Run
+     (Provider : Interfaces.C.int; Iterations : Bench.Iteration_Count)
+   is
+      Local  : aliased U64 := 0;
+      Status : constant Interfaces.C.int :=
+        CPP_Vector_Batch (Provider, U64 (Iterations), Local'Access);
+   begin
+      Publish_CPP (Status, Local, "vector");
+   end CPP_Vector_Run;
+
+   procedure Fly_Map_Batch (Iterations : Bench.Iteration_Count) is
+      Data    : Bytes_8;
+      Found   : Boolean;
       Outcome : Hash_Maps.Put_Result;
-      Local : U64 := 0;
+      Local   : U64 := 0;
+      Key     : U64;
    begin
       Hash_Maps.Clear (Fly_Map);
-      for Key in 1 .. Rounds loop
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Key := U64
+           ((Iteration - 1) mod Bench.Iteration_Count (Working_Capacity)) + 1;
+         if Key = 1 then
+            Hash_Maps.Clear (Fly_Map);
+         end if;
          Hash_Maps.Put
-           (Fly_Map, Encode (U64 (Key)), Encode (U64 (Key) xor 16#5A5A#),
-            Outcome);
+           (Fly_Map, Encode (Key), Encode (Payload (Iteration)), Outcome);
          if Outcome /= Hash_Maps.Inserted then
             raise Program_Error with "Flyology map insert failed";
          end if;
-      end loop;
-      for Key in 1 .. Rounds loop
-         Hash_Maps.Get (Fly_Map, Encode (U64 (Key)), Data, Found);
+         Hash_Maps.Get (Fly_Map, Encode (Key), Data, Found);
          if not Found then
             raise Program_Error with "Flyology map lookup failed";
          end if;
          Local := Local + Decode (Data);
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Fly_Map;
+      Checksum := Local;
+   end Fly_Map_Batch;
 
-   procedure Benchmark_Standard_Map is
+   procedure Ada_Map_Batch (Iterations : Bench.Iteration_Count) is
       Local : U64 := 0;
+      Key   : U64;
    begin
       Standard_Map.Clear;
-      for Key in 1 .. Rounds loop
-         Standard_Map.Insert (U64 (Key), U64 (Key) xor 16#5A5A#);
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Key := U64
+           ((Iteration - 1) mod Bench.Iteration_Count (Working_Capacity)) + 1;
+         if Key = 1 then
+            Standard_Map.Clear;
+         end if;
+         Standard_Map.Insert (Key, Payload (Iteration));
+         Local := Local + Standard_Map.Element (Key);
       end loop;
-      for Key in 1 .. Rounds loop
-         Local := Local + Standard_Map.Element (U64 (Key));
-      end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Standard_Map;
+      Checksum := Local;
+   end Ada_Map_Batch;
 
-   procedure Benchmark_Fly_SPSC is
-      Data : Bytes_8;
-      Success : Boolean;
+   procedure CPP_Map_Run
+     (Provider : Interfaces.C.int; Iterations : Bench.Iteration_Count)
+   is
+      Local  : aliased U64 := 0;
+      Status : constant Interfaces.C.int :=
+        CPP_Map_Batch (Provider, U64 (Iterations), Local'Access);
+   begin
+      Publish_CPP (Status, Local, "map");
+   end CPP_Map_Run;
+
+   procedure Fly_String_Batch (Iterations : Bench.Iteration_Count) is
+      Data  : constant Bytes_8 := Encode (16#666C_796F_6C6F_6779#);
       Local : U64 := 0;
    begin
-      for Value in 1 .. Rounds loop
-         SPSC.Try_Push (Fly_SPSC, Encode (U64 (Value)), Success);
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         pragma Unreferenced (Iteration);
+         Byte_Strings.Assign (Fly_String, Data);
+         Local := Local + U64 (Byte_Strings.Length (Fly_String));
+      end loop;
+      Checksum := Local;
+   end Fly_String_Batch;
+
+   procedure Ada_String_Batch (Iterations : Bench.Iteration_Count) is
+      Local : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         pragma Unreferenced (Iteration);
+         US.Set_Unbounded_String (Standard_String, "flyology");
+         Local := Local + U64 (US.Length (Standard_String));
+      end loop;
+      Checksum := Local;
+   end Ada_String_Batch;
+
+   procedure CPP_String_Run
+     (Provider : Interfaces.C.int; Iterations : Bench.Iteration_Count)
+   is
+      Local  : aliased U64 := 0;
+      Status : constant Interfaces.C.int :=
+        CPP_String_Batch (Provider, U64 (Iterations), Local'Access);
+   begin
+      Publish_CPP (Status, Local, "string");
+   end CPP_String_Run;
+
+   procedure Fly_SPSC_Batch (Iterations : Bench.Iteration_Count) is
+      Data    : Bytes_8;
+      Success : Boolean;
+      Local   : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         SPSC.Try_Push (Fly_SPSC, Encode (Payload (Iteration)), Success);
          if not Success then
             raise Program_Error with "Flyology SPSC push failed";
          end if;
@@ -311,17 +542,17 @@ procedure Data_Structures_Benchmark is
          end if;
          Local := Local + Decode (Data);
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Fly_SPSC;
+      Checksum := Local;
+   end Fly_SPSC_Batch;
 
-   procedure Benchmark_Fly_MPMC is
-      Data : Bytes_8;
-      Push : MPMC.Push_Result;
-      Pop : MPMC.Pop_Result;
+   procedure Fly_MPMC_Batch (Iterations : Bench.Iteration_Count) is
+      Data  : Bytes_8;
+      Push  : MPMC.Push_Result;
+      Pop   : MPMC.Pop_Result;
       Local : U64 := 0;
    begin
-      for Value in 1 .. Rounds loop
-         MPMC.Try_Push (Fly_MPMC, Encode (U64 (Value)), Push);
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         MPMC.Try_Push (Fly_MPMC, Encode (Payload (Iteration)), Push);
          if Push /= MPMC.Pushed then
             raise Program_Error with "Flyology MPMC push failed";
          end if;
@@ -331,64 +562,784 @@ procedure Data_Structures_Benchmark is
          end if;
          Local := Local + Decode (Data);
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Fly_MPMC;
+      Checksum := Local;
+   end Fly_MPMC_Batch;
 
-   procedure Benchmark_Standard_Queue is
-      Data : U64;
+   procedure Ada_Queue_Batch (Iterations : Bench.Iteration_Count) is
+      Data  : U64;
       Local : U64 := 0;
    begin
-      for Value in 1 .. Rounds loop
-         Standard_Queue.Enqueue (U64 (Value));
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
+         Standard_Queue.Enqueue (Payload (Iteration));
          Standard_Queue.Dequeue (Data);
          Local := Local + Data;
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Standard_Queue;
+      Checksum := Local;
+   end Ada_Queue_Batch;
 
-   procedure Benchmark_Fly_Slab is
-      Handle : Handles.Handle;
-      Data : Bytes_8;
-      Result : Slab_Pools.Allocation_Result;
-      Local : U64 := 0;
+   procedure CPP_Queue_Run
+     (Provider : Interfaces.C.int; Iterations : Bench.Iteration_Count)
+   is
+      Local  : aliased U64 := 0;
+      Status : constant Interfaces.C.int :=
+        CPP_Queue_Batch (Provider, U64 (Iterations), Local'Access);
    begin
-      for Value in 1 .. Rounds loop
+      Publish_CPP (Status, Local, "queue");
+   end CPP_Queue_Run;
+
+   procedure Fly_Slab_Batch (Iterations : Bench.Iteration_Count) is
+      Handle : Handles.Handle;
+      Data   : Bytes_8;
+      Result : Slab_Pools.Allocation_Result;
+      Local  : U64 := 0;
+   begin
+      for Iteration in Bench.Iteration_Count range 1 .. Iterations loop
          Slab_Pools.Try_Allocate (Fly_Slab, Handle, Result);
          if Result /= Slab_Pools.Allocated then
             raise Program_Error with "Flyology slab allocation failed";
          end if;
-         Slab_Pools.Write (Fly_Slab, Handle, Encode (U64 (Value)));
+         Slab_Pools.Write (Fly_Slab, Handle, Encode (Payload (Iteration)));
          Slab_Pools.Read (Fly_Slab, Handle, Data);
          Local := Local + Decode (Data);
          Slab_Pools.Release (Fly_Slab, Handle);
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Fly_Slab;
+      Checksum := Local;
+   end Fly_Slab_Batch;
 
-   procedure Benchmark_Fly_String is
-      Data : constant Bytes_8 := Encode (16#666C_796F_6C6F_6779#);
-      Local : U64 := 0;
+   procedure Prepare_Vector_Contention is
+      Appended : Boolean;
    begin
-      for Iteration in 1 .. Rounds loop
-         pragma Unreferenced (Iteration);
-         Byte_Strings.Assign (Fly_String, Data);
-         Local := Local + U64 (Byte_Strings.Length (Fly_String));
+      Vectors.Initialize
+        (Contended_Vectors (1), Region, Vector_Location,
+         Working_Capacity, 8);
+      Vectors.Try_Append (Contended_Vectors (1), Encode (0), Appended);
+      if not Appended then
+         raise Program_Error with "unable to seed contended vector";
+      end if;
+      for Index in 2 .. Contention_Workers loop
+         Vectors.Attach
+           (Contended_Vectors (Index), Region, Vector_Location,
+            Working_Capacity, 8);
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Fly_String;
+   end Prepare_Vector_Contention;
 
-   procedure Benchmark_Standard_String is
-      Local : U64 := 0;
+   procedure Attempt_Vector_Contention
+     (Worker : Positive; Sequence : Bench.Iteration_Count) is
    begin
-      for Iteration in 1 .. Rounds loop
-         pragma Unreferenced (Iteration);
-         US.Set_Unbounded_String (Standard_String, "flyology");
-         Local := Local + U64 (US.Length (Standard_String));
+      Vectors.Replace
+        (Contended_Vectors (Worker), 1,
+         Encode (Payload (Sequence) + U64 (Worker)));
+   end Attempt_Vector_Contention;
+
+   procedure Cleanup_Vector_Contention is
+   begin
+      for Index in Contended_Vectors'Range loop
+         Vectors.Detach (Contended_Vectors (Index));
       end loop;
-      Checksum := Checksum + Local;
-   end Benchmark_Standard_String;
+   end Cleanup_Vector_Contention;
+
+   procedure Run_Vector_Contention is new Run_Guard_Contention
+     (Prepare => Prepare_Vector_Contention,
+      Attempt => Attempt_Vector_Contention,
+      Cleanup => Cleanup_Vector_Contention);
+
+   procedure Prepare_Map_Contention is
+   begin
+      Hash_Maps.Initialize
+        (Contended_Maps (1), Region, Map_Location, Map_Capacity, 8, 8);
+      for Index in 2 .. Contention_Workers loop
+         Hash_Maps.Attach
+           (Contended_Maps (Index), Region, Map_Location,
+            Map_Capacity, 8, 8);
+      end loop;
+   end Prepare_Map_Contention;
+
+   procedure Attempt_Map_Contention
+     (Worker : Positive; Sequence : Bench.Iteration_Count)
+   is
+      Outcome : Hash_Maps.Put_Result;
+   begin
+      Hash_Maps.Put
+        (Contended_Maps (Worker), Encode (U64 (Worker)),
+         Encode (Payload (Sequence)), Outcome);
+      if Outcome = Hash_Maps.Table_Full then
+         raise Program_Error with "contended map filled unexpectedly";
+      end if;
+   end Attempt_Map_Contention;
+
+   procedure Cleanup_Map_Contention is
+   begin
+      for Index in Contended_Maps'Range loop
+         Hash_Maps.Detach (Contended_Maps (Index));
+      end loop;
+   end Cleanup_Map_Contention;
+
+   procedure Run_Map_Contention is new Run_Guard_Contention
+     (Prepare => Prepare_Map_Contention,
+      Attempt => Attempt_Map_Contention,
+      Cleanup => Cleanup_Map_Contention);
+
+   procedure Prepare_String_Contention is
+   begin
+      Byte_Strings.Initialize
+        (Contended_Strings (1), Region, String_Location, 8);
+      for Index in 2 .. Contention_Workers loop
+         Byte_Strings.Attach
+           (Contended_Strings (Index), Region, String_Location, 8);
+      end loop;
+   end Prepare_String_Contention;
+
+   procedure Attempt_String_Contention
+     (Worker : Positive; Sequence : Bench.Iteration_Count) is
+      pragma Unreferenced (Sequence);
+   begin
+      Byte_Strings.Assign
+        (Contended_Strings (Worker), Encode (U64 (Worker)));
+   end Attempt_String_Contention;
+
+   procedure Cleanup_String_Contention is
+   begin
+      for Index in Contended_Strings'Range loop
+         Byte_Strings.Detach (Contended_Strings (Index));
+      end loop;
+   end Cleanup_String_Contention;
+
+   procedure Run_String_Contention is new Run_Guard_Contention
+     (Prepare => Prepare_String_Contention,
+      Attempt => Attempt_String_Contention,
+      Cleanup => Cleanup_String_Contention);
+
+   procedure Prepare_Slab_Contention is
+      Outcome : Slab_Pools.Allocation_Result;
+   begin
+      Slab_Pools.Initialize
+        (Contended_Slabs (1), Region, Slab_Location,
+         Working_Capacity, 8, 8);
+      for Index in 2 .. Contention_Workers loop
+         Slab_Pools.Attach
+           (Contended_Slabs (Index), Region, Slab_Location,
+            Working_Capacity, 8, 8);
+      end loop;
+      Slab_Pools.Try_Allocate
+        (Contended_Slabs (1), Contended_Slab_Handle, Outcome);
+      if Outcome /= Slab_Pools.Allocated then
+         raise Program_Error with "unable to seed contended slab";
+      end if;
+   end Prepare_Slab_Contention;
+
+   procedure Attempt_Slab_Contention
+     (Worker : Positive; Sequence : Bench.Iteration_Count) is
+   begin
+      Slab_Pools.Write
+        (Contended_Slabs (Worker), Contended_Slab_Handle,
+         Encode (Payload (Sequence)));
+   end Attempt_Slab_Contention;
+
+   procedure Cleanup_Slab_Contention is
+   begin
+      Slab_Pools.Release (Contended_Slabs (1), Contended_Slab_Handle);
+      for Index in Contended_Slabs'Range loop
+         Slab_Pools.Detach (Contended_Slabs (Index));
+      end loop;
+   end Cleanup_Slab_Contention;
+
+   procedure Run_Slab_Contention is new Run_Guard_Contention
+     (Prepare => Prepare_Slab_Contention,
+      Attempt => Attempt_Slab_Contention,
+      Cleanup => Cleanup_Slab_Contention);
+
+   procedure Run_SPSC_Contention
+     (Iterations : Bench.Iteration_Count; Retries : out U64)
+   is
+      Gate : Start_Gate;
+      Finished : Completion (2);
+
+      task Producer is
+         pragma Task_Info (Flyology.Native_Task);
+      end Producer;
+
+      task Consumer is
+         pragma Task_Info (Flyology.Native_Task);
+      end Consumer;
+
+      task body Producer is
+         Pushed : Boolean;
+         Local_Retries : U64 := 0;
+      begin
+         Gate.Wait;
+         for Sequence in Bench.Iteration_Count range 1 .. Iterations loop
+            loop
+               SPSC.Try_Push
+                 (Contended_SPSC (1), Encode (Payload (Sequence)), Pushed);
+               exit when Pushed;
+               Local_Retries := Local_Retries + 1;
+               delay 0.0;
+            end loop;
+         end loop;
+         Finished.Done (Local_Retries, True);
+      exception
+         when others => Finished.Done (Local_Retries, False);
+      end Producer;
+
+      task body Consumer is
+         Data : Bytes_8;
+         Popped : Boolean;
+         Local_Retries : U64 := 0;
+         Local : U64 := 0;
+      begin
+         Gate.Wait;
+         for Sequence in Bench.Iteration_Count range 1 .. Iterations loop
+            pragma Unreferenced (Sequence);
+            loop
+               SPSC.Try_Pop (Contended_SPSC (2), Data, Popped);
+               exit when Popped;
+               Local_Retries := Local_Retries + 1;
+               delay 0.0;
+            end loop;
+            Local := Local + Decode (Data);
+         end loop;
+         Checksum := Local;
+         Finished.Done (Local_Retries, True);
+      exception
+         when others => Finished.Done (Local_Retries, False);
+      end Consumer;
+   begin
+      SPSC.Initialize
+        (Contended_SPSC (1), Region, SPSC_Location, Working_Capacity, 8);
+      SPSC.Attach
+        (Contended_SPSC (2), Region, SPSC_Location, Working_Capacity, 8);
+      Gate.Release;
+      Finished.Await_All;
+      if not Finished.Passed then
+         raise Program_Error with "SPSC contention worker failed";
+      end if;
+      Retries := Finished.Retry_Count;
+      SPSC.Destroy (Contended_SPSC (1));
+      SPSC.Detach (Contended_SPSC (2));
+   exception
+      when others =>
+         abort Producer;
+         abort Consumer;
+         raise;
+   end Run_SPSC_Contention;
+
+   procedure Run_MPMC_Contention
+     (Iterations : Bench.Iteration_Count; Retries : out U64)
+   is
+      Half : constant Positive := Contention_Workers / 2;
+      Gate : Start_Gate;
+      Finished : Completion (Contention_Workers);
+      type Result_Array is array (Positive range <>) of U64
+        with Volatile_Components;
+      Values : Result_Array (1 .. Contention_Workers) := (others => 0);
+
+      task type Worker_Task is
+         entry Configure (Identifier : Positive);
+         pragma Task_Info (Flyology.Native_Task);
+      end Worker_Task;
+
+      task body Worker_Task is
+         Worker_Id : Positive := 1;
+         Lane : Natural;
+         First : Bench.Iteration_Count;
+         Last : Bench.Iteration_Count;
+         Data : Bytes_8;
+         Push : MPMC.Push_Result;
+         Pop : MPMC.Pop_Result;
+         Local_Retries : U64 := 0;
+         Local : U64 := 0;
+      begin
+         accept Configure (Identifier : Positive) do
+            Worker_Id := Identifier;
+         end Configure;
+         Lane := (Worker_Id - 1) mod Half;
+         First := Iterations * Bench.Iteration_Count (Lane)
+           / Bench.Iteration_Count (Half) + 1;
+         Last := Iterations * Bench.Iteration_Count (Lane + 1)
+           / Bench.Iteration_Count (Half);
+         Gate.Wait;
+         if First <= Last then
+            for Sequence in First .. Last loop
+               if Worker_Id <= Half then
+                  loop
+                     MPMC.Try_Push
+                       (Contended_MPMC (Worker_Id),
+                        Encode (Payload (Sequence)), Push);
+                     exit when Push = MPMC.Pushed;
+                     Local_Retries := Local_Retries + 1;
+                     delay 0.0;
+                  end loop;
+               else
+                  loop
+                     MPMC.Try_Pop
+                       (Contended_MPMC (Worker_Id), Data, Pop);
+                     exit when Pop = MPMC.Popped;
+                     Local_Retries := Local_Retries + 1;
+                     delay 0.0;
+                  end loop;
+                  Local := Local + Decode (Data);
+               end if;
+            end loop;
+         end if;
+         if Worker_Id > Half then
+            Values (Worker_Id) := Local;
+         end if;
+         Finished.Done (Local_Retries, True);
+      exception
+         when others => Finished.Done (Local_Retries, False);
+      end Worker_Task;
+
+      type Worker_Array is
+        array (Positive range <>) of Worker_Task;
+      Workers : Worker_Array (1 .. Contention_Workers);
+   begin
+      Checksum := 0;
+      MPMC.Initialize
+        (Contended_MPMC (1), Region, MPMC_Location,
+         Working_Capacity, 8);
+      for Index in 2 .. Contention_Workers loop
+         MPMC.Attach
+           (Contended_MPMC (Index), Region, MPMC_Location,
+            Working_Capacity, 8);
+      end loop;
+      for Index in Workers'Range loop
+         Workers (Index).Configure (Index);
+      end loop;
+      Gate.Release;
+      Finished.Await_All;
+      if not Finished.Passed then
+         raise Program_Error with "MPMC contention worker failed";
+      end if;
+      Retries := Finished.Retry_Count;
+      for Index in Half + 1 .. Contention_Workers loop
+         Checksum := Checksum + Values (Index);
+      end loop;
+      MPMC.Destroy (Contended_MPMC (1));
+      for Index in 2 .. Contention_Workers loop
+         MPMC.Detach (Contended_MPMC (Index));
+      end loop;
+   exception
+      when others =>
+         for Worker of Workers loop
+            abort Worker;
+         end loop;
+         raise;
+   end Run_MPMC_Contention;
+
+   type Vector_Case is
+     (Flyology,
+      Ada_Vector,
+      Std_Vector,
+      Std_Vector_Mutex,
+      Boost_Vector,
+      Boost_Vector_Mutex);
+   subtype Vector_Core_Case is
+     Vector_Case range Flyology .. Std_Vector_Mutex;
+
+   procedure Vector_Batch
+     (Which : Vector_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology =>
+            Fly_Vector_Batch (Iterations);
+         when Ada_Vector =>
+            Ada_Vector_Batch (Iterations);
+         when Std_Vector =>
+            CPP_Vector_Run (0, Iterations);
+         when Std_Vector_Mutex =>
+            CPP_Vector_Run (1, Iterations);
+         when Boost_Vector =>
+            CPP_Vector_Run (2, Iterations);
+         when Boost_Vector_Mutex =>
+            CPP_Vector_Run (3, Iterations);
+      end case;
+   end Vector_Batch;
+
+   procedure Vector_Core_Batch
+     (Which : Vector_Core_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      Vector_Batch (Which, Iterations);
+   end Vector_Core_Batch;
+
+   procedure Compare_Vectors is new Bench.Compare_Many
+     (Case_Id => Vector_Case, Batch => Vector_Batch);
+   procedure Compare_Vector_Core is new Bench.Compare_Many
+     (Case_Id => Vector_Core_Case, Batch => Vector_Core_Batch);
+   procedure Put_Vectors is new Reporters.Put_Multi_Comparison_Console
+     (Vector_Case);
+   procedure Put_Vector_Core is new Reporters.Put_Multi_Comparison_Console
+     (Vector_Core_Case);
+
+   type Map_Case is
+     (Flyology,
+      Ada_Hashed_Map,
+      Std_Unordered,
+      Std_Unordered_Mutex,
+      Boost_Flat_Map,
+      Boost_Flat_Map_Mutex,
+      Abseil_Flat_Map,
+      Abseil_Flat_Map_Mutex);
+   subtype Map_Core_Case is
+     Map_Case range Flyology .. Std_Unordered_Mutex;
+   subtype Map_Boost_Case is
+     Map_Case range Flyology .. Boost_Flat_Map_Mutex;
+
+   procedure Map_Batch
+     (Which : Map_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology =>
+            Fly_Map_Batch (Iterations);
+         when Ada_Hashed_Map =>
+            Ada_Map_Batch (Iterations);
+         when Std_Unordered =>
+            CPP_Map_Run (0, Iterations);
+         when Std_Unordered_Mutex =>
+            CPP_Map_Run (1, Iterations);
+         when Boost_Flat_Map =>
+            CPP_Map_Run (2, Iterations);
+         when Boost_Flat_Map_Mutex =>
+            CPP_Map_Run (3, Iterations);
+         when Abseil_Flat_Map =>
+            CPP_Map_Run (4, Iterations);
+         when Abseil_Flat_Map_Mutex =>
+            CPP_Map_Run (5, Iterations);
+      end case;
+   end Map_Batch;
+
+   procedure Map_Core_Batch
+     (Which : Map_Core_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      Map_Batch (Which, Iterations);
+   end Map_Core_Batch;
+
+   procedure Map_Boost_Batch
+     (Which : Map_Boost_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      Map_Batch (Which, Iterations);
+   end Map_Boost_Batch;
+
+   procedure Compare_Maps is new Bench.Compare_Many
+     (Case_Id => Map_Case, Batch => Map_Batch);
+   procedure Compare_Map_Core is new Bench.Compare_Many
+     (Case_Id => Map_Core_Case, Batch => Map_Core_Batch);
+   procedure Compare_Map_Boost is new Bench.Compare_Many
+     (Case_Id => Map_Boost_Case, Batch => Map_Boost_Batch);
+   procedure Put_Maps is new Reporters.Put_Multi_Comparison_Console (Map_Case);
+   procedure Put_Map_Core is new Reporters.Put_Multi_Comparison_Console
+     (Map_Core_Case);
+   procedure Put_Map_Boost is new Reporters.Put_Multi_Comparison_Console
+     (Map_Boost_Case);
+
+   type String_Case is
+     (Flyology, Ada_Unbounded, Std_String, Std_String_Mutex);
+
+   procedure String_Batch
+     (Which : String_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology =>
+            Fly_String_Batch (Iterations);
+         when Ada_Unbounded =>
+            Ada_String_Batch (Iterations);
+         when Std_String =>
+            CPP_String_Run (0, Iterations);
+         when Std_String_Mutex =>
+            CPP_String_Run (1, Iterations);
+      end case;
+   end String_Batch;
+
+   procedure Compare_Strings is new Bench.Compare_Many
+     (Case_Id => String_Case, Batch => String_Batch);
+   procedure Put_Strings is new Reporters.Put_Multi_Comparison_Console
+     (String_Case);
+
+   type SPSC_Case is
+     (Flyology, Std_Deque_Mutex, Boost_Lockfree);
+   subtype SPSC_Core_Case is
+     SPSC_Case range Flyology .. Std_Deque_Mutex;
+
+   procedure SPSC_Batch
+     (Which : SPSC_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology =>
+            Fly_SPSC_Batch (Iterations);
+         when Std_Deque_Mutex =>
+            CPP_Queue_Run (0, Iterations);
+         when Boost_Lockfree =>
+            CPP_Queue_Run (1, Iterations);
+      end case;
+   end SPSC_Batch;
+
+   procedure SPSC_Core_Batch
+     (Which : SPSC_Core_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      SPSC_Batch (Which, Iterations);
+   end SPSC_Core_Batch;
+
+   procedure Compare_SPSC is new Bench.Compare_Many
+     (Case_Id => SPSC_Case, Batch => SPSC_Batch);
+   procedure Compare_SPSC_Core is new Bench.Compare_Many
+     (Case_Id => SPSC_Core_Case, Batch => SPSC_Core_Batch);
+   procedure Put_SPSC is new Reporters.Put_Multi_Comparison_Console
+     (SPSC_Case);
+   procedure Put_SPSC_Core is new Reporters.Put_Multi_Comparison_Console
+     (SPSC_Core_Case);
+
+   type MPMC_Case is
+     (Flyology, Ada_Sync_Queue, Std_Deque_Mutex, Boost_Lockfree);
+   subtype MPMC_Core_Case is
+     MPMC_Case range Flyology .. Std_Deque_Mutex;
+
+   procedure MPMC_Batch
+     (Which : MPMC_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      case Which is
+         when Flyology =>
+            Fly_MPMC_Batch (Iterations);
+         when Ada_Sync_Queue =>
+            Ada_Queue_Batch (Iterations);
+         when Std_Deque_Mutex =>
+            CPP_Queue_Run (0, Iterations);
+         when Boost_Lockfree =>
+            CPP_Queue_Run (2, Iterations);
+      end case;
+   end MPMC_Batch;
+
+   procedure MPMC_Core_Batch
+     (Which : MPMC_Core_Case; Iterations : Bench.Iteration_Count) is
+   begin
+      MPMC_Batch (Which, Iterations);
+   end MPMC_Core_Batch;
+
+   procedure Compare_MPMC is new Bench.Compare_Many
+     (Case_Id => MPMC_Case, Batch => MPMC_Batch);
+   procedure Compare_MPMC_Core is new Bench.Compare_Many
+     (Case_Id => MPMC_Core_Case, Batch => MPMC_Core_Batch);
+   procedure Put_MPMC is new Reporters.Put_Multi_Comparison_Console
+     (MPMC_Case);
+   procedure Put_MPMC_Core is new Reporters.Put_Multi_Comparison_Console
+     (MPMC_Core_Case);
+
+   procedure Measure_Slab is new Bench.Measure_Batched (Fly_Slab_Batch);
+
+   type Contended_Vector_Case is
+     (Flyology, Std_Mutex, Boost_Mutex);
+   subtype Contended_Vector_Core is
+     Contended_Vector_Case range Flyology .. Std_Mutex;
+   procedure Contended_Vector_Batch
+     (Which : Contended_Vector_Case; Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      case Which is
+         when Flyology =>
+            Run_Vector_Contention (Iterations, Retries);
+         when Std_Mutex =>
+            CPP_Contention_Run
+              (0, 0, Iterations, Contention_Workers, Retries);
+         when Boost_Mutex =>
+            CPP_Contention_Run
+              (0, 1, Iterations, Contention_Workers, Retries);
+      end case;
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Contended_Vector_Batch;
+
+   procedure Contended_Vector_Core_Batch
+     (Which : Contended_Vector_Core; Iterations : Bench.Iteration_Count) is
+   begin
+      Contended_Vector_Batch (Which, Iterations);
+   end Contended_Vector_Core_Batch;
+
+   procedure Compare_Contended_Vectors is new Bench.Compare_Many
+     (Case_Id => Contended_Vector_Case, Batch => Contended_Vector_Batch);
+   procedure Compare_Contended_Vector_Core is new Bench.Compare_Many
+     (Case_Id => Contended_Vector_Core,
+      Batch => Contended_Vector_Core_Batch);
+   procedure Put_Contended_Vectors is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Vector_Case);
+   procedure Put_Contended_Vector_Core is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Vector_Core);
+
+   type Contended_Map_Case is
+     (Flyology, Std_Mutex, Boost_Mutex, Abseil_Mutex);
+   subtype Contended_Map_Core is
+     Contended_Map_Case range Flyology .. Std_Mutex;
+   subtype Contended_Map_Boost is
+     Contended_Map_Case range Flyology .. Boost_Mutex;
+   procedure Contended_Map_Batch
+     (Which : Contended_Map_Case; Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      case Which is
+         when Flyology =>
+            Run_Map_Contention (Iterations, Retries);
+         when Std_Mutex =>
+            CPP_Contention_Run
+              (1, 0, Iterations, Contention_Workers, Retries);
+         when Boost_Mutex =>
+            CPP_Contention_Run
+              (1, 1, Iterations, Contention_Workers, Retries);
+         when Abseil_Mutex =>
+            CPP_Contention_Run
+              (1, 2, Iterations, Contention_Workers, Retries);
+      end case;
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Contended_Map_Batch;
+
+   procedure Contended_Map_Core_Batch
+     (Which : Contended_Map_Core; Iterations : Bench.Iteration_Count) is
+   begin
+      Contended_Map_Batch (Which, Iterations);
+   end Contended_Map_Core_Batch;
+
+   procedure Contended_Map_Boost_Batch
+     (Which : Contended_Map_Boost; Iterations : Bench.Iteration_Count) is
+   begin
+      Contended_Map_Batch (Which, Iterations);
+   end Contended_Map_Boost_Batch;
+
+   procedure Compare_Contended_Maps is new Bench.Compare_Many
+     (Case_Id => Contended_Map_Case, Batch => Contended_Map_Batch);
+   procedure Compare_Contended_Map_Core is new Bench.Compare_Many
+     (Case_Id => Contended_Map_Core, Batch => Contended_Map_Core_Batch);
+   procedure Compare_Contended_Map_Boost is new Bench.Compare_Many
+     (Case_Id => Contended_Map_Boost, Batch => Contended_Map_Boost_Batch);
+   procedure Put_Contended_Maps is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Map_Case);
+   procedure Put_Contended_Map_Core is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Map_Core);
+   procedure Put_Contended_Map_Boost is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Map_Boost);
+
+   type Contended_String_Case is (Flyology, Std_Mutex);
+   procedure Contended_String_Batch
+     (Which : Contended_String_Case; Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      case Which is
+         when Flyology =>
+            Run_String_Contention (Iterations, Retries);
+         when Std_Mutex =>
+            CPP_Contention_Run
+              (2, 0, Iterations, Contention_Workers, Retries);
+      end case;
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Contended_String_Batch;
+
+   procedure Compare_Contended_Strings is new Bench.Compare_Many
+     (Case_Id => Contended_String_Case, Batch => Contended_String_Batch);
+   procedure Put_Contended_Strings is new
+     Reporters.Put_Multi_Comparison_Console (Contended_String_Case);
+
+   type Contended_Queue_Case is
+     (Flyology, Std_Deque_Mutex, Boost_Lockfree);
+   subtype Contended_Queue_Core is
+     Contended_Queue_Case range Flyology .. Std_Deque_Mutex;
+   procedure Contended_SPSC_Batch
+     (Which : Contended_Queue_Case; Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      case Which is
+         when Flyology =>
+            Run_SPSC_Contention (Iterations, Retries);
+         when Std_Deque_Mutex =>
+            CPP_Contention_Run (3, 0, Iterations, 2, Retries);
+         when Boost_Lockfree =>
+            CPP_Contention_Run (3, 1, Iterations, 2, Retries);
+      end case;
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Contended_SPSC_Batch;
+
+   procedure Contended_SPSC_Core_Batch
+     (Which : Contended_Queue_Core; Iterations : Bench.Iteration_Count) is
+   begin
+      Contended_SPSC_Batch (Which, Iterations);
+   end Contended_SPSC_Core_Batch;
+
+   procedure Contended_MPMC_Batch
+     (Which : Contended_Queue_Case; Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      case Which is
+         when Flyology =>
+            Run_MPMC_Contention (Iterations, Retries);
+         when Std_Deque_Mutex =>
+            CPP_Contention_Run
+              (4, 0, Iterations, Contention_Workers, Retries);
+         when Boost_Lockfree =>
+            CPP_Contention_Run
+              (4, 1, Iterations, Contention_Workers, Retries);
+      end case;
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Contended_MPMC_Batch;
+
+   procedure Contended_MPMC_Core_Batch
+     (Which : Contended_Queue_Core; Iterations : Bench.Iteration_Count) is
+   begin
+      Contended_MPMC_Batch (Which, Iterations);
+   end Contended_MPMC_Core_Batch;
+
+   procedure Compare_Contended_SPSC is new Bench.Compare_Many
+     (Case_Id => Contended_Queue_Case, Batch => Contended_SPSC_Batch);
+   procedure Compare_Contended_SPSC_Core is new Bench.Compare_Many
+     (Case_Id => Contended_Queue_Core, Batch => Contended_SPSC_Core_Batch);
+   procedure Compare_Contended_MPMC is new Bench.Compare_Many
+     (Case_Id => Contended_Queue_Case, Batch => Contended_MPMC_Batch);
+   procedure Compare_Contended_MPMC_Core is new Bench.Compare_Many
+     (Case_Id => Contended_Queue_Core, Batch => Contended_MPMC_Core_Batch);
+   procedure Put_Contended_Queues is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Queue_Case);
+   procedure Put_Contended_Queue_Core is new
+     Reporters.Put_Multi_Comparison_Console (Contended_Queue_Core);
+
+   procedure Fly_Slab_Contention_Batch
+     (Iterations : Bench.Iteration_Count)
+   is
+      Retries : U64;
+   begin
+      Run_Slab_Contention (Iterations, Retries);
+      Checksum := Checksum xor Retries xor U64 (Iterations);
+   end Fly_Slab_Contention_Batch;
+
+   procedure Measure_Slab_Contention is new Bench.Measure_Batched
+     (Fly_Slab_Contention_Batch);
+
+   Base_Config : constant Bench.Configuration :=
+     (Warmup_Time                  => 0.040,
+      Measurement_Time             => Measurement_Time,
+      Maximum_Sampling_Time        => 2.0 * Measurement_Time,
+      Samples                      => Samples,
+      Minimum_Sample_Time          => 0.000_200,
+      Maximum_Iterations           => Maximum_Iterations,
+      Comparison_Batching          => Bench.Equal_Time,
+      Shootout_Scheduling          => Bench.Balanced_Rounds,
+      Subtract_Timer_Cost          => False,
+      Practical_Threshold_Percent => 1.0,
+      Random_Seed                  => 42,
+      Collect_Process_Telemetry    => False,
+      Progress                     => null,
+      Progress_Name                => <>);
+
+   function Terminal_Config (Name : String) return Bench.Configuration is
+     (Reporters.Terminal_Mode (Base_Config, Name));
+
+   Multi_Result : Bench.Multi_Comparison;
+   Slab_Result  : Bench.Measurement;
+   Have_Boost   : constant Boolean := CPP_Have_Boost /= 0;
+   Have_Abseil  : constant Boolean := CPP_Have_Abseil /= 0;
 
 begin
+   if Contention_Workers < 2 or else Contention_Workers mod 2 /= 0 then
+      raise Program_Error with
+        "contention worker count must be an even integer of at least two";
+   end if;
+
    if Posix_Memalign
      (Base'Access, 64, Interfaces.C.size_t (Region_Length)) /= 0
    then
@@ -396,54 +1347,111 @@ begin
    end if;
 
    Regions.Attach (Region, Base, Region_Length);
-   Vectors.Initialize (Fly_Vector, Region, Vector_Location, Rounds, 8);
+   Vectors.Initialize
+     (Fly_Vector, Region, Vector_Location, Working_Capacity, 8);
    Hash_Maps.Initialize
-     (Fly_Map, Region, Map_Location, Table_Capacity, 8, 8);
-   SPSC.Initialize (Fly_SPSC, Region, SPSC_Location, Ring_Capacity, 8);
-   MPMC.Initialize (Fly_MPMC, Region, MPMC_Location, Ring_Capacity, 8);
+     (Fly_Map, Region, Map_Location, Map_Capacity, 8, 8);
+   SPSC.Initialize
+     (Fly_SPSC, Region, SPSC_Location, Working_Capacity, 8);
+   MPMC.Initialize
+     (Fly_MPMC, Region, MPMC_Location, Working_Capacity, 8);
    Slab_Pools.Initialize
-     (Fly_Slab, Region, Slab_Location, Slab_Capacity, 8, 8);
+     (Fly_Slab, Region, Slab_Location, Working_Capacity, 8, 8);
    Byte_Strings.Initialize (Fly_String, Region, String_Location, 8);
-   Standard_Vector.Reserve_Capacity (Ada.Containers.Count_Type (Rounds));
+   Standard_Vector.Reserve_Capacity
+     (Ada.Containers.Count_Type (Working_Capacity));
    Standard_Map.Reserve_Capacity
-     (Ada.Containers.Count_Type (Table_Capacity));
+     (Ada.Containers.Count_Type (Map_Capacity));
 
+   TIO.Put_Line ("");
+   TIO.Put_Line ("Flyology address-independent data-structure shootout");
    TIO.Put_Line
-     ("data-structure benchmark rounds=" & Rounds'Image
-      & " samples=" & Samples'Image
-      & " (release build; lower ns/op is faster)");
+     ("  Ada/Flyology compiler: GNAT; C++ shim: "
+      & Interfaces.C.Strings.Value (CPP_Compiler));
    TIO.Put_Line
-     ("vector/map measurements include reset, fill, and lookup/scan; "
-      & "queue measurements alternate enqueue/dequeue in one native task");
+     ("  adaptive ceiling=" & Maximum_Iterations'Image
+      & " iterations/sample, samples=" & Samples'Image
+      & ", target=" & Measurement_Time'Image & " s/shootout");
    TIO.Put_Line
-     ("checksums accumulate locally and publish once per sample; results are "
-      & "uncontended amortized loop costs, not concurrent scalability");
+     ("  one logical operation is one mutation plus one observation; "
+      & "lower ns/op is faster");
+   TIO.Put_Line
+     ("  raw C++ rows are not concurrency-safe; *_MUTEX rows lock each public "
+      & "mutation and observation separately");
+   if not Have_Boost then
+      TIO.Put_Line ("  Boost headers unavailable: Boost rows omitted");
+   end if;
+   if not Have_Abseil then
+      TIO.Put_Line
+        ("  Abseil unavailable or ABI-incompatible: Abseil rows omitted");
+   end if;
 
-   Measure (Benchmark_Fly_Vector'Access, Timings);
-   Report ("Flyology.Data_Structures.Vectors", 2 * Rounds, Timings);
-   Measure (Benchmark_Standard_Vector'Access, Timings);
-   Report ("Ada.Containers.Vectors", 2 * Rounds, Timings);
-   Measure (Benchmark_Fly_Map'Access, Timings);
-   Report ("Flyology.Data_Structures.Hash_Maps", 2 * Rounds, Timings);
-   Measure (Benchmark_Standard_Map'Access, Timings);
-   Report ("Ada.Containers.Hashed_Maps", 2 * Rounds, Timings);
-   Measure (Benchmark_Fly_String'Access, Timings);
-   Report ("Flyology.Data_Structures.Byte_Strings", Rounds, Timings);
-   Measure (Benchmark_Standard_String'Access, Timings);
-   Report ("Ada.Strings.Unbounded", Rounds, Timings);
-   Measure (Benchmark_Fly_SPSC'Access, Timings);
-   Report ("Flyology.Data_Structures.Rings.SPSC", 2 * Rounds, Timings);
-   Measure (Benchmark_Fly_MPMC'Access, Timings);
-   Report ("Flyology.Data_Structures.Rings.MPMC", 2 * Rounds, Timings);
-   Measure (Benchmark_Standard_Queue'Access, Timings);
-   Report
-     ("Ada.Containers.Bounded_Synchronized_Queues", 2 * Rounds, Timings);
-   Measure (Benchmark_Fly_Slab'Access, Timings);
-   Report ("Flyology.Data_Structures.Slab_Pools", 4 * Rounds, Timings);
+   if Have_Boost then
+      Compare_Vectors
+        (Config => Terminal_Config ("vector shootout"),
+         Result => Multi_Result);
+      Put_Vectors (Multi_Result);
+   else
+      Compare_Vector_Core
+        (Config => Terminal_Config ("vector shootout"),
+         Result => Multi_Result);
+      Put_Vector_Core (Multi_Result);
+   end if;
+
+   if Have_Abseil then
+      Compare_Maps
+        (Config => Terminal_Config ("hash map shootout"),
+         Result => Multi_Result);
+      Put_Maps (Multi_Result);
+   elsif Have_Boost then
+      Compare_Map_Boost
+        (Config => Terminal_Config ("hash map shootout"),
+         Result => Multi_Result);
+      Put_Map_Boost (Multi_Result);
+   else
+      Compare_Map_Core
+        (Config => Terminal_Config ("hash map shootout"),
+         Result => Multi_Result);
+      Put_Map_Core (Multi_Result);
+   end if;
+
+   Compare_Strings
+     (Config => Terminal_Config ("byte string shootout"),
+      Result => Multi_Result);
+   Put_Strings (Multi_Result);
+
+   if Have_Boost then
+      Compare_SPSC
+        (Config => Terminal_Config ("SPSC queue shootout"),
+         Result => Multi_Result);
+      Put_SPSC (Multi_Result);
+   else
+      Compare_SPSC_Core
+        (Config => Terminal_Config ("SPSC queue shootout"),
+         Result => Multi_Result);
+      Put_SPSC_Core (Multi_Result);
+   end if;
+
+   if Have_Boost then
+      Compare_MPMC
+        (Config => Terminal_Config ("MPMC queue shootout"),
+         Result => Multi_Result);
+      Put_MPMC (Multi_Result);
+   else
+      Compare_MPMC_Core
+        (Config => Terminal_Config ("MPMC queue shootout"),
+         Result => Multi_Result);
+      Put_MPMC_Core (Multi_Result);
+   end if;
+
+   Measure_Slab
+     (Config => Terminal_Config ("slab pool"), Result => Slab_Result);
+   Reporters.Put_Console
+     ("Flyology_Data_Structures_Slab_Pools", Slab_Result);
+
    TIO.Put_Line
      ("checksum=" & Checksum'Image
-      & "; byte strings and queues have different allocation/synchronization "
-      & "contracts, and slab pools have no direct standard-container peer");
+      & "; preceding results are uncontended amortized throughput");
 
    Byte_Strings.Destroy (Fly_String);
    Slab_Pools.Destroy (Fly_Slab);
@@ -451,6 +1459,84 @@ begin
    SPSC.Destroy (Fly_SPSC);
    Hash_Maps.Destroy (Fly_Map);
    Vectors.Destroy (Fly_Vector);
+
+   TIO.New_Line;
+   TIO.Put_Line ("Contended native-task throughput");
+   TIO.Put_Line
+     ("  " & Contention_Workers'Image
+      & " synchronized native workers; queue rows use matched producers and "
+      & "consumers");
+   TIO.Put_Line
+     ("  one vector/map/string/slab operation or one delivered queue item; "
+      & "lower ns/op is higher aggregate throughput");
+
+   if Have_Boost then
+      Compare_Contended_Vectors
+        (Config => Terminal_Config ("contended vector"),
+         Result => Multi_Result);
+      Put_Contended_Vectors (Multi_Result);
+   else
+      Compare_Contended_Vector_Core
+        (Config => Terminal_Config ("contended vector"),
+         Result => Multi_Result);
+      Put_Contended_Vector_Core (Multi_Result);
+   end if;
+
+   if Have_Abseil then
+      Compare_Contended_Maps
+        (Config => Terminal_Config ("contended hash map"),
+         Result => Multi_Result);
+      Put_Contended_Maps (Multi_Result);
+   elsif Have_Boost then
+      Compare_Contended_Map_Boost
+        (Config => Terminal_Config ("contended hash map"),
+         Result => Multi_Result);
+      Put_Contended_Map_Boost (Multi_Result);
+   else
+      Compare_Contended_Map_Core
+        (Config => Terminal_Config ("contended hash map"),
+         Result => Multi_Result);
+      Put_Contended_Map_Core (Multi_Result);
+   end if;
+
+   Compare_Contended_Strings
+     (Config => Terminal_Config ("contended byte string"),
+      Result => Multi_Result);
+   Put_Contended_Strings (Multi_Result);
+
+   if Have_Boost then
+      Compare_Contended_SPSC
+        (Config => Terminal_Config ("contended SPSC"),
+         Result => Multi_Result);
+      Put_Contended_Queues (Multi_Result);
+   else
+      Compare_Contended_SPSC_Core
+        (Config => Terminal_Config ("contended SPSC"),
+         Result => Multi_Result);
+      Put_Contended_Queue_Core (Multi_Result);
+   end if;
+
+   if Have_Boost then
+      Compare_Contended_MPMC
+        (Config => Terminal_Config ("contended MPMC"),
+         Result => Multi_Result);
+      Put_Contended_Queues (Multi_Result);
+   else
+      Compare_Contended_MPMC_Core
+        (Config => Terminal_Config ("contended MPMC"),
+         Result => Multi_Result);
+      Put_Contended_Queue_Core (Multi_Result);
+   end if;
+
+   Measure_Slab_Contention
+     (Config => Terminal_Config ("contended slab"), Result => Slab_Result);
+   Reporters.Put_Console ("Flyology_Slab_Contended", Slab_Result);
+
+   TIO.Put_Line
+     ("checksum=" & Checksum'Image
+      & "; contention results include native-task/thread orchestration and "
+      & "are not crash-recovery measurements");
+
    Regions.Detach (Region);
    C_Free (Base);
 exception

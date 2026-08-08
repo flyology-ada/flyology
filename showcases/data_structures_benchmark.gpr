@@ -1,0 +1,119 @@
+with "../flyology.gpr";
+with "../flyology_bench/flyology_bench.gpr";
+with "config/flyology_showcases_config.gpr";
+
+project Data_Structures_Benchmark is
+   type Build_Profile_Type is ("development", "validation", "release");
+   Default_Build_Profile : Build_Profile_Type := "development";
+   case Flyology_Showcases_Config.Build_Profile is
+      when "development" =>
+         Default_Build_Profile := "development";
+      when "validation" =>
+         Default_Build_Profile := "validation";
+      when "release" =>
+         Default_Build_Profile := "release";
+   end case;
+   Build_Profile : Build_Profile_Type :=
+     external ("FLYOLOGY_SHOWCASE_PROFILE", Default_Build_Profile);
+
+   type Enabled_Type is ("false", "true");
+   Have_Boost : Enabled_Type :=
+     external ("FLYOLOGY_BENCH_HAVE_BOOST", "false");
+   Have_Abseil : Enabled_Type :=
+     external ("FLYOLOGY_BENCH_HAVE_ABSEIL", "false");
+   type Runtime_Type is ("libstdc++", "libc++");
+   CPP_Runtime : Runtime_Type :=
+     external ("FLYOLOGY_BENCH_CPP_RUNTIME", "libstdc++");
+
+   CPP_Switches := ("-std=c++20", "-pthread", "-Wall", "-Wextra");
+   case Build_Profile is
+      when "development" | "validation" =>
+         CPP_Switches := CPP_Switches & ("-O2");
+      when "release" =>
+         CPP_Switches := CPP_Switches & ("-O3", "-DNDEBUG");
+   end case;
+   case CPP_Runtime is
+      when "libc++" =>
+         CPP_Switches := CPP_Switches
+           & ("-Wno-unused-command-line-argument");
+      when "libstdc++" =>
+         null;
+   end case;
+   case Have_Boost is
+      when "true" =>
+         CPP_Switches := CPP_Switches
+           & ("-DFLYOLOGY_BENCH_HAVE_BOOST=1",
+              "-I" & external ("FLYOLOGY_BENCH_BOOST_INCLUDE", "."));
+      when "false" =>
+         CPP_Switches := CPP_Switches
+           & ("-DFLYOLOGY_BENCH_HAVE_BOOST=0");
+   end case;
+   case Have_Abseil is
+      when "true" =>
+         CPP_Switches := CPP_Switches
+           & ("-DFLYOLOGY_BENCH_HAVE_ABSEIL=1",
+              "-I" & external ("FLYOLOGY_BENCH_ABSEIL_INCLUDE", "."));
+      when "false" =>
+         CPP_Switches := CPP_Switches
+           & ("-DFLYOLOGY_BENCH_HAVE_ABSEIL=0");
+   end case;
+
+   Linker_Options := ("-pthread");
+   case CPP_Runtime is
+      when "libstdc++" =>
+         Linker_Options := Linker_Options & ("-lstdc++");
+      when "libc++" =>
+         Linker_Options := Linker_Options & ("-lc++");
+   end case;
+   case Have_Abseil is
+      when "true" =>
+         Linker_Options := Linker_Options
+           & ("-L" & external ("FLYOLOGY_BENCH_ABSEIL_LIB", "."),
+              "-labsl_raw_hash_set",
+              "-labsl_hash",
+              "-labsl_city",
+              "-labsl_base",
+              "-labsl_throw_delegate",
+              "-labsl_raw_logging_internal",
+              "-labsl_log_severity");
+      when "false" =>
+         null;
+   end case;
+
+   for Languages use ("Ada", "C++");
+   for Runtime ("Ada") use
+     external ("FLYOLOGY_RTS_DIR", "../build/rts");
+   for Source_Dirs use (".", "native");
+   for Source_Files use
+     ("data_structures_benchmark.adb",
+      "data_structures_benchmark_cpp.cpp");
+   for Object_Dir use "obj/data_structures_benchmark";
+   for Exec_Dir use "bin";
+   for Main use ("data_structures_benchmark.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Driver ("C++") use
+        external ("FLYOLOGY_BENCH_CPP_DRIVER", "g++");
+      case Build_Profile is
+         when "development" | "validation" =>
+            for Default_Switches ("Ada") use
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              --  Reporters already supply UTF-8 bytes for sparklines. Keep
+              --  Text_IO byte-transparent instead of transcoding them twice.
+              & ("-gnatWb", "-gnat2022", "-gnata", "-gnatVa", "-gnatwa",
+                 "-gnatwJ",
+                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+         when "release" =>
+            for Default_Switches ("Ada") use
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnatWb", "-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
+                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+      end case;
+      for Default_Switches ("C++") use CPP_Switches;
+   end Compiler;
+
+   package Linker is
+      for Switches ("data_structures_benchmark.adb") use Linker_Options;
+   end Linker;
+end Data_Structures_Benchmark;

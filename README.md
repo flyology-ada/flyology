@@ -2635,7 +2635,8 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/bin/runtime_observability
 ./showcases/bin/stall_watchdog
 ./showcases/run_synchronization_benchmark.sh 20000 5
-./showcases/run_data_structures_benchmark.sh 50000 5
+./showcases/run_data_structures_benchmark.sh 200000 30 800 4
+./showcases/bin/data_structures_benchmark 200000 30 800 4
 ./showcases/run_loop_thread_placement.sh
 ./showcases/run_event_loop_pool.sh
 ./showcases/run_thread_per_core.sh 4 1000
@@ -2655,12 +2656,18 @@ The examples demonstrate:
 - uncontended and shared protected-procedure, protected-entry, and rendezvous
   costs across one lightweight execution group, two lightweight groups, native
   tasks, and mixed lanes;
-- relocatable vector and hash-map operations beside
-  `Ada.Containers.Vectors` and `Ada.Containers.Hashed_Maps`, byte-string
-  operations beside `Ada.Strings.Unbounded`, and direct slab/ring timings with
-  a standard bounded synchronized queue as a differently synchronized queue
-  reference; the runner reports raw medians and does not promise relative
-  performance;
+- adaptive, position-balanced `flyology_bench` shootouts for relocatable
+  vectors, hash maps, byte strings, SPSC/MPMC rings, and slab pools beside the
+  relevant Ada containers and GPRBuild-compiled C++ standard-library peers;
+  when installed, Boost container/lock-free and Abseil flat-map rows are added
+  through a narrow C ABI shim. Raw C++ rows and separately mutex-protected rows
+  are labeled because their synchronization contracts differ. A second section
+  compares aggregate throughput under synchronized native-task/C++-thread
+  contention, including vector and hash-map guards and matched queue producers
+  and consumers. The runner's arguments are the maximum iterations per sample,
+  sample count (`10 .. 1000`), target milliseconds per shootout, and an even
+  native worker count of at least two. It prints the retained binary path so the
+  same colorful terminal report can be rerun without rebuilding;
 - fan-out timers and protected aggregation;
 - uncooperative CPU monopolization versus time-budgeted cooperative checkpoints
   on the same event loop;
