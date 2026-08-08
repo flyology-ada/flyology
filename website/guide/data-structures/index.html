@@ -67,6 +67,7 @@
             <li><a href="#arenas">Select an arena allocator</a></li>
             <li><a href="#region">Create or attach a structure</a></li>
             <li><a href="#relocation">Attach another mapping</a></li>
+            <li><a href="#segments">Use shared-memory segments</a></li>
             <li><a href="#envelopes">Add an application contract</a></li>
             <li><a href="#synchronization">Synchronization and waiting</a></li>
             <li><a href="#recovery">Poisoning and recovery</a></li>
@@ -78,7 +79,7 @@
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">i</span>
-            <p>These packages do not create mappings or provide IPC discovery. The application owns the backing bytes, mapping lifetime, descriptor exchange, permissions, flushing policy, and process-lifecycle policy.</p>
+            <p>The relocatable leaf packages do not own mappings. <code>Flyology.Shared_Memory</code> now supplies focused backing, mapping, named-segment, and Unix descriptor-handoff primitives; applications still own peer discovery, transaction, trust, and process-lifecycle policy.</p>
           </aside>
 
           <section id="contract">
@@ -281,7 +282,7 @@ end Local_Vector;</code></pre>
           <section id="relocation">
             <span class="step-label">STORAGE 05</span>
             <h2>Attach independently at every mapping address.</h2>
-            <p>Mapping creation remains outside these packages. The first participant uses <code>Create_Or_Attach</code> after attaching its local region. After the application maps the same backing object again, a later participant attaches another region using that mapping's base and attaches the leaf with the same expected configuration.</p>
+            <p>Mapping creation remains outside the <code>Data_Structures</code> hierarchy. The first participant uses <code>Create_Or_Attach</code> after attaching its local region. After the application maps the same backing object again, a later participant attaches another region using that mapping's base and attaches the leaf with the same expected configuration. The next section shows the public <code>Shared_Memory</code> layer that can own those bytes.</p>
             <figure class="code-panel">
               <figcaption>two local views of the same stored vector</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -307,8 +308,64 @@ Vectors.Attach
             <p>Before unmapping a range, detach every leaf view derived from it and then detach the region view. A leaf view does not retain or extend the mapping's lifetime.</p>
           </section>
 
-          <section id="envelopes">
+          <section id="segments">
             <span class="step-label">STORAGE 06</span>
+            <h2>Name race-safe extents inside an owned shared mapping.</h2>
+            <p><code>Flyology.Shared_Memory</code> creates anonymous, named POSIX, or regular-file backing objects, maps them without execute permission or a fixed address, and attaches a <code>Regions.View</code> without exposing <code>System.Address</code>. Linux anonymous objects use <code>memfd_create</code> with immutable size seals and the runtime-supported no-execute seal; access is capability-based, so inode mode bits are not reported as an owner-only boundary. Darwin uses an unpredictable exclusive mode-0600 POSIX shm name and unlinks it before returning. Named objects and files retain explicit unlink ownership.</p>
+            <p><code>Shared_Memory.Segments</code> persists a fixed-capacity registry before the payload area. The header records magic, version, application schema, complete extent, registry capacity, maximum name length, slot geometry, and alignment. A lookup checks the hash, exact length, and every name byte. Colliding hashes cannot alias different names.</p>
+            <figure class="code-panel">
+              <figcaption>create a backing object, segment, and named byte string</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Shared_Memory.Create_Anonymous (Backing, 1_048_576);
+Shared_Memory.Map (Map, Backing);
+
+Segments.Create_Or_Attach
+  (Segment, Map,
+   (Schema =&gt; 16#4D59_4150_5000_0001#,
+    Registry_Capacity =&gt; 64,
+    Maximum_Name_Length =&gt; 96,
+    Allocation_Alignment =&gt; 64),
+   Segment_Open);
+Segments.Attach_Region (Segment, Region);
+
+Segments.Try_Find_Or_Create
+  (Segment, "status", Byte_Strings.Required_Storage (256),
+   Handle, Claim, Named_Open, Failure);
+
+case Named_Open is
+   when Segments.Created =&gt;
+      Segments.Claimed_Extent (Segment, Claim, Location, Extent);
+      Byte_Strings.Initialize (Value, Region, Location, 256);
+      Segments.Publish (Segment, Claim);
+
+   when Segments.Attached_Existing =&gt;
+      Segments.Resolve (Segment, Handle, Location, Extent);
+      Byte_Strings.Attach (Value, Region, Location, 256);
+
+   when others =&gt;
+      --  Retry busy/in-progress outcomes at an application scheduling point;
+      --  handle failure, mismatch, and bounded exhaustion explicitly.
+      null;
+end case;</code></pre>
+            </figure>
+            <p>Exactly one racing caller receives the limited creator claim. Its extent is unavailable to ordinary handles until success publication. A creator can instead publish a nonzero failure code; failed entries remain visible until explicit removal. Removal does not unlink the OS object or destroy application bytes. Later reuse requires a fitting stored reservation and advances a nonwrapping generation, making earlier handles stale.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Backing lifecycle</dt><dd>Descriptor close, mapping unmap, named-object unlink, file unlink, and registry removal are separate operations. Closing a descriptor leaves an established mapping live.</dd></div>
+                <div class="decision-row"><dt>Initialization trust</dt><dd>Only a mapping derived from exclusive creation may claim a zero segment lifecycle. Opened and received mappings report initialization in progress instead of repairing an abandoned zero object.</dd></div>
+                <div class="decision-row"><dt>Creator death</dt><dd>A dead owner can leave the registry guard or a named extent initializing. Core never steals ownership or claims automatic process-death recovery. Replacement or recovery requires independently established death and quiescence.</dd></div>
+                <div class="decision-row"><dt>Persistence</dt><dd><code>msync</code> and <code>fsync</code> expose writeback control for file-backed mappings. They do not make a multi-object application update crash-transactional.</dd></div>
+                <div class="decision-row"><dt>Descriptor handoff</dt><dd><code>Shared_Memory.Unix_Sockets</code> sends exactly one capability with <code>SCM_RIGHTS</code>, establishes <code>FD_CLOEXEC</code>, closes malformed ancillary descriptors, and validates type and exact size before mapping.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Keep blocking boundaries visible.</strong> Namespace, mapping, and flush operations are synchronous metadata or VM syscalls and may occupy a lightweight task's event-loop pthread. Unix-socket handoff uses synchronous <code>sendmsg</code>/<code>recvmsg</code>; call it from a native task unless readiness is established independently.</p>
+            </aside>
+          </section>
+
+          <section id="envelopes">
+            <span class="step-label">STORAGE 07</span>
             <h2>Add an application-level version when needed.</h2>
             <p>Every leaf already validates its own <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#3ef2c359f4a46aa8c6556874ab8796e27c0663966dfe9699bdd02227b814aab3"><code>Layout_Identity</code></a>. An application that assigns additional meaning to the payload can instantiate <code>Envelopes</code> with the leaf's exported <code>Identity</code>, a stable nonzero signature, and an application-controlled contract version.</p>
             <figure class="code-panel">
@@ -350,7 +407,7 @@ end case;</code></pre>
           </section>
 
           <section id="synchronization">
-            <span class="step-label">STORAGE 07</span>
+            <span class="step-label">STORAGE 08</span>
             <h2>Use the synchronization model stated by the leaf.</h2>
             <p>Relocation and concurrency are separate properties. Region attachment and backing lifetime are never internally synchronized. Leaf initialization, attachment, detachment, destruction, and reinitialization require the documented quiescence even when ordinary operations are internally coordinated.</p>
             <div class="decision-list">
@@ -370,7 +427,7 @@ end case;</code></pre>
           </section>
 
           <section id="recovery">
-            <span class="step-label">STORAGE 08</span>
+            <span class="step-label">STORAGE 09</span>
             <h2>Separate corruption detection from owner-death policy.</h2>
             <p>Layouts fail closed on corrupt identity, geometry, state, counters, and handles, but the core packages do not determine whether another task or process has terminated. Poison operations therefore require an independently authorized caller that has already established owner death and the leaf's required quiescence.</p>
             <div class="decision-list">
@@ -385,7 +442,7 @@ end case;</code></pre>
           </section>
 
           <section id="lifetime">
-            <span class="step-label">STORAGE 09</span>
+            <span class="step-label">STORAGE 10</span>
             <h2>Review the complete lifetime sequence.</h2>
             <ol>
               <li>Choose capacity and an element adapter; its identity and geometry contribute to the stored schema and <code>Required_Storage</code>.</li>
@@ -401,10 +458,10 @@ end case;</code></pre>
           </section>
 
           <section id="limits">
-            <span class="step-label">STORAGE 10</span>
+            <span class="step-label">STORAGE 11</span>
             <h2>Keep the core boundary explicit.</h2>
             <ul>
-              <li>The packages do not open, name, map, resize, flush, or close backing storage.</li>
+              <li>The relocatable leaf packages do not own backing storage. <code>Flyology.Shared_Memory</code> provides focused open, map, flush, close, and descriptor-transfer operations without changing leaf layout contracts.</li>
               <li>They provide no peer discovery, descriptor transfer, access-control policy, wake channel, or automatic process-death recovery.</li>
               <li>Persisted elements are immutable fixed-layout bytes. Applications define their adapter's native layout, validation, stable signature, version changes, and schema migration; arbitrary Ada private types are not persisted directly.</li>
               <li>Timed operations cooperatively retry; they do not provide a pollable completion descriptor.</li>

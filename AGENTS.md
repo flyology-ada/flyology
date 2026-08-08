@@ -252,6 +252,39 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   async-signal-safe work followed by `exec` or `_exit`. Do not make the runtime
   usable in the fork child by resetting isolated locks piecemeal.
 
+## Shared-memory segment invariants
+
+- `Flyology.Shared_Memory` owns descriptors and mappings independently. Closing
+  a descriptor does not invalidate an established mapping. Detach every leaf,
+  region, and segment view before unmapping; finalization is non-raising and
+  never implicitly unlinks a named object or file.
+- Anonymous Linux backing has immutable grow/shrink/seal seals and attempts the
+  runtime-supported no-execute seal; Darwin anonymous backing is exclusive,
+  mode 0600, and immediately unlinked. Public mappings never request execute
+  permission or a fixed address.
+- Only mappings derived from exclusive backing creation may claim a zero
+  segment lifecycle. Opened and received mappings report initialization in
+  progress rather than treating abandoned zero bytes as virgin.
+- The fixed-capacity segment registry persists exact names, generations,
+  geometry, and initializing/ready/failed/removed states. Hash collisions must
+  compare complete names. Partial extents are visible only through the limited
+  creator claim and become generally resolvable only after publication.
+- Registry removal is distinct from backing-object unlink. Reuse advances a
+  nonwrapping generation and may consume only a fitting removed reservation.
+  Exhaustion and published initialization failure remain explicit outcomes.
+- A dead creator may leave a registry guard or initialization claim abandoned.
+  Core never steals it and provides no automatic owner-death recovery. An
+  external authority must establish death and quiescence before replacement or
+  other recovery.
+- `Shared_Memory.Unix_Sockets` transfers exactly one descriptor with
+  `SCM_RIGHTS`, establishes CLOEXEC, closes all descriptors from malformed or
+  truncated control data, and validates type and exact size before mapping.
+  Its synchronous socket calls require a native-task boundary unless readiness
+  was established independently.
+- Backing, mapping, flush, and namespace operations are synchronous metadata or
+  VM syscalls and may occupy a lightweight task's event-loop pthread. File
+  flush is not a crash-consistent application transaction.
+
 ## Repository map
 
 - `src/`: public Flyology packages and platform-neutral API policy.

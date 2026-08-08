@@ -329,6 +329,8 @@ process_lifecycle_smoke
 ready_queue_smoke
 runtime_smoke
 semantic_parity_smoke
+shared_memory_smoke
+shared_memory_child
 stack_guard_violation_child
 stack_guard_smoke
 stack_pool_smoke
