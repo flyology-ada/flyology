@@ -231,10 +231,17 @@ procedure File_Transfers_Smoke is
          if Mode = Post_Submit_Cancel then
             delay 0.05;
             Stop.Request;
+            --  SEND_ZC cancellation is terminal only after the notification
+            --  CQE releases every zero-copy reference. A stalled peer can
+            --  retain an already accepted prefix, so close it after the
+            --  cancellation request instead of joining the sender while
+            --  deliberately withholding all peer progress.
+            delay 0.05;
+            Sockets.Close_Socket (Receiver_Socket);
          end if;
       end;
       Sockets.Close_Socket (Sender_Socket);
-      if Mode /= Closed_Peer then
+      if Mode = Backpressure_Timeout then
          Sockets.Close_Socket (Receiver_Socket);
       end if;
       if Outcome /= 1 then

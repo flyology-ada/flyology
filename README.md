@@ -1722,6 +1722,12 @@ completion-driven read plus ordinary socket-send fallback because its
 event-loop pthread. The caller owns one reusable `Unique_Buffer`, advances the
 explicit offset by `Sent`, and can use the same loop in either lane.
 
+Cancellation and timeout do not shorten that Linux buffer-lifetime rule. If a
+peer stops making progress after accepting a zero-copy prefix, the notification
+CQE—and therefore the call's exceptional return—may remain delayed until the
+peer consumes data or the connection closes. This is terminal cancellation,
+not a bounded cancellation-latency guarantee.
+
 Each call performs at most one socket send and reports its positive progress on
 normal return. A positive completion wins over cancellation observed in the
 same completion, because those bytes cannot safely be replayed. A timeout or
