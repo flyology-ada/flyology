@@ -423,11 +423,13 @@ package body Flyology.Data_Structures.Slab_Pools is
       Value : Handles.Handle;
       Data  : out Ada.Streams.Stream_Element_Array)
    is
-      Slot : Interfaces.Unsigned_32 := 0;
+      Slot     : Interfaces.Unsigned_32 := 0;
+      Acquired : Boolean := False;
       Expected : Interfaces.Unsigned_32;
    begin
       Check_Length (Item, Data'Length);
       Acquire_Live (Item, Value, Accessing_State, Slot);
+      Acquired := True;
       Bytes.Copy
         (Data'Address, Payload_Address (Item, Slot),
          Interfaces.C.size_t (Data'Length));
@@ -443,7 +445,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       end if;
    exception
       when others =>
-         if Slot /= 0
+         if Acquired
            and then Atomic.Load_Acquire_U32 (State_Address (Item, Slot)) =
              Accessing_State
          then
@@ -462,13 +464,19 @@ package body Flyology.Data_Structures.Slab_Pools is
       Value : Handles.Handle;
       Data  : Ada.Streams.Stream_Element_Array)
    is
-      Slot : Interfaces.Unsigned_32 := 0;
+      Slot     : Interfaces.Unsigned_32 := 0;
+      Target   : System.Address := System.Null_Address;
+      Acquired : Boolean := False;
+      Mutated  : Boolean := False;
       Expected : Interfaces.Unsigned_32;
    begin
       Check_Length (Item, Data'Length);
       Acquire_Live (Item, Value, Accessing_State, Slot);
+      Acquired := True;
+      Target := Payload_Address (Item, Slot);
+      Mutated := True;
       Bytes.Copy
-        (Payload_Address (Item, Slot), Data'Address,
+        (Target, Data'Address,
          Interfaces.C.size_t (Data'Length));
       Expected := Accessing_State;
       if not Atomic.Compare_Exchange_U32
@@ -482,13 +490,14 @@ package body Flyology.Data_Structures.Slab_Pools is
       end if;
    exception
       when others =>
-         if Slot /= 0
+         if Acquired
            and then Atomic.Load_Acquire_U32 (State_Address (Item, Slot)) =
              Accessing_State
          then
             Expected := Accessing_State;
             if Atomic.Compare_Exchange_U32
-              (State_Address (Item, Slot), Expected, Live_State)
+              (State_Address (Item, Slot), Expected,
+               (if Mutated then Poisoned_State else Live_State))
             then
                null;
             end if;

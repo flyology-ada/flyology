@@ -307,6 +307,22 @@ begin
         (Slab_Location,
          64 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4),
       3);
+   declare
+      Failed : Boolean := False;
+      State_At : constant C.size_t := Raw_Offset
+        (Slab_Location,
+         64 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4);
+   begin
+      begin
+         Slabs.Read (Slab_B, Poison_Handle, Read_16);
+      exception
+         when DS.Busy_Error => Failed := True;
+      end;
+      Assert (Failed, "slab contender did not report bounded contention");
+      Assert
+        (Read_U32 (Base_A, State_At) = 3,
+         "failed slab contender released another owner's claim");
+   end;
    Slabs.Detach (Slab_A);
    Slabs.Detach (Slab_B);
    Slabs.Poison_Abandoned_At
