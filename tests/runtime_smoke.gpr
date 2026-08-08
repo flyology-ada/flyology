@@ -138,6 +138,7 @@ project Runtime_Smoke is
       "stall_watchdog_smoke.adb",
       "structured_server_smoke.adb",
       "structured_server_abort_smoke.adb",
+      "structured_server_reset_smoke.adb",
       "structured_server_tls_smoke.adb",
       "structured_server_reuse_smoke.adb",
       "thread_affinity_smoke.adb",

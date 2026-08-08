@@ -337,6 +337,7 @@ task_result_abandon_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
 structured_server_smoke
+structured_server_reset_smoke
 structured_server_tls_smoke
 thread_affinity_smoke
 timer_heap_smoke

@@ -33,6 +33,10 @@
     ((FLYOLOGY_MAX_IP_DATAGRAM + FLYOLOGY_DISCARD_CHUNK - 1U) / \
      FLYOLOGY_DISCARD_CHUNK)
 
+/* flyology_socket_accept return values below every valid descriptor. */
+#define FLYOLOGY_ACCEPT_FAILED (-1)
+#define FLYOLOGY_ACCEPT_DISCARDED (-2)
+
 extern int flyology_accept(int socket, void *address, void *length);
 extern int flyology_connect(int socket, const void *address, unsigned length);
 
@@ -384,14 +388,20 @@ int flyology_socket_accept(int listener, unsigned char *family,
     int fd = flyology_accept(listener, &storage, &length);
     if (fd < 0) {
         *error = errno;
-        return -1;
+        return FLYOLOGY_ACCEPT_FAILED;
     }
     if (flyology_socket_configure(fd, 1) < 0 ||
         flyology_socket_split_address((struct sockaddr *)&storage, length,
                                       family, address, port, scope) < 0) {
-        *error = errno;
+        int setup_error = errno;
+
+        /* The listener accepted successfully.  A reset peer can make later
+           descriptor setup fail (SO_NOSIGPIPE on Darwin and fcntl on either
+           platform), so consume this connection without blaming the
+           listener. */
         close(fd);
-        return -1;
+        *error = setup_error;
+        return FLYOLOGY_ACCEPT_DISCARDED;
     }
     *error = 0;
     return fd;

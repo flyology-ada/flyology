@@ -118,6 +118,9 @@ package body Flyology.IO.Sockets is
       Scope   : access Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
    pragma Import (C, C_Accept, "flyology_socket_accept");
+   --  A nonnegative result is the accepted descriptor, -1 means accept(2)
+   --  failed, and -2 means C_Accept closed a descriptor that accept(2)
+   --  returned but post-accept setup could not make usable.
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
    procedure Test_Raw_Accept_Return_Barrier
@@ -289,6 +292,7 @@ package body Flyology.IO.Sockets is
      C_Errno_Process_File_Limit;
    System_File_Limit_Error : constant Interfaces.C.int :=
      C_Errno_System_File_Limit;
+   Accept_Discarded : constant Interfaces.C.int := -2;
 
    function Family_Code (Family : Address_Family) return Interfaces.C.int is
      (Flyology.Socket_Policy.Family_Code (Family = IPv6));
@@ -1358,7 +1362,13 @@ package body Flyology.IO.Sockets is
                Error'Access,
                Socket,
                Result);
-            if Result < 0 then
+            if Result = Accept_Discarded then
+               --  accept(2) succeeded, but the peer became unusable before
+               --  descriptor setup completed.  The C boundary has already
+               --  closed that connection; retry without classifying the
+               --  setup errno as a listener failure.
+               Pause_Before_Retry (0.0);
+            elsif Result < 0 then
                case Wait_Policy.Classify_Accept_Error
                  (Error,
                   Would_Block_Error,

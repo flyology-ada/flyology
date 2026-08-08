@@ -1431,10 +1431,13 @@ cancelled counts plus whether deadline cancellation was needed. Thus no handler
 outlives `Serve`, its context, the server object, or their Ada master.
 
 An aborted backlog entry or protocol-level admission error is retried rather
-than treated as a server failure. Process-wide or system-wide descriptor
-exhaustion uses exponential backoff capped at 50 milliseconds; shutdown and
-other cancellation wake that backoff. Listener state errors such as an invalid
-descriptor remain structural failures and stop the server.
+than treated as a server failure. If `accept` succeeds but the connection
+becomes unusable during descriptor setup, that accepted descriptor is closed
+and skipped without reclassifying its setup error as a listener failure.
+Process-wide or system-wide descriptor exhaustion uses exponential backoff
+capped at 50 milliseconds; shutdown and other cancellation wake that backoff.
+Listener state errors such as an invalid descriptor remain structural failures
+and stop the server.
 
 The structured guarantee applies to `Serve`. Direct use of `Connections`, raw
 socket operations, interrupt descriptors, and descriptor waits remains
