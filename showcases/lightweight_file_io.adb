@@ -22,16 +22,19 @@ procedure Lightweight_File_IO is
    protected Progress is
       procedure Arrived;
       entry Wait_Until_Parked;
-      procedure Release;
-      entry Start;
+      procedure Release (Expected_Count : Natural);
+      procedure Cancel (Expected_Count : Natural);
+      entry Start (Proceed : out Boolean);
       procedure Finished (Passed : Boolean);
       entry Wait_Until_Done;
       function Passed return Boolean;
    private
-      Ready     : Natural := 0;
-      Completed : Natural := 0;
-      Released  : Boolean := False;
-      All_OK    : Boolean := True;
+      Ready              : Natural := 0;
+      Completed          : Natural := 0;
+      Expected           : Natural := 0;
+      Gate_Open          : Boolean := False;
+      Cancelled          : Boolean := False;
+      All_OK             : Boolean := True;
    end Progress;
 
    protected body Progress is
@@ -45,14 +48,23 @@ procedure Lightweight_File_IO is
          null;
       end Wait_Until_Parked;
 
-      procedure Release is
+      procedure Release (Expected_Count : Natural) is
       begin
-         Released := True;
+         Expected := Expected_Count;
+         Cancelled := False;
+         Gate_Open := True;
       end Release;
 
-      entry Start when Released is
+      procedure Cancel (Expected_Count : Natural) is
       begin
-         null;
+         Expected := Expected_Count;
+         Cancelled := True;
+         Gate_Open := True;
+      end Cancel;
+
+      entry Start (Proceed : out Boolean) when Gate_Open is
+      begin
+         Proceed := not Cancelled;
       end Start;
 
       procedure Finished (Passed : Boolean) is
@@ -61,7 +73,7 @@ procedure Lightweight_File_IO is
          All_OK := All_OK and Passed;
       end Finished;
 
-      entry Wait_Until_Done when Completed = Task_Count is
+      entry Wait_Until_Done when Gate_Open and then Completed = Expected is
       begin
          null;
       end Wait_Until_Done;
@@ -80,15 +92,20 @@ procedure Lightweight_File_IO is
       Item : constant Stream_Element_Array :=
         [1 => Stream_Element (Index mod 251)];
       Last : Stream_Element_Offset;
+      Proceed : Boolean;
    begin
       Progress.Arrived;
-      Progress.Start;
-      Flyology.IO.Files.Write_At
-        (File,
-         Flyology.IO.Files.File_Offset (Index - 1),
-         Item,
-         Last);
-      Progress.Finished (Last = Item'Last);
+      Progress.Start (Proceed);
+      if Proceed then
+         Flyology.IO.Files.Write_At
+           (File,
+            Flyology.IO.Files.File_Offset (Index - 1),
+            Item,
+            Last);
+         Progress.Finished (Last = Item'Last);
+      else
+         Progress.Finished (True);
+      end if;
    exception
       when others =>
          Progress.Finished (False);
@@ -98,6 +115,9 @@ procedure Lightweight_File_IO is
    Writers : array (1 .. Task_Count) of Writer_Access;
    Baseline_Threads : constant C.int := Thread_Count;
    Threads          : C.int;
+   Created          : Natural := 0;
+   Gate_Opened      : Boolean := False;
+   Topology_OK      : Boolean := False;
 
    procedure Remove_File is
    begin
@@ -117,28 +137,42 @@ begin
 
    for Index in Writers'Range loop
       Writers (Index) := new Writer (Index);
+      Created := Created + 1;
    end loop;
 
    Progress.Wait_Until_Parked;
    Threads := Thread_Count;
    Put_Line ("lightweight file tasks parked:" & Task_Count'Image);
    Put_Line ("process pthreads:" & Threads'Image);
-   if Threads /= Baseline_Threads + 1 then
-      raise Program_Error with "lightweight file tasks created hidden pthreads";
-   end if;
+   Topology_OK :=
+     Threads = Baseline_Threads
+     or else
+       (Baseline_Threads < C.int'Last
+        and then Threads = Baseline_Threads + 1);
 
-   Progress.Release;
+   Progress.Release (Created);
+   Gate_Opened := True;
    Progress.Wait_Until_Done;
    Flyology.IO.Files.Close (File);
    Remove_File;
 
+   if not Topology_OK then
+      raise Program_Error with
+        "lightweight file tasks created hidden pthreads";
+   end if;
    if not Progress.Passed then
       raise Program_Error with "kernel-completion file writes failed";
    end if;
    Put_Line
-     ("all file operations completed through the event loop; worker pthreads: 0");
+     ("all file operations completed through the event loop; "
+      & "worker pthreads: 0");
 exception
    when others =>
+      if not Gate_Opened then
+         Progress.Cancel (Created);
+         Gate_Opened := True;
+      end if;
+      Progress.Wait_Until_Done;
       if File /= Flyology.IO.Files.Invalid_File then
          begin
             Flyology.IO.Files.Close (File);

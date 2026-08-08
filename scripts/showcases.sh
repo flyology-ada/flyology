@@ -30,7 +30,8 @@ for showcase in \
   lightweight_vs_native
 do
   printf '\n== %s ==\n' "$showcase"
-  "$project_root/showcases/bin/$showcase"
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    "$project_root/showcases/bin/$showcase"
 done
 
 printf '\n== event_loop_pool ==\n'
