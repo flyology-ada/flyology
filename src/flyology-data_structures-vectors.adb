@@ -145,7 +145,11 @@ package body Flyology.Data_Structures.Vectors is
         (Item.Guard_Address, Expected, Locked)
       then
          Layouts.Require_Ready (Item.Core);
-         raise Busy_Error with "vector is busy";
+         if Expected = Locked then
+            raise Busy_Error with "vector is busy";
+         else
+            raise Layout_Error with "vector guard is corrupt";
+         end if;
       end if;
       begin
          Layouts.Require_Ready (Item.Core);

@@ -114,7 +114,11 @@ package body Flyology.Data_Structures.Byte_Strings is
         (Item.Guard_Address, Expected, Locked)
       then
          Layouts.Require_Ready (Item.Core);
-         raise Busy_Error with "byte string is busy";
+         if Expected = Locked then
+            raise Busy_Error with "byte string is busy";
+         else
+            raise Layout_Error with "byte-string guard is corrupt";
+         end if;
       end if;
       begin
          Layouts.Require_Ready (Item.Core);

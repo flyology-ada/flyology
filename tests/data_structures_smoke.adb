@@ -319,6 +319,17 @@ begin
       Strings.Initialize
         (Recovery_String, Region_A, Poison_String_Location, 32);
       Write_U32
+        (Base_B, Raw_Offset (Poison_String_Location, 44), 2);
+      Failed := False;
+      begin
+         if Strings.Length (Recovery_String) /= 0 then
+            raise Program_Error with "unreachable corrupt string length";
+         end if;
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "corrupt byte-string guard was accepted as contention");
+      Write_U32
         (Base_B, Raw_Offset (Poison_String_Location, 44), 1);
       Failed := False;
       begin
