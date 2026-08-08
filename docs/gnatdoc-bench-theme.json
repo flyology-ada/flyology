@@ -1,0 +1,10 @@
+{
+  "pageTitle": "flyology_bench API reference",
+  "indexDescription": "Generated public API reference for flyology_bench.",
+  "indexTitle": "flyology_bench API reference · Flyology",
+  "canonicalUrl": "https://flyology.org/api/flyology_bench/",
+  "brandLabel": "flyology_bench API",
+  "navigationHtml": "<a href='../../'>Overview</a>\n        <a href='../../guide/benchmarking/'>Benchmarking guide</a>\n        <a href='../'>Runtime API</a>\n        <a href='https://github.com/flyology-ada/flyology/tree/main/flyology_bench'>GitHub</a>",
+  "indexIntroduction": "Generated public contracts for benchmark configuration, measurement, comparisons, baselines, metadata, host control, and reporting.",
+  "footerNote": "Generated with GNATdoc. Public API only."
+}

@@ -1,15 +1,19 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
---  Describes build and host attributes relevant to reproducible results.
 package Flyology_Bench.Metadata is
+   --  Describes build and host attributes relevant to reproducible results.
+
    --  Return the operating-system family used to build the crate.
+   --  @return Stable operating-system family name.
    function Operating_System return String;
 
    --  Return the target architecture used to build the crate.
+   --  @return Stable target architecture name.
    function Architecture return String;
 
    --  Return the GNAT compiler version string.
+   --  @return Compiler version reported by the GNAT build.
    function Compiler return String;
 
    --  Return a stable default compatibility fingerprint. Extra should include

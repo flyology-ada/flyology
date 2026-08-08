@@ -17,16 +17,28 @@ package Flyology_Bench is
 
    --  Maximum number of implementations in one multi-way comparison.
    Max_Comparison_Cases : constant := 16;
+   --  Number of implementations participating in a multi-way comparison.
    subtype Comparison_Case_Count is Positive range 2 .. Max_Comparison_Cases;
+   --  One-based implementation index in enumeration order.
    subtype Comparison_Case_Index is Positive range 1 .. Max_Comparison_Cases;
 
    --  Stage reported by an optional progress callback. Callbacks execute only
    --  outside timed regions.
+   --  @enum Starting The run is initializing its clock and state.
+   --  @enum Warming The operation is executing outside timed sampling.
+   --  @enum Calibrating The harness is selecting a batch size.
+   --  @enum Sampling Timed samples are being collected.
+   --  @enum Analyzing Statistics and confidence intervals are being computed.
+   --  @enum Finished The result is complete.
    type Progress_Phase is
      (Starting, Warming, Calibrating, Sampling, Analyzing, Finished);
 
    --  Receives coarse benchmark progress. Total is zero when a phase has no
    --  meaningful bounded work count.
+   --  @param Name Human-readable benchmark or implementation identity.
+   --  @param Phase Current benchmark stage.
+   --  @param Completed Completed work units in the current stage.
+   --  @param Total Total work units, or zero when the phase is unbounded.
    type Progress_Handler is access procedure
      (Name      : String;
       Phase     : Progress_Phase;
@@ -34,6 +46,11 @@ package Flyology_Bench is
       Total     : Natural);
 
    --  Statistical and practical interpretation of a paired comparison.
+   --  @enum Inconclusive The confidence interval supports no practical verdict.
+   --  @enum Practically_Equivalent The full interval lies inside the configured
+   --  practical threshold.
+   --  @enum Contender_Faster The contender is faster beyond the threshold.
+   --  @enum Reference_Faster The reference is faster beyond the threshold.
    type Comparison_Verdict is
      (Inconclusive, Practically_Equivalent, Contender_Faster,
       Reference_Faster);
@@ -42,11 +59,16 @@ package Flyology_Bench is
    --  Equal_Time independently calibrates each implementation toward the same
    --  per-sample duration. Shared_Iterations uses one logical operation count
    --  for every implementation, so elapsed time varies with their speed.
+   --  @enum Equal_Time Independently calibrate equal timed slices.
+   --  @enum Shared_Iterations Use one logical operation count for every case.
    type Comparison_Batch_Policy is (Equal_Time, Shared_Iterations);
 
    --  Controls how Compare_Many orders implementation batches.
    --  Balanced_Rounds interleaves cases and rotates their positions.
    --  Sequential_Cases completes one case's sample block before the next.
+   --  @enum Balanced_Rounds Interleave and position-balance implementation
+   --  batches.
+   --  @enum Sequential_Cases Collect one implementation's block at a time.
    type Shootout_Schedule_Policy is (Balanced_Rounds, Sequential_Cases);
 
    --  Controls warmup, calibration, and timed sampling.
@@ -116,8 +138,8 @@ package Flyology_Bench is
    type Multi_Comparison is private;
 
    generic
-      with procedure Operation;
       --  One logical operation with observable inputs or output.
+      with procedure Operation;
    --  Warm, calibrate, and measure one statically bound operation.
    --  @param Config Measurement policy.
    --  @param Result Collected raw samples and summary statistics.
@@ -126,8 +148,8 @@ package Flyology_Bench is
       Result : out Measurement);
 
    generic
-      with procedure Batch (Iterations : Iteration_Count);
       --  Executes the requested logical operation count.
+      with procedure Batch (Iterations : Iteration_Count);
    --  Warm, calibrate, and measure a caller-controlled batch. The caller must
    --  perform exactly Iterations logical operations before returning.
    --  @param Config Measurement policy.
@@ -137,12 +159,12 @@ package Flyology_Bench is
       Result : out Measurement);
 
    generic
-      with procedure Setup;
       --  Prepare one batch outside its timed region.
-      with procedure Operation;
+      with procedure Setup;
       --  One logical operation executed inside the timed region.
-      with procedure Teardown;
+      with procedure Operation;
       --  Consume or release batch state outside its timed region.
+      with procedure Teardown;
    --  Measure an operation with per-sample setup and teardown hooks. Teardown
    --  also runs when the measured operation raises, before the exception is
    --  propagated.
@@ -153,12 +175,12 @@ package Flyology_Bench is
       Result : out Measurement);
 
    generic
-      type Element is private;
       --  Observable result produced by a batch.
+      type Element is private;
+      --  Execute a batch and return a value that keeps its work observable.
       with procedure Batch
         (Iterations : Iteration_Count;
          Value      : out Element);
-      --  Execute a batch and return a value that keeps its work observable.
    --  Measure a result-producing batch and pass its result to an opaque barrier
    --  after the ending timestamp. This avoids charging barrier cost to the
    --  measured operation.
@@ -169,10 +191,10 @@ package Flyology_Bench is
       Result : out Measurement);
 
    generic
-      with procedure Reference_Operation;
       --  Existing or baseline operation.
-      with procedure Contender_Operation;
+      with procedure Reference_Operation;
       --  Operation compared with the reference.
+      with procedure Contender_Operation;
    --  Measure two operations in adjacent, order-balanced sample pairs. Equal
    --  timed slices are the default; Shared_Iterations can require one count.
    --  @param Config Shared measurement policy.
@@ -182,10 +204,10 @@ package Flyology_Bench is
       Result : out Comparison);
 
    generic
-      with procedure Reference_Batch (Iterations : Iteration_Count);
       --  Executes a reference batch.
-      with procedure Contender_Batch (Iterations : Iteration_Count);
+      with procedure Reference_Batch (Iterations : Iteration_Count);
       --  Executes a contender batch.
+      with procedure Contender_Batch (Iterations : Iteration_Count);
    --  Measure two caller-controlled batches in adjacent, order-balanced sample
    --  pairs. Each batch must perform exactly Iterations logical operations.
    --  @param Config Shared measurement policy.
@@ -195,12 +217,12 @@ package Flyology_Bench is
       Result : out Comparison);
 
    generic
-      type Case_Id is (<>);
       --  Enumeration of implementations; the first value is the reference.
+      type Case_Id is (<>);
+      --  Execute Iterations operations for the selected implementation.
       with procedure Batch
         (Which      : Case_Id;
          Iterations : Iteration_Count);
-      --  Execute Iterations operations for the selected implementation.
    --  Compare two to sixteen implementations in shared rounds. Each case gets
    --  a comparable timed slice by default and occupies every execution
    --  position equally, or within one round when counts are indivisible.
@@ -495,8 +517,8 @@ package Flyology_Bench is
       Index  : Comparison_Case_Index) return Comparison;
 
    generic
-      type Element is private;
       --  Value type accepted by the barrier.
+      type Element is private;
    --  Make a value visible to an opaque compiler barrier. Place this outside a
    --  timed nanosecond operation because the barrier is an out-of-line call.
    --  @param Value Input or output value that the optimizer must retain.

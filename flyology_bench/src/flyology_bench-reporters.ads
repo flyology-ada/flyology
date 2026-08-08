@@ -7,6 +7,10 @@ package Flyology_Bench.Reporters is
    --  Renders benchmark measurements and comparisons for people and tools.
 
    --  Selects whether human-readable console output uses ANSI styling.
+   --  @enum Auto Enable ANSI only when the destination is an interactive
+   --  terminal and styling has not been disabled by the environment.
+   --  @enum Plain Never emit ANSI control sequences.
+   --  @enum ANSI Emit ANSI color and terminal control sequences.
    type Console_Style is (Auto, Plain, ANSI);
 
    --  Render an in-place terminal progress display. Pass this procedure's
@@ -25,6 +29,7 @@ package Flyology_Bench.Reporters is
 
    --  Return a configuration that renders terminal progress for the run.
    --  @param Base Measurement policy to preserve apart from its callback.
+   --  @param Name Human-readable benchmark identity shown during progress.
    --  @return Base with Terminal_Progress installed.
    function Terminal_Mode
      (Base : Configuration := Default_Configuration;
@@ -36,6 +41,7 @@ package Flyology_Bench.Reporters is
    --  @param File Destination text file.
    --  @param Include_Telemetry Whether to append process-wide telemetry from
    --  the most recent terminal-mode run.
+   --  @param Style ANSI styling policy.
    procedure Put_Console
      (Name   : String;
       Result : Measurement;
@@ -72,6 +78,7 @@ package Flyology_Bench.Reporters is
    --  @param Contender_Name Name of the operation compared with it.
    --  @param Result Completed paired comparison.
    --  @param File Destination text file.
+   --  @param Style ANSI styling policy.
    procedure Put_Comparison_Console
      (Reference_Name : String;
       Contender_Name : String;
@@ -107,8 +114,8 @@ package Flyology_Bench.Reporters is
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    generic
-      type Case_Id is (<>);
       --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
    --  Print a colored table of every implementation versus case one.
    --  @param Result Completed multi-way comparison.
    --  @param File Destination text file.
@@ -128,8 +135,8 @@ package Flyology_Bench.Reporters is
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    generic
-      type Case_Id is (<>);
       --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
    --  Print one CSV row per contender versus case one.
    --  @param Result Completed multi-way comparison.
    --  @param File Destination text file.
@@ -138,8 +145,8 @@ package Flyology_Bench.Reporters is
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    generic
-      type Case_Id is (<>);
       --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
    --  Print one JSON object containing the reference and all contender rows.
    --  @param Result Completed multi-way comparison.
    --  @param File Destination text file.

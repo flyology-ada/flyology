@@ -1,9 +1,12 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
---  Optional host controls for reducing benchmark placement noise.
 package Flyology_Bench.Host_Control is
+   --  Optional host controls for reducing benchmark placement noise.
+
    --  Strength of the placement policy applied by the host.
+   --  @enum Advisory Placement is a scheduler hint rather than a hard binding.
+   --  @enum Strict The calling thread is bound to the selected logical CPU.
    type Placement_Strength is (Advisory, Strict);
 
    --  Pin or affinity-tag the calling native thread. Linux applies strict CPU

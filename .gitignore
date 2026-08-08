@@ -17,4 +17,5 @@
 /showcases/http-comparison/servers/rust/target/
 /docs/api/
 /docs/gnatdoc/html/
+/docs/gnatdoc-bench/
 /coverage/

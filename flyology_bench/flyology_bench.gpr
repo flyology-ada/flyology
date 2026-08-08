@@ -13,4 +13,8 @@ project Flyology_Bench is
       for Default_Switches ("C") use
         ("-O3", "-std=c11", "-Wall", "-Wextra", "-Werror");
    end Compiler;
+
+   package Documentation is
+      for Resources_Dir ("html") use "../docs/gnatdoc-bench/html";
+   end Documentation;
 end Flyology_Bench;
