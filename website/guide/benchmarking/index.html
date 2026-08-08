@@ -245,7 +245,7 @@ begin
    Flyology_Bench.Reporters.Put_Console ("integer_mix", Result);
 end Bench_Mix;</code></pre>
             </figure>
-            <p><code>Measure</code> is generic, so the operation is statically bound. Use <code>Measure_Batched</code> when one timed batch coordinates tasks or owns a fixture that the harness must not recreate per operation. Use setup and teardown hooks when preparation must stay outside each timed interval.</p>
+            <p><code>Measure</code> is generic, so the operation is statically bound. Use <code>Measure_Batched</code> when one timed batch coordinates tasks or owns a fixture that the harness must not recreate per operation. Use setup and teardown hooks when preparation must stay outside each timed interval. The generated <a href="../../api/flyology_bench/">flyology_bench API reference</a> lists the complete configuration, measurement, comparison, and reporter contracts.</p>
           </section>
 
           <section id="read">

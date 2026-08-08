@@ -58,6 +58,10 @@ cat "$runtime_gnatdoc_log"
 (
    cd "$project_root/flyology_bench"
    "$alr" build --stop-after=generation
+   #  A generation-only Alire build does not create the project directories
+   #  that GNATdoc expects when it loads the library project. Fresh Pages
+   #  runners therefore need the ignored directories explicitly.
+   mkdir -p obj lib
    if ! "$alr" exec -- gnatdoc \
      --backend=html \
      --warnings \
@@ -89,6 +93,9 @@ if grep -E 'warning:' "$bench_gnatdoc_log" \
     '^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$'
 then
    printf '%s\n' "unexpected warning in benchmark GNATdoc output" >&2
+   grep -E 'warning:' "$bench_gnatdoc_log" \
+     | grep -E -v \
+       '^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$' >&2
    exit 1
 fi
 
