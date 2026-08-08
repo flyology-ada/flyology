@@ -12,6 +12,15 @@ package Flyology.Data_Structures.Allocation_Algorithms.Buddy is new
     (Algorithm_Identity => Buddy_Kernel.Identity,
      Algorithm_Minimum_Block_Limit =>
        Buddy_Kernel.Minimum_Block_Limit,
+     Algorithm_Capabilities =>
+       (Search                => Allocation_Algorithms.Logarithmic,
+        Allocation_Contention => Allocation_Algorithms.Whole_Allocator,
+        Release_Contention    => Allocation_Algorithms.Whole_Allocator,
+        In_Band_Metadata      => False,
+        Splits_Blocks         => True,
+        Coalesces_On_Release  => True,
+        Timed_Contention      => True,
+        Release_Exclusion     => True),
      Algorithm_Configuration => Buddy_Kernel.Configuration,
      Algorithm_View => Buddy_Kernel.View,
      Implementation_Required_Storage =>

@@ -21,6 +21,10 @@ package Flyology.Data_Structures.Arenas with Preelaborate is
    Minimum_Block_Limit : constant Positive :=
      Algorithm.Minimum_Block_Limit;
 
+   --  Compile-time behavioral characteristics of the selected algorithm.
+   Capabilities : constant Allocation_Algorithms.Allocation_Capabilities :=
+     Algorithm.Capabilities;
+
    --  Algorithm-specific immutable creation parameters.
    subtype Configuration is Algorithm.Configuration;
 

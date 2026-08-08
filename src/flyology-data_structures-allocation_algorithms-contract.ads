@@ -6,6 +6,7 @@ with Interfaces;
 --  dispatch, stored callback, or process-local pointer to backing bytes.
 --  @formal Algorithm_Identity Complete persisted allocator layout identity
 --  @formal Algorithm_Minimum_Block_Limit Smallest permitted allocation unit
+--  @formal Algorithm_Capabilities Compile-time behavioral capabilities
 --  @formal Algorithm_Configuration Immutable algorithm creation parameters
 --  @formal Algorithm_View Process-local implementation view
 --  @formal Implementation_Required_Storage Compute complete stored extent
@@ -31,6 +32,7 @@ with Interfaces;
 generic
    Algorithm_Identity : Layout_Identity;
    Algorithm_Minimum_Block_Limit : Positive;
+   Algorithm_Capabilities : Allocation_Algorithms.Allocation_Capabilities;
    type Algorithm_Configuration is private;
    type Algorithm_View is limited private;
    with function Implementation_Required_Storage
@@ -124,6 +126,10 @@ package Flyology.Data_Structures.Allocation_Algorithms.Contract is
    --  Smallest allocation unit accepted by this implementation.
    Minimum_Block_Limit : constant Positive :=
      Algorithm_Minimum_Block_Limit;
+
+   --  Compile-time synchronization, placement, and search characteristics.
+   Capabilities : constant Allocation_Algorithms.Allocation_Capabilities :=
+     Algorithm_Capabilities;
 
    --  Algorithm-specific immutable creation parameters.
    subtype Configuration is Algorithm_Configuration;
