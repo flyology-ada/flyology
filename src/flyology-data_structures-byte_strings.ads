@@ -10,16 +10,19 @@ private with Flyology.Data_Structures.Layouts;
 --  object; Poison_Error then persists until exclusive reinitialization.
 --  Is_Attached, Capacity, and Is_Poisoned inspect only local or lifecycle
 --  metadata and do not acquire the payload guard.
+--  The application must exclude Attach, Detach, Initialize, Destroy, and
+--  backing-lifetime changes from every use of the same local View. Separate
+--  attached views may perform ordinary operations concurrently.
 package Flyology.Data_Structures.Byte_Strings with Preelaborate is
 
    --  Eight-byte magic stored in every byte-string header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5342_5354_3031#;
 
    --  Schema identifier for the current byte-string layout.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4253_5452_0002#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_4253_5452_0003#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -34,7 +37,8 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    function Required_Storage (Maximum_Length : Positive) return Byte_Count;
 
    --  Initialize an empty string and attach Item. Exclusive reinitialization
-   --  is the only recovery from a poisoned lifecycle state.
+   --  is the only recovery from a poisoned lifecycle state and makes every
+   --  preexisting view stale; each peer must attach again.
    --  @param Item View attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero eight-byte-aligned stored offset
@@ -64,7 +68,8 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
 
    --  Report whether Item is locally attached.
    --  @param Item View to inspect
-   --  @return True only while local mapping information is retained
+   --  @return True while local mapping information is retained; this does not
+   --     guarantee the cached initialization epoch is still current
    function Is_Attached (Item : View) return Boolean;
 
    --  Return the fixed payload capacity.
@@ -92,14 +97,16 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @exception Busy_Error The lifecycle changed during the poison attempt
    procedure Poison (Region : Region_View; Location : Region_Offset);
 
-   --  Replace the string with Data.
+   --  Replace the string with Data. Overlap between Data and the stored
+   --  payload is supported.
    --  @param Item Internally synchronized attached view
    --  @param Data Replacement bytes
    --  @exception Constraint_Error Data exceeds Capacity
    procedure Assign
      (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
-   --  Append Data to the current string.
+   --  Append Data to the current string. Overlap between Data and the stored
+   --  payload is supported.
    --  @param Item Internally synchronized attached view
    --  @param Data Bytes appended in order
    --  @exception Constraint_Error The resulting length exceeds Capacity

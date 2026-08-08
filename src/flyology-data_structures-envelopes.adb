@@ -27,8 +27,9 @@ package body Flyology.Data_Structures.Envelopes is
       then
          raise Constraint_Error with
            "nested layout identity fields must be nonzero";
-      elsif Content_Extent = 0 then
-         raise Constraint_Error with "envelope content extent must be nonzero";
+      elsif Content_Extent < Layouts.Header_Size then
+         raise Constraint_Error with
+           "envelope content is smaller than a nested structure header";
       elsif Content_Alignment >
         Byte_Count (Interfaces.Unsigned_32'Last)
       then
@@ -70,6 +71,7 @@ package body Flyology.Data_Structures.Envelopes is
       Core : Layouts.Local_View;
       Content_Offset, Total_Extent : Byte_Count;
    begin
+      Detach (Item);
       Geometry
         (Content_Extent, Content_Alignment, Content_Offset, Total_Extent);
       Layouts.Begin_Initialize
@@ -97,6 +99,12 @@ package body Flyology.Data_Structures.Envelopes is
         (Layouts.Address_At (Item.Core, Nested_Schema_Offset, 8, 8),
          Nested_Identity.Schema);
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Attach
@@ -110,6 +118,7 @@ package body Flyology.Data_Structures.Envelopes is
       Header : Layouts.Header_Values;
       Content_Offset, Total_Extent : Byte_Count;
    begin
+      Detach (Item);
       Geometry
         (Content_Extent, Content_Alignment, Content_Offset, Total_Extent);
       Layouts.Attach
@@ -145,6 +154,12 @@ package body Flyology.Data_Structures.Envelopes is
       Set_View
         (Item, Core, Content_Offset, Content_Extent,
          Content_Alignment);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Attach;
 
    function Content_Location (Item : View) return Region_Offset is

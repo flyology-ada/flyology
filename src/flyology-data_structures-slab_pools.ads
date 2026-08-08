@@ -10,6 +10,7 @@ private with System;
 --  access are internally synchronized across native tasks,
 --  processes, and distinct mappings. Initialization, attachment, destruction,
 --  and backing-region lifetime changes require quiescence across every view.
+--  They must also be excluded from ordinary use of the same local View.
 --  Termination during an operation leaves its slot abandoned rather than
 --  silently reusable; an external recovery authority may poison and reclaim
 --  that slot only after establishing owner death and target-slot quiescence.
@@ -19,10 +20,10 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    Magic : constant Interfaces.Unsigned_64 := 16#4644_534C_4142_3031#;
 
    --  Schema identifier for the current fixed-width slab layout.
-   Schema : constant Interfaces.Unsigned_64 := 16#0002_534C_4142_0001#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0002_534C_4142_0002#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -67,6 +68,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  Create a new slab at Location and attach Item. The caller must
    --  exclusively own the complete target extent. Initialization publishes a
    --  ready state with a release store only after all metadata is complete.
+   --  Every preexisting view becomes stale and must attach again.
    --  @param Item View attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero aligned stored offset
@@ -109,7 +111,8 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
 
    --  Report whether Item is locally attached.
    --  @param Item View to inspect
-   --  @return True only while Item retains local mapping information
+   --  @return True while Item retains local mapping information; this does not
+   --     guarantee the cached initialization epoch is still current
    function Is_Attached (Item : View) return Boolean;
 
    --  Return the immutable stored configuration.
@@ -119,7 +122,11 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    function Current_Metadata (Item : View) return Metadata;
 
    --  Attempt to allocate one free slot without waiting. Every outcome is
-   --  bounded by one scan of the validated capacity.
+   --  bounded by one scan of the validated capacity. A process that terminates
+   --  after the slot becomes live but before it records the returned handle
+   --  leaves a committed allocation that cannot be identified from the slab
+   --  alone; applications needing recovery must journal that ownership or
+   --  exclusively reinitialize the whole pool.
    --  @param Item Any concurrently attached slab view
    --  @param Value New generation-stamped handle or Null_Handle
    --  @param Result Allocated, exhausted, or bounded-contention outcome
@@ -129,11 +136,14 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
       Result    : out Allocation_Result);
 
    --  Reclaim Value and advance its generation so every copy becomes stale.
+   --  Releasing the maximum generation permanently poisons that slot until
+   --  exclusive whole-pool initialization instead of wrapping to an old stamp.
    --  @param Item Any concurrently attached slab view
    --  @param Value Live handle returned by this slab
    --  @exception Handle_Error Value is null, malformed, stale, or reclaimed
    --  @exception Busy_Error The bounded claim budget is exhausted
    --  @exception Poison_Error Value addresses a poisoned slot
+   --     or its generation is exhausted and the slot was retired
    --  @exception Layout_Error Slot bookkeeping is corrupt
    procedure Release
      (Item  : in out View;
@@ -202,13 +212,14 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
 
    --  Explicitly recycle a poisoned slot after external recovery authority
    --  has established target-slot quiescence. The generation advances before
-   --  the slot is published, so every earlier handle remains stale. Failure
-   --  leaves the slot poisoned. Whole-object exclusive Initialize remains an
-   --  unconditional recovery path.
+   --  the slot is published, so every earlier handle remains stale. A maximum
+   --  generation cannot advance and remains poisoned until whole-object
+   --  exclusive Initialize. Other failures also leave the slot poisoned.
    --  @param Item Any attached slab view
    --  @param Slot One-based poisoned slot to reclaim
    --  @exception Handle_Error Slot is null or out of range
    --  @exception Program_Error Slot is not poisoned
+   --  @exception Poison_Error The slot generation is exhausted
    procedure Recover_Poisoned
      (Item : in out View;
       Slot : Handles.Slot_Index);

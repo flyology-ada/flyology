@@ -1,23 +1,21 @@
-with Ada.Unchecked_Conversion;
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
 
 package body Flyology.Data_Structures.Rings.MPMC is
    package Atomic renames Flyology.Data_Structures.Atomics;
+   package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
 
-   use type Interfaces.Integer_64;
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Policy.Sequence_Relation;
 
    Enqueue_Offset : constant Byte_Count := 64;
    Dequeue_Offset : constant Byte_Count := 128;
    Slots_Offset   : constant Byte_Count := 192;
    Sequence_Size  : constant Byte_Count := 8;
-
-   function As_Signed is new Ada.Unchecked_Conversion
-     (Interfaces.Unsigned_64, Interfaces.Integer_64);
 
    procedure Geometry
      (Capacity       : Positive;
@@ -26,8 +24,9 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Stride         : out Byte_Count;
       Extent         : out Byte_Count) is
    begin
-      if (Interfaces.Unsigned_64 (Capacity) and
-          (Interfaces.Unsigned_64 (Capacity) - 1)) /= 0
+      if Capacity < 2 then
+         raise Constraint_Error with "MPMC capacity must be at least two";
+      elsif not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
       then
          raise Constraint_Error with "MPMC capacity must be a power of two";
       end if;
@@ -71,7 +70,10 @@ package body Flyology.Data_Structures.Rings.MPMC is
       return Layouts.Checked_Add
         (Slots_Offset,
          Layouts.Checked_Multiply
-           (Byte_Count (Position and Item.Mask), Item.Stride));
+           (Byte_Count
+              (Policy.Masked_Index
+                 (Position, Policy.Positive_U32 (Item.Capacity_Value))),
+            Item.Stride));
    end Slot_Relative;
 
    function Sequence_Address
@@ -91,6 +93,31 @@ package body Flyology.Data_Structures.Rings.MPMC is
          Byte_Count (Item.Element_Value), 1);
    end Payload_Address;
 
+   procedure Validate_Sequences
+     (Item : View; Enqueue, Dequeue : Interfaces.Unsigned_64)
+   is
+      Occupancy : constant Interfaces.Unsigned_64 := Enqueue - Dequeue;
+      Position, Expected_Sequence : Interfaces.Unsigned_64;
+   begin
+      if not Policy.Within_Capacity
+        (Enqueue, Dequeue, Item.Capacity_Value)
+      then
+         raise Layout_Error with "MPMC ring claim positions are corrupt";
+      end if;
+      for Offset in Interfaces.Unsigned_64 range
+        0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
+      loop
+         Position := Dequeue + Offset;
+         Expected_Sequence :=
+           (if Offset < Occupancy then Position + 1 else Position);
+         if Atomic.Load_Acquire_U64 (Sequence_Address (Item, Position)) /=
+           Expected_Sequence
+         then
+            raise Layout_Error with "MPMC slot sequence is corrupt";
+         end if;
+      end loop;
+   end Validate_Sequences;
+
    procedure Initialize
      (Item         : out View;
       Region       : Region_View;
@@ -103,6 +130,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Capacity_32 : constant Interfaces.Unsigned_32 :=
         Interfaces.Unsigned_32 (Capacity);
    begin
+      Detach (Item);
       Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
@@ -126,6 +154,12 @@ package body Flyology.Data_Structures.Rings.MPMC is
             Interfaces.Unsigned_64 (Slot));
       end loop;
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Attach
@@ -139,9 +173,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Header : Layouts.Header_Values;
       Payload_Offset, Stride, Extent : Byte_Count;
       Enqueue, Dequeue : Interfaces.Unsigned_64;
-      Occupancy : Interfaces.Unsigned_64;
-      Position, Expected_Sequence : Interfaces.Unsigned_64;
    begin
+      Detach (Item);
       Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
@@ -161,22 +194,13 @@ package body Flyology.Data_Structures.Rings.MPMC is
         (Item.Enqueue_Address);
       Dequeue := Atomic.Load_Acquire_U64
         (Item.Dequeue_Address);
-      Occupancy := Enqueue - Dequeue;
-      if Occupancy > Interfaces.Unsigned_64 (Item.Capacity_Value) then
-         raise Layout_Error with "MPMC ring claim positions are corrupt";
-      end if;
-      for Offset in Interfaces.Unsigned_64 range
-        0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
-      loop
-         Position := Dequeue + Offset;
-         Expected_Sequence :=
-           (if Offset < Occupancy then Position + 1 else Position);
-         if Atomic.Load_Acquire_U64 (Sequence_Address (Item, Position)) /=
-           Expected_Sequence
-         then
-            raise Layout_Error with "MPMC slot sequence is corrupt";
+      Validate_Sequences (Item, Enqueue, Dequeue);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
          end if;
-      end loop;
+         raise;
    end Attach;
 
    procedure Detach (Item : in out View) is
@@ -203,7 +227,9 @@ package body Flyology.Data_Structures.Rings.MPMC is
 
    procedure Check_Data (Item : View; Length : Natural) is
    begin
-      if Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
+      if not Item.Core.Attached then
+         raise Region_Error with "detached MPMC ring view";
+      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
          raise Constraint_Error with "MPMC element length does not match";
       end if;
    end Check_Data;
@@ -216,7 +242,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Position : Interfaces.Unsigned_64;
       Sequence : Interfaces.Unsigned_64;
       Expected : Interfaces.Unsigned_64;
-      Difference : Interfaces.Integer_64;
+      Relation : Policy.Sequence_Relation;
    begin
       Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
@@ -226,8 +252,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
          pragma Unreferenced (Attempt);
          Sequence := Atomic.Load_Acquire_U64
            (Sequence_Address (Item, Position));
-         Difference := As_Signed (Sequence - Position);
-         if Difference = 0 then
+         Relation := Policy.Classify_Sequence (Sequence, Position);
+         if Relation = Policy.Sequence_Ready then
             Expected := Position;
             if Atomic.Compare_Exchange_U64
               (Item.Enqueue_Address, Expected, Position + 1)
@@ -241,7 +267,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
                return;
             end if;
             Position := Expected;
-         elsif Difference < 0 then
+         elsif Relation = Policy.Sequence_Behind then
             Result := Full;
             return;
          else
@@ -260,7 +286,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Position : Interfaces.Unsigned_64;
       Sequence : Interfaces.Unsigned_64;
       Expected : Interfaces.Unsigned_64;
-      Difference : Interfaces.Integer_64;
+      Relation : Policy.Sequence_Relation;
    begin
       Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
@@ -270,8 +296,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
          pragma Unreferenced (Attempt);
          Sequence := Atomic.Load_Acquire_U64
            (Sequence_Address (Item, Position));
-         Difference := As_Signed (Sequence - (Position + 1));
-         if Difference = 0 then
+         Relation := Policy.Classify_Sequence (Sequence, Position + 1);
+         if Relation = Policy.Sequence_Ready then
             Expected := Position;
             if Atomic.Compare_Exchange_U64
               (Item.Dequeue_Address, Expected, Position + 1)
@@ -286,7 +312,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
                return;
             end if;
             Position := Expected;
-         elsif Difference < 0 then
+         elsif Relation = Policy.Sequence_Behind then
             Result := Empty;
             return;
          else
@@ -308,6 +334,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       if Enqueue /= Dequeue then
          raise Program_Error with "cannot destroy a nonempty MPMC ring";
       end if;
+      Validate_Sequences (Item, Enqueue, Dequeue);
       Layouts.Mark_Destroyed (Item.Core);
       Detach (Item);
    end Destroy;

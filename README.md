@@ -723,6 +723,17 @@ the complete extent and fails on incompatible, incomplete, truncated, or
 corrupt metadata. The packages create no mapping and package elaboration starts
 no task, scheduler, poller, or event loop.
 
+The shared lifecycle word also carries a 29-bit initialization epoch. A local
+view caches that epoch when it initializes or attaches. Exclusive
+reinitialization advances it before rewriting metadata, so every older view
+fails before using cached capacity, stride, or native addresses—even when the
+same bytes are reused for a different leaf. Peers must attach again after every
+initialization. Epochs do not wrap: after the final value, that extent fails
+closed and must be retired. Fresh or lifecycle-corrupt bytes start at epoch one;
+before using `Initialize` as recovery from out-of-band lifecycle corruption,
+the application must permanently retire every earlier view because the damaged
+epoch can no longer distinguish it.
+
 The first family is byte-oriented so an arbitrary Ada private type cannot hide
 an access value in persistent storage:
 
@@ -744,15 +755,23 @@ owns a slot leaves a persisted transitional state. An external recovery
 authority must establish owner death and target-slot quiescence before marking
 that slot poisoned and explicitly recycling it; recycling advances the
 generation, while exclusive whole-pool initialization remains the unconditional
-recovery path. A poisoned or transitional slot is never silently reused.
+recovery path. A poisoned or transitional slot is never silently reused, and a
+maximum generation is poisoned rather than wrapped. Termination after a slot
+has become live but before the caller records its returned handle leaves a
+committed allocation that the slab cannot identify as abandoned; applications
+that need recovery for that window must journal handle ownership externally or
+reinitialize the whole pool under exclusive authority.
 
 SPSC and MPMC counters occupy separate 64-byte control lines, and both use
-power-of-two capacities for masked slot selection. MPMC reports bounded
+power-of-two capacities for masked slot selection. MPMC capacity is at least
+two so a slot's ready and free sequence phases cannot alias. MPMC reports bounded
 contention rather than waiting. A producer or consumer that terminates after
 claiming an MPMC slot but before publishing its sequence can prevent later
 progress. Core does not detect that death; an external recovery authority can
 poison the ring after establishing quiescence, and exclusive initialization
-then restores an empty ring. The other structures cache validated geometry in
+then restores an empty ring. Destruction validates every slot sequence after
+the enqueue/dequeue equality check, so an abandoned final consumer claim is not
+mistaken for an empty ring. The other structures cache validated geometry in
 each local view and use fixed-stride contiguous storage with no allocation
 after initialization. None of these operations performs file opening,
 mapping, flushing, peer discovery, descriptor exchange, wake-up signaling, or
@@ -794,6 +813,12 @@ byte string, vector, or hash map must not be attaching while its shared guard
 or mutable contents can change. Slab attachment accepts valid transitional and
 poisoned slot states only under the same externally established quiescence so a
 new recovery authority does not need a retained pre-failure view.
+Attach, Detach, Initialize, Destroy, and backing-region lifetime changes must
+also be excluded from every ordinary operation on the same process-local view;
+internal synchronization coordinates separate attached views, not concurrent
+mutation of one view's cached native fields. A failed attachment leaves its
+output view detached. `Is_Attached` reports only whether those local fields are
+retained, not whether a later reinitialization has made their epoch stale.
 Every structure view must be detached before its local mapping disappears;
 `Destroy` requires the synchronization stated by the leaf package and marks
 the stored header unusable for every other view. The layouts use the host byte
@@ -1967,6 +1992,15 @@ proved admission, close/drain, counter, and circular-index transitions. Worker
 pools likewise consume proved start, completion classification, worker join,
 and terminal-state decisions. Resource destruction, task activation,
 protected-object mutual exclusion, and provider calls remain outside SPARK.
+
+Relocatable data-structure geometry and scalar state decisions also consume a
+private SPARK policy kernel. Its contracts prove checked addition,
+multiplication, power-of-two alignment, contained slices, initialization and
+slot-generation advancement without wrap, masked ring/hash indexing, bounded
+slab slot selection, SPSC distance bounds, and MPMC modular sequence
+classification. Native-address conversion, process-shared atomics, byte moves,
+and the concurrent algorithms remain outside that kernel and are covered by
+relocation, corruption, wraparound, and native-task stress tests.
 
 The supervision policy kernel proves run-time safety and its contracts for
 bounded state transitions, complete successful start plans, prerequisite

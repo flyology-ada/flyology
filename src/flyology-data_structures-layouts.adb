@@ -1,9 +1,11 @@
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Layouts is
    package Atomic renames Flyology.Data_Structures.Atomics;
+   package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
    package Native renames System.Storage_Elements;
 
@@ -13,10 +15,10 @@ package body Flyology.Data_Structures.Layouts is
    use type Native.Storage_Offset;
    use type System.Address;
 
-   Initializing : constant Interfaces.Unsigned_32 := 1;
-   Ready        : constant Interfaces.Unsigned_32 := 2;
-   Destroyed    : constant Interfaces.Unsigned_32 := 3;
-   Poisoned_State : constant Interfaces.Unsigned_32 := 5;
+   Initializing : constant Policy.Lifecycle_Code := 1;
+   Ready        : constant Policy.Lifecycle_Code := 2;
+   Destroyed    : constant Policy.Lifecycle_Code := 3;
+   Poisoned_State : constant Policy.Lifecycle_Code := 5;
 
    State_Offset      : constant Byte_Count := 0;
    Version_Offset    : constant Byte_Count := 4;
@@ -32,15 +34,15 @@ package body Flyology.Data_Structures.Layouts is
 
    function Checked_Add (Left, Right : Byte_Count) return Byte_Count is
    begin
-      if Right > Byte_Count'Last - Left then
+      if not Policy.Addition_Fits (Left, Right) then
          raise Constraint_Error with "relocatable layout addition overflow";
       end if;
-      return Left + Right;
+      return Policy.Add (Left, Right);
    end Checked_Add;
 
    function Checked_Multiply (Left, Right : Byte_Count) return Byte_Count is
    begin
-      if Left /= 0 and then Right > Byte_Count'Last / Left then
+      if not Policy.Multiplication_Fits (Left, Right) then
          raise Constraint_Error with
            "relocatable layout multiplication overflow";
       end if;
@@ -52,10 +54,10 @@ package body Flyology.Data_Structures.Layouts is
    is
       Remainder : Byte_Count;
    begin
-      if Alignment = 0
-        or else (Alignment and (Alignment - 1)) /= 0
-      then
+      if not Policy.Is_Power_Of_Two (Alignment) then
          raise Constraint_Error with "layout alignment is not a power of two";
+      elsif not Policy.Alignment_Fits (Value, Alignment) then
+         raise Constraint_Error with "aligned layout value overflows";
       end if;
       Remainder := Value mod Alignment;
       return
@@ -81,6 +83,7 @@ package body Flyology.Data_Structures.Layouts is
         (Base     => Address,
          Location => Location,
          Extent   => Extent,
+         Epoch_Value => 0,
          Attached => True);
    end Capture;
 
@@ -95,12 +98,12 @@ package body Flyology.Data_Structures.Layouts is
    begin
       if not Item.Attached or else Item.Base = System.Null_Address then
          raise Region_Error with "detached structure view";
-      elsif Relative > Item.Extent
-        or else Extent > Item.Extent - Relative
-      then
-         raise Layout_Error with "structure-relative extent is corrupt";
-      elsif Extent = 0 then
-         raise Region_Error with "zero-sized structure-relative slice";
+      elsif not Policy.Slice_Fits (Item.Extent, Relative, Extent) then
+         if Extent = 0 then
+            raise Region_Error with "zero-sized structure-relative slice";
+         else
+            raise Layout_Error with "structure-relative extent is corrupt";
+         end if;
       elsif Alignment = 0
         or else (Alignment and (Alignment - 1)) /= 0
       then
@@ -156,7 +159,10 @@ package body Flyology.Data_Structures.Layouts is
       Identity       : Layout_Identity;
       Extent         : Byte_Count;
       Header         : Header_Values;
-      Base_Alignment : Byte_Count) is
+      Base_Alignment : Byte_Count)
+   is
+      Previous_State : Interfaces.Unsigned_32;
+      Epoch_Value    : Policy.Epoch;
    begin
       if not Atomic.Supported then
          raise Program_Error with
@@ -165,22 +171,52 @@ package body Flyology.Data_Structures.Layouts is
          raise Constraint_Error with "structure extent is smaller than header";
       end if;
       Item := Capture (Region, Location, Extent, Base_Alignment);
+      Previous_State := Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4));
+      if Policy.Valid_State (Previous_State) then
+         if not Policy.Epoch_Can_Advance (Previous_State) then
+            raise Layout_Error with
+              "structure initialization epoch is exhausted";
+         end if;
+         Epoch_Value := Policy.Next_Epoch
+           (Policy.Epoch (Policy.State_Epoch (Previous_State)));
+      else
+         Epoch_Value := 1;
+      end if;
+      Item.Epoch_Value := Epoch_Value;
       Atomic.Store_Release_U32
-        (Address_At (Item, State_Offset, 4, 4), Initializing);
+        (Address_At (Item, State_Offset, 4, 4),
+         Policy.Make_State (Epoch_Value, Initializing));
       Write_Header (Item, Identity, Extent, Header);
    end Begin_Initialize;
 
    procedure Publish (Item : Local_View) is
    begin
       Atomic.Store_Release_U32
-        (Address_At (Item, State_Offset, 4, 4), Ready);
+        (Address_At (Item, State_Offset, 4, 4),
+         Policy.Make_State (Policy.Epoch (Item.Epoch_Value), Ready));
    end Publish;
 
    procedure Invalidate_Nested
-     (Item : Local_View; Relative : Byte_Count) is
+     (Item : Local_View; Relative : Byte_Count)
+   is
+      Address        : constant System.Address :=
+        Address_At (Item, Relative, 4, 4);
+      Previous_State : constant Interfaces.Unsigned_32 :=
+        Atomic.Load_Acquire_U32 (Address);
+      Epoch_Value    : Policy.Epoch;
    begin
+      if Policy.Valid_State (Previous_State) then
+         if not Policy.Epoch_Can_Advance (Previous_State) then
+            raise Layout_Error with "nested initialization epoch is exhausted";
+         end if;
+         Epoch_Value := Policy.Next_Epoch
+           (Policy.Epoch (Policy.State_Epoch (Previous_State)));
+      else
+         Epoch_Value := 1;
+      end if;
       Atomic.Store_Release_U32
-        (Address_At (Item, Relative, 4, 4), Initializing);
+        (Address, Policy.Make_State (Epoch_Value, Initializing));
    end Invalidate_Nested;
 
    procedure Attach
@@ -194,6 +230,7 @@ package body Flyology.Data_Structures.Layouts is
       Initial : constant Local_View :=
         Capture (Region, Location, Header_Size, Base_Alignment);
       Stored_Extent : Byte_Count;
+      Epoch_Value : Policy.Epoch;
    begin
       if not Atomic.Supported then
          raise Program_Error with
@@ -204,11 +241,14 @@ package body Flyology.Data_Structures.Layouts is
          State : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
            (Address_At (Initial, State_Offset, 4, 4));
       begin
-         if State = Poisoned_State then
+         if not Policy.Valid_State (State) then
+            raise Layout_Error with "structure initialization is incomplete";
+         elsif Policy.State_Lifecycle (State) = Poisoned_State then
             raise Poison_Error with "structure is poisoned";
-         elsif State /= Ready then
+         elsif Policy.State_Lifecycle (State) /= Ready then
             raise Layout_Error with "structure initialization is incomplete";
          end if;
+         Epoch_Value := Policy.Epoch (Policy.State_Epoch (State));
       end;
 
       if Bytes.Read_U32
@@ -227,7 +267,12 @@ package body Flyology.Data_Structures.Layouts is
 
       Stored_Extent := Byte_Count
         (Bytes.Read_U64 (Address_At (Initial, Extent_Offset, 8, 8)));
+      if Stored_Extent < Header_Size then
+         raise Layout_Error with
+           "stored structure extent is smaller than header";
+      end if;
       Item := Capture (Region, Location, Stored_Extent, Base_Alignment);
+      Item.Epoch_Value := Epoch_Value;
       Header :=
         (Capacity => Bytes.Read_U32
            (Address_At (Item, Capacity_Offset, 4, 4)),
@@ -245,35 +290,51 @@ package body Flyology.Data_Structures.Layouts is
 
    procedure Require_Ready (Item : Local_View) is
       State : Interfaces.Unsigned_32;
+      Expected : Interfaces.Unsigned_32;
    begin
       if not Item.Attached then
          raise Region_Error with "detached structure view";
       end if;
       State := Atomic.Load_Acquire_U32
         (Address_At (Item, State_Offset, 4, 4));
-      if State = Poisoned_State then
+      if Item.Epoch_Value not in Policy.Epoch then
+         raise Layout_Error with "structure view has no initialization epoch";
+      end if;
+      Expected := Policy.Make_State (Policy.Epoch (Item.Epoch_Value), Ready);
+      if State =
+        Policy.Make_State (Policy.Epoch (Item.Epoch_Value), Poisoned_State)
+      then
          raise Poison_Error with "structure is poisoned";
-      elsif State /= Ready then
-         raise Layout_Error with "structure is not active";
+      elsif State /= Expected then
+         raise Layout_Error with "structure view is stale or inactive";
       end if;
    end Require_Ready;
 
    procedure Poison (Item : Local_View) is
       Expected : Interfaces.Unsigned_32;
+      Ready_State, Poison_State : Interfaces.Unsigned_32;
    begin
       if not Item.Attached then
          raise Region_Error with "detached structure view";
       end if;
+      if Item.Epoch_Value not in Policy.Epoch then
+         raise Layout_Error with "structure view has no initialization epoch";
+      end if;
+      Ready_State := Policy.Make_State
+        (Policy.Epoch (Item.Epoch_Value), Ready);
+      Poison_State := Policy.Make_State
+        (Policy.Epoch (Item.Epoch_Value), Poisoned_State);
       Expected := Atomic.Load_Acquire_U32
         (Address_At (Item, State_Offset, 4, 4));
       for Attempt in 1 .. 2 loop
          pragma Unreferenced (Attempt);
-         if Expected = Poisoned_State then
+         if Expected = Poison_State then
             return;
-         elsif Expected /= Ready then
-            raise Layout_Error with "inactive structure cannot be poisoned";
+         elsif Expected /= Ready_State then
+            raise Layout_Error with
+              "stale or inactive structure cannot be poisoned";
          elsif Atomic.Compare_Exchange_U32
-           (Address_At (Item, State_Offset, 4, 4), Expected, Poisoned_State)
+           (Address_At (Item, State_Offset, 4, 4), Expected, Poison_State)
          then
             return;
          end if;
@@ -287,13 +348,20 @@ package body Flyology.Data_Structures.Layouts is
       Identity       : Layout_Identity;
       Base_Alignment : Byte_Count)
    is
-      Item : constant Local_View :=
+      Item : Local_View :=
         Capture (Region, Location, Header_Size, Base_Alignment);
-      State : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
-        (Address_At (Item, State_Offset, 4, 4));
+      State : Interfaces.Unsigned_32;
    begin
-      if State /= Ready
-        and then State /= Poisoned_State
+      if not Atomic.Supported then
+         raise Program_Error with
+           "process-capable 32/64-bit atomics are unavailable";
+      end if;
+      State := Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4));
+      if not Policy.Valid_State (State)
+        or else
+          (Policy.State_Lifecycle (State) /= Ready
+           and then Policy.State_Lifecycle (State) /= Poisoned_State)
       then
          raise Layout_Error with
            "incomplete structure cannot be recovery-poisoned";
@@ -306,30 +374,53 @@ package body Flyology.Data_Structures.Layouts is
       then
          raise Layout_Error with "recovery poison identity does not match";
       end if;
+      Item.Epoch_Value := Policy.State_Epoch (State);
       Poison (Item);
    end Poison_At;
 
    function Is_Poisoned (Item : Local_View) return Boolean is
+      State : Interfaces.Unsigned_32;
    begin
       if not Item.Attached then
          raise Region_Error with "detached structure view";
+      elsif Item.Epoch_Value not in Policy.Epoch then
+         raise Layout_Error with "structure view has no initialization epoch";
       end if;
-      return Atomic.Load_Acquire_U32
-        (Address_At (Item, State_Offset, 4, 4)) = Poisoned_State;
+      State := Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4));
+      if not Policy.Valid_State (State) then
+         raise Layout_Error with "structure lifecycle state is corrupt";
+      elsif Policy.State_Epoch (State) /= Item.Epoch_Value then
+         raise Layout_Error with "structure view is stale";
+      elsif Policy.State_Lifecycle (State) = Poisoned_State then
+         return True;
+      elsif Policy.State_Lifecycle (State) /= Ready then
+         raise Layout_Error with "structure is not active";
+      end if;
+      return False;
    end Is_Poisoned;
 
    procedure Mark_Destroyed (Item : in out Local_View) is
-      Expected : Interfaces.Unsigned_32 := Ready;
+      Expected : Interfaces.Unsigned_32;
    begin
       if not Item.Attached then
          raise Region_Error with "detached structure view";
-      elsif not Atomic.Compare_Exchange_U32
-        (Address_At (Item, State_Offset, 4, 4), Expected, Destroyed)
+      elsif Item.Epoch_Value not in Policy.Epoch then
+         raise Layout_Error with "structure view has no initialization epoch";
+      else
+         Expected := Policy.Make_State
+           (Policy.Epoch (Item.Epoch_Value), Ready);
+      end if;
+      if not Atomic.Compare_Exchange_U32
+        (Address_At (Item, State_Offset, 4, 4), Expected,
+         Policy.Make_State (Policy.Epoch (Item.Epoch_Value), Destroyed))
       then
-         if Expected = Poisoned_State then
+         if Expected = Policy.Make_State
+           (Policy.Epoch (Item.Epoch_Value), Poisoned_State)
+         then
             raise Poison_Error with "structure is poisoned";
          else
-            raise Layout_Error with "structure is not active";
+            raise Layout_Error with "structure is stale or not active";
          end if;
       end if;
       Detach (Item);

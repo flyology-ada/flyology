@@ -9,16 +9,18 @@ private with System;
 --  different mappings. Acquire/release publication makes payload transfer
 --  explicit. Attachment and destruction require quiescence. Operations never
 --  wait, allocate, enter the Flyology scheduler, or invoke a blocking syscall.
+--  Attach, Detach, Initialize, Destroy, and backing-lifetime changes must not
+--  race with any use of the same local View.
 package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
 
    --  Eight-byte magic stored in every SPSC header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5350_5343_3031#;
 
    --  Schema identifier for the current SPSC layout and memory ordering.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_5350_5343_0002#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_5350_5343_0003#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -47,7 +49,8 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
      (Capacity : Positive; Element_Size : Positive) return Byte_Count;
 
    --  Initialize a new empty ring and attach Item. The caller exclusively
-   --  owns the target extent until ready-state publication completes.
+   --  owns the target extent until ready-state publication completes. Every
+   --  preexisting view becomes stale and must attach again.
    --  @param Item View attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero eight-byte-aligned stored offset
@@ -88,7 +91,8 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
 
    --  Report whether Item is locally attached.
    --  @param Item View to inspect
-   --  @return True only while local mapping information is retained
+   --  @return True while local mapping information is retained; this does not
+   --     guarantee the cached initialization epoch is still current
    function Is_Attached (Item : View) return Boolean;
 
    --  Report whether Item's backing ring was explicitly poisoned.

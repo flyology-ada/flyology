@@ -12,16 +12,21 @@ private with System;
 --  it can prevent later progress. Core does not detect participant death; an
 --  external recovery authority may poison the ring and reinitialize it after
 --  establishing quiescence. Attachment and destruction require quiescence.
+--  Signed modular sequence ordering assumes that no paused operation is
+--  overtaken by 2**63 completed claims; ordinary 64-bit counter wrap remains
+--  supported within that horizon.
+--  Attach, Detach, Initialize, Destroy, and backing-lifetime changes must not
+--  race with any use of the same local View.
 package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
    --  Eight-byte magic stored in every MPMC header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_4D50_4D43_3031#;
 
    --  Schema identifier for the current per-slot-sequence algorithm.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4D50_4D43_0002#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_4D50_4D43_0003#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -46,15 +51,17 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    type Pop_Result is (Popped, Empty, Pop_Contended);
 
    --  Compute the complete MPMC layout extent. Capacity must be a power of
-   --  two so hot-path slot selection uses a mask.
+   --  two and at least two so ready and free slot sequences remain distinct.
    --  @param Capacity Number of usable elements
    --  @param Element_Size Bytes per element
    --  @return Required header, sequence counters, padding, and payload bytes
-   --  @exception Constraint_Error Capacity is not a power of two
+   --  @exception Constraint_Error Capacity is below two, not a power of two,
+   --     or cannot be represented in the stored layout
    function Required_Storage
      (Capacity : Positive; Element_Size : Positive) return Byte_Count;
 
-   --  Initialize an empty MPMC ring and attach Item.
+   --  Initialize an empty MPMC ring and attach Item. Every preexisting view
+   --  becomes stale and must attach again.
    --  @param Item View attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero eight-byte-aligned stored offset
@@ -95,7 +102,8 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
    --  Report whether Item is locally attached.
    --  @param Item View to inspect
-   --  @return True only while local mapping information is retained
+   --  @return True while local mapping information is retained; this does not
+   --     guarantee the cached initialization epoch is still current
    function Is_Attached (Item : View) return Boolean;
 
    --  Report whether Item's backing ring was explicitly poisoned.

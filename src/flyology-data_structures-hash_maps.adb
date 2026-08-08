@@ -1,10 +1,12 @@
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Hash_Maps is
    package Atomic renames Flyology.Data_Structures.Atomics;
+   package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
    package Addressing renames System.Storage_Elements;
 
@@ -31,8 +33,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Stride       : out Byte_Count;
       Extent       : out Byte_Count) is
    begin
-      if (Interfaces.Unsigned_64 (Capacity) and
-          (Interfaces.Unsigned_64 (Capacity) - 1)) /= 0
+      if not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
       then
          raise Constraint_Error with
            "hash-map capacity must be a power of two";
@@ -87,7 +88,7 @@ package body Flyology.Data_Structures.Hash_Maps is
          raise Layout_Error with "hash-map entry index is corrupt";
       end if;
       return Item.Entries_Address + Addressing.Storage_Offset
-        (Byte_Count (Index) * Item.Stride);
+        (Layouts.Checked_Multiply (Byte_Count (Index), Item.Stride));
    end Entry_Address;
 
    function Field_Address
@@ -132,6 +133,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Core : Layouts.Local_View;
       Value_Offset, Stride, Extent : Byte_Count;
    begin
+      Detach (Item);
       Geometry
         (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
       Layouts.Begin_Initialize
@@ -157,6 +159,12 @@ package body Flyology.Data_Structures.Hash_Maps is
             Empty_State);
       end loop;
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Attach
@@ -177,6 +185,7 @@ package body Flyology.Data_Structures.Hash_Maps is
       Reached : Boolean;
       Slot_Address, Candidate_Address : System.Address;
    begin
+      Detach (Item);
       Geometry
         (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
@@ -236,7 +245,9 @@ package body Flyology.Data_Structures.Hash_Maps is
             for Probe in Interfaces.Unsigned_64 range
               0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
             loop
-               Candidate := (Stored_Hash + Probe) and Item.Mask;
+               Candidate := Policy.Masked_Index
+                 (Stored_Hash + Probe,
+                  Policy.Positive_U32 (Item.Capacity_Value));
                Candidate_Address := Entry_Address (Item, Candidate);
                Candidate_State := Bytes.Read_U32
                  (Field_Address
@@ -272,6 +283,12 @@ package body Flyology.Data_Structures.Hash_Maps is
             end if;
          end if;
       end loop;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Attach;
 
    procedure Detach (Item : in out View) is
@@ -353,14 +370,18 @@ package body Flyology.Data_Structures.Hash_Maps is
    procedure Check_Key
      (Item : View; Key : Ada.Streams.Stream_Element_Array) is
    begin
-      if Byte_Count (Key'Length) /= Byte_Count (Item.Key_Value) then
+      if not Item.Core.Attached then
+         raise Region_Error with "detached hash-map view";
+      elsif Byte_Count (Key'Length) /= Byte_Count (Item.Key_Value) then
          raise Constraint_Error with "hash-map key length does not match";
       end if;
    end Check_Key;
 
    procedure Check_Value (Item : View; Length : Natural) is
    begin
-      if Byte_Count (Length) /= Byte_Count (Item.Value_Value) then
+      if not Item.Core.Attached then
+         raise Region_Error with "detached hash-map view";
+      elsif Byte_Count (Length) /= Byte_Count (Item.Value_Value) then
          raise Constraint_Error with "hash-map value length does not match";
       end if;
    end Check_Value;
@@ -407,11 +428,15 @@ package body Flyology.Data_Structures.Hash_Maps is
       for Probe in Interfaces.Unsigned_64 range
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
-         Index := (Hash_Value + Probe) and Item.Mask;
+         Index := Policy.Masked_Index
+           (Hash_Value + Probe, Policy.Positive_U32 (Item.Capacity_Value));
          Slot_Address := Entry_Address (Item, Index);
          State := Bytes.Read_U32
            (Field_Address (Item, Slot_Address, State_Offset, 4));
-         if State = Occupied_State
+         if State = Occupied_State and then Count = 0 then
+            raise Layout_Error with
+              "hash-map occupied entry contradicts zero count";
+         elsif State = Occupied_State
            and then Key_Matches (Item, Slot_Address, Hash_Value, Key)
          then
             Bytes.Copy
@@ -426,6 +451,10 @@ package body Flyology.Data_Structures.Hash_Maps is
          then
             First_Deleted := Index;
          elsif State = Empty_State then
+            if Count = Interfaces.Unsigned_64 (Item.Capacity_Value) then
+               raise Layout_Error with
+                 "hash-map free entry contradicts full count";
+            end if;
             Target :=
               (if First_Deleted = Interfaces.Unsigned_64'Last
                then Index else First_Deleted);
@@ -449,9 +478,15 @@ package body Flyology.Data_Structures.Hash_Maps is
             Bytes.Write_U64 (Item.Count_Address, Count + 1);
             Result := Inserted;
             return;
+         elsif State /= Occupied_State and then State /= Deleted_State then
+            raise Layout_Error with "hash-map entry state is corrupt";
          end if;
       end loop;
       if First_Deleted /= Interfaces.Unsigned_64'Last then
+         if Count = Interfaces.Unsigned_64 (Item.Capacity_Value) then
+            raise Layout_Error with
+              "hash-map tombstone contradicts full count";
+         end if;
          Target := First_Deleted;
          Target_Address := Entry_Address (Item, Target);
          Bytes.Write_U64
@@ -506,7 +541,8 @@ package body Flyology.Data_Structures.Hash_Maps is
       for Probe in Interfaces.Unsigned_64 range
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
-         Candidate := (Hash_Value + Probe) and Item.Mask;
+         Candidate := Policy.Masked_Index
+           (Hash_Value + Probe, Policy.Positive_U32 (Item.Capacity_Value));
          Slot_Address := Entry_Address (Item, Candidate);
          State := Bytes.Read_U32
            (Field_Address (Item, Slot_Address, State_Offset, 4));
@@ -571,6 +607,10 @@ package body Flyology.Data_Structures.Hash_Maps is
          Find_Index_Unlocked (Item, Key, Removed, Index);
          if Removed then
             Count := Stored_Count (Item);
+            if Count = 0 then
+               raise Layout_Error with
+                 "hash-map occupied entry contradicts zero count";
+            end if;
             Bytes.Write_U32
               (Field_Address
                  (Item, Entry_Address (Item, Index), State_Offset, 4),
@@ -586,17 +626,30 @@ package body Flyology.Data_Structures.Hash_Maps is
    end Remove;
 
    procedure Clear (Item : in out View) is
+      Occupied : Interfaces.Unsigned_64 := 0;
+      State    : Interfaces.Unsigned_32;
    begin
       Acquire (Item);
       begin
          for Index in Interfaces.Unsigned_64 range
            0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
          loop
+            State := Bytes.Read_U32
+              (Field_Address
+                 (Item, Entry_Address (Item, Index), State_Offset, 4));
+            if State = Occupied_State then
+               Occupied := Occupied + 1;
+            elsif State /= Empty_State and then State /= Deleted_State then
+               raise Layout_Error with "hash-map entry state is corrupt";
+            end if;
             Bytes.Write_U32
               (Field_Address
                  (Item, Entry_Address (Item, Index), State_Offset, 4),
                Empty_State);
          end loop;
+         if Occupied /= Stored_Count (Item) then
+            raise Layout_Error with "hash-map occupied count is corrupt";
+         end if;
          Bytes.Write_U64 (Item.Count_Address, 0);
          Release (Item);
       exception

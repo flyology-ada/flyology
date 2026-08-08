@@ -10,16 +10,19 @@ private with System;
 --  across mappings by one process-capable stored guard. They make one
 --  acquisition attempt and raise Busy_Error rather than waiting. Lifecycle
 --  operations still require whole-object quiescence.
+--  The application must exclude Attach, Detach, Initialize, Destroy, and
+--  backing-lifetime changes from every use of the same local View. Separate
+--  attached views may perform ordinary operations concurrently.
 package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
    --  Eight-byte magic stored in every map header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5348_4D41_3031#;
 
    --  Schema identifier for the current FNV-1a/open-addressed layout.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_484D_4150_0002#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_484D_4150_0003#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -45,7 +48,8 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Key_Size   : Positive;
       Value_Size : Positive) return Byte_Count;
 
-   --  Initialize an empty map and attach Item.
+   --  Initialize an empty map and attach Item. Every preexisting view becomes
+   --  stale and must attach again before use.
    --  @param Item View attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero eight-byte-aligned stored offset
@@ -97,7 +101,8 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
    --  Report whether Item is locally attached.
    --  @param Item View to inspect
-   --  @return True only while local mapping information is retained
+   --  @return True while local mapping information is retained; this does not
+   --     guarantee the cached initialization epoch is still current
    function Is_Attached (Item : View) return Boolean;
 
    --  Report whether Item's backing map was explicitly poisoned.

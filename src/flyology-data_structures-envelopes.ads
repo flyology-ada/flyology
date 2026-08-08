@@ -7,6 +7,8 @@ private with Flyology.Data_Structures.Layouts;
 --  and version before it computes the nested location. Initialization marks
 --  the nested leaf incomplete, but the envelope does not otherwise initialize,
 --  synchronize, or manage that object, and direct leaf use opts out.
+--  Attach, Detach, Initialize, Destroy, and backing-lifetime changes require
+--  exclusion from every use of the same local View.
 --  @formal Nested_Identity Stable identity exported by the nested leaf
 --  @formal Contract_Signature Nonzero 64-bit application contract identity
 --  @formal Contract_Version Nonzero 64-bit application contract version
@@ -20,10 +22,10 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5345_4E56_3031#;
 
    --  Schema identifier for the current envelope geometry.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_454E_564C_0001#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_454E_564C_0002#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable identity of the envelope layout itself.
    Identity : constant Layout_Identity :=
@@ -33,7 +35,8 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
    type View is limited private;
 
    --  Compute the envelope plus aligned nested extent.
-   --  @param Content_Extent Complete nested structure extent
+   --  @param Content_Extent Complete nested structure extent, including at
+   --     least the shared 64-byte leaf header
    --  @param Content_Alignment Required power-of-two nested alignment
    --  @return Complete envelope and nested byte extent
    function Required_Storage
@@ -44,11 +47,13 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
    --  incomplete, and then publish the envelope. The caller then initializes
    --  the nested leaf at Content_Location. A crash between those steps leaves
    --  the nested leaf incomplete even when this extent previously contained a
-   --  ready leaf, so the leaf's own attachment rejects it.
+   --  ready leaf, so the leaf's own attachment rejects it. Reinitialization
+   --  also makes every preexisting envelope view stale.
    --  @param Item Envelope view attached on success
    --  @param Region Attached backing region
    --  @param Location Nonzero offset aligned for Content_Alignment
-   --  @param Content_Extent Complete nested structure extent
+   --  @param Content_Extent Complete nested structure extent, including at
+   --     least the shared 64-byte leaf header
    --  @param Content_Alignment Required power-of-two nested alignment
    --  @exception Constraint_Error Generic identity or geometry is invalid
    procedure Initialize
@@ -63,7 +68,8 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
    --  @param Item Envelope view attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored envelope offset
-   --  @param Content_Extent Expected complete nested structure extent
+   --  @param Content_Extent Expected complete nested structure extent,
+   --     including at least the shared 64-byte leaf header
    --  @param Content_Alignment Expected nested alignment
    --  @exception Layout_Error Contract or geometry does not match
    procedure Attach
@@ -90,7 +96,8 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
 
    --  Report whether Item is locally attached.
    --  @param Item Envelope view to inspect
-   --  @return True only while local mapping information is retained
+   --  @return True while local mapping information is retained; this does not
+   --     guarantee the cached initialization epoch is still current
    function Is_Attached (Item : View) return Boolean;
 
    --  Invalidate the envelope after the application has quiesced and

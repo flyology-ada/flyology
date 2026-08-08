@@ -70,6 +70,9 @@ procedure Data_Structures_Smoke is
    Crash_Envelope_Location : constant DS.Region_Offset := 110_000;
    Poison_String_Location : constant DS.Region_Offset := 120_000;
    Poison_Vector_Location : constant DS.Region_Offset := 121_000;
+   Scratch_MPMC_Location : constant DS.Region_Offset := 130_000;
+   Scratch_Slab_Location : constant DS.Region_Offset := 132_000;
+   Scratch_Map_Location  : constant DS.Region_Offset := 134_000;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4, 8);
 
@@ -186,6 +189,12 @@ procedure Data_Structures_Smoke is
      (Raw_Offset
         (Map_Location, 72 + Natural (Index) * 32 + Relative));
 
+   function Map_Entry_Offset_At
+     (Location : DS.Region_Offset;
+      Index    : Interfaces.Unsigned_64;
+      Relative : Natural) return C.size_t is
+     (Raw_Offset (Location, 72 + Natural (Index) * 32 + Relative));
+
    Temp_Root : constant String := Ada.Environment_Variables.Value
      ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
    Path : constant C.char_array := C.To_C
@@ -255,6 +264,29 @@ begin
    Regions.Attach (Region_A, Base_A, DS.Byte_Count (Mapping_Length));
    Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
 
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         if Contract_V1.Required_Storage (DS.Byte_Count (63), 8) = 0 then
+            raise Program_Error with "unreachable envelope extent";
+         end if;
+      exception
+         when Constraint_Error => Failed := True;
+      end;
+      Assert (Failed, "envelope accepted less than a complete leaf header");
+
+      Failed := False;
+      begin
+         if MPMC.Required_Storage (1, 8) = 0 then
+            raise Program_Error with "unreachable MPMC extent";
+         end if;
+      exception
+         when Constraint_Error => Failed := True;
+      end;
+      Assert (Failed, "MPMC accepted capacity one");
+   end;
+
    Slabs.Initialize (Slab_A, Region_A, Slab_Location, 8, 16, 8);
    Slabs.Attach (Slab_B, Region_B, Slab_Location, 8, 16, 8);
    Strings.Initialize (String_A, Region_A, String_Location, 128);
@@ -286,6 +318,199 @@ begin
         (Base_A, Mapping_Length,
          Interfaces.Unsigned_64 (SSE.To_Integer (Base_B))) = 0,
       "mapping B address escaped into stored bytes");
+
+   declare
+      Small_A, Small_B : MPMC.View;
+      Failed : Boolean := False;
+   begin
+      MPMC.Initialize
+        (Small_A, Region_A, Scratch_MPMC_Location, 2, 8);
+      MPMC.Attach
+        (Small_B, Region_B, Scratch_MPMC_Location, 2, 8);
+      MPMC.Try_Push (Small_A, Encode (99), Push_Outcome);
+      Assert (Push_Outcome = MPMC.Pushed,
+              "capacity-two MPMC setup push failed");
+
+      --  Model a consumer that advanced Dequeue and then terminated before
+      --  it republished the claimed slot as free. Enqueue now equals
+      --  Dequeue, but the slot sequence still proves the ring is not empty.
+      Write_U64
+        (Base_B, Raw_Offset (Scratch_MPMC_Location, 128), 1);
+      begin
+         MPMC.Destroy (Small_A);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "MPMC destroy accepted an abandoned consumer claim");
+
+      MPMC.Initialize
+        (Small_A, Region_A, Scratch_MPMC_Location, 2, 8);
+      MPMC.Detach (Small_B);
+      MPMC.Attach
+        (Small_B, Region_B, Scratch_MPMC_Location, 2, 8);
+      for Round in Interfaces.Unsigned_64 range 1 .. 128 loop
+         MPMC.Try_Push (Small_A, Encode (Round * 2 - 1), Push_Outcome);
+         Assert (Push_Outcome = MPMC.Pushed,
+                 "capacity-two MPMC rejected its first slot");
+         MPMC.Try_Push (Small_B, Encode (Round * 2), Push_Outcome);
+         Assert (Push_Outcome = MPMC.Pushed,
+                 "capacity-two MPMC rejected its second slot");
+         MPMC.Try_Push (Small_A, Encode (0), Push_Outcome);
+         Assert (Push_Outcome = MPMC.Full,
+                 "capacity-two MPMC did not report full");
+         MPMC.Try_Pop (Small_B, Eight, Pop_Outcome);
+         Assert
+           (Pop_Outcome = MPMC.Popped
+            and then Decode (Eight) = Round * 2 - 1,
+            "capacity-two MPMC lost FIFO order at wraparound");
+         MPMC.Try_Pop (Small_A, Eight, Pop_Outcome);
+         Assert
+           (Pop_Outcome = MPMC.Popped
+            and then Decode (Eight) = Round * 2,
+            "capacity-two MPMC duplicated or reordered an element");
+         MPMC.Try_Pop (Small_B, Eight, Pop_Outcome);
+         Assert (Pop_Outcome = MPMC.Empty,
+                 "capacity-two MPMC did not return to empty");
+      end loop;
+      declare
+         Saved_State : constant Interfaces.Unsigned_32 :=
+           Read_U32 (Base_B, Raw_Offset (Scratch_MPMC_Location, 0));
+      begin
+         Write_U32
+           (Base_B, Raw_Offset (Scratch_MPMC_Location, 0),
+            (Saved_State and not Interfaces.Unsigned_32'(7)) or 4);
+         Failed := False;
+         begin
+            if MPMC.Is_Poisoned (Small_A) then
+               raise Program_Error with "unreachable poisoned MPMC state";
+            end if;
+         exception
+            when DS.Layout_Error => Failed := True;
+         end;
+         Write_U32
+           (Base_B, Raw_Offset (Scratch_MPMC_Location, 0), Saved_State);
+         Assert (Failed, "corrupt lifecycle was reported as healthy");
+      end;
+      MPMC.Destroy (Small_A);
+      MPMC.Detach (Small_B);
+
+      Write_U32
+        (Base_B, Raw_Offset (Scratch_MPMC_Location, 0), 16#FFFF_FFFA#);
+      Failed := False;
+      begin
+         MPMC.Initialize
+           (Small_A, Region_A, Scratch_MPMC_Location, 2, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not MPMC.Is_Attached (Small_A),
+         "exhausted initialization epoch wrapped or retained a view");
+   end;
+
+   declare
+      One : Slabs.View;
+      Last_Handle : Handles.Handle;
+      Failed : Boolean := False;
+   begin
+      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1, 16, 8);
+      Write_U32
+        (Base_B, Raw_Offset (Scratch_Slab_Location, 64),
+         Interfaces.Unsigned_32'Last);
+      Slabs.Try_Allocate (One, Last_Handle, Allocation);
+      Assert
+        (Allocation = Slabs.Allocated
+         and then Last_Handle.Stamp = Handles.Generation'Last,
+         "slab did not expose the generation-exhaustion fixture");
+      begin
+         Slabs.Release (One, Last_Handle);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "slab generation wrapped and revived an old handle");
+
+      Failed := False;
+      begin
+         Slabs.Recover_Poisoned (One, Last_Handle.Slot);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "slab recovered an exhausted generation");
+      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1, 16, 8);
+      Slabs.Destroy (One);
+   end;
+
+   declare
+      Scratch, Peer : Maps.View;
+      Replacement : Vectors.View;
+      Home : Interfaces.Unsigned_64;
+      Failed : Boolean := False;
+   begin
+      Maps.Initialize
+        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+      Maps.Attach
+        (Peer, Region_B, Scratch_Map_Location, 2, 8, 8);
+      Home := Test_Hash (Key_1) and 1;
+      Write_U32
+        (Base_B, Map_Entry_Offset_At (Scratch_Map_Location, Home, 0), 9);
+      begin
+         Maps.Put (Scratch, Key_1, Value_1, Put_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then Maps.Is_Poisoned (Scratch),
+         "hash-map operation did not poison an invalid entry state");
+
+      Maps.Initialize
+        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+      Maps.Put (Scratch, Key_1, Value_1, Put_Outcome);
+      Write_U64
+        (Base_B, Raw_Offset (Scratch_Map_Location, 48), 0);
+      Failed := False;
+      begin
+         Maps.Remove (Scratch, Key_1, Flag);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then Maps.Is_Poisoned (Scratch),
+         "hash-map removal underflow did not fail closed");
+
+      Maps.Initialize
+        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+      Write_U64
+        (Base_B, Raw_Offset (Scratch_Map_Location, 48), 2);
+      Failed := False;
+      begin
+         Maps.Put (Scratch, Key_1, Value_1, Put_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then Maps.Is_Poisoned (Scratch),
+         "hash-map insertion overflow did not fail closed");
+
+      --  Reusing the same bytes for a different leaf must not revive Peer's
+      --  cached map geometry. The new initialization epoch is checked before
+      --  any cached count, guard, entry, or payload address is dereferenced.
+      Maps.Initialize
+        (Scratch, Region_A, Scratch_Map_Location, 2, 8, 8);
+      Maps.Detach (Peer);
+      Maps.Attach
+        (Peer, Region_B, Scratch_Map_Location, 2, 8, 8);
+      Vectors.Initialize
+        (Replacement, Region_A, Scratch_Map_Location, 2, 8);
+      Failed := False;
+      begin
+         Maps.Get (Peer, Key_1, Eight, Flag);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "stale cross-leaf view used replacement storage");
+      Maps.Detach (Peer);
+      Vectors.Destroy (Replacement);
+   end;
 
    Slabs.Try_Allocate (Slab_A, Handle_1, Allocation);
    Assert (Allocation = Slabs.Allocated
@@ -379,6 +604,29 @@ begin
      (String_Read (1 .. 3) = String_Data
       and then String_Read (4 .. 8) = String_More,
       "byte-string cross-view append failed");
+
+   declare
+      Seed : constant Ada.Streams.Stream_Element_Array (1 .. 12) :=
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+      Source : Ada.Streams.Stream_Element_Array (1 .. 5);
+      for Source'Address use SSE."+"
+        (Base_A,
+         SSE.Storage_Offset
+           (DS.Byte_Count (String_Location) + DS.Byte_Count (70)));
+      Expected : Ada.Streams.Stream_Element_Array (1 .. 5);
+      Result   : Ada.Streams.Stream_Element_Array (1 .. 13);
+   begin
+      Strings.Assign (String_A, Seed);
+      Strings.Assign (String_A, Seed (1 .. 8));
+      Expected := Source;
+      Strings.Append (String_A, Source);
+      Strings.Read (String_B, Result);
+      Assert
+        (Result (9 .. 13) = Expected,
+         "overlapping byte-string append did not preserve its source");
+      Strings.Assign (String_A, String_Data);
+      Strings.Append (String_A, String_More);
+   end;
 
    Vectors.Try_Append (Vector_A, Encode (1), Flag);
    Assert (Flag, "vector append failed");
@@ -530,6 +778,16 @@ begin
       end;
       Write_U64 (Base_B, Map_Entry_Offset (Home, 8), Saved_Hash);
       Assert (Failed, "hash-map entry with a mismatched hash was accepted");
+      Assert
+        (not Maps.Is_Attached (Map_Bad),
+         "failed hash-map attach retained a usable local view");
+      Failed := False;
+      begin
+         Maps.Get (Map_Bad, Key_1, Eight, Flag);
+      exception
+         when DS.Region_Error => Failed := True;
+      end;
+      Assert (Failed, "failed hash-map attach allowed a later operation");
    end;
 
    declare
@@ -666,7 +924,7 @@ begin
       Vectors.Try_Append (Stale_Leaf, Encode (707), Flag);
       Assert
         (Flag and then
-         Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) = 2,
+         (Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) and 7) = 2,
          "stale nested leaf was not ready before envelope reuse");
       Vectors.Detach (Stale_Leaf);
       Contract_V1.Detach (First_Envelope);
@@ -678,7 +936,7 @@ begin
         (Peer_Envelope, Region_B, Crash_Envelope_Location,
          Envelope_Content_Extent, 8);
       Assert
-        (Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) = 1,
+        ((Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) and 7) = 1,
          "envelope reuse did not invalidate stale nested state");
       begin
          Vectors.Attach (Failed_Leaf, Region_B, Crash_Content, 4, 8);
@@ -709,6 +967,24 @@ begin
          when DS.Layout_Error => Failed := True;
       end;
       Assert (Failed, "slab capacity mismatch was accepted");
+   end;
+
+   declare
+      Saved : constant Interfaces.Unsigned_32 :=
+        Read_U32 (Base_B, Raw_Offset (Slab_Location, 72));
+      Failed : Boolean := False;
+   begin
+      Write_U32 (Base_B, Raw_Offset (Slab_Location, 72), 1);
+      begin
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8, 16, 8);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32 (Base_B, Raw_Offset (Slab_Location, 72), Saved);
+      Assert (Failed, "corrupt slab slot metadata was accepted");
+      Assert
+        (not Slabs.Is_Attached (Slab_Bad),
+         "failed slab attach retained a usable local view");
    end;
 
    declare
@@ -809,6 +1085,9 @@ begin
       end;
       Write_U64 (Base_B, Raw_Offset (SPSC_Location, 128), Saved);
       Assert (Failed, "corrupt SPSC indices were accepted");
+      Assert
+        (not SPSC.Is_Attached (Ring_Bad),
+         "failed SPSC attach retained a usable local view");
    end;
 
    declare
@@ -824,6 +1103,9 @@ begin
       end;
       Write_U64 (Base_B, Raw_Offset (MPMC_Location, 192), Saved);
       Assert (Failed, "corrupt MPMC slot sequence was accepted");
+      Assert
+        (not MPMC.Is_Attached (Multi_Bad),
+         "failed MPMC attach retained a usable local view");
    end;
 
    Slabs.Detach (Slab_A);
@@ -941,6 +1223,17 @@ begin
    end;
    SPSC.Initialize (Ring_C, Region_C, SPSC_Location, 16, 8);
    SPSC.Try_Push (Ring_C, Encode (90), Flag);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         SPSC.Try_Pop (Ring_B, Eight, Flag);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "stale SPSC view revived after reinitialization");
+   end;
+   SPSC.Attach (Ring_B, Region_B, SPSC_Location, 16, 8);
    SPSC.Try_Pop (Ring_B, Eight, Flag);
    Assert
      (Flag and then Decode (Eight) = 90,
@@ -960,6 +1253,17 @@ begin
    end;
    MPMC.Initialize (Multi_C, Region_C, MPMC_Location, 16, 8);
    MPMC.Try_Push (Multi_C, Encode (92), Push_Outcome);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "stale MPMC view revived after reinitialization");
+   end;
+   MPMC.Attach (Multi_B, Region_B, MPMC_Location, 16, 8);
    MPMC.Try_Pop (Multi_B, Eight, Pop_Outcome);
    Assert
      (Push_Outcome = MPMC.Pushed
@@ -1012,6 +1316,17 @@ begin
    end;
    Maps.Initialize (Map_C, Region_C, Map_Location, 16, 8, 8);
    Maps.Put (Map_C, Key_1, Value_1, Put_Outcome);
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Maps.Get (Map_B, Key_1, Eight, Flag);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert (Failed, "stale hash-map view revived after reinitialization");
+   end;
+   Maps.Attach (Map_B, Region_B, Map_Location, 16, 8, 8);
    Maps.Get (Map_B, Key_1, Eight, Flag);
    Assert
      (Put_Outcome = Maps.Inserted and then Flag and then Eight = Value_1,

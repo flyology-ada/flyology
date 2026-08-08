@@ -46,6 +46,7 @@ package body Flyology.Data_Structures.Byte_Strings is
       Stored_Capacity : constant Interfaces.Unsigned_32 :=
         Interfaces.Unsigned_32 (Maximum_Length);
    begin
+      Detach (Item);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity,
          Required_Storage (Maximum_Length),
@@ -58,6 +59,12 @@ package body Flyology.Data_Structures.Byte_Strings is
          8);
       Set_View (Item, Core, Stored_Capacity);
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Attach
@@ -70,6 +77,7 @@ package body Flyology.Data_Structures.Byte_Strings is
       Header : Layouts.Header_Values;
       Expected : constant Byte_Count := Required_Storage (Maximum_Length);
    begin
+      Detach (Item);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
       if Header.Capacity /= Interfaces.Unsigned_32 (Maximum_Length)
         or else Header.Element_Size /= 1
@@ -100,6 +108,7 @@ package body Flyology.Data_Structures.Byte_Strings is
       if not Item.Core.Attached then
          raise Region_Error with "detached byte-string view";
       end if;
+      Layouts.Require_Ready (Item.Core);
       return Natural (Item.Capacity_Value);
    end Capacity;
 
@@ -206,11 +215,11 @@ package body Flyology.Data_Structures.Byte_Strings is
       Mutated : Boolean := False;
       Target  : System.Address := System.Null_Address;
    begin
-      if Byte_Count (Data'Length) > Byte_Count (Item.Capacity_Value) then
-         raise Constraint_Error with "byte string exceeds capacity";
-      end if;
       Acquire (Item);
       begin
+         if Byte_Count (Data'Length) > Byte_Count (Item.Capacity_Value) then
+            raise Constraint_Error with "byte string exceeds capacity";
+         end if;
          if Data'Length > 0 then
             Target := Data_Address (Item, 0, Byte_Count (Data'Length));
             Mutated := True;

@@ -1,9 +1,11 @@
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
 
 package body Flyology.Data_Structures.Slab_Pools is
    package Atomic renames Flyology.Data_Structures.Atomics;
+   package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
 
    use type Handles.Generation;
@@ -27,17 +29,6 @@ package body Flyology.Data_Structures.Slab_Pools is
    begin
       return Interfaces.Unsigned_32 (Value);
    end U32;
-
-   function Next_Generation
-     (Value : Interfaces.Unsigned_32) return Interfaces.Unsigned_32
-   is
-      Result : Interfaces.Unsigned_32 := Value + 1;
-   begin
-      if Result = 0 then
-         Result := 1;
-      end if;
-      return Result;
-   end Next_Generation;
 
    procedure Geometry
      (Capacity          : Positive;
@@ -143,6 +134,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Alignment_32   : constant Interfaces.Unsigned_32 :=
         U32 (Element_Alignment);
    begin
+      Detach (Item);
       Geometry
         (Capacity, Element_Size, Element_Alignment,
          Payload_Offset, Stride, Extent);
@@ -165,6 +157,12 @@ package body Flyology.Data_Structures.Slab_Pools is
          Bytes.Write_U32 (Next_Address (Item, Slot), 0);
       end loop;
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Validate_Slots (Item : View) is
@@ -195,6 +193,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Core             : Layouts.Local_View;
       Header           : Layouts.Header_Values;
    begin
+      Detach (Item);
       Geometry
         (Capacity, Element_Size, Element_Alignment,
          Expected_Payload, Expected_Stride, Expected_Extent);
@@ -214,6 +213,12 @@ package body Flyology.Data_Structures.Slab_Pools is
         (Item, Core, Header.Capacity, Header.Element_Size, Header.Alignment,
          Expected_Payload, Expected_Stride);
       Validate_Slots (Item);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Attach;
 
    procedure Detach (Item : in out View) is
@@ -234,6 +239,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       if not Item.Core.Attached then
          raise Region_Error with "detached slab view";
       end if;
+      Layouts.Require_Ready (Item.Core);
       return
         (Capacity          => Item.Capacity_Value,
          Element_Size      => Item.Element_Value,
@@ -312,7 +318,6 @@ package body Flyology.Data_Structures.Slab_Pools is
    is
       Cursor     : Interfaces.Unsigned_64;
       Expected_Cursor : Interfaces.Unsigned_64;
-      Start      : Interfaces.Unsigned_32;
       Slot       : Interfaces.Unsigned_32;
       State      : Interfaces.Unsigned_32;
       State_Expected : Interfaces.Unsigned_32;
@@ -328,16 +333,11 @@ package body Flyology.Data_Structures.Slab_Pools is
       then
          Cursor := Expected_Cursor;
       end if;
-      Start := Interfaces.Unsigned_32
-        (Cursor mod Interfaces.Unsigned_64 (Item.Capacity_Value)) + 1;
-
       for Offset in Interfaces.Unsigned_32 range
         0 .. Item.Capacity_Value - 1
       loop
-         Slot := Interfaces.Unsigned_32
-           ((Interfaces.Unsigned_64 (Start - 1) +
-             Interfaces.Unsigned_64 (Offset)) mod
-            Interfaces.Unsigned_64 (Item.Capacity_Value)) + 1;
+         Slot := Policy.Allocation_Slot
+           (Cursor, Offset, Policy.Positive_U32 (Item.Capacity_Value));
          State := Atomic.Load_Acquire_U32 (State_Address (Item, Slot));
          if State = Free_State then
             State_Expected := Free_State;
@@ -390,7 +390,23 @@ package body Flyology.Data_Structures.Slab_Pools is
       Generation : Interfaces.Unsigned_32;
    begin
       Acquire_Live (Item, Value, Releasing_State, Slot);
-      Generation := Next_Generation (Interfaces.Unsigned_32 (Value.Stamp));
+      if not Policy.Generation_Can_Advance
+        (Interfaces.Unsigned_32 (Value.Stamp))
+      then
+         if not Atomic.Compare_Exchange_U32
+           (State_Address (Item, Slot), Expected, Poisoned_State)
+         then
+            if Expected = Poisoned_State then
+               raise Poison_Error with "slab generation was retired";
+            else
+               raise Layout_Error with "slab retirement state changed";
+            end if;
+         end if;
+         raise Poison_Error with
+           "slab generation is exhausted; exclusive reinitialization required";
+      end if;
+      Generation := Policy.Next_Generation
+        (Interfaces.Unsigned_32 (Value.Stamp));
       Bytes.Write_U32 (Generation_Address (Item, Slot), Generation);
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Slot), Expected, Free_State)
@@ -413,7 +429,9 @@ package body Flyology.Data_Structures.Slab_Pools is
 
    procedure Check_Length (Item : View; Length : Natural) is
    begin
-      if Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
+      if not Item.Core.Attached then
+         raise Region_Error with "detached slab view";
+      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
          raise Constraint_Error with "slab payload length does not match";
       end if;
    end Check_Length;
@@ -605,8 +623,19 @@ package body Flyology.Data_Structures.Slab_Pools is
          end if;
          raise Layout_Error with "slab poisoned generation is zero";
       end if;
+      if not Policy.Generation_Can_Advance (Generation) then
+         Expected := Releasing_State;
+         if Atomic.Compare_Exchange_U32
+           (State_Address (Item, Index), Expected, Poisoned_State)
+         then
+            null;
+         end if;
+         raise Poison_Error with
+           "slab generation is exhausted; exclusive reinitialization required";
+      end if;
       Bytes.Write_U32
-        (Generation_Address (Item, Index), Next_Generation (Generation));
+        (Generation_Address (Item, Index),
+         Policy.Next_Generation (Generation));
       Expected := Releasing_State;
       if not Atomic.Compare_Exchange_U32
         (State_Address (Item, Index), Expected, Free_State)

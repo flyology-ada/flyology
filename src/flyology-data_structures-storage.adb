@@ -16,11 +16,11 @@ package body Flyology.Data_Structures.Storage is
    package Eight_Access is new System.Address_To_Access_Conversions
      (Eight_Bytes);
 
-   function C_Copy
+   function C_Move
      (Target : System.Address;
       Source : System.Address;
       Length : Interfaces.C.size_t) return System.Address;
-   pragma Import (C, C_Copy, "memcpy");
+   pragma Import (C, C_Move, "memmove");
 
    function C_Equal
      (Left   : System.Address;
@@ -63,7 +63,7 @@ package body Flyology.Data_Structures.Storage is
          return;
       end if;
       declare
-         Ignored : constant System.Address := C_Copy (Target, Source, Length);
+         Ignored : constant System.Address := C_Move (Target, Source, Length);
          pragma Unreferenced (Ignored);
       begin
          null;

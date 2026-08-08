@@ -1,9 +1,11 @@
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Interfaces.C;
 
 package body Flyology.Data_Structures.Rings.SPSC is
    package Atomic renames Flyology.Data_Structures.Atomics;
+   package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
 
    use type Interfaces.Unsigned_32;
@@ -24,8 +26,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Stride       : out Byte_Count;
       Extent       : out Byte_Count) is
    begin
-      if (Interfaces.Unsigned_64 (Capacity) and
-          (Interfaces.Unsigned_64 (Capacity) - 1)) /= 0
+      if not Policy.Is_Power_Of_Two (Byte_Count (Capacity))
       then
          raise Constraint_Error with "SPSC capacity must be a power of two";
       end if;
@@ -72,6 +73,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Extent : Byte_Count;
       Core   : Layouts.Local_View;
    begin
+      Detach (Item);
       Geometry (Capacity, Element_Size, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
@@ -88,6 +90,12 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Atomic.Store_Release_U64
         (Item.Tail_Address, 0);
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Attach
@@ -104,6 +112,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Head   : Interfaces.Unsigned_64;
       Tail   : Interfaces.Unsigned_64;
    begin
+      Detach (Item);
       Geometry (Capacity, Element_Size, Stride, Extent);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
       if Header.Capacity /= U32 (Capacity)
@@ -121,9 +130,17 @@ package body Flyology.Data_Structures.Rings.SPSC is
         (Item.Head_Address);
       Tail := Atomic.Load_Acquire_U64
         (Item.Tail_Address);
-      if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+      if not Policy.Within_Capacity
+        (Tail, Head, Item.Capacity_Value)
+      then
          raise Layout_Error with "SPSC ring indices are corrupt";
       end if;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Attach;
 
    procedure Detach (Item : in out View) is
@@ -152,6 +169,7 @@ package body Flyology.Data_Structures.Rings.SPSC is
       if not Item.Core.Attached then
          raise Region_Error with "detached SPSC ring view";
       end if;
+      Layouts.Require_Ready (Item.Core);
       return
         (Capacity     => Item.Capacity_Value,
          Element_Size => Item.Element_Value,
@@ -160,7 +178,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
 
    procedure Check_Length (Item : View; Length : Natural) is
    begin
-      if Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
+      if not Item.Core.Attached then
+         raise Region_Error with "detached SPSC ring view";
+      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
          raise Constraint_Error with "SPSC element length does not match";
       end if;
    end Check_Length;
@@ -168,7 +188,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
    function Element_Address
      (Item : View; Position : Interfaces.Unsigned_64) return System.Address
    is
-      Index : constant Byte_Count := Byte_Count (Position and Item.Mask);
+      Index : constant Byte_Count := Byte_Count
+        (Policy.Masked_Index
+           (Position, Policy.Positive_U32 (Item.Capacity_Value)));
       Relative : constant Byte_Count := Layouts.Checked_Add
         (Slots_Offset,
          Layouts.Checked_Multiply (Index, Item.Stride));
@@ -191,7 +213,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
         (Item.Tail_Address);
       Head := Atomic.Load_Acquire_U64
         (Item.Head_Address);
-      if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+      if not Policy.Within_Capacity
+        (Tail, Head, Item.Capacity_Value)
+      then
          raise Layout_Error with "SPSC ring indices are corrupt";
       elsif Tail - Head = Interfaces.Unsigned_64 (Item.Capacity_Value) then
          Pushed := False;
@@ -219,7 +243,9 @@ package body Flyology.Data_Structures.Rings.SPSC is
         (Item.Head_Address);
       Tail := Atomic.Load_Acquire_U64
         (Item.Tail_Address);
-      if Tail - Head > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+      if not Policy.Within_Capacity
+        (Tail, Head, Item.Capacity_Value)
+      then
          raise Layout_Error with "SPSC ring indices are corrupt";
       elsif Tail = Head then
          Popped := False;

@@ -6,6 +6,11 @@ with System;
 --  payload bytes; a Region_View's native address is process-local state and
 --  is never copied into its backing bytes. Linking this hierarchy has no
 --  scheduler, poller, task, mapping, or allocation side effect.
+--  Every attached structure view caches a persisted initialization epoch.
+--  Reinitializing an extent advances that epoch, so an older local view fails
+--  closed instead of applying cached geometry to replacement bytes.
+--  If out-of-band corruption destroys the epoch itself, recovery Initialize
+--  treats the bytes as fresh; all earlier views must first be retired.
 package Flyology.Data_Structures with Preelaborate is
 
    --  Fixed-width byte count used by stored extents and region views.

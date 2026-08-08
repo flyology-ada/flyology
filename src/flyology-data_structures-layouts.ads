@@ -12,11 +12,13 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @field Base Validated native structure base, never persisted
    --  @field Location Stored structure offset retained for nested layouts
    --  @field Extent Validated structure extent
+   --  @field Epoch_Value Initialization epoch cached for stale-view rejection
    --  @field Attached Whether the local view remains active
    type Local_View is record
       Base          : System.Address := System.Null_Address;
       Location      : Region_Offset := Null_Offset;
       Extent        : Byte_Count := 0;
+      Epoch_Value   : Interfaces.Unsigned_32 := 0;
       Attached      : Boolean := False;
    end record;
 

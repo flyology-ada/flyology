@@ -69,6 +69,7 @@ package body Flyology.Data_Structures.Vectors is
       Core : Layouts.Local_View;
       Stride, Extent : Byte_Count;
    begin
+      Detach (Item);
       Geometry (Capacity, Element_Size, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
@@ -83,6 +84,12 @@ package body Flyology.Data_Structures.Vectors is
         (Item, Core, Interfaces.Unsigned_32 (Capacity),
          Interfaces.Unsigned_32 (Element_Size), Stride);
       Layouts.Publish (Item.Core);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Initialize;
 
    procedure Attach
@@ -96,6 +103,7 @@ package body Flyology.Data_Structures.Vectors is
       Header : Layouts.Header_Values;
       Stride, Extent : Byte_Count;
    begin
+      Detach (Item);
       Geometry (Capacity, Element_Size, Stride, Extent);
       Layouts.Attach (Core, Header, Region, Location, Identity, 8);
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
@@ -110,6 +118,12 @@ package body Flyology.Data_Structures.Vectors is
       end if;
       Set_View
         (Item, Core, Header.Capacity, Header.Element_Size, Stride);
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
    end Attach;
 
    procedure Detach (Item : in out View) is
@@ -131,6 +145,7 @@ package body Flyology.Data_Structures.Vectors is
       if not Item.Core.Attached then
          raise Region_Error with "detached vector view";
       end if;
+      Layouts.Require_Ready (Item.Core);
       return Natural (Item.Capacity_Value);
    end Capacity;
 
@@ -221,7 +236,9 @@ package body Flyology.Data_Structures.Vectors is
 
    procedure Check_Data (Item : View; Length : Natural) is
    begin
-      if Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
+      if not Item.Core.Attached then
+         raise Region_Error with "detached vector view";
+      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
          raise Constraint_Error with "vector element length does not match";
       end if;
    end Check_Data;
