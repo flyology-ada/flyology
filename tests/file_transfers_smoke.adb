@@ -238,12 +238,15 @@ procedure File_Transfers_Smoke is
             --  deliberately withholding all peer progress.
             delay 0.05;
             Sockets.Close_Socket (Receiver_Socket);
+         elsif Mode = Backpressure_Timeout then
+            --  Let the 50 ms deadline cancel the backpressured operation,
+            --  then release any accepted zero-copy prefix whose terminal
+            --  notification still depends on peer progress.
+            delay 1.0;
+            Sockets.Close_Socket (Receiver_Socket);
          end if;
       end;
       Sockets.Close_Socket (Sender_Socket);
-      if Mode = Backpressure_Timeout then
-         Sockets.Close_Socket (Receiver_Socket);
-      end if;
       if Outcome /= 1 then
          raise Program_Error with
            Lane & " file-transfer " & Mode'Image & " edge failed";
