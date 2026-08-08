@@ -253,7 +253,8 @@ remain the live integration boundary.
 <!-- A subagent executes the Tactical Loop for the subprogram below.
      It should update this section as it works. -->
 
-- None.
+- [x] `Flyology.Timer_Set_Policy.Sift_Down` deterministic level-1 proof
+  - [x] Loop-invariant preservation no longer depends on prover time luck
 
 ## Not Started
 <!-- Whenever a subprogram is added (due to refactoring) or discovered
@@ -263,6 +264,8 @@ remain the live integration boundary.
 - None.
 
 ## Discovered Obligations
+
+- [x] Prove the selected `Sift_Down` child precedes no sibling before swapping
 
 - [x] Prove successful start plans contain every configured child exactly
       once and place prerequisites first
