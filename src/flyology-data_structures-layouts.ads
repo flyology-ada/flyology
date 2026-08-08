@@ -20,6 +20,12 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
       Attached      : Boolean := False;
    end record;
 
+   --  Result of one nonblocking stored-guard acquisition attempt.
+   --  @enum Acquired The caller exclusively owns the object mutation guard
+   --  @enum Busy Another caller currently owns the guard
+   --  @enum Poisoned An interrupted mutation invalidated the object
+   type Lock_Result is (Acquired, Busy, Poisoned);
+
    --  Structure-specific fields in the shared header.
    --  @field Capacity Primary bounded capacity
    --  @field Element_Size Primary fixed payload size
@@ -126,6 +132,42 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Item Local view to validate
    procedure Require_Ready (Item : Local_View);
 
+   --  Attempt once to acquire the process-capable guard in the shared
+   --  lifecycle word. The operation never spins or waits.
+   --  @param Item Attached local view
+   --  @return Acquired, Busy, or Poisoned
+   function Try_Acquire (Item : Local_View) return Lock_Result;
+
+   --  Publish completion of a guarded operation. A concurrently established
+   --  poison is preserved rather than overwritten.
+   --  @param Item Attached local view whose guard the caller owns
+   --  @exception Poison_Error A recovery authority poisoned the object
+   procedure Release (Item : Local_View);
+
+   --  Atomically poison a Ready or Locked object. The caller must have
+   --  independently established exclusive recovery authority, such as known
+   --  owner death or whole-region quiescence.
+   --  @param Item Attached local view to invalidate
+   procedure Poison (Item : Local_View);
+
+   --  Validate a stored identity and poison an object without first attaching
+   --  its potentially inconsistent mutable contents. This is the recovery
+   --  entry point for a supervisor that did not retain an earlier leaf view.
+   --  @param Region Attached backing region
+   --  @param Location Stored structure offset
+   --  @param Identity Expected leaf identity
+   --  @param Base_Alignment Required structure alignment
+   procedure Poison_At
+     (Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Base_Alignment : Byte_Count);
+
+   --  Report whether an attached object is poisoned.
+   --  @param Item Attached local view
+   --  @return True only for the stored Poisoned lifecycle state
+   function Is_Poisoned (Item : Local_View) return Boolean;
+
    --  Publish destroyed state and detach Item.
    --  @param Item Exclusively synchronized active view
    procedure Mark_Destroyed (Item : in out Local_View);
@@ -135,5 +177,5 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    procedure Detach (Item : in out Local_View);
    pragma Inline_Always
      (Checked_Add, Checked_Multiply, Align_Up, Address_At, Require_Ready,
-      Invalidate_Nested);
+      Invalidate_Nested, Try_Acquire, Release, Is_Poisoned);
 end Flyology.Data_Structures.Layouts;

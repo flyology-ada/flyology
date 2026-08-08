@@ -45,6 +45,17 @@ package Flyology.Data_Structures with Preelaborate is
    --  reclaimed, or otherwise invalid for the receiving structure.
    Handle_Error : exception;
 
+   --  Raised when a nonblocking internally synchronized operation cannot
+   --  acquire its stored guard immediately. Callers may retry only at an
+   --  application-selected scheduling or fairness point; implementations do
+   --  not spin, sleep, or block an event-loop pthread.
+   Busy_Error : exception;
+
+   --  Raised when an object was explicitly poisoned after an interrupted or
+   --  failed mutation. Poisoned bytes are never treated as a valid object;
+   --  exclusive reinitialization is the recovery operation.
+   Poison_Error : exception;
+
    --  Process-local view of mapped or arena-backed bytes. The type owns no
    --  mapping and performs no allocation. Flyology.Data_Structures.Regions
    --  attaches and detaches it; every structure view borrowing the same bytes

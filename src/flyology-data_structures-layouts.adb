@@ -16,6 +16,8 @@ package body Flyology.Data_Structures.Layouts is
    Initializing : constant Interfaces.Unsigned_32 := 1;
    Ready        : constant Interfaces.Unsigned_32 := 2;
    Destroyed    : constant Interfaces.Unsigned_32 := 3;
+   Locked         : constant Interfaces.Unsigned_32 := 4;
+   Poisoned_State : constant Interfaces.Unsigned_32 := 5;
 
    State_Offset      : constant Byte_Count := 0;
    Version_Offset    : constant Byte_Count := 4;
@@ -197,11 +199,22 @@ package body Flyology.Data_Structures.Layouts is
       if not Atomic.Supported then
          raise Program_Error with
            "process-capable 32/64-bit atomics are unavailable";
-      elsif Atomic.Load_Acquire_U32
-        (Address_At (Initial, State_Offset, 4, 4)) /= Ready
-      then
-         raise Layout_Error with "structure initialization is incomplete";
-      elsif Bytes.Read_U32
+      end if;
+
+      declare
+         State : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
+           (Address_At (Initial, State_Offset, 4, 4));
+      begin
+         if State = Locked then
+            raise Busy_Error with "structure is being mutated";
+         elsif State = Poisoned_State then
+            raise Poison_Error with "structure is poisoned";
+         elsif State /= Ready then
+            raise Layout_Error with "structure initialization is incomplete";
+         end if;
+      end;
+
+      if Bytes.Read_U32
         (Address_At (Initial, Version_Offset, 4, 4)) /= Identity.Version
       then
          raise Layout_Error with "unsupported structure layout version";
@@ -234,21 +247,135 @@ package body Flyology.Data_Structures.Layouts is
    end Attach;
 
    procedure Require_Ready (Item : Local_View) is
+      State : Interfaces.Unsigned_32;
    begin
       if not Item.Attached then
          raise Region_Error with "detached structure view";
-      elsif Atomic.Load_Acquire_U32
-        (Address_At (Item, State_Offset, 4, 4)) /= Ready
-      then
+      end if;
+      State := Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4));
+      if State = Locked then
+         raise Busy_Error with "structure is being mutated";
+      elsif State = Poisoned_State then
+         raise Poison_Error with "structure is poisoned";
+      elsif State /= Ready then
          raise Layout_Error with "structure is not active";
       end if;
    end Require_Ready;
 
-   procedure Mark_Destroyed (Item : in out Local_View) is
+   function Try_Acquire (Item : Local_View) return Lock_Result is
+      Expected : Interfaces.Unsigned_32 := Ready;
    begin
-      Require_Ready (Item);
-      Atomic.Store_Release_U32
-        (Address_At (Item, State_Offset, 4, 4), Destroyed);
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      end if;
+      if Atomic.Compare_Exchange_U32
+        (Address_At (Item, State_Offset, 4, 4), Expected, Locked)
+      then
+         return Acquired;
+      elsif Expected = Locked then
+         return Busy;
+      elsif Expected = Poisoned_State then
+         return Poisoned;
+      else
+         raise Layout_Error with "structure is not active";
+      end if;
+   end Try_Acquire;
+
+   procedure Release (Item : Local_View) is
+      Expected : Interfaces.Unsigned_32 := Locked;
+   begin
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      end if;
+      if Atomic.Compare_Exchange_U32
+        (Address_At (Item, State_Offset, 4, 4), Expected, Ready)
+      then
+         return;
+      elsif Expected = Poisoned_State then
+         raise Poison_Error with "structure was poisoned while guarded";
+      else
+         raise Layout_Error with "structure guard is not owned";
+      end if;
+   end Release;
+
+   procedure Poison (Item : Local_View) is
+      Expected : Interfaces.Unsigned_32;
+   begin
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      end if;
+      Expected := Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4));
+      for Attempt in 1 .. 2 loop
+         pragma Unreferenced (Attempt);
+         if Expected = Poisoned_State then
+            return;
+         elsif Expected /= Ready and then Expected /= Locked then
+            raise Layout_Error with "inactive structure cannot be poisoned";
+         elsif Atomic.Compare_Exchange_U32
+           (Address_At (Item, State_Offset, 4, 4), Expected, Poisoned_State)
+         then
+            return;
+         end if;
+      end loop;
+      raise Busy_Error with "structure lifecycle changed while poisoning";
+   end Poison;
+
+   procedure Poison_At
+     (Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Base_Alignment : Byte_Count)
+   is
+      Item : constant Local_View :=
+        Capture (Region, Location, Header_Size, Base_Alignment);
+      State : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4));
+   begin
+      if State /= Ready
+        and then State /= Locked
+        and then State /= Poisoned_State
+      then
+         raise Layout_Error with
+           "incomplete structure cannot be recovery-poisoned";
+      elsif Bytes.Read_U32
+        (Address_At (Item, Version_Offset, 4, 4)) /= Identity.Version
+        or else Bytes.Read_U64
+          (Address_At (Item, Magic_Offset, 8, 8)) /= Identity.Magic
+        or else Bytes.Read_U64
+          (Address_At (Item, Schema_Offset, 8, 8)) /= Identity.Schema
+      then
+         raise Layout_Error with "recovery poison identity does not match";
+      end if;
+      Poison (Item);
+   end Poison_At;
+
+   function Is_Poisoned (Item : Local_View) return Boolean is
+   begin
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      end if;
+      return Atomic.Load_Acquire_U32
+        (Address_At (Item, State_Offset, 4, 4)) = Poisoned_State;
+   end Is_Poisoned;
+
+   procedure Mark_Destroyed (Item : in out Local_View) is
+      Expected : Interfaces.Unsigned_32 := Ready;
+   begin
+      if not Item.Attached then
+         raise Region_Error with "detached structure view";
+      elsif not Atomic.Compare_Exchange_U32
+        (Address_At (Item, State_Offset, 4, 4), Expected, Destroyed)
+      then
+         if Expected = Locked then
+            raise Busy_Error with "structure is being mutated";
+         elsif Expected = Poisoned_State then
+            raise Poison_Error with "structure is poisoned";
+         else
+            raise Layout_Error with "structure is not active";
+         end if;
+      end if;
       Detach (Item);
    end Mark_Destroyed;
 
