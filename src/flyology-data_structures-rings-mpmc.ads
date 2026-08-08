@@ -17,8 +17,8 @@ private with System;
 --  Signed modular sequence ordering assumes that no paused operation is
 --  overtaken by 2**63 completed claims; ordinary 64-bit counter wrap remains
 --  supported within that horizon.
---  Attach, Detach, Initialize, Destroy, and backing-lifetime changes must not
---  race with any use of the same local View.
+--  Attach, Create_Or_Attach, Detach, Initialize, Destroy, and backing-lifetime
+--  changes must not race with any use of the same local View.
 package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
 
    --  Eight-byte magic stored in every MPMC header.
@@ -75,6 +75,28 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
       Location     : Region_Offset;
       Capacity     : Positive;
       Element_Size : Positive);
+
+   --  Atomically initialize a known-virgin zeroed extent or attach to a ready
+   --  compatible ring. Only the exact zero lifecycle sentinel is eligible for
+   --  creation; no existing lifecycle is reinitialized. The operation does
+   --  not wait for another initializer.
+   --  Concurrent calls are permitted only while the allocation protocol
+   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  @param Item Attached view, or detached when initialization is in
+   --     progress
+   --  @param Region Independently attached backing region
+   --  @param Location Stored ring offset
+   --  @param Capacity Expected power-of-two usable element count
+   --  @param Element_Size Expected bytes per element
+   --  @param Result Whether this caller initialized, attached, or observed an
+   --     initialization in progress
+   procedure Create_Or_Attach
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive;
+      Result       : out Open_Result);
 
    --  Attach to a quiescent existing MPMC ring and validate configuration and
    --  claim positions.

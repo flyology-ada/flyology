@@ -98,6 +98,34 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
       Header       : Header_Values;
       Base_Alignment : Byte_Count);
 
+   --  Result of atomically claiming an exact zero lifecycle sentinel.
+   --  @enum Claimed_Virgin This caller owns initialization of virgin bytes
+   --  @enum Existing_Ready A ready lifecycle must be validated and attached
+   --  @enum Claim_In_Progress Another caller owns the initialization claim
+   type Initialization_Claim is
+     (Claimed_Virgin, Existing_Ready, Claim_In_Progress);
+
+   --  Claim a virgin header for initialization without replacing an existing
+   --  lifecycle. A successful claim publishes Initializing before metadata is
+   --  written. Existing ready bytes are not otherwise validated here.
+   --  @param Item Claimed local view only for Claimed_Virgin
+   --  @param Result Virgin claim, existing-ready, or in-progress outcome
+   --  @param Region Attached target region
+   --  @param Location Stored structure offset
+   --  @param Identity Leaf-specific magic, version, and schema
+   --  @param Extent Complete expected structure extent
+   --  @param Header Leaf-specific common-header fields for a new object
+   --  @param Base_Alignment Required structure alignment
+   procedure Try_Begin_Initialize
+     (Item           : out Local_View;
+      Result         : out Initialization_Claim;
+      Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Extent         : Byte_Count;
+      Header         : Header_Values;
+      Base_Alignment : Byte_Count);
+
    --  Publish complete initialization with a release store.
    --  @param Item Initialized local view
    procedure Publish (Item : Local_View);

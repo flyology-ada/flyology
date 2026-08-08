@@ -190,6 +190,52 @@ package body Flyology.Data_Structures.Layouts is
       Write_Header (Item, Identity, Extent, Header);
    end Begin_Initialize;
 
+   procedure Try_Begin_Initialize
+     (Item           : out Local_View;
+      Result         : out Initialization_Claim;
+      Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Extent         : Byte_Count;
+      Header         : Header_Values;
+      Base_Alignment : Byte_Count)
+   is
+      Candidate : Local_View;
+      Expected  : Interfaces.Unsigned_32 := 0;
+      Desired   : constant Interfaces.Unsigned_32 :=
+        Policy.Make_State (1, Initializing);
+   begin
+      Item := (others => <>);
+      if not Atomic.Supported then
+         raise Program_Error with
+           "process-capable 32/64-bit atomics are unavailable";
+      elsif Extent < Header_Size then
+         raise Constraint_Error with "structure extent is smaller than header";
+      end if;
+
+      Candidate := Capture
+        (Region, Location, Extent, Base_Alignment);
+      if Atomic.Compare_Exchange_U32
+        (Address_At (Candidate, State_Offset, 4, 4), Expected, Desired)
+      then
+         Candidate.Epoch_Value := 1;
+         Write_Header (Candidate, Identity, Extent, Header);
+         Item := Candidate;
+         Result := Claimed_Virgin;
+      elsif not Policy.Valid_State (Expected) then
+         raise Layout_Error with
+           "virgin lifecycle sentinel is nonzero or corrupt";
+      elsif Policy.State_Lifecycle (Expected) = Ready then
+         Result := Existing_Ready;
+      elsif Policy.State_Lifecycle (Expected) = Initializing then
+         Result := Claim_In_Progress;
+      elsif Policy.State_Lifecycle (Expected) = Poisoned_State then
+         raise Poison_Error with "structure is poisoned";
+      else
+         raise Layout_Error with "structure is destroyed or inactive";
+      end if;
+   end Try_Begin_Initialize;
+
    procedure Publish (Item : Local_View) is
    begin
       Atomic.Store_Release_U32

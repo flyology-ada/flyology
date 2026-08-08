@@ -7,8 +7,8 @@ private with Flyology.Data_Structures.Layouts;
 --  and version before it computes the nested location. Initialization marks
 --  the nested leaf incomplete, but the envelope does not otherwise initialize,
 --  synchronize, or manage that object, and direct leaf use opts out.
---  Attach, Detach, Initialize, Destroy, and backing-lifetime changes require
---  exclusion from every use of the same local View.
+--  Attach, Create_Or_Attach, Detach, Initialize, Destroy, and backing-lifetime
+--  changes require exclusion from every use of the same local View.
 --  @formal Nested_Identity Stable identity exported by the nested leaf
 --  @formal Contract_Signature Nonzero 64-bit application contract identity
 --  @formal Contract_Version Nonzero 64-bit application contract version
@@ -62,6 +62,29 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
       Location          : Region_Offset;
       Content_Extent    : Byte_Count;
       Content_Alignment : Byte_Count := 8);
+
+   --  Atomically initialize a known-virgin zeroed extent or attach to a ready
+   --  compatible envelope. Only the exact zero lifecycle sentinel is eligible
+   --  for creation; no existing lifecycle is reinitialized. A newly created
+   --  envelope still leaves its nested leaf incomplete for the caller to
+   --  initialize. The operation does not wait for another initializer.
+   --  Concurrent calls are permitted only while the allocation protocol
+   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  @param Item Attached view, or detached when initialization is in
+   --     progress
+   --  @param Region Independently attached backing region
+   --  @param Location Stored envelope offset
+   --  @param Content_Extent Expected complete nested structure extent
+   --  @param Content_Alignment Expected nested alignment
+   --  @param Result Whether this caller initialized, attached, or observed an
+   --     initialization in progress
+   procedure Create_Or_Attach
+     (Item              : out View;
+      Region            : Region_View;
+      Location          : Region_Offset;
+      Content_Extent    : Byte_Count;
+      Content_Alignment : Byte_Count;
+      Result            : out Open_Result);
 
    --  Attach only when the application contract, nested leaf identity,
    --  nested extent, and alignment all match this generic instance.

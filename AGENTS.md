@@ -147,6 +147,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Leaf magic/version/schema checks are mandatory. The optional `Envelopes`
   generic adds a stable application-selected 64-bit signature and 64-bit
   contract version without weakening a nested leaf's structural checks.
+- `Create_Or_Attach` may atomically claim only an exact zero lifecycle sentinel
+  supplied by an allocation protocol that knows the extent is virgin. It never
+  overwrites incomplete, destroyed, poisoned, incompatible, or corrupt nonzero
+  bytes. It is not recovery because a zeroed corrupt lifecycle is
+  indistinguishable from new storage without an outer directory or journal.
 - Ring operations are nonblocking and allocate nothing. Keep hot producer and
   consumer counters on separate 64-byte control lines and use power-of-two
   capacities for masked slot selection.

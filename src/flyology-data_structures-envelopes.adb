@@ -61,6 +61,30 @@ package body Flyology.Data_Structures.Envelopes is
       Item.Content_Alignment := Alignment;
    end Set_View;
 
+   procedure Finish_Initialize
+     (Item              : out View;
+      Core              : Layouts.Local_View;
+      Content_Offset    : Byte_Count;
+      Content_Extent    : Byte_Count;
+      Content_Alignment : Byte_Count) is
+   begin
+      Set_View
+        (Item, Core, Content_Offset, Content_Extent, Content_Alignment);
+      Layouts.Invalidate_Nested (Item.Core, Item.Content_Offset);
+      Bytes.Write_U64
+        (Layouts.Address_At (Item.Core, Nested_Magic_Offset, 8, 8),
+         Nested_Identity.Magic);
+      Bytes.Write_U32
+        (Layouts.Address_At (Item.Core, Nested_Version_Offset, 4, 4),
+         Nested_Identity.Version);
+      Bytes.Write_U32
+        (Layouts.Address_At (Item.Core, Nested_Reserved_Offset, 4, 4), 0);
+      Bytes.Write_U64
+        (Layouts.Address_At (Item.Core, Nested_Schema_Offset, 8, 8),
+         Nested_Identity.Schema);
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    procedure Initialize
      (Item              : out View;
       Region            : Region_View;
@@ -83,22 +107,8 @@ package body Flyology.Data_Structures.Envelopes is
           Word_1       => Contract_Signature,
           Word_2       => Contract_Version),
          Byte_Count'Max (8, Content_Alignment));
-      Set_View
-        (Item, Core, Content_Offset, Content_Extent,
-         Content_Alignment);
-      Layouts.Invalidate_Nested (Item.Core, Item.Content_Offset);
-      Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Nested_Magic_Offset, 8, 8),
-         Nested_Identity.Magic);
-      Bytes.Write_U32
-        (Layouts.Address_At (Item.Core, Nested_Version_Offset, 4, 4),
-         Nested_Identity.Version);
-      Bytes.Write_U32
-        (Layouts.Address_At (Item.Core, Nested_Reserved_Offset, 4, 4), 0);
-      Bytes.Write_U64
-        (Layouts.Address_At (Item.Core, Nested_Schema_Offset, 8, 8),
-         Nested_Identity.Schema);
-      Layouts.Publish (Item.Core);
+      Finish_Initialize
+        (Item, Core, Content_Offset, Content_Extent, Content_Alignment);
    exception
       when others =>
          if Item.Core.Attached then
@@ -106,6 +116,51 @@ package body Flyology.Data_Structures.Envelopes is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item              : out View;
+      Region            : Region_View;
+      Location          : Region_Offset;
+      Content_Extent    : Byte_Count;
+      Content_Alignment : Byte_Count;
+      Result            : out Open_Result)
+   is
+      Core : Layouts.Local_View;
+      Claim : Layouts.Initialization_Claim;
+      Content_Offset, Total_Extent : Byte_Count;
+   begin
+      Detach (Item);
+      Geometry
+        (Content_Extent, Content_Alignment, Content_Offset, Total_Extent);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity, Total_Extent,
+         (Capacity     => 0,
+          Element_Size => 0,
+          Alignment    => Interfaces.Unsigned_32 (Content_Alignment),
+          Auxiliary    => Interfaces.Unsigned_32 (Content_Offset),
+          Word_1       => Contract_Signature,
+          Word_2       => Contract_Version),
+         Byte_Count'Max (8, Content_Alignment));
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize
+              (Item, Core, Content_Offset, Content_Extent,
+               Content_Alignment);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach
+              (Item, Region, Location, Content_Extent, Content_Alignment);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Attach
      (Item              : out View;

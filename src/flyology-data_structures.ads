@@ -67,6 +67,17 @@ package Flyology.Data_Structures with Preelaborate is
    --  out. Time starts with the first unsuccessful claim.
    subtype Wait_Timeout is Duration range 0.0 .. 86_400.0;
 
+   --  Outcome of one race-safe attempt to create a virgin stored object or
+   --  attach to an existing compatible object.
+   --  @enum Initialized_New The caller atomically claimed an exact zero
+   --     lifecycle sentinel, initialized the object, and attached Item
+   --  @enum Attached_Existing A ready compatible object already existed and
+   --     Item attached to it without rewriting stored bytes
+   --  @enum Initialization_In_Progress Another caller owns the virgin-state
+   --     initialization claim; Item remains detached and no waiting occurs
+   type Open_Result is
+     (Initialized_New, Attached_Existing, Initialization_In_Progress);
+
    --  Raised when an object or independently recoverable slot was explicitly
    --  poisoned after an interrupted or failed mutation. Poisoned bytes are
    --  never silently treated as ready; the leaf defines explicit recovery.

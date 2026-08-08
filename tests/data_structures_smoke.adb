@@ -49,6 +49,7 @@ procedure Data_Structures_Smoke is
    use type C.int;
    use type C.size_t;
    use type DS.Byte_Count;
+   use type DS.Open_Result;
    use type Slabs.Allocation_Result;
    use type Handles.Generation;
    use type Handles.Slot_Index;
@@ -73,6 +74,7 @@ procedure Data_Structures_Smoke is
    Scratch_MPMC_Location : constant DS.Region_Offset := 130_000;
    Scratch_Slab_Location : constant DS.Region_Offset := 132_000;
    Scratch_Map_Location  : constant DS.Region_Offset := 134_000;
+   Scratch_Open_Location : constant DS.Region_Offset := 140_000;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4, 8);
 
@@ -243,6 +245,7 @@ procedure Data_Structures_Smoke is
    Put_Outcome : Maps.Put_Result;
    Push_Outcome : MPMC.Push_Result;
    Pop_Outcome : MPMC.Pop_Result;
+   Open_Outcome : DS.Open_Result;
 
    procedure Cleanup is
       Ignored : C.int;
@@ -287,26 +290,103 @@ begin
       Assert (Failed, "MPMC accepted capacity one");
    end;
 
-   Slabs.Initialize (Slab_A, Region_A, Slab_Location, 8, 16, 8);
-   Slabs.Attach (Slab_B, Region_B, Slab_Location, 8, 16, 8);
-   Strings.Initialize (String_A, Region_A, String_Location, 128);
-   Strings.Attach (String_B, Region_B, String_Location, 128);
-   Vectors.Initialize (Vector_A, Region_A, Vector_Location, 16, 8);
-   Vectors.Attach (Vector_B, Region_B, Vector_Location, 16, 8);
-   SPSC.Initialize (Ring_A, Region_A, SPSC_Location, 16, 8);
-   SPSC.Attach (Ring_B, Region_B, SPSC_Location, 16, 8);
-   MPMC.Initialize (Multi_A, Region_A, MPMC_Location, 16, 8);
-   MPMC.Attach (Multi_B, Region_B, MPMC_Location, 16, 8);
-   Maps.Initialize (Map_A, Region_A, Map_Location, 16, 8, 8);
-   Maps.Attach (Map_B, Region_B, Map_Location, 16, 8, 8);
-   Contract_V1.Initialize
-     (Envelope_A, Region_A, Envelope_Location, Envelope_Content_Extent, 8);
+   Slabs.Create_Or_Attach
+     (Slab_A, Region_A, Slab_Location, 8, 16, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "slab was not created");
+   Slabs.Create_Or_Attach
+     (Slab_B, Region_B, Slab_Location, 8, 16, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Attached_Existing, "slab was reinitialized");
+   Strings.Create_Or_Attach
+     (String_A, Region_A, String_Location, 128, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "string was not created");
+   Strings.Create_Or_Attach
+     (String_B, Region_B, String_Location, 128, Open_Outcome);
+   Assert (Open_Outcome = DS.Attached_Existing, "string was reinitialized");
+   Vectors.Create_Or_Attach
+     (Vector_A, Region_A, Vector_Location, 16, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "vector was not created");
+   Vectors.Create_Or_Attach
+     (Vector_B, Region_B, Vector_Location, 16, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Attached_Existing, "vector was reinitialized");
+   SPSC.Create_Or_Attach
+     (Ring_A, Region_A, SPSC_Location, 16, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "SPSC ring was not created");
+   SPSC.Create_Or_Attach
+     (Ring_B, Region_B, SPSC_Location, 16, 8, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing, "SPSC ring was reinitialized");
+   MPMC.Create_Or_Attach
+     (Multi_A, Region_A, MPMC_Location, 16, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "MPMC ring was not created");
+   MPMC.Create_Or_Attach
+     (Multi_B, Region_B, MPMC_Location, 16, 8, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing, "MPMC ring was reinitialized");
+   Maps.Create_Or_Attach
+     (Map_A, Region_A, Map_Location, 16, 8, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "map was not created");
+   Maps.Create_Or_Attach
+     (Map_B, Region_B, Map_Location, 16, 8, 8, Open_Outcome);
+   Assert (Open_Outcome = DS.Attached_Existing, "map was reinitialized");
+   Contract_V1.Create_Or_Attach
+     (Envelope_A, Region_A, Envelope_Location, Envelope_Content_Extent, 8,
+      Open_Outcome);
+   Assert (Open_Outcome = DS.Initialized_New, "envelope was not created");
+   Vectors.Create_Or_Attach
+     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_A), 4, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialization_In_Progress
+      and then not Vectors.Is_Attached (Wrapped_B),
+      "nested initializer claim was not observable");
    Vectors.Initialize
      (Wrapped_A, Region_A, Contract_V1.Content_Location (Envelope_A), 4, 8);
-   Contract_V1.Attach
-     (Envelope_B, Region_B, Envelope_Location, Envelope_Content_Extent, 8);
-   Vectors.Attach
-     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_B), 4, 8);
+   Contract_V1.Create_Or_Attach
+     (Envelope_B, Region_B, Envelope_Location, Envelope_Content_Extent, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing, "envelope was reinitialized");
+   Vectors.Create_Or_Attach
+     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_B), 4, 8,
+      Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "nested vector was reinitialized");
+
+   declare
+      Wrong  : Vectors.View;
+      Failed : Boolean := False;
+      Saved_State : constant Interfaces.Unsigned_32 :=
+        Read_U32 (Base_B, Raw_Offset (Vector_Location, 0));
+   begin
+      begin
+         Vectors.Create_Or_Attach
+           (Wrong, Region_B, Vector_Location, 8, 8, Open_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Vectors.Is_Attached (Wrong)
+         and then Read_U32
+           (Base_B, Raw_Offset (Vector_Location, 0)) = Saved_State,
+         "create-or-attach overwrote an incompatible ready vector");
+
+      Write_U32
+        (Base_A, Raw_Offset (Scratch_Open_Location, 0), 16#FFFF_FFFA#);
+      Failed := False;
+      begin
+         Vectors.Create_Or_Attach
+           (Wrong, Region_A, Scratch_Open_Location, 4, 8, Open_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Vectors.Is_Attached (Wrong)
+         and then Read_U32
+           (Base_B, Raw_Offset (Scratch_Open_Location, 0)) = 16#FFFF_FFFA#,
+         "create-or-attach treated a corrupt nonzero state as virgin");
+      Write_U32 (Base_A, Raw_Offset (Scratch_Open_Location, 0), 0);
+   end;
 
    Assert
      (Contains_U64
@@ -725,6 +805,17 @@ begin
          when DS.Poison_Error => Failed := True;
       end;
       Assert (Failed, "poisoned byte string attached as ready");
+      Failed := False;
+      begin
+         Strings.Create_Or_Attach
+           (Recovery_Peer, Region_B, Poison_String_Location, 32,
+            Open_Outcome);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Strings.Is_Attached (Recovery_Peer),
+         "create-or-attach overwrote a poisoned byte string");
 
       Strings.Initialize
         (Recovery_String, Region_A, Poison_String_Location, 32);

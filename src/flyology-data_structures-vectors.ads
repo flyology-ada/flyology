@@ -11,9 +11,9 @@ private with Flyology.Data_Structures.Layouts;
 --  object; Poison_Error then persists until exclusive reinitialization.
 --  Is_Attached, Capacity, and Is_Poisoned inspect only local or lifecycle
 --  metadata and do not acquire the payload guard.
---  The application must exclude Attach, Detach, Initialize, Destroy, and
---  backing-lifetime changes from every use of the same local View. Separate
---  attached views may perform ordinary operations concurrently.
+--  The application must exclude Attach, Create_Or_Attach, Detach, Initialize,
+--  Destroy, and backing-lifetime changes from every use of the same local
+--  View. Separate attached views may perform ordinary operations concurrently.
 package Flyology.Data_Structures.Vectors with Preelaborate is
 
    --  Eight-byte magic stored in every vector header.
@@ -53,6 +53,28 @@ package Flyology.Data_Structures.Vectors with Preelaborate is
       Location     : Region_Offset;
       Capacity     : Positive;
       Element_Size : Positive);
+
+   --  Atomically initialize a known-virgin zeroed extent or attach to a ready
+   --  compatible vector. Only the exact zero lifecycle sentinel is eligible
+   --  for creation; no existing lifecycle is reinitialized. The operation
+   --  does not wait for another initializer.
+   --  Concurrent calls are permitted only while the allocation protocol
+   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  @param Item Attached view, or detached when initialization is in
+   --     progress
+   --  @param Region Independently attached backing region
+   --  @param Location Stored vector offset
+   --  @param Capacity Expected maximum element count
+   --  @param Element_Size Expected bytes per element
+   --  @param Result Whether this caller initialized, attached, or observed an
+   --     initialization in progress
+   procedure Create_Or_Attach
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive;
+      Result       : out Open_Result);
 
    --  Attach to a quiescent vector with the expected configuration.
    --  @param Item View attached on success

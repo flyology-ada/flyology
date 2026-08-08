@@ -38,6 +38,15 @@ package body Flyology.Data_Structures.Byte_Strings is
       Item.Capacity_Value := Maximum_Length;
    end Set_View;
 
+   procedure Finish_Initialize
+     (Item            : out View;
+      Core            : Layouts.Local_View;
+      Stored_Capacity : Interfaces.Unsigned_32) is
+   begin
+      Set_View (Item, Core, Stored_Capacity);
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    procedure Initialize
      (Item           : out View;
       Region         : Region_View;
@@ -59,8 +68,7 @@ package body Flyology.Data_Structures.Byte_Strings is
           Word_1       => 0,
           Word_2       => 0),
          8);
-      Set_View (Item, Core, Stored_Capacity);
-      Layouts.Publish (Item.Core);
+      Finish_Initialize (Item, Core, Stored_Capacity);
    exception
       when others =>
          if Item.Core.Attached then
@@ -68,6 +76,47 @@ package body Flyology.Data_Structures.Byte_Strings is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item           : out View;
+      Region         : Region_View;
+      Location       : Region_Offset;
+      Maximum_Length : Positive;
+      Result         : out Open_Result)
+   is
+      Core     : Layouts.Local_View;
+      Claim    : Layouts.Initialization_Claim;
+      Capacity : constant Interfaces.Unsigned_32 :=
+        Interfaces.Unsigned_32 (Maximum_Length);
+   begin
+      Detach (Item);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity,
+         Required_Storage (Maximum_Length),
+         (Capacity     => Capacity,
+          Element_Size => 1,
+          Alignment    => 1,
+          Auxiliary    => 0,
+          Word_1       => 0,
+          Word_2       => 0),
+         8);
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize (Item, Core, Capacity);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach (Item, Region, Location, Maximum_Length);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Attach
      (Item           : out View;

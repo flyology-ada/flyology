@@ -61,6 +61,17 @@ package body Flyology.Data_Structures.Vectors is
       Item.Stride := Stride;
    end Set_View;
 
+   procedure Finish_Initialize
+     (Item         : out View;
+      Core         : Layouts.Local_View;
+      Capacity     : Interfaces.Unsigned_32;
+      Element_Size : Interfaces.Unsigned_32;
+      Stride       : Byte_Count) is
+   begin
+      Set_View (Item, Core, Capacity, Element_Size, Stride);
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    procedure Initialize
      (Item         : out View;
       Region       : Region_View;
@@ -82,10 +93,9 @@ package body Flyology.Data_Structures.Vectors is
           Word_1       => 0,
           Word_2       => Interfaces.Unsigned_64 (Stride)),
          8);
-      Set_View
+      Finish_Initialize
         (Item, Core, Interfaces.Unsigned_32 (Capacity),
          Interfaces.Unsigned_32 (Element_Size), Stride);
-      Layouts.Publish (Item.Core);
    exception
       when others =>
          if Item.Core.Attached then
@@ -93,6 +103,50 @@ package body Flyology.Data_Structures.Vectors is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive;
+      Result       : out Open_Result)
+   is
+      Core   : Layouts.Local_View;
+      Claim  : Layouts.Initialization_Claim;
+      Stride : Byte_Count;
+      Extent : Byte_Count;
+   begin
+      Detach (Item);
+      Geometry (Capacity, Element_Size, Stride, Extent);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity, Extent,
+         (Capacity     => Interfaces.Unsigned_32 (Capacity),
+          Element_Size => Interfaces.Unsigned_32 (Element_Size),
+          Alignment    => 8,
+          Auxiliary    => 0,
+          Word_1       => 0,
+          Word_2       => Interfaces.Unsigned_64 (Stride)),
+         8);
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize
+              (Item, Core, Interfaces.Unsigned_32 (Capacity),
+               Interfaces.Unsigned_32 (Element_Size), Stride);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach (Item, Region, Location, Capacity, Element_Size);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Attach
      (Item         : out View;

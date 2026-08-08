@@ -103,6 +103,29 @@ package body Flyology.Data_Structures.Hash_Maps is
       return Slot_Address + Addressing.Storage_Offset (Offset);
    end Field_Address;
 
+   procedure Finish_Initialize
+     (Item         : out View;
+      Core         : Layouts.Local_View;
+      Capacity     : Interfaces.Unsigned_32;
+      Key_Size     : Interfaces.Unsigned_32;
+      Value_Size   : Interfaces.Unsigned_32;
+      Value_Offset : Byte_Count;
+      Stride       : Byte_Count) is
+   begin
+      Set_View
+        (Item, Core, Capacity, Key_Size, Value_Size, Value_Offset, Stride);
+      Bytes.Write_U32 (Item.Guard_Address, 0);
+      for Index in Interfaces.Unsigned_64 range
+        0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
+      loop
+         Bytes.Write_U32
+           (Field_Address
+              (Item, Entry_Address (Item, Index), State_Offset, 4),
+            Empty_State);
+      end loop;
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    function Hash
      (Key : Ada.Streams.Stream_Element_Array) return Interfaces.Unsigned_64;
 
@@ -147,20 +170,10 @@ package body Flyology.Data_Structures.Hash_Maps is
           Word_1       => 0,
           Word_2       => Interfaces.Unsigned_64 (Stride)),
          8);
-      Set_View
+      Finish_Initialize
         (Item, Core, Interfaces.Unsigned_32 (Capacity),
          Interfaces.Unsigned_32 (Key_Size),
          Interfaces.Unsigned_32 (Value_Size), Value_Offset, Stride);
-      Bytes.Write_U32 (Item.Guard_Address, 0);
-      for Index in Interfaces.Unsigned_64 range
-        0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
-      loop
-         Bytes.Write_U32
-           (Field_Address
-              (Item, Entry_Address (Item, Index), State_Offset, 4),
-            Empty_State);
-      end loop;
-      Layouts.Publish (Item.Core);
    exception
       when others =>
          if Item.Core.Attached then
@@ -168,6 +181,53 @@ package body Flyology.Data_Structures.Hash_Maps is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item       : out View;
+      Region     : Region_View;
+      Location   : Region_Offset;
+      Capacity   : Positive;
+      Key_Size   : Positive;
+      Value_Size : Positive;
+      Result     : out Open_Result)
+   is
+      Core : Layouts.Local_View;
+      Claim : Layouts.Initialization_Claim;
+      Value_Offset, Stride, Extent : Byte_Count;
+   begin
+      Detach (Item);
+      Geometry
+        (Capacity, Key_Size, Value_Size, Value_Offset, Stride, Extent);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity, Extent,
+         (Capacity     => Interfaces.Unsigned_32 (Capacity),
+          Element_Size => Interfaces.Unsigned_32 (Key_Size),
+          Alignment    => 8,
+          Auxiliary    => Interfaces.Unsigned_32 (Value_Size),
+          Word_1       => 0,
+          Word_2       => Interfaces.Unsigned_64 (Stride)),
+         8);
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize
+              (Item, Core, Interfaces.Unsigned_32 (Capacity),
+               Interfaces.Unsigned_32 (Key_Size),
+               Interfaces.Unsigned_32 (Value_Size), Value_Offset, Stride);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach
+              (Item, Region, Location, Capacity, Key_Size, Value_Size);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Attach
      (Item       : out View;

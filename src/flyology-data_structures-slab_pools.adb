@@ -120,6 +120,26 @@ package body Flyology.Data_Structures.Slab_Pools is
       Item.Allocation_Cursor_Address := Layouts.Address_At (Core, 56, 8, 8);
    end Set_View;
 
+   procedure Finish_Initialize
+     (Item           : out View;
+      Core           : Layouts.Local_View;
+      Capacity       : Interfaces.Unsigned_32;
+      Element_Size   : Interfaces.Unsigned_32;
+      Alignment      : Interfaces.Unsigned_32;
+      Payload_Offset : Byte_Count;
+      Stride         : Byte_Count) is
+   begin
+      Set_View
+        (Item, Core, Capacity, Element_Size, Alignment,
+         Payload_Offset, Stride);
+      for Slot in Interfaces.Unsigned_32 range 1 .. Capacity loop
+         Bytes.Write_U32 (Generation_Address (Item, Slot), 1);
+         Bytes.Write_U32 (State_Address (Item, Slot), Free_State);
+         Bytes.Write_U32 (Next_Address (Item, Slot), 0);
+      end loop;
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    procedure Initialize
      (Item              : out View;
       Region            : Region_View;
@@ -150,16 +170,9 @@ package body Flyology.Data_Structures.Slab_Pools is
           Word_1       => Interfaces.Unsigned_64 (Stride),
           Word_2       => 0),
          Byte_Count'Max (8, Byte_Count (Alignment_32)));
-      Set_View
+      Finish_Initialize
         (Item, Core, Capacity_32, Element_32, Alignment_32,
          Payload_Offset, Stride);
-
-      for Slot in Interfaces.Unsigned_32 range 1 .. Capacity_32 loop
-         Bytes.Write_U32 (Generation_Address (Item, Slot), 1);
-         Bytes.Write_U32 (State_Address (Item, Slot), Free_State);
-         Bytes.Write_U32 (Next_Address (Item, Slot), 0);
-      end loop;
-      Layouts.Publish (Item.Core);
    exception
       when others =>
          if Item.Core.Attached then
@@ -167,6 +180,60 @@ package body Flyology.Data_Structures.Slab_Pools is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item              : out View;
+      Region            : Region_View;
+      Location          : Region_Offset;
+      Capacity          : Positive;
+      Element_Size      : Positive;
+      Element_Alignment : Positive;
+      Result            : out Open_Result)
+   is
+      Payload_Offset : Byte_Count;
+      Stride         : Byte_Count;
+      Extent         : Byte_Count;
+      Core           : Layouts.Local_View;
+      Claim          : Layouts.Initialization_Claim;
+      Capacity_32    : constant Interfaces.Unsigned_32 := U32 (Capacity);
+      Element_32     : constant Interfaces.Unsigned_32 := U32 (Element_Size);
+      Alignment_32   : constant Interfaces.Unsigned_32 :=
+        U32 (Element_Alignment);
+   begin
+      Detach (Item);
+      Geometry
+        (Capacity, Element_Size, Element_Alignment,
+         Payload_Offset, Stride, Extent);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity, Extent,
+         (Capacity     => Capacity_32,
+          Element_Size => Element_32,
+          Alignment    => Alignment_32,
+          Auxiliary    => Interfaces.Unsigned_32 (Payload_Offset),
+          Word_1       => Interfaces.Unsigned_64 (Stride),
+          Word_2       => 0),
+         Byte_Count'Max (8, Byte_Count (Alignment_32)));
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize
+              (Item, Core, Capacity_32, Element_32, Alignment_32,
+               Payload_Offset, Stride);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach
+              (Item, Region, Location, Capacity, Element_Size,
+               Element_Alignment);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Validate_Slots (Item : View) is
       State : Interfaces.Unsigned_32;

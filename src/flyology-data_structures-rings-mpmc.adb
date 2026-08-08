@@ -102,6 +102,26 @@ package body Flyology.Data_Structures.Rings.MPMC is
    pragma Inline_Always
      (Slot_Relative, Slot_Address, Payload_Address);
 
+   procedure Finish_Initialize
+     (Item           : out View;
+      Core           : Layouts.Local_View;
+      Capacity       : Interfaces.Unsigned_32;
+      Element_Size   : Interfaces.Unsigned_32;
+      Payload_Offset : Byte_Count;
+      Stride         : Byte_Count) is
+   begin
+      Set_View
+        (Item, Core, Capacity, Element_Size, Payload_Offset, Stride);
+      Atomic.Store_Release_U64 (Item.Enqueue_Address, 0);
+      Atomic.Store_Release_U64 (Item.Dequeue_Address, 0);
+      for Slot in Interfaces.Unsigned_32 range 0 .. Capacity - 1 loop
+         Atomic.Store_Release_U64
+           (Slot_Address (Item, Interfaces.Unsigned_64 (Slot)),
+            Interfaces.Unsigned_64 (Slot));
+      end loop;
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    procedure Validate_Sequences
      (Item : View; Enqueue, Dequeue : Interfaces.Unsigned_64)
    is
@@ -150,19 +170,9 @@ package body Flyology.Data_Structures.Rings.MPMC is
           Word_1       => 0,
           Word_2       => 0),
          8);
-      Set_View
+      Finish_Initialize
         (Item, Core, Capacity_32, Interfaces.Unsigned_32 (Element_Size),
          Payload_Offset, Stride);
-      Atomic.Store_Release_U64
-        (Item.Enqueue_Address, 0);
-      Atomic.Store_Release_U64
-        (Item.Dequeue_Address, 0);
-      for Slot in Interfaces.Unsigned_32 range 0 .. Capacity_32 - 1 loop
-         Atomic.Store_Release_U64
-           (Slot_Address (Item, Interfaces.Unsigned_64 (Slot)),
-            Interfaces.Unsigned_64 (Slot));
-      end loop;
-      Layouts.Publish (Item.Core);
    exception
       when others =>
          if Item.Core.Attached then
@@ -170,6 +180,52 @@ package body Flyology.Data_Structures.Rings.MPMC is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive;
+      Result       : out Open_Result)
+   is
+      Core : Layouts.Local_View;
+      Claim : Layouts.Initialization_Claim;
+      Payload_Offset, Stride, Extent : Byte_Count;
+      Capacity_32 : constant Interfaces.Unsigned_32 :=
+        Interfaces.Unsigned_32 (Capacity);
+   begin
+      Detach (Item);
+      Geometry (Capacity, Element_Size, Payload_Offset, Stride, Extent);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity, Extent,
+         (Capacity     => Capacity_32,
+          Element_Size => Interfaces.Unsigned_32 (Element_Size),
+          Alignment    => 8,
+          Auxiliary    => Interfaces.Unsigned_32 (Payload_Offset),
+          Word_1       => 0,
+          Word_2       => 0),
+         8);
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize
+              (Item, Core, Capacity_32,
+               Interfaces.Unsigned_32 (Element_Size),
+               Payload_Offset, Stride);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach (Item, Region, Location, Capacity, Element_Size);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Attach
      (Item         : out View;

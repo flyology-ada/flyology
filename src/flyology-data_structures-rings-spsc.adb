@@ -64,6 +64,19 @@ package body Flyology.Data_Structures.Rings.SPSC is
       Item.Tail_Address := Layouts.Address_At (Core, Tail_Offset, 8, 8);
    end Set_View;
 
+   procedure Finish_Initialize
+     (Item         : out View;
+      Core         : Layouts.Local_View;
+      Capacity     : Interfaces.Unsigned_32;
+      Element_Size : Interfaces.Unsigned_32;
+      Stride       : Byte_Count) is
+   begin
+      Set_View (Item, Core, Capacity, Element_Size, Stride);
+      Atomic.Store_Release_U64 (Item.Head_Address, 0);
+      Atomic.Store_Release_U64 (Item.Tail_Address, 0);
+      Layouts.Publish (Item.Core);
+   end Finish_Initialize;
+
    procedure Initialize
      (Item         : out View;
       Region       : Region_View;
@@ -86,12 +99,8 @@ package body Flyology.Data_Structures.Rings.SPSC is
           Word_1       => 0,
           Word_2       => 0),
          8);
-      Set_View (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
-      Atomic.Store_Release_U64
-        (Item.Head_Address, 0);
-      Atomic.Store_Release_U64
-        (Item.Tail_Address, 0);
-      Layouts.Publish (Item.Core);
+      Finish_Initialize
+        (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -99,6 +108,49 @@ package body Flyology.Data_Structures.Rings.SPSC is
          end if;
          raise;
    end Initialize;
+
+   procedure Create_Or_Attach
+     (Item         : out View;
+      Region       : Region_View;
+      Location     : Region_Offset;
+      Capacity     : Positive;
+      Element_Size : Positive;
+      Result       : out Open_Result)
+   is
+      Stride : Byte_Count;
+      Extent : Byte_Count;
+      Core   : Layouts.Local_View;
+      Claim  : Layouts.Initialization_Claim;
+   begin
+      Detach (Item);
+      Geometry (Capacity, Element_Size, Stride, Extent);
+      Layouts.Try_Begin_Initialize
+        (Core, Claim, Region, Location, Identity, Extent,
+         (Capacity     => U32 (Capacity),
+          Element_Size => U32 (Element_Size),
+          Alignment    => 8,
+          Auxiliary    => 0,
+          Word_1       => 0,
+          Word_2       => 0),
+         8);
+      case Claim is
+         when Layouts.Claimed_Virgin =>
+            Finish_Initialize
+              (Item, Core, U32 (Capacity), U32 (Element_Size), Stride);
+            Result := Initialized_New;
+         when Layouts.Existing_Ready =>
+            Attach (Item, Region, Location, Capacity, Element_Size);
+            Result := Attached_Existing;
+         when Layouts.Claim_In_Progress =>
+            Result := Initialization_In_Progress;
+      end case;
+   exception
+      when others =>
+         if Item.Core.Attached then
+            Detach (Item);
+         end if;
+         raise;
+   end Create_Or_Attach;
 
    procedure Attach
      (Item         : out View;

@@ -9,11 +9,12 @@ private with System;
 --  hashes, keys, and values. Ordinary operations are internally serialized
 --  across mappings by one process-capable stored guard. Immediate operations
 --  make one acquisition attempt and raise Busy_Error; timed overloads yield
---  and retry through one explicit timeout. Lifecycle operations still require
---  whole-object quiescence.
---  The application must exclude Attach, Detach, Initialize, Destroy, and
---  backing-lifetime changes from every use of the same local View. Separate
---  attached views may perform ordinary operations concurrently.
+--  and retry through one explicit timeout. Except for concurrent
+--  Create_Or_Attach calls on allocation-certified virgin bytes, lifecycle
+--  operations require whole-object quiescence.
+--  The application must exclude Attach, Create_Or_Attach, Detach, Initialize,
+--  Destroy, and backing-lifetime changes from every use of the same local
+--  View. Separate attached views may perform ordinary operations concurrently.
 package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
    --  Eight-byte magic stored in every map header.
@@ -64,6 +65,30 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Capacity   : Positive;
       Key_Size   : Positive;
       Value_Size : Positive);
+
+   --  Atomically initialize a known-virgin zeroed extent or attach to a ready
+   --  compatible map. Only the exact zero lifecycle sentinel is eligible for
+   --  creation; no existing lifecycle is reinitialized. The operation does
+   --  not wait for another initializer or for the map guard.
+   --  Concurrent calls are permitted only while the allocation protocol
+   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  @param Item Attached view, or detached when initialization is in
+   --     progress
+   --  @param Region Independently attached backing region
+   --  @param Location Stored map offset
+   --  @param Capacity Expected power-of-two capacity
+   --  @param Key_Size Expected key size
+   --  @param Value_Size Expected value size
+   --  @param Result Whether this caller initialized, attached, or observed an
+   --     initialization in progress
+   procedure Create_Or_Attach
+     (Item       : out View;
+      Region     : Region_View;
+      Location   : Region_Offset;
+      Capacity   : Positive;
+      Key_Size   : Positive;
+      Value_Size : Positive;
+      Result     : out Open_Result);
 
    --  Attach to a quiescent map, validating its expected geometry, entry
    --  states and count, fixed-key hashes, linear-probe reachability, and key

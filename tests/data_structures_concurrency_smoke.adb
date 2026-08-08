@@ -31,6 +31,7 @@ procedure Data_Structures_Concurrency_Smoke is
    use type C.int;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_64;
+   use type DS.Open_Result;
    use type Hash_Maps.Put_Result;
    use type Slabs.Allocation_Result;
    use type System.Address;
@@ -50,6 +51,7 @@ procedure Data_Structures_Concurrency_Smoke is
    Vector_Location : constant DS.Region_Offset := 524_288;
    String_Location : constant DS.Region_Offset := 700_000;
    Map_Location : constant DS.Region_Offset := 786_432;
+   Open_Location : constant DS.Region_Offset := 950_000;
 
    function Mapping_Create
      (Path   : C.char_array;
@@ -128,6 +130,100 @@ procedure Data_Structures_Concurrency_Smoke is
       function Completed return Natural is (Count);
    end Completion;
 
+   Region_A, Region_B : Regions.View;
+
+   procedure Run_Create_Or_Attach_Race is
+      View_A, View_B : Vectors.View;
+      Result_A, Result_B : DS.Open_Result;
+      Finished : Completion (2);
+
+      protected Gate is
+         procedure Arrive;
+         entry Go;
+      private
+         Arrivals : Natural := 0;
+      end Gate;
+
+      protected body Gate is
+         procedure Arrive is
+         begin
+            Arrivals := Arrivals + 1;
+         end Arrive;
+
+         entry Go when Arrivals = 2 is
+         begin
+            null;
+         end Go;
+      end Gate;
+
+      task Creator_A is
+         pragma Task_Info (Flyology.Native_Task);
+      end Creator_A;
+
+      task Creator_B is
+         pragma Task_Info (Flyology.Native_Task);
+      end Creator_B;
+
+      task body Creator_A is
+      begin
+         Gate.Arrive;
+         Gate.Go;
+         Vectors.Create_Or_Attach
+           (View_A, Region_A, Open_Location, 128, 8, Result_A);
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Creator_A;
+
+      task body Creator_B is
+      begin
+         Gate.Arrive;
+         Gate.Go;
+         Vectors.Create_Or_Attach
+           (View_B, Region_B, Open_Location, 128, 8, Result_B);
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Creator_B;
+   begin
+      select
+         Finished.Await_All;
+      or
+         delay 5.0;
+         abort Creator_A;
+         abort Creator_B;
+         raise Program_Error with "create-or-attach race timed out";
+      end select;
+      Assert (Finished.Passed, "create-or-attach race raised an exception");
+      Assert
+        ((Result_A = DS.Initialized_New)
+         xor (Result_B = DS.Initialized_New),
+         "create-or-attach race did not select exactly one initializer");
+
+      if Result_A = DS.Initialization_In_Progress then
+         Vectors.Create_Or_Attach
+           (View_A, Region_A, Open_Location, 128, 8, Result_A);
+      elsif Result_B = DS.Initialization_In_Progress then
+         Vectors.Create_Or_Attach
+           (View_B, Region_B, Open_Location, 128, 8, Result_B);
+      end if;
+      Assert
+        ((Result_A = DS.Initialized_New
+          and then Result_B = DS.Attached_Existing)
+         or else
+         (Result_B = DS.Initialized_New
+          and then Result_A = DS.Attached_Existing),
+         "create-or-attach loser did not attach after publication");
+
+      if Result_A = DS.Initialized_New then
+         Vectors.Destroy (View_A);
+         Vectors.Detach (View_B);
+      else
+         Vectors.Destroy (View_B);
+         Vectors.Detach (View_A);
+      end if;
+   end Run_Create_Or_Attach_Race;
+
    Temp_Root : constant String := Ada.Environment_Variables.Value
      ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
    Path : constant C.char_array := C.To_C
@@ -135,7 +231,6 @@ procedure Data_Structures_Concurrency_Smoke is
    Base_A : aliased System.Address := System.Null_Address;
    Base_B : aliased System.Address := System.Null_Address;
    FD     : aliased C.int := -1;
-   Region_A, Region_B : Regions.View;
 
    procedure Cleanup is
       Ignored : C.int;
@@ -710,6 +805,7 @@ begin
    Assert (Base_A /= Base_B, "concurrency mappings share one virtual base");
    Regions.Attach (Region_A, Base_A, DS.Byte_Count (Mapping_Length));
    Regions.Attach (Region_B, Base_B, DS.Byte_Count (Mapping_Length));
+   Run_Create_Or_Attach_Race;
    Run_SPSC;
    Run_MPMC;
    Run_Slab;

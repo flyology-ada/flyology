@@ -10,7 +10,10 @@ private with System;
 --  access are internally synchronized across native tasks,
 --  processes, and distinct mappings. Initialization, attachment, destruction,
 --  and backing-region lifetime changes require quiescence across every view.
---  They must also be excluded from ordinary use of the same local View.
+--  Concurrent Create_Or_Attach calls are allowed only on
+--  allocation-certified virgin bytes; if Ready may exist, attachment
+--  quiescence applies. Lifecycle operations must also be excluded from
+--  ordinary use of the same local View.
 --  Immediate operations retain bounded contention outcomes or Busy_Error;
 --  timed overloads yield through one explicit timeout.
 --  Termination during an operation leaves its slot abandoned rather than
@@ -87,6 +90,30 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
       Capacity          : Positive;
       Element_Size      : Positive;
       Element_Alignment : Positive := 1);
+
+   --  Atomically initialize a known-virgin zeroed extent or attach to a ready
+   --  compatible slab. Only the exact zero lifecycle sentinel is eligible for
+   --  creation; no existing lifecycle is reinitialized. The operation does
+   --  not wait for another initializer.
+   --  Concurrent calls are permitted only while the allocation protocol
+   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  @param Item Attached view, or detached when initialization is in
+   --     progress
+   --  @param Region Independently attached backing region
+   --  @param Location Stored slab offset
+   --  @param Capacity Expected slot count
+   --  @param Element_Size Expected payload size
+   --  @param Element_Alignment Expected payload alignment
+   --  @param Result Whether this caller initialized, attached, or observed an
+   --     initialization in progress
+   procedure Create_Or_Attach
+     (Item              : out View;
+      Region            : Region_View;
+      Location          : Region_Offset;
+      Capacity          : Positive;
+      Element_Size      : Positive;
+      Element_Alignment : Positive;
+      Result            : out Open_Result);
 
    --  Attach to a quiescent existing slab and validate its complete layout,
    --  slot states, generations, and expected configuration. Valid transitional

@@ -734,6 +734,22 @@ before using `Initialize` as recovery from out-of-band lifecycle corruption,
 the application must permanently retire every earlier view because the damaged
 epoch can no longer distinguish it.
 
+Every stored leaf also provides `Create_Or_Attach` for a different case: an
+allocation protocol has supplied an extent known to be virgin with an exact
+zero lifecycle sentinel, but more than one participant may reach it. One
+caller atomically changes zero to `Initializing`, writes the complete object,
+and returns `Initialized_New`. A caller that observes a ready compatible
+object validates and attaches with `Attached_Existing`; one that observes the
+winning caller before publication returns `Initialization_In_Progress` with a
+detached view and does not wait. Incomplete, destroyed, poisoned, incompatible,
+and corrupt nonzero states are never overwritten. This is not a recovery API:
+if corruption changes an old object's lifecycle word to zero, core cannot
+distinguish those bytes from virgin storage without an outer allocation
+directory or journal. Explicit `Initialize` remains the exclusively authorized
+destructive initialization and recovery operation. Concurrent calls are valid
+only while the allocation protocol still guarantees virgin bytes. Once a ready
+object may exist, the leaf's ordinary attachment-quiescence rule also applies.
+
 The first family is byte-oriented so an arbitrary Ada private type cannot hide
 an access value in persistent storage:
 
@@ -822,8 +838,10 @@ Applications should assign signatures independently and keep them stable; the
 value reduces accidental misidentification but is not authentication or a
 cryptographic integrity check.
 
-Initialization requires exclusive ownership of the target extent. Attachment
-and destruction require the quiescence stated by each leaf; in particular, a
+Explicit `Initialize` requires exclusive ownership of the target extent.
+`Create_Or_Attach` requires the caller's allocation protocol to establish that
+an exact zero lifecycle may be treated as virgin. Attachment and destruction
+require the quiescence stated by each leaf; in particular, a
 byte string, vector, or hash map must not be attaching while its shared guard
 or mutable contents can change. Slab attachment accepts valid transitional and
 poisoned slot states only under the same externally established quiescence so a
