@@ -31,7 +31,8 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    Identity : constant Layout_Identity :=
      (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
-   --  Maximum compare/exchange attempts made by one operation.
+   --  Maximum compare/exchange attempts made by one immediate claim
+   --  campaign. Timed overloads may use shorter campaigns between yields.
    Contention_Limit : constant Positive := 64;
 
    --  Allocation outcome.

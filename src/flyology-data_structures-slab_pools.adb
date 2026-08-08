@@ -26,6 +26,7 @@ package body Flyology.Data_Structures.Slab_Pools is
    Accessing_State  : constant Interfaces.Unsigned_32 := 3;
    Releasing_State  : constant Interfaces.Unsigned_32 := 4;
    Poisoned_State   : constant Interfaces.Unsigned_32 := 5;
+   Timed_Contention_Limit : constant Positive := 16;
 
    function U32 (Value : Positive) return Interfaces.Unsigned_32 is
    begin
@@ -279,13 +280,14 @@ package body Flyology.Data_Structures.Slab_Pools is
      (Item          : View;
       Value         : Handles.Handle;
       Desired_State : Interfaces.Unsigned_32;
-      Slot          : out Interfaces.Unsigned_32)
+      Slot          : out Interfaces.Unsigned_32;
+      Attempts      : Positive := Contention_Limit)
    is
       State    : Interfaces.Unsigned_32;
       Expected : Interfaces.Unsigned_32;
    begin
       Check_Handle_Shape (Item, Value, Slot);
-      for Attempt in 1 .. Contention_Limit loop
+      for Attempt in 1 .. Attempts loop
          pragma Unreferenced (Attempt);
          State := Atomic.Load_Acquire_U32 (State_Address (Item, Slot));
          if State = Poisoned_State then
@@ -324,7 +326,9 @@ package body Flyology.Data_Structures.Slab_Pools is
    begin
       loop
          begin
-            Acquire_Live (Item, Value, Desired_State, Slot);
+            Acquire_Live
+              (Item, Value, Desired_State, Slot,
+               Attempts => Timed_Contention_Limit);
             return;
          exception
             when Busy_Error =>
