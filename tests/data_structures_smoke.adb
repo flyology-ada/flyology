@@ -14,6 +14,8 @@ with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
 with Flyology.Data_Structures.Slab_Pools;
+with Flyology.Data_Structures.Storage_Types.Immutable;
+with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
 with Interfaces;
 with Interfaces.C;
@@ -30,7 +32,22 @@ procedure Data_Structures_Smoke is
    package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
    package Dynamic_Maps renames DS.Dynamic.Hash_Maps;
    package Dynamic_Vectors renames DS.Dynamic.Vectors;
-   package Vectors renames DS.Vectors;
+   package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package Vectors is new DS.Vectors
+     (Element => U64_Elements.Representation);
+   package Alternate_U64 is new DS.Storage_Types.Immutable
+     (Byte_Size          => 8,
+      Required_Alignment => 8,
+      Type_Signature     => 16#5445_5354_5536_3402#,
+      Layout_Version     => 1);
+   package Wrong_Vectors is new DS.Vectors (Element => Alternate_U64);
+   package Alternate_U64_Version is new DS.Storage_Types.Immutable
+     (Byte_Size          => 8,
+      Required_Alignment => 8,
+      Type_Signature     => U64_Elements.Representation.Signature,
+      Layout_Version     => 2);
+   package Wrong_Version_Vectors is new DS.Vectors
+     (Element => Alternate_U64_Version);
    package SPSC renames DS.Rings.SPSC;
    package MPMC renames DS.Rings.MPMC;
    package Maps renames DS.Hash_Maps;
@@ -94,7 +111,7 @@ procedure Data_Structures_Smoke is
    Scratch_Arena_Location : constant DS.Region_Offset := 154_112;
    Scratch_Dynamic_Location : constant DS.Region_Offset := 157_184;
    Envelope_Content_Extent : constant DS.Byte_Count :=
-     Vectors.Required_Storage (4, 8);
+     Vectors.Required_Storage (4);
 
    function Mapping_Create
      (Path   : C.char_array;
@@ -186,6 +203,27 @@ procedure Data_Structures_Smoke is
       end loop;
       return Result;
    end Decode;
+
+   Vector_Construction_Value : Interfaces.Unsigned_64 := 0;
+   Vector_Observed_Value     : Interfaces.Unsigned_64 := 0;
+
+   procedure Construct_Vector_Element
+     (Item : in out U64_Elements.Builder) is
+   begin
+      U64_Elements.Set (Item, Vector_Construction_Value);
+   end Construct_Vector_Element;
+
+   procedure Fail_Vector_Construction
+     (Item : in out U64_Elements.Builder) is
+   begin
+      U64_Elements.Set (Item, 16#DEAD_BEEF#);
+      raise Constraint_Error with "deliberate constructor failure";
+   end Fail_Vector_Construction;
+
+   procedure Observe_Vector_Element (Item : U64_Elements.Const_Ref) is
+   begin
+      Vector_Observed_Value := U64_Elements.Value_Of (Item);
+   end Observe_Vector_Element;
 
    function Test_Hash
      (Key : Ada.Streams.Stream_Element_Array)
@@ -687,10 +725,10 @@ begin
      (String_B, Region_B, String_Location, 128, Open_Outcome);
    Assert (Open_Outcome = DS.Attached_Existing, "string was reinitialized");
    Vectors.Create_Or_Attach
-     (Vector_A, Region_A, Vector_Location, 16, 8, Open_Outcome);
+     (Vector_A, Region_A, Vector_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "vector was not created");
    Vectors.Create_Or_Attach
-     (Vector_B, Region_B, Vector_Location, 16, 8, Open_Outcome);
+     (Vector_B, Region_B, Vector_Location, 16, Open_Outcome);
    Assert (Open_Outcome = DS.Attached_Existing, "vector was reinitialized");
    SPSC.Create_Or_Attach
      (Ring_A, Region_A, SPSC_Location, 16, 8, Open_Outcome);
@@ -717,21 +755,21 @@ begin
       Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "envelope was not created");
    Vectors.Create_Or_Attach
-     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_A), 4, 8,
+     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_A), 4,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Initialization_In_Progress
       and then not Vectors.Is_Attached (Wrapped_B),
       "nested initializer claim was not observable");
    Vectors.Initialize
-     (Wrapped_A, Region_A, Contract_V1.Content_Location (Envelope_A), 4, 8);
+     (Wrapped_A, Region_A, Contract_V1.Content_Location (Envelope_A), 4);
    Contract_V1.Create_Or_Attach
      (Envelope_B, Region_B, Envelope_Location, Envelope_Content_Extent, 8,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing, "envelope was reinitialized");
    Vectors.Create_Or_Attach
-     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_B), 4, 8,
+     (Wrapped_B, Region_B, Contract_V1.Content_Location (Envelope_B), 4,
       Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing,
@@ -745,7 +783,7 @@ begin
    begin
       begin
          Vectors.Create_Or_Attach
-           (Wrong, Region_B, Vector_Location, 8, 8, Open_Outcome);
+           (Wrong, Region_B, Vector_Location, 8, Open_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -755,12 +793,40 @@ begin
            (Base_B, Raw_Offset (Vector_Location, 0)) = Saved_State,
          "create-or-attach overwrote an incompatible ready vector");
 
+      declare
+         Wrong_Element : Wrong_Vectors.View;
+         Wrong_Version : Wrong_Version_Vectors.View;
+      begin
+         Failed := False;
+         begin
+            Wrong_Vectors.Attach
+              (Wrong_Element, Region_B, Vector_Location, 16);
+         exception
+            when DS.Layout_Error => Failed := True;
+         end;
+         Assert
+           (Failed and then not Wrong_Vectors.Is_Attached (Wrong_Element),
+            "vector accepted a different immutable element identity");
+
+         Failed := False;
+         begin
+            Wrong_Version_Vectors.Attach
+              (Wrong_Version, Region_B, Vector_Location, 16);
+         exception
+            when DS.Layout_Error => Failed := True;
+         end;
+         Assert
+           (Failed and then
+            not Wrong_Version_Vectors.Is_Attached (Wrong_Version),
+            "vector accepted a different immutable element version");
+      end;
+
       Write_U32
         (Base_A, Raw_Offset (Scratch_Open_Location, 0), 16#FFFF_FFFA#);
       Failed := False;
       begin
          Vectors.Create_Or_Attach
-           (Wrong, Region_A, Scratch_Open_Location, 4, 8, Open_Outcome);
+           (Wrong, Region_A, Scratch_Open_Location, 4, Open_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -993,7 +1059,7 @@ begin
       Maps.Attach
         (Peer, Region_B, Scratch_Map_Location, 2, 8, 8);
       Vectors.Initialize
-        (Replacement, Region_A, Scratch_Map_Location, 2, 8);
+        (Replacement, Region_A, Scratch_Map_Location, 2);
       Failed := False;
       begin
          Maps.Get (Peer, Key_1, Eight, Flag);
@@ -1121,19 +1187,36 @@ begin
       Strings.Append (String_A, String_More);
    end;
 
-   Vectors.Try_Append (Vector_A, Encode (1), Flag);
+   Vector_Construction_Value := 1;
+   Vectors.Try_Emplace
+     (Vector_A, Construct_Vector_Element'Access, Flag);
    Assert (Flag, "vector append failed");
-   Vectors.Read (Vector_B, 1, Eight);
-   Assert (Decode (Eight) = 1, "vector A-to-B read failed");
-   Vectors.Replace (Vector_B, 1, Encode (2));
-   Vectors.Read (Vector_A, 1, Eight);
-   Assert (Decode (Eight) = 2, "vector B-to-A replace failed");
+   Vectors.Read (Vector_B, 1, Observe_Vector_Element'Access);
+   Assert
+     (Vector_Observed_Value = 1,
+      "zero-copy vector A-to-B read failed");
+   Vectors.Replace (Vector_B, 1, U64_Elements.Create (2));
+   Assert
+     (U64_Elements.Value_Of (Vectors.Read (Vector_A, 1)) = 2,
+      "vector B-to-A replace failed");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Vectors.Try_Emplace
+           (Vector_A, Fail_Vector_Construction'Access, Flag);
+      exception
+         when Constraint_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then Vectors.Length (Vector_B) = 1,
+         "failed vector construction published a partial element");
+   end;
 
    declare
       Recovery_String : Strings.View;
       Recovery_Peer   : Strings.View;
       Recovery_Vector : Vectors.View;
-      Recovery_Data   : Ada.Streams.Stream_Element_Array (1 .. 8);
       Failed          : Boolean;
    begin
       Strings.Initialize
@@ -1213,13 +1296,13 @@ begin
       Strings.Detach (Recovery_Peer);
 
       Vectors.Initialize
-        (Recovery_Vector, Region_A, Poison_Vector_Location, 4, 8);
+        (Recovery_Vector, Region_A, Poison_Vector_Location, 4);
       Write_U32
         (Base_B, Raw_Offset (Poison_Vector_Location, 44), 1);
       Failed := False;
       begin
          Vectors.Try_Append
-           (Recovery_Vector, Encode (1), 0.0, Flag);
+           (Recovery_Vector, U64_Elements.Create (1), 0.0, Flag);
       exception
          when DS.Timeout_Error => Failed := True;
       end;
@@ -1232,7 +1315,8 @@ begin
          "vector poison was not visible across mappings");
       Failed := False;
       begin
-         Vectors.Try_Append (Recovery_Vector, Encode (1), Flag);
+         Vectors.Try_Append
+           (Recovery_Vector, U64_Elements.Create (1), Flag);
       exception
          when DS.Poison_Error => Failed := True;
       end;
@@ -1246,12 +1330,12 @@ begin
       Assert (Failed, "recovery poison accepted the wrong leaf identity");
 
       Vectors.Initialize
-        (Recovery_Vector, Region_A, Poison_Vector_Location, 4, 8);
-      Vectors.Try_Append (Recovery_Vector, Encode (91), Flag);
+        (Recovery_Vector, Region_A, Poison_Vector_Location, 4);
+      Vectors.Try_Append
+        (Recovery_Vector, U64_Elements.Create (91), Flag);
       Assert (Flag, "reinitialized vector rejected an append");
-      Vectors.Read (Recovery_Vector, 1, Recovery_Data);
       Assert
-        (Decode (Recovery_Data) = 91,
+        (U64_Elements.Value_Of (Vectors.Read (Recovery_Vector, 1)) = 91,
          "reinitialized vector did not restore normal operation");
       Vectors.Destroy (Recovery_Vector);
    end;
@@ -1414,9 +1498,10 @@ begin
       Assert (Failed, "duplicate occupied hash-map keys were accepted");
    end;
 
-   Vectors.Try_Append (Wrapped_A, Encode (909), Flag);
-   Vectors.Read (Wrapped_B, 1, Eight);
-   Assert (Flag and then Decode (Eight) = 909,
+   Vectors.Try_Append (Wrapped_A, U64_Elements.Create (909), Flag);
+   Assert
+     (Flag and then
+      U64_Elements.Value_Of (Vectors.Read (Wrapped_B, 1)) = 909,
            "versioned envelope content did not relocate");
    declare
       Wrong : Contract_V2.View;
@@ -1465,8 +1550,9 @@ begin
         (First_Envelope, Region_A, Crash_Envelope_Location,
          Envelope_Content_Extent, 8);
       Crash_Content := Contract_V1.Content_Location (First_Envelope);
-      Vectors.Initialize (Stale_Leaf, Region_A, Crash_Content, 4, 8);
-      Vectors.Try_Append (Stale_Leaf, Encode (707), Flag);
+      Vectors.Initialize (Stale_Leaf, Region_A, Crash_Content, 4);
+      Vectors.Try_Append
+        (Stale_Leaf, U64_Elements.Create (707), Flag);
       Assert
         (Flag and then
          (Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) and 7) = 2,
@@ -1484,7 +1570,7 @@ begin
         ((Read_U32 (Base_B, Raw_Offset (Crash_Content, 0)) and 7) = 1,
          "envelope reuse did not invalidate stale nested state");
       begin
-         Vectors.Attach (Failed_Leaf, Region_B, Crash_Content, 4, 8);
+         Vectors.Attach (Failed_Leaf, Region_B, Crash_Content, 4);
       exception
          when DS.Layout_Error => Failed := True;
       end;
@@ -1492,8 +1578,8 @@ begin
         (Failed,
          "stale nested leaf survived the envelope initialization window");
 
-      Vectors.Initialize (New_Leaf, Region_A, Crash_Content, 4, 8);
-      Vectors.Attach (Peer_Leaf, Region_B, Crash_Content, 4, 8);
+      Vectors.Initialize (New_Leaf, Region_A, Crash_Content, 4);
+      Vectors.Attach (Peer_Leaf, Region_B, Crash_Content, 4);
       Assert
         (Vectors.Length (Peer_Leaf) = 0,
          "nested leaf did not finish initialization after envelope reuse");
@@ -1696,14 +1782,14 @@ begin
    Dynamic_Maps.Attach
      (Dynamic_Map_C, Region_C, Dynamic_Map_Location, Arena_C, 2, 8, 8);
    Strings.Attach (String_C, Region_C, String_Location, 128);
-   Vectors.Attach (Vector_C, Region_C, Vector_Location, 16, 8);
+   Vectors.Attach (Vector_C, Region_C, Vector_Location, 16);
    SPSC.Attach (Ring_C, Region_C, SPSC_Location, 16, 8);
    MPMC.Attach (Multi_C, Region_C, MPMC_Location, 16, 8);
    Maps.Attach (Map_C, Region_C, Map_Location, 16, 8, 8);
    Contract_V1.Attach
      (Envelope_C, Region_C, Envelope_Location, Envelope_Content_Extent, 8);
    Vectors.Attach
-     (Wrapped_C, Region_C, Contract_V1.Content_Location (Envelope_C), 4, 8);
+     (Wrapped_C, Region_C, Contract_V1.Content_Location (Envelope_C), 4);
 
    Assert
      (Contains_U64
@@ -1789,7 +1875,7 @@ begin
       and then String_Read (6 .. 8) = String_Data,
       "byte string did not continue across the third mapping");
 
-   Vectors.Try_Append (Vector_C, Encode (3), Flag);
+   Vectors.Try_Append (Vector_C, U64_Elements.Create (3), Flag);
    Assert (Flag and then Vectors.Length (Vector_B) = 2,
            "vector did not continue after remap");
    SPSC.Try_Push (Ring_C, Encode (77), Flag);
@@ -1934,8 +2020,8 @@ begin
      (Put_Outcome = Maps.Inserted and then Flag and then Eight = Value_1,
       "exclusive hash-map reinitialization did not recover poison");
 
-   Vectors.Read (Wrapped_C, 1, Eight);
-   Assert (Decode (Eight) = 909,
+   Assert
+     (U64_Elements.Value_Of (Vectors.Read (Wrapped_C, 1)) = 909,
            "versioned envelope did not survive third mapping");
 
    Slabs.Destroy (Slab_C);

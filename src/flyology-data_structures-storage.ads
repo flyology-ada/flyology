@@ -12,6 +12,8 @@ private package Flyology.Data_Structures.Storage with Preelaborate is
      (Address : System.Address; Value : Interfaces.Unsigned_32);
    procedure Write_U64
      (Address : System.Address; Value : Interfaces.Unsigned_64);
+   procedure Write_U8
+     (Address : System.Address; Value : Interfaces.Unsigned_8);
    procedure Copy
      (Target : System.Address;
       Source : System.Address;
@@ -21,5 +23,6 @@ private package Flyology.Data_Structures.Storage with Preelaborate is
       Right  : System.Address;
       Length : Interfaces.C.size_t) return Boolean;
    pragma Inline_Always
-     (Read_U8, Read_U32, Read_U64, Write_U32, Write_U64, Copy, Equal);
+     (Read_U8, Read_U32, Read_U64, Write_U8, Write_U32, Write_U64, Copy,
+      Equal);
 end Flyology.Data_Structures.Storage;

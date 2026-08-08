@@ -21,6 +21,7 @@ with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
 with Flyology.Data_Structures.Slab_Pools;
+with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
 with Flyology_Bench;
 with Flyology_Bench.Reporters;
@@ -43,7 +44,9 @@ procedure Data_Structures_Benchmark is
    package Regions renames DS.Regions;
    package Slab_Pools renames DS.Slab_Pools;
    package SPSC renames DS.Rings.SPSC;
-   package Vectors renames DS.Vectors;
+   package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package Vectors is new DS.Vectors
+     (Element => U64_Elements.Representation);
    package Bench renames Flyology_Bench;
    package Reporters renames Flyology_Bench.Reporters;
    package TIO renames Ada.Text_IO;
@@ -178,7 +181,7 @@ procedure Data_Structures_Benchmark is
 
    Vector_Location : constant DS.Region_Offset := 64;
    Vector_Extent : constant DS.Byte_Count :=
-     Vectors.Required_Storage (Working_Capacity, 8);
+     Vectors.Required_Storage (Working_Capacity);
    Map_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Vector_Location) + Vector_Extent));
    Map_Extent : constant DS.Byte_Count :=
@@ -246,6 +249,15 @@ procedure Data_Structures_Benchmark is
    Standard_Queue : Standard_Queues.Queue;
    Standard_String : US.Unbounded_String;
    Checksum : U64 := 0 with Volatile;
+   Vector_Observed : U64 := 0;
+
+   procedure Observe_Vector (Item : U64_Elements.Const_Ref) is
+   begin
+      Vector_Observed := U64_Elements.Value_Of (Item);
+   end Observe_Vector;
+
+   procedure Visit_Vector is new Vectors.Visit
+     (Process => Observe_Vector);
 
    type Vector_View_Array is
      array (Positive range <>) of aliased Vectors.View;
@@ -421,7 +433,6 @@ procedure Data_Structures_Benchmark is
    end Run_Guard_Contention;
 
    procedure Fly_Vector_Batch (Iterations : Bench.Iteration_Count) is
-      Data  : Bytes_8;
       Added : Boolean;
       Count : Natural := 0;
       Local : U64 := 0;
@@ -433,13 +444,13 @@ procedure Data_Structures_Benchmark is
             Count := 0;
          end if;
          Vectors.Try_Append
-           (Fly_Vector, Encode (Payload (Iteration)), Added);
+           (Fly_Vector, U64_Elements.Create (Payload (Iteration)), Added);
          if not Added then
             raise Program_Error with "Flyology vector filled early";
          end if;
          Count := Count + 1;
-         Vectors.Read (Fly_Vector, Positive (Count), Data);
-         Local := Local + Decode (Data);
+         Visit_Vector (Fly_Vector, Positive (Count));
+         Local := Local + Vector_Observed;
       end loop;
       Checksum := Local;
    end Fly_Vector_Batch;
@@ -743,15 +754,16 @@ procedure Data_Structures_Benchmark is
    begin
       Vectors.Initialize
         (Contended_Vectors (1), Region, Vector_Location,
-         Working_Capacity, 8);
-      Vectors.Try_Append (Contended_Vectors (1), Encode (0), Appended);
+         Working_Capacity);
+      Vectors.Try_Append
+        (Contended_Vectors (1), U64_Elements.Create (0), Appended);
       if not Appended then
          raise Program_Error with "unable to seed contended vector";
       end if;
       for Index in 2 .. Contention_Workers loop
          Vectors.Attach
            (Contended_Vectors (Index), Region, Vector_Location,
-            Working_Capacity, 8);
+            Working_Capacity);
       end loop;
    end Prepare_Vector_Contention;
 
@@ -760,7 +772,7 @@ procedure Data_Structures_Benchmark is
    begin
       Vectors.Replace
         (Contended_Vectors (Worker), 1,
-         Encode (Payload (Sequence) + U64 (Worker)));
+         U64_Elements.Create (Payload (Sequence) + U64 (Worker)));
    end Attempt_Vector_Contention;
 
    procedure Attempt_Vector_Wait
@@ -768,7 +780,7 @@ procedure Data_Structures_Benchmark is
    begin
       Vectors.Replace
         (Contended_Vectors (Worker), 1,
-         Encode (Payload (Sequence) + U64 (Worker)), 5.0);
+         U64_Elements.Create (Payload (Sequence) + U64 (Worker)), 5.0);
    end Attempt_Vector_Wait;
 
    procedure Cleanup_Vector_Contention is
@@ -1662,7 +1674,7 @@ begin
 
    Regions.Attach (Region, Base, Region_Length);
    Vectors.Initialize
-     (Fly_Vector, Region, Vector_Location, Working_Capacity, 8);
+     (Fly_Vector, Region, Vector_Location, Working_Capacity);
    Hash_Maps.Initialize
      (Fly_Map, Region, Map_Location, Map_Capacity, 8, 8);
    SPSC.Initialize

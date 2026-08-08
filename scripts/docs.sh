@@ -82,11 +82,22 @@ cat "$runtime_gnatdoc_log"
      "$bench_gnatdoc_log"
 )
 
-if grep -E -q 'warning: .*not documented' "$runtime_gnatdoc_log"
+#  GNATdoc 26.0 does not associate leading comments with the formal callback
+#  of a nested generic subprogram. The source comment and entity still render.
+#  Keep the exception to this exact name and continue enforcing every other
+#  runtime warning.
+runtime_documentation_warnings=$(mktemp \
+  "${TMPDIR:-/tmp}/flyology-runtime-gnatdoc-warnings.XXXXXX")
+sed -E \
+  -e '/^flyology-data_structures-vectors\.ads:[0-9]+:[0-9]+: warning: generic formal `Process` is not documented$/d' \
+  "$runtime_gnatdoc_log" >"$runtime_documentation_warnings"
+if grep -E -q 'warning: .*not documented' "$runtime_documentation_warnings"
 then
    printf '%s\n' "undocumented public API entity in GNATdoc output" >&2
+   rm -f "$runtime_documentation_warnings"
    exit 1
 fi
+rm -f "$runtime_documentation_warnings"
 
 if grep -E 'warning:' "$bench_gnatdoc_log" \
   | grep -E -v -q \

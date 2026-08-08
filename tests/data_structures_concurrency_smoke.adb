@@ -14,6 +14,7 @@ with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
 with Flyology.Data_Structures.Slab_Pools;
+with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
 with Interfaces;
 with Interfaces.C;
@@ -31,7 +32,9 @@ procedure Data_Structures_Concurrency_Smoke is
    package SPSC renames DS.Rings.SPSC;
    package MPMC renames DS.Rings.MPMC;
    package Slabs renames DS.Slab_Pools;
-   package Vectors renames DS.Vectors;
+   package U64_Elements renames DS.Storage_Types.Unsigned_64s;
+   package Vectors is new DS.Vectors
+     (Element => U64_Elements.Representation);
    package C renames Interfaces.C;
 
    use type C.int;
@@ -180,7 +183,7 @@ procedure Data_Structures_Concurrency_Smoke is
          Gate.Arrive;
          Gate.Go;
          Vectors.Create_Or_Attach
-           (View_A, Region_A, Open_Location, 128, 8, Result_A);
+           (View_A, Region_A, Open_Location, 128, Result_A);
          Finished.Done (True);
       exception
          when others => Finished.Done (False);
@@ -191,7 +194,7 @@ procedure Data_Structures_Concurrency_Smoke is
          Gate.Arrive;
          Gate.Go;
          Vectors.Create_Or_Attach
-           (View_B, Region_B, Open_Location, 128, 8, Result_B);
+           (View_B, Region_B, Open_Location, 128, Result_B);
          Finished.Done (True);
       exception
          when others => Finished.Done (False);
@@ -213,10 +216,10 @@ procedure Data_Structures_Concurrency_Smoke is
 
       if Result_A = DS.Initialization_In_Progress then
          Vectors.Create_Or_Attach
-           (View_A, Region_A, Open_Location, 128, 8, Result_A);
+           (View_A, Region_A, Open_Location, 128, Result_A);
       elsif Result_B = DS.Initialization_In_Progress then
          Vectors.Create_Or_Attach
-           (View_B, Region_B, Open_Location, 128, 8, Result_B);
+           (View_B, Region_B, Open_Location, 128, Result_B);
       end if;
       Assert
         ((Result_A = DS.Initialized_New
@@ -575,7 +578,7 @@ procedure Data_Structures_Concurrency_Smoke is
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
             Vectors.Try_Append
-              (Vector.all, Encode (Value), 5.0, Appended);
+              (Vector.all, U64_Elements.Create (Value), 5.0, Appended);
             if not Appended then
                raise Program_Error with "synchronized vector append failed";
             end if;
@@ -589,18 +592,17 @@ procedure Data_Structures_Concurrency_Smoke is
       type Worker_Array is array (Positive range <>) of Worker_Access;
       Workers : Worker_Array (1 .. Worker_Count);
       Seen : Seen_Array (1 .. Total) := (others => False);
-      Data : Ada.Streams.Stream_Element_Array (1 .. 8);
       Value : Interfaces.Unsigned_64;
    begin
       Vectors.Initialize
-        (Views (1), Region_A, Vector_Location, Total, 8);
+        (Views (1), Region_A, Vector_Location, Total);
       for Index in 2 .. Worker_Count loop
          if Index mod 2 = 0 then
             Vectors.Attach
-              (Views (Index), Region_B, Vector_Location, Total, 8);
+              (Views (Index), Region_B, Vector_Location, Total);
          else
             Vectors.Attach
-              (Views (Index), Region_A, Vector_Location, Total, 8);
+              (Views (Index), Region_A, Vector_Location, Total);
          end if;
       end loop;
       for Index in Workers'Range loop
@@ -621,8 +623,7 @@ procedure Data_Structures_Concurrency_Smoke is
       Assert (Vectors.Length (Views (1)) = Total,
               "internally synchronized vector lost elements");
       for Index in 1 .. Total loop
-         Vectors.Read (Views (1), Index, Data);
-         Value := Decode (Data);
+         Value := U64_Elements.Value_Of (Vectors.Read (Views (1), Index));
          Assert
            (Value in 1 .. Interfaces.Unsigned_64 (Total)
             and then not Seen (Positive (Value)),

@@ -750,8 +750,14 @@ destructive initialization and recovery operation. Concurrent calls are valid
 only while the allocation protocol still guarantees virgin bytes. Once a ready
 object may exist, the leaf's ordinary attachment-quiescence rule also applies.
 
-The first family is byte-oriented so an arbitrary Ada private type cannot hide
-an access value in persistent storage:
+Value-bearing containers do not accept arbitrary Ada private types, because a
+private type may hide an access value, task, controlled component, or compiler
+metadata. `Vectors` is generic over an instance of `Storage_Types.Immutable`:
+the instance owns a definite byte-array `Value`, supplies scoped zero-copy
+`Const_Ref` and unpublished `Builder` types, and exports a stable 64-bit type
+signature plus layout version. `Storage_Types.Unsigned_64s` is the built-in
+eight-byte scalar twin. The remaining first-generation leaves retain their
+explicit byte-array APIs while the same typed contract is applied to them.
 
 | Package | Stored value | Synchronization |
 | --- | --- | --- |
@@ -761,7 +767,7 @@ an access value in persistent storage:
 | `Arenas` | Fixed managed extent with a persisted buddy tree and generation-stamped variable-size allocations | One process-shared metadata guard; payload lifetime exclusion belongs to the handle user |
 | `Slab_Pools` | Fixed-size payload slots with generation-stamped handles | Per-slot atomic claims; immediate and timed operations |
 | `Byte_Strings` | Bounded variable-length byte sequence | Shared guard; immediate and timed operations |
-| `Vectors` | Bounded vector of fixed-size byte elements | Shared guard; immediate and timed operations |
+| `Vectors` | Bounded vector of immutable fixed-layout elements | Shared guard; immediate and timed operations |
 | `Dynamic.Byte_Strings` | Growable byte sequence in an `Arenas` allocation | Shared string guard; immediate arena-growth outcomes |
 | `Dynamic.Vectors` | Growable vector of fixed-size byte elements in an `Arenas` allocation | Shared vector guard; immediate arena-growth outcomes |
 | `Dynamic.Hash_Maps` | Growable open-addressed table in an `Arenas` allocation | Shared map guard; immediate arena-growth outcomes |

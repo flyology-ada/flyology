@@ -1,7 +1,6 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
-with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Vectors is
@@ -11,7 +10,6 @@ package body Flyology.Data_Structures.Vectors is
    package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
    use type Addressing.Integer_Address;
    use type Addressing.Storage_Offset;
    use type System.Address;
@@ -20,32 +18,46 @@ package body Flyology.Data_Structures.Vectors is
    Guard_Offset  : constant Byte_Count := 44;
    Unlocked      : constant Interfaces.Unsigned_32 := 0;
    Locked        : constant Interfaces.Unsigned_32 := 1;
+   Storage_Alignment : constant Byte_Count :=
+     Byte_Count'Max (8, Byte_Count (Element.Alignment));
+
+   procedure Validate_Element_Contract is
+   begin
+      if Element.Signature = 0
+        or else Element.Version = 0
+        or else Element.Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
+      then
+         raise Constraint_Error with
+           "invalid immutable vector element contract";
+      end if;
+   end Validate_Element_Contract;
+   pragma Inline_Always (Validate_Element_Contract);
 
    procedure Geometry
-     (Capacity     : Positive;
-      Element_Size : Positive;
-      Stride       : out Byte_Count;
-      Extent       : out Byte_Count) is
+     (Capacity : Positive;
+      Stride   : out Byte_Count;
+      Extent   : out Byte_Count) is
    begin
-      Stride := Layouts.Align_Up (Byte_Count (Element_Size), 8);
+      Validate_Element_Contract;
+      Stride := Layouts.Align_Up
+        (Byte_Count (Element.Size), Storage_Alignment);
       Extent := Layouts.Checked_Add
         (Layouts.Header_Size,
          Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
    end Geometry;
 
-   function Required_Storage
-     (Capacity : Positive; Element_Size : Positive) return Byte_Count
-   is
+   function Required_Storage (Capacity : Positive) return Byte_Count is
       Stride : Byte_Count;
       Extent : Byte_Count;
    begin
-      Geometry (Capacity, Element_Size, Stride, Extent);
+      Geometry (Capacity, Stride, Extent);
       return Extent;
    end Required_Storage;
 
    procedure Set_View
-     (Item : out View; Core : Layouts.Local_View;
-      Capacity, Element_Size : Interfaces.Unsigned_32;
+     (Item : out View;
+      Core : Layouts.Local_View;
+      Capacity : Interfaces.Unsigned_32;
       Stride : Byte_Count) is
    begin
       Item.Core := Core;
@@ -54,48 +66,44 @@ package body Flyology.Data_Structures.Vectors is
       Item.Guard_Address := Layouts.Address_At (Core, Guard_Offset, 4, 4);
       Item.Payload_Address := Layouts.Address_At
         (Core, Layouts.Header_Size,
-         Core.Extent - Layouts.Header_Size, 1);
+         Core.Extent - Layouts.Header_Size, Storage_Alignment);
       Item.Payload_Extent := Core.Extent - Layouts.Header_Size;
       Item.Capacity_Value := Capacity;
-      Item.Element_Value := Element_Size;
       Item.Stride := Stride;
    end Set_View;
 
    procedure Finish_Initialize
-     (Item         : out View;
-      Core         : Layouts.Local_View;
-      Capacity     : Interfaces.Unsigned_32;
-      Element_Size : Interfaces.Unsigned_32;
-      Stride       : Byte_Count) is
+     (Item : out View;
+      Core : Layouts.Local_View;
+      Capacity : Interfaces.Unsigned_32;
+      Stride : Byte_Count) is
    begin
-      Set_View (Item, Core, Capacity, Element_Size, Stride);
+      Set_View (Item, Core, Capacity, Stride);
       Layouts.Publish (Item.Core);
    end Finish_Initialize;
 
    procedure Initialize
-     (Item         : out View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive)
+     (Item     : out View;
+      Region   : Region_View;
+      Location : Region_Offset;
+      Capacity : Positive)
    is
       Core : Layouts.Local_View;
       Stride, Extent : Byte_Count;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Stride, Extent);
+      Geometry (Capacity, Stride, Extent);
       Layouts.Begin_Initialize
         (Core, Region, Location, Identity, Extent,
          (Capacity     => Interfaces.Unsigned_32 (Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Element_Size),
-          Alignment    => 8,
-          Auxiliary    => 0,
+          Element_Size => Interfaces.Unsigned_32 (Element.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Alignment),
+          Auxiliary    => Unlocked,
           Word_1       => 0,
-          Word_2       => Interfaces.Unsigned_64 (Stride)),
-         8);
+          Word_2       => Element.Signature),
+         Storage_Alignment);
       Finish_Initialize
-        (Item, Core, Interfaces.Unsigned_32 (Capacity),
-         Interfaces.Unsigned_32 (Element_Size), Stride);
+        (Item, Core, Interfaces.Unsigned_32 (Capacity), Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -105,37 +113,34 @@ package body Flyology.Data_Structures.Vectors is
    end Initialize;
 
    procedure Create_Or_Attach
-     (Item         : out View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive;
-      Result       : out Open_Result)
+     (Item     : out View;
+      Region   : Region_View;
+      Location : Region_Offset;
+      Capacity : Positive;
+      Result   : out Open_Result)
    is
-      Core   : Layouts.Local_View;
-      Claim  : Layouts.Initialization_Claim;
-      Stride : Byte_Count;
-      Extent : Byte_Count;
+      Core : Layouts.Local_View;
+      Claim : Layouts.Initialization_Claim;
+      Stride, Extent : Byte_Count;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Stride, Extent);
+      Geometry (Capacity, Stride, Extent);
       Layouts.Try_Begin_Initialize
         (Core, Claim, Region, Location, Identity, Extent,
          (Capacity     => Interfaces.Unsigned_32 (Capacity),
-          Element_Size => Interfaces.Unsigned_32 (Element_Size),
-          Alignment    => 8,
-          Auxiliary    => 0,
+          Element_Size => Interfaces.Unsigned_32 (Element.Size),
+          Alignment    => Interfaces.Unsigned_32 (Element.Alignment),
+          Auxiliary    => Unlocked,
           Word_1       => 0,
-          Word_2       => Interfaces.Unsigned_64 (Stride)),
-         8);
+          Word_2       => Element.Signature),
+         Storage_Alignment);
       case Claim is
          when Layouts.Claimed_Virgin =>
             Finish_Initialize
-              (Item, Core, Interfaces.Unsigned_32 (Capacity),
-               Interfaces.Unsigned_32 (Element_Size), Stride);
+              (Item, Core, Interfaces.Unsigned_32 (Capacity), Stride);
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
-            Attach (Item, Region, Location, Capacity, Element_Size);
+            Attach (Item, Region, Location, Capacity);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -149,31 +154,32 @@ package body Flyology.Data_Structures.Vectors is
    end Create_Or_Attach;
 
    procedure Attach
-     (Item         : out View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Capacity     : Positive;
-      Element_Size : Positive)
+     (Item     : out View;
+      Region   : Region_View;
+      Location : Region_Offset;
+      Capacity : Positive)
    is
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
       Stride, Extent : Byte_Count;
    begin
       Detach (Item);
-      Geometry (Capacity, Element_Size, Stride, Extent);
-      Layouts.Attach (Core, Header, Region, Location, Identity, 8);
+      Geometry (Capacity, Stride, Extent);
+      Layouts.Attach
+        (Core, Header, Region, Location, Identity, Storage_Alignment);
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
-        or else Header.Element_Size /= Interfaces.Unsigned_32 (Element_Size)
-        or else Header.Alignment /= 8
-        or else Header.Auxiliary /= 0
-        or else Header.Word_2 /= Interfaces.Unsigned_64 (Stride)
+        or else Header.Element_Size /= Interfaces.Unsigned_32 (Element.Size)
+        or else Header.Alignment /=
+          Interfaces.Unsigned_32 (Element.Alignment)
+        or else Header.Auxiliary /= Unlocked
+        or else Header.Word_2 /= Element.Signature
         or else Header.Word_1 > Interfaces.Unsigned_64 (Header.Capacity)
         or else Core.Extent /= Extent
       then
-         raise Layout_Error with "vector layout does not match";
+         raise Layout_Error with
+           "vector capacity or immutable element contract does not match";
       end if;
-      Set_View
-        (Item, Core, Header.Capacity, Header.Element_Size, Stride);
+      Set_View (Item, Core, Header.Capacity, Stride);
    exception
       when others =>
          if Item.Core.Attached then
@@ -190,7 +196,6 @@ package body Flyology.Data_Structures.Vectors is
       Item.Payload_Address := System.Null_Address;
       Item.Payload_Extent := 0;
       Item.Capacity_Value := 0;
-      Item.Element_Value := 0;
       Item.Stride := 0;
    end Detach;
 
@@ -233,7 +238,7 @@ package body Flyology.Data_Structures.Vectors is
    pragma Inline_Always (Acquire);
 
    procedure Acquire (Item : View; Timeout : Wait_Timeout) is
-      Wait     : Waiting.Context := Waiting.Start (Timeout);
+      Wait : Waiting.Context := Waiting.Start (Timeout);
       Expected : Interfaces.Unsigned_32;
    begin
       if not Item.Core.Attached
@@ -282,11 +287,11 @@ package body Flyology.Data_Structures.Vectors is
    pragma Inline_Always (Finish_Failure);
 
    function Stored_Length_Unlocked
-     (Item : View) return Interfaces.Unsigned_64 is
-      Result : Interfaces.Unsigned_64;
+     (Item : View) return Interfaces.Unsigned_64
+   is
+      Result : constant Interfaces.Unsigned_64 :=
+        Bytes.Read_U64 (Item.Length_Address);
    begin
-      Result := Bytes.Read_U64
-        (Item.Length_Address);
       if Result > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "vector length is corrupt";
       end if;
@@ -327,26 +332,16 @@ package body Flyology.Data_Structures.Vectors is
    function Is_Poisoned (Item : View) return Boolean is
      (Layouts.Is_Poisoned (Item.Core));
 
-   procedure Poison
-     (Region : Region_View; Location : Region_Offset) is
+   procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
-      Layouts.Poison_At (Region, Location, Identity, 8);
+      Layouts.Poison_At
+        (Region, Location, Identity, Storage_Alignment);
    end Poison;
-
-   procedure Check_Data (Item : View; Length : Natural) is
-   begin
-      if not Item.Core.Attached then
-         raise Region_Error with "detached vector view";
-      elsif Byte_Count (Length) /= Byte_Count (Item.Element_Value) then
-         raise Constraint_Error with "vector element length does not match";
-      end if;
-   end Check_Data;
-   pragma Inline_Always (Check_Data);
 
    function Element_Address
      (Item : View; Index : Interfaces.Unsigned_64) return System.Address
    is
-      Relative   : Byte_Count;
+      Relative : Byte_Count;
       Base_Value : Addressing.Integer_Address;
    begin
       if not Item.Core.Attached
@@ -356,18 +351,14 @@ package body Flyology.Data_Structures.Vectors is
       elsif Index >= Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "vector element index exceeds payload";
       end if;
-
-      Relative := Layouts.Checked_Multiply
-        (Byte_Count (Index), Item.Stride);
+      Relative := Layouts.Checked_Multiply (Byte_Count (Index), Item.Stride);
       if Relative > Item.Payload_Extent
-        or else Byte_Count (Item.Element_Value) >
-          Item.Payload_Extent - Relative
+        or else Byte_Count (Element.Size) > Item.Payload_Extent - Relative
       then
          raise Layout_Error with "vector element extent is corrupt";
       elsif Relative > Byte_Count (Addressing.Storage_Offset'Last) then
          raise Region_Error with "vector element offset is not native";
       end if;
-
       Base_Value := Addressing.To_Integer (Item.Payload_Address);
       if Relative > Byte_Count (Addressing.Integer_Address'Last - Base_Value)
       then
@@ -377,60 +368,33 @@ package body Flyology.Data_Structures.Vectors is
    end Element_Address;
    pragma Inline_Always (Element_Address);
 
+   function Binding
+     (Item : View;
+      Index : Interfaces.Unsigned_64;
+      Writable : Boolean) return Immutable_Storage_View is
+     (Base      => Element_Address (Item, Index),
+      Extent    => Byte_Count (Element.Size),
+      Signature => Element.Signature,
+      Version   => Element.Version,
+      Writable  => Writable);
+   pragma Inline_Always (Binding);
+
    procedure Try_Append
      (Item     : in out View;
-      Data     : Ada.Streams.Stream_Element_Array;
+      Data     : Element.Value;
       Appended : out Boolean)
    is
       Current : Interfaces.Unsigned_64;
       Mutated : Boolean := False;
-      Target  : System.Address := System.Null_Address;
    begin
-      Check_Data (Item, Data'Length);
       Acquire (Item);
       begin
          Current := Stored_Length_Unlocked (Item);
          if Current = Interfaces.Unsigned_64 (Item.Capacity_Value) then
             Appended := False;
          else
-            Target := Element_Address (Item, Current);
             Mutated := True;
-            Bytes.Copy
-              (Target, Data'Address,
-               Interfaces.C.size_t (Data'Length));
-            Bytes.Write_U64
-              (Item.Length_Address, Current + 1);
-            Appended := True;
-         end if;
-      exception
-         when others =>
-            Finish_Failure (Item, Mutated);
-            raise;
-      end;
-      Release (Item);
-   end Try_Append;
-
-   procedure Try_Append
-     (Item     : in out View;
-      Data     : Ada.Streams.Stream_Element_Array;
-      Timeout  : Wait_Timeout;
-      Appended : out Boolean)
-   is
-      Current : Interfaces.Unsigned_64;
-      Mutated : Boolean := False;
-      Target  : System.Address := System.Null_Address;
-   begin
-      Check_Data (Item, Data'Length);
-      Acquire (Item, Timeout);
-      begin
-         Current := Stored_Length_Unlocked (Item);
-         if Current = Interfaces.Unsigned_64 (Item.Capacity_Value) then
-            Appended := False;
-         else
-            Target := Element_Address (Item, Current);
-            Mutated := True;
-            Bytes.Copy
-              (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+            Element.Copy_To (Data, Binding (Item, Current, True));
             Bytes.Write_U64 (Item.Length_Address, Current + 1);
             Appended := True;
          end if;
@@ -442,6 +406,63 @@ package body Flyology.Data_Structures.Vectors is
       Release (Item);
    end Try_Append;
 
+   procedure Try_Append
+     (Item     : in out View;
+      Data     : Element.Value;
+      Timeout  : Wait_Timeout;
+      Appended : out Boolean)
+   is
+      Current : Interfaces.Unsigned_64;
+      Mutated : Boolean := False;
+   begin
+      Acquire (Item, Timeout);
+      begin
+         Current := Stored_Length_Unlocked (Item);
+         if Current = Interfaces.Unsigned_64 (Item.Capacity_Value) then
+            Appended := False;
+         else
+            Mutated := True;
+            Element.Copy_To (Data, Binding (Item, Current, True));
+            Bytes.Write_U64 (Item.Length_Address, Current + 1);
+            Appended := True;
+         end if;
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated);
+            raise;
+      end;
+      Release (Item);
+   end Try_Append;
+
+   procedure Try_Emplace
+     (Item        : in out View;
+      Constructor : Construct_Action;
+      Appended    : out Boolean)
+   is
+      Current : Interfaces.Unsigned_64;
+      Slot : Element.Builder;
+      Mutated : Boolean := False;
+   begin
+      Acquire (Item);
+      begin
+         Current := Stored_Length_Unlocked (Item);
+         if Current = Interfaces.Unsigned_64 (Item.Capacity_Value) then
+            Appended := False;
+         else
+            Element.Bind (Slot, Binding (Item, Current, True));
+            Constructor (Slot);
+            Mutated := True;
+            Bytes.Write_U64 (Item.Length_Address, Current + 1);
+            Appended := True;
+         end if;
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated);
+            raise;
+      end;
+      Release (Item);
+   end Try_Emplace;
+
    procedure Check_Index_Unlocked (Item : View; Index : Positive) is
    begin
       if Interfaces.Unsigned_64 (Index) > Stored_Length_Unlocked (Item) then
@@ -451,18 +472,19 @@ package body Flyology.Data_Structures.Vectors is
    pragma Inline_Always (Check_Index_Unlocked);
 
    procedure Read
-     (Item  : View;
-      Index : Positive;
-      Data  : out Ada.Streams.Stream_Element_Array) is
+     (Item    : View;
+      Index   : Positive;
+      Process : Read_Action)
+   is
+      Reference : Element.Const_Ref;
    begin
-      Check_Data (Item, Data'Length);
       Acquire (Item);
       begin
          Check_Index_Unlocked (Item, Index);
-         Bytes.Copy
-           (Data'Address,
-            Element_Address (Item, Interfaces.Unsigned_64 (Index - 1)),
-            Interfaces.C.size_t (Data'Length));
+         Element.Bind
+           (Reference,
+            Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
+         Process (Reference);
       exception
          when others =>
             Release (Item);
@@ -471,20 +493,56 @@ package body Flyology.Data_Structures.Vectors is
       Release (Item);
    end Read;
 
+   function Read (Item : View; Index : Positive) return Element.Value is
+      Result : Element.Value;
+   begin
+      Acquire (Item);
+      begin
+         Check_Index_Unlocked (Item, Index);
+         Result := Element.Copy_From
+           (Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
+      exception
+         when others =>
+            Release (Item);
+            raise;
+      end;
+      Release (Item);
+      return Result;
+   end Read;
+
+   procedure Visit (Item : View; Index : Positive) is
+      Reference : Element.Const_Ref;
+   begin
+      Acquire (Item);
+      begin
+         Check_Index_Unlocked (Item, Index);
+         Element.Bind
+           (Reference,
+            Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
+         Process (Reference);
+      exception
+         when others =>
+            Release (Item);
+            raise;
+      end;
+      Release (Item);
+   end Visit;
+
    procedure Read
      (Item    : View;
       Index   : Positive;
-      Data    : out Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout) is
+      Timeout : Wait_Timeout;
+      Process : Read_Action)
+   is
+      Reference : Element.Const_Ref;
    begin
-      Check_Data (Item, Data'Length);
       Acquire (Item, Timeout);
       begin
          Check_Index_Unlocked (Item, Index);
-         Bytes.Copy
-           (Data'Address,
-            Element_Address (Item, Interfaces.Unsigned_64 (Index - 1)),
-            Interfaces.C.size_t (Data'Length));
+         Element.Bind
+           (Reference,
+            Binding (Item, Interfaces.Unsigned_64 (Index - 1), False));
+         Process (Reference);
       exception
          when others =>
             Release (Item);
@@ -496,19 +554,17 @@ package body Flyology.Data_Structures.Vectors is
    procedure Replace
      (Item  : in out View;
       Index : Positive;
-      Data  : Ada.Streams.Stream_Element_Array) is
+      Data  : Element.Value)
+   is
       Mutated : Boolean := False;
-      Target  : System.Address := System.Null_Address;
    begin
-      Check_Data (Item, Data'Length);
       Acquire (Item);
       begin
          Check_Index_Unlocked (Item, Index);
-         Target := Element_Address
-           (Item, Interfaces.Unsigned_64 (Index - 1));
          Mutated := True;
-         Bytes.Copy
-           (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+         Element.Copy_To
+           (Data, Binding
+              (Item, Interfaces.Unsigned_64 (Index - 1), True));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -520,21 +576,18 @@ package body Flyology.Data_Structures.Vectors is
    procedure Replace
      (Item    : in out View;
       Index   : Positive;
-      Data    : Ada.Streams.Stream_Element_Array;
+      Data    : Element.Value;
       Timeout : Wait_Timeout)
    is
       Mutated : Boolean := False;
-      Target  : System.Address := System.Null_Address;
    begin
-      Check_Data (Item, Data'Length);
       Acquire (Item, Timeout);
       begin
          Check_Index_Unlocked (Item, Index);
-         Target := Element_Address
-           (Item, Interfaces.Unsigned_64 (Index - 1));
          Mutated := True;
-         Bytes.Copy
-           (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+         Element.Copy_To
+           (Data, Binding
+              (Item, Interfaces.Unsigned_64 (Index - 1), True));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -544,55 +597,22 @@ package body Flyology.Data_Structures.Vectors is
    end Replace;
 
    procedure Try_Pop
-     (Item   : in out View;
-      Data   : out Ada.Streams.Stream_Element_Array;
-      Popped : out Boolean)
-   is
-      Current : Interfaces.Unsigned_64;
-      Mutated : Boolean := False;
-   begin
-      Check_Data (Item, Data'Length);
-      Acquire (Item);
-      begin
-         Current := Stored_Length_Unlocked (Item);
-         if Current = 0 then
-            Popped := False;
-         else
-            Bytes.Copy
-              (Data'Address, Element_Address (Item, Current - 1),
-               Interfaces.C.size_t (Data'Length));
-            Mutated := True;
-            Bytes.Write_U64
-              (Item.Length_Address, Current - 1);
-            Popped := True;
-         end if;
-      exception
-         when others =>
-            Finish_Failure (Item, Mutated);
-            raise;
-      end;
-      Release (Item);
-   end Try_Pop;
-
-   procedure Try_Pop
      (Item    : in out View;
-      Data    : out Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout;
+      Process : Read_Action;
       Popped  : out Boolean)
    is
       Current : Interfaces.Unsigned_64;
+      Reference : Element.Const_Ref;
       Mutated : Boolean := False;
    begin
-      Check_Data (Item, Data'Length);
-      Acquire (Item, Timeout);
+      Popped := False;
+      Acquire (Item);
       begin
          Current := Stored_Length_Unlocked (Item);
-         if Current = 0 then
-            Popped := False;
-         else
-            Bytes.Copy
-              (Data'Address, Element_Address (Item, Current - 1),
-               Interfaces.C.size_t (Data'Length));
+         if Current /= 0 then
+            Element.Bind
+              (Reference, Binding (Item, Current - 1, False));
+            Process (Reference);
             Mutated := True;
             Bytes.Write_U64 (Item.Length_Address, Current - 1);
             Popped := True;
@@ -620,21 +640,6 @@ package body Flyology.Data_Structures.Vectors is
       Release (Item);
    end Clear;
 
-   procedure Clear (Item : in out View; Timeout : Wait_Timeout) is
-      Mutated : Boolean := False;
-   begin
-      Acquire (Item, Timeout);
-      begin
-         Mutated := True;
-         Bytes.Write_U64 (Item.Length_Address, 0);
-      exception
-         when others =>
-            Finish_Failure (Item, Mutated);
-            raise;
-      end;
-      Release (Item);
-   end Clear;
-
    procedure Destroy (Item : in out View) is
    begin
       Acquire (Item);
@@ -648,5 +653,4 @@ package body Flyology.Data_Structures.Vectors is
       Release (Item);
       Detach (Item);
    end Destroy;
-
 end Flyology.Data_Structures.Vectors;

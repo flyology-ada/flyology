@@ -89,11 +89,26 @@ package Flyology.Data_Structures with Preelaborate is
    --  must be detached before the application unmaps or releases the region.
    type Region_View is limited private;
 
+   --  Opaque process-local binding used by immutable storage-type instances.
+   --  Structure implementations construct bindings only after validating a
+   --  complete element extent. Applications cannot inspect or construct the
+   --  native address retained by this value.
+   --  @exclude
+   type Immutable_Storage_View is private;
+
 private
    type Region_View is limited record
       Base         : System.Address := System.Null_Address;
       Length_Value : Byte_Count := 0;
       Attached     : Boolean := False;
+   end record;
+
+   type Immutable_Storage_View is record
+      Base       : System.Address := System.Null_Address;
+      Extent     : Byte_Count := 0;
+      Signature  : Interfaces.Unsigned_64 := 0;
+      Version    : Interfaces.Unsigned_32 := 0;
+      Writable   : Boolean := False;
    end record;
 
    --  Return an address only after checking the complete local slice. This is

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Use Flyology's relocatable byte-oriented data structures in caller-owned arenas and mappings, with explicit attachment, synchronization, layout contracts, and recovery boundaries.">
+    <meta name="description" content="Use Flyology's relocatable data structures in caller-owned arenas and mappings, with explicit element representations, attachment, synchronization, and recovery boundaries.">
     <meta name="theme-color" content="#17213d">
     <title>Relocatable data structures · Flyology Runtime</title>
     <link rel="canonical" href="https://flyology.org/guide/data-structures/">
@@ -55,7 +55,7 @@
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Relocatable data structures</li></ol>
           <h1>Store structures in caller-owned regions.</h1>
         </div>
-        <p class="doc-hero-copy">Initialize byte-oriented structures in a caller-owned region, optionally manage payload growth with a relocatable arena, attach process-local views at each virtual address, and use the synchronization model stated by each leaf.</p>
+        <p class="doc-hero-copy">Initialize structures in a caller-owned region, optionally manage payload growth with a relocatable arena, attach process-local views at each virtual address, and use the element and synchronization contracts stated by each leaf.</p>
       </header>
 
       <div class="docs-layout">
@@ -90,7 +90,7 @@
               <dl>
                 <div class="decision-row"><dt>Stored metadata</dt><dd>Every leaf records a 64-bit magic, layout version, schema, extent, configuration, lifecycle state, and initialization epoch.</dd></div>
                 <div class="decision-row"><dt>Attachment</dt><dd>The expected identity and geometry must match. Null, truncated, misaligned, overflowing, incomplete, stale, or corrupt layouts fail before payload access.</dd></div>
-                <div class="decision-row"><dt>Payload types</dt><dd>Public containers store explicit byte representations. An arbitrary Ada private type may contain hidden access values or compiler metadata and is not accepted as a persistable element.</dd></div>
+                <div class="decision-row"><dt>Payload types</dt><dd>Persisted elements use explicit byte-array-backed representations. An arbitrary Ada private type may contain hidden access values or compiler metadata and is not accepted as a persistable element.</dd></div>
                 <div class="decision-row"><dt>Allocation</dt><dd>Bounded leaves keep fixed capacity. Dynamic leaves can replace payload allocations inside a fixed managed arena, but no leaf grows or remaps the backing region.</dd></div>
               </dl>
             </div>
@@ -106,7 +106,7 @@
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html#97166b56d6d2b4d8a17560db84fd55d8ca3f15a25bb22299f8f091c0fa6768cc"><code>Byte_Strings.View</code></a></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence of fixed-size byte elements. Indexing is one-based at the public API.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence generic over an immutable fixed-layout element representation. Indexing is one-based at the public API.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/2deb1c418009bddb97baa53a4ddbc4b6934c37124c59528b494223aee6c9b93e.html#597139e2424f6d33451757a2f8ced40f78441f5eb500b45562accefcca7ace75"><code>Hash_Maps.View</code></a></dt><dd>Fixed-size byte keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a></dt><dd>A fixed managed extent with variable-size buddy allocations identified by generations rather than addresses.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/3b065985c3e335db58df8578f6a05aea354fda11d81238c958c208971a819df1.html#fbf4e1d6dac71f7df1df68d21ef9b4fff66873450899a844416728ba100ba4db"><code>Dynamic.Byte_Strings.View</code></a></dt><dd>A byte sequence whose payload capacity grows through an arena allocation.</dd></div>
@@ -118,6 +118,7 @@
                 <div class="decision-row"><dt><a href="../../api/ab437ecbee2450a004e2975e535265ec7c799e66225cc0576865134bcd7854dd.html#61c377a30faa2f76d4e0a3d5b1b7d2d92bf86b4c31fa1a400ebc2d21f7fb6890"><code>Envelopes.View</code></a></dt><dd>An optional application signature and contract version around one nested leaf. The nested leaf still validates its own identity and geometry.</dd></div>
               </dl>
             </div>
+            <p><a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html"><code>Storage_Types.Immutable</code></a> defines the element protocol used by <code>Vectors</code>. Its <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#3507dcaca62e2b43b1ddb79001053336c3bc5dfba2a0017cce98ca17a5e007af"><code>Value</code></a> owns a fixed byte array, <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#7038f670816d8226fdb0c9cb3f800eea1f92487104cf0c253e55aa2780e16bae"><code>Const_Ref</code></a> borrows published bytes during a read callback, and <a href="../../api/c5ea4611f86e5ae1b6a0dc93bfc0336ca683568a73c60f937858bc9037d5a0d2.html#acd6b1971019e0f740e83eb974d665b101eaa092d6e0ab528c3dd770b24bdfcb"><code>Builder</code></a> can write only an unpublished slot during emplacement. The container copies bytes for an independent value and performs no encode/decode step. <a href="../../api/abf88fe8cdb76cf2e4f264a1a33bfd618d39637c7f3235299790e9ed0bad06fe.html#3794f9b62c2d43f1c918c55eb0f2c41dbd90a51a9a8980912c2353f328cb8567"><code>Storage_Types.Unsigned_64s.Representation</code></a> supplies the built-in eight-byte scalar representation.</p>
             <p><a href="../../api/406d17cda42c14faf09bd101e96f3b5bcdc3ca6a383babe76d63bfb2ab6c79d5.html#62bc05b67554ce668c1a0b7a9b463cacd9aab976a202c38ce34502599d0547df"><code>Regions.View</code></a> supplies a checked process-local backing view, while <a href="../../api/03f2d320fb794d315fb0308aee9d015f09a38ee74193c79a1555c97337e54a54.html#67131a4bbd82f6c74291e930859a6f9154206ce32e9b3d3b16b53c7afca18bc0"><code>Handles.Handle</code></a> is the fixed-width slot-and-generation representation used by structures such as slabs. Neither package owns storage.</p>
           </section>
 
@@ -167,12 +168,15 @@ end if;</code></pre>
               <pre><code class="language-ada">with Ada.Streams;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Regions;
+with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
 
 procedure Local_Vector is
    package DS      renames Flyology.Data_Structures;
    package Regions renames DS.Regions;
-   package Vectors renames DS.Vectors;
+   package U64s    renames DS.Storage_Types.Unsigned_64s;
+   package Vectors is new DS.Vectors
+     (Element =&gt; U64s.Representation);
 
    type Arena_Bytes is array
      (Ada.Streams.Stream_Element_Offset range &lt;&gt;) of
@@ -182,7 +186,6 @@ procedure Local_Vector is
    Arena : aliased Arena_Bytes (1 .. 8_192) := [others =&gt; 0];
    Region : Regions.View;
    Items  : Vectors.View;
-   Data   : Ada.Streams.Stream_Element_Array (1 .. 8) := [others =&gt; 0];
    Added  : Boolean;
 begin
    Regions.Attach
@@ -191,19 +194,19 @@ begin
    Vectors.Initialize
      (Items,
       Region,
-      Location     =&gt; 64,
-      Capacity     =&gt; 128,
-      Element_Size =&gt; Data'Length);
+      Location =&gt; 64,
+      Capacity =&gt; 128);
 
-   Vectors.Try_Append (Items, Data, Added);
+   Vectors.Try_Append (Items, U64s.Create (42), Added);
 
    --  Detach local views before Arena ceases to exist.
    Vectors.Detach (Items);
    Regions.Detach (Region);
 end Local_Vector;</code></pre>
             </figure>
-            <p><code>Required_Storage</code> computes the complete extent for a chosen capacity and element size. Reserve that extent at a nonzero leaf-aligned <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#78be162a1b0646d241594f054dc95f74c1ac181241b9ea8fcbdf29568d19f59f"><code>Region_Offset</code></a>; offset zero is the null sentinel. Initialization requires exclusive ownership of the target extent through final ready-state publication.</p>
-            <p>When an allocation protocol supplies an extent known to have an exact zero lifecycle but several participants may discover it, call <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#cc42887b693a346917d59a831d97b16e3138d0108cf49615eb1d3d88decdd7ce"><code>Vectors.Create_Or_Attach</code></a>, or the corresponding operation on another leaf. Its <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#c99756d9b923e013a8b0b249754801974bdbb2d45e2b42a855d82b25789d9ec9"><code>Open_Result</code></a> is <code>Initialized_New</code> for the caller that atomically claims initialization, <code>Attached_Existing</code> for a caller that validates the completed compatible object, or <code>Initialization_In_Progress</code> with a detached view when another caller has not published yet. The operation does not wait. Concurrent calls are permitted while the allocation protocol still guarantees virgin bytes; once a ready object may exist, use the leaf's ordinary attachment-quiescence rule.</p>
+            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#ec8cb1619bde063cd9e11f33ac2bd515d4bc7804145584ecabe6b4480f54e450"><code>Vectors.Required_Storage</code></a> computes the complete extent from capacity and the generic element's size and alignment. Reserve that extent at a nonzero leaf-aligned <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#78be162a1b0646d241594f054dc95f74c1ac181241b9ea8fcbdf29568d19f59f"><code>Region_Offset</code></a>; offset zero is the null sentinel. Initialization requires exclusive ownership of the target extent through final ready-state publication.</p>
+            <p><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#16531f665a59bd4b57eee1ff9b3bdcc70a7cdeb456d6b18e42718174334b611c"><code>Vectors.Try_Emplace</code></a> passes an unpublished builder to a constructor and publishes the new length only after the constructor returns. A raising constructor may have changed unused bytes, but it does not publish a partial element. Callback <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#62eb10dcd4b26723affd170e04b16c76555e8affaeb367ed641b3472c717391d"><code>Vectors.Read</code></a> passes a zero-copy <code>Const_Ref</code> while holding the vector guard. The callback must consume it synchronously: do not retain it, block, reenter the vector, detach a view, or release the mapping.</p>
+            <p>When an allocation protocol supplies an extent known to have an exact zero lifecycle but several participants may discover it, call <a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#68d7334e490088c89ffa1c0813f52860dd0460f318a11ae4f6ccc5bac1b78765"><code>Vectors.Create_Or_Attach</code></a>, or the corresponding operation on another leaf. Its <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#c99756d9b923e013a8b0b249754801974bdbb2d45e2b42a855d82b25789d9ec9"><code>Open_Result</code></a> is <code>Initialized_New</code> for the caller that atomically claims initialization, <code>Attached_Existing</code> for a caller that validates the completed compatible object, or <code>Initialization_In_Progress</code> with a detached view when another caller has not published yet. The operation does not wait. Concurrent calls are permitted while the allocation protocol still guarantees virgin bytes; once a ready object may exist, use the leaf's ordinary attachment-quiescence rule.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p><strong>Creation is not recovery.</strong> Use <code>Create_Or_Attach</code> only when an outer allocation protocol establishes that zero means virgin storage. If corruption zeros the lifecycle word of an older object, the core layout cannot distinguish it from a new extent. Explicit <code>Initialize</code> remains the destructive recovery operation under exclusive authority.</p>
@@ -223,11 +226,11 @@ Regions.Attach (Region_B, Mapping_B_Base, Mapping_Length);
 
 Vectors.Initialize
   (Vector_A, Region_A, Location =&gt; 64,
-   Capacity =&gt; 128, Element_Size =&gt; 8);
+   Capacity =&gt; 128);
 
 Vectors.Attach
   (Vector_B, Region_B, Location =&gt; 64,
-   Capacity =&gt; 128, Element_Size =&gt; 8);
+   Capacity =&gt; 128);
 
 --  Operations through Vector_A and Vector_B reach the same stored bytes.
 --  The process-local native bases may differ.</code></pre>
@@ -249,7 +252,7 @@ Vectors.Attach
    Contract_Version   =&gt; 1);
 
 Vector_Extent : constant DS.Byte_Count :=
-  Vectors.Required_Storage (Capacity =&gt; 128, Element_Size =&gt; 8);
+  Vectors.Required_Storage (Capacity =&gt; 128);
 
 Contract_V1.Initialize
   (Envelope, Region, Location =&gt; 64,
@@ -257,9 +260,8 @@ Contract_V1.Initialize
 
 Vectors.Initialize
   (Items, Region,
-   Location     =&gt; Contract_V1.Content_Location (Envelope),
-   Capacity     =&gt; 128,
-   Element_Size =&gt; 8);</code></pre>
+   Location =&gt; Contract_V1.Content_Location (Envelope),
+   Capacity =&gt; 128);</code></pre>
             </figure>
             <p>Envelope initialization first marks the nested lifecycle incomplete, publishes the envelope, and leaves nested initialization to the caller. If execution stops between those steps, leaf attachment rejects the incomplete nested object. The 64-bit signature reduces accidental contract confusion; it is not authentication or an integrity checksum.</p>
           </section>

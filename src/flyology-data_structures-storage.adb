@@ -40,6 +40,12 @@ package body Flyology.Data_Structures.Storage is
      (Address : System.Address) return Interfaces.Unsigned_64 is
      (U64_Access.To_Pointer (Address).all);
 
+   procedure Write_U8
+     (Address : System.Address; Value : Interfaces.Unsigned_8) is
+   begin
+      U8_Access.To_Pointer (Address).all := Value;
+   end Write_U8;
+
    procedure Write_U32
      (Address : System.Address; Value : Interfaces.Unsigned_32) is
    begin
