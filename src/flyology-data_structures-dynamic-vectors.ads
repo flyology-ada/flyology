@@ -15,8 +15,10 @@ use type Interfaces.Unsigned_64;
 --  Callers must exclude lifecycle operations and local View detachment from
 --  ordinary use of that same View, and must keep the supplied arena attached.
 --  A vector and its arena may be mapped at different native addresses.
+--  @formal Arena_Provider Statically selected relocatable arena instance
 --  @formal Element Immutable element adapter bound once for this vector type
 generic
+   with package Arena_Provider is new Flyology.Data_Structures.Arenas (<>);
    with package Element is new
      Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
@@ -26,11 +28,14 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
 
    --  Schema identifier for the arena-backed vector layout and growth policy.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_4456_4543_0002# xor Element.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
+     16#0001_4456_4543_0003# xor Element.Signature xor
+     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32) xor
+     Arena_Provider.Identity.Schema xor
+     Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19) xor
+     Interfaces.Unsigned_64 (Arena_Provider.Identity.Version);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelopes and tooling.
    Identity : constant Layout_Identity :=
@@ -56,7 +61,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive);
 
    --  Initialize allocation-certified virgin bytes or attach to a compatible
@@ -72,7 +77,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Result           : out Open_Result);
 
@@ -89,7 +94,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive);
 
    --  Detach Item without modifying its header or arena allocations.
@@ -131,7 +136,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @exception Busy_Error Another caller owns the vector guard
    procedure Try_Append
      (Item   : in out View;
-      Arena  : in out Arenas.View;
+      Arena  : in out Arena_Provider.View;
       Data   : Element.Source;
       Result : out Growth_Result);
 
@@ -142,7 +147,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @return Bound immutable observation
    function Read
      (Item  : View;
-      Arena : Arenas.View;
+      Arena : Arena_Provider.View;
       Index : Positive) return Element.Observed;
 
    --  Replace the one-based initialized element at Index.
@@ -152,7 +157,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Data Application element value
    procedure Replace
      (Item  : in out View;
-      Arena : Arenas.View;
+      Arena : Arena_Provider.View;
       Index : Positive;
       Data  : Element.Source);
 
@@ -164,7 +169,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Popped True only when an element was removed
    procedure Try_Pop
      (Item   : in out View;
-      Arena  : Arenas.View;
+      Arena  : Arena_Provider.View;
       Data   : out Element.Observed;
       Popped : out Boolean);
 
@@ -177,7 +182,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  that could not be reclaimed is forgotten.
    --  @param Item Exclusively synchronized vector view
    --  @param Arena Matching attached arena view
-   procedure Destroy (Item : in out View; Arena : in out Arenas.View);
+   procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View);
 
 private
    type View is limited record

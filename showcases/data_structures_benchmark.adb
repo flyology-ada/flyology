@@ -10,6 +10,7 @@ with Ada.Text_IO;
 with Ada.Unchecked_Conversion;
 with Flyology;
 with Flyology.Data_Structures;
+with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
 with Flyology.Data_Structures.Arenas;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Dynamic.Byte_Strings;
@@ -34,8 +35,10 @@ procedure Data_Structures_Benchmark is
    package CLI renames Ada.Command_Line;
    package DS renames Flyology.Data_Structures;
    package Byte_Strings renames DS.Byte_Strings;
-   package Arenas renames DS.Arenas;
-   package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
+   package Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Buddy);
+   package Dynamic_Strings is new DS.Dynamic.Byte_Strings
+     (Arena_Provider => Arenas);
    package Handles renames DS.Handles;
    package Regions renames DS.Regions;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
@@ -48,10 +51,12 @@ procedure Data_Structures_Benchmark is
    package Vectors is new DS.Vectors
      (Element => U64_Elements.Element);
    package Dynamic_Vectors is new DS.Dynamic.Vectors
-     (Element => U64_Elements.Element);
+     (Arena_Provider => Arenas,
+      Element        => U64_Elements.Element);
    package Dynamic_Maps is new DS.Dynamic.Hash_Maps
-     (Key     => U64_Elements.Element,
-      Element => U64_Elements.Element);
+     (Arena_Provider => Arenas,
+      Key            => U64_Elements.Element,
+      Element        => U64_Elements.Element);
    package Hash_Maps is new DS.Hash_Maps
      (Key     => U64_Elements.Element,
       Element => U64_Elements.Element);
@@ -227,7 +232,8 @@ procedure Data_Structures_Benchmark is
    Arena_Location : constant DS.Region_Offset := DS.Region_Offset
      (Align_64 (DS.Byte_Count (Dynamic_Map_Location) + Dynamic_Map_Extent));
    Arena_Extent : constant DS.Byte_Count :=
-     Arenas.Required_Storage (262_144, 64);
+     Arenas.Required_Storage
+       ((Usable_Capacity => 262_144, Minimum_Block_Size => 64));
    Region_Length : constant DS.Byte_Count := Align_64
      (DS.Byte_Count (Arena_Location) + Arena_Extent + 64);
 
@@ -1678,7 +1684,8 @@ begin
      (Fly_Slab, Region, Slab_Location, Working_Capacity);
    Byte_Strings.Initialize (Fly_String, Region, String_Location, 8);
    Arenas.Initialize
-     (Fly_Arena, Region, Arena_Location, 262_144, 64,
+     (Fly_Arena, Region, Arena_Location,
+      (Usable_Capacity => 262_144, Minimum_Block_Size => 64),
       16#B34C_7A91_04D2_EE01#);
    Dynamic_Vectors.Initialize
      (Fly_Dynamic_Vector, Region, Dynamic_Vector_Location,

@@ -4,7 +4,7 @@ with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
 with Interfaces.C;
 
-package body Flyology.Data_Structures.Arenas is
+package body Flyology.Data_Structures.Allocation_Algorithms.Buddy_Kernel is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
@@ -13,6 +13,25 @@ package body Flyology.Data_Structures.Arenas is
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
    use type System.Address;
+
+   function Make_Token
+     (Arena_Epoch : Interfaces.Unsigned_32;
+      Node        : Interfaces.Unsigned_32) return Interfaces.Unsigned_64 is
+     (Interfaces.Shift_Left (Interfaces.Unsigned_64 (Arena_Epoch), 32)
+      or Interfaces.Unsigned_64 (Node));
+   pragma Inline_Always (Make_Token);
+
+   function Token_Epoch
+     (Value : Allocation_Handle) return Interfaces.Unsigned_32 is
+     (Interfaces.Unsigned_32 (Interfaces.Shift_Right (Value.Token, 32)));
+   pragma Inline_Always (Token_Epoch);
+
+   function Token_Node
+     (Value : Allocation_Handle) return Interfaces.Unsigned_32 is
+     (Interfaces.Unsigned_32
+        (Value.Token
+         and Interfaces.Unsigned_64 (Interfaces.Unsigned_32'Last)));
+   pragma Inline_Always (Token_Node);
 
    Node_Table_Offset : constant Byte_Count := Layouts.Header_Size;
    Node_Entry_Size   : constant Byte_Count := 16;
@@ -80,9 +99,10 @@ package body Flyology.Data_Structures.Arenas is
    end Geometry;
 
    function Required_Storage
-     (Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive) return Byte_Count is
-     (Geometry (Usable_Capacity, Minimum_Block_Size).Extent);
+     (Configuration : Buddy_Kernel.Configuration) return Byte_Count is
+     (Geometry
+        (Configuration.Usable_Capacity,
+         Configuration.Minimum_Block_Size).Extent);
 
    function Node_Relative
      (Item : View; Node : Interfaces.Unsigned_32) return Byte_Count
@@ -184,15 +204,16 @@ package body Flyology.Data_Structures.Arenas is
    end Check_Instance;
 
    procedure Initialize
-     (Item               : out View;
-      Region             : Region_View;
-      Location           : Region_Offset;
-      Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive;
-      Instance_ID        : Interfaces.Unsigned_64)
+     (Item          : out View;
+      Region        : Region_View;
+      Location      : Region_Offset;
+      Configuration : Buddy_Kernel.Configuration;
+      Instance_ID   : Interfaces.Unsigned_64)
    is
       Values : constant Geometry_Values :=
-        Geometry (Usable_Capacity, Minimum_Block_Size);
+        Geometry
+          (Configuration.Usable_Capacity,
+           Configuration.Minimum_Block_Size);
       Core : Layouts.Local_View;
    begin
       Check_Instance (Instance_ID);
@@ -216,16 +237,17 @@ package body Flyology.Data_Structures.Arenas is
    end Initialize;
 
    procedure Create_Or_Attach
-     (Item               : out View;
-      Region             : Region_View;
-      Location           : Region_Offset;
-      Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive;
-      Instance_ID        : Interfaces.Unsigned_64;
-      Result             : out Open_Result)
+     (Item          : out View;
+      Region        : Region_View;
+      Location      : Region_Offset;
+      Configuration : Buddy_Kernel.Configuration;
+      Instance_ID   : Interfaces.Unsigned_64;
+      Result        : out Open_Result)
    is
       Values : constant Geometry_Values :=
-        Geometry (Usable_Capacity, Minimum_Block_Size);
+        Geometry
+          (Configuration.Usable_Capacity,
+           Configuration.Minimum_Block_Size);
       Core  : Layouts.Local_View;
       Claim : Layouts.Initialization_Claim;
    begin
@@ -246,8 +268,7 @@ package body Flyology.Data_Structures.Arenas is
             Result := Initialized_New;
          when Layouts.Existing_Ready =>
             Attach
-              (Item, Region, Location, Usable_Capacity,
-               Minimum_Block_Size, Instance_ID);
+              (Item, Region, Location, Configuration, Instance_ID);
             Result := Attached_Existing;
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
@@ -315,15 +336,16 @@ package body Flyology.Data_Structures.Arenas is
    end Validate_Tree;
 
    procedure Attach
-     (Item               : out View;
-      Region             : Region_View;
-      Location           : Region_Offset;
-      Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive;
-      Instance_ID        : Interfaces.Unsigned_64)
+     (Item          : out View;
+      Region        : Region_View;
+      Location      : Region_Offset;
+      Configuration : Buddy_Kernel.Configuration;
+      Instance_ID   : Interfaces.Unsigned_64)
    is
       Values : constant Geometry_Values :=
-        Geometry (Usable_Capacity, Minimum_Block_Size);
+        Geometry
+          (Configuration.Usable_Capacity,
+           Configuration.Minimum_Block_Size);
       Core   : Layouts.Local_View;
       Header : Layouts.Header_Values;
    begin
@@ -517,9 +539,8 @@ package body Flyology.Data_Structures.Arenas is
             Atomic.Store_Release_U32
               (State_Address (Item, Node), Allocated_State);
             Value :=
-              (Node        => Node,
-               Arena_Epoch => Item.Core.Epoch_Value,
-               Generation  => Counter);
+              (Token      => Make_Token (Item.Core.Epoch_Value, Node),
+               Generation => Counter);
             return True;
          elsif State = Split_State then
             Half := Block_Size / 2;
@@ -632,26 +653,27 @@ package body Flyology.Data_Structures.Arenas is
    is
       State : Interfaces.Unsigned_32;
       Stored_Generation : Interfaces.Unsigned_64;
+      Node : constant Interfaces.Unsigned_32 := Token_Node (Value);
    begin
       Layouts.Require_Ready (Item.Core);
       if Value = Null_Allocation
-        or else Value.Arena_Epoch = 0
+        or else Token_Epoch (Value) = 0
         or else Value.Generation = 0
-        or else Value.Arena_Epoch /= Item.Core.Epoch_Value
-        or else Value.Node >= Item.Node_Count
+        or else Token_Epoch (Value) /= Item.Core.Epoch_Value
+        or else Node >= Item.Node_Count
       then
          raise Handle_Error with "arena allocation handle is invalid or stale";
       end if;
-      State := Atomic.Load_Acquire_U32 (State_Address (Item, Value.Node));
+      State := Atomic.Load_Acquire_U32 (State_Address (Item, Node));
       Stored_Generation := Bytes.Read_U64
-        (Generation_Address (Item, Value.Node));
+        (Generation_Address (Item, Node));
       if State /= Allocated_State
         or else Stored_Generation /= Value.Generation
       then
          raise Handle_Error with
            "arena allocation handle is reclaimed or stale";
       end if;
-      return Describe_Node (Item, Value.Node);
+      return Describe_Node (Item, Node);
    end Validate_Handle;
 
    procedure Release_Unlocked
@@ -659,7 +681,7 @@ package body Flyology.Data_Structures.Arenas is
    is
       Ignored : constant Block_Description := Validate_Handle (Item, Value);
       pragma Unreferenced (Ignored);
-      Node : Interfaces.Unsigned_32 := Value.Node;
+      Node : Interfaces.Unsigned_32 := Token_Node (Value);
       Parent, Buddy : Interfaces.Unsigned_32;
    begin
       Atomic.Store_Release_U32 (State_Address (Item, Node), Free_State);
@@ -913,4 +935,4 @@ package body Flyology.Data_Structures.Arenas is
       Detach (Item);
    end Destroy;
 
-end Flyology.Data_Structures.Arenas;
+end Flyology.Data_Structures.Allocation_Algorithms.Buddy_Kernel;

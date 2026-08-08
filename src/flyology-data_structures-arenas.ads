@@ -1,187 +1,164 @@
 with Ada.Streams;
+with Flyology.Data_Structures.Allocation_Algorithms;
+with Flyology.Data_Structures.Allocation_Algorithms.Contract;
 with Interfaces;
-private with Flyology.Data_Structures.Layouts;
-private with System;
 
---  Provides variable-size allocation inside a fixed caller-owned relocatable
---  region. The stored buddy tree contains only fixed-width states and
---  generations. Allocation and reclamation are serialized across mappings by
---  one persisted nonblocking guard; immediate allocation reports contention
---  and timed overloads yield between attempts. Payload access does not acquire
---  that metadata guard: the application or receiving data structure must
---  exclude release of a handle from reads, writes, and copies using it.
---  A dead metadata-guard owner leaves the arena locked. An independently
---  authorized supervisor may poison the arena after establishing owner death
---  and whole-arena quiescence; exclusive reinitialization is the only
---  recovery.
+--  Provides a fixed caller-owned relocatable allocation domain using one
+--  statically selected allocation algorithm. Instantiation introduces no
+--  runtime dispatch or stored callback. Algorithm identity and configuration
+--  are validated by Create_Or_Attach and Attach. The selected algorithm owns
+--  allocation synchronization, abandonment, poison, and recovery semantics.
+--  @formal Algorithm Allocation implementation and persisted layout contract
+generic
+   with package Algorithm is new
+     Flyology.Data_Structures.Allocation_Algorithms.Contract (<>);
 package Flyology.Data_Structures.Arenas with Preelaborate is
 
-   --  Eight-byte magic stored in every arena header.
-   Magic : constant Interfaces.Unsigned_64 := 16#4644_5341_5245_3031#;
+   --  Complete persisted allocator identity.
+   Identity : constant Layout_Identity := Algorithm.Identity;
 
-   --  Schema identifier for the buddy-tree allocation contract.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_4152_454E_0001#;
+   --  Minimum allocation unit accepted by the selected algorithm.
+   Minimum_Block_Limit : constant Positive :=
+     Algorithm.Minimum_Block_Limit;
 
-   --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   --  Algorithm-specific immutable creation parameters.
+   subtype Configuration is Algorithm.Configuration;
 
-   --  Complete stable layout identity for envelopes and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
-
-   --  Minimum supported buddy block and guaranteed payload alignment.
-   Minimum_Block_Limit : constant Positive := 16;
-
-   --  Stable allocation identity. Node is a buddy-tree slot rather than a
-   --  native address. Arena_Epoch rejects handles across arena
-   --  reinitialization; Generation rejects a released and reused node.
-   --  @field Node Zero-based buddy-tree node index
-   --  @field Arena_Epoch Persisted arena initialization epoch
-   --  @field Generation Monotonic nonzero allocation generation
-   type Allocation_Handle is record
-      Node        : Interfaces.Unsigned_32 := 0;
-      Arena_Epoch : Interfaces.Unsigned_32 := 0;
-      Generation  : Interfaces.Unsigned_64 := 0;
-   end record;
+   --  Fixed-width address-independent allocation identity.
+   subtype Allocation_Handle is
+     Allocation_Algorithms.Allocation_Handle;
 
    --  Null allocation relationship.
    Null_Allocation : constant Allocation_Handle :=
-     (Node => 0, Arena_Epoch => 0, Generation => 0);
+     Allocation_Algorithms.Null_Allocation;
 
    --  Allocation attempt outcome.
-   --  @enum Allocated Value names a newly allocated block
-   --  @enum Exhausted No free buddy block can satisfy Requested_Size
-   --  @enum Allocation_Contended Another caller owns the metadata guard
-   type Allocation_Result is
-     (Allocated, Exhausted, Allocation_Contended);
+   subtype Allocation_Result is Allocation_Algorithms.Allocation_Result;
 
-   --  Process-local attached arena view. It owns neither the backing region
-   --  nor any allocation and must be detached before the mapping disappears.
-   type View is limited private;
+   --  A newly allocated block was returned.
+   Allocated : constant Allocation_Result :=
+     Allocation_Algorithms.Allocated;
+
+   --  No free block can satisfy the request.
+   Exhausted : constant Allocation_Result :=
+     Allocation_Algorithms.Exhausted;
+
+   --  Another caller owns allocator metadata.
+   Allocation_Contended : constant Allocation_Result :=
+     Allocation_Algorithms.Allocation_Contended;
 
    --  Immutable stored arena configuration.
-   --  @field Usable_Capacity Bytes managed by the buddy tree
-   --  @field Minimum_Block_Size Smallest block and payload alignment
-   --  @field Instance_ID Caller-selected nonzero arena identity
-   --  @field Incarnation Persisted initialization epoch for dependencies
-   --  @field Extent Complete arena header, tree, padding, and payload extent
-   type Metadata is record
-      Usable_Capacity   : Interfaces.Unsigned_32;
-      Minimum_Block_Size : Interfaces.Unsigned_32;
-      Instance_ID       : Interfaces.Unsigned_64;
-      Incarnation       : Interfaces.Unsigned_32;
-      Extent            : Byte_Count;
-   end record;
+   subtype Metadata is Allocation_Algorithms.Metadata;
 
-   --  Compute the complete arena extent. Both sizes must be powers of two,
-   --  Minimum_Block_Size must be at least Minimum_Block_Limit, and usable
-   --  capacity must be an exact multiple of the minimum block.
-   --  @param Usable_Capacity Payload bytes managed by the buddy tree
-   --  @param Minimum_Block_Size Smallest block and payload alignment
-   --  @return Required shared header, node table, padding, and payload bytes
-   --  @exception Constraint_Error Geometry is invalid or cannot be represented
+   --  Process-local attached arena view. It owns neither the backing region
+   --  nor an allocation and must be detached before its mapping disappears.
+   subtype View is Algorithm.View;
+
+   --  Compute the complete allocator extent for Configuration.
+   --  @param Configuration Algorithm-specific immutable geometry
+   --  @return Complete allocator metadata, padding, and payload bytes
+   --  @exception Constraint_Error Configuration is invalid or unrepresentable
    function Required_Storage
-     (Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive) return Byte_Count;
+     (Configuration : Algorithm.Configuration) return Byte_Count
+     renames Algorithm.Required_Storage;
 
    --  Destructively initialize an empty arena and attach Item. The caller must
    --  exclusively own the complete extent. Reinitialization invalidates every
-   --  allocation handle and attached arena-dependent structure.
+   --  allocation handle and dependent structure.
    --  @param Item View attached on success
    --  @param Region Attached caller-owned backing region
-   --  @param Location Nonzero location aligned to Minimum_Block_Size
-   --  @param Usable_Capacity Power-of-two managed payload bytes
-   --  @param Minimum_Block_Size Power-of-two minimum block and alignment
-   --  @param Instance_ID Nonzero caller-selected arena instance identity
+   --  @param Location Nonzero suitably aligned stored location
+   --  @param Configuration Algorithm-specific immutable geometry
+   --  @param Instance_ID Nonzero caller-selected arena identity
    procedure Initialize
-     (Item               : out View;
-      Region             : Region_View;
-      Location           : Region_Offset;
-      Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive;
-      Instance_ID        : Interfaces.Unsigned_64);
+     (Item          : out Algorithm.View;
+      Region        : Region_View;
+      Location      : Region_Offset;
+      Configuration : Algorithm.Configuration;
+      Instance_ID   : Interfaces.Unsigned_64)
+     renames Algorithm.Initialize;
 
    --  Atomically initialize allocation-certified virgin bytes or attach to a
-   --  ready compatible arena. Every immutable creation parameter must match an
-   --  existing arena. The operation does not wait for another initializer or
-   --  the metadata guard. Concurrent calls are valid only while the outer
-   --  allocation protocol still guarantees virgin bytes; otherwise attachment
-   --  quiescence applies.
-   --  @param Item Attached view, or detached while initialization is active
+   --  ready compatible arena. Algorithm identity, every configuration field,
+   --  and Instance_ID must match an existing arena. This is not recovery.
+   --  @param Item Attached view or detached during another initialization
    --  @param Region Independently attached backing region
    --  @param Location Stored arena offset
-   --  @param Usable_Capacity Expected managed payload bytes
-   --  @param Minimum_Block_Size Expected minimum block and alignment
-   --  @param Instance_ID Expected nonzero arena instance identity
+   --  @param Configuration Expected algorithm-specific geometry
+   --  @param Instance_ID Expected nonzero arena identity
    --  @param Result Creation, attachment, or in-progress outcome
    procedure Create_Or_Attach
-     (Item               : out View;
-      Region             : Region_View;
-      Location           : Region_Offset;
-      Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive;
-      Instance_ID        : Interfaces.Unsigned_64;
-      Result             : out Open_Result);
+     (Item          : out Algorithm.View;
+      Region        : Region_View;
+      Location      : Region_Offset;
+      Configuration : Algorithm.Configuration;
+      Instance_ID   : Interfaces.Unsigned_64;
+      Result        : out Open_Result)
+     renames Algorithm.Create_Or_Attach;
 
-   --  Attach to a quiescent arena and validate its complete buddy tree and
-   --  immutable configuration.
+   --  Attach to a quiescent compatible arena and validate its complete stored
+   --  algorithm state.
    --  @param Item View attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored arena offset
-   --  @param Usable_Capacity Expected managed payload bytes
-   --  @param Minimum_Block_Size Expected minimum block and alignment
-   --  @param Instance_ID Expected arena instance identity
-   --  @exception Layout_Error Stored identity, geometry, or tree is corrupt
-   --  @exception Busy_Error The arena metadata guard is active or abandoned
-   --  @exception Poison_Error The arena lifecycle is poisoned
+   --  @param Configuration Expected algorithm-specific geometry
+   --  @param Instance_ID Expected arena identity
+   --  @exception Layout_Error Identity, configuration, or metadata is corrupt
+   --  @exception Busy_Error Allocator metadata is active or abandoned
+   --  @exception Poison_Error Arena lifecycle is poisoned
    procedure Attach
-     (Item               : out View;
-      Region             : Region_View;
-      Location           : Region_Offset;
-      Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive;
-      Instance_ID        : Interfaces.Unsigned_64);
+     (Item          : out Algorithm.View;
+      Region        : Region_View;
+      Location      : Region_Offset;
+      Configuration : Algorithm.Configuration;
+      Instance_ID   : Interfaces.Unsigned_64)
+     renames Algorithm.Attach;
 
    --  Detach Item without releasing allocations or modifying backing bytes.
    --  @param Item Local view to detach
-   procedure Detach (Item : in out View);
+   procedure Detach (Item : in out Algorithm.View)
+     renames Algorithm.Detach;
 
    --  Report whether Item retains process-local mapping information.
    --  @param Item View to inspect
    --  @return True while the local arena view is attached
-   function Is_Attached (Item : View) return Boolean;
+   function Is_Attached (Item : Algorithm.View) return Boolean
+     renames Algorithm.Is_Attached;
 
-   --  Return the immutable arena configuration.
+   --  Return the immutable common arena configuration.
    --  @param Item Attached arena view
-   --  @return Validated arena metadata
-   function Current_Metadata (Item : View) return Metadata;
+   --  @return Validated capacity, allocation unit, identity, and incarnation
+   function Current_Metadata
+     (Item : Algorithm.View) return Allocation_Algorithms.Metadata
+     renames Algorithm.Current_Metadata;
 
    --  Report whether an attached arena was explicitly poisoned.
    --  @param Item Attached arena view
    --  @return True only for the persisted Poisoned lifecycle state
-   function Is_Poisoned (Item : View) return Boolean;
+   function Is_Poisoned (Item : Algorithm.View) return Boolean
+     renames Algorithm.Is_Poisoned;
 
-   --  Poison a ready or abandoned-locked arena after independently
-   --  establishing whole-arena quiescence and owner death where applicable.
+   --  Poison an arena only after the selected algorithm's documented external
+   --  owner-death and quiescence conditions are established.
    --  @param Region Attached backing region
    --  @param Location Stored arena offset
-   procedure Poison (Region : Region_View; Location : Region_Offset);
+   procedure Poison (Region : Region_View; Location : Region_Offset)
+     renames Algorithm.Poison;
 
-   --  Attempt one variable-size allocation without waiting. Requested_Size is
-   --  rounded to a buddy block and every returned block is aligned to the
-   --  arena's Minimum_Block_Size.
+   --  Attempt one variable-size allocation without waiting.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Value New handle or Null_Allocation
    --  @param Result Allocated, exhausted, or contended outcome
    procedure Try_Allocate
-     (Item           : in out View;
+     (Item           : in out Algorithm.View;
       Requested_Size : Positive;
-      Value          : out Allocation_Handle;
-      Result         : out Allocation_Result);
+      Value          : out Allocation_Algorithms.Allocation_Handle;
+      Result         : out Allocation_Algorithms.Allocation_Result)
+     renames Algorithm.Try_Allocate;
 
-   --  Allocate after waiting only for metadata-guard contention. Genuine
-   --  exhaustion still returns Exhausted after one complete search.
+   --  Allocate after waiting only for allocator-metadata contention. Genuine
+   --  exhaustion still returns Exhausted after one complete attempt.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Timeout Maximum wait; zero permits one immediate attempt
@@ -189,55 +166,57 @@ package Flyology.Data_Structures.Arenas with Preelaborate is
    --  @param Result Allocated or exhausted outcome
    --  @exception Timeout_Error Metadata contention persists through deadline
    procedure Try_Allocate
-     (Item           : in out View;
+     (Item           : in out Algorithm.View;
       Requested_Size : Positive;
       Timeout        : Wait_Timeout;
-      Value          : out Allocation_Handle;
-      Result         : out Allocation_Result);
+      Value          : out Allocation_Algorithms.Allocation_Handle;
+      Result         : out Allocation_Algorithms.Allocation_Result)
+     renames Algorithm.Try_Allocate;
 
-   --  Release a live allocation and coalesce free buddies. The caller must
-   --  exclude every payload access through Value.
+   --  Release a live allocation. The caller must exclude every payload access
+   --  through Value.
    --  @param Item Any concurrently attached arena view
    --  @param Value Live handle issued by this arena incarnation
-   --  @exception Busy_Error Another caller owns the metadata guard
+   --  @exception Busy_Error Another caller owns allocator metadata
    --  @exception Handle_Error Value is null, stale, reclaimed, or foreign
-   procedure Release (Item : in out View; Value : Allocation_Handle);
+   procedure Release
+     (Item  : in out Algorithm.View;
+      Value : Allocation_Algorithms.Allocation_Handle)
+     renames Algorithm.Release;
 
-   --  Release after waiting for metadata-guard contention.
+   --  Release after waiting for allocator-metadata contention.
    --  @param Item Any concurrently attached arena view
    --  @param Value Live handle issued by this arena incarnation
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error Metadata contention persists through deadline
    procedure Release
-     (Item    : in out View;
-      Value   : Allocation_Handle;
-      Timeout : Wait_Timeout);
+     (Item    : in out Algorithm.View;
+      Value   : Allocation_Algorithms.Allocation_Handle;
+      Timeout : Wait_Timeout)
+     renames Algorithm.Release;
 
    --  Return the rounded capacity of a live allocation.
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
-   --  @return Usable bytes in the selected buddy block
+   --  @return Usable bytes in the selected block
    --  @exception Handle_Error Value is invalid or stale
    function Block_Capacity
-     (Item : View; Value : Allocation_Handle) return Byte_Count;
+     (Item  : Algorithm.View;
+      Value : Allocation_Algorithms.Allocation_Handle) return Byte_Count
+     renames Algorithm.Block_Capacity;
 
-   --  Attach Region to the exact bytes of a live allocation. No native address
-   --  is returned or persisted. The resulting region owns neither the arena
-   --  nor the allocation and must be detached before Value is released or its
-   --  arena mapping disappears. Because Region_Offset zero is the null
-   --  sentinel, nested relocatable objects need leading padding and a nonzero
-   --  location inside this allocation region.
+   --  Attach Region to the exact bytes of a live allocation. The region must
+   --  be detached before release or backing-mapping destruction.
    --  @param Region Process-local allocation-region view attached on success
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
    procedure Attach_Allocation
      (Region : in out Region_View;
-      Item   : View;
-      Value  : Allocation_Handle);
+      Item   : Algorithm.View;
+      Value  : Allocation_Algorithms.Allocation_Handle)
+     renames Algorithm.Attach_Allocation;
 
    --  Bind one checked allocation slice for an immutable element adapter.
-   --  This hierarchy-internal operation returns no inspectable native address;
-   --  release of Value must remain excluded for the binding's complete use.
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
    --  @param Offset Byte offset within the allocation
@@ -249,41 +228,41 @@ package Flyology.Data_Structures.Arenas with Preelaborate is
    --  @return Opaque checked immutable-storage binding
    --  @exclude
    function Bind_Allocation
-     (Item      : View;
-      Value     : Allocation_Handle;
+     (Item      : Algorithm.View;
+      Value     : Allocation_Algorithms.Allocation_Handle;
       Offset    : Byte_Count;
       Extent    : Byte_Count;
       Alignment : Byte_Count;
       Signature : Interfaces.Unsigned_64;
       Version   : Interfaces.Unsigned_32;
-      Writable  : Boolean) return Immutable_Storage_View;
+      Writable  : Boolean) return Immutable_Storage_View
+     renames Algorithm.Bind_Allocation;
 
-   --  Copy a checked allocation slice into Data. Release of Value must not
-   --  race with this operation.
+   --  Copy a checked allocation slice into Data.
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
    --  @param Offset Byte offset within the allocation
    --  @param Data Destination byte array
    procedure Read
-     (Item   : View;
-      Value  : Allocation_Handle;
+     (Item   : Algorithm.View;
+      Value  : Allocation_Algorithms.Allocation_Handle;
       Offset : Byte_Count;
-      Data   : out Ada.Streams.Stream_Element_Array);
+      Data   : out Ada.Streams.Stream_Element_Array)
+     renames Algorithm.Read;
 
-   --  Copy Data into a checked allocation slice. Release of Value must not
-   --  race with this operation.
+   --  Copy Data into a checked allocation slice.
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
    --  @param Offset Byte offset within the allocation
    --  @param Data Source byte array
    procedure Write
-     (Item   : View;
-      Value  : Allocation_Handle;
+     (Item   : Algorithm.View;
+      Value  : Allocation_Algorithms.Allocation_Handle;
       Offset : Byte_Count;
-      Data   : Ada.Streams.Stream_Element_Array);
+      Data   : Ada.Streams.Stream_Element_Array)
+     renames Algorithm.Write;
 
-   --  Copy between two nonoverlapping or overlapping live allocation slices.
-   --  Release of either handle must not race with this operation.
+   --  Copy between two live allocation slices.
    --  @param Item Attached arena view
    --  @param Source Source allocation handle
    --  @param Source_Offset Byte offset in Source
@@ -291,27 +270,18 @@ package Flyology.Data_Structures.Arenas with Preelaborate is
    --  @param Target_Offset Byte offset in Target
    --  @param Length Bytes to copy; zero performs validation only
    procedure Copy
-     (Item          : View;
-      Source        : Allocation_Handle;
+     (Item          : Algorithm.View;
+      Source        : Allocation_Algorithms.Allocation_Handle;
       Source_Offset : Byte_Count;
-      Target        : Allocation_Handle;
+      Target        : Allocation_Algorithms.Allocation_Handle;
       Target_Offset : Byte_Count;
-      Length        : Byte_Count);
+      Length        : Byte_Count)
+     renames Algorithm.Copy;
 
    --  Destroy an empty quiescent arena and detach Item.
    --  @param Item Exclusively synchronized arena view
    --  @exception Layout_Error Live allocations remain
-   procedure Destroy (Item : in out View);
+   procedure Destroy (Item : in out Algorithm.View)
+     renames Algorithm.Destroy;
 
-private
-   type View is limited record
-      Core          : Layouts.Local_View;
-      Guard_Address : System.Address := System.Null_Address;
-      Counter_Address : System.Address := System.Null_Address;
-      Usable_Value  : Interfaces.Unsigned_32 := 0;
-      Minimum_Value : Interfaces.Unsigned_32 := 0;
-      Node_Count    : Interfaces.Unsigned_32 := 0;
-      Data_Offset   : Byte_Count := 0;
-      Instance_Value : Interfaces.Unsigned_64 := 0;
-   end record;
 end Flyology.Data_Structures.Arenas;

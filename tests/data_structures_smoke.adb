@@ -2,6 +2,7 @@ with Ada.Environment_Variables;
 with Ada.Streams;
 with Ada.Text_IO;
 with Flyology.Data_Structures;
+with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
 with Flyology.Data_Structures.Arenas;
 with Flyology.Data_Structures.Byte_Strings;
 with Flyology.Data_Structures.Dynamic.Byte_Strings;
@@ -26,16 +27,20 @@ with System.Storage_Elements;
 procedure Data_Structures_Smoke is
    package DS renames Flyology.Data_Structures;
    package Regions renames DS.Regions;
-   package Arenas renames DS.Arenas;
+   package Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Buddy);
    package Handles renames DS.Handles;
    package Strings renames DS.Byte_Strings;
-   package Dynamic_Strings renames DS.Dynamic.Byte_Strings;
+   package Dynamic_Strings is new DS.Dynamic.Byte_Strings
+     (Arena_Provider => Arenas);
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
    package Dynamic_Vectors is new DS.Dynamic.Vectors
-     (Element => U64_Elements.Element);
+     (Arena_Provider => Arenas,
+      Element        => U64_Elements.Element);
    package Dynamic_Maps is new DS.Dynamic.Hash_Maps
-     (Key     => U64_Elements.Element,
-      Element => U64_Elements.Element);
+     (Arena_Provider => Arenas,
+      Key            => U64_Elements.Element,
+      Element        => U64_Elements.Element);
    subtype Bytes_16 is Ada.Streams.Stream_Element_Array (1 .. 16);
    package Bytes_16_Representation is new DS.Storage_Types.Immutable
      (Byte_Size          => 16,
@@ -212,10 +217,12 @@ procedure Data_Structures_Smoke is
      (Key     => Alternate_Element,
       Element => U64_Elements.Element);
    package Wrong_Dynamic_Vectors is new DS.Dynamic.Vectors
-     (Element => Alternate_Element);
+     (Arena_Provider => Arenas,
+      Element        => Alternate_Element);
    package Wrong_Dynamic_Maps is new DS.Dynamic.Hash_Maps
-     (Key     => U64_Elements.Element,
-      Element => Alternate_Element);
+     (Arena_Provider => Arenas,
+      Key            => U64_Elements.Element,
+      Element        => Alternate_Element);
    package SPSC is new DS.Rings.SPSC
      (Element => U64_Elements.Element);
    package MPMC is new DS.Rings.MPMC
@@ -519,11 +526,13 @@ begin
    end;
 
    Arenas.Create_Or_Attach
-     (Arena_A, Region_A, Arena_Location, 32_768, 64,
+     (Arena_A, Region_A, Arena_Location,
+      (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
       16#A8E4_7B19_2C63_D501#, Open_Outcome);
    Assert (Open_Outcome = DS.Initialized_New, "arena was not created");
    Arenas.Create_Or_Attach
-     (Arena_B, Region_B, Arena_Location, 32_768, 64,
+     (Arena_B, Region_B, Arena_Location,
+      (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
       16#A8E4_7B19_2C63_D501#, Open_Outcome);
    Assert
      (Open_Outcome = DS.Attached_Existing, "arena was reinitialized");
@@ -533,14 +542,41 @@ begin
    begin
       begin
          Arenas.Create_Or_Attach
-           (Arena_Bad, Region_B, Arena_Location, 16_384, 64,
+           (Arena_Bad, Region_B, Arena_Location,
+            (Usable_Capacity => 16_384, Minimum_Block_Size => 64),
             16#A8E4_7B19_2C63_D501#, Open_Outcome);
       exception
          when DS.Layout_Error => Failed := True;
       end;
       Assert
         (Failed and then not Arenas.Is_Attached (Arena_Bad),
-         "arena accepted incompatible creation parameters");
+         "arena accepted incompatible managed capacity");
+
+      Failed := False;
+      begin
+         Arenas.Create_Or_Attach
+           (Arena_Bad, Region_B, Arena_Location,
+            (Usable_Capacity => 32_768, Minimum_Block_Size => 128),
+            16#A8E4_7B19_2C63_D501#, Open_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "arena accepted incompatible algorithm configuration");
+
+      Failed := False;
+      begin
+         Arenas.Create_Or_Attach
+           (Arena_Bad, Region_B, Arena_Location,
+            (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
+            16#A8E4_7B19_2C63_D502#, Open_Outcome);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "arena accepted an incompatible instance identity");
    end;
 
    Arenas.Try_Allocate (Arena_A, 33, Arena_Handle, Arena_Allocation);
@@ -655,10 +691,12 @@ begin
    --  caller-selected instance id. Reinitializing the arena under exclusive
    --  authority must therefore make that older header fail closed.
    Arenas.Initialize
-     (Scratch_Arena_A, Region_A, Scratch_Arena_Location, 1_024, 64,
+     (Scratch_Arena_A, Region_A, Scratch_Arena_Location,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64),
       16#C0DE_0110_CAFE_0001#);
    Arenas.Attach
-     (Scratch_Arena_B, Region_B, Scratch_Arena_Location, 1_024, 64,
+     (Scratch_Arena_B, Region_B, Scratch_Arena_Location,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64),
       16#C0DE_0110_CAFE_0001#);
    declare
       type Arena_Handle_Array is
@@ -701,10 +739,12 @@ begin
    Dynamic_Vectors.Detach (Scratch_Dynamic_A);
    Arenas.Detach (Scratch_Arena_B);
    Arenas.Initialize
-     (Scratch_Arena_A, Region_A, Scratch_Arena_Location, 1_024, 64,
+     (Scratch_Arena_A, Region_A, Scratch_Arena_Location,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64),
       16#C0DE_0110_CAFE_0001#);
    Arenas.Attach
-     (Scratch_Arena_B, Region_B, Scratch_Arena_Location, 1_024, 64,
+     (Scratch_Arena_B, Region_B, Scratch_Arena_Location,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64),
       16#C0DE_0110_CAFE_0001#);
    declare
       Failed : Boolean := False;
@@ -822,7 +862,8 @@ begin
       Failed := False;
       begin
          Arenas.Attach
-           (Arena_Bad, Region_B, Arena_Location, 32_768, 64,
+           (Arena_Bad, Region_B, Arena_Location,
+            (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
             16#A8E4_7B19_2C63_D501#);
       exception
          when DS.Layout_Error => Failed := True;
@@ -837,7 +878,8 @@ begin
       Failed := False;
       begin
          Arenas.Attach
-           (Arena_Bad, Region_B, Arena_Location, 32_768, 64,
+           (Arena_Bad, Region_B, Arena_Location,
+            (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
             16#A8E4_7B19_2C63_D501#);
       exception
          when DS.Busy_Error => Failed := True;
@@ -2011,7 +2053,8 @@ begin
    Regions.Attach (Region_C, Base_C, DS.Byte_Count (Mapping_Length));
    Slabs.Attach (Slab_C, Region_C, Slab_Location, 8);
    Arenas.Attach
-     (Arena_C, Region_C, Arena_Location, 32_768, 64,
+     (Arena_C, Region_C, Arena_Location,
+      (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
       16#A8E4_7B19_2C63_D501#);
    Dynamic_Vectors.Attach
      (Dynamic_Vector_C, Region_C, Dynamic_Vector_Location, Arena_C, 2);

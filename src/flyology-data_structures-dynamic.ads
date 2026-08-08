@@ -1,7 +1,8 @@
 --  Shared contracts for relocatable data structures whose payload capacity
---  grows through Flyology.Data_Structures.Arenas. "Dynamic" describes growth
---  within a caller-owned fixed arena; these packages do not resize mappings,
---  allocate process-local heap objects, or own backing-region lifetimes.
+--  grows through a statically selected Flyology.Data_Structures.Arenas
+--  instance. "Dynamic" describes growth within a caller-owned fixed arena;
+--  these packages do not resize mappings, allocate process-local heap objects,
+--  or own backing-region lifetimes.
 package Flyology.Data_Structures.Dynamic with Preelaborate is
 
    --  Outcome of an operation that may need another arena allocation.

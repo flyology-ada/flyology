@@ -1,0 +1,42 @@
+with Flyology.Data_Structures.Allocation_Algorithms.Buddy_Kernel;
+with Flyology.Data_Structures.Allocation_Algorithms.Contract;
+
+--  Buddy allocation for relocatable arenas. The persisted complete binary
+--  tree splits power-of-two blocks and coalesces free siblings. One persisted
+--  nonblocking guard serializes allocation and release across mappings;
+--  payload access requires the handle owner to exclude release. A dead guard
+--  owner leaves the allocator locked until an external authority poisons it,
+--  and exclusive reinitialization is the only recovery.
+package Flyology.Data_Structures.Allocation_Algorithms.Buddy is new
+  Flyology.Data_Structures.Allocation_Algorithms.Contract
+    (Algorithm_Identity => Buddy_Kernel.Identity,
+     Algorithm_Minimum_Block_Limit =>
+       Buddy_Kernel.Minimum_Block_Limit,
+     Algorithm_Configuration => Buddy_Kernel.Configuration,
+     Algorithm_View => Buddy_Kernel.View,
+     Implementation_Required_Storage =>
+       Buddy_Kernel.Required_Storage,
+     Implementation_Initialize => Buddy_Kernel.Initialize,
+     Implementation_Create_Or_Attach =>
+       Buddy_Kernel.Create_Or_Attach,
+     Implementation_Attach => Buddy_Kernel.Attach,
+     Implementation_Detach => Buddy_Kernel.Detach,
+     Implementation_Is_Attached => Buddy_Kernel.Is_Attached,
+     Implementation_Current_Metadata =>
+       Buddy_Kernel.Current_Metadata,
+     Implementation_Is_Poisoned => Buddy_Kernel.Is_Poisoned,
+     Implementation_Poison => Buddy_Kernel.Poison,
+     Implementation_Try_Allocate_Immediate =>
+       Buddy_Kernel.Try_Allocate,
+     Implementation_Try_Allocate_Timed => Buddy_Kernel.Try_Allocate,
+     Implementation_Release_Immediate => Buddy_Kernel.Release,
+     Implementation_Release_Timed => Buddy_Kernel.Release,
+     Implementation_Block_Capacity => Buddy_Kernel.Block_Capacity,
+     Implementation_Attach_Allocation =>
+       Buddy_Kernel.Attach_Allocation,
+     Implementation_Bind_Allocation =>
+       Buddy_Kernel.Bind_Allocation,
+     Implementation_Read => Buddy_Kernel.Read,
+     Implementation_Write => Buddy_Kernel.Write,
+     Implementation_Copy => Buddy_Kernel.Copy,
+     Implementation_Destroy => Buddy_Kernel.Destroy);

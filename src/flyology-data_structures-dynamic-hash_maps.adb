@@ -9,8 +9,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    package Bytes renames Flyology.Data_Structures.Storage;
    package Native renames System.Storage_Elements;
 
-   use type Arenas.Allocation_Handle;
-   use type Arenas.Allocation_Result;
+   use type Arena_Provider.Allocation_Handle;
    use type Interfaces.Unsigned_32;
    use type Native.Storage_Offset;
    use type System.Address;
@@ -64,16 +63,14 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    pragma Inline_Always (Field_At);
 
    function Read_Handle (Address : System.Address)
-      return Arenas.Allocation_Handle is
-     ((Node        => Bytes.Read_U32 (Address),
-       Arena_Epoch => Bytes.Read_U32 (Field_At (Address, 4)),
-       Generation  => Bytes.Read_U64 (Field_At (Address, 8))));
+      return Arena_Provider.Allocation_Handle is
+     ((Token      => Bytes.Read_U64 (Address),
+       Generation => Bytes.Read_U64 (Field_At (Address, 8))));
 
    procedure Write_Handle
-     (Address : System.Address; Value : Arenas.Allocation_Handle) is
+     (Address : System.Address; Value : Arena_Provider.Allocation_Handle) is
    begin
-      Bytes.Write_U32 (Address, Value.Node);
-      Bytes.Write_U32 (Field_At (Address, 4), Value.Arena_Epoch);
+      Bytes.Write_U64 (Address, Value.Token);
       Bytes.Write_U64 (Field_At (Address, 8), Value.Generation);
    end Write_Handle;
 
@@ -91,9 +88,9 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    end Slot_Geometry;
 
    procedure Validate_Configuration
-      (Arena            : Arenas.View;
+      (Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
-      Metadata         : out Arenas.Metadata;
+      Metadata         : out Arena_Provider.Metadata;
       Key_Offset       : out Byte_Count;
       Value_Offset     : out Byte_Count;
       Stride           : out Byte_Count)
@@ -106,7 +103,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          raise Constraint_Error with
            "dynamic-map initial capacity must be a power of two at least two";
       end if;
-      Metadata := Arenas.Current_Metadata (Arena);
+      Metadata := Arena_Provider.Current_Metadata (Arena);
       if Key.Signature = 0
         or else Key.Version = 0
         or else Element.Signature = 0
@@ -197,8 +194,8 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          Arena_Epoch, Key_Offset, Value_Offset, Stride);
       Bytes.Write_U64 (Item.Capacity_Address, 0);
       Bytes.Write_U64 (Item.Capacity_Check_Address, Capacity_Check (0));
-      Write_Handle (Item.Current_Address, Arenas.Null_Allocation);
-      Write_Handle (Item.Retired_Address, Arenas.Null_Allocation);
+      Write_Handle (Item.Current_Address, Arena_Provider.Null_Allocation);
+      Write_Handle (Item.Retired_Address, Arena_Provider.Null_Allocation);
       Bytes.Write_U32
         (Layouts.Address_At (Core, Arena_Epoch_Offset, 4, 4), Arena_Epoch);
       Bytes.Write_U32
@@ -212,10 +209,10 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive)
    is
-      Metadata : Arenas.Metadata;
+      Metadata : Arena_Provider.Metadata;
       Key_Offset, Value_Offset, Stride : Byte_Count;
       Core : Layouts.Local_View;
    begin
@@ -249,11 +246,11 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Result           : out Open_Result)
    is
-      Metadata : Arenas.Metadata;
+      Metadata : Arena_Provider.Metadata;
       Key_Offset, Value_Offset, Stride : Byte_Count;
       Core : Layouts.Local_View;
       Claim : Layouts.Initialization_Claim;
@@ -294,8 +291,9 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          raise;
    end Create_Or_Attach;
 
-   procedure Require_Arena (Item : View; Arena : Arenas.View) is
-      Metadata : constant Arenas.Metadata := Arenas.Current_Metadata (Arena);
+   procedure Require_Arena (Item : View; Arena : Arena_Provider.View) is
+      Metadata : constant Arena_Provider.Metadata :=
+        Arena_Provider.Current_Metadata (Arena);
    begin
       if Metadata.Instance_ID /= Item.Arena_ID_Value
         or else Metadata.Incarnation /= Item.Arena_Epoch_Value
@@ -311,8 +309,8 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
 
    procedure Attach_Table
      (Item     : View;
-      Arena    : Arenas.View;
-      Handle   : Arenas.Allocation_Handle;
+      Arena    : Arena_Provider.View;
+      Handle   : Arena_Provider.Allocation_Handle;
       Capacity : Interfaces.Unsigned_64;
       Table    : out Table_View)
    is
@@ -320,7 +318,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Required : Byte_Count;
    begin
       Table := (others => <>);
-      if Handle = Arenas.Null_Allocation then
+      if Handle = Arena_Provider.Null_Allocation then
          if Capacity /= 0 then
             raise Layout_Error with "dynamic-map table has no allocation";
          end if;
@@ -332,7 +330,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          raise Layout_Error with "dynamic-map table capacity is corrupt";
       end if;
       Required := Table_Bytes (Item, Capacity);
-      Arenas.Attach_Allocation (Region, Arena, Handle);
+      Arena_Provider.Attach_Allocation (Region, Arena, Handle);
       if Region.Length_Value < Required
         or else Region.Base = System.Null_Address
       then
@@ -505,16 +503,16 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive)
    is
-      Metadata : Arenas.Metadata;
+      Metadata : Arena_Provider.Metadata;
       Key_Offset, Value_Offset, Stride : Byte_Count;
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
       Arena_Epoch : Interfaces.Unsigned_32;
       Current_Capacity : Interfaces.Unsigned_64;
-      Current, Retired : Arenas.Allocation_Handle;
+      Current, Retired : Arena_Provider.Allocation_Handle;
       Table, Retired_Table : Table_View;
    begin
       Validate_Configuration
@@ -557,12 +555,14 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Current := Read_Handle (Item.Current_Address);
       Retired := Read_Handle (Item.Retired_Address);
       Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-      if Current = Arenas.Null_Allocation and then Header.Word_2 /= 0 then
+      if Current = Arena_Provider.Null_Allocation
+        and then Header.Word_2 /= 0
+      then
          raise Layout_Error with "empty dynamic-map table has entries";
-      elsif Current /= Arenas.Null_Allocation then
+      elsif Current /= Arena_Provider.Null_Allocation then
          Validate_Table (Item, Table, Header.Word_2);
       end if;
-      if Retired /= Arenas.Null_Allocation then
+      if Retired /= Arena_Provider.Null_Allocation then
          if Retired = Current then
             raise Layout_Error with
               "dynamic-map current and retired allocations alias";
@@ -799,34 +799,37 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    end Insert_Stored;
 
    procedure Cleanup_Retired
-     (Item : View; Arena : in out Arenas.View; Mutated : in out Boolean)
+     (Item    : View;
+      Arena   : in out Arena_Provider.View;
+      Mutated : in out Boolean)
    is
-      Retired : constant Arenas.Allocation_Handle :=
+      Retired : constant Arena_Provider.Allocation_Handle :=
         Read_Handle (Item.Retired_Address);
    begin
-      if Retired = Arenas.Null_Allocation then
+      if Retired = Arena_Provider.Null_Allocation then
          return;
       end if;
-      Arenas.Release (Arena, Retired);
+      Arena_Provider.Release (Arena, Retired);
       Mutated := True;
-      Write_Handle (Item.Retired_Address, Arenas.Null_Allocation);
+      Write_Handle (Item.Retired_Address, Arena_Provider.Null_Allocation);
    exception
       when Handle_Error =>
          raise Layout_Error with "dynamic-map deferred allocation is stale";
    end Cleanup_Retired;
 
    procedure Grow
-     (Item : View; Arena : in out Arenas.View;
+     (Item : View; Arena : in out Arena_Provider.View;
       Mutated : in out Boolean; Result : out Put_Result)
    is
       Current_Capacity : constant Interfaces.Unsigned_64 :=
         Stored_Capacity (Item);
-      Current : constant Arenas.Allocation_Handle :=
+      Current : constant Arena_Provider.Allocation_Handle :=
         Read_Handle (Item.Current_Address);
       Target : Byte_Count;
       Requested : Byte_Count;
-      New_Handle : Arenas.Allocation_Handle := Arenas.Null_Allocation;
-      Allocation : Arenas.Allocation_Result;
+      New_Handle : Arena_Provider.Allocation_Handle :=
+        Arena_Provider.Null_Allocation;
+      Allocation : Arena_Provider.Allocation_Result;
       Old_Table, New_Table : Table_View;
       Slot : System.Address;
       Cleanup_Mutated : Boolean := False;
@@ -853,16 +856,16 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          Result := Put_Arena_Exhausted;
          return;
       end if;
-      Arenas.Try_Allocate
+      Arena_Provider.Try_Allocate
         (Arena, Positive (Requested), New_Handle, Allocation);
       case Allocation is
-         when Arenas.Allocation_Contended =>
+         when Arena_Provider.Allocation_Contended =>
             Result := Put_Arena_Contended;
             return;
-         when Arenas.Exhausted =>
+         when Arena_Provider.Exhausted =>
             Result := Put_Arena_Exhausted;
             return;
-         when Arenas.Allocated =>
+         when Arena_Provider.Allocated =>
             null;
       end case;
 
@@ -871,7 +874,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
            (Item, Arena, New_Handle, Interfaces.Unsigned_64 (Target),
             New_Table);
          Initialize_Table (Item, New_Table);
-         if Current /= Arenas.Null_Allocation then
+         if Current /= Arena_Provider.Null_Allocation then
             Attach_Table
               (Item, Arena, Current, Current_Capacity, Old_Table);
             for Index in Interfaces.Unsigned_64 range
@@ -889,7 +892,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       exception
          when others =>
             begin
-               Arenas.Release (Arena, New_Handle);
+               Arena_Provider.Release (Arena, New_Handle);
             exception
                when others =>
                   null;
@@ -898,7 +901,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       end;
 
       Mutated := True;
-      if Current /= Arenas.Null_Allocation then
+      if Current /= Arena_Provider.Null_Allocation then
          Write_Handle (Item.Retired_Address, Current);
       end if;
       Write_Handle (Item.Current_Address, New_Handle);
@@ -909,7 +912,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          Capacity_Check (Interfaces.Unsigned_64 (Target)));
       Result := Put_Inserted;
 
-      if Current /= Arenas.Null_Allocation then
+      if Current /= Arena_Provider.Null_Allocation then
          begin
             Cleanup_Mutated := False;
             Cleanup_Retired (Item, Arena, Cleanup_Mutated);
@@ -922,7 +925,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
 
    procedure Put
      (Item   : in out View;
-      Arena  : in out Arenas.View;
+      Arena  : in out Arena_Provider.View;
       Key_Data : Key.Source;
       Value  : Element.Source;
       Result : out Put_Result)
@@ -931,7 +934,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Stored_Value : constant Element.Value := Element.Create (Value);
       Current_Capacity : Interfaces.Unsigned_64;
       Count : Interfaces.Unsigned_64;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
       Table : Table_View;
       Found : Boolean;
       Index, Insertion : Interfaces.Unsigned_64;
@@ -1008,14 +1011,14 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
 
    procedure Get
      (Item  : View;
-      Arena : Arenas.View;
+      Arena : Arena_Provider.View;
       Key_Data : Key.Source;
       Value : out Element.Observed;
       Found : out Boolean)
    is
       Stored_Key : constant Key.Value := Key.Create (Key_Data);
       Current_Capacity : Interfaces.Unsigned_64;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
       Table : Table_View;
       Index, Insertion : Interfaces.Unsigned_64;
       Slot : System.Address;
@@ -1050,13 +1053,13 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
 
    procedure Remove
      (Item    : in out View;
-      Arena   : Arenas.View;
+      Arena   : Arena_Provider.View;
       Key_Data : Key.Source;
       Removed : out Boolean)
    is
       Stored_Key : constant Key.Value := Key.Create (Key_Data);
       Current_Capacity : Interfaces.Unsigned_64;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
       Table : Table_View;
       Found : Boolean;
       Index, Insertion : Interfaces.Unsigned_64;
@@ -1096,9 +1099,9 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Release_Guard (Item);
    end Remove;
 
-   procedure Clear (Item : in out View; Arena : Arenas.View) is
+   procedure Clear (Item : in out View; Arena : Arena_Provider.View) is
       Current_Capacity : Interfaces.Unsigned_64;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
       Table : Table_View;
       Slot : System.Address;
       Mutated : Boolean := False;
@@ -1129,8 +1132,9 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Release_Guard (Item);
    end Clear;
 
-   procedure Destroy (Item : in out View; Arena : in out Arenas.View) is
-      Current : Arenas.Allocation_Handle;
+   procedure Destroy
+     (Item : in out View; Arena : in out Arena_Provider.View) is
+      Current : Arena_Provider.Allocation_Handle;
       Mutated : Boolean := False;
    begin
       Acquire (Item);
@@ -1138,10 +1142,11 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          Require_Arena (Item, Arena);
          Cleanup_Retired (Item, Arena, Mutated);
          Current := Read_Handle (Item.Current_Address);
-         if Current /= Arenas.Null_Allocation then
-            Arenas.Release (Arena, Current);
+         if Current /= Arena_Provider.Null_Allocation then
+            Arena_Provider.Release (Arena, Current);
             Mutated := True;
-            Write_Handle (Item.Current_Address, Arenas.Null_Allocation);
+            Write_Handle
+              (Item.Current_Address, Arena_Provider.Null_Allocation);
             Bytes.Write_U64 (Item.Capacity_Address, 0);
             Bytes.Write_U64
               (Item.Capacity_Check_Address, Capacity_Check (0));

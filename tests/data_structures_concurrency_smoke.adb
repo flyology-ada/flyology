@@ -5,6 +5,7 @@ with Ada.Text_IO;
 with Flyology;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Byte_Strings;
+with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
 with Flyology.Data_Structures.Arenas;
 with Flyology.Data_Structures.Dynamic.Hash_Maps;
 with Flyology.Data_Structures.Dynamic.Vectors;
@@ -23,7 +24,8 @@ with System;
 procedure Data_Structures_Concurrency_Smoke is
    package DS renames Flyology.Data_Structures;
    package Byte_Strings renames DS.Byte_Strings;
-   package Arenas renames DS.Arenas;
+   package Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Buddy);
    package Handles renames DS.Handles;
    package Regions renames DS.Regions;
    package U64_Elements renames DS.Storage_Types.Unsigned_64s;
@@ -36,10 +38,12 @@ procedure Data_Structures_Concurrency_Smoke is
    package Vectors is new DS.Vectors
      (Element => U64_Elements.Element);
    package Dynamic_Vectors is new DS.Dynamic.Vectors
-     (Element => U64_Elements.Element);
+     (Arena_Provider => Arenas,
+      Element        => U64_Elements.Element);
    package Dynamic_Maps is new DS.Dynamic.Hash_Maps
-     (Key     => U64_Elements.Element,
-      Element => U64_Elements.Element);
+     (Arena_Provider => Arenas,
+      Key            => U64_Elements.Element,
+      Element        => U64_Elements.Element);
    package Hash_Maps is new DS.Hash_Maps
      (Key     => U64_Elements.Element,
       Element => U64_Elements.Element);
@@ -1007,13 +1011,16 @@ procedure Data_Structures_Concurrency_Smoke is
       end Run_Map;
    begin
       Arenas.Initialize
-        (Arena_Views (1), Region_A, Arena_Location, 1_048_576, 64,
+        (Arena_Views (1), Region_A, Arena_Location,
+         (Usable_Capacity => 1_048_576, Minimum_Block_Size => 64),
          16#D4A9_7C31_08E2_B65F#);
       for Index in 2 .. Worker_Count loop
          Arenas.Attach
            (Arena_Views (Index),
             (if Index mod 2 = 0 then Region_B else Region_A),
-            Arena_Location, 1_048_576, 64, 16#D4A9_7C31_08E2_B65F#);
+            Arena_Location,
+            (Usable_Capacity => 1_048_576, Minimum_Block_Size => 64),
+            16#D4A9_7C31_08E2_B65F#);
       end loop;
       Run_Vector;
       Run_Map;

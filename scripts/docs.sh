@@ -83,15 +83,17 @@ cat "$runtime_gnatdoc_log"
 )
 
 #  GNATdoc 26.0 does not associate leading comments with the formal callback
-#  of a nested generic subprogram or with the formals of Elements, whose formal
-#  package contributes types to later formal subprogram profiles. The source
-#  comments and entities still render. Keep these exceptions to exact units and
-#  names and continue enforcing every other runtime warning.
+#  of a nested generic subprogram or with the formals of Elements and the
+#  allocation-algorithm Contract, whose formal types contribute to later
+#  formal subprogram profiles. The source comments and entities still render.
+#  Keep these exceptions to exact units and names and continue enforcing every
+#  other runtime warning.
 runtime_documentation_warnings=$(mktemp \
   "${TMPDIR:-/tmp}/flyology-runtime-gnatdoc-warnings.XXXXXX")
 sed -E \
   -e '/^flyology-data_structures-vectors\.ads:[0-9]+:[0-9]+: warning: generic formal `Process` is not documented$/d' \
   -e '/^flyology-data_structures-storage_types-elements\.ads:[0-9]+:[0-9]+: warning: generic formal `(Representation|Source_Type|Observed_Type|Create_Value|Observe_Value|Direct_Constructor)` is not documented$/d' \
+  -e '/^flyology-data_structures-allocation_algorithms-contract\.ads:[0-9]+:[0-9]+: warning: generic formal `(Algorithm_Identity|Algorithm_Minimum_Block_Limit|Algorithm_Configuration|Algorithm_View|Implementation_Required_Storage|Implementation_Initialize|Implementation_Create_Or_Attach|Implementation_Attach|Implementation_Detach|Implementation_Is_Attached|Implementation_Current_Metadata|Implementation_Is_Poisoned|Implementation_Poison|Implementation_Try_Allocate_Immediate|Implementation_Try_Allocate_Timed|Implementation_Release_Immediate|Implementation_Release_Timed|Implementation_Block_Capacity|Implementation_Attach_Allocation|Implementation_Bind_Allocation|Implementation_Read|Implementation_Write|Implementation_Copy|Implementation_Destroy)` is not documented$/d' \
   "$runtime_gnatdoc_log" >"$runtime_documentation_warnings"
 if grep -E -q 'warning: .*not documented' "$runtime_documentation_warnings"
 then

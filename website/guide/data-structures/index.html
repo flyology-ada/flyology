@@ -108,7 +108,7 @@
                 <div class="decision-row"><dt><a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html#97166b56d6d2b4d8a17560db84fd55d8ca3f15a25bb22299f8f091c0fa6768cc"><code>Byte_Strings.View</code></a></dt><dd>A bounded variable-length byte sequence. Ordinary operations share one persisted guard.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/b596efd0f620aa7df921b80a80622253a008b40b3ce010618ed713afb7bd30f6.html#777eebc10654cd7abb017e76446bfd142d640291f344d6ef2fb87031c35f0b48"><code>Vectors.View</code></a></dt><dd>A bounded sequence generic over an immutable element adapter. Indexing is one-based at the public API.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/2deb1c418009bddb97baa53a4ddbc4b6934c37124c59528b494223aee6c9b93e.html#597139e2424f6d33451757a2f8ced40f78441f5eb500b45562accefcca7ace75"><code>Hash_Maps.View</code></a></dt><dd>Immutable typed keys and values in a bounded open-addressed table. Capacity is a power of two.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a></dt><dd>A fixed managed extent with variable-size buddy allocations identified by generations rather than addresses.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a></dt><dd>A generic fixed managed extent using one compile-time allocation algorithm.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/3b065985c3e335db58df8578f6a05aea354fda11d81238c958c208971a819df1.html#fbf4e1d6dac71f7df1df68d21ef9b4fff66873450899a844416728ba100ba4db"><code>Dynamic.Byte_Strings.View</code></a></dt><dd>A byte sequence whose payload capacity grows through an arena allocation.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#ef52ac089f2889eeb8451dfa5315c99f7c50310323efd9fdf07c876da3f43b0d"><code>Dynamic.Vectors.View</code></a></dt><dd>An immutable typed vector whose payload capacity grows through an arena allocation.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/2019939f291a34570c155cc5667dafe8f3df91d59b699c7b8267808aedfda0a4.html#92733d1c768ad9e91be0684ca99c5ad27e0c8ec9edea14218ed5c541712524e5"><code>Dynamic.Hash_Maps.View</code></a></dt><dd>An immutable typed map that allocates and rehashes larger tables inside an arena.</dd></div>
@@ -125,15 +125,25 @@
           <section id="arenas">
             <span class="step-label">STORAGE 03</span>
             <h2>Use an arena when payload capacity must grow.</h2>
-            <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a> manages a fixed region extent with a persisted buddy tree. Each successful allocation returns an <a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#4eddf9f5a1acc9705b6440b934fded8428ef19d5dfe9ed41d0d410b1b0a47224"><code>Arenas.Allocation_Handle</code></a> containing a tree-node index, arena initialization epoch, and nonzero allocation generation. The handle remains the stored relationship; the arena derives a checked process-local address only inside an operation.</p>
-            <p>The managed capacity and minimum block size are powers of two. Allocation rounds a request to the smallest fitting buddy block and reports allocation, exhaustion, or immediate metadata contention. Releasing a handle coalesces free buddies and makes every copy of that generation stale. Payload read, write, and copy do not acquire the metadata guard, so the handle owner must exclude release while payload access or a nested allocation-region view is active.</p>
+            <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#3fbfc153124ba93a9f7319baaa356ce1289ca404880c5b9675be98c92f964c65"><code>Arenas.View</code></a> manages a fixed region extent using one statically selected allocation algorithm. The generic facade adds no runtime dispatch or stored callback. Each successful allocation returns an <a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#4eddf9f5a1acc9705b6440b934fded8428ef19d5dfe9ed41d0d410b1b0a47224"><code>Arenas.Allocation_Handle</code></a> containing an opaque fixed-width token and nonzero generation. The handle remains the stored relationship; the arena derives a checked process-local address only inside an operation.</p>
+            <p><a href="../../api/03952ed1ed4d27a2eb5f29ddea382d3ddf94250231394852830a79c1aba937eb.html"><code>Allocation_Algorithms.Contract</code></a> defines the compile-time package shape used by the generic arena. <a href="../../api/1f1b37eca2839f2ed2e2b8f7d2834de07c11aeda73814fa10423af96865a06a5.html"><code>Allocation_Algorithms.Buddy</code></a> is the provided instance. Its managed capacity and minimum block size are powers of two. Allocation rounds a request to the smallest fitting buddy block and reports allocation, exhaustion, or immediate metadata contention. Releasing a handle coalesces free buddies and makes every copy of that generation stale. Payload read, write, and copy do not acquire the metadata guard, so the handle owner must exclude release while payload access or a nested allocation-region view is active.</p>
             <figure class="code-panel">
               <figcaption>create or attach an arena-backed dynamic vector</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">Arenas.Create_Or_Attach
+              <pre><code class="language-ada">package Buddy_Arenas is new DS.Arenas
+  (Algorithm =&gt; DS.Allocation_Algorithms.Buddy);
+
+package Dynamic_Vectors is new DS.Dynamic.Vectors
+  (Arena_Provider =&gt; Buddy_Arenas,
+   Element        =&gt; DS.Storage_Types.Unsigned_64s.Element);
+
+Arena_Configuration : constant Buddy_Arenas.Configuration :=
+  (Usable_Capacity =&gt; 1_048_576,
+   Minimum_Block_Size =&gt; 64);
+
+Buddy_Arenas.Create_Or_Attach
   (Arena_View, Region, Location =&gt; 4_096,
-   Usable_Capacity =&gt; 1_048_576,
-   Minimum_Block_Size =&gt; 64,
+   Configuration =&gt; Arena_Configuration,
    Instance_ID =&gt; 16#A8E4_7B19_2C63_D501#,
    Result =&gt; Arena_Open);
 
@@ -161,7 +171,7 @@ if Growth = DS.Dynamic.Arena_Exhausted then
 end if;</code></pre>
             </figure>
             <p>The dynamic leaves keep a fixed 128-byte header at their original region offset and move only the payload allocation. Growth allocates and initializes a replacement before publishing its handle. A deferred old handle remains recorded until reclamation succeeds, so arena contention cannot make a published allocation unreachable. <a href="../../api/b500dc85fb0983f0d2c0528959d9cffac53e84061e5fa4e1d33d8d4056c939c4.html#dee88d8149046a2e463e9537133196c04d4c4b7bc8d66a673d43478c5c43ea24"><code>Dynamic.Growth_Result</code></a> separates completion, arena exhaustion, and arena contention.</p>
-            <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#f536ce6548123e89816d545321a2be05719faa09b816b78faa7c2bb49c0ecf35"><code>Arenas.Create_Or_Attach</code></a> and <a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#6ea28f33a307ccf456ba21620b3a575e068f27e6d91dd821b6add8cf1ca76544"><code>Dynamic.Vectors.Create_Or_Attach</code></a> compare every immutable creation parameter before attaching. For an arena this includes managed capacity, minimum block size, and the caller-selected instance identifier. For a dynamic leaf it includes initial capacity, adapter-derived element or key/value identity and geometry, and the arena instance plus initialization incarnation. A ready object with different parameters raises <code>Layout_Error</code>; it is not reinitialized or adapted.</p>
+            <p><a href="../../api/b69e1944809d68b6359e75cc6eac3ac6c33ac007c231f38c5514b481997061e2.html#37dfabfa0ccc66050e3d1cbc2c7f037a22f631496c4e1c8238ef42235954fec0"><code>Arenas.Create_Or_Attach</code></a> and <a href="../../api/c0e594a1ae99f4eb062837254e42ea7cec52958d88a538e669c6a94b7dfaccbe.html#52df6f0a00d49715f11568a47f8f21d70b9e48f36a375d9cb996687afe6e3d0f"><code>Dynamic.Vectors.Create_Or_Attach</code></a> compare every immutable creation parameter before attaching. For an arena this includes allocation-algorithm identity, its complete configuration, and the caller-selected instance identifier. For a dynamic leaf it includes initial capacity, adapter-derived element or key/value identity and geometry, the arena algorithm, and the arena instance plus initialization incarnation. A ready object with different parameters raises <code>Layout_Error</code>; it is not reinitialized or adapted.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p><strong>Growable is not an unbounded resource claim.</strong> Dynamic structures grow until allocation geometry or the fixed arena is exhausted. The arena does not extend a mapping, compact live blocks, or recover ownership after process death. Termination after allocation but before handle publication requires an external allocation journal or exclusive whole-arena reinitialization.</p>

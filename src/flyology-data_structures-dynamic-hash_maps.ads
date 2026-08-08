@@ -15,9 +15,11 @@ use type Interfaces.Unsigned_64;
 --  publishing a replacement table. One persisted nonblocking map guard
 --  serializes operations across mappings; arena contention is reported in the
 --  insertion result. Lifecycle operations and detachment require exclusion.
+--  @formal Arena_Provider Statically selected relocatable arena instance
 --  @formal Key Immutable key adapter bound once for this map type
 --  @formal Element Immutable mapped-value adapter bound once for this map type
 generic
+   with package Arena_Provider is new Flyology.Data_Structures.Arenas (<>);
    with package Key is new
      Flyology.Data_Structures.Storage_Types.Elements (<>);
    with package Element is new
@@ -29,13 +31,17 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
 
    --  Schema for the FNV-1a, linear-probe, arena-backed map contract.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_4448_4D41_0002# xor Key.Signature xor
+     16#0001_4448_4D41_0003# xor Key.Signature xor
      Interfaces.Shift_Left (Interfaces.Unsigned_64 (Key.Version), 32) xor
      Interfaces.Rotate_Left (Element.Signature, 17) xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48);
+     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48) xor
+     Arena_Provider.Identity.Schema xor
+     Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19) xor
+     Interfaces.Rotate_Left
+       (Interfaces.Unsigned_64 (Arena_Provider.Identity.Version), 41);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelopes and tooling.
    Identity : constant Layout_Identity :=
@@ -57,7 +63,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @return Complete dynamic-map header bytes
    function Required_Storage return Byte_Count;
 
-   --  Destructively initialize an empty map bound to Arena.
+   --  Destructively initialize an empty map bound to Arena_Provider.
    --  @param Item View attached on success
    --  @param Region Region containing the fixed map header
    --  @param Location Nonzero eight-byte-aligned map-header offset
@@ -67,7 +73,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive);
 
    --  Initialize virgin bytes or attach to an exact compatible map. Initial
@@ -83,7 +89,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Result           : out Open_Result);
 
@@ -100,7 +106,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive);
 
    --  Detach Item without changing its header or allocations.
@@ -142,7 +148,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Result Insert, replacement, exhaustion, or arena contention
    procedure Put
      (Item   : in out View;
-      Arena  : in out Arenas.View;
+      Arena  : in out Arena_Provider.View;
       Key_Data : Key.Source;
       Value  : Element.Source;
       Result : out Put_Result);
@@ -155,7 +161,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Found True only when Key is present
    procedure Get
      (Item  : View;
-      Arena : Arenas.View;
+      Arena : Arena_Provider.View;
       Key_Data : Key.Source;
       Value : out Element.Observed;
       Found : out Boolean);
@@ -167,20 +173,20 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Removed True only when Key was present
    procedure Remove
      (Item    : in out View;
-      Arena   : Arenas.View;
+      Arena   : Arena_Provider.View;
       Key_Data : Key.Source;
       Removed : out Boolean);
 
    --  Reset every current slot to empty without releasing table capacity.
    --  @param Item Internally synchronized map view
    --  @param Arena Matching attached arena view
-   procedure Clear (Item : in out View; Arena : Arenas.View);
+   procedure Clear (Item : in out View; Arena : Arena_Provider.View);
 
    --  Release current and deferred tables, destroy the quiescent header, and
    --  detach Item.
    --  @param Item Exclusively synchronized map view
    --  @param Arena Matching attached arena view
-   procedure Destroy (Item : in out View; Arena : in out Arenas.View);
+   procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View);
 
 private
    type View is limited record

@@ -7,10 +7,8 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
    package Bytes renames Flyology.Data_Structures.Storage;
    package Native renames System.Storage_Elements;
 
-   use type Arenas.Allocation_Handle;
-   use type Arenas.Allocation_Result;
+   use type Arena_Provider.Allocation_Handle;
    use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
    use type Native.Storage_Offset;
    use type System.Address;
 
@@ -44,27 +42,26 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
    pragma Inline_Always (Field_At);
 
    function Read_Handle (Address : System.Address)
-      return Arenas.Allocation_Handle is
-     ((Node        => Bytes.Read_U32 (Address),
-       Arena_Epoch => Bytes.Read_U32 (Field_At (Address, 4)),
-       Generation  => Bytes.Read_U64 (Field_At (Address, 8))));
+      return Arena_Provider.Allocation_Handle is
+     ((Token      => Bytes.Read_U64 (Address),
+       Generation => Bytes.Read_U64 (Field_At (Address, 8))));
 
    procedure Write_Handle
-     (Address : System.Address; Value : Arenas.Allocation_Handle) is
+     (Address : System.Address; Value : Arena_Provider.Allocation_Handle) is
    begin
-      Bytes.Write_U32 (Address, Value.Node);
-      Bytes.Write_U32 (Field_At (Address, 4), Value.Arena_Epoch);
+      Bytes.Write_U64 (Address, Value.Token);
       Bytes.Write_U64 (Field_At (Address, 8), Value.Generation);
    end Write_Handle;
 
-   function Arena_Metadata (Arena : Arenas.View) return Arenas.Metadata is
-     (Arenas.Current_Metadata (Arena));
+   function Arena_Metadata
+     (Arena : Arena_Provider.View) return Arena_Provider.Metadata is
+     (Arena_Provider.Current_Metadata (Arena));
 
    procedure Validate_Configuration
-     (Arena            : Arenas.View;
+     (Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Element_Size     : Positive;
-      Metadata         : out Arenas.Metadata)
+      Metadata         : out Arena_Provider.Metadata)
    is
       Bytes_Required : Byte_Count;
    begin
@@ -130,8 +127,8 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
         (Item, Core, Initial_Capacity, Element_Size, Arena_ID, Arena_Epoch);
       Bytes.Write_U64 (Item.Capacity_Address, 0);
       Bytes.Write_U64 (Item.Capacity_Check_Address, Capacity_Check (0));
-      Write_Handle (Item.Current_Address, Arenas.Null_Allocation);
-      Write_Handle (Item.Retired_Address, Arenas.Null_Allocation);
+      Write_Handle (Item.Current_Address, Arena_Provider.Null_Allocation);
+      Write_Handle (Item.Retired_Address, Arena_Provider.Null_Allocation);
       Bytes.Write_U32
         (Layouts.Address_At (Core, Arena_Epoch_Offset, 4, 4), Arena_Epoch);
       Bytes.Write_U32
@@ -145,7 +142,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Element_Size     : Positive);
 
@@ -153,11 +150,11 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Element_Size     : Positive)
    is
-      Metadata : Arenas.Metadata;
+      Metadata : Arena_Provider.Metadata;
       Core : Layouts.Local_View;
    begin
       Validate_Configuration
@@ -188,12 +185,12 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Element_Size     : Positive;
       Result           : out Open_Result)
    is
-      Metadata : Arenas.Metadata;
+      Metadata : Arena_Provider.Metadata;
       Core  : Layouts.Local_View;
       Claim : Layouts.Initialization_Claim;
    begin
@@ -231,8 +228,8 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
          raise;
    end Create_Or_Attach_Core;
 
-   procedure Require_Arena (Item : View; Arena : Arenas.View) is
-      Metadata : constant Arenas.Metadata := Arena_Metadata (Arena);
+   procedure Require_Arena (Item : View; Arena : Arena_Provider.View) is
+      Metadata : constant Arena_Provider.Metadata := Arena_Metadata (Arena);
    begin
       if Metadata.Instance_ID /= Item.Arena_ID_Value
         or else Metadata.Incarnation /= Item.Arena_Epoch_Value
@@ -244,14 +241,14 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
 
    procedure Validate_Allocation
      (Item     : View;
-      Arena    : Arenas.View;
-      Value    : Arenas.Allocation_Handle;
+      Arena    : Arena_Provider.View;
+      Value    : Arena_Provider.Allocation_Handle;
       Capacity : Interfaces.Unsigned_64)
    is
       Block : Byte_Count;
       Payload : Byte_Count;
    begin
-      if Value = Arenas.Null_Allocation then
+      if Value = Arena_Provider.Null_Allocation then
          if Capacity /= 0 then
             raise Layout_Error with
               "dynamic-byte-string capacity has no allocation";
@@ -262,7 +259,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
            "dynamic-byte-string allocation has zero capacity";
       end if;
       begin
-         Block := Arenas.Block_Capacity (Arena, Value);
+         Block := Arena_Provider.Block_Capacity (Arena, Value);
       exception
          when Handle_Error =>
             raise Layout_Error with
@@ -282,16 +279,16 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Element_Size     : Positive)
    is
-      Metadata : Arenas.Metadata;
+      Metadata : Arena_Provider.Metadata;
       Core     : Layouts.Local_View;
       Header   : Layouts.Header_Values;
       Stored_Epoch : Interfaces.Unsigned_32;
       Current_Capacity : Interfaces.Unsigned_64;
-      Current, Retired : Arenas.Allocation_Handle;
+      Current, Retired : Arena_Provider.Allocation_Handle;
    begin
       Validate_Configuration
         (Arena, Initial_Capacity, Element_Size, Metadata);
@@ -332,14 +329,14 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       Current := Read_Handle (Item.Current_Address);
       Retired := Read_Handle (Item.Retired_Address);
       Validate_Allocation (Item, Arena, Current, Current_Capacity);
-      if Retired /= Arenas.Null_Allocation then
+      if Retired /= Arena_Provider.Null_Allocation then
          if Retired = Current then
             raise Layout_Error with
               "dynamic-byte-string current and retired allocations alias";
          end if;
          declare
             Ignored : constant Byte_Count :=
-              Arenas.Block_Capacity (Arena, Retired);
+              Arena_Provider.Block_Capacity (Arena, Retired);
             pragma Unreferenced (Ignored);
          begin
             null;
@@ -363,7 +360,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive) is
    begin
       Initialize_Core
@@ -374,7 +371,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive;
       Result           : out Open_Result) is
    begin
@@ -386,7 +383,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
      (Item             : out View;
       Region           : Region_View;
       Location         : Region_Offset;
-      Arena            : Arenas.View;
+      Arena            : Arena_Provider.View;
       Initial_Capacity : Positive) is
    begin
       Attach_Core (Item, Region, Location, Arena, Initial_Capacity, 1);
@@ -502,17 +499,19 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
    end Length;
 
    procedure Cleanup_Retired
-     (Item : View; Arena : in out Arenas.View; Mutated : in out Boolean)
+     (Item    : View;
+      Arena   : in out Arena_Provider.View;
+      Mutated : in out Boolean)
    is
-      Retired : constant Arenas.Allocation_Handle :=
+      Retired : constant Arena_Provider.Allocation_Handle :=
         Read_Handle (Item.Retired_Address);
    begin
-      if Retired = Arenas.Null_Allocation then
+      if Retired = Arena_Provider.Null_Allocation then
          return;
       end if;
-      Arenas.Release (Arena, Retired);
+      Arena_Provider.Release (Arena, Retired);
       Mutated := True;
-      Write_Handle (Item.Retired_Address, Arenas.Null_Allocation);
+      Write_Handle (Item.Retired_Address, Arena_Provider.Null_Allocation);
    exception
       when Handle_Error =>
          raise Layout_Error with
@@ -521,19 +520,20 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
 
    procedure Ensure_Capacity
      (Item     : View;
-      Arena    : in out Arenas.View;
+      Arena    : in out Arena_Provider.View;
       Required : Positive;
       Mutated  : in out Boolean;
       Result   : out Growth_Result)
    is
       Current_Capacity : constant Interfaces.Unsigned_64 :=
         Bytes.Read_U64 (Item.Capacity_Address);
-      Current : constant Arenas.Allocation_Handle :=
+      Current : constant Arena_Provider.Allocation_Handle :=
         Read_Handle (Item.Current_Address);
       Target : Byte_Count;
       Requested_Bytes : Byte_Count;
-      New_Handle : Arenas.Allocation_Handle := Arenas.Null_Allocation;
-      Allocation : Arenas.Allocation_Result;
+      New_Handle : Arena_Provider.Allocation_Handle :=
+        Arena_Provider.Null_Allocation;
+      Allocation : Arena_Provider.Allocation_Result;
       Block : Byte_Count;
       New_Capacity : Byte_Count;
       Copy_Length : Byte_Count;
@@ -574,21 +574,21 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
          Result := Arena_Exhausted;
          return;
       end if;
-      Arenas.Try_Allocate
+      Arena_Provider.Try_Allocate
         (Arena, Positive (Requested_Bytes), New_Handle, Allocation);
       case Allocation is
-         when Arenas.Allocation_Contended =>
+         when Arena_Provider.Allocation_Contended =>
             Result := Arena_Contended;
             return;
-         when Arenas.Exhausted =>
+         when Arena_Provider.Exhausted =>
             Result := Arena_Exhausted;
             return;
-         when Arenas.Allocated =>
+         when Arena_Provider.Allocated =>
             null;
       end case;
 
       begin
-         Block := Arenas.Block_Capacity (Arena, New_Handle);
+         Block := Arena_Provider.Block_Capacity (Arena, New_Handle);
          New_Capacity := Block / Byte_Count (Item.Element_Value);
          if New_Capacity < Byte_Count (Required)
            or else New_Capacity > Byte_Count (Natural'Last)
@@ -600,13 +600,13 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
            (Byte_Count (Stored_Length (Item)),
             Byte_Count (Item.Element_Value));
          if Copy_Length /= 0 then
-            Arenas.Copy
+            Arena_Provider.Copy
               (Arena, Current, 0, New_Handle, 0, Copy_Length);
          end if;
       exception
          when others =>
             begin
-               Arenas.Release (Arena, New_Handle);
+               Arena_Provider.Release (Arena, New_Handle);
             exception
                when others =>
                   null;
@@ -615,7 +615,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       end;
 
       Mutated := True;
-      if Current /= Arenas.Null_Allocation then
+      if Current /= Arena_Provider.Null_Allocation then
          Write_Handle (Item.Retired_Address, Current);
       end if;
       Write_Handle (Item.Current_Address, New_Handle);
@@ -626,7 +626,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
          Capacity_Check (Interfaces.Unsigned_64 (New_Capacity)));
       Result := Completed;
 
-      if Current /= Arenas.Null_Allocation then
+      if Current /= Arena_Provider.Null_Allocation then
          begin
             declare
                Cleanup_Mutated : Boolean := False;
@@ -642,13 +642,13 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
 
    procedure Try_Assign
      (Item   : in out View;
-      Arena  : in out Arenas.View;
+      Arena  : in out Arena_Provider.View;
       Data   : Ada.Streams.Stream_Element_Array;
       Result : out Growth_Result)
    is
       New_Length : constant Byte_Count := Byte_Count (Data'Length);
       Mutated : Boolean := False;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
    begin
       Acquire (Item);
       begin
@@ -665,7 +665,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
             if Result = Completed then
                Current := Read_Handle (Item.Current_Address);
                Mutated := True;
-               Arenas.Write (Arena, Current, 0, Data);
+               Arena_Provider.Write (Arena, Current, 0, Data);
                Bytes.Write_U64
                  (Item.Length_Address, Interfaces.Unsigned_64 (New_Length));
             end if;
@@ -680,7 +680,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
 
    procedure Try_Append
      (Item   : in out View;
-      Arena  : in out Arenas.View;
+      Arena  : in out Arena_Provider.View;
       Data   : Ada.Streams.Stream_Element_Array;
       Result : out Growth_Result)
    is
@@ -688,7 +688,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       Current_Length : Interfaces.Unsigned_64;
       Required : Byte_Count;
       Mutated : Boolean := False;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
    begin
       Acquire (Item);
       begin
@@ -708,7 +708,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
                if Result = Completed then
                   Current := Read_Handle (Item.Current_Address);
                   Mutated := True;
-                  Arenas.Write
+                  Arena_Provider.Write
                     (Arena, Current, Byte_Count (Current_Length), Data);
                   Bytes.Write_U64
                     (Item.Length_Address, Interfaces.Unsigned_64 (Required));
@@ -725,11 +725,11 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
 
    procedure Read
      (Item  : View;
-      Arena : Arenas.View;
+      Arena : Arena_Provider.View;
       Data  : out Ada.Streams.Stream_Element_Array)
    is
       Current_Length : Interfaces.Unsigned_64;
-      Current : Arenas.Allocation_Handle;
+      Current : Arena_Provider.Allocation_Handle;
    begin
       Acquire (Item);
       begin
@@ -740,7 +740,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
               "dynamic-byte-string destination has the wrong length";
          elsif Current_Length /= 0 then
             Current := Read_Handle (Item.Current_Address);
-            Arenas.Read (Arena, Current, 0, Data);
+            Arena_Provider.Read (Arena, Current, 0, Data);
          end if;
       exception
          when others =>
@@ -767,8 +767,9 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       Release_Guard (Item);
    end Clear;
 
-   procedure Destroy (Item : in out View; Arena : in out Arenas.View) is
-      Current : Arenas.Allocation_Handle;
+   procedure Destroy
+     (Item : in out View; Arena : in out Arena_Provider.View) is
+      Current : Arena_Provider.Allocation_Handle;
       Mutated : Boolean := False;
    begin
       Acquire (Item);
@@ -776,10 +777,11 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
          Require_Arena (Item, Arena);
          Cleanup_Retired (Item, Arena, Mutated);
          Current := Read_Handle (Item.Current_Address);
-         if Current /= Arenas.Null_Allocation then
-            Arenas.Release (Arena, Current);
+         if Current /= Arena_Provider.Null_Allocation then
+            Arena_Provider.Release (Arena, Current);
             Mutated := True;
-            Write_Handle (Item.Current_Address, Arenas.Null_Allocation);
+            Write_Handle
+              (Item.Current_Address, Arena_Provider.Null_Allocation);
             Bytes.Write_U64 (Item.Capacity_Address, 0);
             Bytes.Write_U64
               (Item.Capacity_Check_Address, Capacity_Check (0));

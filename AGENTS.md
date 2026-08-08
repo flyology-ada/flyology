@@ -128,12 +128,16 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   access value. Persist relationships only as fixed-width offsets, indices,
   generations, counters, hashes, and byte payloads; native bases belong only
   to process-local views.
-- `Arenas` manages a fixed caller-owned extent with a persisted buddy tree.
-  Allocation handles combine a tree-node index, arena incarnation, and
-  nonwrapping generation. Payload access and nested allocation views require
-  the handle owner to exclude release.
-- `Dynamic.Byte_Strings`, `Dynamic.Vectors`, and `Dynamic.Hash_Maps` retain a
-  fixed outer header and replace arena allocations during growth. Publish the
+- `Arenas` is generic over a compile-time `Allocation_Algorithms.Contract`
+  instance. The selected algorithm owns its persisted metadata,
+  synchronization, abandonment, and recovery rules; arena calls introduce no
+  runtime dispatch or stored callback. `Allocation_Algorithms.Buddy` provides
+  the persisted buddy tree. Allocation handles contain an opaque fixed-width
+  token and nonwrapping generation. Payload access and nested allocation views
+  require the handle owner to exclude release.
+- `Dynamic.Byte_Strings`, `Dynamic.Vectors`, and `Dynamic.Hash_Maps` are generic
+  over an `Arenas` instance. They retain a fixed outer header and replace arena
+  allocations during growth. Publish the
   new generation-stamped handle only after copying or rehashing completes, and
   retain the old handle in deferred-reclamation metadata until release
   succeeds. Dynamic means growable within a fixed arena, not mapping growth or
