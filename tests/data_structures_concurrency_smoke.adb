@@ -583,7 +583,7 @@ procedure Data_Structures_Concurrency_Smoke is
       end loop;
    end Run_Externally_Synchronized_String;
 
-   procedure Run_Externally_Synchronized_Map is
+   procedure Run_Internally_Synchronized_Map is
       Worker_Count : constant Positive := 4;
       Per_Worker   : constant Positive := 1_000;
       Total        : constant Positive := Worker_Count * Per_Worker;
@@ -591,7 +591,6 @@ procedure Data_Structures_Concurrency_Smoke is
       type View_Array is array (Positive range <>) of aliased Hash_Maps.View;
       Views : View_Array (1 .. Worker_Count);
       type View_Access is access all Hash_Maps.View;
-      Guard : Mutex;
       Finished : Completion (Worker_Count);
 
       task type Worker_Task
@@ -601,31 +600,30 @@ procedure Data_Structures_Concurrency_Smoke is
       end Worker_Task;
 
       task body Worker_Task is
-         Owns_Lock : Boolean := False;
          Outcome : Hash_Maps.Put_Result;
          Value : Interfaces.Unsigned_64;
       begin
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
-            Guard.Acquire;
-            Owns_Lock := True;
-            Hash_Maps.Put
-              (Item.all, Encode (Value), Encode (Value xor 16#A5A5#),
-               Outcome);
-            Guard.Release;
-            Owns_Lock := False;
+            loop
+               begin
+                  Hash_Maps.Put
+                    (Item.all, Encode (Value), Encode (Value xor 16#A5A5#),
+                     Outcome);
+                  exit;
+               exception
+                  when DS.Busy_Error =>
+                     delay 0.0;
+               end;
+            end loop;
             if Outcome /= Hash_Maps.Inserted then
-               raise Program_Error with "locked hash-map insert failed";
+               raise Program_Error with "internally guarded map insert failed";
             end if;
          end loop;
          Finished.Done (True);
       exception
-         when others =>
-            if Owns_Lock then
-               Guard.Release;
-            end if;
-            Finished.Done (False);
+         when others => Finished.Done (False);
       end Worker_Task;
 
       type Worker_Access is access Worker_Task;
@@ -656,12 +654,12 @@ procedure Data_Structures_Concurrency_Smoke is
             abort Worker.all;
          end loop;
          raise Program_Error with
-           "externally synchronized hash-map test timed out";
+           "internally synchronized hash-map test timed out";
       end select;
-      Assert (Finished.Passed, "externally synchronized hash-map tasks failed");
+      Assert (Finished.Passed, "internally synchronized hash-map tasks failed");
       Assert
         (Hash_Maps.Length (Views (1)) = Total,
-         "externally synchronized hash map lost entries");
+         "internally synchronized hash map lost entries");
       for Value in Interfaces.Unsigned_64 range
         1 .. Interfaces.Unsigned_64 (Total)
       loop
@@ -669,13 +667,13 @@ procedure Data_Structures_Concurrency_Smoke is
            (Views (2), Encode (Value), Data, Found);
          Assert
            (Found and then Decode (Data) = (Value xor 16#A5A5#),
-            "externally synchronized hash map returned a wrong value");
+            "internally synchronized hash map returned a wrong value");
       end loop;
       Hash_Maps.Destroy (Views (1));
       for Index in 2 .. Worker_Count loop
          Hash_Maps.Detach (Views (Index));
       end loop;
-   end Run_Externally_Synchronized_Map;
+   end Run_Internally_Synchronized_Map;
 
 begin
    Assert
@@ -689,7 +687,7 @@ begin
    Run_MPMC;
    Run_Externally_Synchronized_Vector;
    Run_Externally_Synchronized_String;
-   Run_Externally_Synchronized_Map;
+   Run_Internally_Synchronized_Map;
    Regions.Detach (Region_A);
    Regions.Detach (Region_B);
    Assert (Unmap (Base_A, Mapping_Length) = 0, "failed to unmap view A");

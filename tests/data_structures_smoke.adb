@@ -47,6 +47,7 @@ procedure Data_Structures_Smoke is
 
    use type Ada.Streams.Stream_Element_Array;
    use type C.int;
+   use type C.size_t;
    use type DS.Byte_Count;
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
@@ -178,7 +179,7 @@ procedure Data_Structures_Smoke is
    function Map_Entry_Offset
      (Index : Interfaces.Unsigned_64; Relative : Natural) return C.size_t is
      (Raw_Offset
-        (Map_Location, 64 + Natural (Index) * 32 + Relative));
+        (Map_Location, 72 + Natural (Index) * 32 + Relative));
 
    Temp_Root : constant String := Ada.Environment_Variables.Value
      ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
@@ -756,6 +757,49 @@ begin
    Maps.Remove (Map_C, Key_1, Flag);
    Assert (Flag and then Maps.Length (Map_B) = 1,
       "hash-map removal failed across mappings");
+
+   --  Simulate an owner that died after acquiring the stored mutation guard.
+   --  A recovery authority operating through another mapping poisons the
+   --  abandoned object without first attaching its mutable contents.
+   Write_U32
+     (Base_C, C.size_t (Map_Location) + C.size_t'(64),
+      Interfaces.Unsigned_32'(1));
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Maps.Put (Map_C, Key_1, Value_1, Put_Outcome);
+      exception
+         when DS.Busy_Error => Failed := True;
+      end;
+      Assert (Failed, "busy hash map did not fail without waiting");
+   end;
+   Maps.Poison (Region_B, Map_Location);
+   Assert (Maps.Is_Poisoned (Map_C), "hash-map poison was not shared");
+   declare
+      Failed : Boolean := False;
+   begin
+      begin
+         Maps.Get (Map_B, Key_2, Eight, Flag);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned hash map accepted an operation");
+      Failed := False;
+      begin
+         Maps.Attach (Map_Bad, Region_B, Map_Location, 16, 8, 8);
+      exception
+         when DS.Poison_Error => Failed := True;
+      end;
+      Assert (Failed, "poisoned hash map attached as healthy");
+   end;
+   Maps.Initialize (Map_C, Region_C, Map_Location, 16, 8, 8);
+   Maps.Put (Map_C, Key_1, Value_1, Put_Outcome);
+   Maps.Get (Map_B, Key_1, Eight, Flag);
+   Assert
+     (Put_Outcome = Maps.Inserted and then Flag and then Eight = Value_1,
+      "exclusive hash-map reinitialization did not recover poison");
+
    Vectors.Read (Wrapped_C, 1, Eight);
    Assert (Decode (Eight) = 909,
            "versioned envelope did not survive third mapping");

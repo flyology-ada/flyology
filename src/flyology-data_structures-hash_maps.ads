@@ -6,18 +6,20 @@ private with System;
 --  Provides bounded open-addressed maps from fixed-size byte keys to
 --  fixed-size byte values. Capacity is a power of two and probing is linear
 --  over cached fixed-stride entries. Stored data contains only state scalars,
---  hashes, keys, and values. The package is not internally synchronized; all
---  operations across all views require application-level exclusion.
+--  hashes, keys, and values. Ordinary operations are internally serialized
+--  across mappings by one process-capable stored guard. They make one
+--  acquisition attempt and raise Busy_Error rather than waiting. Lifecycle
+--  operations still require whole-object quiescence.
 package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
    --  Eight-byte magic stored in every map header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5348_4D41_3031#;
 
    --  Schema identifier for the current FNV-1a/open-addressed layout.
-   Schema : constant Interfaces.Unsigned_64 := 16#0001_484D_4150_0001#;
+   Schema : constant Interfaces.Unsigned_64 := 16#0001_484D_4150_0002#;
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity :=
@@ -76,6 +78,15 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Key_Size   : Positive;
       Value_Size : Positive);
 
+   --  Poison a ready or abandoned-locked map after independently establishing
+   --  that no live owner can still mutate it. This recovery operation validates
+   --  the map identity without attaching mutable contents. Poisoning is
+   --  permanent until exclusive reinitialization.
+   --  @param Region Attached backing region
+   --  @param Location Stored map offset
+   --  @exception Layout_Error The location is incomplete or has another identity
+   procedure Poison (Region : Region_View; Location : Region_Offset);
+
    --  Detach Item without modifying the map.
    --  @param Item View to detach
    procedure Detach (Item : in out View);
@@ -85,17 +96,27 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @return True only while local mapping information is retained
    function Is_Attached (Item : View) return Boolean;
 
+   --  Report whether Item's backing map was explicitly poisoned.
+   --  @param Item Attached map view
+   --  @return True only when the shared lifecycle state is Poisoned
+   --  @exception Region_Error Item is detached
+   function Is_Poisoned (Item : View) return Boolean;
+
    --  Return the current occupied entry count.
-   --  @param Item Attached synchronized view
+   --  @param Item Attached view
    --  @return Number of keys currently present
+   --  @exception Busy_Error Another operation owns the guard
+   --  @exception Poison_Error The map is poisoned
    function Length (Item : View) return Natural;
 
    --  Insert Key and Value, or replace the value for an existing key.
-   --  @param Item Exclusively synchronized map view
+   --  @param Item Attached map view
    --  @param Key Fixed-size key bytes
    --  @param Value Fixed-size value bytes
    --  @param Result Insert, replacement, or full-table outcome
    --  @exception Constraint_Error Key or Value has the wrong length
+   --  @exception Busy_Error Another operation owns the guard
+   --  @exception Poison_Error The map is poisoned
    procedure Put
      (Item   : in out View;
       Key    : Ada.Streams.Stream_Element_Array;
@@ -103,11 +124,13 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Result : out Put_Result);
 
    --  Look up Key and copy its value when present.
-   --  @param Item Exclusively synchronized map view
+   --  @param Item Attached map view
    --  @param Key Fixed-size key bytes
    --  @param Value Fixed-size destination, assigned only when Found is true
    --  @param Found True only when Key is present
    --  @exception Constraint_Error Key or Value has the wrong length
+   --  @exception Busy_Error Another operation owns the guard
+   --  @exception Poison_Error The map is poisoned
    procedure Get
      (Item  : View;
       Key   : Ada.Streams.Stream_Element_Array;
@@ -115,17 +138,21 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Found : out Boolean);
 
    --  Remove Key when present, retaining a tombstone for probe continuity.
-   --  @param Item Exclusively synchronized map view
+   --  @param Item Attached map view
    --  @param Key Fixed-size key bytes
    --  @param Removed True only when an occupied entry was deleted
    --  @exception Constraint_Error Key has the wrong length
+   --  @exception Busy_Error Another operation owns the guard
+   --  @exception Poison_Error The map is poisoned
    procedure Remove
      (Item    : in out View;
       Key     : Ada.Streams.Stream_Element_Array;
       Removed : out Boolean);
 
    --  Reset every entry to empty and set Length to zero.
-   --  @param Item Exclusively synchronized map view
+   --  @param Item Attached map view
+   --  @exception Busy_Error Another operation owns the guard
+   --  @exception Poison_Error The map is poisoned
    procedure Clear (Item : in out View);
 
    --  Invalidate a quiescent map and detach Item.
@@ -142,6 +169,7 @@ private
       Value_Offset   : Byte_Count := 0;
       Stride         : Byte_Count := 0;
       Count_Address   : System.Address := System.Null_Address;
+      Guard_Address   : System.Address := System.Null_Address;
       Entries_Address : System.Address := System.Null_Address;
    end record;
 end Flyology.Data_Structures.Hash_Maps;
