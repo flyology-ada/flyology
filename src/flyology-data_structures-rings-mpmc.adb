@@ -3,12 +3,14 @@ with Flyology.Data_Structures.Policy;
 with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
 with Interfaces.C;
+with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Rings.MPMC is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Policy renames Flyology.Data_Structures.Policy;
    package Bytes renames Flyology.Data_Structures.Storage;
    package Waiting renames Flyology.Data_Structures.Waits;
+   package Native renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
@@ -78,22 +80,27 @@ package body Flyology.Data_Structures.Rings.MPMC is
             Item.Stride));
    end Slot_Relative;
 
-   function Sequence_Address
+   function Slot_Address
      (Item : View; Position : Interfaces.Unsigned_64) return System.Address is
    begin
       return Layouts.Address_At
-        (Item.Core, Slot_Relative (Item, Position), 8, 8);
-   end Sequence_Address;
+        (Item.Core, Slot_Relative (Item, Position), Item.Stride, 8);
+   end Slot_Address;
 
    function Payload_Address
-     (Item : View; Position : Interfaces.Unsigned_64) return System.Address is
+     (Item : View; Slot : System.Address) return System.Address
+   is
    begin
-      return Layouts.Address_At
-        (Item.Core,
-         Layouts.Checked_Add
-           (Slot_Relative (Item, Position), Item.Payload_Offset),
-         Byte_Count (Item.Element_Value), 1);
+      --  Slot_Address has checked the null sentinel, complete slot extent,
+      --  alignment, and native conversion. Initialize or Attach has checked
+      --  that Payload_Offset and Element_Value fit within the validated stride,
+      --  so this process-local subaddress cannot escape that slot.
+      return Native."+"
+        (Slot, Native.Storage_Offset (Item.Payload_Offset));
    end Payload_Address;
+
+   pragma Inline_Always
+     (Slot_Relative, Slot_Address, Payload_Address);
 
    procedure Validate_Sequences
      (Item : View; Enqueue, Dequeue : Interfaces.Unsigned_64)
@@ -112,7 +119,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
          Position := Dequeue + Offset;
          Expected_Sequence :=
            (if Offset < Occupancy then Position + 1 else Position);
-         if Atomic.Load_Acquire_U64 (Sequence_Address (Item, Position)) /=
+         if Atomic.Load_Acquire_U64 (Slot_Address (Item, Position)) /=
            Expected_Sequence
          then
             raise Layout_Error with "MPMC slot sequence is corrupt";
@@ -152,7 +159,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
         (Item.Dequeue_Address, 0);
       for Slot in Interfaces.Unsigned_32 range 0 .. Capacity_32 - 1 loop
          Atomic.Store_Release_U64
-           (Sequence_Address (Item, Interfaces.Unsigned_64 (Slot)),
+           (Slot_Address (Item, Interfaces.Unsigned_64 (Slot)),
             Interfaces.Unsigned_64 (Slot));
       end loop;
       Layouts.Publish (Item.Core);
@@ -245,6 +252,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Sequence : Interfaces.Unsigned_64;
       Expected : Interfaces.Unsigned_64;
       Relation : Policy.Sequence_Relation;
+      Slot     : System.Address;
    begin
       Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
@@ -252,8 +260,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
         (Item.Enqueue_Address);
       for Attempt in 1 .. Contention_Limit loop
          pragma Unreferenced (Attempt);
-         Sequence := Atomic.Load_Acquire_U64
-           (Sequence_Address (Item, Position));
+         Slot := Slot_Address (Item, Position);
+         Sequence := Atomic.Load_Acquire_U64 (Slot);
          Relation := Policy.Classify_Sequence (Sequence, Position);
          if Relation = Policy.Sequence_Ready then
             Expected := Position;
@@ -261,10 +269,10 @@ package body Flyology.Data_Structures.Rings.MPMC is
               (Item.Enqueue_Address, Expected, Position + 1)
             then
                Bytes.Copy
-                 (Payload_Address (Item, Position), Data'Address,
+                 (Payload_Address (Item, Slot), Data'Address,
                   Interfaces.C.size_t (Data'Length));
                Atomic.Store_Release_U64
-                 (Sequence_Address (Item, Position), Position + 1);
+                 (Slot, Position + 1);
                Result := Pushed;
                return;
             end if;
@@ -304,6 +312,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Sequence : Interfaces.Unsigned_64;
       Expected : Interfaces.Unsigned_64;
       Relation : Policy.Sequence_Relation;
+      Slot     : System.Address;
    begin
       Check_Data (Item, Data'Length);
       Layouts.Require_Ready (Item.Core);
@@ -311,8 +320,8 @@ package body Flyology.Data_Structures.Rings.MPMC is
         (Item.Dequeue_Address);
       for Attempt in 1 .. Contention_Limit loop
          pragma Unreferenced (Attempt);
-         Sequence := Atomic.Load_Acquire_U64
-           (Sequence_Address (Item, Position));
+         Slot := Slot_Address (Item, Position);
+         Sequence := Atomic.Load_Acquire_U64 (Slot);
          Relation := Policy.Classify_Sequence (Sequence, Position + 1);
          if Relation = Policy.Sequence_Ready then
             Expected := Position;
@@ -320,10 +329,10 @@ package body Flyology.Data_Structures.Rings.MPMC is
               (Item.Dequeue_Address, Expected, Position + 1)
             then
                Bytes.Copy
-                 (Data'Address, Payload_Address (Item, Position),
+                 (Data'Address, Payload_Address (Item, Slot),
                   Interfaces.C.size_t (Data'Length));
                Atomic.Store_Release_U64
-                 (Sequence_Address (Item, Position),
+                 (Slot,
                   Position + Interfaces.Unsigned_64 (Item.Capacity_Value));
                Result := Popped;
                return;
