@@ -1,6 +1,16 @@
+with Flyology.TLS_OpenSSL_Policy;
+with Flyology.TLS_OpenSSL_Raw;
+
 package body Flyology.IO.TLS.OpenSSL is
    package C renames Interfaces.C;
    package CS renames Interfaces.C.Strings;
+   package Policy renames Flyology.TLS_OpenSSL_Policy;
+
+   --  The C ALPN callback calls this Ada export directly. Keep an Ada
+   --  reference so the binder includes the raw-buffer package body.
+   ALPN_Callback_Bridge_Anchor : constant System.Address :=
+     Flyology.TLS_OpenSSL_Raw.Select_ALPN'Address;
+   pragma Unreferenced (ALPN_Callback_Bridge_Anchor);
 
    use type Ada.Streams.Stream_Element_Offset;
    use type C.int;
@@ -113,12 +123,12 @@ package body Flyology.IO.TLS.OpenSSL is
 
    function Status (Value : C.long) return Step_Status is
    begin
-      case Value is
-         when 0  => return Complete;
-         when -2 => return Want_Read;
-         when -3 => return Want_Write;
-         when -4 => return Peer_Closed;
-         when others => return Failed;
+      case Policy.Classify_Provider_Result (Value) is
+         when Policy.Provider_Complete    => return Complete;
+         when Policy.Provider_Want_Read   => return Want_Read;
+         when Policy.Provider_Want_Write  => return Want_Write;
+         when Policy.Provider_Peer_Closed => return Peer_Closed;
+         when Policy.Provider_Failed      => return Failed;
       end case;
    end Status;
 

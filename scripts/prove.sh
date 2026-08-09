@@ -57,6 +57,7 @@ run_gnatprove "$library_log" \
   flyology-wall_clock_native_policy.adb \
   flyology-wall_clock_policy.adb \
   flyology-tls_policy.adb \
+  flyology-tls_openssl_policy.adb \
   flyology-structured_server_policy.adb \
   flyology-task_scope_policy.adb \
   flyology-supervision_policy.adb \

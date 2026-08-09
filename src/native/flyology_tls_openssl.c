@@ -18,17 +18,8 @@
 #include "flyology_tls_signal.h"
 
 #define FLY_COMPLETE 0
-#define FLY_WANT_READ -2
-#define FLY_WANT_WRITE -3
-#define FLY_PEER_CLOSED -4
 #define FLY_FAILED -1
 
-#define SSL_ERROR_NONE 0
-#define SSL_ERROR_SSL 1
-#define SSL_ERROR_WANT_READ 2
-#define SSL_ERROR_WANT_WRITE 3
-#define SSL_ERROR_SYSCALL 5
-#define SSL_ERROR_ZERO_RETURN 6
 #define SSL_VERIFY_NONE 0
 #define SSL_VERIFY_PEER 1
 #define SSL_FILETYPE_PEM 1
@@ -50,6 +41,19 @@ typedef int (*SSL_verify_cb)(int, X509_STORE_CTX *);
 typedef int (*SSL_alpn_select_cb)(SSL *, const unsigned char **,
                                   unsigned char *, const unsigned char *,
                                   unsigned int, void *);
+
+/* Pure policy and checked raw-buffer traversal live in Ada.  This bridge keeps
+ * only dynamic-loader and foreign-function-pointer work plus the callback ABI. */
+extern int flyology_tls_openssl_policy_classify_error(int, int);
+extern int flyology_tls_openssl_policy_transport_end(int);
+extern int flyology_tls_openssl_policy_versions_match
+  (int, unsigned long, unsigned long, unsigned long);
+extern int flyology_tls_openssl_policy_classify_shutdown(int);
+extern int flyology_tls_openssl_ada_valid_alpn_list
+  (const unsigned char *, unsigned int);
+extern uint64_t flyology_tls_openssl_ada_select_alpn
+  (const unsigned char *, unsigned int,
+   const unsigned char *, unsigned int);
 
 struct fly_module {
    void *crypto;
@@ -173,6 +177,9 @@ static struct fly_module *load_from_directory(const char *directory,
    void *explicit_version_symbol;
    unsigned long (*dependency_version)(void);
    unsigned long (*explicit_version)(void);
+   unsigned long dependency_value;
+   unsigned long explicit_value;
+   unsigned long major_value;
    char crypto_path[1024];
    char ssl_path[1024];
 #if defined(__APPLE__)
@@ -224,13 +231,22 @@ static struct fly_module *load_from_directory(const char *directory,
           sizeof dependency_version);
    memcpy(&explicit_version, &explicit_version_symbol,
           sizeof explicit_version);
-   if (dependency_version_symbol != explicit_version_symbol ||
-       dependency_version() != explicit_version() ||
-       (explicit_version() >> 28) != 3) {
-      set_error(error, error_size,
-                "libssl and libcrypto are not one matched OpenSSL 3.x pair");
-      goto fail;
-   }
+   /* Preserve the original short-circuit order and OpenSSL call count. */
+   if (dependency_version_symbol != explicit_version_symbol) goto mismatch;
+   dependency_value = dependency_version();
+   explicit_value = explicit_version();
+   if (dependency_value != explicit_value) goto mismatch;
+   major_value = explicit_version();
+   if (!flyology_tls_openssl_policy_versions_match
+       (1, dependency_value, explicit_value, major_value)) goto mismatch;
+   goto matched;
+
+mismatch:
+   set_error(error, error_size,
+             "libssl and libcrypto are not one matched OpenSSL 3.x pair");
+   goto fail;
+
+matched:
 
    LOAD(module, OpenSSL_version_num, module->crypto);
    LOAD(module, OpenSSL_version, module->crypto);
@@ -301,46 +317,21 @@ static void provider_error(struct fly_module *module, char *buffer, size_t size,
    else set_error(buffer, size, fallback);
 }
 
-static int valid_alpn_list(const unsigned char *protocols, unsigned int length)
-{
-   unsigned int cursor = 0;
-   if (length != 0 && protocols == NULL) return 0;
-   while (cursor < length) {
-      unsigned int item_length = protocols[cursor++];
-      if (item_length == 0 || item_length > length - cursor) return 0;
-      cursor += item_length;
-   }
-   return cursor == length;
-}
-
 static int select_alpn(SSL *ssl, const unsigned char **selected,
                        unsigned char *selected_length,
                        const unsigned char *offered,
                        unsigned int offered_length, void *argument)
 {
    struct fly_provider *provider = argument;
-   unsigned int server_cursor = 0;
+   uint64_t choice;
    (void)ssl;
-   if (!valid_alpn_list(offered, offered_length)) return SSL_TLSEXT_ERR_NOACK;
-   while (server_cursor < provider->alpn_protocols_length) {
-      unsigned int server_length = provider->alpn_protocols[server_cursor++];
-      const unsigned char *server_value =
-        provider->alpn_protocols + server_cursor;
-      unsigned int client_cursor = 0;
-      while (client_cursor < offered_length) {
-         unsigned int client_length = offered[client_cursor++];
-         const unsigned char *client_value = offered + client_cursor;
-         if (client_length == server_length &&
-             memcmp(client_value, server_value, server_length) == 0) {
-            *selected = client_value;
-            *selected_length = (unsigned char)client_length;
-            return SSL_TLSEXT_ERR_OK;
-         }
-         client_cursor += client_length;
-      }
-      server_cursor += server_length;
-   }
-   return SSL_TLSEXT_ERR_NOACK;
+   choice = flyology_tls_openssl_ada_select_alpn
+     (provider->alpn_protocols, provider->alpn_protocols_length,
+      offered, offered_length);
+   if (choice == 0) return SSL_TLSEXT_ERR_NOACK;
+   *selected = offered + (unsigned int)(choice >> 8);
+   *selected_length = (unsigned char)(choice & 0xffu);
+   return SSL_TLSEXT_ERR_OK;
 }
 
 void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
@@ -363,7 +354,8 @@ void *flyology_tls_openssl_provider_create(int side, const char *ca_file,
    }
    provider->module = module;
    provider->side = side;
-   if (!valid_alpn_list(protocols, protocols_length)) {
+   if (!flyology_tls_openssl_ada_valid_alpn_list
+       (protocols, protocols_length)) {
       set_error(error, error_size, "invalid ALPN protocol list");
       free(provider);
       destroy_module(module);
@@ -511,7 +503,8 @@ void *flyology_tls_openssl_session_create(void *provider_handle, int fd,
       provider_release(provider);
       return NULL;
    }
-   if (!valid_alpn_list(protocols, protocols_length) ||
+   if (!flyology_tls_openssl_ada_valid_alpn_list
+       (protocols, protocols_length) ||
        (side != 0 && protocols_length != 0)) {
       set_error(error, error_size, "invalid per-session ALPN protocol list");
       provider_release(provider);
@@ -588,11 +581,11 @@ static int classify(struct fly_session *session, int result, int peer_close_ok)
 {
    struct fly_module *module = session->provider->module;
    int error = module->SSL_get_error(session->ssl, result);
-   if (error == SSL_ERROR_WANT_READ) return FLY_WANT_READ;
-   if (error == SSL_ERROR_WANT_WRITE) return FLY_WANT_WRITE;
-   if (error == SSL_ERROR_ZERO_RETURN && peer_close_ok) return FLY_PEER_CLOSED;
+   int classified = flyology_tls_openssl_policy_classify_error
+     (error, peer_close_ok);
+   if (classified != FLY_FAILED) return classified;
    provider_error(module, session->error, sizeof session->error,
-                  error == SSL_ERROR_SYSCALL
+                  flyology_tls_openssl_policy_transport_end(error)
                     ? "TLS transport ended without close_notify"
                     : "TLS protocol operation failed");
    return FLY_FAILED;
@@ -670,12 +663,10 @@ int flyology_tls_openssl_shutdown(void *handle)
    }
    module->ERR_clear_error();
    result = module->SSL_shutdown(session->ssl);
-   if (result == 1) {
+   classified = flyology_tls_openssl_policy_classify_shutdown(result);
+   if (classified == FLY_COMPLETE) {
       session->shutdown_complete = 1;
-      classified = FLY_COMPLETE;
-   } else if (result == 0) {
-      classified = FLY_WANT_READ;
-   } else {
+   } else if (classified == FLY_FAILED) {
       classified = classify(session, result, 0);
    }
    flyology_sigpipe_end(&guard);

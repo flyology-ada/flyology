@@ -86,6 +86,7 @@ project Runtime_Smoke is
       "flyology-counter_policy_smoke.adb",
       "flyology-file_transfer_policy-smoke.adb",
       "flyology-socket_policy-smoke.adb",
+      "flyology-tls_openssl_policy-smoke.adb",
       "flyology-structured_server_policy-smoke.adb",
       "flyology-supervision-static_smoke.adb",
       "flyology-supervision-handle_smoke.adb",

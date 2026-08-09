@@ -294,6 +294,7 @@ files_smoke
 flyology-counter_policy_smoke
 flyology-file_transfer_policy-smoke
 flyology-socket_policy-smoke
+flyology-tls_openssl_policy-smoke
 flyology-structured_server_policy-smoke
 flyology-supervision-static_smoke
 flyology-supervision-handle_smoke
