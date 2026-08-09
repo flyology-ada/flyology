@@ -2984,14 +2984,18 @@ To run every Alire release covered by the patch family:
 - the full behavioral suite and a 1,000-connection showcase smoke on macOS and
   Linux with GNAT 16.1;
 - explicit `epoll` and `io_uring` checks in the Linux behavioral run; and
-- the SPARK proof crate on Linux with GNATprove 16.1.
+- the SPARK proof crate on Linux with GNATprove 16.1; and
+- the bounded TLA+ shared-memory models and their required broken-model
+  counterexamples with TLC 2.19.
 
 The official Alire setup action is pinned to its v6.0.0 commit and Alire 2.1.1.
 Its cache key includes runner OS, architecture, Alire revision, and the exact
 GNAT/GPRbuild selection, so toolchains are reused without sharing incompatible
-runtime objects. Local and Docker scripts remain the source of the commands run
-by CI; generated `alire`, `config`, `obj`, `lib`, `build`, and test/showcase
-output directories stay ignored and are not release inputs.
+runtime objects. The TLA+ job pins the official 1.7.4 CLI archive by SHA-256 and
+runs the same `scripts/check-tla.sh` entry point used locally. Local and Docker
+scripts remain the source of the commands run by CI; generated `alire`,
+`config`, `obj`, `lib`, `build`, and test/showcase output directories stay
+ignored and are not release inputs.
 
 For a release, replace the `-dev` crate version with the intended semantic
 version, run `./scripts/test.sh`, `./scripts/stress.sh`, and
