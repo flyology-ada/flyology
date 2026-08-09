@@ -5,10 +5,23 @@
 /*
  * Shared-memory ABI leaves only.
  *
- * Ada owns retries, validation, error classification, syscall sequencing,
- * cleanup, ownership, and lifecycle state. C remains here only for struct stat
- * field extraction, variadic fcntl/syscall calls, and cmsghdr/sockaddr macros
- * and layouts. tests/native/shared_memory_abi_probe.c checks this boundary.
+ * This file exists where a direct fixed-signature Ada import would have to
+ * reproduce target-dependent C semantics: struct stat and sockaddr field
+ * layouts, variadic fcntl commands, the header-selected Linux memfd syscall,
+ * and cmsghdr alignment and traversal expressed by the CMSG_* macros.
+ *
+ * The ancillary receive leaf is consequently longer than the other wrappers.
+ * It makes exactly one recvmsg call, bounds every kernel-supplied control
+ * length before pointer arithmetic, and exports every observable descriptor to
+ * Ada. Those checks make traversal memory-safe; they do not decide whether the
+ * message is an acceptable Flyology handoff. The leaf never retries, closes a
+ * descriptor, assumes ownership, or mutates Flyology lifecycle state.
+ *
+ * Ada owns protocol framing, trust and security validation, error
+ * classification, retry and syscall sequencing, cleanup, ownership, and
+ * lifecycle policy. scripts/check-shared-memory-c-boundary.sh allowlists the
+ * exported leaves, and tests/probes/shared_memory_abi_probe.c compares their
+ * ABI observations with the host C API.
  */
 
 #include <errno.h>
