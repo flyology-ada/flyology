@@ -1017,6 +1017,9 @@ file or Linux POSIX shm name when the host exposes stable identity, but callers
 must still exclude concurrent namespace replacement because comparison and
 unlink are separate operations. Darwin POSIX shm descriptors expose no stable
 per-object identity, so that external namespace ownership is the only guard.
+The website's focused [shared-memory segments guide](https://flyology.org/guide/shared-memory/)
+walks through backing selection, mapping, registry publication, relocatable
+leaf attachment, descriptor handoff, persistence, and ordered teardown.
 
 `Flyology.Shared_Memory.Segments` puts a fixed-capacity named-extent registry
 inside those bytes. Its header persists magic, layout version, application
