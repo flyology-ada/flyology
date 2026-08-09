@@ -1,36 +1,18 @@
 with Ada.Calendar.Formatting;
 with Flyology.IO;
 with Flyology.Time_Math;
-with System;
+with Flyology.Wall_Clock_Native_Policy;
 
 package body Flyology.Wall_Clock_Waits is
    package C renames Interfaces.C;
-
-   function Native_Open (State : System.Address) return C.int;
-   pragma Import (C, Native_Open, "flyology_wall_wait_open");
-
-   function Native_Arm
-     (State                     : System.Address;
-      Target_Year               : C.int;
-      Target_Month              : C.int;
-      Target_Day                : C.int;
-      Target_Hour               : C.int;
-      Target_Minute             : C.int;
-      Target_Second             : C.int;
-      Target_Nanoseconds        : C.long;
-      Target_Is_Leap_Second     : C.int;
-      Maximum_Slice_Nanoseconds : C.long_long) return C.int;
-   pragma Import (C, Native_Arm, "flyology_wall_wait_arm");
-
-   function Native_Consume (State : System.Address) return C.int;
-   pragma Import (C, Native_Consume, "flyology_wall_wait_consume");
-
-   procedure Native_Close (State : System.Address);
-   pragma Import (C, Native_Close, "flyology_wall_wait_close");
+   package Native renames Flyology.Wall_Clock_Native;
+   package Policy renames Flyology.Wall_Clock_Native_Policy;
+   use type Native.Arm_Outcome;
+   use type Native.Consume_Outcome;
 
    procedure Open (Item : in out Source) is
    begin
-      if Native_Open (Item.Native'Address) /= 0 then
+      if not Native.Open (Item.Native) then
          raise Flyology.IO.Device_Error with
            "cannot create wall-clock wait source";
       end if;
@@ -63,32 +45,36 @@ package body Flyology.Wall_Clock_Waits is
          Time_Zone   => 0);
 
       declare
-         Result : constant C.int :=
-           Native_Arm
-             (Item.Native'Address,
-              C.int (Year),
-              C.int (Month),
-              C.int (Day),
-              C.int (Hour),
-              C.int (Minute),
-              C.int (Second),
-              C.long
+         Native_Target : constant Policy.Timestamp :=
+           Policy.Civil_Timestamp
+             (Integer (Year),
+              Integer (Month),
+              Integer (Day),
+              Integer (Hour),
+              Integer (Minute),
+              Integer (Second),
+              Policy.Nanosecond_Part
                 (Flyology.Time_Math.To_Nanoseconds
                    (Duration (Sub_Second))),
-              C.int (Boolean'Pos (Leap_Second)),
-              Flyology.Time_Math.To_Nanoseconds (Maximum_Slice));
+              Leap_Second);
+         Result : constant Native.Arm_Outcome :=
+           Native.Arm
+             (Item.Native,
+              Native_Target,
+              Interfaces.Integer_64
+                (Flyology.Time_Math.To_Nanoseconds (Maximum_Slice)));
       begin
-         if Result < 0 then
+         if Result = Native.Arm_Failed then
             raise Flyology.IO.Device_Error with "cannot arm wall-clock wait";
          end if;
-         return Result /= 0;
+         return Result = Native.Clock_Changed;
       end;
    end Arm;
 
    procedure Consume (Item : in out Source) is
-      Result : constant C.int := Native_Consume (Item.Native'Address);
+      Result : constant Native.Consume_Outcome := Native.Consume (Item.Native);
    begin
-      if Result < 0 then
+      if Result = Native.Consume_Failed then
          raise Flyology.IO.Device_Error with "cannot consume wall-clock wait";
       end if;
    end Consume;
@@ -102,6 +88,6 @@ package body Flyology.Wall_Clock_Waits is
 
    overriding procedure Finalize (Item : in out Source) is
    begin
-      Native_Close (Item.Native'Address);
+      Native.Close (Item.Native);
    end Finalize;
 end Flyology.Wall_Clock_Waits;

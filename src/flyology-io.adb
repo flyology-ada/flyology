@@ -2,15 +2,18 @@ with GNAT.OS_Lib;
 with Flyology.Time_Math;
 with Flyology.Wait_Policy;
 with System.OS_Constants;
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+with Flyology.Wall_Clock_IO_Testing;
+#end if;
 
 package body Flyology.IO is
    package C renames Interfaces.C;
 
    use type C.int;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-   use type C.long_long;
-#end if;
    use type C.short;
+#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
+   use type Interfaces.Integer_64;
+#end if;
 
    POLLIN  : constant C.short := 16#0001#;
    POLLOUT : constant C.short := 16#0004#;
@@ -63,15 +66,9 @@ package body Flyology.IO is
    pragma Import (C, Read_Monotonic, "flyology_monotonic_clock");
 
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-   function Test_Clock_Adjustment return C.long_long;
-   pragma Import
-     (C, Test_Clock_Adjustment, "flyology_io_test_steady_adjustment");
-
-   function Test_Take_EINTR return C.int;
-   pragma Import (C, Test_Take_EINTR, "flyology_io_test_take_eintr");
-
    function Test_Clock_Offset return Duration is
-      Nanoseconds : constant C.long_long := Test_Clock_Adjustment;
+      Nanoseconds : constant Interfaces.Integer_64 :=
+        Flyology.Wall_Clock_IO_Testing.Steady_Adjustment;
    begin
       return
         Duration (Nanoseconds / 1_000_000_000)
@@ -239,7 +236,7 @@ package body Flyology.IO is
                  Time_Math.Remaining (Timeout, Elapsed);
             begin
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-               if Test_Take_EINTR /= 0 then
+               if Flyology.Wall_Clock_IO_Testing.Take_EINTR then
                   Result := -1;
                   Error_Code := C.int (System.OS_Constants.EINTR);
                else

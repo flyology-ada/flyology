@@ -54,6 +54,7 @@ run_gnatprove "$library_log" \
   flyology-placement_policy.adb \
   flyology-topology_policy.adb \
   flyology-time_math.adb \
+  flyology-wall_clock_native_policy.adb \
   flyology-wall_clock_policy.adb \
   flyology-tls_policy.adb \
   flyology-structured_server_policy.adb \

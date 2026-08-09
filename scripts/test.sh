@@ -304,6 +304,7 @@ flyology-supervision-adapters_exit_smoke
 flyology-supervision-service_slots_smoke
 flyology-supervision-task_generations_smoke
 flyology-supervision_policy-smoke
+flyology-wall_clock_native_policy-smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 io_smoke

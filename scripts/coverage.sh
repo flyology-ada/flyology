@@ -98,6 +98,7 @@ files_smoke
 flyology-counter_policy_smoke
 flyology-structured_server_policy-smoke
 flyology-wall_clock_testing-smoke
+flyology-wall_clock_native_policy-smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
 io_smoke

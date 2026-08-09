@@ -1,52 +1,8 @@
-with Interfaces.C;
 with Flyology.Time_Math;
+with Flyology.Wall_Clock_IO_Testing;
+with Flyology.Wall_Clock_Native;
 
 package body Flyology.Wall_Clock_Testing is
-   package C renames Interfaces.C;
-   use type C.int;
-   use type C.long_long;
-
-   procedure Native_Set_Remaining (Value : C.long_long);
-   pragma Import
-     (C, Native_Set_Remaining, "flyology_wall_wait_test_set_remaining");
-
-   function Native_Last_Arm return C.long_long;
-   pragma Import (C, Native_Last_Arm, "flyology_wall_wait_test_last_arm");
-
-   function Native_Uses_Relative_Timer return C.int;
-   pragma Import
-     (C,
-      Native_Uses_Relative_Timer,
-      "flyology_wall_wait_test_uses_relative_timer");
-
-   procedure Native_Set_Consume_EINTR (Count : C.int);
-   pragma Import
-     (C,
-      Native_Set_Consume_EINTR,
-      "flyology_wall_wait_test_set_consume_eintr");
-
-   function Native_Consume_EINTR_Left return C.int;
-   pragma Import
-     (C,
-      Native_Consume_EINTR_Left,
-      "flyology_wall_wait_test_consume_eintr_remaining");
-
-   procedure Native_Configure_IO_Retry
-     (Steady_Nanoseconds : C.long_long;
-      Wall_Nanoseconds   : C.long_long);
-   pragma Import
-     (C, Native_Configure_IO_Retry, "flyology_io_test_configure_retry");
-
-   procedure Native_Reset_IO_Retry;
-   pragma Import (C, Native_Reset_IO_Retry, "flyology_io_test_reset_retry");
-
-   function Native_IO_Wall_Adjustment return C.long_long;
-   pragma Import
-     (C, Native_IO_Wall_Adjustment, "flyology_io_test_wall_adjustment");
-
-   function Native_IO_Retry_Count return C.int;
-   pragma Import (C, Native_IO_Retry_Count, "flyology_io_test_retry_count");
-
    protected Control is
       procedure Set_Offset (Value : Duration);
       function Offset return Duration;
@@ -56,6 +12,13 @@ package body Flyology.Wall_Clock_Testing is
       procedure Note_Sample_Attempt;
       function Sample_Bracket return Duration;
       function Sample_Attempts return Natural;
+      procedure Set_Native_Remaining (Nanoseconds : Interfaces.Integer_64);
+      function Native_Remaining return Interfaces.Integer_64;
+      procedure Note_Native_Arm (Nanoseconds : Interfaces.Integer_64);
+      function Last_Native_Arm return Interfaces.Integer_64;
+      procedure Set_Consume_EINTR (Count : Natural);
+      procedure Take_Consume_EINTR (Taken : out Boolean);
+      function Consume_EINTR_Remaining return Natural;
       entry Wait_For_Baseline;
       entry Wait_For_Offset;
    private
@@ -65,6 +28,9 @@ package body Flyology.Wall_Clock_Testing is
       Pause_On_Baseline : Boolean := True;
       Current_Sample_Bracket : Duration := 0.0;
       Current_Sample_Attempts : Natural := 0;
+      Current_Native_Remaining     : Interfaces.Integer_64 := -1;
+      Current_Last_Native_Arm      : Interfaces.Integer_64 := -1;
+      Current_Consume_EINTR        : Natural := 0;
    end Control;
 
    protected body Control is
@@ -115,6 +81,39 @@ package body Flyology.Wall_Clock_Testing is
       function Sample_Attempts return Natural is
         (Current_Sample_Attempts);
 
+      procedure Set_Native_Remaining
+        (Nanoseconds : Interfaces.Integer_64) is
+      begin
+         Current_Native_Remaining := Nanoseconds;
+      end Set_Native_Remaining;
+
+      function Native_Remaining return Interfaces.Integer_64 is
+        (Current_Native_Remaining);
+
+      procedure Note_Native_Arm (Nanoseconds : Interfaces.Integer_64) is
+      begin
+         Current_Last_Native_Arm := Nanoseconds;
+      end Note_Native_Arm;
+
+      function Last_Native_Arm return Interfaces.Integer_64 is
+        (Current_Last_Native_Arm);
+
+      procedure Set_Consume_EINTR (Count : Natural) is
+      begin
+         Current_Consume_EINTR := Count;
+      end Set_Consume_EINTR;
+
+      procedure Take_Consume_EINTR (Taken : out Boolean) is
+      begin
+         Taken := Current_Consume_EINTR > 0;
+         if Taken then
+            Current_Consume_EINTR := Current_Consume_EINTR - 1;
+         end if;
+      end Take_Consume_EINTR;
+
+      function Consume_EINTR_Remaining return Natural is
+        (Current_Consume_EINTR);
+
       entry Wait_For_Baseline when Sample_Count >= 2 is
       begin
          null;
@@ -132,7 +131,8 @@ package body Flyology.Wall_Clock_Testing is
    end Set_Offset;
 
    function Offset return Duration is
-      Nanoseconds : constant C.long_long := Native_IO_Wall_Adjustment;
+      Nanoseconds : constant Interfaces.Integer_64 :=
+        Flyology.Wall_Clock_IO_Testing.Wall_Adjustment;
    begin
       return
         Control.Offset
@@ -183,40 +183,72 @@ package body Flyology.Wall_Clock_Testing is
       Wall_Adjustment : Duration)
    is
    begin
-      Native_Configure_IO_Retry
-        (Flyology.Time_Math.To_Nanoseconds (Steady_Advance),
-         C.long_long (Wall_Adjustment / 0.000_000_001));
+      Flyology.Wall_Clock_IO_Testing.Configure
+        (Interfaces.Integer_64
+           (Flyology.Time_Math.To_Nanoseconds (Steady_Advance)),
+         Interfaces.Integer_64 (Wall_Adjustment / 0.000_000_001));
    end Configure_IO_Retry;
 
    procedure Reset_IO_Retry is
    begin
-      Native_Reset_IO_Retry;
+      Flyology.Wall_Clock_IO_Testing.Reset;
    end Reset_IO_Retry;
 
    function IO_Retry_Count return Natural is
-     (Natural (Native_IO_Retry_Count));
+     (Flyology.Wall_Clock_IO_Testing.Retry_Count);
 
    procedure Set_Native_Remaining (Value : Duration) is
    begin
-      Native_Set_Remaining (Flyology.Time_Math.To_Nanoseconds (Value));
+      Control.Set_Native_Remaining
+        (Interfaces.Integer_64
+           (Flyology.Time_Math.To_Nanoseconds (Value)));
    end Set_Native_Remaining;
 
    procedure Reset_Native_Remaining is
    begin
-      Native_Set_Remaining (-1);
+      Control.Set_Native_Remaining (-1);
    end Reset_Native_Remaining;
 
    function Last_Native_Arm return Duration is
-     (Duration (Native_Last_Arm) / 1_000_000_000);
+     (Duration (Control.Last_Native_Arm) / 1_000_000_000);
 
    function Uses_Native_Relative_Timer return Boolean is
-     (Native_Uses_Relative_Timer /= 0);
+     (Flyology.Wall_Clock_Native.Uses_Relative_Timer);
 
    procedure Set_Native_Consume_EINTR (Count : Natural) is
    begin
-      Native_Set_Consume_EINTR (C.int (Count));
+      Control.Set_Consume_EINTR (Count);
    end Set_Native_Consume_EINTR;
 
    function Native_Consume_EINTR_Remaining return Natural is
-     (Natural (Native_Consume_EINTR_Left));
+     (Control.Consume_EINTR_Remaining);
+
+   function Native_Remaining_Nanoseconds return Interfaces.Integer_64 is
+     (Control.Native_Remaining);
+
+   procedure Note_Native_Arm (Nanoseconds : Interfaces.Integer_64) is
+   begin
+      Control.Note_Native_Arm (Nanoseconds);
+   end Note_Native_Arm;
+
+   function Take_Native_Consume_EINTR return Boolean is
+      Result : Boolean;
+   begin
+      Control.Take_Consume_EINTR (Result);
+      return Result;
+   end Take_Native_Consume_EINTR;
+
+   function Take_IO_EINTR return Boolean is
+   begin
+      return Flyology.Wall_Clock_IO_Testing.Take_EINTR;
+   end Take_IO_EINTR;
+
+   function IO_Steady_Adjustment return Duration is
+      Nanoseconds : constant Interfaces.Integer_64 :=
+        Flyology.Wall_Clock_IO_Testing.Steady_Adjustment;
+   begin
+      return
+        Duration (Nanoseconds / 1_000_000_000)
+        + Duration (Nanoseconds rem 1_000_000_000) / 1_000_000_000;
+   end IO_Steady_Adjustment;
 end Flyology.Wall_Clock_Testing;

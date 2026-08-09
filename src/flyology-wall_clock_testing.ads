@@ -1,6 +1,10 @@
 --  Test-only wall-clock observation control. Production timer sampling does
 --  not reference this unit when FLYOLOGY_WALL_CLOCK_TEST_HOOKS is false.
+with Interfaces;
+
 private package Flyology.Wall_Clock_Testing is
+   use type Interfaces.Integer_64;
+
    procedure Set_Offset (Value : Duration);
    function Offset return Duration;
    --  Coordinate a synthetic backstep after Wait_Until captures its baseline.
@@ -31,4 +35,12 @@ private package Flyology.Wall_Clock_Testing is
    function Uses_Native_Relative_Timer return Boolean;
    procedure Set_Native_Consume_EINTR (Count : Natural);
    function Native_Consume_EINTR_Remaining return Natural;
+
+   --  Internal seams used only by Ada units compiled with test hooks enabled.
+   function Native_Remaining_Nanoseconds return Interfaces.Integer_64;
+   procedure Note_Native_Arm (Nanoseconds : Interfaces.Integer_64)
+     with Pre => Nanoseconds > 0;
+   function Take_Native_Consume_EINTR return Boolean;
+   function Take_IO_EINTR return Boolean;
+   function IO_Steady_Adjustment return Duration;
 end Flyology.Wall_Clock_Testing;

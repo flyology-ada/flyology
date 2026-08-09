@@ -1,6 +1,7 @@
 with Ada.Calendar;
 with Ada.Finalization;
 with Interfaces.C;
+with Flyology.Wall_Clock_Native;
 
 --  Internal controlled owner of one platform wall-clock readiness source.
 --  Linux uses timerfd; Darwin uses a relative kqueue timer, clock-set
@@ -30,15 +31,8 @@ private package Flyology.Wall_Clock_Waits is
    function Cancels_On_Clock_Set (Item : Source) return Boolean;
 
 private
-   type Native_Wait_State is record
-      Wait_FD   : Interfaces.C.int := -1;
-      Change_FD : Interfaces.C.int := -1;
-      Token     : Interfaces.C.int := -1;
-   end record
-     with Convention => C;
-
    type Source is new Ada.Finalization.Limited_Controlled with record
-      Native : aliased Native_Wait_State;
+      Native : Flyology.Wall_Clock_Native.Wait_State;
    end record;
 
    --  Release every owned descriptor without propagating close errors.
