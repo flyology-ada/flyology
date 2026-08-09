@@ -11,8 +11,8 @@ with System;
 --  An initializing slot remains unavailable until its creator publishes
 --  success or failure. If a creator dies while holding the registry guard or
 --  an initialization claim, the state remains abandoned. This package never
---  steals ownership and provides no process-death detection. An independently
---  A live creator can publish failure. Otherwise an independently authorized
+--  steals ownership and provides no process-death detection. A live creator
+--  can publish failure. Otherwise an independently authorized
 --  supervisor must establish owner death and participant quiescence before
 --  replacing the whole backing object.
 package Flyology.Shared_Memory.Segments is
@@ -306,6 +306,7 @@ private
       Name_Limit : Interfaces.Unsigned_32 := 0;
       Slot_Size  : Interfaces.Unsigned_32 := 0;
       Alignment  : Interfaces.Unsigned_32 := 0;
+      Data_Start : Byte_Length := 0;
       Schema     : Interfaces.Unsigned_64 := 0;
       Attached   : Boolean := False;
    end record;

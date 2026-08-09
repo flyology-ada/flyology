@@ -1012,6 +1012,11 @@ use no-symlink-following where the host supports it. Mappings are shared,
 read/write, operating-system placed, and never executable.
 Linux memfd access is capability-based rather than pathname-permission-based;
 its reported inode mode bits are not treated as an owner-only access claim.
+`Unlink` requires the backing descriptor to remain open. It rejects a replaced
+file or Linux POSIX shm name when the host exposes stable identity, but callers
+must still exclude concurrent namespace replacement because comparison and
+unlink are separate operations. Darwin POSIX shm descriptors expose no stable
+per-object identity, so that external namespace ownership is the only guard.
 
 `Flyology.Shared_Memory.Segments` puts a fixed-capacity named-extent registry
 inside those bytes. Its header persists magic, layout version, application
@@ -1029,6 +1034,10 @@ outcome and cannot resolve partial bytes. Removal is explicit. A reused slot
 gets a new generation, so old handles fail closed. Removed extents are reused
 only when their stored reservation fits; otherwise allocation advances a
 bounded frontier and reports exhaustion.
+Every active or reusable slot is revalidated before use: its generation, exact
+name length, aligned location, reservation, payload length, and complete extent
+must remain within the persisted segment geometry. The allocation frontier is
+also alignment-checked at attachment and immediately before allocation.
 
 ```ada
 with Interfaces;

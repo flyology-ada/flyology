@@ -93,6 +93,22 @@ procedure Shared_Memory_Smoke is
      (Name : C.char_array; Descriptor : C.int) return C.int;
    pragma Import
      (C, Close_Unsized, "flyology_test_close_unsized_shm");
+   function Unlink_Shared_Name (Name : C.char_array) return C.int;
+   pragma Import (C, Unlink_Shared_Name, "flyology_test_unlink_shm");
+   function Failed_Named_Create_Cleanup (Name : C.char_array) return C.int;
+   pragma Import
+     (C, Failed_Named_Create_Cleanup,
+      "flyology_test_failed_named_create_cleanup");
+   function Failed_File_Create_Cleanup (Path : C.char_array) return C.int;
+   pragma Import
+     (C, Failed_File_Create_Cleanup,
+      "flyology_test_failed_file_create_cleanup");
+   procedure Store_Mapping_U64
+     (Base   : System.Address;
+      Offset : C.unsigned_long_long;
+      Value  : Interfaces.Unsigned_64);
+   pragma Import
+     (C, Store_Mapping_U64, "flyology_test_store_mapping_u64");
 
    procedure Assert (Condition : Boolean; Message : String) is
    begin
@@ -377,6 +393,11 @@ procedure Shared_Memory_Smoke is
       Unsized_Name : constant String := Name & "-unsized";
       C_Unsized_Name : constant C.char_array := C.To_C (Unsized_Name);
       Unsized_FD : aliased C.int := -1;
+      Original, Replacement : Shared.Backing_Object;
+      Replacement_Name : constant String := Name & "-r";
+      C_Replacement_Name : constant C.char_array :=
+        C.To_C (Replacement_Name);
+      Identity_Rejected : Boolean := False;
    begin
       Shared.Create_Or_Open_Named
         (Created, Name, Mapping_Length, Namespace_Result);
@@ -430,6 +451,31 @@ procedure Shared_Memory_Smoke is
         (Close_Unsized (C_Unsized_Name, Unsized_FD) = 0,
          "unsized named object cleanup failed");
       Unsized_FD := -1;
+
+      Shared.Create_Named (Original, Replacement_Name, Mapping_Length);
+      Assert
+        (Unlink_Shared_Name (C_Replacement_Name) = 0,
+         "named identity replacement setup failed");
+      Shared.Create_Named (Replacement, Replacement_Name, Mapping_Length);
+      if Is_Linux = 1 then
+         begin
+            Shared.Unlink (Original);
+         exception
+            when Shared.Validation_Error =>
+               Identity_Rejected := True;
+         end;
+         Assert
+           (Identity_Rejected,
+            "stale named backing unlinked its namespace replacement");
+      end if;
+      Shared.Unlink (Replacement);
+      Shared.Close (Replacement);
+      Shared.Close (Original);
+      Assert
+        (Failed_Named_Create_Cleanup
+           (C.To_C (Name & "-f")) = 1,
+         "failed named creation left a namespace object");
+
       Shared.Unlink (Created);
       Shared.Unlink (Created);
       Segments.Detach (Segment_Created);
@@ -437,6 +483,17 @@ procedure Shared_Memory_Smoke is
       Shared.Close (Created);
    exception
       when others =>
+         if Shared.Is_Open (Replacement) then
+            begin
+               Shared.Unlink (Replacement);
+            exception
+               when others => null;
+            end;
+            Shared.Close (Replacement);
+         end if;
+         if Shared.Is_Open (Original) then
+            Shared.Close (Original);
+         end if;
          if Shared.Is_Open (Created) then
             begin
                Shared.Unlink (Created);
@@ -465,6 +522,10 @@ procedure Shared_Memory_Smoke is
       Map_Created, Map_Opened : Shared.Mapping;
       Segment_Created, Segment_Opened : Segments.View;
       Segment_Result : Segments.Segment_Open_Result;
+      Identity_Path : constant String := Path & ".identity";
+      Failure_Path : constant String := Path & ".failed-create";
+      Original, Replacement : Shared.Backing_Object;
+      Identity_Rejected : Boolean := False;
    begin
       Shared.Create_File (Created, Path, Mapping_Length);
       Assert
@@ -495,8 +556,38 @@ procedure Shared_Memory_Smoke is
       Segments.Detach (Segment_Opened);
       Shared.Unmap (Map_Opened);
       Shared.Close (Opened);
+
+      Shared.Create_File (Original, Identity_Path, Mapping_Length);
+      Ada.Directories.Delete_File (Identity_Path);
+      Shared.Create_File (Replacement, Identity_Path, Mapping_Length);
+      begin
+         Shared.Unlink (Original);
+      exception
+         when Shared.Validation_Error =>
+            Identity_Rejected := True;
+      end;
+      Assert
+        (Identity_Rejected,
+         "stale file backing unlinked its namespace replacement");
+      Shared.Unlink (Replacement);
+      Shared.Close (Replacement);
+      Shared.Close (Original);
+      Assert
+        (Failed_File_Create_Cleanup (C.To_C (Failure_Path)) = 1,
+         "failed file creation left a namespace entry");
    exception
       when others =>
+         if Shared.Is_Open (Replacement) then
+            begin
+               Shared.Unlink (Replacement);
+            exception
+               when others => null;
+            end;
+            Shared.Close (Replacement);
+         end if;
+         if Shared.Is_Open (Original) then
+            Shared.Close (Original);
+         end if;
          if Shared.Is_Open (Opened) then
             begin
                Shared.Unlink (Opened);
@@ -512,6 +603,59 @@ procedure Shared_Memory_Smoke is
          end if;
          raise;
    end Check_File;
+
+   procedure Check_Registry_Corruption is
+      Backing : Shared.Backing_Object;
+      Map : Shared.Mapping;
+      Segment : Segments.View;
+      Segment_Result : Segments.Segment_Open_Result;
+      Handle : Segments.Named_Handle;
+      Claim : Segments.Creation_Claim;
+      Result : Segments.Find_Or_Create_Result;
+      Removed : Segments.Remove_Result;
+      Failure : Interfaces.Unsigned_32;
+      Rejected : Boolean := False;
+      Data_Start : constant Shared.Byte_Length :=
+        Segments.Required_Registry_Storage (Config);
+   begin
+      Shared.Create_Anonymous (Backing, Mapping_Length);
+      Shared.Map (Map, Backing);
+      Segments.Create_Or_Attach (Segment, Map, Config, Segment_Result);
+      Assert
+        (Segment_Result = Segments.Initialized_New,
+         "corruption-test segment did not initialize");
+      Segments.Detach (Segment);
+      Store_Mapping_U64
+        (Testing.Base (Map), 56, Interfaces.Unsigned_64 (Data_Start + 1));
+      begin
+         Segments.Create_Or_Attach (Segment, Map, Config, Segment_Result);
+      exception
+         when Segments.Segment_Error => Rejected := True;
+      end;
+      Assert (Rejected, "misaligned registry frontier was accepted");
+      Shared.Unmap (Map);
+      Shared.Close (Backing);
+
+      Shared.Create_Anonymous (Backing, Mapping_Length);
+      Shared.Map (Map, Backing);
+      Segments.Create_Or_Attach (Segment, Map, Config, Segment_Result);
+      Create_Name (Segment, "removed", 256, Handle, Claim);
+      Segments.Publish (Segment, Claim);
+      Segments.Try_Remove (Segment, "removed", Removed);
+      Assert (Removed = Segments.Removed, "corruption slot was not removed");
+      Store_Mapping_U64 (Testing.Base (Map), 152, 1);
+      Rejected := False;
+      begin
+         Segments.Try_Find_Or_Create
+           (Segment, "reuse", 128, Handle, Claim, Result, Failure);
+      exception
+         when Segments.Segment_Error => Rejected := True;
+      end;
+      Assert (Rejected, "corrupt removed extent was reused");
+      Segments.Detach (Segment);
+      Shared.Unmap (Map);
+      Shared.Close (Backing);
+   end Check_Registry_Corruption;
 
    procedure Check_Exhaustion is
       Small_Config : constant Segments.Configuration :=
@@ -761,5 +905,6 @@ begin
    Check_Named;
    Check_File;
    Check_Exhaustion;
+   Check_Registry_Corruption;
    Check_Handoff;
 end Shared_Memory_Smoke;

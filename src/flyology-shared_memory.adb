@@ -62,13 +62,18 @@ package body Flyology.Shared_Memory is
    pragma Import (C, C_Close, "flyology_shm_close");
 
    function C_Unlink
-     (Name : C_Strings.chars_ptr; POSIX_Name : C.int) return C.int;
+     (Descriptor : C.int;
+      Name       : C_Strings.chars_ptr;
+      POSIX_Name : C.int) return C.int;
    pragma Import (C, C_Unlink, "flyology_shm_unlink_name");
 
    function Native_Length (Value : Byte_Length) return C.unsigned_long_long is
    begin
       if Value = 0 then
          raise Constraint_Error with "shared-memory length must be positive";
+      elsif Value > Byte_Length (C.long_long'Last) then
+         raise Constraint_Error with
+           "shared-memory length is not natively representable";
       end if;
       return C.unsigned_long_long (Value);
    end Native_Length;
@@ -83,6 +88,9 @@ package body Flyology.Shared_Memory is
       elsif Code = -3 then
          raise Security_Error with
            Operation & ": required security property is unavailable";
+      elsif Code = -4 then
+         raise Validation_Error with
+           Operation & ": namespace no longer names this backing object";
       else
          raise Operating_System_Error with
            Operation & " failed (errno" & C.int'Image (Code) & ")";
@@ -304,15 +312,18 @@ package body Flyology.Shared_Memory is
 
    procedure Unlink (Item : in out Backing_Object) is
       Name   : constant String := Unbounded.To_String (Item.Namespace_Value);
-      C_Name : C_Strings.chars_ptr;
+      C_Name : C_Strings.chars_ptr := C_Strings.Null_Ptr;
       Status : C.int;
    begin
       if Name'Length = 0 then
          return;
+      elsif not Is_Open (Item) then
+         raise Validation_Error with
+           "cannot unlink without an open identity descriptor";
       end if;
       C_Name := C_Strings.New_String (Name);
       Status := C_Unlink
-        (C_Name, Boolean'Pos (Item.Namespace_Is_POSIX));
+        (Item.Descriptor, C_Name, Boolean'Pos (Item.Namespace_Is_POSIX));
       C_Strings.Free (C_Name);
       if Status /= 0 then
          Raise_Failure ("shared-memory unlink", Status);
