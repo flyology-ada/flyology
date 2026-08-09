@@ -504,29 +504,96 @@ end if;</code></pre>
             </figure>
 
             <figure class="code-panel">
-              <figcaption>adopt each dedicated endpoint, then hand off one backing capability</figcaption>
+              <figcaption>coordinator process: send the capability</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">--  Socket setup and peer authentication are application responsibilities.
+              <pre><code class="language-ada">--  Sender_Socket is this process's end of one connected AF_UNIX
+--  SOCK_STREAM pair. The application created the pair and authenticated
+--  or launched the process at the other end. No other protocol, read,
+--  write, or duplicate descriptor may use this endpoint.
 Unix_Sockets.Adopt
   (Sender, Sender_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
-Unix_Sockets.Adopt
-  (Receiver, Receiver_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
+--  Sender now owns the endpoint; Sender_Socket is invalid after success.
 
---  Borrow keeps Backing open; Transfer closes it after local acceptance.
+--  Send emits one carrier byte with exactly one SCM_RIGHTS descriptor.
+--  Borrow keeps the coordinator's Backing descriptor open. The existing
+--  Coordinator_Map is independent and would survive either ownership mode.
 Unix_Sockets.Send
   (Sender, Backing, Ownership =&gt; Unix_Sockets.Borrow);
 
---  Received gains exactly one newly owned, locally validated descriptor.
+--  Success means the local kernel accepted the record. It does not prove
+--  that the worker received, validated, mapped, or attached the segment.
+--  A one-shot handoff can close its channel now; a protocol that sends more
+--  capabilities may retain it and serialize later Send calls.
+Unix_Sockets.Close (Sender);</code></pre>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>worker process: validate, map, then attach</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Receiver_Socket is the worker's end of the dedicated stream. This
+--  example trusts it because the coordinator created and exec'd this worker.
+Unix_Sockets.Adopt
+  (Receiver, Receiver_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
+--  Receiver now owns the endpoint and rejects concurrent channel use.
+
+--  Receive consumes one complete handoff record. Before returning, it checks
+--  the carrier and ancillary layout, closes visible extra descriptors, sets
+--  CLOEXEC, and requires writable regular backing of this exact local size.
 Unix_Sockets.Receive
   (Receiver,
    Expected_Length        =&gt; 1_048_576,
    Item                   =&gt; Received,
    Require_Immutable_Size =&gt; False);
+
+--  Map creates a process-local mapping at any address. Closing the received
+--  descriptor afterward is safe because Peer_Map owns an independent mapping
+--  lifetime. Attach the segment and its relocatable objects through Peer_Map.
 Shared.Map (Peer_Map, Received);
-Shared.Close (Received);</code></pre>
+Shared.Close (Received);
+Segments.Create_Or_Attach
+  (Peer_Segment, Peer_Map, Config, Segment_Open);
+
+if Segment_Open /= Segments.Attached_Existing then
+   raise Program_Error with "peer did not receive a ready segment";
+end if;
+
+--  The one-shot handoff channel is no longer needed. Closing it does not
+--  affect Peer_Map. Resolve names and attach relocatable leaves next. At the
+--  end of that work, detach leaves, region, and segment before unmapping.
+--  Close is idempotent; failed channel I/O would already have poisoned it.
+Unix_Sockets.Close (Receiver);</code></pre>
             </figure>
 
             <p><code>Trusted_Peer</code> is a declaration by the application, not authentication. It permits Darwin and permits a mutable regular file because the application promises that the peer will not exploit ancillary truncation, resize a retained duplicate, or mutate shared open-file-description state. <code>Untrusted_Peer</code> is accepted only on Linux and always requires immutable grow, shrink, and seal seals. In practice this narrows an untrusted handoff to an exact-size writable sealed object such as Flyology's anonymous <code>memfd</code>. Darwin rejects that policy: XNU can install excess descriptors during a truncated receive without exposing enough information for user space to close them.</p>
+
+            <h3>Choose the handoff pattern from the deployment.</h3>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Coordinator launches a worker</dt><dd>Create the socket pair before spawning or exec'ing the worker, pass one endpoint through the launch contract, and adopt both ends as <code>Trusted_Peer</code>. Send an anonymous segment with <code>Transfer</code> when the coordinator no longer needs its descriptor. Existing mappings remain live. Use a separate status extent plus a readiness signal or acknowledgment when the coordinator must know that attachment completed.</dd></div>
+                <div class="decision-row"><dt>Linux service accepts a less-trusted peer</dt><dd>Authenticate and authorize the connection outside Flyology, then adopt the receiving endpoint as <code>Untrusted_Peer</code>. Receive automatically requires immutable Linux size seals, so use an exact-size sealed anonymous <code>memfd</code>. Do not downgrade to <code>Trusted_Peer</code> merely to accept a regular file. Darwin deliberately has no equivalent untrusted mode.</dd></div>
+                <div class="decision-row"><dt>Peers reopen persistent state</dt><dd>Use <code>Open_Named</code> for a POSIX shared-memory name or <code>Open_File</code> for a stable file path when namespace discovery and persistence are intentional. Validate the exact size, map, and attach the segment registry. <code>SCM_RIGHTS</code> is useful when possession of an already-open descriptor is the capability; it is not required merely because two processes share the same persisted segment.</dd></div>
+              </dl>
+            </div>
+
+            <figure class="code-panel">
+              <figcaption>Linux receiver: require a sealed capability from a less-trusted peer</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Authentication and authorization still happen before this call.
+--  Untrusted_Peer is a receive policy, not an identity check.
+Unix_Sockets.Adopt
+  (Receiver, Receiver_Socket, Trust =&gt; Unix_Sockets.Untrusted_Peer);
+
+--  The trust policy automatically requires immutable grow, shrink, and seal
+--  seals. The explicit flag may remain False; it cannot weaken the policy.
+Unix_Sockets.Receive
+  (Receiver,
+   Expected_Length        =&gt; Segment_Length,
+   Item                   =&gt; Received,
+   Require_Immutable_Size =&gt; False);
+
+Shared.Map (Peer_Map, Received);
+Shared.Close (Received);</code></pre>
+            </figure>
 
             <h3>Why the details change the API.</h3>
             <p><code>SCM_RIGHTS</code> is attached to stream bytes, not to an abstract message object. A stateless <code>Receive (Socket, ...)</code> call cannot stop another reader from stealing the carrier byte, prevent another writer from interleaving its own protocol, or prove that a failed stream is safe to reuse. The owned channel captures those requirements. The raw socket overloads remain for integrations that already provide equivalent exclusive ownership and serialization; after any raw-operation exception, retire that socket.</p>
