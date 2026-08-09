@@ -99,7 +99,7 @@ if [ "$require_perf" -eq 1 ]; then
     --env FLYOLOGY_EXPECT_FILE_BACKEND=native-aio \
     --env FLYOLOGY_BENCH_REQUIRE_PERF=1 \
     "$image" \
-    sh -c 'cd flyology_bench && alr --non-interactive test && ./examples/bin/basic --metrics=perf --require-perf && cd .. && ./scripts/test.sh')
+    sh -c 'cd flyology_debug && alr --non-interactive test && cd ../flyology_bench && alr --non-interactive test && ./examples/bin/basic --metrics=perf --require-perf && cd .. && ./scripts/test.sh')
 else
   container_id=$(docker container create \
     --platform "linux/$linux_arch" \

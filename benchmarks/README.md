@@ -17,7 +17,7 @@ when its median time grows by more than 10%.
 
 ## What is measured
 
-`runtime_callback_bench` reports three timings:
+`runtime_callback_bench` reports five timings:
 
 - `trampoline_cycle_lightweight` — creating and releasing one nested-subprogram
   trampoline inside a lightweight task. This is the path
@@ -26,6 +26,10 @@ when its median time grows by more than 10%.
   ordinary per-thread cursor and must stay unaffected.
 - `fiber_dispatch` — a lightweight task yielding to its event loop and back,
   covering the scheduler's dispatch loop.
+- `debug_selector_lightweight` — automatic trace-producer selection using the
+  calling lightweight task's current execution group.
+- `debug_selector_native` — automatic trace-producer selection using the
+  calling native task's pthread identity.
 
 `fiber_trampoline_memory` holds `count` lightweight tasks suspended with, and
 without, a live callback and reports the resident-set difference. Subtracting

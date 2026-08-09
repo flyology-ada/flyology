@@ -11,7 +11,11 @@ project-files = ["runtime_policy.gpr"]
 
 [[depends-on]]
 flyology = "*"
+flyology_debug = "*"
 gnatprove = "^16.1.0"
 
 [[pins]]
 flyology = { path = ".." }
+
+[[pins]]
+flyology_debug = { path = "../flyology_debug" }

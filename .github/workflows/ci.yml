@@ -50,6 +50,9 @@ jobs:
       - name: Require the Linux io_uring file backend
         if: runner.os == 'Linux'
         run: printf '%s\n' 'FLYOLOGY_EXPECT_FILE_BACKEND=io-uring' >> "$GITHUB_ENV"
+      - name: Test flyology_debug
+        working-directory: flyology_debug
+        run: alr test
       - name: Test flyology_bench
         working-directory: flyology_bench
         run: alr test

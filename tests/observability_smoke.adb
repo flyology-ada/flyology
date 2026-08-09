@@ -1,4 +1,5 @@
 with Flyology;
+with Flyology.Debug_Producer_Selection;
 with Flyology.Execution_Groups;
 with Flyology.IO;
 with Flyology.IO.Sockets;
@@ -173,6 +174,10 @@ begin
 
       task body Timed is
       begin
+         if Flyology.Debug_Producer_Selection.Choose (4) /= 2 then
+            raise Program_Error with
+              "lightweight debug producer did not follow execution group";
+         end if;
          Control.Started (1, Observation.Current_Task_Instance);
          delay 0.100;
          Control.Finished;
@@ -180,6 +185,10 @@ begin
 
       task body Descriptor is
       begin
+         if Flyology.Debug_Producer_Selection.Choose (4) /= 2 then
+            raise Program_Error with
+              "lightweight debug producer did not follow execution group";
+         end if;
          Control.Started (2, Observation.Current_Task_Instance);
          if not Flyology.IO.Wait
            (Flyology.IO.Sockets.Native_Descriptor (Reader_Socket),
@@ -197,6 +206,10 @@ begin
             Pin : Groups.Thread_Pin := Groups.Pin_To_Current_Thread;
             pragma Unreferenced (Pin);
          begin
+            if Flyology.Debug_Producer_Selection.Choose (4) /= 2 then
+               raise Program_Error with
+                 "lightweight debug producer did not follow execution group";
+            end if;
             Control.Started (3, Observation.Current_Task_Instance);
             Control.Gate;
             Control.Finished;

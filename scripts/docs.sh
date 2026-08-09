@@ -30,6 +30,9 @@ node "$website_kit/scripts/render-gnatdoc-theme.mjs" \
 node "$website_kit/scripts/render-gnatdoc-theme.mjs" \
   "$project_root/docs/gnatdoc-bench-theme.json" \
   "$project_root/docs/gnatdoc-bench/html"
+node "$website_kit/scripts/render-gnatdoc-theme.mjs" \
+  "$project_root/docs/gnatdoc-debug-theme.json" \
+  "$project_root/docs/gnatdoc-debug/html"
 bench_index_template="$project_root/docs/gnatdoc-bench/html/template/index.xhtml"
 sed "s|href='../guide/'|href='../../guide/benchmarking/'|" \
   "$bench_index_template" >"$bench_index_template.tmp"
@@ -37,8 +40,9 @@ mv "$bench_index_template.tmp" "$bench_index_template"
 
 runtime_gnatdoc_log=$(mktemp "${TMPDIR:-/tmp}/flyology-gnatdoc.XXXXXX")
 bench_gnatdoc_log=$(mktemp "${TMPDIR:-/tmp}/flyology-bench-gnatdoc.XXXXXX")
+debug_gnatdoc_log=$(mktemp "${TMPDIR:-/tmp}/flyology-debug-gnatdoc.XXXXXX")
 cleanup () {
-   rm -f "$runtime_gnatdoc_log" "$bench_gnatdoc_log"
+   rm -f "$runtime_gnatdoc_log" "$bench_gnatdoc_log" "$debug_gnatdoc_log"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -59,6 +63,29 @@ cat "$runtime_gnatdoc_log"
 #  units that leave the documented source set. Recreate this generated-only
 #  subtree so an internal or renamed unit cannot survive into Pages or search.
 rm -rf "$project_root/docs/api/flyology_bench"
+
+(
+   cd "$project_root/flyology_debug"
+   "$alr" build --stop-after=generation
+   mkdir -p obj/docs
+   if ! "$alr" exec -- gnatdoc \
+     --backend=html \
+     --generate=public \
+     --warnings \
+     --style=leading \
+     -P flyology_debug_docs.gpr \
+     -O "$project_root/docs/api/flyology_debug" \
+     >"$debug_gnatdoc_log" 2>&1
+   then
+      cat "$debug_gnatdoc_log" >&2
+      exit 1
+   fi
+   #  GNATdoc 26.0 reports documented formals on these child generics as
+   #  undocumented. Their exact @formal comments and names still render.
+   sed -E \
+     '/^flyology_debug-(gauges|tracers)\.ads:[0-9]+:[0-9]+: warning: generic formal `(Message_Type|Gauge_Kind|Gauge_Value_Type|Capacity|Overflow|Now|Producer_Count|Select_Producer)` is not documented$/d' \
+     "$debug_gnatdoc_log"
+)
 
 (
    cd "$project_root/flyology_bench"
@@ -119,6 +146,17 @@ then
    exit 1
 fi
 
+if grep -E 'warning:' "$debug_gnatdoc_log" \
+  | grep -E -v -q \
+    '^flyology_debug-(gauges|tracers)\.ads:[0-9]+:[0-9]+: warning: generic formal `(Message_Type|Gauge_Kind|Gauge_Value_Type|Capacity|Overflow|Now|Producer_Count|Select_Producer)` is not documented$'
+then
+   printf '%s\n' "unexpected warning in debug GNATdoc output" >&2
+   grep -E 'warning:' "$debug_gnatdoc_log" \
+     | grep -E -v \
+       '^flyology_debug-(gauges|tracers)\.ads:[0-9]+:[0-9]+: warning: generic formal `(Message_Type|Gauge_Kind|Gauge_Value_Type|Capacity|Overflow|Now|Producer_Count|Select_Producer)` is not documented$' >&2
+   exit 1
+fi
+
 #  GNATdoc accepts a qualified @exception name without a warning, but this
 #  version renders only the first selector as the exception name and moves the
 #  remaining selectors into a description beginning with a dot.
@@ -143,9 +181,20 @@ cp "$website_kit/assets/scripts/ada-highlight.js" \
   docs/api/flyology_bench/ada-highlight.js
 node "$website_kit/scripts/build-api-search-index.mjs" \
   docs/api/flyology_bench
+mkdir -p docs/api/flyology_debug/fonts
+cp "$website_kit/assets/fonts/geologica-latin-variable.woff2" \
+  docs/api/flyology_debug/fonts/
+cp assets/brand/flyology-mark-transparent.svg \
+  docs/api/flyology_debug/flyology-mark.svg
+cp "$website_kit/assets/scripts/ada-highlight.js" \
+  docs/api/flyology_debug/ada-highlight.js
+node "$website_kit/scripts/build-api-search-index.mjs" \
+  docs/api/flyology_debug
 node "$website_kit/scripts/build-api-search-index.mjs" docs/api
 
 test -f docs/api/index.html
 test -f docs/api/search-index.js
+test -f docs/api/flyology_debug/index.html
+test -f docs/api/flyology_debug/search-index.js
 test -f docs/api/flyology_bench/index.html
 test -f docs/api/flyology_bench/search-index.js

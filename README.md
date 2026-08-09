@@ -2344,6 +2344,12 @@ rather than hidden behind a claim of universal portability.
   I/O, lifecycle, stress, fault injection, sanitizers, and observability; the
   detailed scope is listed under [CI and releases](#ci-and-releases).
 - [`showcases`](showcases): side-by-side scheduling and I/O demonstrations.
+- [`flyology_debug`](flyology_debug): an independent bounded in-memory tracing
+  crate with separate typed trace and persistent-gauge generics, zero-copy trace
+  batches and borrowed visitation, independently synchronized producer shards,
+  Flyology-aware automatic shard selection, allocation-free merged consumption,
+  injected clocks, producer-local admission sequences, reversible producer
+  control, and configurable overwrite, drop, or blocking trace overflow.
 - [`flyology_bench`](flyology_bench): an independent adaptive and paired
   comparison benchmarking crate for Ada and Flyology workloads. The website's
   [benchmarking guide](https://flyology.org/guide/benchmarking/) covers the
@@ -2486,14 +2492,15 @@ Generate the public API reference with:
 ```
 
 The [documentation script](scripts/docs.sh) runs GNATdoc with
-undocumented-entity warnings enabled for both Flyology Runtime and the
-standalone `flyology_bench` crate. It writes the ignored HTML output to
-`docs/api/index.html` and `docs/api/flyology_bench/index.html`. It also builds
+undocumented-entity warnings enabled for Flyology Runtime and the standalone
+`flyology_debug` and `flyology_bench` crates. It writes the ignored HTML output
+to `docs/api/index.html`, `docs/api/flyology_debug/index.html`, and
+`docs/api/flyology_bench/index.html`. It also builds
 client-side name indexes for compilation units, declarations, enumeration
 literals, record fields, formal parameters, parameters, and exceptions. Search
 is case-insensitive and tolerates nearby misspellings while ranking exact and
 prefix matches first. Build the complete GitHub Pages artifact, including the
-guide, architecture notes, and both generated API references, with:
+guide, architecture notes, and all generated API references, with:
 
 ```sh
 ./scripts/build-site.sh
@@ -2698,7 +2705,7 @@ The default image uses Ubuntu 24.04, the matching official AArch64 or x86-64
 Alire 2.1.0 archive, GNAT 16.1, and GPRbuild 26.0.1. The test run deliberately
 denies `io_uring_setup` at the C bridge and asserts that a real lightweight file
 operation selected Linux native AIO. It also builds and runs the standalone
-`flyology_bench` crate before the main runtime suite.
+`flyology_debug` and `flyology_bench` crates before the main runtime suite.
 `FLYOLOGY_LINUX_ARCH=amd64` requests the x86-64 compatibility target explicitly;
 `FLYOLOGY_GNAT_VERSION` and
 `FLYOLOGY_GPRBUILD_VERSION` select another pair, and `FLYOLOGY_LINUX_IMAGE`

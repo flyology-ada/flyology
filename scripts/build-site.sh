@@ -66,6 +66,8 @@ test -f "$site_output/reports/websocket/performance-native/index.html"
 test -f "$site_output/reports/websocket/performance-lightweight-wss/index.html"
 test -f "$site_output/reports/websocket/performance-native-wss/index.html"
 test -f "$site_output/api/index.html"
+test -f "$site_output/api/flyology_debug/index.html"
+test -f "$site_output/api/flyology_debug/search-index.js"
 test -f "$site_output/api/flyology_bench/index.html"
 test -f "$site_output/api/flyology_bench/search-index.js"
 

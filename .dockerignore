@@ -20,3 +20,13 @@ flyology_bench/examples/bin
 flyology_bench/examples/obj
 flyology_bench/tests/bin
 flyology_bench/tests/obj
+flyology_debug/alire
+flyology_debug/config
+flyology_debug/lib
+flyology_debug/obj
+flyology_debug/benchmarks/bin
+flyology_debug/benchmarks/obj
+flyology_debug/examples/bin
+flyology_debug/examples/obj
+flyology_debug/tests/bin
+flyology_debug/tests/obj

@@ -265,9 +265,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - `tests/`: behavioral, parity, lifecycle, stress, fault, sanitizer, and
   observability programs.
 - `showcases/`: side-by-side demonstrations and reproducible measurements.
+- `flyology_debug/`: independent bounded in-memory tracing and gauge crate,
+  smoke tests, producer-cost benchmark, and example.
 - `flyology_bench/`: independent adaptive and paired-comparison benchmark
   crate, reporters, smoke tests, and examples.
-- `proof/`: SPARK-only development crate and runtime policy proof model.
+- `proof/`: SPARK-only development crate plus runtime and debug policy proofs.
 - `scripts/`: all supported build, runtime preparation, test, docs, and proof
   entry points.
 - `docker/`: native-architecture Linux validation.
@@ -341,6 +343,15 @@ required by the changed boundary.
   generated traces and reports remain outside version control.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
   benchmark before changing a performance table or claim.
+- `cd flyology_debug && alr test`: build and run the standalone tracing crate's
+  wrap, drop, blocking, automatic and explicit shard selection, merged
+  consumption, sharded-producer isolation, batch ownership, borrowed
+  visitation, producer state, clear, close, timestamp, sequence, and gauge
+  checks.
+- `cd flyology_debug && ./scripts/benchmark.sh`: optional non-gating producer
+  cost comparison for disabled, injected-clock, automatic-selector,
+  native-clock, shared-store, and sharded concurrent tracing. Re-run it before
+  making a tracer hot-path performance claim.
 - `cd flyology_bench && alr test`: build and run the standalone benchmark
   crate's smoke tests and example, and check the published CSV/JSON schemas.
   Set `FLYOLOGY_BENCH_REQUIRE_PERF=1` to also require Linux hardware counters

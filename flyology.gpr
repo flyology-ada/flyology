@@ -145,6 +145,7 @@ project Flyology is
             "flyology-data_structures-storage_types-immutable.ads",
             "flyology-data_structures-storage_types-unsigned_64s.ads",
             "flyology-data_structures-vectors.ads",
+            "flyology-debug_producer_selection.ads",
             "flyology-dormancy.ads",
             "flyology-execution_groups.ads",
             "flyology-execution_groups-topology.ads",

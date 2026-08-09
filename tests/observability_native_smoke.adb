@@ -1,4 +1,5 @@
 with Flyology;
+with Flyology.Debug_Producer_Selection;
 with Flyology.Observability;
 
 procedure Observability_Native_Smoke is
@@ -43,13 +44,29 @@ procedure Observability_Native_Smoke is
 
    task body Native is
       Local : Observation.Group_Snapshot;
+      First : constant Positive :=
+        Flyology.Debug_Producer_Selection.Choose (4);
    begin
       Result.Set
         (not Observation.Snapshot (0, Local)
          and then Observation.Current_Task_Instance =
-           Observation.No_Task_Instance);
+           Observation.No_Task_Instance
+         and then First in 1 .. 4
+         and then Flyology.Debug_Producer_Selection.Choose (4) = First);
    end Native;
 begin
+   declare
+      First : constant Positive :=
+        Flyology.Debug_Producer_Selection.Choose (4);
+   begin
+      if First not in 1 .. 4
+        or else Flyology.Debug_Producer_Selection.Choose (4) /= First
+        or else Flyology.Debug_Producer_Selection.Choose (1) /= 1
+      then
+         raise Program_Error with
+           "native debug producer selection is unstable or out of range";
+      end if;
+   end;
    if Observation.Current_Task_Instance /= Observation.No_Task_Instance then
       raise Program_Error with
         "environment task received a lightweight task identity";

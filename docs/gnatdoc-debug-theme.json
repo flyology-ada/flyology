@@ -1,0 +1,10 @@
+{
+  "pageTitle": "flyology_debug API reference",
+  "indexDescription": "Generated public API reference for flyology_debug.",
+  "indexTitle": "flyology_debug API reference · Flyology",
+  "canonicalUrl": "https://flyology.org/api/flyology_debug/",
+  "brandLabel": "flyology_debug API",
+  "navigationHtml": "<a href='../../'>Overview</a>\n        <a href='../'>Runtime API</a>\n        <a href='../flyology_bench/'>Benchmark API</a>\n        <a href='https://github.com/flyology-ada/flyology/tree/main/flyology_debug'>GitHub</a>",
+  "indexIntroduction": "Generated public contracts for bounded typed tracing, gauges, snapshots, clearing, and overflow behavior.",
+  "footerNote": "Generated with GNATdoc. Public API only."
+}

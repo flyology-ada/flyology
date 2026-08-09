@@ -5,10 +5,11 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 alr=$("$project_root/scripts/find-alr.sh")
 library_log=$(mktemp "${TMPDIR:-/tmp}/flyology-library-proof.XXXXXX")
 runtime_log=$(mktemp "${TMPDIR:-/tmp}/flyology-runtime-proof.XXXXXX")
+debug_log=$(mktemp "${TMPDIR:-/tmp}/flyology-debug-proof.XXXXXX")
 
 cleanup_logs()
 {
-  rm -f "$library_log" "$runtime_log"
+  rm -f "$library_log" "$runtime_log" "$debug_log"
 }
 
 trap cleanup_logs EXIT
@@ -80,5 +81,16 @@ run_gnatprove "$runtime_log" \
   --report=all \
   -f \
   -u s-flscpo.adb s-flpopo.adb s-ftrepo.adb s-flstpo.adb s-fszcpo.adb
+
+run_gnatprove "$debug_log" \
+  -P "$project_root/flyology_debug/flyology_debug.gpr" \
+  --mode=all \
+  --level=1 \
+  -j0 \
+  --output=oneline \
+  --output-header \
+  --report=all \
+  -f \
+  -u flyology_debug-internal-ring_policy.adb
 
 printf '%s\n' "Flyology SPARK proof suite passed"

@@ -41,6 +41,7 @@ COPY . .
 
 # Resolve project dependencies and catch public-library portability failures.
 RUN alr --non-interactive build
+RUN cd flyology_debug && alr --non-interactive build
 RUN cd flyology_bench && alr --non-interactive build
 
-CMD ["sh", "-c", "cd flyology_bench && alr --non-interactive test && cd .. && ./scripts/test.sh"]
+CMD ["sh", "-c", "cd flyology_debug && alr --non-interactive test && cd ../flyology_bench && alr --non-interactive test && cd .. && ./scripts/test.sh"]

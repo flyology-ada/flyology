@@ -4,6 +4,7 @@
 with Ada.Command_Line;
 with Ada.Text_IO;
 with Flyology;
+with Flyology.Debug_Producer_Selection;
 with Flyology.Fairness;
 with Flyology_Bench;
 with Flyology_Bench.Baselines;
@@ -21,6 +22,10 @@ with Flyology_Bench.Reporters;
 --                                  keep the compiler's per-thread behaviour
 --    fiber_dispatch                a lightweight task yielding to its event
 --                                  loop and back, the scheduler's hottest loop
+--    debug_selector_lightweight    automatic trace-shard selection on a
+--                                  lightweight task
+--    debug_selector_native         automatic trace-shard selection on a
+--                                  native task
 --
 --  Run with no argument to print results. Pass "save <directory>" to persist
 --  baselines and "check <directory>" to compare against them.
@@ -36,6 +41,9 @@ procedure Runtime_Callback_Bench is
 
    Observed : Natural := 0;
    pragma Volatile (Observed);
+
+   Selected_Producer : Positive := 1;
+   pragma Volatile (Selected_Producer);
 
    --  Entering this procedure creates a trampoline and returning releases it,
    --  because Callback reads and writes the frame that declares it.
@@ -55,8 +63,15 @@ procedure Runtime_Callback_Bench is
       Flyology.Fairness.Yield_Now;
    end Fiber_Dispatch;
 
+   procedure Select_Debug_Producer is
+   begin
+      Selected_Producer :=
+        Flyology.Debug_Producer_Selection.Choose (Producer_Count => 4);
+   end Select_Debug_Producer;
+
    procedure Measure_Trampoline is new Bench.Measure (Trampoline_Cycle);
    procedure Measure_Dispatch is new Bench.Measure (Fiber_Dispatch);
+   procedure Measure_Selection is new Bench.Measure (Select_Debug_Producer);
 
    Config : constant Bench.Configuration :=
      (Bench.Default_Configuration with delta
@@ -66,7 +81,9 @@ procedure Runtime_Callback_Bench is
 
    Lightweight_Trampoline : Bench.Measurement;
    Lightweight_Dispatch   : Bench.Measurement;
+   Lightweight_Selection  : Bench.Measurement;
    Native_Trampoline      : Bench.Measurement;
+   Native_Selection       : Bench.Measurement;
 
    --  The environment task is native, so the lightweight measurements run in a
    --  task pinned to one execution group.
@@ -78,22 +95,35 @@ procedure Runtime_Callback_Bench is
    begin
       Measure_Trampoline (Config => Config, Result => Lightweight_Trampoline);
       Measure_Dispatch (Config => Config, Result => Lightweight_Dispatch);
+      Measure_Selection (Config => Config, Result => Lightweight_Selection);
+      if Selected_Producer /= 2 then
+         raise Program_Error with
+           "lightweight debug producer selector returned the wrong shard";
+      end if;
    end Lightweight_Probe;
 
    type Case_Name is
-     (Trampoline_Cycle_Lightweight, Trampoline_Cycle_Native, Fiber_Dispatch_Case);
+     (Trampoline_Cycle_Lightweight,
+      Trampoline_Cycle_Native,
+      Fiber_Dispatch_Case,
+      Debug_Selector_Lightweight,
+      Debug_Selector_Native);
 
    function Label (Item : Case_Name) return String is
      (case Item is
          when Trampoline_Cycle_Lightweight => "trampoline_cycle_lightweight",
          when Trampoline_Cycle_Native      => "trampoline_cycle_native",
-         when Fiber_Dispatch_Case          => "fiber_dispatch");
+         when Fiber_Dispatch_Case          => "fiber_dispatch",
+         when Debug_Selector_Lightweight   => "debug_selector_lightweight",
+         when Debug_Selector_Native        => "debug_selector_native");
 
    function Result_Of (Item : Case_Name) return Bench.Measurement is
      (case Item is
          when Trampoline_Cycle_Lightweight => Lightweight_Trampoline,
          when Trampoline_Cycle_Native      => Native_Trampoline,
-         when Fiber_Dispatch_Case          => Lightweight_Dispatch);
+         when Fiber_Dispatch_Case          => Lightweight_Dispatch,
+         when Debug_Selector_Lightweight   => Lightweight_Selection,
+         when Debug_Selector_Native        => Native_Selection);
 
    Mode      : constant String :=
      (if Ada.Command_Line.Argument_Count >= 1
@@ -111,6 +141,7 @@ begin
       delay 0.005;
    end loop;
    Measure_Trampoline (Config => Config, Result => Native_Trampoline);
+   Measure_Selection (Config => Config, Result => Native_Selection);
 
    for Item in Case_Name loop
       Flyology_Bench.Reporters.Put_Console (Label (Item), Result_Of (Item));
