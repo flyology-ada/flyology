@@ -5,14 +5,47 @@ package body Flyology.Wake_Sources is
    package C renames Interfaces.C;
    use type C.int;
    use type C.long;
+   use type C.unsigned;
+
+   F_GETFD : C.int
+     with Import,
+          Convention    => C,
+          External_Name => "flyology_wake_source_f_getfd";
+   F_SETFD : C.int
+     with Import,
+          Convention    => C,
+          External_Name => "flyology_wake_source_f_setfd";
+   F_GETFL : C.int
+     with Import,
+          Convention    => C,
+          External_Name => "flyology_wake_source_f_getfl";
+   F_SETFL : C.int
+     with Import,
+          Convention    => C,
+          External_Name => "flyology_wake_source_f_setfl";
+   FD_CLOEXEC : C.int
+     with Import,
+          Convention    => C,
+          External_Name => "flyology_wake_source_fd_cloexec";
+   O_NONBLOCK : C.int
+     with Import,
+          Convention    => C,
+          External_Name => "flyology_wake_source_o_nonblock";
 
    type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int
      with Convention => C;
 
    function Pipe (Ends : System.Address) return C.int;
    pragma Import (C, Pipe, "pipe");
-   function Configure (FD : C.int) return C.int;
-   pragma Import (C, Configure, "flyology_wake_source_configure");
+   function Fcntl_Get (FD : C.int; Command : C.int) return C.int
+     with Import,
+          Convention    => C_Variadic_2,
+          External_Name => "fcntl";
+   function Fcntl_Set
+     (FD : C.int; Command : C.int; Argument : C.int) return C.int
+     with Import,
+          Convention    => C_Variadic_2,
+          External_Name => "fcntl";
    function Write
      (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
@@ -21,6 +54,31 @@ package body Flyology.Wake_Sources is
    pragma Import (C, Read, "read");
    function Close (FD : C.int) return C.int;
    pragma Import (C, Close, "close");
+
+   function With_Flag (Flags : C.int; Flag : C.int) return C.int is
+     (C.int (C.unsigned (Flags) or C.unsigned (Flag)));
+
+   function Configure (FD : C.int) return C.int is
+      Status_Flags     : constant C.int := Fcntl_Get (FD, F_GETFL);
+      Descriptor_Flags : C.int;
+   begin
+      if Status_Flags < 0
+        or else Fcntl_Set
+          (FD, F_SETFL, With_Flag (Status_Flags, O_NONBLOCK)) < 0
+      then
+         return -1;
+      end if;
+
+      Descriptor_Flags := Fcntl_Get (FD, F_GETFD);
+      if Descriptor_Flags < 0
+        or else Fcntl_Set
+          (FD, F_SETFD, With_Flag (Descriptor_Flags, FD_CLOEXEC)) < 0
+      then
+         return -1;
+      end if;
+
+      return 0;
+   end Configure;
 
    procedure Ensure (Item : in out Source) is
       Ends    : aliased Descriptor_Pair := (others => -1);
