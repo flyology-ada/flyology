@@ -69,7 +69,7 @@
             <li><a href="#registry">Initialize the registry</a></li>
             <li><a href="#objects">Publish a relocatable object</a></li>
             <li><a href="#worker-status">Share worker status</a></li>
-            <li><a href="#peers">Open or hand off to peers</a></li>
+            <li><a href="#peers">Hand off one capability safely</a></li>
             <li><a href="#lifecycle">Detach and persist</a></li>
             <li><a href="#import-checkpoint">Reopen an import checkpoint</a></li>
             <li><a href="#limits">Trust and recovery limits</a></li>
@@ -391,8 +391,10 @@ else
    raise Program_Error with "new status extent was not created";
 end if;
 
+Unix_Sockets.Adopt
+  (Worker_Channel, Worker_Socket, Unix_Sockets.Trusted_Peer);
 Unix_Sockets.Send
-  (Worker_Socket, Backing, Ownership =&gt; Unix_Sockets.Transfer);
+  (Worker_Channel, Backing, Ownership =&gt; Unix_Sockets.Transfer);
 --  Coordinator_Map and Status remain live after Transfer closes Backing.</code></pre>
             </figure>
             <figure class="code-panel">
@@ -405,8 +407,10 @@ Complete : constant Ada.Streams.Stream_Element_Array :=
   (1 =&gt; 16#63#, 2 =&gt; 16#6F#, 3 =&gt; 16#6D#, 4 =&gt; 16#70#,
    5 =&gt; 16#6C#, 6 =&gt; 16#65#, 7 =&gt; 16#74#, 8 =&gt; 16#65#);
 
+Unix_Sockets.Adopt
+  (Coordinator_Channel, Coordinator_Socket, Unix_Sockets.Trusted_Peer);
 Unix_Sockets.Receive
-  (Coordinator_Socket, Segment_Length, Received,
+  (Coordinator_Channel, Segment_Length, Received,
    Require_Immutable_Size =&gt; False);
 Shared.Map (Worker_Map, Received);
 Shared.Close (Received);
@@ -438,34 +442,121 @@ else
    raise Program_Error with "worker status is not ready";
 end if;</code></pre>
             </figure>
-            <p>The coordinator can read the updated value through its retained <code>Status</code> view. Shared memory supplies no notification, so the application must choose how the coordinator learns that the value changed. It can poll at an application scheduling point or use a separate readiness channel. A Linux-only protocol that requires memfd size seals can pass <code>Require_Immutable_Size =&gt; True</code>; the portable example accepts the validated exact-size descriptor because Darwin anonymous storage has no Linux seals. Process creation must also respect Flyology's post-tasking rule: after Ada tasking starts, a fork child performs only async-signal-safe work before <code>exec</code> or <code>_exit</code>.</p>
+            <p>The coordinator can read the updated value through its retained <code>Status</code> view. Shared memory supplies no notification, so the application must choose how the coordinator learns that the value changed. It can poll at an application scheduling point or use a separate readiness channel. This example selects <code>Trusted_Peer</code> because the coordinator created and exec'd the worker; that declaration is application policy, not authentication performed by Flyology. A Linux deployment that receives from an untrusted peer selects <code>Untrusted_Peer</code>, which automatically requires memfd size seals. Process creation must also respect Flyology's post-tasking rule: after Ada tasking starts, a fork child performs only async-signal-safe work before <code>exec</code> or <code>_exit</code>.</p>
           </section>
 
           <section id="peers">
             <span class="step-label">SEGMENT 06</span>
-            <h2>Let peers open a name or receive one capability.</h2>
+            <h2>Give descriptor handoff an owned protocol boundary.</h2>
             <p>A named-object peer calls <code>Open_Named</code> with the exact expected length, maps the returned descriptor, then calls segment <code>Create_Or_Attach</code>. Because that mapping is not an exclusive creator, it can attach a ready registry but cannot claim zero storage.</p>
-            <p>For capability handoff, <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html"><code>Shared_Memory.Unix_Sockets</code></a> sends exactly one descriptor over an already connected Unix-domain socket with <code>SCM_RIGHTS</code>.</p>
-            <figure class="code-panel">
-              <figcaption>send and receive one backing capability</figcaption>
-              <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code class="language-ada">--  Sender: Borrow keeps Backing open; Transfer closes it after send.
-Unix_Sockets.Send
-  (Socket, Backing, Ownership =&gt; Unix_Sockets.Borrow);
+            <p>For capability handoff, <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html"><code>Shared_Memory.Unix_Sockets</code></a> uses one deliberately narrow protocol over a connected Unix-domain stream: one nonzero carrier byte and one <code>SCM_RIGHTS</code> descriptor. Use the owned <code>Handoff_Channel</code> overloads by default. They make the socket's exclusive-use rule concrete, reject concurrent calls without waiting, and permanently poison and close the endpoint after any transport, framing, ancillary, security, or received-backing validation failure.</p>
 
---  Receiver: Item gains exactly one newly owned descriptor.
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One carrier byte, one capability, one local validation chain</strong><span>the stream is dedicated to handoff records</span></figcaption>
+              <svg role="img" aria-labelledby="handoff-frame-title handoff-frame-desc" viewBox="0 0 760 430">
+                <title id="handoff-frame-title">Flyology descriptor handoff framing and validation</title>
+                <desc id="handoff-frame-desc">The sender passes one writable shared-memory descriptor with a one-byte stream record. The owned receiver reads exactly that carrier with a large ancillary buffer, scans every control header, closes extras, requires one descriptor, establishes close-on-exec, validates writable regular backing and exact size, optionally validates immutable Linux size seals, and only then creates a backing owner. Any failure closes descriptors and poisons the channel.</desc>
+                <defs>
+                  <marker id="handoff-frame-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="handoff-frame-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <text class="diagram-label" x="28" y="32">SENDMSG</text>
+                <rect class="diagram-violet" x="28" y="48" width="180" height="90" rx="12"/>
+                <text x="118" y="78" text-anchor="middle" font-size="13" font-weight="620">Handoff record</text>
+                <text class="diagram-code" x="118" y="103" text-anchor="middle">byte 0x46</text>
+                <text class="diagram-code diagram-muted" x="118" y="124" text-anchor="middle">SCM_RIGHTS × 1</text>
+
+                <path class="diagram-line-violet" d="M208 93h66" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-box" x="282" y="48" width="194" height="90" rx="12"/>
+                <text x="379" y="78" text-anchor="middle" font-size="13" font-weight="620">Dedicated stream</text>
+                <text class="diagram-code diagram-muted" x="379" y="103" text-anchor="middle">AF_UNIX · SOCK_STREAM</text>
+                <text class="diagram-muted" x="379" y="124" text-anchor="middle">no ordinary reads or writes</text>
+
+                <path class="diagram-line-violet" d="M476 93h66" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-violet" x="550" y="48" width="182" height="90" rx="12"/>
+                <text x="641" y="78" text-anchor="middle" font-size="13" font-weight="620">One recvmsg</text>
+                <text class="diagram-code diagram-muted" x="641" y="103" text-anchor="middle">1-byte data buffer</text>
+                <text class="diagram-code diagram-muted" x="641" y="124" text-anchor="middle">control room for 512 FDs</text>
+
+                <path class="diagram-line" d="M641 138v37" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-box" x="492" y="183" width="240" height="78" rx="12"/>
+                <text x="612" y="210" text-anchor="middle" font-size="13" font-weight="620">Parse bounded control data</text>
+                <text class="diagram-muted" x="612" y="233" text-anchor="middle">scan every header · close every extra</text>
+                <text class="diagram-muted" x="612" y="251" text-anchor="middle">require exact carrier and descriptor count</text>
+
+                <path class="diagram-line" d="M492 222h-52" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-box" x="214" y="183" width="218" height="78" rx="12"/>
+                <text x="323" y="210" text-anchor="middle" font-size="13" font-weight="620">Validate the capability</text>
+                <text class="diagram-muted" x="323" y="233" text-anchor="middle">CLOEXEC · writable · regular</text>
+                <text class="diagram-muted" x="323" y="251" text-anchor="middle">exact length · required Linux seals</text>
+
+                <path class="diagram-line-teal" d="M323 261v50" marker-end="url(#handoff-frame-teal)"/>
+                <rect class="diagram-teal" x="214" y="319" width="218" height="78" rx="12"/>
+                <text x="323" y="348" text-anchor="middle" font-size="13" font-weight="620">Owned Backing_Object</text>
+                <text class="diagram-muted" x="323" y="371" text-anchor="middle">safe to map, then attach segment</text>
+
+                <path class="diagram-dashed" d="M650 261v50" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-header" x="500" y="319" width="232" height="78" rx="12"/>
+                <text x="616" y="348" text-anchor="middle" font-size="13" font-weight="620">Any failed check</text>
+                <text class="diagram-muted" x="616" y="371" text-anchor="middle">close visible FDs · poison endpoint</text>
+              </svg>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>adopt each dedicated endpoint, then hand off one backing capability</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Socket setup and peer authentication are application responsibilities.
+Unix_Sockets.Adopt
+  (Sender, Sender_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
+Unix_Sockets.Adopt
+  (Receiver, Receiver_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
+
+--  Borrow keeps Backing open; Transfer closes it after local acceptance.
+Unix_Sockets.Send
+  (Sender, Backing, Ownership =&gt; Unix_Sockets.Borrow);
+
+--  Received gains exactly one newly owned, locally validated descriptor.
 Unix_Sockets.Receive
-  (Socket,
+  (Receiver,
    Expected_Length        =&gt; 1_048_576,
    Item                   =&gt; Received,
    Require_Immutable_Size =&gt; False);
 Shared.Map (Peer_Map, Received);
 Shared.Close (Received);</code></pre>
             </figure>
-            <p>Receive establishes <code>FD_CLOEXEC</code>, validates regular-file type and exact size, and can require Linux immutable-size seals. Malformed, missing, extra, or truncated ancillary data closes every received descriptor before raising.</p>
+
+            <p><code>Trusted_Peer</code> is a declaration by the application, not authentication. It permits Darwin and permits a mutable regular file because the application promises that the peer will not exploit ancillary truncation, resize a retained duplicate, or mutate shared open-file-description state. <code>Untrusted_Peer</code> is accepted only on Linux and always requires immutable grow, shrink, and seal seals. In practice this narrows an untrusted handoff to an exact-size writable sealed object such as Flyology's anonymous <code>memfd</code>. Darwin rejects that policy: XNU can install excess descriptors during a truncated receive without exposing enough information for user space to close them.</p>
+
+            <h3>Why the details change the API.</h3>
+            <p><code>SCM_RIGHTS</code> is attached to stream bytes, not to an abstract message object. A stateless <code>Receive (Socket, ...)</code> call cannot stop another reader from stealing the carrier byte, prevent another writer from interleaving its own protocol, or prove that a failed stream is safe to reuse. The owned channel captures those requirements. The raw socket overloads remain for integrations that already provide equivalent exclusive ownership and serialization; after any raw-operation exception, retire that socket.</p>
+
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>1 · Byte association</dt><dd>Ancillary rights must accompany at least one byte. Flyology sends one fixed nonzero byte and receives exactly one byte. The descriptor belongs to the byte range passed by that <code>sendmsg</code>, not to the lifetime of the socket.</dd></div>
+                <div class="decision-row"><dt>2 · Stream boundaries</dt><dd>One <code>sendmsg</code> need not correspond to one arbitrary <code>recvmsg</code>. Linux and BSD also differ around ancillary boundaries. A one-byte record and a one-byte receive remove partial-record ambiguity for a compliant peer.</dd></div>
+                <div class="decision-row"><dt>3 · First-byte delivery</dt><dd>The receive that consumes the range's first byte receives its control data. No <code>read</code>, <code>recv</code>, or second <code>recvmsg</code> may race the channel, and an endpoint duplicate is subject to the same ban.</dd></div>
+                <div class="decision-row"><dt>4 · Short reads</dt><dd>Linux may stop a read at an ancillary boundary; ordinary stream conditions can also produce short reads. A short result is never treated as “the socket is drained,” and Flyology does not mix this channel with edge-triggered application draining.</dd></div>
+                <div class="decision-row"><dt>5 · Crossing a range</dt><dd>If a receiver only partly consumes a larger associated byte range, a later receive can pass its remainder and encounter later ancillary data. Flyology makes every valid range exactly one byte, so a successful receive consumes the complete record.</dd></div>
+                <div class="decision-row"><dt>6 · Descriptor count</dt><dd>Linux permits up to <code>SCM_MAX_FD</code> (253) descriptors in one rights message. The native receiver reserves aligned control space for 512 descriptors, scans the count actually returned, accepts exactly one, and closes every visible extra.</dd></div>
+                <div class="decision-row"><dt>7 · Alignment</dt><dd><code>CMSG_SPACE</code> includes alignment padding, so a buffer sized “for one” can sometimes expose more than one descriptor. Flyology calculates payload size from <code>CMSG_LEN(0)</code>, counts complete descriptor integers, and never assumes the requested capacity is the returned count.</dd></div>
+                <div class="decision-row"><dt>8 · Every header</dt><dd>One receive may contain several control headers. Flyology walks all bounded headers, accumulates every <code>SCM_RIGHTS</code> descriptor, closes extras, and rejects unrelated ancillary types instead of ignoring a hidden descriptor later in the buffer.</dd></div>
+                <div class="decision-row"><dt>9 · Truncation</dt><dd><code>MSG_CTRUNC</code>, <code>MSG_TRUNC</code>, an overlong returned control length, a malformed header length, or an incomplete descriptor payload is a protocol error. Linux closes rights discarded by control truncation; Flyology also closes every descriptor it can observe.</dd></div>
+                <div class="decision-row"><dt>10 · Darwin kernel limits</dt><dd>Darwin has no documented rights-count maximum and has had a truncation path that can leak installed descriptors. It can also report a control-header length beyond the returned control extent. Flyology clamps all parsing to its real buffer and uses the 512-descriptor buffer as defense in depth, but does not claim that this proves safe receipt from an untrusted Darwin peer.</dd></div>
+                <div class="decision-row"><dt>11 · Close on exec</dt><dd>Linux requests <code>MSG_CMSG_CLOEXEC</code>. Darwin sets <code>FD_CLOEXEC</code> immediately after receipt, but that cannot be atomic with a concurrent <code>fork</code> plus <code>exec</code>; Flyology's rule against doing work in a post-tasking fork child remains part of the boundary.</dd></div>
+                <div class="decision-row"><dt>12 · Hostile descriptors</dt><dd>The receiver accepts only an <code>O_RDWR</code>, exact-size regular or POSIX-shm backing descriptor. Sockets, pipes, devices, directories, and read-only files are rejected. Untrusted Linux receipt additionally requires immutable size seals so a retained peer duplicate cannot shrink the mapping and induce <code>SIGBUS</code>.</dd></div>
+                <div class="decision-row"><dt>13 · Shared open description</dt><dd><code>SCM_RIGHTS</code> duplicates a reference to the same open file description; it does not create an independent underlying object. Trusted peers must not mutate shared status flags or backing state in ways outside the segment protocol. Shared payload mutation itself remains the intended capability.</dd></div>
+                <div class="decision-row"><dt>14 · Broken peers</dt><dd>Linux sends with <code>MSG_NOSIGNAL</code>; Darwin applies <code>SO_NOSIGPIPE</code> when the channel is adopted. A closed peer therefore raises an Ada exception and poisons the channel instead of terminating the process with <code>SIGPIPE</code>.</dd></div>
+                <div class="decision-row"><dt>15 · Authentication</dt><dd>The package does not use <code>SCM_CREDENTIALS</code> as an identity oracle and does not create or authenticate the socket. Establish peer provenance through an application-owned Unix-socket namespace or inherited endpoint before selecting <code>Trusted_Peer</code>.</dd></div>
+                <div class="decision-row"><dt>16 · Acceptance is local</dt><dd>A successful <code>Send</code> means the local kernel accepted the byte and capability. It does not mean the peer received, validated, mapped, attached, or published anything. Add a separate application acknowledgment when that distinction matters.</dd></div>
+                <div class="decision-row"><dt>17 · Portability choices</dt><dd>Flyology uses <code>SOCK_STREAM</code>, the mode documented for rights passing on both supported hosts. It does not substitute <code>SOCK_SEQPACKET</code>, and it does not use Linux-only <code>recvmmsg</code>; neither removes the need for the portable framing and cleanup rules.</dd></div>
+              </dl>
+            </div>
+
+            <p>These constraints follow the failure cases collected in Kenton Varda's <a href="https://gist.github.com/kentonv/bc7592af98c68ba2738f4436920868dc">SCM_RIGHTS notes</a>. The implementation keeps C control-message layout and platform flags in the narrow native bridge; Ada owns endpoint lifetime, nonblocking guard state, poisoning, backing validation policy, and the resulting limited owners.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Unix-socket handoff is synchronous.</strong> <code>sendmsg</code> and <code>recvmsg</code> may block. Use a native-task boundary unless the application has independently established nonblocking readiness.</p>
+              <p><strong>Unix-socket handoff is synchronous.</strong> <code>sendmsg</code> and <code>recvmsg</code> may block, and an owned channel poisons itself after a would-block transport failure rather than hiding a retry loop. Use a native-task boundary unless the application has independently established readiness and deliberately owns the retry policy.</p>
             </aside>
           </section>
 

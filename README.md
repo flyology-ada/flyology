@@ -1098,11 +1098,47 @@ quiescence. Recovery requires an independently authorized supervisor and an
 application policy, commonly replacement of the whole backing object.
 
 `Flyology.Shared_Memory.Unix_Sockets` transfers exactly one backing descriptor
-with `SCM_RIGHTS`. Receive establishes `FD_CLOEXEC`, rejects malformed or
-truncated ancillary data while closing every received descriptor, and validates
-type, exact size, and optionally Linux immutable-size seals before mapping.
-Its `sendmsg` and `recvmsg` calls are synchronous: use a native-task boundary
-unless the application has independently established nonblocking readiness.
+with one nonzero stream byte and one `SCM_RIGHTS` control record. Its limited
+`Handoff_Channel` is the ordinary interface: it adopts sole ownership of a
+connected `AF_UNIX` `SOCK_STREAM` endpoint, rejects concurrent operations,
+and permanently poisons and closes the endpoint after a framing, ancillary,
+transport, security, or backing-validation failure. Raw-socket overloads are
+available only for callers that already enforce the same dedicated-lane rule;
+no ordinary read, write, duplicate endpoint, or second protocol may share that
+stream, and the caller must retire it after any raw-operation exception.
+
+The receiver provides aligned control space for 512 descriptors, bounds every
+control-header walk by the buffer actually supplied, calculates payload size
+from `CMSG_LEN (0)`, scans all ancillary headers, rejects unrelated control
+data, and accepts exactly one descriptor while closing every visible extra.
+Missing control data, the wrong carrier, incomplete payload, malformed length,
+`MSG_CTRUNC`, or `MSG_TRUNC` is a protocol error. Linux additionally closes
+rights discarded during control truncation. Darwin has a kernel truncation
+case that can install excess descriptors without exposing them for user-space
+cleanup; the larger buffer is defense in depth, not a proof against an
+untrusted peer, so `Untrusted_Peer` is rejected there.
+
+Linux receive requests `MSG_CMSG_CLOEXEC`; Darwin sets `FD_CLOEXEC` immediately
+afterward and therefore still relies on Flyology's post-tasking fork rule.
+Linux send uses `MSG_NOSIGNAL`, while Darwin channel adoption applies
+`SO_NOSIGPIPE`. Before a received descriptor becomes a `Backing_Object`, it
+must be writable, regular or POSIX-shm storage of the exact locally expected
+size. An untrusted Linux channel also requires immutable grow, shrink, and seal
+seals, preventing a peer that retained a duplicate from shrinking a live
+mapping. Trusted peers remain responsible for safe shared open-file-description
+and backing behavior.
+
+The package does not create or authenticate the socket, interpret peer
+credentials, or acknowledge remote attachment. Successful `Send` means local
+kernel acceptance only. The website's shared-memory guide has the complete
+[SCM_RIGHTS edge-case ledger](https://flyology.org/guide/shared-memory/#peers),
+including stream-range association, short reads, descriptor-count and alignment
+hazards, multiple control headers, Darwin limits, and the reason the owned
+channel is the default. These rules follow the failure cases collected in
+[Kenton Varda's SCM_RIGHTS notes](https://gist.github.com/kentonv/bc7592af98c68ba2738f4436920868dc).
+
+`sendmsg` and `recvmsg` remain synchronous: use a native-task boundary unless
+the application has independently established readiness and owns retry policy.
 The same caution applies to create, open, unlink, map, unmap, and flush metadata
 syscalls, which may occupy a lightweight task's event-loop pthread.
 

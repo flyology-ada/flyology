@@ -37,6 +37,7 @@ procedure Shared_Memory_Smoke is
    use type Segments.Lookup_Result;
    use type Segments.Remove_Result;
    use type Segments.Segment_Open_Result;
+   use type Unix_Sockets.Socket_Descriptor;
 
    Mapping_Length : constant Shared.Byte_Length := 1_048_576;
    Config : constant Segments.Configuration :=
@@ -71,6 +72,19 @@ procedure Shared_Memory_Smoke is
      (Socket, First, Second : C.int) return C.int;
    pragma Import
      (C, Send_Two, "flyology_test_send_two_descriptors");
+   function Send_Split
+     (Socket, First, Second : C.int) return C.int;
+   pragma Import
+     (C, Send_Split, "flyology_test_send_split_descriptors");
+   function Send_Many
+     (Socket, Descriptor : C.int; Count : C.unsigned) return C.int;
+   pragma Import
+     (C, Send_Many, "flyology_test_send_many_descriptors");
+   function Create_Read_Only
+     (Length     : C.unsigned_long_long;
+      Descriptor : access C.int) return C.int;
+   pragma Import
+     (C, Create_Read_Only, "flyology_test_create_read_only_backing");
    function Send_Raw (Socket, Descriptor : C.int) return C.int;
    pragma Import (C, Send_Raw, "flyology_shm_send_fd");
    function Open_FD_Count return C.int;
@@ -734,6 +748,8 @@ procedure Shared_Memory_Smoke is
       Wrong_Size_Rejected : Boolean := False;
       Immutable_Rejected : Boolean := False;
       Wrong_Type_Rejected : Boolean := False;
+      Read_Only_Rejected : Boolean := False;
+      Socket_Rejected : Boolean := False;
       Ignored : C.int;
    begin
       Shared.Create_Anonymous (Backing, Mapping_Length);
@@ -860,6 +876,54 @@ procedure Shared_Memory_Smoke is
       Assert (Ignored = 0, "wrong-type receiver socket close failed");
       Right := -1;
 
+      declare
+         Read_Only : aliased C.int := -1;
+      begin
+         Assert
+           (Create_Read_Only
+              (C.unsigned_long_long (Mapping_Length), Read_Only'Access) = 0,
+            "read-only ancillary backing setup failed");
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "socketpair failed");
+         Before := Open_FD_Count;
+         Assert
+           (Send_Raw (Left, Read_Only) = 0,
+            "read-only ancillary test send failed");
+         begin
+            Unix_Sockets.Receive
+              (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length,
+               Received);
+         exception
+            when Shared.Validation_Error =>
+               Read_Only_Rejected := True;
+         end;
+         After := Open_FD_Count;
+         Assert
+           (Read_Only_Rejected,
+            "read-only received backing descriptor was accepted");
+         Assert
+           (After = Before, "read-only receive leaked a descriptor");
+         Ignored := Close_Socket (Read_Only);
+         Assert (Ignored = 0, "read-only backing close failed");
+         Ignored := Close_Socket (Left);
+         Assert (Ignored = 0, "read-only sender socket close failed");
+         Left := -1;
+         Ignored := Close_Socket (Right);
+         Assert (Ignored = 0, "read-only receiver socket close failed");
+         Right := -1;
+      end;
+
+      begin
+         Unix_Sockets.Send
+           (Unix_Sockets.Socket_Descriptor (Testing.Descriptor (Backing)),
+            Backing, Unix_Sockets.Borrow);
+      exception
+         when Unix_Sockets.Protocol_Error =>
+            Socket_Rejected := True;
+      end;
+      Assert (Socket_Rejected, "non-socket handoff endpoint was accepted");
+
       Assert (Socketpair (Left'Access, Right'Access) = 0, "socketpair failed");
       Before := Open_FD_Count;
       Assert
@@ -871,7 +935,7 @@ procedure Shared_Memory_Smoke is
          Unix_Sockets.Receive
            (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length, Received);
       exception
-         when Shared.Operating_System_Error =>
+         when Unix_Sockets.Protocol_Error =>
             Rejected := True;
       end;
       After := Open_FD_Count;
@@ -883,6 +947,266 @@ procedure Shared_Memory_Smoke is
       Ignored := Close_Socket (Right);
       Assert (Ignored = 0, "malformed receiver socket close failed");
       Right := -1;
+
+      Assert (Socketpair (Left'Access, Right'Access) = 0, "socketpair failed");
+      Before := Open_FD_Count;
+      declare
+         Split_Result : constant C.int :=
+           Send_Split
+             (Left, Testing.Descriptor (Backing),
+              Testing.Descriptor (Backing));
+      begin
+         Assert
+           (Split_Result = 0 or else Split_Result = 1,
+            "split ancillary test send failed");
+         if Split_Result = 0 then
+            Rejected := False;
+            begin
+               Unix_Sockets.Receive
+                 (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length,
+                  Received);
+            exception
+               when Unix_Sockets.Protocol_Error =>
+                  Rejected := True;
+            end;
+            After := Open_FD_Count;
+            Assert (Rejected, "multiple SCM_RIGHTS headers were accepted");
+            Assert
+              (After = Before,
+               "split ancillary receive leaked descriptors");
+         end if;
+      end;
+      Ignored := Close_Socket (Left);
+      Assert (Ignored = 0, "split ancillary sender close failed");
+      Left := -1;
+      Ignored := Close_Socket (Right);
+      Assert (Ignored = 0, "split ancillary receiver close failed");
+      Right := -1;
+
+      Assert (Socketpair (Left'Access, Right'Access) = 0, "socketpair failed");
+      Before := Open_FD_Count;
+      Assert
+        (Send_Many
+           (Left, Testing.Descriptor (Backing), C.unsigned (64)) = 0,
+         "many-descriptor ancillary test send failed");
+      Rejected := False;
+      begin
+         Unix_Sockets.Receive
+           (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length, Received);
+      exception
+         when Unix_Sockets.Protocol_Error =>
+            Rejected := True;
+      end;
+      After := Open_FD_Count;
+      Assert (Rejected, "large descriptor set was accepted");
+      Assert (After = Before, "large descriptor receive leaked descriptors");
+      Ignored := Close_Socket (Left);
+      Assert (Ignored = 0, "many-descriptor sender close failed");
+      Left := -1;
+      Ignored := Close_Socket (Right);
+      Assert (Ignored = 0, "many-descriptor receiver close failed");
+      Right := -1;
+
+      Assert (Socketpair (Left'Access, Right'Access) = 0, "socketpair failed");
+      Before := Open_FD_Count;
+      Unix_Sockets.Send
+        (Unix_Sockets.Socket_Descriptor (Left), Backing,
+         Unix_Sockets.Borrow);
+      Unix_Sockets.Send
+        (Unix_Sockets.Socket_Descriptor (Left), Backing,
+         Unix_Sockets.Borrow);
+      Unix_Sockets.Receive
+        (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length, Received);
+      Shared.Close (Received);
+      Unix_Sockets.Receive
+        (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length, Received);
+      Shared.Close (Received);
+      After := Open_FD_Count;
+      Assert
+        (After = Before,
+         "back-to-back one-byte handoff records leaked descriptors");
+      Ignored := Close_Socket (Left);
+      Assert (Ignored = 0, "back-to-back sender close failed");
+      Left := -1;
+      Ignored := Close_Socket (Right);
+      Assert (Ignored = 0, "back-to-back receiver close failed");
+      Right := -1;
+
+      declare
+         Send_Socket : Unix_Sockets.Socket_Descriptor;
+         Receive_Socket : Unix_Sockets.Socket_Descriptor;
+         Sender : Unix_Sockets.Handoff_Channel;
+         Receiver : Unix_Sockets.Handoff_Channel;
+      begin
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "owned-channel socketpair failed");
+         Send_Socket := Unix_Sockets.Socket_Descriptor (Left);
+         Receive_Socket := Unix_Sockets.Socket_Descriptor (Right);
+         Unix_Sockets.Adopt (Sender, Send_Socket);
+         Unix_Sockets.Adopt (Receiver, Receive_Socket);
+         Left := C.int (Send_Socket);
+         Right := C.int (Receive_Socket);
+         Assert
+           (Left = -1 and then Right = -1,
+            "owned-channel adoption did not consume socket descriptors");
+         Unix_Sockets.Send (Sender, Backing, Unix_Sockets.Borrow);
+         Unix_Sockets.Receive (Receiver, Mapping_Length, Received);
+         Assert
+           (Shared.Is_Open (Received)
+            and then Shared.Properties (Received).Close_On_Exec,
+            "owned channel did not receive validated backing");
+         Shared.Close (Received);
+         Unix_Sockets.Close (Sender);
+         Unix_Sockets.Close (Sender);
+         Unix_Sockets.Close (Receiver);
+         Unix_Sockets.Close (Receiver);
+         Assert
+           (not Unix_Sockets.Is_Open (Sender)
+            and then not Unix_Sockets.Is_Open (Receiver),
+            "owned channel close was not idempotent");
+      end;
+
+      declare
+         Receive_Socket : Unix_Sockets.Socket_Descriptor;
+         Receiver : Unix_Sockets.Handoff_Channel;
+      begin
+         Before := Open_FD_Count;
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "validation-channel socketpair failed");
+         Receive_Socket := Unix_Sockets.Socket_Descriptor (Right);
+         Unix_Sockets.Adopt (Receiver, Receive_Socket);
+         Right := C.int (Receive_Socket);
+         Unix_Sockets.Send
+           (Unix_Sockets.Socket_Descriptor (Left), Backing,
+            Unix_Sockets.Borrow);
+         Wrong_Size_Rejected := False;
+         begin
+            Unix_Sockets.Receive
+              (Receiver, Mapping_Length / 2, Received);
+         exception
+            when Shared.Validation_Error =>
+               Wrong_Size_Rejected := True;
+         end;
+         Assert
+           (Wrong_Size_Rejected
+            and then Unix_Sockets.Is_Poisoned (Receiver)
+            and then not Unix_Sockets.Is_Open (Receiver),
+            "owned channel did not fail closed after backing validation");
+         Ignored := Close_Socket (Left);
+         Assert (Ignored = 0, "validation-channel sender close failed");
+         Left := -1;
+         After := Open_FD_Count;
+         Assert (After = Before, "validation failure leaked descriptors");
+      end;
+
+      declare
+         Receive_Socket : Unix_Sockets.Socket_Descriptor;
+         Receiver : Unix_Sockets.Handoff_Channel;
+      begin
+         Before := Open_FD_Count;
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "poison-channel socketpair failed");
+         Receive_Socket := Unix_Sockets.Socket_Descriptor (Right);
+         Unix_Sockets.Adopt (Receiver, Receive_Socket);
+         Right := C.int (Receive_Socket);
+         Assert
+           (Send_Many
+              (Left, Testing.Descriptor (Backing), C.unsigned (64)) = 0,
+            "poison-channel malformed send failed");
+         Rejected := False;
+         begin
+            Unix_Sockets.Receive (Receiver, Mapping_Length, Received);
+         exception
+            when Unix_Sockets.Protocol_Error =>
+               Rejected := True;
+         end;
+         Assert
+           (Rejected and then Unix_Sockets.Is_Poisoned (Receiver)
+            and then not Unix_Sockets.Is_Open (Receiver),
+            "owned channel did not fail closed after malformed ancillary");
+         Ignored := Close_Socket (Left);
+         Assert (Ignored = 0, "poison-channel sender close failed");
+         Left := -1;
+         After := Open_FD_Count;
+         Assert (After = Before, "poisoned channel leaked descriptors");
+      end;
+
+      declare
+         Send_Socket : Unix_Sockets.Socket_Descriptor;
+         Sender : Unix_Sockets.Handoff_Channel;
+         Failed : Boolean := False;
+      begin
+         Before := Open_FD_Count;
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "broken-channel socketpair failed");
+         Send_Socket := Unix_Sockets.Socket_Descriptor (Left);
+         Unix_Sockets.Adopt (Sender, Send_Socket);
+         Left := C.int (Send_Socket);
+         Ignored := Close_Socket (Right);
+         Assert (Ignored = 0, "broken-channel peer close failed");
+         Right := -1;
+         begin
+            Unix_Sockets.Send (Sender, Backing, Unix_Sockets.Borrow);
+         exception
+            when Shared.Operating_System_Error =>
+               Failed := True;
+         end;
+         Assert
+           (Failed and then Unix_Sockets.Is_Poisoned (Sender),
+            "broken channel did not suppress SIGPIPE and fail closed");
+         After := Open_FD_Count;
+         Assert (After = Before, "broken channel leaked descriptors");
+      end;
+
+      declare
+         Receive_Socket : Unix_Sockets.Socket_Descriptor;
+         Receiver : Unix_Sockets.Handoff_Channel;
+         Unsupported : Boolean := False;
+      begin
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "untrusted-channel socketpair failed");
+         Receive_Socket := Unix_Sockets.Socket_Descriptor (Right);
+         if Is_Linux = 1 then
+            Assert
+              (Shared.Properties (Backing).Size_Immutable,
+               "Linux anonymous backing lacks immutable size seals");
+            Unix_Sockets.Adopt
+              (Receiver, Receive_Socket, Unix_Sockets.Untrusted_Peer);
+            Right := C.int (Receive_Socket);
+            Assert
+              (Send_Raw (Left, Testing.Descriptor (Backing)) = 0,
+               "untrusted-channel send failed");
+            Unix_Sockets.Receive (Receiver, Mapping_Length, Received);
+            Assert
+              (Shared.Is_Open (Received)
+               and then Shared.Properties (Received).Size_Immutable,
+               "untrusted channel accepted insufficient backing security");
+            Shared.Close (Received);
+            Unix_Sockets.Close (Receiver);
+         else
+            begin
+               Unix_Sockets.Adopt
+                 (Receiver, Receive_Socket, Unix_Sockets.Untrusted_Peer);
+            exception
+               when Shared.Security_Error =>
+                  Unsupported := True;
+            end;
+            Assert
+              (Unsupported and then Receive_Socket >= 0,
+               "Darwin untrusted handoff did not fail closed before adoption");
+            Ignored := Close_Socket (C.int (Receive_Socket));
+            Assert (Ignored = 0, "untrusted receiver close failed");
+            Right := -1;
+         end if;
+         Ignored := Close_Socket (Left);
+         Assert (Ignored = 0, "untrusted sender close failed");
+         Left := -1;
+      end;
 
       Strings.Detach (Object);
       Regions.Detach (Region);
