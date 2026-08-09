@@ -258,6 +258,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   a descriptor does not invalidate an established mapping. Detach every leaf,
   region, and segment view before unmapping; finalization is non-raising and
   never implicitly unlinks a named object or file.
+- Keep a backing descriptor open through explicit `Unlink`. Callers must
+  externally exclude concurrent namespace replacement because identity check
+  and unlink are separate operations; Darwin POSIX shm exposes no stable
+  per-object identity for that check.
 - Anonymous Linux backing has immutable grow/shrink/seal seals and attempts the
   runtime-supported no-execute seal; Darwin anonymous backing is exclusive,
   mode 0600, and immediately unlinked. Public mappings never request execute
@@ -269,6 +273,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   geometry, and initializing/ready/failed/removed states. Hash collisions must
   compare complete names. Partial extents are visible only through the limited
   creator claim and become generally resolvable only after publication.
+- Validate the mutable allocation frontier and every active or reusable slot's
+  generation, name length, aligned location, reservation, payload length, and
+  complete extent before allocation, reuse, resolution, or publication.
 - Registry removal is distinct from backing-object unlink. Reuse advances a
   nonwrapping generation and may consume only a fitting removed reservation.
   Exhaustion and published initialization failure remain explicit outcomes.

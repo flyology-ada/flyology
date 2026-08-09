@@ -114,6 +114,49 @@ static int flyology_descriptor_properties(int fd, int nofollow,
     return 0;
 }
 
+static int flyology_namespace_matches(int fd, const char *name, int posix)
+{
+    struct stat expected;
+    struct stat current;
+    int current_fd = -1;
+    int error;
+    if (fstat(fd, &expected) != 0) return errno;
+    if (posix) {
+        current_fd = shm_open(name, O_RDONLY | FLYOLOGY_SHM_CLOEXEC, 0);
+        if (current_fd < 0) return errno;
+        error = flyology_set_cloexec(current_fd);
+        if (error == 0 && fstat(current_fd, &current) != 0) error = errno;
+        close(current_fd);
+        if (error != 0) return error;
+    } else if (lstat(name, &current) != 0) {
+        return errno;
+    }
+    if (expected.st_dev != current.st_dev || expected.st_ino != current.st_ino ||
+        (expected.st_mode & S_IFMT) != (current.st_mode & S_IFMT))
+        return -4;
+    return 0;
+}
+
+static int flyology_unlink_matching(int fd, const char *name, int posix)
+{
+    int error = flyology_namespace_matches(fd, name, posix);
+    int result;
+    if (error != 0) return error;
+    result = posix ? shm_unlink(name) : unlink(name);
+    return result == 0 ? 0 : errno;
+}
+
+static int flyology_fail_open(int fd, int created, const char *name, int posix,
+                              int error)
+{
+    if (created) {
+        int cleanup = flyology_unlink_matching(fd, name, posix);
+        if (cleanup != 0) error = cleanup;
+    }
+    close(fd);
+    return error;
+}
+
 int flyology_shm_create_anonymous(unsigned long long length, int require_noexec,
                                   int *fd_out, int *properties_out)
 {
@@ -206,20 +249,24 @@ int flyology_shm_open_named(const char *name, unsigned long long length,
     if (fd < 0) return errno;
     {
         int error = flyology_set_cloexec(fd);
-        if (error != 0) { close(fd); return error; }
+        if (error != 0)
+            return flyology_fail_open(fd, created, name, 1, error);
     }
     if (created && ftruncate(fd, (off_t)length) != 0) {
-        int saved = errno; close(fd); shm_unlink(name); return saved;
+        return flyology_fail_open(fd, 1, name, 1, errno);
     }
     {
         int error = flyology_descriptor_properties(fd, 0, &props, &actual);
-        if (error != 0) { close(fd); return error; }
+        if (error != 0)
+            return flyology_fail_open(fd, created, name, 1, error);
     }
-    if ((props & FLYOLOGY_PROP_CLOEXEC) == 0) { close(fd); return -3; }
+    if ((props & FLYOLOGY_PROP_CLOEXEC) == 0)
+        return flyology_fail_open(fd, created, name, 1, -3);
     if (!created && actual == 0) {
         close(fd); *outcome_out = 2; return 0;
     }
-    if (actual != length) { close(fd); return -1; }
+    if (actual != length)
+        return flyology_fail_open(fd, created, name, 1, -1);
     *fd_out = fd;
     *properties_out = props;
     *outcome_out = created ? 0 : 1;
@@ -240,19 +287,24 @@ int flyology_shm_open_file(const char *path, unsigned long long length,
     if (fd < 0) return errno;
     {
         int error = flyology_set_cloexec(fd);
-        if (error != 0) { close(fd); return error; }
+        if (error != 0)
+            return flyology_fail_open(fd, create, path, 0, error);
     }
-    if (fstat(fd, &st) != 0) { int saved = errno; close(fd); return saved; }
-    if (!S_ISREG(st.st_mode)) { close(fd); return -2; }
+    if (fstat(fd, &st) != 0)
+        return flyology_fail_open(fd, create, path, 0, errno);
+    if (!S_ISREG(st.st_mode))
+        return flyology_fail_open(fd, create, path, 0, -2);
     if (create && ftruncate(fd, (off_t)length) != 0) {
-        int saved = errno; close(fd); unlink(path); return saved;
+        return flyology_fail_open(fd, 1, path, 0, errno);
     }
     {
         int error = flyology_descriptor_properties(fd, O_NOFOLLOW != 0,
                                                     &props, &actual);
-        if (error != 0) { close(fd); return error; }
+        if (error != 0)
+            return flyology_fail_open(fd, create, path, 0, error);
     }
-    if (actual != length) { close(fd); return -1; }
+    if (actual != length)
+        return flyology_fail_open(fd, create, path, 0, -1);
     *fd_out = fd;
     *properties_out = props;
     return 0;
@@ -306,10 +358,9 @@ int flyology_shm_msync(void *base, unsigned long long length, int synchronous)
 
 int flyology_shm_fsync(int fd) { return fsync(fd) == 0 ? 0 : errno; }
 int flyology_shm_close(int fd) { return close(fd) == 0 ? 0 : errno; }
-int flyology_shm_unlink_name(const char *name, int posix)
+int flyology_shm_unlink_name(int fd, const char *name, int posix)
 {
-    int result = posix ? shm_unlink(name) : unlink(name);
-    return result == 0 || errno == ENOENT ? 0 : errno;
+    return flyology_unlink_matching(fd, name, posix);
 }
 
 int flyology_shm_send_fd(int socket_fd, int descriptor)

@@ -173,10 +173,16 @@ package Flyology.Shared_Memory is
       Path            : String;
       Expected_Length : Byte_Length);
 
-   --  Remove Item's named POSIX object or file namespace entry. This is
-   --  explicit, idempotent after success, and independent of Close and live
-   --  mappings. Anonymous objects are already unlinked or unnamed.
+   --  Remove Item's named POSIX object or file namespace entry. Where the host
+   --  exposes stable object identity, reject a name that no longer identifies
+   --  Item's open descriptor. Callers must always exclude concurrent unlink-
+   --  and-replacement until this call returns: identity comparison and unlink
+   --  are separate operations, and Darwin POSIX shm descriptors expose no
+   --  stable identity for this comparison. The call is explicit, idempotent
+   --  after success, and independent of live mappings. Anonymous objects are
+   --  already unlinked or unnamed.
    --  @param Item Owned backing object whose saved namespace entry is removed
+   --  @exception Validation_Error Item is closed or the name was replaced
    --  @exception Operating_System_Error Unlinking fails
    procedure Unlink (Item : in out Backing_Object);
 

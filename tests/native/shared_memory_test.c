@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdint.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -20,6 +22,11 @@
 #endif
 
 extern char **environ;
+
+int flyology_shm_open_named(const char *, unsigned long long, unsigned int,
+                            int, int *, int *, int *);
+int flyology_shm_open_file(const char *, unsigned long long, unsigned int,
+                           int, int *, int *);
 
 int flyology_test_is_linux(void)
 {
@@ -193,4 +200,54 @@ int flyology_test_close_unsized_shm(const char *name, int fd)
     int close_result = close(fd);
     int unlink_result = shm_unlink(name);
     return close_result == 0 && unlink_result == 0 ? 0 : -1;
+}
+
+int flyology_test_unlink_shm(const char *name)
+{
+    return shm_unlink(name) == 0 ? 0 : -1;
+}
+
+int flyology_test_failed_named_create_cleanup(const char *name)
+{
+    int fd = -1;
+    int properties = 0;
+    int outcome = 0;
+    int probe;
+    int result = flyology_shm_open_named(
+        name, (unsigned long long)LLONG_MAX + 1ULL, 0600, 0,
+        &fd, &properties, &outcome);
+    if (result == 0) {
+        close(fd);
+        shm_unlink(name);
+        return 0;
+    }
+    probe = shm_open(name, O_RDWR, 0);
+    if (probe >= 0) {
+        close(probe);
+        shm_unlink(name);
+        return 0;
+    }
+    return errno == ENOENT ? 1 : 0;
+}
+
+int flyology_test_failed_file_create_cleanup(const char *path)
+{
+    int fd = -1;
+    int properties = 0;
+    int result = flyology_shm_open_file(
+        path, (unsigned long long)LLONG_MAX + 1ULL, 0600, 1,
+        &fd, &properties);
+    if (result == 0) {
+        close(fd);
+        unlink(path);
+        return 0;
+    }
+    return lstat(path, &(struct stat){0}) != 0 && errno == ENOENT ? 1 : 0;
+}
+
+void flyology_test_store_mapping_u64(void *base, unsigned long long offset,
+                                     uint64_t value)
+{
+    __atomic_store_n((uint64_t *)((unsigned char *)base + offset), value,
+                     __ATOMIC_RELEASE);
 }

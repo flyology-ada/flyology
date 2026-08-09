@@ -236,6 +236,40 @@ package body Flyology.Shared_Memory.Segments is
         (Item, Add (Slot_Base (Item, Slot), Relative), Size);
    end Slot_At;
 
+   procedure Validate_Slot_Metadata
+     (Item : View; Slot : Interfaces.Unsigned_32)
+   is
+      Generation : constant Interfaces.Unsigned_64 := Read_U64
+        (Slot_At (Item, Slot, Slot_Generation_Offset, 8));
+      Name_Length : constant Interfaces.Unsigned_32 := Read_U32
+        (Slot_At (Item, Slot, Slot_Name_Length_Offset, 4));
+      Location : constant Byte_Length := Byte_Length
+        (Read_U64 (Slot_At (Item, Slot, Slot_Location_Offset, 8)));
+      Length : constant Byte_Length := Byte_Length
+        (Read_U64 (Slot_At (Item, Slot, Slot_Length_Offset, 8)));
+      Reserved : constant Byte_Length := Byte_Length
+        (Read_U64 (Slot_At (Item, Slot, Slot_Reserved_Offset, 8)));
+      Alignment : constant Byte_Length := Byte_Length (Item.Alignment);
+   begin
+      if Generation = 0 then
+         raise Segment_Error with "active segment slot has zero generation";
+      elsif Name_Length = 0 or else Name_Length > Item.Name_Limit then
+         raise Segment_Error with "segment slot name length is corrupt";
+      elsif Location < Item.Data_Start
+        or else Location mod Alignment /= 0
+      then
+         raise Segment_Error with "segment slot location is corrupt";
+      elsif Length = 0 or else Reserved = 0 or else Length > Reserved
+        or else Reserved mod Alignment /= 0
+      then
+         raise Segment_Error with "segment slot reservation is corrupt";
+      elsif Location > Item.Extent
+        or else Reserved > Item.Extent - Location
+      then
+         raise Segment_Error with "segment slot extent is out of range";
+      end if;
+   end Validate_Slot_Metadata;
+
    function Name_Hash (Name : String) return Interfaces.Unsigned_32 is
       Value : Interfaces.Unsigned_32 := 16#811C_9DC5#;
    begin
@@ -330,6 +364,7 @@ package body Flyology.Shared_Memory.Segments is
       Item.Name_Limit := Interfaces.Unsigned_32 (Config.Maximum_Name_Length);
       Item.Slot_Size := Interfaces.Unsigned_32 (Shape.Slot_Size);
       Item.Alignment := Interfaces.Unsigned_32 (Config.Allocation_Alignment);
+      Item.Data_Start := Shape.Data_Start;
       Item.Schema := Config.Schema;
       Item.Attached := True;
    end Set_View;
@@ -464,6 +499,8 @@ package body Flyology.Shared_Memory.Segments is
       begin
          if Next < Interfaces.Unsigned_64 (Shape.Data_Start)
            or else Next > Interfaces.Unsigned_64 (Extent)
+           or else Next mod
+             Interfaces.Unsigned_64 (Config.Allocation_Alignment) /= 0
          then
             raise Segment_Error with "segment allocation frontier is corrupt";
          elsif Guard /= Guard_Free and then Guard /= Guard_Locked then
@@ -487,6 +524,7 @@ package body Flyology.Shared_Memory.Segments is
       Item.Name_Limit := 0;
       Item.Slot_Size := 0;
       Item.Alignment := 0;
+      Item.Data_Start := 0;
       Item.Schema := 0;
       Item.Attached := False;
    end Detach;
@@ -550,6 +588,7 @@ package body Flyology.Shared_Memory.Segments is
                   Free_Candidate := Slot;
                end if;
             elsif State = Removed_Slot then
+               Validate_Slot_Metadata (Item, Slot);
                declare
                   Reserved : constant Byte_Length := Byte_Length
                     (Read_U64
@@ -568,6 +607,7 @@ package body Flyology.Shared_Memory.Segments is
               or else State = Ready_Slot
               or else State = Failed_Slot
             then
+               Validate_Slot_Metadata (Item, Slot);
                if Same_Name (Item, Slot, Name, Hash) then
                   Fill_Handle (Item, Slot, Handle);
                   if State = Initializing_Slot then
@@ -629,7 +669,12 @@ package body Flyology.Shared_Memory.Segments is
               (C_Load_U64 (Address_At (Item, Next_Offset, 8)));
             Reserved := Align_Up
               (Requested_Length, Byte_Length (Item.Alignment));
-            if Location > Item.Extent
+            if Location < Item.Data_Start
+              or else Location mod Byte_Length (Item.Alignment) /= 0
+            then
+               raise Segment_Error with
+                 "segment allocation frontier is corrupt";
+            elsif Location > Item.Extent
               or else Reserved > Item.Extent - Location
             then
                Release_Guard (Item);
@@ -718,6 +763,7 @@ package body Flyology.Shared_Memory.Segments is
               or else State = Ready_Slot
               or else State = Failed_Slot
             then
+               Validate_Slot_Metadata (Item, Slot);
                if Same_Name (Item, Slot, Name, Hash) then
                   Fill_Handle (Item, Slot, Handle);
                   if State = Initializing_Slot then
@@ -776,6 +822,7 @@ package body Flyology.Shared_Memory.Segments is
       then
          raise Segment_Error with "stale or inactive segment creation claim";
       end if;
+      Validate_Slot_Metadata (Item, Claim.Slot);
    end Validate_Claim;
 
    procedure Claimed_Extent
@@ -864,6 +911,7 @@ package body Flyology.Shared_Memory.Segments is
       if State_Of (Item, Handle) /= Ready then
          raise Segment_Error with "named segment handle is not ready";
       end if;
+      Validate_Slot_Metadata (Item, Handle.Slot);
       Location := DS.Region_Offset
         (Read_U64
            (Slot_At (Item, Handle.Slot, Slot_Location_Offset, 8)));
@@ -921,6 +969,7 @@ package body Flyology.Shared_Memory.Segments is
               or else State = Ready_Slot
               or else State = Failed_Slot
             then
+               Validate_Slot_Metadata (Item, Slot);
                if Same_Name (Item, Slot, Name, Hash) then
                   if State = Initializing_Slot then
                      Result := Initialization_In_Progress;
