@@ -33,6 +33,10 @@ node "$website_kit/scripts/render-gnatdoc-theme.mjs" \
 node "$website_kit/scripts/render-gnatdoc-theme.mjs" \
   "$project_root/docs/gnatdoc-debug-theme.json" \
   "$project_root/docs/gnatdoc-debug/html"
+debug_index_template="$project_root/docs/gnatdoc-debug/html/template/index.xhtml"
+sed "s|href='../guide/'|href='../../guide/'|" \
+  "$debug_index_template" >"$debug_index_template.tmp"
+mv "$debug_index_template.tmp" "$debug_index_template"
 bench_index_template="$project_root/docs/gnatdoc-bench/html/template/index.xhtml"
 sed "s|href='../guide/'|href='../../guide/benchmarking/'|" \
   "$bench_index_template" >"$bench_index_template.tmp"
