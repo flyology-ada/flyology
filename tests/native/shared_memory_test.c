@@ -2,10 +2,19 @@
 #define _GNU_SOURCE
 #endif
 
+/*
+ * Test-only ABI fixtures for shared-memory integration.
+ *
+ * C is retained here only where the test must construct or inspect C-only
+ * representations: opaque posix_spawn actions, wait-status macros, cmsghdr
+ * layouts (including deliberately malformed descriptor sets), platform VM
+ * reservation APIs, and platform-created adversarial descriptors. Retry,
+ * timeout, lifecycle, validation, and assertion policy stay in the Ada test.
+ */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <signal.h>
 #include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,11 +32,6 @@
 #endif
 
 extern char **environ;
-
-int flyology_shm_open_named(const char *, unsigned long long, unsigned int,
-                            int, int *, int *, int *);
-int flyology_shm_open_file(const char *, unsigned long long, unsigned int,
-                           int, int *, int *);
 
 int flyology_test_is_linux(void)
 {
@@ -94,20 +98,15 @@ int flyology_test_spawn_shared_memory_child(const char *program, int socket_fd,
     return 0;
 }
 
-int flyology_test_wait_shared_memory_child(int pid)
+/* waitpid status macros have no linkable ABI. Return one observation only:
+ * 0 still running, 1 successful exit, 2 interrupted, -1 failed/invalid. */
+int flyology_test_poll_shared_memory_child(int pid)
 {
     int status;
-    for (int attempt = 0; attempt < 10000; ++attempt) {
-        pid_t result = waitpid((pid_t)pid, &status, WNOHANG);
-        if (result == (pid_t)pid) {
-            return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
-        }
-        if (result < 0 && errno != EINTR) return -1;
-        usleep(1000);
-    }
-    kill((pid_t)pid, SIGKILL);
-    (void)waitpid((pid_t)pid, &status, 0);
-    return -1;
+    pid_t result = waitpid((pid_t)pid, &status, WNOHANG);
+    if (result == 0) return 0;
+    if (result < 0) return errno == EINTR ? 2 : -1;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 1 : -1;
 }
 
 int flyology_test_reserve_mapping_base(unsigned long long base,
@@ -149,11 +148,6 @@ int flyology_test_release_reserved_base(unsigned long long base,
 #else
     return munmap((void *)(uintptr_t)base, (size_t)length) == 0 ? 0 : -1;
 #endif
-}
-
-int flyology_test_close_shared_socket(int fd)
-{
-    return close(fd) == 0 ? 0 : -1;
 }
 
 int flyology_test_send_two_descriptors(int socket_fd, int first, int second)
@@ -260,13 +254,6 @@ int flyology_test_create_read_only_backing(unsigned long long length,
     return 0;
 }
 
-int flyology_test_size_changes_rejected(int fd, unsigned long long length)
-{
-    int grow_rejected = ftruncate(fd, (off_t)(length + 1)) != 0;
-    int shrink_rejected = ftruncate(fd, (off_t)(length - 1)) != 0;
-    return grow_rejected && shrink_rejected ? 1 : 0;
-}
-
 int flyology_test_create_unsized_shm(const char *name, int *fd_out)
 {
     int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
@@ -288,49 +275,4 @@ int flyology_test_close_unsized_shm(const char *name, int fd)
 int flyology_test_unlink_shm(const char *name)
 {
     return shm_unlink(name) == 0 ? 0 : -1;
-}
-
-int flyology_test_failed_named_create_cleanup(const char *name)
-{
-    int fd = -1;
-    int properties = 0;
-    int outcome = 0;
-    int probe;
-    int result = flyology_shm_open_named(
-        name, (unsigned long long)LLONG_MAX + 1ULL, 0600, 0,
-        &fd, &properties, &outcome);
-    if (result == 0) {
-        close(fd);
-        shm_unlink(name);
-        return 0;
-    }
-    probe = shm_open(name, O_RDWR, 0);
-    if (probe >= 0) {
-        close(probe);
-        shm_unlink(name);
-        return 0;
-    }
-    return errno == ENOENT ? 1 : 0;
-}
-
-int flyology_test_failed_file_create_cleanup(const char *path)
-{
-    int fd = -1;
-    int properties = 0;
-    int result = flyology_shm_open_file(
-        path, (unsigned long long)LLONG_MAX + 1ULL, 0600, 1,
-        &fd, &properties);
-    if (result == 0) {
-        close(fd);
-        unlink(path);
-        return 0;
-    }
-    return lstat(path, &(struct stat){0}) != 0 && errno == ENOENT ? 1 : 0;
-}
-
-void flyology_test_store_mapping_u64(void *base, unsigned long long offset,
-                                     uint64_t value)
-{
-    __atomic_store_n((uint64_t *)((unsigned char *)base + offset), value,
-                     __ATOMIC_RELEASE);
 }

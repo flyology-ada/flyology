@@ -299,6 +299,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   unless readiness was established independently. Send success is only local
   kernel acceptance; socket creation, peer authentication, remote
   acknowledgment, and application trust policy remain outside the package.
+- Shared-memory C is an allowlisted ABI leaf boundary: host `stat` extraction,
+  variadic `fcntl`, Linux `memfd_create`, socket-family extraction, and one-shot
+  `cmsghdr` encoding/decoding only. Ada owns retry, validation, security,
+  cleanup, ownership, and lifecycle policy; the pure classifiers are SPARK.
 - Backing, mapping, flush, and namespace operations are synchronous metadata or
   VM syscalls and may occupy a lightweight task's event-loop pthread. File
   flush is not a crash-consistent application transaction.

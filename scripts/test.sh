@@ -109,6 +109,14 @@ link_test_mains () {
 FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
+"$project_root/scripts/check-shared-memory-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
+mkdir -p "$project_root/build/tests"
+cc -std=c11 -Wall -Wextra -Werror \
+  "$project_root/tests/probes/shared_memory_abi_probe.c" \
+  "$project_root/src/native/flyology_shared_memory.c" \
+  -o "$project_root/build/tests/shared_memory_abi_probe"
+"$project_root/build/tests/shared_memory_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
   'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_' \

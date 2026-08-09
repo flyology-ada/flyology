@@ -310,6 +310,16 @@ private
       Descriptor : C.int;
       Length     : Byte_Length;
       Properties : Security_Properties);
+   --  @exclude Private child-package received descriptor validation
+   --  @param Descriptor Newly received descriptor to inspect
+   --  @param Expected_Length Exact locally selected length
+   --  @param Require_Immutable_Size Whether immutable size seals are required
+   --  @param Properties Verified properties returned on success
+   procedure Validate_Received
+     (Descriptor             : C.int;
+      Expected_Length        : Byte_Length;
+      Require_Immutable_Size : Boolean;
+      Properties             : out Security_Properties);
    --  @exclude Private child-package descriptor access
    --  @param Item Open descriptor owner
    --  @return Owned native descriptor
