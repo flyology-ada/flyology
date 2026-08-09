@@ -1,6 +1,8 @@
 --  Test-only TLS ownership-transfer barrier state. The project excludes this
---  unit completely unless FLYOLOGY_TLS_TEST_HOOKS is enabled.
-private package Flyology.TLS_Test_Hooks
+--  unit completely unless FLYOLOGY_TLS_TEST_HOOKS is enabled. It is a public
+--  child only in that test build so its abstract state remains self-contained;
+--  a private child's state would have to become part of Flyology's state.
+package Flyology.TLS_Test_Hooks
   with SPARK_Mode => On,
        Abstract_State =>
          (Barrier_State with
@@ -27,11 +29,13 @@ is
 
    function Reached (Point : Integer) return Boolean
    with
+     Volatile_Function,
      Global => (Input => Barrier_State),
      Post => (if not Valid_Point (Point) then not Reached'Result);
 
    function Released (Point : Integer) return Boolean
    with
+     Volatile_Function,
      Global => (Input => Barrier_State),
      Post => (if not Valid_Point (Point) then Released'Result);
 

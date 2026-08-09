@@ -39,19 +39,49 @@ is
 
    procedure Arrive (Point : Integer; Did_Arrive : out Boolean) is
    begin
-      if not Valid_Point (Point) or else not Armed_Flags (Point) then
+      if not Valid_Point (Point) then
          Did_Arrive := False;
          return;
       end if;
+
+      declare
+         Is_Armed : constant Boolean := Armed_Flags (Point);
+      begin
+         if not Is_Armed then
+            Did_Arrive := False;
+            return;
+         end if;
+      end;
+
       Reached_Flags (Point) := True;
       Did_Arrive := True;
    end Arrive;
 
    function Reached (Point : Integer) return Boolean is
-     (if Valid_Point (Point) then Reached_Flags (Point) else False);
+   begin
+      if not Valid_Point (Point) then
+         return False;
+      end if;
+
+      declare
+         Has_Reached : constant Boolean := Reached_Flags (Point);
+      begin
+         return Has_Reached;
+      end;
+   end Reached;
 
    function Released (Point : Integer) return Boolean is
-     (if Valid_Point (Point) then Released_Flags (Point) else True);
+   begin
+      if not Valid_Point (Point) then
+         return True;
+      end if;
+
+      declare
+         Is_Released : constant Boolean := Released_Flags (Point);
+      begin
+         return Is_Released;
+      end;
+   end Released;
 
    procedure Release (Point : Integer) is
    begin
