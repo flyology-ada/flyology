@@ -67,8 +67,10 @@
             <li><a href="#mapping">Map and attach</a></li>
             <li><a href="#registry">Initialize the registry</a></li>
             <li><a href="#objects">Publish a relocatable object</a></li>
+            <li><a href="#worker-status">Share worker status</a></li>
             <li><a href="#peers">Open or hand off to peers</a></li>
             <li><a href="#lifecycle">Detach and persist</a></li>
+            <li><a href="#import-checkpoint">Reopen an import checkpoint</a></li>
             <li><a href="#limits">Trust and recovery limits</a></li>
           </ol>
         </nav>
@@ -213,6 +215,99 @@ end case;</code></pre>
             <p>Removal invalidates the registry handle but does not destroy application bytes or unlink the OS object. A later fitting reuse advances a nonwrapping generation, so stale handles fail. The <a href="../data-structures/#choose">relocatable data-structures guide</a> explains how to select and initialize the leaf placed in each extent.</p>
           </section>
 
+          <section id="worker-status">
+            <span class="step-label">EXAMPLE 01</span>
+            <h2>Report progress from an exec'd worker.</h2>
+            <p>Consider a coordinator that starts a helper process to index a collection of images. The coordinator needs a small status value that survives different virtual addresses and remains valid after it closes the descriptor used for handoff. A named byte string inside an anonymous segment is enough for the stored state.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Coordinator</dt><dd>Creates the anonymous backing, publishes <code>jobs/image-index/status</code> with the value <code>queued</code>, and sends the descriptor over a connected Unix-domain socket.</dd></div>
+                <div class="decision-row"><dt>Worker</dt><dd>Receives and maps the descriptor after <code>exec</code>, attaches the ready named extent, then replaces the value with <code>working</code> and finally <code>complete</code>.</dd></div>
+                <div class="decision-row"><dt>Observer</dt><dd>Reads the same byte string through its own mapping. Its native base may differ from both the coordinator and worker bases.</dd></div>
+              </dl>
+            </div>
+            <figure class="code-panel">
+              <figcaption>coordinator: publish queued before handing off</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Queued : constant Ada.Streams.Stream_Element_Array :=
+  (1 =&gt; 16#71#, 2 =&gt; 16#75#, 3 =&gt; 16#65#,
+   4 =&gt; 16#75#, 5 =&gt; 16#65#);
+
+Shared.Create_Anonymous (Backing, Segment_Length);
+Shared.Map (Coordinator_Map, Backing);
+Segments.Create_Or_Attach
+  (Coordinator_Segment, Coordinator_Map, Config, Segment_Open);
+if Segment_Open /= Segments.Initialized_New then
+   raise Program_Error with "coordinator did not initialize the segment";
+end if;
+Segments.Attach_Region (Coordinator_Segment, Coordinator_Region);
+
+Segments.Try_Find_Or_Create
+  (Coordinator_Segment, "jobs/image-index/status",
+   Byte_Strings.Required_Storage (32),
+   Status_Handle, Status_Claim, Named_Open, Failure);
+
+if Named_Open = Segments.Created then
+   Segments.Claimed_Extent
+     (Coordinator_Segment, Status_Claim, Location, Extent);
+   Byte_Strings.Initialize
+     (Status, Coordinator_Region, Location, Maximum_Length =&gt; 32);
+   Byte_Strings.Assign (Status, Queued);
+   Segments.Publish (Coordinator_Segment, Status_Claim);
+else
+   raise Program_Error with "new status extent was not created";
+end if;
+
+Unix_Sockets.Send
+  (Worker_Socket, Backing, Ownership =&gt; Unix_Sockets.Transfer);
+--  Coordinator_Map and Status remain live after Transfer closes Backing.</code></pre>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>worker: attach at its own address and publish progress</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Working : constant Ada.Streams.Stream_Element_Array :=
+  (1 =&gt; 16#77#, 2 =&gt; 16#6F#, 3 =&gt; 16#72#, 4 =&gt; 16#6B#,
+   5 =&gt; 16#69#, 6 =&gt; 16#6E#, 7 =&gt; 16#67#);
+Complete : constant Ada.Streams.Stream_Element_Array :=
+  (1 =&gt; 16#63#, 2 =&gt; 16#6F#, 3 =&gt; 16#6D#, 4 =&gt; 16#70#,
+   5 =&gt; 16#6C#, 6 =&gt; 16#65#, 7 =&gt; 16#74#, 8 =&gt; 16#65#);
+
+Unix_Sockets.Receive
+  (Coordinator_Socket, Segment_Length, Received,
+   Require_Immutable_Size =&gt; False);
+Shared.Map (Worker_Map, Received);
+Shared.Close (Received);
+
+Segments.Create_Or_Attach
+  (Worker_Segment, Worker_Map, Config, Segment_Open);
+if Segment_Open /= Segments.Attached_Existing then
+   raise Program_Error with "worker did not receive a ready segment";
+end if;
+Segments.Attach_Region (Worker_Segment, Worker_Region);
+
+loop
+   Segments.Try_Find
+     (Worker_Segment, "jobs/image-index/status",
+      Status_Handle, Lookup, Failure);
+   exit when Lookup /= Segments.Registry_Busy;
+   delay 0.0;
+end loop;
+
+if Lookup = Segments.Found then
+   Segments.Resolve
+     (Worker_Segment, Status_Handle, Location, Extent);
+   Byte_Strings.Attach
+     (Status, Worker_Region, Location, Maximum_Length =&gt; 32);
+   Byte_Strings.Assign (Status, Working);
+   Index_Images;
+   Byte_Strings.Assign (Status, Complete);
+else
+   raise Program_Error with "worker status is not ready";
+end if;</code></pre>
+            </figure>
+            <p>The coordinator can read the updated value through its retained <code>Status</code> view. Shared memory supplies no notification, so the application must choose how the coordinator learns that the value changed. It can poll at an application scheduling point or use a separate readiness channel. A Linux-only protocol that requires memfd size seals can pass <code>Require_Immutable_Size =&gt; True</code>; the portable example accepts the validated exact-size descriptor because Darwin anonymous storage has no Linux seals. Process creation must also respect Flyology's post-tasking rule: after Ada tasking starts, a fork child performs only async-signal-safe work before <code>exec</code> or <code>_exit</code>.</p>
+          </section>
+
           <section id="peers">
             <span class="step-label">SEGMENT 06</span>
             <h2>Let peers open a name or receive one capability.</h2>
@@ -230,7 +325,7 @@ Unix_Sockets.Receive
   (Socket,
    Expected_Length        =&gt; 1_048_576,
    Item                   =&gt; Received,
-   Require_Immutable_Size =&gt; True);
+   Require_Immutable_Size =&gt; False);
 Shared.Map (Peer_Map, Received);
 Shared.Close (Received);</code></pre>
             </figure>
@@ -256,6 +351,74 @@ Shared.Close (Received);</code></pre>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
               <p><strong>Writeback is not a transaction.</strong> These calls do not make several registry and leaf updates atomically crash-consistent. Supply an application journal or another explicit transaction protocol when several writes must commit together.</p>
+            </aside>
+          </section>
+
+          <section id="import-checkpoint">
+            <span class="step-label">EXAMPLE 02</span>
+            <h2>Resume an import from a file-backed checkpoint.</h2>
+            <p>A single-owner importer can keep its last completed record in a regular-file segment. The first run creates the file and publishes a named byte string. Later runs open the same exact-size file, attach the registry, resolve the checkpoint, and continue from the stored value. The application creates the containing <code>state</code> directory before this startup sequence.</p>
+            <figure class="code-panel">
+              <figcaption>open or create the checkpoint segment at application startup</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Checkpoint_Path : constant String := "state/orders-import.segment";
+
+if Ada.Directories.Exists (Checkpoint_Path) then
+   Shared.Open_File (Backing, Checkpoint_Path, Segment_Length);
+else
+   Shared.Create_File
+     (Backing, Checkpoint_Path, Segment_Length, Permissions =&gt; 8#600#);
+end if;
+
+Shared.Map (Map, Backing);
+Segments.Create_Or_Attach (Segment, Map, Config, Segment_Open);
+
+case Segment_Open is
+   when Segments.Initialized_New |
+        Segments.Attached_Existing =&gt;
+      Segments.Attach_Region (Segment, Region);
+
+   when Segments.Initialization_In_Progress =&gt;
+      raise Program_Error with "checkpoint initialization is incomplete";
+end case;</code></pre>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>publish or attach the last completed record</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Segments.Try_Find_Or_Create
+  (Segment, "imports/orders/last-record",
+   Byte_Strings.Required_Storage (32),
+   Checkpoint_Handle, Checkpoint_Claim, Named_Open, Failure);
+
+case Named_Open is
+   when Segments.Created =&gt;
+      Segments.Claimed_Extent
+        (Segment, Checkpoint_Claim, Location, Extent);
+      Byte_Strings.Initialize
+        (Checkpoint, Region, Location, Maximum_Length =&gt; 32);
+      Byte_Strings.Assign
+        (Checkpoint, Ada.Streams.Stream_Element_Array'(1 =&gt; 16#30#));
+      Segments.Publish (Segment, Checkpoint_Claim);
+
+   when Segments.Attached_Existing =&gt;
+      Segments.Resolve
+        (Segment, Checkpoint_Handle, Location, Extent);
+      Byte_Strings.Attach
+        (Checkpoint, Region, Location, Maximum_Length =&gt; 32);
+
+   when others =&gt;
+      raise Program_Error with "checkpoint is not available";
+end case;
+
+--  After importing record 25000, encode "25000" as bytes and assign it.
+Byte_Strings.Assign (Checkpoint, Encoded_Record_Number);
+Shared.Flush (Map, Synchronous =&gt; True);
+Shared.Flush (Backing);</code></pre>
+            </figure>
+            <p>On restart, <code>Byte_Strings.Read</code> returns the last stored record number and the importer resumes after it. The file path is owned by one externally serialized startup authority in this example. <code>Ada.Directories.Exists</code> is not a multi-process create-or-open protocol.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Define the checkpoint transaction.</strong> Flushing the string does not prove that the external database or output file committed the corresponding record. A resumable importer must define which side commits first and how it detects or tolerates replay.</p>
             </aside>
           </section>
 
