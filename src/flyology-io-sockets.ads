@@ -260,6 +260,8 @@ package Flyology.IO.Sockets is
      with Post => not Is_Open (Source);
 
    --  Enable nonblocking and close-on-exec modes.
+   --  Configuration is retained by the owning handle and repeated calls for
+   --  the same descriptor generation do not repeat operating-system setup.
    --  @param Socket Open socket to configure
    --  @exception Socket_Error Descriptor configuration fails
    procedure Prepare (Socket : Socket_Type);
@@ -274,15 +276,16 @@ package Flyology.IO.Sockets is
 
    --  Supported socket option names.
    --  @enum Reuse_Address Permit local address reuse
+   --  @enum Reuse_Port Permit multiple opted-in sockets to bind one endpoint
    --  @enum Receive_Timeout Bound blocking receives in native setup code
-   type Option_Name is (Reuse_Address, Receive_Timeout);
+   type Option_Name is (Reuse_Address, Reuse_Port, Receive_Timeout);
    --  Socket options supported by Flyology's portable layer.
    --  @field Name Selected option
-   --  @field Enabled Reuse_Address setting
+   --  @field Enabled Reuse_Address or Reuse_Port setting
    --  @field Timeout Receive_Timeout interval in seconds
    type Option_Type (Name : Option_Name := Reuse_Address) is record
       case Name is
-         when Reuse_Address =>
+         when Reuse_Address | Reuse_Port =>
             Enabled : Boolean := False;
          when Receive_Timeout =>
             Timeout : Duration := 0.0;
@@ -690,6 +693,7 @@ package Flyology.IO.Sockets is
 
 private
    type Socket_Type is limited record
-      Value : Interfaces.C.int := -1;
+      Value       : Interfaces.C.int := -1;
+      Preparation : aliased Interfaces.Unsigned_32 := 0 with Atomic;
    end record;
 end Flyology.IO.Sockets;

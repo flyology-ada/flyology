@@ -1346,6 +1346,12 @@ uses host headers for address conversion, socket constants, variadic descriptor
 configuration, and `errno` capture; retry, timeout, cancellation, and exception
 policy remain in Ada.
 
+`Reuse_Address` and `Reuse_Port` remain separate socket options. On Darwin and
+Linux, `Reuse_Port` permits multiple sockets that all enable it before
+`Bind_Socket` to bind the same concrete IPv4 or IPv6 endpoint. Kernel policy
+selects which socket receives each unicast datagram; Flyology does not impose a
+userspace distribution policy.
+
 `Receive_Datagram` is the task-aware UDP boundary for wildcard and multihomed
 servers. One `recvmsg` returns the source endpoint, the kernel-selected local
 destination endpoint, the original datagram length, explicit truncation state,
@@ -3141,8 +3147,14 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_dormant_stack_pressure.sh 128 64
 ./showcases/run_file_transfer_benchmark.sh
 ./showcases/run_shared_image_index.sh
+./showcases/run_socket_preparation_benchmark.sh 200000
 ./showcases/run_http_benchmark.sh
 ```
+
+The socket-preparation benchmark runs a lightweight UDP echo task against a
+native client with an optimized build and a 16-loop prepared runtime. It
+reports round trips per second and test-only nonblocking descriptor setup
+attempts; the counter is absent from normal library builds.
 
 The examples demonstrate:
 

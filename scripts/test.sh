@@ -8,10 +8,12 @@ connection_test_subdir=behavioral-connection-hooks
 worker_pool_test_subdir=behavioral-worker-pool-hooks
 structured_server_test_subdir=behavioral-structured-server-hooks
 wall_clock_test_subdir=behavioral-wall-clock-hooks
+socket_test_subdir=behavioral-socket-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
 wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
+socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
 test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
 FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
 export FLYOLOGY_TEST_TEMP_ROOT
@@ -119,7 +121,7 @@ cc -std=c11 -Wall -Wextra -Werror \
 "$project_root/build/tests/shared_memory_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_' \
+  'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -395,6 +397,8 @@ structured_server_hook_mains=structured_server_abort_smoke
 
 wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 
+socket_hook_mains=socket_preparation_smoke
+
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
@@ -428,6 +432,7 @@ unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
+unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 compile_test_mains "$test_subdir" "$all_test_mains"
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
@@ -450,6 +455,11 @@ FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
 export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 compile_test_mains "$wall_clock_test_subdir" "$wall_clock_hook_mains"
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+
+FLYOLOGY_SOCKET_TEST_HOOKS=true
+export FLYOLOGY_SOCKET_TEST_HOOKS
+compile_test_mains "$socket_test_subdir" "$socket_hook_mains"
+unset FLYOLOGY_SOCKET_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains \
@@ -504,8 +514,15 @@ link_test_mains \
   "$wall_clock_hook_mains"
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 
+FLYOLOGY_SOCKET_TEST_HOOKS=true
+export FLYOLOGY_SOCKET_TEST_HOOKS
+link_test_mains \
+  "$socket_test_subdir" "$project_root/build/rts" "$socket_hook_mains"
+unset FLYOLOGY_SOCKET_TEST_HOOKS
+
 "$test_bin/default_policy_smoke" native
 "$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
+"$socket_test_bin/socket_preparation_smoke"
 
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
@@ -748,6 +765,7 @@ fi
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
+unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \

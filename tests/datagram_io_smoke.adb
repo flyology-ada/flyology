@@ -259,8 +259,183 @@ procedure Datagram_IO_Smoke is
          Close_If_Open (Socket);
          raise;
    end Run_Deadline_And_Interruption;
+
+   procedure Run_Reuse_Port is
+      First, Second, Moved_Second, Collision : Sockets.Socket_Type;
+      Bound : Sockets.Endpoint;
+      Reuse : constant Sockets.Option_Type :=
+        (Name => Sockets.Reuse_Port, Enabled => True);
+      Request  : constant Stream_Element_Array := [16#C3#, 16#01#];
+      Response : constant Stream_Element_Array := [16#43#, 16#02#];
+      First_Received, Second_Received : Boolean := False;
+      Rejected : Boolean := False;
+      Wake : Flyology.Wake_Sources.Source;
+
+      procedure Exchange_One (Listener : Sockets.Socket_Type) is
+         Client : Sockets.Socket_Type;
+         Incoming : Stream_Element_Array (Response'Range);
+         Last, Sent : Stream_Element_Offset;
+         Metadata : Sockets.Datagram_Metadata;
+      begin
+         Sockets.Create_Socket
+           (Client, Sockets.IPv4, Sockets.Socket_Datagram);
+         Sockets.Bind_Socket
+           (Client,
+            Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
+         Sockets.Send_Datagram
+           (Client, Request, Sent, Bound, Timeout => 1.0);
+         pragma Assert (Sent = Request'Last);
+         Sockets.Receive_Datagram
+           (Listener, Incoming, Last, Metadata, Timeout => 1.0);
+         pragma Assert (Last = Incoming'Last);
+         pragma Assert (Incoming = Request);
+         Sockets.Send_Datagram
+           (Listener, Response, Sent,
+            Destination => Metadata.Source,
+            Source => Metadata.Destination,
+            Timeout => 1.0);
+         pragma Assert (Sent = Response'Last);
+         Sockets.Receive_Datagram
+           (Client, Incoming, Last, Metadata, Timeout => 1.0);
+         pragma Assert (Last = Incoming'Last);
+         pragma Assert (Incoming = Response);
+         Sockets.Close_Socket (Client);
+      exception
+         when others =>
+            Close_If_Open (Client);
+            raise;
+      end Exchange_One;
+   begin
+      Sockets.Create_Socket
+        (First, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Bind_Socket
+        (First,
+         Sockets.Network_Endpoint
+           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Bound := Sockets.Get_Socket_Name (First);
+      Sockets.Create_Socket
+        (Collision, Sockets.IPv4, Sockets.Socket_Datagram);
+      begin
+         Sockets.Bind_Socket (Collision, Bound);
+      exception
+         when Sockets.Socket_Error =>
+            Rejected := True;
+      end;
+      pragma Assert (Rejected);
+      Sockets.Close_Socket (Collision);
+      Sockets.Close_Socket (First);
+
+      Sockets.Create_Socket
+        (First, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Create_Socket
+        (Second, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Set_Socket_Option (First, Reuse);
+      Sockets.Set_Socket_Option (Second, Reuse);
+      Sockets.Bind_Socket
+        (First,
+         Sockets.Network_Endpoint
+           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Bound := Sockets.Get_Socket_Name (First);
+      Sockets.Bind_Socket (Second, Bound);
+      Sockets.Move (Second, Moved_Second);
+
+      Flyology.Wake_Sources.Ensure (Wake);
+      Flyology.Wake_Sources.Signal (Wake);
+      declare
+         Incoming : Stream_Element_Array (Request'Range);
+         Last     : Stream_Element_Offset;
+         Metadata : Sockets.Datagram_Metadata;
+         Interrupted : Boolean := False;
+      begin
+         begin
+            Sockets.Receive_Datagram
+              (Moved_Second, Incoming, Last, Metadata, Timeout => 1.0,
+               Interrupts =>
+                 (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+         exception
+            when Sockets.Operation_Interrupted =>
+               Interrupted := True;
+         end;
+         pragma Assert (Interrupted);
+      end;
+
+      declare
+         Client : Sockets.Socket_Type;
+         Incoming : Stream_Element_Array (Response'Range);
+         Last, Sent : Stream_Element_Offset;
+         Metadata : Sockets.Datagram_Metadata;
+      begin
+         Sockets.Create_Socket
+           (Client, Sockets.IPv4, Sockets.Socket_Datagram);
+         Sockets.Bind_Socket
+           (Client,
+            Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
+         Sockets.Send_Datagram
+           (Client, Request, Sent, Bound, Timeout => 1.0);
+         pragma Assert (Sent = Request'Last);
+         begin
+            Sockets.Receive_Datagram
+              (First, Incoming, Last, Metadata, Timeout => 0.002);
+            First_Received := True;
+         exception
+            when Flyology.IO.Timeout_Error =>
+               Sockets.Receive_Datagram
+                 (Moved_Second, Incoming, Last, Metadata, Timeout => 1.0);
+               Second_Received := True;
+         end;
+         pragma Assert (Last = Incoming'Last);
+         pragma Assert (Incoming = Request);
+         if First_Received then
+            Sockets.Send_Datagram
+              (First, Response, Sent,
+               Destination => Metadata.Source,
+               Source => Metadata.Destination,
+               Timeout => 1.0);
+         else
+            Sockets.Send_Datagram
+              (Moved_Second, Response, Sent,
+               Destination => Metadata.Source,
+               Source => Metadata.Destination,
+               Timeout => 1.0);
+         end if;
+         pragma Assert (Sent = Response'Last);
+         Sockets.Receive_Datagram
+           (Client, Incoming, Last, Metadata, Timeout => 1.0);
+         pragma Assert (Last = Incoming'Last);
+         pragma Assert (Incoming = Response);
+         Sockets.Close_Socket (Client);
+      exception
+         when others =>
+            Close_If_Open (Client);
+            raise;
+      end;
+
+      if First_Received then
+         Sockets.Close_Socket (First);
+         Exchange_One (Moved_Second);
+         Second_Received := True;
+      else
+         Sockets.Close_Socket (Moved_Second);
+         Exchange_One (First);
+         First_Received := True;
+      end if;
+      pragma Assert (First_Received and then Second_Received);
+
+      Sockets.Close_Socket (Moved_Second);
+      Sockets.Close_Socket (First);
+   exception
+      when others =>
+         Close_If_Open (Collision);
+         Close_If_Open (Moved_Second);
+         Close_If_Open (Second);
+         Close_If_Open (First);
+         raise;
+   end Run_Reuse_Port;
 begin
    Run_Family (Sockets.IPv4);
    Run_Family (Sockets.IPv6);
    Run_Deadline_And_Interruption;
+   Run_Reuse_Port;
 end Datagram_IO_Smoke;

@@ -11,6 +11,9 @@
 #include <limits.h>
 #include <netinet/in.h>
 #include <stdint.h>
+#if FLYOLOGY_SOCKET_TEST_HOOKS
+#include <stdatomic.h>
+#endif
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -32,6 +35,22 @@
 #define FLYOLOGY_DISCARD_VECTORS \
     ((FLYOLOGY_MAX_IP_DATAGRAM + FLYOLOGY_DISCARD_CHUNK - 1U) / \
      FLYOLOGY_DISCARD_CHUNK)
+
+#if FLYOLOGY_SOCKET_TEST_HOOKS
+static _Atomic unsigned long long flyology_socket_nonblocking_setups;
+
+void flyology_test_socket_reset_nonblocking_setups(void)
+{
+    atomic_store_explicit(&flyology_socket_nonblocking_setups, 0,
+                          memory_order_relaxed);
+}
+
+unsigned long long flyology_test_socket_nonblocking_setup_count(void)
+{
+    return atomic_load_explicit(&flyology_socket_nonblocking_setups,
+                                memory_order_relaxed);
+}
+#endif
 
 /* Ada provides 128 bytes of aligned opaque storage for sockaddr values. */
 _Static_assert(sizeof(struct sockaddr_storage) <= 16U * sizeof(uint64_t),
@@ -77,6 +96,13 @@ int flyology_socket_configure_descriptor(int fd, int nonblocking)
 {
     int descriptor_flags = fcntl(fd, F_GETFD);
     int status_flags;
+
+#if FLYOLOGY_SOCKET_TEST_HOOKS
+    if (nonblocking) {
+        atomic_fetch_add_explicit(&flyology_socket_nonblocking_setups, 1,
+                                  memory_order_relaxed);
+    }
+#endif
 
     if (descriptor_flags < 0 ||
         fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) < 0) {
@@ -273,6 +299,11 @@ int flyology_socket_level(void)
 int flyology_socket_reuse_address_option(void)
 {
     return SO_REUSEADDR;
+}
+
+int flyology_socket_reuse_port_option(void)
+{
+    return SO_REUSEPORT;
 }
 
 int flyology_socket_pending_error_option(void)
