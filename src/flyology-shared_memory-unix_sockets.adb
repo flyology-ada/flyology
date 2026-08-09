@@ -1,44 +1,18 @@
+with Flyology.Shared_Memory_Native;
+with Flyology.Shared_Memory_Policy;
+with GNAT.OS_Lib;
+with Interfaces;
+
 package body Flyology.Shared_Memory.Unix_Sockets is
+   package Native renames Flyology.Shared_Memory_Native;
+   package Policy renames Flyology.Shared_Memory_Policy;
+
    use type Byte_Length;
+   use type C.long;
+   use type C.size_t;
+   use type Interfaces.Unsigned_32;
 
-   function C_Send (Socket, Descriptor : C.int) return C.int;
-   pragma Import (C, C_Send, "flyology_shm_send_fd");
-
-   function C_Prepare (Socket : C.int) return C.int;
-   pragma Import
-     (C, C_Prepare, "flyology_shm_prepare_handoff_socket");
-
-   function C_Untrusted_Supported return C.int;
-   pragma Import
-     (C, C_Untrusted_Supported,
-      "flyology_shm_untrusted_handoff_supported");
-
-   function C_Receive
-     (Socket : C.int; Descriptor : access C.int) return C.int;
-   pragma Import (C, C_Receive, "flyology_shm_receive_fd");
-
-   function C_Validate
-     (Descriptor        : C.int;
-      Expected_Length   : C.unsigned_long_long;
-      Require_Immutable : C.int;
-      Properties        : access C.int) return C.int;
-   pragma Import (C, C_Validate, "flyology_shm_validate_received");
-
-   function C_Close (Descriptor : C.int) return C.int;
-   pragma Import (C, C_Close, "flyology_shm_close");
-
-   function Decode (Value : C.int) return Security_Properties is
-      function Has (Power : Natural) return Boolean is
-        ((Value / (2 ** Power)) mod 2 = 1);
-   begin
-      return
-        (Close_On_Exec             => Has (0),
-         Size_Immutable            => Has (1),
-         No_Execute_Seal           => Has (2),
-         No_Execute_Seal_Supported => Has (3),
-         No_Symlink_Follow         => Has (4),
-         Owner_Only_Permissions    => Has (5));
-   end Decode;
+   function Current_Error return C.int is (C.int (GNAT.OS_Lib.Errno));
 
    procedure Raise_Child_Failure (Operation : String; Code : C.int) is
    begin
@@ -57,6 +31,97 @@ package body Flyology.Shared_Memory.Unix_Sockets is
            Operation & " failed (errno" & C.int'Image (Code) & ")";
       end if;
    end Raise_Child_Failure;
+
+   procedure Raise_Current (Operation : String) is
+   begin
+      Raise_Child_Failure (Operation, Current_Error);
+   end Raise_Current;
+
+   function Has_Flag (Value, Flag : C.int) return Boolean is
+     ((Interfaces.Unsigned_32 (Value) and Interfaces.Unsigned_32 (Flag)) /= 0);
+
+   procedure Ensure_Close_On_Exec (Descriptor : C.int) is
+      Flags : C.int := Native.Get_Descriptor_Flags (Descriptor);
+   begin
+      if Flags < 0 then
+         Raise_Current ("handoff descriptor flag inspection");
+      elsif not Has_Flag (Flags, Native.Descriptor_Close_On_Exec) then
+         Flags := Flags + Native.Descriptor_Close_On_Exec;
+         if Native.Set_Descriptor_Flags (Descriptor, Flags) /= 0 then
+            Raise_Current ("handoff descriptor close-on-exec setup");
+         end if;
+      end if;
+   end Ensure_Close_On_Exec;
+
+   procedure Prepare_Handoff_Socket (Socket : C.int) is
+      Kind, Local_Family, Peer_Family : C.int;
+   begin
+      if Native.Socket_Type (Socket, Kind) /= 0 then
+         if Current_Error = Native.Error_Not_Socket then
+            Raise_Child_Failure ("handoff socket validation", -5);
+         else
+            Raise_Current ("handoff socket type inspection");
+         end if;
+      elsif Kind /= Native.Stream_Socket_Type then
+         Raise_Child_Failure ("handoff socket validation", -5);
+      end if;
+      if Native.Local_Socket_Family (Socket, Local_Family) /= 0 then
+         Raise_Current ("handoff local socket inspection");
+      elsif Native.Peer_Socket_Family (Socket, Peer_Family) /= 0 then
+         if Current_Error = Native.Error_Not_Connected then
+            Raise_Child_Failure ("handoff socket validation", -5);
+         else
+            Raise_Current ("handoff peer socket inspection");
+         end if;
+      elsif Local_Family /= Native.Unix_Socket_Family
+        or else Peer_Family /= Native.Unix_Socket_Family
+      then
+         Raise_Child_Failure ("handoff socket validation", -5);
+      end if;
+      Ensure_Close_On_Exec (Socket);
+      if Native.Enable_No_SIGPIPE (Socket) /= 0 then
+         Raise_Current ("handoff SIGPIPE suppression");
+      end if;
+   end Prepare_Handoff_Socket;
+
+   procedure Send_One (Socket, Descriptor : C.int) is
+      Amount : C.long;
+      Error  : C.int;
+   begin
+      Prepare_Handoff_Socket (Socket);
+      loop
+         Amount := Native.Send_Descriptor_Once (Socket, Descriptor);
+         exit when Amount >= 0;
+         Error := Current_Error;
+         exit when Error /= Native.Error_Interrupted;
+      end loop;
+      if Amount /= 1 then
+         if Amount < 0 then
+            Raise_Current ("SCM_RIGHTS send");
+         else
+            Raise_Child_Failure ("SCM_RIGHTS send", Native.Error_IO);
+         end if;
+      end if;
+   end Send_One;
+
+   procedure Close_Descriptors
+     (Descriptors : in out Native.Descriptor_Array;
+      Count       : C.size_t)
+   is
+      Ignored : C.int;
+      Last : constant C.size_t :=
+        C.size_t'Min (Count, Descriptors'Length);
+   begin
+      if Last = 0 then
+         return;
+      end if;
+      for Index in C.size_t range 0 .. Last - 1 loop
+         if Descriptors (Index) >= 0 then
+            Ignored := Native.Close (Descriptors (Index));
+            Descriptors (Index) := -1;
+         end if;
+      end loop;
+   end Close_Descriptors;
 
    protected body Channel_Controller is
       procedure Adopt
@@ -154,7 +219,7 @@ package body Flyology.Shared_Memory.Unix_Sockets is
    begin
       Item.Owner.Controller.Poison (Descriptor);
       if Descriptor >= 0 then
-         Ignored := C_Close (Descriptor);
+         Ignored := Native.Close (Descriptor);
       end if;
    end Poison_And_Close;
 
@@ -163,31 +228,54 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Expected_Length        : Byte_Length;
       Require_Immutable_Size : Boolean;
       Descriptor             : out C.int;
-      Props                  : out C.int)
+      Props                  : out Security_Properties)
    is
-      Local_Descriptor : aliased C.int := -1;
-      Local_Props      : aliased C.int := 0;
-      Status           : C.int;
-      Ignored          : C.int;
+      Descriptors : Native.Descriptor_Array (0 .. 511) := (others => -1);
+      Count       : C.size_t := 0;
+      Payload     : Interfaces.Unsigned_8 := 0;
+      Message_Flags : C.int := 0;
+      Malformed   : Boolean := False;
+      Amount      : C.long;
+      Error       : C.int := 0;
+      Local_Descriptor : C.int := -1;
    begin
-      Status := C_Receive (Socket, Local_Descriptor'Access);
-      if Status /= 0 then
-         Raise_Child_Failure ("SCM_RIGHTS receive", Status);
+      Prepare_Handoff_Socket (Socket);
+      loop
+         Amount := Native.Receive_Descriptors_Once
+           (Socket, Native.Message_Close_On_Exec, Descriptors, Count,
+            Payload, Message_Flags, Malformed);
+         exit when Amount >= 0;
+         Error := Current_Error;
+         exit when Error /= Native.Error_Interrupted;
+      end loop;
+      if Amount < 0 then
+         Raise_Child_Failure ("SCM_RIGHTS receive", Error);
+      elsif Count > Descriptors'Length
+        or else not Policy.Valid_Handoff
+          (Long_Long_Integer (Amount), Payload,
+           Interfaces.Unsigned_64 (Count), Malformed,
+           Has_Flag (Message_Flags, Native.Message_Control_Truncated),
+           Has_Flag (Message_Flags, Native.Message_Truncated))
+      then
+         Close_Descriptors (Descriptors, Count);
+         Raise_Child_Failure ("SCM_RIGHTS receive", -5);
       end if;
-      Status := C_Validate
-        (Local_Descriptor, C.unsigned_long_long (Expected_Length),
-         Boolean'Pos (Require_Immutable_Size), Local_Props'Access);
-      if Status /= 0 then
-         Ignored := C_Close (Local_Descriptor);
-         Local_Descriptor := -1;
-         Raise_Child_Failure ("received descriptor validation", Status);
-      end if;
+      Local_Descriptor := Descriptors (0);
+      Descriptors (0) := -1;
+      Validate_Received
+        (Local_Descriptor, Expected_Length, Require_Immutable_Size, Props);
       Descriptor := Local_Descriptor;
-      Props := Local_Props;
+      Local_Descriptor := -1;
    exception
       when others =>
+         Close_Descriptors (Descriptors, Count);
          if Local_Descriptor >= 0 then
-            Ignored := C_Close (Local_Descriptor);
+            declare
+               Ignored : constant C.int := Native.Close (Local_Descriptor);
+               pragma Unreferenced (Ignored);
+            begin
+               null;
+            end;
          end if;
          raise;
    end Receive_Validated;
@@ -197,7 +285,6 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Socket : in out Socket_Descriptor;
       Trust  : Peer_Trust := Trusted_Peer)
    is
-      Status   : C.int;
       Accepted : Boolean;
    begin
       if Socket < 0 then
@@ -206,14 +293,13 @@ package body Flyology.Shared_Memory.Unix_Sockets is
          raise Validation_Error with "handoff channel is already open";
       elsif Is_Poisoned (Item) then
          raise Protocol_Error with "handoff channel is poisoned";
-      elsif Trust = Untrusted_Peer and then C_Untrusted_Supported = 0 then
+      elsif Trust = Untrusted_Peer
+        and then not Native.Untrusted_Handoff_Supported
+      then
          raise Security_Error with
            "untrusted SCM_RIGHTS receipt is unavailable on this host";
       end if;
-      Status := C_Prepare (C.int (Socket));
-      if Status /= 0 then
-         Raise_Child_Failure ("handoff channel adoption", Status);
-      end if;
+      Prepare_Handoff_Socket (C.int (Socket));
       Item.Owner.Controller.Adopt (C.int (Socket), Trust, Accepted);
       if not Accepted then
          raise Validation_Error with "handoff channel is already open";
@@ -230,9 +316,9 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       if Busy_Now then
          raise Channel_Busy with "handoff channel is already in use";
       elsif Descriptor >= 0 then
-         Status := C_Close (Descriptor);
+         Status := Native.Close (Descriptor);
          if Status /= 0 then
-            Raise_Child_Failure ("handoff channel close", Status);
+            Raise_Current ("handoff channel close");
          end if;
       end if;
    end Close;
@@ -253,7 +339,7 @@ package body Flyology.Shared_Memory.Unix_Sockets is
          Item.Controller.Poison (Descriptor);
       end if;
       if Descriptor >= 0 then
-         Ignored := C_Close (Descriptor);
+         Ignored := Native.Close (Descriptor);
       end if;
    exception
       when others =>
@@ -265,17 +351,14 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Item      : in out Backing_Object;
       Ownership : Send_Ownership := Borrow)
    is
-      Status : C.int;
    begin
       if Socket < 0 then
          raise Validation_Error with "Unix-domain socket is invalid";
       elsif not Shared_Memory.Is_Open (Item) then
          raise Validation_Error with "backing object is closed";
       end if;
-      Status := C_Send (C.int (Socket), Owned_Descriptor (Item));
-      if Status /= 0 then
-         Raise_Child_Failure ("SCM_RIGHTS send", Status);
-      elsif Ownership = Transfer then
+      Send_One (C.int (Socket), Owned_Descriptor (Item));
+      if Ownership = Transfer then
          Close (Item);
       end if;
    end Send;
@@ -287,7 +370,6 @@ package body Flyology.Shared_Memory.Unix_Sockets is
    is
       Socket   : C.int;
       Trust    : Peer_Trust;
-      Status   : C.int;
       Acquired : Boolean := False;
    begin
       if not Shared_Memory.Is_Open (Item) then
@@ -295,11 +377,13 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       end if;
       Begin_Operation (Channel, Socket, Trust);
       Acquired := True;
-      Status := C_Send (Socket, Owned_Descriptor (Item));
-      if Status /= 0 then
-         Poison_And_Close (Channel);
-         Raise_Child_Failure ("SCM_RIGHTS channel send", Status);
-      end if;
+      begin
+         Send_One (Socket, Owned_Descriptor (Item));
+      exception
+         when others =>
+            Poison_And_Close (Channel);
+            raise;
+      end;
       Channel.Owner.Controller.Finish;
       Acquired := False;
       if Ownership = Transfer then
@@ -320,7 +404,7 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Require_Immutable_Size : Boolean := False)
    is
       Descriptor : C.int := -1;
-      Props      : C.int := 0;
+      Props      : Security_Properties;
    begin
       if Socket < 0 then
          raise Validation_Error with "Unix-domain socket is invalid";
@@ -335,13 +419,13 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Receive_Validated
         (C.int (Socket), Expected_Length, Require_Immutable_Size,
          Descriptor, Props);
-      Adopt_Received (Item, Descriptor, Expected_Length, Decode (Props));
+      Adopt_Received (Item, Descriptor, Expected_Length, Props);
       Descriptor := -1;
    exception
       when others =>
          if Descriptor >= 0 and then not Shared_Memory.Is_Open (Item) then
             declare
-               Ignored : constant C.int := C_Close (Descriptor);
+               Ignored : constant C.int := Native.Close (Descriptor);
                pragma Unreferenced (Ignored);
             begin
                null;
@@ -359,7 +443,7 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Socket     : C.int;
       Trust      : Peer_Trust;
       Descriptor : C.int := -1;
-      Props      : C.int := 0;
+      Props      : Security_Properties;
       Ignored    : C.int;
    begin
       if Shared_Memory.Is_Open (Item) then
@@ -375,13 +459,13 @@ package body Flyology.Shared_Memory.Unix_Sockets is
            (Socket, Expected_Length,
             Require_Immutable_Size or else Trust = Untrusted_Peer,
             Descriptor, Props);
-         Adopt_Received (Item, Descriptor, Expected_Length, Decode (Props));
+         Adopt_Received (Item, Descriptor, Expected_Length, Props);
          Descriptor := -1;
          Channel.Owner.Controller.Finish;
       exception
          when others =>
             if Descriptor >= 0 and then not Shared_Memory.Is_Open (Item) then
-               Ignored := C_Close (Descriptor);
+               Ignored := Native.Close (Descriptor);
             end if;
             Poison_And_Close (Channel);
             raise;

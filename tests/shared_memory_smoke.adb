@@ -31,6 +31,7 @@ procedure Shared_Memory_Smoke is
    use type DS.Region_Offset;
    use type Interfaces.Unsigned_32;
    use type C.int;
+   use type C.long;
    use type Shared.Backing_Kind;
    use type Shared.Byte_Length;
    use type Shared.Namespace_Open_Result;
@@ -64,12 +65,13 @@ procedure Shared_Memory_Smoke is
       PID         : access C.int) return C.int;
    pragma Import
      (C, Spawn_Child, "flyology_test_spawn_shared_memory_child");
-   function Wait_Child (PID : C.int) return C.int;
+   function Poll_Child (PID : C.int) return C.int;
    pragma Import
-     (C, Wait_Child, "flyology_test_wait_shared_memory_child");
+     (C, Poll_Child, "flyology_test_poll_shared_memory_child");
+   function Kill (PID, Signal : C.int) return C.int;
+   pragma Import (C, Kill, "kill");
    function Close_Socket (Socket : C.int) return C.int;
-   pragma Import
-     (C, Close_Socket, "flyology_test_close_shared_socket");
+   pragma Import (C, Close_Socket, "close");
    function Send_Two
      (Socket, First, Second : C.int) return C.int;
    pragma Import
@@ -87,8 +89,8 @@ procedure Shared_Memory_Smoke is
       Descriptor : access C.int) return C.int;
    pragma Import
      (C, Create_Read_Only, "flyology_test_create_read_only_backing");
-   function Send_Raw (Socket, Descriptor : C.int) return C.int;
-   pragma Import (C, Send_Raw, "flyology_shm_send_fd");
+   function Send_Raw (Socket, Descriptor : C.int) return C.long;
+   pragma Import (C, Send_Raw, "flyology_shm_send_fd_once");
    function Open_FD_Count return C.int;
    pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
    function Contains_U64
@@ -97,10 +99,8 @@ procedure Shared_Memory_Smoke is
       Value  : Interfaces.Unsigned_64) return C.int;
    pragma Import
      (C, Contains_U64, "flyology_test_mapping_contains_u64");
-   function Size_Changes_Rejected
-     (Descriptor : C.int; Length : C.unsigned_long_long) return C.int;
-   pragma Import
-     (C, Size_Changes_Rejected, "flyology_test_size_changes_rejected");
+   function Truncate (Descriptor : C.int; Length : C.long_long) return C.int;
+   pragma Import (C, Truncate, "ftruncate");
    function Create_Unsized
      (Name : C.char_array; Descriptor : access C.int) return C.int;
    pragma Import
@@ -111,21 +111,6 @@ procedure Shared_Memory_Smoke is
      (C, Close_Unsized, "flyology_test_close_unsized_shm");
    function Unlink_Shared_Name (Name : C.char_array) return C.int;
    pragma Import (C, Unlink_Shared_Name, "flyology_test_unlink_shm");
-   function Failed_Named_Create_Cleanup (Name : C.char_array) return C.int;
-   pragma Import
-     (C, Failed_Named_Create_Cleanup,
-      "flyology_test_failed_named_create_cleanup");
-   function Failed_File_Create_Cleanup (Path : C.char_array) return C.int;
-   pragma Import
-     (C, Failed_File_Create_Cleanup,
-      "flyology_test_failed_file_create_cleanup");
-   procedure Store_Mapping_U64
-     (Base   : System.Address;
-      Offset : C.unsigned_long_long;
-      Value  : Interfaces.Unsigned_64);
-   pragma Import
-     (C, Store_Mapping_U64, "flyology_test_store_mapping_u64");
-
    procedure Assert (Condition : Boolean; Message : String) is
    begin
       if not Condition then
@@ -135,6 +120,37 @@ procedure Shared_Memory_Smoke is
 
    function Identifier return String is
      (Ada.Strings.Fixed.Trim (C.int'Image (Getpid), Ada.Strings.Both));
+
+   function Wait_Child (PID : C.int) return C.int is
+      Result : C.int;
+   begin
+      for Attempt in 1 .. 10_000 loop
+         Result := Poll_Child (PID);
+         if Result = 1 then
+            return 0;
+         elsif Result = -1 then
+            return -1;
+         end if;
+         delay 0.001;
+      end loop;
+      Result := Kill (PID, 9);
+      for Attempt in 1 .. 10_000 loop
+         Result := Poll_Child (PID);
+         exit when Result in -1 | 1;
+         delay 0.001;
+      end loop;
+      return -1;
+   end Wait_Child;
+
+   function Size_Changes_Rejected
+     (Descriptor : C.int; Length : Shared.Byte_Length) return Boolean is
+      Grow_Result : constant C.int :=
+        Truncate (Descriptor, C.long_long (Length + 1));
+      Shrink_Result : constant C.int :=
+        Truncate (Descriptor, C.long_long (Length - 1));
+   begin
+      return Grow_Result /= 0 and then Shrink_Result /= 0;
+   end Size_Changes_Rejected;
 
    procedure Create_Name
      (Segment : Segments.View;
@@ -191,8 +207,7 @@ procedure Shared_Memory_Smoke is
             "Linux anonymous descriptor lacks immutable size seals");
          Assert
            (Size_Changes_Rejected
-              (Testing.Descriptor (Backing),
-               C.unsigned_long_long (Mapping_Length)) = 1,
+              (Testing.Descriptor (Backing), Mapping_Length),
             "sealed anonymous size accepted grow or shrink");
       else
          Assert
@@ -487,10 +502,30 @@ procedure Shared_Memory_Smoke is
       Shared.Unlink (Replacement);
       Shared.Close (Replacement);
       Shared.Close (Original);
-      Assert
-        (Failed_Named_Create_Cleanup
-           (C.To_C (Name & "-f")) = 1,
-         "failed named creation left a namespace object");
+      declare
+         Failure_Object : Shared.Backing_Object;
+         Failed         : Boolean := False;
+      begin
+         begin
+            Shared.Create_Named
+              (Failure_Object, Name & "-f",
+               Shared.Byte_Length (C.long_long'Last) + 1);
+         exception
+            when Constraint_Error =>
+               Failed := True;
+         end;
+         if Shared.Is_Open (Failure_Object) then
+            Shared.Unlink (Failure_Object);
+            Shared.Close (Failure_Object);
+         end if;
+         Assert
+           (Failed,
+            "nonrepresentable named creation unexpectedly succeeded");
+         Shared.Create_Named
+           (Failure_Object, Name & "-f", Mapping_Length);
+         Shared.Unlink (Failure_Object);
+         Shared.Close (Failure_Object);
+      end;
 
       Shared.Unlink (Created);
       Shared.Unlink (Created);
@@ -588,9 +623,30 @@ procedure Shared_Memory_Smoke is
       Shared.Unlink (Replacement);
       Shared.Close (Replacement);
       Shared.Close (Original);
-      Assert
-        (Failed_File_Create_Cleanup (C.To_C (Failure_Path)) = 1,
-         "failed file creation left a namespace entry");
+      declare
+         Failure_Object : Shared.Backing_Object;
+         Failed         : Boolean := False;
+      begin
+         begin
+            Shared.Create_File
+              (Failure_Object, Failure_Path,
+               Shared.Byte_Length (C.long_long'Last) + 1);
+         exception
+            when Constraint_Error =>
+               Failed := True;
+         end;
+         if Shared.Is_Open (Failure_Object) then
+            Shared.Unlink (Failure_Object);
+            Shared.Close (Failure_Object);
+         end if;
+         Assert
+           (Failed,
+            "nonrepresentable file creation unexpectedly succeeded");
+         Shared.Create_File
+           (Failure_Object, Failure_Path, Mapping_Length);
+         Shared.Unlink (Failure_Object);
+         Shared.Close (Failure_Object);
+      end;
    exception
       when others =>
          if Shared.Is_Open (Replacement) then
@@ -641,8 +697,8 @@ procedure Shared_Memory_Smoke is
         (Segment_Result = Segments.Initialized_New,
          "corruption-test segment did not initialize");
       Segments.Detach (Segment);
-      Store_Mapping_U64
-        (Testing.Base (Map), 56, Interfaces.Unsigned_64 (Data_Start + 1));
+      Testing.Store_Release_U64
+        (Map, 56, Interfaces.Unsigned_64 (Data_Start + 1));
       begin
          Segments.Create_Or_Attach (Segment, Map, Config, Segment_Result);
       exception
@@ -659,7 +715,7 @@ procedure Shared_Memory_Smoke is
       Segments.Publish (Segment, Claim);
       Segments.Try_Remove (Segment, "removed", Removed);
       Assert (Removed = Segments.Removed, "corruption slot was not removed");
-      Store_Mapping_U64 (Testing.Base (Map), 152, 1);
+      Testing.Store_Release_U64 (Map, 152, 1);
       Rejected := False;
       begin
          Segments.Try_Find_Or_Create
@@ -859,7 +915,7 @@ procedure Shared_Memory_Smoke is
       Assert (Socketpair (Left'Access, Right'Access) = 0, "socketpair failed");
       Before := Open_FD_Count;
       Assert
-        (Send_Raw (Left, Left) = 0,
+        (Send_Raw (Left, Left) = 1,
          "wrong-type ancillary test send failed");
       begin
          Unix_Sockets.Receive
@@ -890,7 +946,7 @@ procedure Shared_Memory_Smoke is
             "socketpair failed");
          Before := Open_FD_Count;
          Assert
-           (Send_Raw (Left, Read_Only) = 0,
+           (Send_Raw (Left, Read_Only) = 1,
             "read-only ancillary test send failed");
          begin
             Unix_Sockets.Receive
@@ -1076,7 +1132,7 @@ procedure Shared_Memory_Smoke is
          Busy_Rejected     : Boolean := False;
          Guard_Preserved   : Boolean := False;
          Receive_Succeeded : Boolean := False;
-         Unblock_Status    : C.int := -1;
+         Unblock_Status    : C.long := -1;
 
          task Blocking_Receiver
            with Priority => System.Priority'Last
@@ -1154,7 +1210,7 @@ procedure Shared_Memory_Smoke is
          Assert
            (Guard_Preserved,
             "rejected send released another operation's channel guard");
-         Assert (Unblock_Status = 0, "busy-channel receive unblock failed");
+         Assert (Unblock_Status = 1, "busy-channel receive unblock failed");
          Assert (Receive_Succeeded, "busy-channel receive did not complete");
          Assert (Ignored = 0, "busy-channel peer close failed");
       end;
@@ -1271,7 +1327,7 @@ procedure Shared_Memory_Smoke is
               (Receiver, Receive_Socket, Unix_Sockets.Untrusted_Peer);
             Right := C.int (Receive_Socket);
             Assert
-              (Send_Raw (Left, Testing.Descriptor (Backing)) = 0,
+              (Send_Raw (Left, Testing.Descriptor (Backing)) = 1,
                "untrusted-channel send failed");
             Unix_Sockets.Receive (Receiver, Mapping_Length, Received);
             Assert

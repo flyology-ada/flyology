@@ -1,8 +1,12 @@
+with Flyology.Atomic_Primitives;
+with Flyology.Memory_Operations;
 with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Shared_Memory.Segments is
    package C renames Interfaces.C;
+   package Atomic renames Flyology.Atomic_Primitives;
+   package Memory renames Flyology.Memory_Operations;
    package Storage renames System.Storage_Elements;
    package DS renames Flyology.Data_Structures;
 
@@ -56,32 +60,18 @@ package body Flyology.Shared_Memory.Segments is
    Segment_Magic : constant Interfaces.Unsigned_64 :=
      16#464C_594F_5345_474D#;
 
-   function C_Load_U32
-     (Address : System.Address) return Interfaces.Unsigned_32;
-   pragma Import (C, C_Load_U32, "flyology_shm_atomic_load_u32");
-   function C_Load_U64
-     (Address : System.Address) return Interfaces.Unsigned_64;
-   pragma Import (C, C_Load_U64, "flyology_shm_atomic_load_u64");
-   procedure C_Store_U32
-     (Address : System.Address; Value : Interfaces.Unsigned_32);
-   pragma Import (C, C_Store_U32, "flyology_shm_atomic_store_u32");
-   procedure C_Store_U64
-     (Address : System.Address; Value : Interfaces.Unsigned_64);
-   pragma Import (C, C_Store_U64, "flyology_shm_atomic_store_u64");
-   function C_CAS_U32
+   function CAS_U32
      (Address  : System.Address;
       Expected : access Interfaces.Unsigned_32;
-      Desired  : Interfaces.Unsigned_32) return C.int;
-   pragma Import (C, C_CAS_U32, "flyology_shm_atomic_cas_u32");
-   procedure C_Copy_In
-     (Target : System.Address; Source : System.Address; Length : C.size_t);
-   pragma Import (C, C_Copy_In, "flyology_shm_copy_in");
-   procedure C_Zero (Target : System.Address; Length : C.size_t);
-   pragma Import (C, C_Zero, "flyology_shm_zero");
-   function C_Equal
-     (Left : System.Address; Right : System.Address; Length : C.size_t)
-      return C.int;
-   pragma Import (C, C_Equal, "flyology_shm_equal");
+      Desired  : Interfaces.Unsigned_32) return C.int
+   is
+      Local : Interfaces.Unsigned_32 := Expected.all;
+      Result : constant Boolean :=
+        Atomic.Compare_Exchange_U32 (Address, Local, Desired);
+   begin
+      Expected.all := Local;
+      return Boolean'Pos (Result);
+   end CAS_U32;
 
    type Geometry is record
       Slot_Size  : Byte_Length;
@@ -186,27 +176,27 @@ package body Flyology.Shared_Memory.Segments is
    function Read_U32
      (Address : System.Address) return Interfaces.Unsigned_32 is
    begin
-      return C_Load_U32 (Address);
+      return Atomic.Load_Acquire_U32 (Address);
    end Read_U32;
 
    function Read_U64
      (Address : System.Address) return Interfaces.Unsigned_64 is
    begin
-      return C_Load_U64 (Address);
+      return Atomic.Load_Acquire_U64 (Address);
    end Read_U64;
 
    procedure Write_U32
      (Address : System.Address; Value : Interfaces.Unsigned_32)
    is
    begin
-      C_Store_U32 (Address, Value);
+      Atomic.Store_Release_U32 (Address, Value);
    end Write_U32;
 
    procedure Write_U64
      (Address : System.Address; Value : Interfaces.Unsigned_64)
    is
    begin
-      C_Store_U64 (Address, Value);
+      Atomic.Store_Release_U64 (Address, Value);
    end Write_U64;
 
    function Slot_Base
@@ -302,9 +292,9 @@ package body Flyology.Shared_Memory.Segments is
         and then Read_U32
           (Slot_At (Item, Slot, Slot_Name_Length_Offset, 4)) =
             Interfaces.Unsigned_32 (Name'Length)
-        and then C_Equal
+        and then Memory.Equal
           (Slot_At (Item, Slot, Name_Offset, Byte_Length (Name'Length)),
-           Name'Address, C.size_t (Name'Length)) /= 0;
+           Name'Address, C.size_t (Name'Length));
    end Same_Name;
 
    procedure Clear_Claim (Claim : out Creation_Claim) is
@@ -323,7 +313,8 @@ package body Flyology.Shared_Memory.Segments is
       if not Item.Attached then
          raise Segment_Error with "detached segment view";
       end if;
-      State := C_Load_U32 (Address_At (Item, Lifecycle_Offset, 4));
+      State := Atomic.Load_Acquire_U32
+        (Address_At (Item, Lifecycle_Offset, 4));
       if State = Poisoned_State then
          raise Segment_Error with "segment registry is poisoned";
       elsif State /= Ready_State then
@@ -335,7 +326,7 @@ package body Flyology.Shared_Memory.Segments is
       Expected : aliased Interfaces.Unsigned_32 := Guard_Free;
    begin
       Require_Ready (Item);
-      if C_CAS_U32
+      if CAS_U32
         (Address_At (Item, Guard_Offset, 4), Expected'Access,
          Guard_Locked) /= 0
       then
@@ -349,7 +340,8 @@ package body Flyology.Shared_Memory.Segments is
 
    procedure Release_Guard (Item : View) is
    begin
-      C_Store_U32 (Address_At (Item, Guard_Offset, 4), Guard_Free);
+      Atomic.Store_Release_U32
+        (Address_At (Item, Guard_Offset, 4), Guard_Free);
    end Release_Guard;
 
    procedure Set_View
@@ -397,12 +389,13 @@ package body Flyology.Shared_Memory.Segments is
            "segment mapping is not natively indexable";
       end if;
 
-      State := C_Load_U32 (At_Base (Base, Extent, Lifecycle_Offset, 4));
+      State := Atomic.Load_Acquire_U32
+        (At_Base (Base, Extent, Lifecycle_Offset, 4));
       if State = Virgin_State and then not Mapping_May_Initialize (Source) then
          Result := Initialization_In_Progress;
          return;
       elsif State = Virgin_State then
-         Claimed := C_CAS_U32
+         Claimed := CAS_U32
            (At_Base (Base, Extent, Lifecycle_Offset, 4), Expected'Access,
             Initializing_State) /= 0;
          if not Claimed then
@@ -412,7 +405,7 @@ package body Flyology.Shared_Memory.Segments is
 
       if Claimed then
          begin
-            C_Zero
+            Memory.Zero
               (At_Base (Base, Extent, Version_Offset,
                         Shape.Data_Start - Version_Offset),
                C.size_t (Shape.Data_Start - Version_Offset));
@@ -440,21 +433,21 @@ package body Flyology.Shared_Memory.Segments is
             Write_U64
               (At_Base (Base, Extent, Data_Start_Offset, 8),
                Interfaces.Unsigned_64 (Shape.Data_Start));
-            C_Store_U64
+            Atomic.Store_Release_U64
               (At_Base (Base, Extent, Next_Offset, 8),
                Interfaces.Unsigned_64 (Shape.Data_Start));
-            C_Store_U64
+            Atomic.Store_Release_U64
               (At_Base (Base, Extent, Generation_Offset, 8), 0);
-            C_Store_U32
+            Atomic.Store_Release_U32
               (At_Base (Base, Extent, Guard_Offset, 4), Guard_Free);
             Set_View (Item, Source, Config, Shape);
-            C_Store_U32
+            Atomic.Store_Release_U32
               (Address_At (Item, Lifecycle_Offset, 4), Ready_State);
             Result := Initialized_New;
             return;
          exception
             when others =>
-               C_Store_U32
+               Atomic.Store_Release_U32
                  (At_Base (Base, Extent, Lifecycle_Offset, 4), Poisoned_State);
                Detach (Item);
                raise;
@@ -493,9 +486,9 @@ package body Flyology.Shared_Memory.Segments is
       Set_View (Item, Source, Config, Shape);
       declare
          Next : constant Interfaces.Unsigned_64 :=
-           C_Load_U64 (Address_At (Item, Next_Offset, 8));
+           Atomic.Load_Acquire_U64 (Address_At (Item, Next_Offset, 8));
          Guard : constant Interfaces.Unsigned_32 :=
-           C_Load_U32 (Address_At (Item, Guard_Offset, 4));
+           Atomic.Load_Acquire_U32 (Address_At (Item, Guard_Offset, 4));
       begin
          if Next < Interfaces.Unsigned_64 (Shape.Data_Start)
            or else Next > Interfaces.Unsigned_64 (Extent)
@@ -581,7 +574,8 @@ package body Flyology.Shared_Memory.Segments is
       for Slot in Interfaces.Unsigned_32 range 1 .. Item.Capacity loop
          declare
             State : constant Interfaces.Unsigned_32 :=
-              C_Load_U32 (Slot_At (Item, Slot, Slot_State_Offset, 4));
+              Atomic.Load_Acquire_U32
+                (Slot_At (Item, Slot, Slot_State_Offset, 4));
          begin
             if State = Free_Slot then
                if Free_Candidate = 0 then
@@ -644,7 +638,7 @@ package body Flyology.Shared_Memory.Segments is
          Location : Byte_Length;
          Reserved : Byte_Length;
          Generation : Interfaces.Unsigned_64 :=
-           C_Load_U64 (Address_At (Item, Generation_Offset, 8));
+           Atomic.Load_Acquire_U64 (Address_At (Item, Generation_Offset, 8));
       begin
          if Generation = Interfaces.Unsigned_64'Last then
             Release_Guard (Item);
@@ -666,7 +660,7 @@ package body Flyology.Shared_Memory.Segments is
          else
             Slot := Free_Candidate;
             Location := Byte_Length
-              (C_Load_U64 (Address_At (Item, Next_Offset, 8)));
+              (Atomic.Load_Acquire_U64 (Address_At (Item, Next_Offset, 8)));
             Reserved := Align_Up
               (Requested_Length, Byte_Length (Item.Alignment));
             if Location < Item.Data_Start
@@ -682,15 +676,15 @@ package body Flyology.Shared_Memory.Segments is
                Result := Segment_Exhausted;
                return;
             end if;
-            C_Store_U64
+            Atomic.Store_Release_U64
               (Address_At (Item, Next_Offset, 8),
                Interfaces.Unsigned_64 (Location + Reserved));
          end if;
 
          Generation := Generation + 1;
-         C_Store_U64
+         Atomic.Store_Release_U64
            (Address_At (Item, Generation_Offset, 8), Generation);
-         C_Zero
+         Memory.Zero
            (Slot_At
               (Item, Slot, Name_Offset,
                Byte_Length (Item.Slot_Size) - Name_Offset),
@@ -713,10 +707,10 @@ package body Flyology.Shared_Memory.Segments is
          Write_U64
            (Slot_At (Item, Slot, Slot_Reserved_Offset, 8),
             Interfaces.Unsigned_64 (Reserved));
-         C_Copy_In
+         Memory.Copy
            (Slot_At (Item, Slot, Name_Offset, Byte_Length (Name'Length)),
             Name'Address, C.size_t (Name'Length));
-         C_Store_U32
+         Atomic.Store_Release_U32
            (Slot_At (Item, Slot, Slot_State_Offset, 4), Initializing_Slot);
          Handle := (Slot => Slot, Stamp => Generation);
          Claim.Slot := Slot;
@@ -757,7 +751,8 @@ package body Flyology.Shared_Memory.Segments is
       for Slot in Interfaces.Unsigned_32 range 1 .. Item.Capacity loop
          declare
             State : constant Interfaces.Unsigned_32 :=
-              C_Load_U32 (Slot_At (Item, Slot, Slot_State_Offset, 4));
+              Atomic.Load_Acquire_U32
+                (Slot_At (Item, Slot, Slot_State_Offset, 4));
          begin
             if State = Initializing_Slot
               or else State = Ready_Slot
@@ -810,7 +805,7 @@ package body Flyology.Shared_Memory.Segments is
         or else Read_U64
           (Slot_At (Item, Claim.Slot, Slot_Generation_Offset, 8)) /=
             Claim.Stamp
-        or else C_Load_U32
+        or else Atomic.Load_Acquire_U32
           (Slot_At (Item, Claim.Slot, Slot_State_Offset, 4)) /=
             Initializing_Slot
         or else Read_U64
@@ -840,7 +835,7 @@ package body Flyology.Shared_Memory.Segments is
       Expected : aliased Interfaces.Unsigned_32 := Initializing_Slot;
    begin
       Validate_Claim (Item, Claim);
-      if C_CAS_U32
+      if CAS_U32
         (Slot_At (Item, Claim.Slot, Slot_State_Offset, 4), Expected'Access,
          Ready_Slot) = 0
       then
@@ -858,7 +853,7 @@ package body Flyology.Shared_Memory.Segments is
       Validate_Claim (Item, Claim);
       Write_U32
         (Slot_At (Item, Claim.Slot, Slot_Failure_Offset, 4), Failure);
-      if C_CAS_U32
+      if CAS_U32
         (Slot_At (Item, Claim.Slot, Slot_State_Offset, 4), Expected'Access,
          Failed_Slot) = 0
       then
@@ -881,7 +876,7 @@ package body Flyology.Shared_Memory.Segments is
       then
          return Stale;
       end if;
-      State := C_Load_U32
+      State := Atomic.Load_Acquire_U32
         (Slot_At (Item, Handle.Slot, Slot_State_Offset, 4));
       if State = Free_Slot then
          return Stale;
@@ -962,7 +957,7 @@ package body Flyology.Shared_Memory.Segments is
       Acquired := True;
       for Slot in Interfaces.Unsigned_32 range 1 .. Item.Capacity loop
          declare
-            State : constant Interfaces.Unsigned_32 := C_Load_U32
+            State : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
               (Slot_At (Item, Slot, Slot_State_Offset, 4));
          begin
             if State = Initializing_Slot
@@ -974,7 +969,7 @@ package body Flyology.Shared_Memory.Segments is
                   if State = Initializing_Slot then
                      Result := Initialization_In_Progress;
                   else
-                     C_Store_U32
+                     Atomic.Store_Release_U32
                        (Slot_At (Item, Slot, Slot_State_Offset, 4),
                         Removed_Slot);
                      Result := Removed;
