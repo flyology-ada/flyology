@@ -55,6 +55,11 @@ then
 fi
 cat "$runtime_gnatdoc_log"
 
+#  GNATdoc updates its destination in place and does not remove pages for
+#  units that leave the documented source set. Recreate this generated-only
+#  subtree so an internal or renamed unit cannot survive into Pages or search.
+rm -rf "$project_root/docs/api/flyology_bench"
+
 (
    cd "$project_root/flyology_bench"
    "$alr" build --stop-after=generation
@@ -66,7 +71,7 @@ cat "$runtime_gnatdoc_log"
      --backend=html \
      --warnings \
      --style=leading \
-     -P flyology_bench.gpr \
+     -P flyology_bench_docs.gpr \
      -O "$project_root/docs/api/flyology_bench" \
      >"$bench_gnatdoc_log" 2>&1
    then
@@ -78,7 +83,7 @@ cat "$runtime_gnatdoc_log"
    #  render, but --warnings reports the formals as undocumented. Keep this
    #  exception narrow; every other public benchmark entity remains enforced.
    sed -E \
-     '/^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$/d' \
+     -e '/^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$/d' \
      "$bench_gnatdoc_log"
 )
 

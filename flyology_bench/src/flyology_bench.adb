@@ -4,11 +4,13 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Characters.Handling;
 with Ada.Unchecked_Deallocation;
+with Flyology_Bench_Internal_Probes;
 with Interfaces.C;
 with System;
 
 package body Flyology_Bench is
    package Math renames Ada.Numerics.Long_Elementary_Functions;
+   use Flyology_Bench_Internal_Probes;
 
    use type Interfaces.Unsigned_64;
    use type Interfaces.C.int;
@@ -21,82 +23,6 @@ package body Flyology_Bench is
 
    procedure Memory_Barrier;
    pragma Import (C, Memory_Barrier, "flyology_bench_clobber_memory");
-
-   function Native_Clock_Now
-     (Value : access Interfaces.Unsigned_64) return Interfaces.C.int;
-   pragma Import (C, Native_Clock_Now, "flyology_bench_clock_now");
-
-   function Native_Clock_Resolution
-     (Value : access Interfaces.Unsigned_64) return Interfaces.C.int;
-   pragma Import
-     (C, Native_Clock_Resolution, "flyology_bench_clock_resolution");
-
-   function Native_Clock_Backend return Interfaces.C.int;
-   pragma Import (C, Native_Clock_Backend, "flyology_bench_clock_backend");
-
-   Resource_Value_Count : constant := 11;
-   type Native_Resource_Values is
-     array (Natural range 0 .. Resource_Value_Count - 1)
-       of aliased Interfaces.Unsigned_64
-     with Convention => C;
-
-   function Native_Resource_Snapshot
-     (Values         : System.Address;
-      Capacity       : Interfaces.C.size_t;
-      Available_Mask : access Interfaces.Unsigned_64)
-      return Interfaces.C.int;
-   pragma Import
-     (C, Native_Resource_Snapshot, "flyology_bench_resource_snapshot");
-
-   Perf_Value_Count : constant := 5;
-   type Native_Perf_FDs is
-     array (Natural range 0 .. Perf_Value_Count - 1) of Interfaces.C.int
-     with Convention => C;
-   type Native_Perf_Statuses is
-     array (Natural range 0 .. Perf_Value_Count - 1) of Interfaces.C.int
-     with Convention => C;
-   type Native_Perf_Counters is
-     array (Natural range 0 .. Perf_Value_Count - 1)
-       of Interfaces.Unsigned_64
-     with Convention => C;
-   --  Mirrors struct flyology_bench_perf_state. The baseline fields let the
-   --  bridge report each sample as a difference; inherited counts cannot be
-   --  cleared between samples with PERF_EVENT_IOC_RESET.
-   type Native_Perf_State is record
-      FDs              : Native_Perf_FDs := (others => -1);
-      Available_Mask   : Interfaces.Unsigned_64 := 0;
-      Statuses         : Native_Perf_Statuses := (others => 0);
-      IPC_Grouped      : Interfaces.C.int := 0;
-      Baseline_Value   : Native_Perf_Counters := (others => 0);
-      Baseline_Enabled : Native_Perf_Counters := (others => 0);
-      Baseline_Running : Native_Perf_Counters := (others => 0);
-   end record
-     with Convention => C;
-   type Native_Perf_Values is
-     array (Natural range 0 .. Perf_Value_Count - 1)
-       of aliased Interfaces.Unsigned_64
-     with Convention => C;
-
-   function Native_Perf_Initialize
-     (State          : access Native_Perf_State;
-      Requested_Mask : Interfaces.Unsigned_64) return Interfaces.C.int;
-   pragma Import
-     (C, Native_Perf_Initialize, "flyology_bench_perf_initialize");
-
-   function Native_Perf_Start
-     (State : access Native_Perf_State) return Interfaces.C.int;
-   pragma Import (C, Native_Perf_Start, "flyology_bench_perf_start");
-
-   function Native_Perf_Finish
-     (State          : access Native_Perf_State;
-      Values         : System.Address;
-      Capacity       : Interfaces.C.size_t;
-      Available_Mask : access Interfaces.Unsigned_64)
-      return Interfaces.C.int;
-   pragma Import (C, Native_Perf_Finish, "flyology_bench_perf_finish");
-
-   procedure Native_Perf_Close (State : access Native_Perf_State);
-   pragma Import (C, Native_Perf_Close, "flyology_bench_perf_close");
 
    function Native_Host_CPU_Snapshot
      (Busy_Ticks  : System.Address;
@@ -133,19 +59,6 @@ package body Flyology_Bench is
       else
          Object.Data.References := Object.Data.References - 1;
          Object.Data := null;
-      end if;
-   end Finalize;
-
-   type Perf_Handle is new Ada.Finalization.Limited_Controlled with record
-      State       : aliased Native_Perf_State;
-      Initialized : Boolean := False;
-   end record;
-
-   overriding procedure Finalize (Object : in out Perf_Handle) is
-   begin
-      if Object.Initialized then
-         Native_Perf_Close (Object.State'Access);
-         Object.Initialized := False;
       end if;
    end Finalize;
 
@@ -188,11 +101,6 @@ package body Flyology_Bench is
       return False;
    end Scheduler_Metrics_Requested;
 
-   function Mask_Has
-     (Mask : Interfaces.Unsigned_64;
-      Bit  : Natural) return Boolean is
-     ((Mask and Interfaces.Shift_Left (Interfaces.Unsigned_64'(1), Bit)) /= 0);
-
    function Perf_Status
      (Perf  : Perf_Handle;
       Index : Natural) return Metric_Availability
@@ -207,20 +115,6 @@ package body Flyology_Bench is
       end if;
       return Metric_Availability'Val (Natural (Value));
    end Perf_Status;
-
-   procedure Read_Resource_Snapshot
-     (Values    : out Native_Resource_Values;
-      Mask      : out Interfaces.Unsigned_64;
-      Available : out Boolean) is
-     Local_Mask : aliased Interfaces.Unsigned_64 := 0;
-   begin
-      Values := (others => 0);
-      Available := Native_Resource_Snapshot
-        (Values (Values'First)'Address,
-         Interfaces.C.size_t (Values'Length),
-         Local_Mask'Access) = 0;
-      Mask := Local_Mask;
-   end Read_Resource_Snapshot;
 
    procedure Initialize_Metrics
      (Config : Configuration;
@@ -306,15 +200,6 @@ package body Flyology_Bench is
          raise Program_Error with "Linux perf counter start failed";
       end if;
    end Start_Sample;
-
-   function Clock_Now return Interfaces.Unsigned_64 is
-      Value : aliased Interfaces.Unsigned_64;
-   begin
-      if Native_Clock_Now (Value'Access) /= 0 then
-         raise Program_Error with "platform monotonic clock read failed";
-      end if;
-      return Value;
-   end Clock_Now;
 
    function Elapsed_Nanoseconds
      (Started  : Interfaces.Unsigned_64;

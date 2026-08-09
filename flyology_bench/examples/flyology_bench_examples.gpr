@@ -2,7 +2,7 @@ with "../flyology_bench.gpr";
 
 project Flyology_Bench_Examples is
    for Source_Dirs use (".");
-   for Main use ("basic.adb");
+   for Main use ("basic.adb", "recording_service.adb");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";

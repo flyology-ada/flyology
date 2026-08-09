@@ -177,6 +177,7 @@
             <li><a href="#budget">Bound collection time</a></li>
             <li><a href="#quiescence">Wait for a quiet CPU</a></li>
             <li><a href="#telemetry">Use telemetry</a></li>
+            <li><a href="#recording">Record externally driven work</a></li>
             <li><a href="#automation">Emit CSV or JSON</a></li>
             <li><a href="#correctness">Interpret nanoseconds</a></li>
             <li><a href="#platforms">Platforms and verification</a></li>
@@ -424,6 +425,72 @@ Config.Samples := 75;</code></pre>
               <span class="callout-symbol" aria-hidden="true">→</span>
               <p>The maintained example includes CPU-heavy, memory-retaining, wait-heavy, and occasionally hiccuping cases so each telemetry signal is visible. Those cases demonstrate observability; they are not equivalent implementations of one algorithm.</p>
             </aside>
+          </section>
+
+          <section id="recording">
+            <span class="step-label">RECORDER</span>
+            <h2>Mark work that the runner does not call.</h2>
+            <p><code>Flyology_Bench.Recording</code> is for a server, consumer, worker pool, or other long-lived process whose own control flow decides when work starts. Register bounded identities before the session, then mark each span inside the application. The benchmark runner remains available for calibrated microbenchmarks; recording does not force request handling through a harness callback.</p>
+            <figure class="code-panel">
+              <figcaption>record one application-owned request</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">package Recording renames Flyology_Bench.Recording;
+
+Recorder : Recording.Recorder
+  (Maximum_Benchmarks =&gt; 8,
+   Retained_Samples   =&gt; 10_000);
+Request : Recording.Benchmark;
+
+Recording.Register (Recorder, "request", Request);
+Recording.Start (Recorder);
+
+declare
+   Sample : Recording.Span;
+begin
+   Recording.Begin_Sample (Recorder, Request, Sample);
+   begin
+      Handle_Request;
+   exception
+      when others =&gt;
+         Recording.Finish (Sample, Recording.Failure);
+         raise;
+   end;
+   Recording.Finish (Sample, Recording.Success);
+end;</code></pre>
+            </figure>
+            <p>Registration allocates the bounded stores. The span path performs no Ada heap allocation. <code>Finish</code> captures its ending timestamp before entering the protected store, so retention work is outside recorded wall time. A snapshot reports observed, retained, omitted, active, abandoned, successful, failed, timed out, and cancelled spans. Each retained row keeps its observation number and outcome aligned with the status and optional value of every requested axis.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Individual spans</dt><dd>Recorded p50, p95, and p99 describe individual application spans. They are not the runner's per-operation batch means.</dd></div>
+                <div class="decision-row"><dt>Independent comparison</dt><dd><code>Compare_Independent</code> resamples separately observed distributions. It does not reuse the runner's paired bootstrap or claim correlation that the load schedule did not establish.</dd></div>
+                <div class="decision-row"><dt>Partial samples</dt><dd>If only some retained spans have an axis, its status is <code>partially_collected</code> and valid and unavailable counts are reported separately. Raw rows remain aligned, but an independent comparison uses an axis only when both inputs are complete.</dd></div>
+                <div class="decision-row"><dt>Bounded retention</dt><dd><code>Reservoir</code> keeps a bounded sample across the complete session. <code>First_N</code> and <code>Latest_N</code> are available when the beginning or end is the intended window. Aggregate lifecycle and outcome counts still cover every completed span.</dd></div>
+                <div class="decision-row"><dt>Attribution</dt><dd>Wall time has exact span boundaries. Thread CPU requires the same native thread at both boundaries. Process CPU, RSS, faults, switches, and I/O include concurrent process work. Linux PMU values use recorder-owned per-worker groups and retain native task-tree scope; worker exit closes its group.</dd></div>
+              </dl>
+            </div>
+            <p>The live terminal rewrites one fixed display instead of printing an event log. It shows session elapsed time, current process CPU and occupied cores, RSS, and one row per registered identity with completed spans, active spans, errors, rolling median, and rolling p95.</p>
+            <figure class="benchmark-terminal">
+              <figcaption>recording_service · live display</figcaption>
+              <div class="terminal-scroll" tabindex="0" aria-label="Scrollable recorder terminal output">
+                <pre><span class="term-heading">fly recorder  elapsed 01.31 s      cpu  38.4% / 0.4 cores   rss 31.2 MiB</span>
+benchmark                    done  live  errors   median      p95
+quick request                  66     0       2   42.0 ns     250.0 ns
+cpu-heavy request              68     1       1    3.21 ms      4.08 ms
+memory-burst request           70     0       2  140.3 us     358.2 us
+wait-bound request             64     1       2   19.01 ms     64.03 ms</pre>
+              </div>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>run the self-contained service example</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>cd flyology_bench
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+./examples/bin/recording_service
+
+FLYOLOGY_BENCH_RECORDING_OUTPUT=csv  ./examples/bin/recording_service
+FLYOLOGY_BENCH_RECORDING_OUTPUT=json ./examples/bin/recording_service</code></pre>
+            </figure>
+            <p>The example does not use an HTTP server. Eight client tasks drive a long-lived rendezvous service with four workers. Instrumentation lives inside those workers, while fast, CPU-heavy, memory-burst, wait-bound, occasional-failure, and occasional-hiccup work makes the live fields move. CSV and JSON label the contracts as <code>sample_semantics=individual_span</code> and <code>comparison_design=independent</code>. Raw CSV and the JSON <code>samples</code> array retain observation identity and outcome across axes. Comparison output retains unavailable axes; when wall time is absent, wall-derived JSON fields are <code>null</code> rather than a fabricated 1× result.</p>
           </section>
 
           <section id="automation">

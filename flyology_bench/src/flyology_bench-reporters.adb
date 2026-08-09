@@ -304,6 +304,7 @@ package body Flyology_Bench.Reporters is
          when Counter_Resources_Unavailable =>
             return "counter resources unavailable";
          when Probe_Failed => return "probe failed";
+         when Metric_Partially_Collected => return "partially collected";
       end case;
    end Metric_Status_Name;
 

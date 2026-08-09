@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
 #include <time.h>
@@ -142,6 +143,20 @@ int flyology_bench_platform_architecture(void)
     return 2;
 #else
     return 0;
+#endif
+}
+
+uint64_t flyology_bench_native_thread_id(void)
+{
+#if defined(__APPLE__)
+    uint64_t identifier = 0;
+
+    if (pthread_threadid_np(NULL, &identifier) != 0) {
+        return 0;
+    }
+    return identifier;
+#else
+    return (uint64_t)syscall(__NR_gettid);
 #endif
 }
 
@@ -791,6 +806,253 @@ void flyology_bench_perf_close(struct flyology_bench_perf_state *state)
     }
     state->available_mask = 0;
     state->cycles_instructions_grouped = 0;
+}
+
+/* Recorder-mode counters remain enabled for the lifetime of an externally
+ * controlled session. Each native thread gets one counter group per recorder;
+ * spans read cumulative value/time triples at both boundaries and scale the
+ * difference. A pthread-specific token, rather than pthread_t, identifies the
+ * owner because pthread_t values can be reused after a worker exits.
+ */
+struct flyology_bench_recording_perf_context {
+    const void *owner_token;
+    struct flyology_bench_perf_state perf;
+    struct flyology_bench_recording_perf_context *next;
+};
+
+struct flyology_bench_recording_perf_session {
+    uint64_t identifier;
+    uint64_t requested;
+    struct flyology_bench_recording_perf_context *contexts;
+    struct flyology_bench_recording_perf_session *next;
+};
+
+static pthread_mutex_t flyology_bench_recording_perf_lock =
+    PTHREAD_MUTEX_INITIALIZER;
+static struct flyology_bench_recording_perf_session
+    *flyology_bench_recording_perf_sessions;
+static uint64_t flyology_bench_recording_perf_generation;
+static pthread_key_t flyology_bench_recording_thread_key;
+static pthread_once_t flyology_bench_recording_thread_key_once =
+    PTHREAD_ONCE_INIT;
+static int flyology_bench_recording_thread_key_status;
+
+static void flyology_bench_recording_perf_clear(
+    struct flyology_bench_recording_perf_session *session)
+{
+    struct flyology_bench_recording_perf_context *context =
+        session->contexts;
+
+    while (context != NULL) {
+        struct flyology_bench_recording_perf_context *next = context->next;
+
+        flyology_bench_perf_close(&context->perf);
+        free(context);
+        context = next;
+    }
+    session->contexts = NULL;
+}
+
+static void flyology_bench_recording_thread_destroy(void *token)
+{
+    struct flyology_bench_recording_perf_session *session;
+
+    if (token == NULL) {
+        return;
+    }
+    if (pthread_mutex_lock(&flyology_bench_recording_perf_lock) == 0) {
+        for (session = flyology_bench_recording_perf_sessions;
+             session != NULL;
+             session = session->next) {
+            struct flyology_bench_recording_perf_context **link =
+                &session->contexts;
+
+            while (*link != NULL) {
+                struct flyology_bench_recording_perf_context *context = *link;
+
+                if (context->owner_token == token) {
+                    *link = context->next;
+                    flyology_bench_perf_close(&context->perf);
+                    free(context);
+                } else {
+                    link = &context->next;
+                }
+            }
+        }
+        (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+    }
+    free(token);
+}
+
+static void flyology_bench_recording_thread_key_initialize(void)
+{
+    flyology_bench_recording_thread_key_status = pthread_key_create(
+        &flyology_bench_recording_thread_key,
+        flyology_bench_recording_thread_destroy);
+}
+
+static void *flyology_bench_recording_thread_token(void)
+{
+    void *token;
+    int status = pthread_once(&flyology_bench_recording_thread_key_once,
+                              flyology_bench_recording_thread_key_initialize);
+
+    if (status != 0 || flyology_bench_recording_thread_key_status != 0) {
+        errno = status != 0
+            ? status : flyology_bench_recording_thread_key_status;
+        return NULL;
+    }
+    token = pthread_getspecific(flyology_bench_recording_thread_key);
+    if (token == NULL) {
+        token = calloc(1, 1);
+        if (token == NULL) {
+            return NULL;
+        }
+        status = pthread_setspecific(flyology_bench_recording_thread_key, token);
+        if (status != 0) {
+            free(token);
+            errno = status;
+            return NULL;
+        }
+    }
+    return token;
+}
+
+int flyology_bench_recording_perf_start(uint64_t requested_mask,
+                                        uint64_t *session)
+{
+    struct flyology_bench_recording_perf_session *created;
+    int status;
+
+    if (session == NULL || requested_mask == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    created = calloc(1, sizeof(*created));
+    if (created == NULL) {
+        return -1;
+    }
+    status = pthread_mutex_lock(&flyology_bench_recording_perf_lock);
+    if (status != 0) {
+        free(created);
+        errno = status;
+        return -1;
+    }
+    ++flyology_bench_recording_perf_generation;
+    if (flyology_bench_recording_perf_generation == 0) {
+        ++flyology_bench_recording_perf_generation;
+    }
+    created->identifier = flyology_bench_recording_perf_generation;
+    created->requested = requested_mask;
+    created->next = flyology_bench_recording_perf_sessions;
+    flyology_bench_recording_perf_sessions = created;
+    *session = created->identifier;
+    (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+    return 0;
+}
+
+void flyology_bench_recording_perf_stop(uint64_t session)
+{
+    struct flyology_bench_recording_perf_session **link;
+
+    if (pthread_mutex_lock(&flyology_bench_recording_perf_lock) != 0) {
+        return;
+    }
+    link = &flyology_bench_recording_perf_sessions;
+    while (*link != NULL && (*link)->identifier != session) {
+        link = &(*link)->next;
+    }
+    if (*link != NULL && session != 0) {
+        struct flyology_bench_recording_perf_session *found = *link;
+
+        *link = found->next;
+        flyology_bench_recording_perf_clear(found);
+        free(found);
+    }
+    (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+}
+
+int flyology_bench_recording_perf_snapshot(uint64_t session,
+                                           uint64_t *values,
+                                           uint64_t *enabled,
+                                           uint64_t *running,
+                                           int *statuses,
+                                           size_t capacity,
+                                           uint64_t *available_mask)
+{
+    struct flyology_bench_recording_perf_session *found;
+    struct flyology_bench_recording_perf_context *context;
+    void *owner_token;
+    int lock_status;
+
+    if (values == NULL || enabled == NULL || running == NULL
+        || statuses == NULL || available_mask == NULL
+        || capacity < FLYOLOGY_BENCH_PERF_COUNT) {
+        errno = EINVAL;
+        return -1;
+    }
+    memset(values, 0, capacity * sizeof(*values));
+    memset(enabled, 0, capacity * sizeof(*enabled));
+    memset(running, 0, capacity * sizeof(*running));
+    owner_token = flyology_bench_recording_thread_token();
+    if (owner_token == NULL) {
+        return -1;
+    }
+    lock_status = pthread_mutex_lock(&flyology_bench_recording_perf_lock);
+    if (lock_status != 0) {
+        errno = lock_status;
+        return -1;
+    }
+    found = flyology_bench_recording_perf_sessions;
+    while (found != NULL && found->identifier != session) {
+        found = found->next;
+    }
+    if (session == 0 || found == NULL) {
+        (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+        errno = EINVAL;
+        return -1;
+    }
+    context = found->contexts;
+    while (context != NULL && context->owner_token != owner_token) {
+        context = context->next;
+    }
+    if (context == NULL) {
+        context = calloc(1, sizeof(*context));
+        if (context == NULL) {
+            (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+            return -1;
+        }
+        context->owner_token = owner_token;
+        if (flyology_bench_perf_initialize(
+                &context->perf, found->requested) != 0
+            || flyology_bench_perf_start(&context->perf) != 0) {
+            flyology_bench_perf_close(&context->perf);
+            free(context);
+            (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+            return -1;
+        }
+        context->next = found->contexts;
+        found->contexts = context;
+    }
+    for (unsigned int index = 0; index < FLYOLOGY_BENCH_PERF_COUNT; ++index) {
+        statuses[index] = context->perf.statuses[index];
+#if defined(__linux__)
+        if (context->perf.fds[index] >= 0) {
+            int metric_status = FLYOLOGY_BENCH_METRIC_PROBE_FAILED;
+
+            if (flyology_bench_perf_read_counter(
+                    context->perf.fds[index], &values[index], &enabled[index],
+                    &running[index], &metric_status) != 0) {
+                flyology_bench_perf_fail_event(
+                    &context->perf, index, metric_status);
+                statuses[index] = context->perf.statuses[index];
+            }
+        }
+#endif
+    }
+    *available_mask = context->perf.available_mask;
+    (void)pthread_mutex_unlock(&flyology_bench_recording_perf_lock);
+    return 0;
 }
 
 int flyology_bench_host_cpu_snapshot(uint64_t *busy_ticks,

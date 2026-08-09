@@ -27,8 +27,19 @@ build -q -p -P "$crate_root/tests/flyology_bench_tests.gpr"
 # hide a failing smoke test.
 "$crate_root/tests/bin/flyology_bench_smoke" >"$work_dir/smoke.out"
 cat "$work_dir/smoke.out"
+"$crate_root/tests/bin/recording_smoke" >"$work_dir/recording.out"
+cat "$work_dir/recording.out"
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
+"$crate_root/examples/bin/recording_service" \
+  >"$work_dir/recording-example.ansi"
+escape=$(printf '\033')
+if ! grep -Fq "${escape}[2K" "$work_dir/recording-example.ansi" \
+  || ! grep -q 'fly recorder  elapsed ' "$work_dir/recording-example.ansi"
+then
+  printf '%s\n' "recording example did not render an in-place ANSI dashboard" >&2
+  exit 1
+fi
 
 # Machine-readable output is a published interface, so its shape is checked
 # rather than only printed. The example emits the multi-way schemas; the smoke
@@ -37,6 +48,9 @@ FLYOLOGY_BENCH_OUTPUT=csv "$crate_root/examples/bin/basic" \
   >"$work_dir/multi.csv"
 FLYOLOGY_BENCH_OUTPUT=json "$crate_root/examples/bin/basic" \
   >"$work_dir/multi.json"
+FLYOLOGY_BENCH_RECORDING_OUTPUT=json \
+  "$crate_root/examples/bin/recording_service" \
+  >"$work_dir/recording-example.jsonl"
 awk '/^-- machine output begin --$/ { inside = 1; next }
      /^-- machine output end --$/ { inside = 0; next }
      inside { print }' "$work_dir/smoke.out" >"$work_dir/smoke.machine"
@@ -114,6 +128,13 @@ check_csv() {
 check_csv multi-comparison "$work_dir/multi.csv"
 check_csv measurement "$work_dir/smoke.csv"
 
+awk '/^-- recording machine output begin --$/ { inside = 1; next }
+     /^-- recording machine output end --$/ { inside = 0; next }
+     inside { print }' "$work_dir/recording.out" >"$work_dir/recording.machine"
+grep '^{' "$work_dir/recording.machine" >"$work_dir/recording.jsonl"
+grep -v '^{' "$work_dir/recording.machine" >"$work_dir/recording.csv"
+check_csv recording "$work_dir/recording.csv"
+
 # At least one long-form metric section must exist, otherwise the checks above
 # would pass over latency-only output.
 if ! grep -q '^name,axis,scope,unit,available,status,' "$work_dir/smoke.csv"
@@ -156,6 +177,39 @@ if command -v jq >/dev/null 2>&1; then
     printf '%s\n' "$line" | check_json \
       || { printf '%s\n' "smoke JSON object failed validation" >&2; exit 1; }
   done <"$work_dir/smoke.jsonl"
+  while IFS= read -r line; do
+    printf '%s\n' "$line" | jq -e . >/dev/null \
+      || { printf '%s\n' "recording JSON object failed validation" >&2; exit 1; }
+  done <"$work_dir/recording.jsonl"
+  jq -s -e '
+    any(.[];
+      .sample_semantics == "individual_span"
+      and .name == "fast\trequest"
+      and (.samples | length == 40)
+      and all(.samples[];
+        (.observation | type) == "number"
+        and (.outcome == "success" or .outcome == "failure")
+        and (.metrics | length > 0)
+        and all(.metrics[]; has("axis") and has("status") and has("value"))))
+    and any(.[];
+      .comparison_design == "independent"
+      and .wall_comparison_available == false
+      and .speedup == null
+      and .relative_change_percent == null)
+    and any(.[];
+      .comparison_design == "independent"
+      and any(.metrics[]; .available == false
+        and has("reference_status") and has("contender_status")))
+  ' "$work_dir/recording.jsonl" >/dev/null \
+    || { printf '%s\n' "recording alignment/status JSON failed validation" >&2; exit 1; }
+  jq -s -e '
+    length == 4
+    and all(.[];
+      .sample_semantics == "individual_span"
+      and .observed > 0
+      and (.metrics | length > 0))
+  ' "$work_dir/recording-example.jsonl" >/dev/null \
+    || { printf '%s\n' "recording example JSON failed validation" >&2; exit 1; }
   check_json <"$work_dir/multi.json" \
     || { printf '%s\n' "multi-comparison JSON failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'
@@ -191,5 +245,6 @@ else
       printf "JSON verified with awk (%d objects); install jq for a full parse\n",
         objects
     }
-  ' "$work_dir/smoke.jsonl" "$work_dir/multi.json"
+  ' "$work_dir/smoke.jsonl" "$work_dir/recording.jsonl" \
+    "$work_dir/recording-example.jsonl" "$work_dir/multi.json"
 fi

@@ -171,6 +171,8 @@ package Flyology_Bench is
    --  allocated.
    --  @enum Probe_Failed A native snapshot, counter control, or read failed,
    --  or the kernel rejected the requested counter attributes.
+   --  @enum Metric_Partially_Collected At least one retained sample contains a
+   --  value, but one or more retained samples do not.
    type Metric_Availability is
      (Metric_Not_Requested,
       Metric_Collected,
@@ -178,7 +180,8 @@ package Flyology_Bench is
       Permission_Denied,
       Unsupported_Event,
       Counter_Resources_Unavailable,
-      Probe_Failed);
+      Probe_Failed,
+      Metric_Partially_Collected);
 
    --  Attribution boundary of a metric.
    --  @enum Batch_Wall_Clock Monotonic elapsed time surrounding the batch.
@@ -190,6 +193,28 @@ package Flyology_Bench is
    type Metric_Scope is
      (Batch_Wall_Clock, Benchmark_Process, Current_Native_Thread,
       Native_Task_Tree, Flyology_Runtime);
+
+   --  Quality of the boundary used to attribute a collected metric. This is
+   --  deliberately separate from Metric_Availability: a process-wide value
+   --  can be successfully collected while also including concurrent work
+   --  outside the operation being observed.
+   --  @enum Exact_Window The value belongs to the measured wall-clock window.
+   --  @enum Same_Native_Thread_Window The value covers one native thread and
+   --  is valid only when both boundaries execute on that thread.
+   --  @enum Native_Task_Tree_Window The value covers one native thread and
+   --  native children inherited by its counter group.
+   --  @enum Shared_Process_Window The value covers the complete process and
+   --  can include unrelated or concurrent work.
+   --  @enum Shared_Runtime_Window The value covers a Flyology runtime or
+   --  execution-group boundary rather than one operation exclusively.
+   --  @enum Unattributable No valid attribution survived the two boundaries.
+   type Metric_Attribution is
+     (Exact_Window,
+      Same_Native_Thread_Window,
+      Native_Task_Tree_Window,
+      Shared_Process_Window,
+      Shared_Runtime_Window,
+      Unattributable);
 
    --  Whether a smaller or larger value is normally resource-favorable.
    --  Diagnostic metrics receive no better/worse verdict.
@@ -246,7 +271,7 @@ package Flyology_Bench is
      (Snapshot : out Flyology_Scheduler_Snapshot);
 
    --  Distribution summary for one requested measurement axis.
-   --  @field Available Whether every retained sample has this axis.
+   --  @field Available Whether at least one retained sample has this axis.
    --  @field Samples Number of retained metric samples.
    --  @field Minimum Smallest sample in Metric_Unit units.
    --  @field Maximum Largest sample.

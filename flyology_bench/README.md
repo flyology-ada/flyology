@@ -83,6 +83,113 @@ result per operation. `Measure_Batched` instead passes the calibrated iteration
 count to the caller; use it when one measured batch coordinates tasks or owns
 setup that must not be repeated by the harness.
 
+## Record externally driven work
+
+`Flyology_Bench.Recording` inverts control when the application, rather than
+the benchmark runner, decides when work happens. Register stable identities
+before starting, then mark boundaries inside a request handler, consumer, or
+long-lived worker:
+
+```ada
+with Flyology_Bench.Recording;
+
+package Recording renames Flyology_Bench.Recording;
+
+Recorder : Recording.Recorder
+  (Maximum_Benchmarks => 8,
+   Retained_Samples   => 10_000);
+Request : Recording.Benchmark;
+
+Recording.Register (Recorder, "request", Request);
+Recording.Start (Recorder);
+
+declare
+   Sample : Recording.Span;
+begin
+   Recording.Begin_Sample (Recorder, Request, Sample);
+   begin
+      Handle_Request;
+   exception
+      when others =>
+         Recording.Finish (Sample, Recording.Failure);
+         raise;
+   end;
+   Recording.Finish (Sample, Recording.Success);
+end;
+```
+
+Registration and bounded-store allocation happen before `Start`. The boundary
+path performs no Ada heap allocation. `Finish` reads the ending timestamp
+before entering the protected sample store, so retention and analysis are not
+part of the recorded wall-time value. The recorder counts success, failure,
+timeout, cancellation, unfinished spans, observations, retained samples, and
+samples omitted by its bounded retention policy. `Reservoir` is the default
+for a long run; `First_N` and `Latest_N` are also available.
+
+Each retained row keeps its original observation number and outcome together
+with the status and optional value of every requested axis. Raw CSV and the
+JSON `samples` array therefore preserve the relationship between latency, CPU,
+memory, and outcome even when a migration or failed probe makes one axis
+unavailable. Summary statistics cover every retained outcome. Filter the
+aligned raw rows when success-only or outcome-specific statistics are needed.
+An axis with both valid and invalid rows reports `partially_collected`, its
+valid and unavailable counts separately, and is not used for an independent
+comparison until both sides are complete.
+
+The live terminal is a continuously refreshed display rather than a log:
+
+```ada
+Recording.Start_Live_Terminal
+  (Recorder, Refresh_Interval => 0.100);
+
+--  Externally controlled work runs here.
+
+Recording.Stop (Recorder);
+Recording.Stop_Live_Terminal (Recorder);
+```
+
+Its fixed rows report session elapsed time, current process CPU as percentage
+and occupied cores, RSS, completed and active spans, errors, and rolling median
+and p95 latency for every registered identity. The maintained
+`recording_service` example uses several client tasks to drive a long-lived Ada
+rendezvous service. Instrumentation lives inside four service workers and
+therefore demonstrates overlapping CPU-heavy, memory-burst, wait-bound, fast,
+occasionally slow, and occasionally failed spans without an HTTP dependency:
+
+```sh
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+examples/bin/recording_service
+
+FLYOLOGY_BENCH_RECORDING_OUTPUT=csv examples/bin/recording_service
+FLYOLOGY_BENCH_RECORDING_OUTPUT=json examples/bin/recording_service
+```
+
+Recorded percentiles describe individual spans, unlike the runner's
+per-operation batch means. `Compare_Independent` compares separately observed
+recorded distributions with independent resampling; it does not reuse the
+runner's paired bootstrap. CSV and JSON mark these contracts as
+`sample_semantics=individual_span` and `comparison_design=independent`.
+Comparison output retains requested-but-unavailable axes and both input
+statuses. If wall time was not requested or was incomplete, JSON emits `null`
+for wall-derived speedup and relative change and the console reports that the
+wall comparison is unavailable.
+
+Metric availability and attribution are separate. Wall time has an exact span
+boundary. Thread CPU is accepted only when both boundaries execute on the same
+native thread. Process CPU, RSS, faults, switches, and I/O include concurrent
+process activity. Flyology scheduler counters cover their supplied runtime
+scope. On Linux, each recorder session owns PMU groups that remain enabled per
+native worker, and each span scales the difference between its two cumulative
+value/enabled/running snapshots; they include inherited native children and
+remain task-tree scoped. Concurrent recorders use separate sessions. Worker
+exit closes that worker's groups, so later pthread reuse cannot inherit stale
+descriptors. A migrated span excludes thread and PMU values rather than
+silently attaching them to the destination thread.
+
+Use `Flyology_Bench.Recording.Reporters` for the terminal summary, long-form
+summary CSV, raw retained-sample CSV, newline-delimited JSON, and independent
+comparison formats.
+
 ## Comparisons
 
 Comparisons are measured directly rather than assembled from two independent
