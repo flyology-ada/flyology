@@ -301,6 +301,11 @@ int flyology_socket_reuse_address_option(void)
     return SO_REUSEADDR;
 }
 
+int flyology_socket_reuse_port_option(void)
+{
+    return SO_REUSEPORT;
+}
+
 int flyology_socket_pending_error_option(void)
 {
     return SO_ERROR;

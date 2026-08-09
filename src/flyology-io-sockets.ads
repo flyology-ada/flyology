@@ -276,15 +276,16 @@ package Flyology.IO.Sockets is
 
    --  Supported socket option names.
    --  @enum Reuse_Address Permit local address reuse
+   --  @enum Reuse_Port Permit multiple opted-in sockets to bind one endpoint
    --  @enum Receive_Timeout Bound blocking receives in native setup code
-   type Option_Name is (Reuse_Address, Receive_Timeout);
+   type Option_Name is (Reuse_Address, Reuse_Port, Receive_Timeout);
    --  Socket options supported by Flyology's portable layer.
    --  @field Name Selected option
-   --  @field Enabled Reuse_Address setting
+   --  @field Enabled Reuse_Address or Reuse_Port setting
    --  @field Timeout Receive_Timeout interval in seconds
    type Option_Type (Name : Option_Name := Reuse_Address) is record
       case Name is
-         when Reuse_Address =>
+         when Reuse_Address | Reuse_Port =>
             Enabled : Boolean := False;
          when Receive_Timeout =>
             Timeout : Duration := 0.0;

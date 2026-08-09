@@ -88,6 +88,10 @@ package body Flyology.IO.Sockets is
      (C, C_Reuse_Address_Option,
       "flyology_socket_reuse_address_option");
 
+   function C_Reuse_Port_Option return Interfaces.C.int;
+   pragma Import
+     (C, C_Reuse_Port_Option, "flyology_socket_reuse_port_option");
+
    function C_Pending_Error_Option return Interfaces.C.int;
    pragma Import
      (C, C_Pending_Error_Option,
@@ -655,6 +659,25 @@ package body Flyology.IO.Sockets is
       Error.all := 0;
       return 0;
    end C_Set_Reuse_Address;
+
+   function C_Set_Reuse_Port
+     (Socket  : Interfaces.C.int;
+      Enabled : Interfaces.C.int;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Value : aliased Interfaces.C.int := Enabled;
+   begin
+      if C_Set_Socket_Option
+           (Socket, C_Socket_Level, C_Reuse_Port_Option,
+            Value'Address,
+            Interfaces.C.unsigned (Interfaces.C.int'Size / 8)) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Set_Reuse_Port;
 
    function C_Bind
      (Socket  : Interfaces.C.int;
@@ -1255,6 +1278,10 @@ package body Flyology.IO.Sockets is
       case Option.Name is
          when Reuse_Address =>
             Result := C_Set_Reuse_Address
+              (Socket.Value, Boolean'Pos (Option.Enabled),
+               Error'Access);
+         when Reuse_Port =>
+            Result := C_Set_Reuse_Port
               (Socket.Value, Boolean'Pos (Option.Enabled),
                Error'Access);
          when Receive_Timeout =>

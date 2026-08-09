@@ -1346,6 +1346,12 @@ uses host headers for address conversion, socket constants, variadic descriptor
 configuration, and `errno` capture; retry, timeout, cancellation, and exception
 policy remain in Ada.
 
+`Reuse_Address` and `Reuse_Port` remain separate socket options. On Darwin and
+Linux, `Reuse_Port` permits multiple sockets that all enable it before
+`Bind_Socket` to bind the same concrete IPv4 or IPv6 endpoint. Kernel policy
+selects which socket receives each unicast datagram; Flyology does not impose a
+userspace distribution policy.
+
 `Receive_Datagram` is the task-aware UDP boundary for wildcard and multihomed
 servers. One `recvmsg` returns the source endpoint, the kernel-selected local
 destination endpoint, the original datagram length, explicit truncation state,
