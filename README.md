@@ -1089,6 +1089,58 @@ end if;
 --  happen earlier: an established mapping has an independent lifetime.
 ```
 
+Segments grow by replacement rather than by resizing a live backing object.
+The application first stops every participant from using the source registry
+and its nested objects, creates a strictly larger backing and mapping, then
+asks `Try_Prepare_Replacement` to clone the quiescent stored state. The clone
+preserves exact names, offsets, reservations, generations, the allocation
+frontier, and every byte through that frontier; only the zero-filled allocation
+tail grows. Existing handles therefore resolve in both snapshots immediately
+after cloning. Registry capacity, name length, alignment, schema, and nested
+object geometry remain unchanged.
+
+```ada
+New_Backing : Flyology.Shared_Memory.Backing_Object;
+New_Map     : Flyology.Shared_Memory.Mapping;
+Replacement : Flyology.Shared_Memory.Segments.View;
+Migrated    : Flyology.Shared_Memory.Segments.Replacement_Result;
+
+--  Application protocol: stop producers, consumers, registry callers, and
+--  every process that may still operate on a nested relocatable object.
+Flyology.Shared_Memory.Create_Anonymous (New_Backing, 2_097_152);
+Flyology.Shared_Memory.Map (New_Map, New_Backing);
+Flyology.Shared_Memory.Segments.Try_Prepare_Replacement
+  (Source      => Segment,
+   Target      => New_Map,
+   Config      =>
+     (Schema                 => 16#4D59_4150_5000_0001#,
+      Registry_Capacity      => 64,
+      Maximum_Name_Length    => 96,
+      Allocation_Alignment   => 64),
+   Quiescence  =>
+     Flyology.Shared_Memory.Segments.Caller_Established_Quiescence,
+   Replacement => Replacement,
+   Result      => Migrated);
+```
+
+The target must be a distinct virgin mapping derived from exclusive backing
+creation; opened and received mappings cannot be overwritten. A source registry
+operation reports `Registry_Busy`, and an unpublished named extent reports
+`Initialization_In_Progress`. The registry guard cannot detect concurrent leaf
+access, so `Caller_Established_Quiescence` is an explicit assertion of
+application authority rather than a proof discovered by Flyology. The target
+lifecycle becomes ready only after the bounded copy and extent update complete.
+The source stays ready and unchanged, which permits handoff plus receiver
+attachment acknowledgments before an application-selected cutover. Participants
+must not resume against both snapshots: after cloning, their mutations diverge.
+
+The scalar admission classifier is SPARK-proved: an accepted frontier is aligned
+and lies within both mappings, the target is strictly larger, virgin, exclusive,
+and distinct, and the configuration is unchanged. Address-based atomic guard
+acquisition and byte copying remain in the narrow non-SPARK segment body. File
+targets still require `Flush` when persistence is intended; cloning does not add
+crash-consistent transactions or make namespace replacement atomic.
+
 Only a mapping derived from exclusive backing creation may claim an exact-zero
 segment lifecycle. An opener or received descriptor that sees zero reports
 initialization in progress; it never treats an abandoned named object as fresh.

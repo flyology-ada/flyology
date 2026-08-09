@@ -39,6 +39,7 @@ procedure Shared_Memory_Smoke is
    use type Segments.Handle_State;
    use type Segments.Lookup_Result;
    use type Segments.Remove_Result;
+   use type Segments.Replacement_Result;
    use type Segments.Segment_Open_Result;
    use type Unix_Sockets.Socket_Descriptor;
 
@@ -803,6 +804,229 @@ procedure Shared_Memory_Smoke is
       Shared.Close (Backing);
    end Check_Exhaustion;
 
+   procedure Check_Replacement_Migration is
+      Migration_Config : constant Segments.Configuration :=
+        (Schema               => 16#4D49_4752_4154_0001#,
+         Registry_Capacity    => 4,
+         Maximum_Name_Length  => 24,
+         Allocation_Alignment => 64);
+      Old_Length : constant Shared.Byte_Length := 16_384;
+      New_Length : constant Shared.Byte_Length := 32_768;
+      Registry_Guard_Offset : constant Shared.Byte_Length := 64;
+      Root : constant String :=
+        Ada.Environment_Variables.Value
+          ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
+      Path : constant String :=
+        Root & "/shared-memory-migration-" & Identifier & ".data";
+      Source_Backing, Target_Backing, Target_Opened, Equal_Backing :
+        Shared.Backing_Object;
+      Source_Map, Target_Map, Opened_Map, Equal_Map : Shared.Mapping;
+      Source_Segment, Replacement : Segments.View;
+      Source_Region, Target_Region : Regions.View;
+      Source_String, Target_String : Strings.View;
+      Segment_Result : Segments.Segment_Open_Result;
+      Migration_Result : Segments.Replacement_Result;
+      Handle, Pending, Reused, Large : Segments.Named_Handle;
+      Claim, Pending_Claim, Reuse_Claim, Large_Claim :
+        Segments.Creation_Claim;
+      Find_Result : Segments.Find_Or_Create_Result;
+      Remove_Result : Segments.Remove_Result;
+      Failure : Interfaces.Unsigned_32;
+      Location, Target_Location : DS.Region_Offset;
+      Extent, Target_Extent : Shared.Byte_Length;
+      Payload : constant Ada.Streams.Stream_Element_Array :=
+        (1 => 16#67#, 2 => 16#72#, 3 => 16#6F#, 4 => 16#77#);
+      Observed : Ada.Streams.Stream_Element_Array (Payload'Range);
+      Opened_Target_Rejected : Boolean := False;
+      Equal_Target_Rejected : Boolean := False;
+      Source_Base, Target_Base : Interfaces.Unsigned_64;
+   begin
+      Shared.Create_Anonymous (Source_Backing, Old_Length);
+      Shared.Map (Source_Map, Source_Backing);
+      Source_Base := Testing.Base_Value (Source_Map);
+      Segments.Create_Or_Attach
+        (Source_Segment, Source_Map, Migration_Config, Segment_Result);
+      Assert
+        (Segment_Result = Segments.Initialized_New,
+         "replacement source did not initialize");
+      Segments.Attach_Region (Source_Segment, Source_Region);
+      Create_Name
+        (Source_Segment, "kept", Strings.Required_Storage (64),
+         Handle, Claim);
+      Segments.Claimed_Extent
+        (Source_Segment, Claim, Location, Extent);
+      Strings.Initialize (Source_String, Source_Region, Location, 64);
+      Strings.Assign (Source_String, Payload);
+      Segments.Publish (Source_Segment, Claim);
+      Strings.Detach (Source_String);
+      Regions.Detach (Source_Region);
+
+      Segments.Try_Find_Or_Create
+        (Source_Segment, "large", Old_Length, Large, Large_Claim,
+         Find_Result, Failure);
+      Assert
+        (Find_Result = Segments.Segment_Exhausted,
+         "replacement source did not exhaust its fixed byte extent");
+
+      Shared.Create_Anonymous (Equal_Backing, Old_Length);
+      Shared.Map (Equal_Map, Equal_Backing);
+      begin
+         Segments.Try_Prepare_Replacement
+           (Source      => Source_Segment,
+            Target      => Equal_Map,
+            Config      => Migration_Config,
+            Quiescence  => Segments.Caller_Established_Quiescence,
+            Replacement => Replacement,
+            Result      => Migration_Result);
+      exception
+         when Constraint_Error =>
+            Equal_Target_Rejected := True;
+      end;
+      Assert
+        (Equal_Target_Rejected and then not Segments.Is_Attached (Replacement),
+         "same-size mapping was accepted as a larger replacement");
+      Shared.Unmap (Equal_Map);
+      Shared.Close (Equal_Backing);
+
+      Create_Name (Source_Segment, "pending", 64, Pending, Pending_Claim);
+      Shared.Create_File (Target_Backing, Path, New_Length);
+      Shared.Open_File (Target_Opened, Path, New_Length);
+      Shared.Map (Opened_Map, Target_Opened);
+      begin
+         Segments.Try_Prepare_Replacement
+           (Source      => Source_Segment,
+            Target      => Opened_Map,
+            Config      => Migration_Config,
+            Quiescence  => Segments.Caller_Established_Quiescence,
+            Replacement => Replacement,
+            Result      => Migration_Result);
+      exception
+         when Shared.Validation_Error =>
+            Opened_Target_Rejected := True;
+      end;
+      Assert
+        (Opened_Target_Rejected and then
+         not Segments.Is_Attached (Replacement),
+         "opened mapping received exclusive replacement authority");
+      Shared.Unmap (Opened_Map);
+      Shared.Close (Target_Opened);
+
+      Shared.Map (Target_Map, Target_Backing);
+      Target_Base := Testing.Base_Value (Target_Map);
+      Testing.Store_Release_U32 (Source_Map, Registry_Guard_Offset, 1);
+      Segments.Try_Prepare_Replacement
+        (Source      => Source_Segment,
+         Target      => Target_Map,
+         Config      => Migration_Config,
+         Quiescence  => Segments.Caller_Established_Quiescence,
+         Replacement => Replacement,
+         Result      => Migration_Result);
+      Assert
+        (Migration_Result = Segments.Registry_Busy
+         and then not Segments.Is_Attached (Replacement),
+         "replacement copied while the source registry guard was owned");
+      Testing.Store_Release_U32 (Source_Map, Registry_Guard_Offset, 0);
+
+      Segments.Try_Prepare_Replacement
+        (Source      => Source_Segment,
+         Target      => Target_Map,
+         Config      => Migration_Config,
+         Quiescence  => Segments.Caller_Established_Quiescence,
+         Replacement => Replacement,
+         Result      => Migration_Result);
+      Assert
+        (Migration_Result = Segments.Initialization_In_Progress
+         and then not Segments.Is_Attached (Replacement),
+         "replacement exposed an unpublished named extent");
+
+      Segments.Publish_Failure (Source_Segment, Pending_Claim, 91);
+      Segments.Try_Remove (Source_Segment, "pending", Remove_Result);
+      Assert
+        (Remove_Result = Segments.Removed,
+         "replacement setup could not retire failed initialization");
+      Segments.Try_Prepare_Replacement
+        (Source      => Source_Segment,
+         Target      => Target_Map,
+         Config      => Migration_Config,
+         Quiescence  => Segments.Caller_Established_Quiescence,
+         Replacement => Replacement,
+         Result      => Migration_Result);
+      Assert
+        (Migration_Result = Segments.Replacement_Ready
+         and then Segments.Is_Attached (Replacement),
+         "larger replacement was not published ready");
+      Assert
+        (Shared.Length (Target_Map) = New_Length,
+         "replacement mapping lost its larger extent");
+
+      Segments.Resolve (Replacement, Handle, Target_Location, Target_Extent);
+      Assert
+        (Target_Location = Location and then Target_Extent = Extent,
+         "replacement changed a published offset or extent");
+      Segments.Attach_Region (Replacement, Target_Region);
+      Strings.Attach (Target_String, Target_Region, Target_Location, 64);
+      Strings.Read (Target_String, Observed);
+      Assert (Observed = Payload, "replacement lost stored payload bytes");
+      Assert
+        (Contains_U64
+           (Testing.Base (Target_Map), C.size_t (New_Length), Source_Base) = 0
+         and then Contains_U64
+           (Testing.Base (Target_Map), C.size_t (New_Length), Target_Base) = 0,
+         "replacement stored a process-local mapping address");
+      Strings.Detach (Target_String);
+      Regions.Detach (Target_Region);
+
+      Segments.Try_Find_Or_Create
+        (Replacement, "reused", 64, Reused, Reuse_Claim,
+         Find_Result, Failure);
+      Assert
+        (Find_Result = Segments.Created,
+         "replacement did not reuse a fitting removed reservation");
+      Segments.Publish (Replacement, Reuse_Claim);
+      Assert
+        (Segments.State_Of (Replacement, Pending) = Segments.Stale
+         and then Segments.State_Of (Source_Segment, Pending) =
+           Segments.Removed,
+         "replacement reuse did not advance only the cloned generation");
+
+      Segments.Try_Find_Or_Create
+        (Replacement, "large", Old_Length, Large, Large_Claim,
+         Find_Result, Failure);
+      Assert
+        (Find_Result = Segments.Created,
+         "larger replacement did not expose its additional allocation tail");
+      Segments.Publish (Replacement, Large_Claim);
+      Assert
+        (Segments.State_Of (Replacement, Handle) = Segments.Ready
+         and then Segments.State_Of (Source_Segment, Handle) = Segments.Ready,
+         "replacement did not preserve the original generation-stamped handle");
+
+      Shared.Unlink (Target_Backing);
+      Shared.Close (Target_Backing);
+      Assert
+        (Shared.Is_Mapped (Target_Map),
+         "closing replacement backing invalidated its mapping");
+      Segments.Detach (Replacement);
+      Shared.Unmap (Target_Map);
+      Segments.Detach (Source_Segment);
+      Shared.Unmap (Source_Map);
+      Shared.Close (Source_Backing);
+   exception
+      when others =>
+         if Shared.Is_Open (Target_Opened) then
+            Shared.Close (Target_Opened);
+         end if;
+         if Shared.Is_Open (Target_Backing) then
+            begin
+               Shared.Unlink (Target_Backing);
+            exception
+               when others => null;
+            end;
+            Shared.Close (Target_Backing);
+         end if;
+         raise;
+   end Check_Replacement_Migration;
+
    procedure Check_Handoff is
       Backing : Shared.Backing_Object;
       Parent_Map : Shared.Mapping;
@@ -1406,6 +1630,7 @@ begin
    Check_Named;
    Check_File;
    Check_Exhaustion;
+   Check_Replacement_Migration;
    Check_Registry_Corruption;
    Check_Handoff;
 end Shared_Memory_Smoke;

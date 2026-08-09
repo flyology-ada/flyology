@@ -21,8 +21,11 @@ Ada bodies. Stable per-platform flag values live in those bodies. Darwin
 
 The pure classifiers in `Flyology.Shared_Memory_Policy` are SPARK code. They
 decide exact-size and type validity, required security properties, namespace
-initialization state, and the exact-one handoff frame. The authoritative proof
-script includes that package.
+initialization state, and the exact-one handoff frame. They also prove
+replacement admission: an accepted frontier is aligned and bounded by both
+distinct mappings, the target is strictly larger, virgin, and exclusively
+created, and the persisted configuration is unchanged. The authoritative
+proof script includes that package.
 
 `tests/native/shared_memory_test.c` is not linked into the production library.
 It retains only foreign test fixtures that require opaque `posix_spawn` action

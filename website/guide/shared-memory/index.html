@@ -68,6 +68,7 @@
             <li><a href="#mapping">Map and attach</a></li>
             <li><a href="#registry">Initialize the registry</a></li>
             <li><a href="#objects">Publish a relocatable object</a></li>
+            <li><a href="#migration">Grow by replacement</a></li>
             <li><a href="#worker-status">Share worker status</a></li>
             <li><a href="#image-index-showcase">Run the image index</a></li>
             <li><a href="#peers">Hand off one capability safely</a></li>
@@ -305,6 +306,88 @@ end case;</code></pre>
             </figure>
             <p>Call <code>Publish</code> only after the nested leaf is ready. If initialization fails while the creator is still alive, call <code>Publish_Failure</code> with a nonzero application code. The failed name remains visible until explicit removal; no later participant silently overwrites it.</p>
             <p>Removal invalidates the registry handle but does not destroy application bytes or unlink the OS object. A later fitting reuse advances a nonwrapping generation, so stale handles fail. The <a href="../data-structures/#choose">relocatable data-structures guide</a> explains how to select and initialize the leaf placed in each extent.</p>
+          </section>
+
+          <section id="migration">
+            <span class="step-label">SEGMENT GROWTH</span>
+            <h2>Replace a quiescent segment instead of resizing it.</h2>
+            <p>A live mapping cannot safely follow an in-place backing resize. Linux anonymous segments additionally carry immutable grow and shrink seals by design. Flyology therefore grows a segment by preparing a larger replacement: the old mapping stays ready while the library copies its validated registry and allocated bytes into a distinct, exclusively created mapping.</p>
+
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>Preserve the stored coordinate system</strong><span>publish the new lifecycle last</span></figcaption>
+              <svg role="img" aria-labelledby="migration-title migration-desc" viewBox="0 0 760 340">
+                <title id="migration-title">Safe segment growth by replacement</title>
+                <desc id="migration-desc">Applications quiesce every participant. Flyology locks and validates the old registry, copies every allocated byte to the same offsets in a larger virgin mapping, updates only the total extent, and publishes the replacement ready. The application hands it to peers, waits for attachment acknowledgments, cuts over, then retires the old mapping.</desc>
+                <defs>
+                  <marker id="migration-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="migration-teal-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="24" y="68" width="206" height="166" rx="15"/>
+                <text x="127" y="97" text-anchor="middle" font-size="14" font-weight="620">Old segment · ready</text>
+                <rect class="diagram-violet" x="48" y="116" width="158" height="36" rx="8"/>
+                <text class="diagram-code" x="127" y="139" text-anchor="middle">registry + generations</text>
+                <rect class="diagram-payload" x="48" y="164" width="118" height="42" rx="8"/>
+                <text class="diagram-code" x="107" y="190" text-anchor="middle">allocated bytes</text>
+                <rect class="diagram-box" x="166" y="164" width="40" height="42" rx="8"/>
+                <text class="diagram-muted" x="186" y="190" text-anchor="middle">free</text>
+
+                <rect class="diagram-violet" x="274" y="32" width="212" height="50" rx="11"/>
+                <text x="380" y="54" text-anchor="middle" font-size="13" font-weight="620">Caller-established quiescence</text>
+                <text class="diagram-muted" x="380" y="72" text-anchor="middle">registry + every nested object</text>
+                <path class="diagram-line-violet" d="M230 112c28-36 45-48 72-48" marker-end="url(#migration-arrow)"/>
+                <path class="diagram-line" d="M230 166h66" marker-end="url(#migration-arrow)"/>
+                <text class="diagram-label" x="330" y="144" text-anchor="middle">VALIDATE · COPY</text>
+                <text class="diagram-code diagram-muted" x="330" y="188" text-anchor="middle">same offsets</text>
+                <text class="diagram-code diagram-muted" x="330" y="208" text-anchor="middle">same handles</text>
+
+                <rect class="diagram-header" x="400" y="100" width="336" height="166" rx="15"/>
+                <text x="568" y="129" text-anchor="middle" font-size="14" font-weight="620">Larger replacement · ready last</text>
+                <rect class="diagram-violet" x="424" y="148" width="158" height="36" rx="8"/>
+                <text class="diagram-code" x="503" y="171" text-anchor="middle">preserved registry</text>
+                <rect class="diagram-payload" x="424" y="196" width="118" height="42" rx="8"/>
+                <text class="diagram-code" x="483" y="222" text-anchor="middle">copied bytes</text>
+                <rect class="diagram-teal" x="542" y="196" width="170" height="42" rx="8"/>
+                <text class="diagram-code" x="627" y="222" text-anchor="middle">new zero-filled tail</text>
+                <path class="diagram-line-teal" d="M568 266v42" marker-end="url(#migration-teal-arrow)"/>
+                <text class="diagram-label" x="568" y="329" text-anchor="middle">HAND OFF · ACKNOWLEDGE · CUT OVER · RETIRE OLD</text>
+              </svg>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>prepare a larger anonymous replacement</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Shared.Create_Anonymous (New_Backing, 2_097_152);
+Shared.Map (New_Map, New_Backing);
+
+Segments.Try_Prepare_Replacement
+  (Source      =&gt; Segment,
+   Target      =&gt; New_Map,
+   Config      =&gt; Segment_Config,
+   Quiescence  =&gt; Segments.Caller_Established_Quiescence,
+   Replacement =&gt; New_Segment,
+   Result      =&gt; Migration);
+
+case Migration is
+   when Segments.Replacement_Ready =&gt;
+      --  Send New_Backing, wait for every peer to attach New_Segment,
+      --  then direct participants to the new capability and retire the old.
+      null;
+   when Segments.Registry_Busy |
+        Segments.Initialization_In_Progress =&gt;
+      --  Quiescence is incomplete. Do not copy or cut over.
+      null;
+end case;</code></pre>
+            </figure>
+
+            <p><code>Caller_Established_Quiescence</code> is deliberately explicit. Flyology acquires the persisted registry guard and rejects every unpublished creation claim, but no generic segment layer can discover application-owned leaf views or know whether another process is still mutating a ring, map, arena, or string. The caller must stop and acknowledge every participant before making this declaration. If it cannot establish quiescence, it must not migrate.</p>
+            <p>The target must be a distinct mapping with a virgin lifecycle derived from exclusive backing creation. An opened or received mapping is rejected, even if its bytes currently happen to be zero. The operation zeroes the target, keeps the configuration fixed, validates every active and reusable slot, copies only through the aligned allocation frontier, changes the persisted total extent, resets the target registry guard, and release-publishes the target lifecycle last. A partial target is poisoned on an exceptional copy failure and must be discarded.</p>
+            <p>Offsets and generation-stamped handles retain their values, so existing application metadata can resolve immediately in the replacement. Registry capacity and object geometry do not grow; reserve enough registry slots up front, and use the new tail for later extents or arena allocations. The old and new segments are independent snapshots after cloning—resuming writers against both creates divergent state, not mirroring.</p>
+            <p>The application still owns peer handoff and cutover. Send the replacement capability, wait for receiver validation and segment-attachment acknowledgments, switch all participants, detach old leaf and segment views, then unmap and close or unlink the old backing. For file-backed targets, flush according to the persistence policy after migration. This is not a durable transaction, schema conversion, automatic owner-death recovery, or namespace-atomic replacement.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">✓</span>
+              <p>The scalar admission kernel is SPARK-proved. Acceptance implies an unchanged configuration, a virgin exclusive distinct target, a strictly larger extent, and an aligned copy frontier bounded by both mappings. Address-based atomics and byte copying remain in the narrow reviewed Ada boundary.</p>
+            </aside>
           </section>
 
           <section id="worker-status">
@@ -827,7 +910,7 @@ Shared.Flush (Backing);</code></pre>
               <li><code>Unlink</code> requires external exclusion of concurrent namespace replacement because identity comparison and unlink are separate operations. Darwin POSIX shm exposes no stable per-object identity for that comparison.</li>
               <li>A dead creator can leave the registry guard or a named extent initializing. Flyology does not detect process death, steal ownership, or infer participant quiescence.</li>
               <li>Recovery requires independently authorized owner-death detection and quiescence. Replacing the complete backing object is often the simplest valid policy.</li>
-              <li>The fixed registry does not grow. Capacity, name length, alignment, and total segment extent are persisted schema decisions.</li>
+              <li>The fixed registry does not grow. Capacity, name length, alignment, and schema remain fixed during replacement migration; only a newly created segment's total extent and zero-filled allocation tail may increase.</li>
               <li>Names are exact Ada <code>String</code> bytes. The registry performs no Unicode normalization and treats different byte sequences as different names.</li>
               <li>Shared memory does not provide peer discovery, authentication, higher-level permissions, wake channels, schema migration, or durable application transactions.</li>
               <li>The implementation is experimental and currently tested on Flyology's supported 64-bit Darwin and Linux targets.</li>

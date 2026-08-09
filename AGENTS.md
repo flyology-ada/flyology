@@ -283,6 +283,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   Core never steals it and provides no automatic owner-death recovery. An
   external authority must establish death and quiescence before replacement or
   other recovery.
+- Segment growth uses a larger exclusively created virgin replacement mapping,
+  never in-place backing resize. The caller must establish quiescence for the
+  registry and every nested object. Replacement preserves configuration,
+  offsets, generations, reservations, the allocation frontier, and bytes
+  through that frontier; it release-publishes the target lifecycle last and
+  leaves handoff, acknowledgment, cutover, and old-backing retirement explicit.
 - `Shared_Memory.Unix_Sockets.Handoff_Channel` owns a dedicated connected
   `AF_UNIX` `SOCK_STREAM` endpoint for the one-byte, one-`SCM_RIGHTS` protocol.
   No ordinary I/O, duplicate endpoint, or second protocol may share it. Reject

@@ -47,6 +47,23 @@ package Flyology.Shared_Memory.Segments is
    type Segment_Open_Result is
      (Initialized_New, Attached_Existing, Initialization_In_Progress);
 
+   --  Explicit declaration that the caller has stopped every participant
+   --  from accessing the source registry and all nested objects. This value is
+   --  not proof: Flyology cannot discover application-owned views, operations,
+   --  or peer acknowledgments. It makes the required authority visible at the
+   --  migration call site.
+   --  @enum Caller_Established_Quiescence The application has established
+   --     complete source-segment quiescence
+   type Quiescence_Authority is (Caller_Established_Quiescence);
+
+   --  Outcome of preparing a larger replacement mapping.
+   --  @enum Replacement_Ready The target contains a ready compatible clone
+   --  @enum Registry_Busy A registry operation still owns the source guard
+   --  @enum Initialization_In_Progress A named extent still has an
+   --     unpublished creator claim
+   type Replacement_Result is
+     (Replacement_Ready, Registry_Busy, Initialization_In_Progress);
+
    --  Outcome of one nonblocking exact-name find-or-create attempt.
    --  @enum Created The caller owns the returned Creation_Claim and must
    --     publish success or failure
@@ -145,6 +162,46 @@ package Flyology.Shared_Memory.Segments is
       Source : Mapping;
       Config : Configuration;
       Result : out Segment_Open_Result);
+
+   --  Nonblockingly prepare a larger replacement segment while preserving
+   --  every registry slot, exact name, extent offset, generation, allocation
+   --  frontier, and stored payload byte through the source frontier. Target
+   --  must be a distinct mapping with a virgin lifecycle derived from
+   --  exclusive backing creation, must be strictly larger than Source, and
+   --  must use the same persisted Configuration. Anonymous, named POSIX, and
+   --  file-backed target mappings are all accepted through the common Mapping
+   --  contract; the caller must keep a named or file target private until
+   --  publication and cutover are authorized.
+   --
+   --  The caller must first establish quiescence for every process, native
+   --  task, registry operation, creation claim, and nested relocatable object.
+   --  The source registry guard detects a concurrent registry operation, and
+   --  the slot scan detects an unpublished creation claim, but this operation
+   --  cannot detect concurrent leaf access. On success it publishes the target
+   --  lifecycle last and attaches Replacement; Source remains ready and
+   --  unchanged. Peer handoff, attachment acknowledgment, cutover, old-view
+   --  detachment, persistence, and old-backing retirement remain explicit
+   --  application protocol steps. Registry capacity, name length, alignment,
+   --  and schema do not grow; only the allocation tail becomes larger.
+   --  @param Source Attached ready source segment kept alive and unchanged
+   --  @param Target Distinct virgin mapping from exclusive backing creation
+   --  @param Config Exact source and target registry configuration
+   --  @param Quiescence Required caller declaration of complete quiescence
+   --  @param Replacement Detached view attached to the ready target on success
+   --  @param Result Ready, busy, or unpublished-claim outcome
+   --  @exception Constraint_Error Target is not strictly larger or geometry
+   --     is not natively representable
+   --  @exception Validation_Error Target is unmapped, nonexclusive, nonvirgin,
+   --     or aliases the source mapping
+   --  @exception Segment_Error Source identity, geometry, frontier, slot, or
+   --     lifecycle state is corrupt
+   procedure Try_Prepare_Replacement
+     (Source      : View;
+      Target      : Mapping;
+      Config      : Configuration;
+      Quiescence  : Quiescence_Authority;
+      Replacement : in out View;
+      Result      : out Replacement_Result);
 
    --  Detach Item without changing the registry or mapping.
    --  @param Item Segment view to detach

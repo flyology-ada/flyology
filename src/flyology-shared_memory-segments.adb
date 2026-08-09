@@ -1,5 +1,6 @@
 with Flyology.Atomic_Primitives;
 with Flyology.Memory_Operations;
+with Flyology.Shared_Memory_Policy;
 with Interfaces.C;
 with System.Storage_Elements;
 
@@ -7,6 +8,7 @@ package body Flyology.Shared_Memory.Segments is
    package C renames Interfaces.C;
    package Atomic renames Flyology.Atomic_Primitives;
    package Memory renames Flyology.Memory_Operations;
+   package Policy renames Flyology.Shared_Memory_Policy;
    package Storage renames System.Storage_Elements;
    package DS renames Flyology.Data_Structures;
 
@@ -508,6 +510,230 @@ package body Flyology.Shared_Memory.Segments is
          end if;
          raise;
    end Create_Or_Attach;
+
+   procedure Try_Prepare_Replacement
+     (Source      : View;
+      Target      : Mapping;
+      Config      : Configuration;
+      Quiescence  : Quiescence_Authority;
+      Replacement : in out View;
+      Result      : out Replacement_Result)
+   is
+      pragma Unreferenced (Quiescence);
+      Shape : constant Geometry := Stored_Geometry (Config);
+      Target_Base     : System.Address := System.Null_Address;
+      Target_Extent   : Byte_Length := 0;
+      Frontier        : Byte_Length;
+      Admission       : Policy.Replacement_Validation;
+      Acquired        : Boolean := False;
+      Target_Touched  : Boolean := False;
+      Has_Initializer : Boolean := False;
+   begin
+      Require_Ready (Source);
+      Detach (Replacement);
+
+      if Is_Mapped (Target) then
+         Target_Base := Mapping_Base (Target);
+         Target_Extent := Mapping_Length (Target);
+      end if;
+      Frontier := Byte_Length
+        (Atomic.Load_Acquire_U64 (Address_At (Source, Next_Offset, 8)));
+      Admission := Policy.Validate_Replacement
+        (Source_Extent      => Interfaces.Unsigned_64 (Source.Extent),
+         Target_Extent      => Interfaces.Unsigned_64 (Target_Extent),
+         Frontier           => Interfaces.Unsigned_64 (Frontier),
+         Data_Start         => Interfaces.Unsigned_64 (Shape.Data_Start),
+         Alignment          =>
+           Interfaces.Unsigned_64 (Config.Allocation_Alignment),
+         Native_Index_Limit =>
+           Interfaces.Unsigned_64 (Storage.Storage_Offset'Last),
+         Source_Ready       =>
+           Atomic.Load_Acquire_U32
+             (Address_At (Source, Lifecycle_Offset, 4)) = Ready_State,
+         Same_Configuration =>
+           Source.Schema = Config.Schema
+           and then Source.Capacity =
+             Interfaces.Unsigned_32 (Config.Registry_Capacity)
+           and then Source.Name_Limit =
+             Interfaces.Unsigned_32 (Config.Maximum_Name_Length)
+           and then Source.Slot_Size =
+             Interfaces.Unsigned_32 (Shape.Slot_Size)
+           and then Source.Alignment =
+             Interfaces.Unsigned_32 (Config.Allocation_Alignment)
+           and then Source.Data_Start = Shape.Data_Start,
+         Target_Mapped      => Is_Mapped (Target),
+         Target_Exclusive   =>
+           Is_Mapped (Target) and then Mapping_May_Initialize (Target),
+         Target_Virgin      =>
+           Is_Mapped (Target)
+           and then Atomic.Load_Acquire_U32
+             (At_Base (Target_Base, Target_Extent, Lifecycle_Offset, 4)) =
+               Virgin_State,
+         Distinct_Mappings  =>
+           Is_Mapped (Target) and then Target_Base /= Source.Base);
+
+      case Admission is
+         when Policy.Replacement_Valid =>
+            null;
+         when Policy.Source_Invalid | Policy.Configuration_Mismatch =>
+            raise Segment_Error with
+              "source segment is not a valid replacement source";
+         when Policy.Target_Not_Larger =>
+            raise Constraint_Error with
+              "replacement mapping must be strictly larger";
+         when Policy.Target_Not_Indexable =>
+            raise Constraint_Error with
+              "replacement mapping is not natively indexable";
+         when Policy.Target_Unmapped =>
+            raise Validation_Error with "replacement mapping is unmapped";
+         when Policy.Target_Not_Exclusive =>
+            raise Validation_Error with
+              "replacement mapping was not exclusively created";
+         when Policy.Target_Not_Virgin =>
+            raise Validation_Error with
+              "replacement mapping lifecycle is not virgin";
+         when Policy.Mapping_Aliased =>
+            raise Validation_Error with
+              "replacement mapping aliases the source";
+      end case;
+
+      if Read_U32 (Address_At (Source, Version_Offset, 4)) /= Layout_Version
+        or else Read_U64 (Address_At (Source, Magic_Offset, 8)) /=
+          Segment_Magic
+        or else Read_U64 (Address_At (Source, Schema_Offset, 8)) /=
+          Config.Schema
+        or else Read_U64 (Address_At (Source, Extent_Offset, 8)) /=
+          Interfaces.Unsigned_64 (Source.Extent)
+        or else Read_U32 (Address_At (Source, Capacity_Offset, 4)) /=
+          Interfaces.Unsigned_32 (Config.Registry_Capacity)
+        or else Read_U32 (Address_At (Source, Name_Limit_Offset, 4)) /=
+          Interfaces.Unsigned_32 (Config.Maximum_Name_Length)
+        or else Read_U32 (Address_At (Source, Slot_Size_Offset, 4)) /=
+          Interfaces.Unsigned_32 (Shape.Slot_Size)
+        or else Read_U32 (Address_At (Source, Alignment_Offset, 4)) /=
+          Interfaces.Unsigned_32 (Config.Allocation_Alignment)
+        or else Read_U64 (Address_At (Source, Data_Start_Offset, 8)) /=
+          Interfaces.Unsigned_64 (Shape.Data_Start)
+      then
+         raise Segment_Error with
+           "source segment header changed before replacement";
+      end if;
+
+      if not Acquire_Guard (Source) then
+         Result := Registry_Busy;
+         return;
+      end if;
+      Acquired := True;
+
+      Frontier := Byte_Length
+        (Atomic.Load_Acquire_U64 (Address_At (Source, Next_Offset, 8)));
+      if Frontier < Source.Data_Start or else Frontier > Source.Extent
+        or else Frontier mod Byte_Length (Source.Alignment) /= 0
+      then
+         raise Segment_Error with
+           "source segment allocation frontier is corrupt";
+      end if;
+
+      for Slot in Interfaces.Unsigned_32 range 1 .. Source.Capacity loop
+         declare
+            State : constant Interfaces.Unsigned_32 :=
+              Atomic.Load_Acquire_U32
+                (Slot_At (Source, Slot, Slot_State_Offset, 4));
+         begin
+            if State /= Free_Slot then
+               declare
+                  Slot_State : constant Policy.Replacement_Slot_State :=
+                    (if State = Initializing_Slot then Policy.Slot_Initializing
+                     elsif State = Ready_Slot then Policy.Slot_Ready
+                     elsif State = Failed_Slot then Policy.Slot_Failed
+                     elsif State = Removed_Slot then Policy.Slot_Removed
+                     else Policy.Slot_Invalid);
+                  Generation : constant Interfaces.Unsigned_64 := Read_U64
+                    (Slot_At
+                       (Source, Slot, Slot_Generation_Offset, 8));
+                  Name_Length : constant Interfaces.Unsigned_32 := Read_U32
+                    (Slot_At
+                       (Source, Slot, Slot_Name_Length_Offset, 4));
+                  Location : constant Interfaces.Unsigned_64 := Read_U64
+                    (Slot_At
+                       (Source, Slot, Slot_Location_Offset, 8));
+                  Length : constant Interfaces.Unsigned_64 := Read_U64
+                    (Slot_At (Source, Slot, Slot_Length_Offset, 8));
+                  Reserved : constant Interfaces.Unsigned_64 := Read_U64
+                    (Slot_At
+                       (Source, Slot, Slot_Reserved_Offset, 8));
+                  Failure : constant Interfaces.Unsigned_32 := Read_U32
+                    (Slot_At
+                       (Source, Slot, Slot_Failure_Offset, 4));
+               begin
+                  if not Policy.Valid_Replacement_Slot
+                    (State       => Slot_State,
+                     Generation  => Generation,
+                     Name_Length => Name_Length,
+                     Name_Limit  => Source.Name_Limit,
+                     Location    => Location,
+                     Length      => Length,
+                     Reserved    => Reserved,
+                     Failure     => Failure,
+                     Data_Start  =>
+                       Interfaces.Unsigned_64 (Source.Data_Start),
+                     Frontier    => Interfaces.Unsigned_64 (Frontier),
+                     Alignment   =>
+                       Interfaces.Unsigned_64 (Source.Alignment))
+                  then
+                     raise Segment_Error with
+                       "source slot is invalid for replacement";
+                  end if;
+                  if State = Initializing_Slot then
+                     Has_Initializer := True;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+
+      if Has_Initializer then
+         Release_Guard (Source);
+         Acquired := False;
+         Result := Initialization_In_Progress;
+         return;
+      end if;
+
+      Memory.Zero (Target_Base, C.size_t (Target_Extent));
+      Target_Touched := True;
+      Atomic.Store_Release_U32
+        (At_Base (Target_Base, Target_Extent, Lifecycle_Offset, 4),
+         Initializing_State);
+      Memory.Copy
+        (At_Base (Target_Base, Target_Extent, Version_Offset,
+                  Frontier - Version_Offset),
+         Address_At (Source, Version_Offset, Frontier - Version_Offset),
+         C.size_t (Frontier - Version_Offset));
+      Write_U64
+        (At_Base (Target_Base, Target_Extent, Extent_Offset, 8),
+         Interfaces.Unsigned_64 (Target_Extent));
+      Atomic.Store_Release_U32
+        (At_Base (Target_Base, Target_Extent, Guard_Offset, 4), Guard_Free);
+      Set_View (Replacement, Target, Config, Shape);
+      Atomic.Store_Release_U32
+        (Address_At (Replacement, Lifecycle_Offset, 4), Ready_State);
+      Target_Touched := False;
+      Release_Guard (Source);
+      Acquired := False;
+      Result := Replacement_Ready;
+   exception
+      when others =>
+         if Acquired then
+            Release_Guard (Source);
+         end if;
+         if Target_Touched then
+            Atomic.Store_Release_U32
+              (At_Base (Target_Base, Target_Extent, Lifecycle_Offset, 4),
+               Poisoned_State);
+         end if;
+         Detach (Replacement);
+         raise;
+   end Try_Prepare_Replacement;
 
    procedure Detach (Item : in out View) is
    begin
