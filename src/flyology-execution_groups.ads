@@ -119,11 +119,26 @@ package Flyology.Execution_Groups with Preelaborate is
 
    --  Return the automatic pool size without starting any group. The value of
    --  FLYOLOGY_LOOP_POOL_SIZE is captured once at process startup, defaults to
-   --  one when absent, and freezes before task activation. A lightweight task
-   --  without a specific CPU is assigned among groups 0 .. Result - 1.
+   --  one when absent, and establishes the initial size before task
+   --  activation.
+   --  Grow_Configured_Pool may increase it later. A lightweight task without a
+   --  specific CPU is assigned among groups 0 .. Result - 1.
    --  @return Configured shared-group pool size
    --  @exception Group_Error The runtime reports an invalid size
    function Configured_Pool_Size return Loop_Pool_Size;
+
+   --  Ensure the automatic pool contains at least Minimum_Size shared groups.
+   --  Concurrent calls converge on the largest requested value. A request at
+   --  or below the current size is an idempotent no-op; the pool never
+   --  shrinks.
+   --  Existing tasks remain on their current groups, while future automatic
+   --  placements use the enlarged pool. Newly included groups remain lazy.
+   --  Growing changes the modulus used by Topology.Shard_For_Hash.
+   --  @param Minimum_Size Minimum automatic pool size after the call
+   --  @exception Group_Error The runtime lifecycle does not permit growth
+   procedure Grow_Configured_Pool (Minimum_Size : Loop_Pool_Size)
+   with Post => Configured_Pool_Size >= Minimum_Size;
+
    --  Return the automatic policy without starting any group.
    --  @return Configured placement policy
    --  @exception Group_Error The runtime reports an unknown policy

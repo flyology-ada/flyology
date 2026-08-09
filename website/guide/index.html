@@ -135,26 +135,29 @@ alr with flyology</code></pre>
             </figure>
             <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock OS-thread execution, and no event machinery starts until a lightweight task is activated.</p>
             <figure class="code-panel">
-              <figcaption>lightweight project default</figcaption>
-              <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>alr exec -- sh -c \
-  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
-alr build</code></pre>
-            </figure>
-            <figure class="code-panel">
               <figcaption>launch with four shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>FLYOLOGY_LOOP_POOL_SIZE=4 alr run</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> is captured once at application startup, before library-level tasks activate, and is fixed for the process lifetime. It defaults to <code>1</code>. An empty, malformed, or out-of-range value fails application initialization.</p>
+              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> establishes the initial size at application startup, before library-level tasks activate. It defaults to <code>1</code>. An empty, malformed, or out-of-range value fails application initialization. The pool may grow later but never shrinks.</p>
+            </aside>
+            <h3 id="grow-pool">Grow the automatic pool later</h3>
+            <p><code>Grow_Configured_Pool</code> ensures that the automatic pool contains at least the requested number of groups. Concurrent calls converge on the largest request, and calls at or below the current size do nothing. Existing tasks stay on their current groups; future automatic placements use the enlarged pool. Growth alone starts no group or OS thread.</p>
+            <figure class="code-panel">
+              <figcaption>grow-only runtime configuration</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Flyology.Execution_Groups.Grow_Configured_Pool (8);</code></pre>
+            </figure>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Growth changes topology hashing.</strong> <code>Topology.Shard_For_Hash</code> uses the current configured pool size, so persist an independent shard count when keys must keep stable ownership.</p>
             </aside>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>FLYOLOGY_DEFAULT</code></dt><dd>Selects <code>native</code> or <code>lightweight</code> for tasks that do not carry an explicit designation.</dd></div>
                 <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement at application startup. Groups and their OS threads still start lazily.</dd></div>
-                <div class="decision-row"><dt>Loop placement</dt><dd><code>FLYOLOGY_LOOP_PLACEMENT</code> and <code>FLYOLOGY_LOOP_PLACEMENT_MAP</code> request Linux strict logical-CPU binding or a supported Darwin advisory tag. This places loop threads; it does not change task-to-group assignment.</dd></div>
+                <div class="decision-row"><dt><a href="#grow-pool"><code>Grow_Configured_Pool</code></a></dt><dd>Raises that minimum later without moving existing tasks or starting unused groups.</dd></div>
               </dl>
             </div>
           </section>
@@ -174,7 +177,7 @@ package Worker is
    end Connection;
 end Worker;</code></pre>
             </figure>
-            <p>Explicit <code>Flyology.Native_Task</code> and <code>Flyology.Lightweight_Task</code> values override the prepared project default. <code>Flyology.Project_Default</code> requests that default explicitly, which is useful on discriminated task types.</p>
+            <p>Use <code>Flyology.Native_Task</code> and <code>Flyology.Lightweight_Task</code> for explicit task designations. <code>Flyology.Project_Default</code> requests the project default explicitly, which is useful on discriminated task types.</p>
             <figure class="code-panel">
               <figcaption>rebuild after changing the application</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -324,6 +327,7 @@ task Writer with CPU =&gt; 2 is
 end Writer;</code></pre>
             </figure>
             <p>Tasks in one group share a stable loop thread and schedule cooperatively. Separate groups use separate OS threads and may execute in parallel. Shared group identifiers are <code>0 .. 127</code>; dedicated group identifiers are <code>128 .. 255</code>.</p>
+            <p>The <a href="#grow-pool">startup pool configuration</a> can be increased at runtime without moving existing tasks.</p>
             <h3>Migration is an explicit safe point</h3>
             <p>A lightweight task can move to another group without changing Ada task identity, stack, locals, or exception state. Use a scoped thread pin while holding thread-affine foreign state, and use a dedicated group when exclusive OS-thread ownership is also required.</p>
             <figure class="code-panel">
@@ -371,7 +375,7 @@ Flyology.IO.Files.Read_At
                 <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, plan usable stack bytes as peak live tasks multiplied by the observed effective bytes per task. Read <code>Reserved_Bytes</code> for guarded virtual address space and measure RSS for resident memory.</dd></div>
                 <div class="decision-row"><dt>Task-owned regions</dt><dd>Region storage currently grows on demand without a built-in quota. Bound the number and size of admitted phases, sample <code>Statistics</code>, and call <code>Release</code> at the earliest valid lifetime boundary.</dd></div>
                 <div class="decision-row"><dt>Dormant stacks</dt><dd>Choose <code>Minimum_Wait</code> from tolerated wake latency and representative host measurements. Accepted cold or page-out advice does not reduce the configured stack capacity.</dd></div>
-                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> bounds automatic shared groups, not task count. Set it when launching the application, start near the CPU parallelism the workload can use, and compare measurements; each created group adds an OS thread plus poller, scheduler, and kernel-queue resources.</dd></div>
+                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> selects the initial automatic shared groups, not task count. Start near the CPU parallelism the workload can use, grow with <code>Grow_Configured_Pool</code> when measurements justify it, and remember that each created group adds an OS thread plus poller, scheduler, and kernel-queue resources.</dd></div>
                 <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These are separate limits: cancellation is not a timeout, and a fairness quantum is not a hard execution deadline.</dd></div>
               </dl>
             </div>

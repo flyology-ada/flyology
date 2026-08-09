@@ -24,6 +24,13 @@ package body Flyology.Execution_Groups is
       Runtime_Configured_Pool_Size,
       "flyology_runtime_configured_pool_size");
 
+   function Runtime_Grow_Configured_Pool
+     (Minimum_Size : C.int) return C.int;
+   pragma Import
+     (C,
+      Runtime_Grow_Configured_Pool,
+      "flyology_runtime_grow_configured_pool");
+
    function Runtime_Configured_Placement return C.int;
    pragma Import
      (C,
@@ -147,6 +154,13 @@ package body Flyology.Execution_Groups is
       end if;
       return Loop_Pool_Size (Result);
    end Configured_Pool_Size;
+
+   procedure Grow_Configured_Pool (Minimum_Size : Loop_Pool_Size) is
+   begin
+      if Runtime_Grow_Configured_Pool (C.int (Minimum_Size)) /= 0 then
+         raise Group_Error with "cannot grow configured event-loop pool";
+      end if;
+   end Grow_Configured_Pool;
 
    function Configured_Placement return Automatic_Placement_Policy is
    begin

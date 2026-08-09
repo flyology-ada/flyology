@@ -404,6 +404,7 @@ package body System.Flyology.Scheduler is
    Groups         : Group_Array := (others => null);
    Fiber_Registry : Registry_Bucket_Array := (others => null);
    Automatic_Pool_Size : Positive := Pool_Config.Prepared_Pool_Size;
+   pragma Atomic (Automatic_Pool_Size);
    Next_Automatic_Group : C.unsigned_long_long := 0;
    Thread_Group   : Loop_Group_Access := null;
    pragma Thread_Local_Storage (Thread_Group);
@@ -2475,6 +2476,34 @@ package body System.Flyology.Scheduler is
 
    function Configured_Pool_Size return C.int is
      (C.int (Automatic_Pool_Size));
+
+   function Grow_Configured_Pool (Minimum_Size : C.int) return C.int is
+      Result : C.int := -1;
+   begin
+      if In_Fork_Child
+        or else not Initialized
+        or else Minimum_Size < 1
+        or else Minimum_Size > Dedicated_First_Id
+      then
+         return -1;
+      end if;
+
+      Lock_Topology;
+      if Initialized
+        and then Scheduling.Creation_Admitted (Lifecycle_State)
+      then
+         Automatic_Pool_Size := Positive
+           (Scheduling.Growth_Target
+              (Scheduling.Pool_Size (Automatic_Pool_Size),
+               Scheduling.Pool_Size (Minimum_Size)));
+         Result := 0;
+      end if;
+      Unlock_Topology;
+      return Result;
+   exception
+      when others =>
+         Fatal;
+   end Grow_Configured_Pool;
 
    function Configured_Placement return C.int is (0);
 

@@ -58,7 +58,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Shared group ids are `0 .. 127`; dedicated ids are `128 .. 255`. Automatic
   pool size is `1 .. 128` and currently uses deterministic round robin. The
   RTS reads `FLYOLOGY_LOOP_POOL_SIZE` once at process startup, falls back to
-  the prepared value when absent, and freezes it before task activation.
+  the prepared value when absent, and establishes the initial size before task
+  activation. `Grow_Configured_Pool` may only increase it under the topology
+  lock; growth moves no existing task and starts no group by itself.
 - Ada reserves `CPU => 0` as `Not_A_Specific_CPU`, so only `1 .. 127` name a
   group. `CPU => 0` and an absent aspect both take automatic placement; group
   0 is reachable only through automatic placement or migration. Do not

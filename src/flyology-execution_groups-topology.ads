@@ -14,10 +14,9 @@ package Flyology.Execution_Groups.Topology with Preelaborate is
    subtype Shard_Id is Shared_Group_Id;
 
    --  Map Hash deterministically across the process's configured shared
-   --  groups. The pool size is frozen during application startup, so a given
-   --  hash remains on the same shard within one process. Launching with a
-   --  different FLYOLOGY_LOOP_POOL_SIZE may remap keys; persist an independent
-   --  partition count when storage compatibility requires it.
+   --  groups. Launching with a different FLYOLOGY_LOOP_POOL_SIZE or calling
+   --  Grow_Configured_Pool may remap a hash within one process; persist an
+   --  independent partition count when storage compatibility requires it.
    --  @param Hash Application key or hash to partition
    --  @return Group in 0 .. Configured_Pool_Size - 1
    --  @exception Group_Error The runtime reports an invalid pool size

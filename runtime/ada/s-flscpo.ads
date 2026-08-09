@@ -86,6 +86,40 @@ is
    First_Dedicated_Group : constant C.int := 128;
    Last_Group            : constant C.int := 255;
 
+   subtype Pool_Size is C.int range 1 .. First_Dedicated_Group;
+
+   --  Compute the grow-only automatic-pool transition used while the
+   --  scheduler holds the topology lock.
+   function Growth_Target
+     (Current   : Pool_Size;
+      Requested : Pool_Size) return Pool_Size
+   with Inline,
+        Post =>
+          Growth_Target'Result =
+            (if Requested > Current then Requested else Current)
+          and then Growth_Target'Result >= Current
+          and then Growth_Target'Result >= Requested;
+
+   --  Repeating a growth request cannot change its first result.
+   procedure Lemma_Growth_Idempotent
+     (Current   : Pool_Size;
+      Requested : Pool_Size)
+   with Ghost,
+        Post =>
+          Growth_Target
+            (Growth_Target (Current, Requested), Requested) =
+          Growth_Target (Current, Requested);
+
+   --  Serialized concurrent requests converge regardless of lock order.
+   procedure Lemma_Growth_Converges
+     (Current : Pool_Size;
+      Left    : Pool_Size;
+      Right   : Pool_Size)
+   with Ghost,
+        Post =>
+          Growth_Target (Growth_Target (Current, Left), Right) =
+          Growth_Target (Growth_Target (Current, Right), Left);
+
    function Valid_Group (Group : C.int) return Boolean
    with Inline,
         Post =>

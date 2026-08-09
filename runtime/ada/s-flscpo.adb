@@ -36,6 +36,23 @@ is
       Outstanding_Claims : Natural)
    is null;
 
+   function Growth_Target
+     (Current   : Pool_Size;
+      Requested : Pool_Size) return Pool_Size
+   is
+     (if Requested > Current then Requested else Current);
+
+   procedure Lemma_Growth_Idempotent
+     (Current   : Pool_Size;
+      Requested : Pool_Size)
+   is null;
+
+   procedure Lemma_Growth_Converges
+     (Current : Pool_Size;
+      Left    : Pool_Size;
+      Right   : Pool_Size)
+   is null;
+
    function Valid_Group (Group : C.int) return Boolean is
      (Group >= First_Shared_Group and then Group <= Last_Group);
 

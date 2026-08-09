@@ -114,15 +114,9 @@ task Connection is
 end Connection;
 ```
 
-The prepared runtime has a project-wide default. The Alire dependency workflow
-uses `native` unless configured otherwise. A lightweight application can opt in
-once for the whole project, then rebuild normally:
-
-```sh
-alr exec -- sh -c \
-  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
-alr build
-```
+The project-wide default is `native`. Applications opt individual task types
+into lightweight execution with an explicit `Flyology.Lightweight_Task`
+designation.
 
 The environment task always remains native. No poller, scheduler context,
 fiber stack, or event-loop pthread is created until activation of the first
@@ -165,9 +159,18 @@ FLYOLOGY_LOOP_POOL_SIZE=4 ./application
 ```
 
 The launch value must be an integer in `1 .. 128`. It is captured once at
-application startup, before library-level tasks activate, and is immutable for
-the process lifetime. An absent value defaults to `1`; an invalid value fails
-application initialization.
+application startup, before library-level tasks activate. An absent value
+defaults to `1`; an invalid value fails application initialization. The pool
+never shrinks, but an application may explicitly grow it later:
+
+```ada
+Flyology.Execution_Groups.Grow_Configured_Pool (8);
+```
+
+Growth is thread-safe and idempotent. Concurrent calls converge on the largest
+requested size. Existing tasks remain on their current groups, future automatic
+placements use the enlarged pool, and newly included groups stay lazy until
+work first selects them.
 
 Pool groups are created independently and lazily: configuration inspection
 does not start them, and a four-loop configuration owns no event pthreads until
@@ -365,9 +368,8 @@ begin
 end;
 ```
 
-The default mapping is `Hash mod Configured_Pool_Size`. The pool size is frozen
-during application startup and does not change while a process is running.
-Launching with a different pool size can remap keys.
+The default mapping is `Hash mod Configured_Pool_Size`. Launching with a
+different pool size or calling `Grow_Configured_Pool` can remap keys.
 The overload taking an explicit `Shard_Count` is available when an application
 must keep a stored partitioning scheme independent of loop configuration.
 Crossing targets are limited to configured shared-pool ids; dedicated groups
@@ -2071,7 +2073,7 @@ async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 | Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first lightweight task pays the one-time group startup handshake |
 | Finalize loops only at GNARL's process boundary | Suspended stacks, in-flight file buffers, and Ada masters must outlive their tasks | There is no arbitrary shutdown/restart API; unsafe cleanup is deferred to OS exit |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
-| Place undesignated lightweight tasks through a startup-configured loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration or rebuilding the RTS | The default remains one loop; the size freezes before task activation, and round-robin balances task count rather than measured work |
+| Place undesignated lightweight tasks through a grow-only loop pool | High-I/O applications can select initial parallelism at startup and add automatic groups without encoding a `CPU` aspect into every task declaration | The default remains one loop; growth never moves existing tasks or starts an unused group, and round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Configure loop pthread placement separately | Logical co-location and physical scheduling are different policies | Linux can verify a strict one-CPU mask; Darwin exposes only a capability-checked advisory cache tag, and requests become immutable once startup begins |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
@@ -2493,9 +2495,10 @@ Every newly prepared tree contains `.flyology-rts-root`; do not copy that marker
 into a directory that Flyology does not own.
 `FLYOLOGY_DEFAULT` accepts only `native` or `lightweight`.
 At application startup, `FLYOLOGY_LOOP_POOL_SIZE` accepts `1 .. 128` and
-defaults to `1`. It is captured once before task activation and remains fixed
-for the process lifetime. An empty, malformed, or out-of-range value fails
-application initialization.
+defaults to `1`. It is captured once before task activation. An empty,
+malformed, or out-of-range value fails application initialization. The
+grow-only `Grow_Configured_Pool` operation may increase the effective size
+later.
 `FLYOLOGY_PLACEMENT` currently accepts `round_robin`.
 `FLYOLOGY_LOOP_PLACEMENT` accepts `none`, `strict`, or `advisory`, and
 `FLYOLOGY_LOOP_PLACEMENT_MAP` supplies unique `GROUP:VALUE` pairs. `strict` is

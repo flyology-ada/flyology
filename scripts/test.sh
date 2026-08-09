@@ -358,6 +358,7 @@ wait_any_smoke
 wall_clock_wait_smoke'
 
 pool_mains='loop_pool_smoke
+pool_growth_smoke
 topology_smoke
 semantic_conformance_matrix
 semantic_termination_matrix'
