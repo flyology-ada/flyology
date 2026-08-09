@@ -2,6 +2,9 @@ with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.Time_Math;
 with Flyology.TLS_Policy;
+#if FLYOLOGY_TLS_TEST_HOOKS then
+with Flyology.TLS_Test_Hooks;
+#end if;
 with Interfaces.C;
 
 package body Flyology.IO.TLS is
@@ -30,23 +33,14 @@ package body Flyology.IO.TLS is
 
 #if FLYOLOGY_TLS_TEST_HOOKS then
    --  Test-only barriers that widen the Take ownership-transfer window so a
-   --  test can deliver an abort inside it. Production builds compile every
-   --  call below away.
-   function Test_Barrier_Arrive
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_tls_barrier_arrive";
-   function Test_Barrier_Released
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_tls_barrier_released";
-
-   procedure Test_Barrier (Point : Interfaces.C.int) is
+   --  test can deliver an abort inside it. Production preprocessing removes
+   --  this call site and excludes the Ada state package from the build.
+   procedure Test_Barrier (Point : Integer) is
+      Did_Arrive : Boolean;
    begin
-      if Test_Barrier_Arrive (Point) /= 0 then
-         while Test_Barrier_Released (Point) = 0 loop
+      Flyology.TLS_Test_Hooks.Arrive (Point, Did_Arrive);
+      if Did_Arrive then
+         while not Flyology.TLS_Test_Hooks.Released (Point) loop
             delay 0.0;
          end loop;
       end if;

@@ -19,7 +19,9 @@ project Flyology is
    TLS_Ada_Test_Hook_Switch := "-gnateDFLYOLOGY_TLS_TEST_HOOKS=False";
    case TLS_Test_Hooks is
       when "false" =>
-         null;
+         for Excluded_Source_Files use
+           ("flyology-tls_test_hooks.ads",
+            "flyology-tls_test_hooks.adb");
       when "true" =>
          TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=1";
          TLS_Ada_Test_Hook_Switch := "-gnateDFLYOLOGY_TLS_TEST_HOOKS=True";

@@ -1,27 +1,11 @@
 with Ada.Real_Time;
-with Interfaces.C;
+with Flyology.TLS_Test_Hooks;
 
 package body Flyology.IO.TLS.Testing is
 
    use type Ada.Real_Time.Time;
-   use type Interfaces.C.int;
 
-   procedure C_Reset
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_tls_barrier_reset";
-   procedure C_Arm (Point : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_tls_barrier_arm";
-   function C_Reached (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_tls_barrier_reached";
-   procedure C_Release (Point : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_tls_barrier_release";
+   package Test_Hooks renames Flyology.TLS_Test_Hooks;
 
    function Generation
      (Item : in out Connection) return Interfaces.Unsigned_64
@@ -59,19 +43,19 @@ package body Flyology.IO.TLS.Testing is
 
    procedure Reset_Take_Barriers is
    begin
-      C_Reset;
+      Test_Hooks.Reset;
    end Reset_Take_Barriers;
 
    procedure Arm (Point : Take_Barrier_Point) is
    begin
-      C_Arm (Take_Barrier_Point'Pos (Point));
+      Test_Hooks.Arm (Take_Barrier_Point'Pos (Point));
    end Arm;
 
    procedure Wait_Reached (Point : Take_Barrier_Point) is
       Deadline : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
-      while C_Reached (Take_Barrier_Point'Pos (Point)) = 0 loop
+      while not Test_Hooks.Reached (Take_Barrier_Point'Pos (Point)) loop
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "TLS take barrier was not reached";
          end if;
@@ -81,7 +65,56 @@ package body Flyology.IO.TLS.Testing is
 
    procedure Release (Point : Take_Barrier_Point) is
    begin
-      C_Release (Take_Barrier_Point'Pos (Point));
+      Test_Hooks.Release (Take_Barrier_Point'Pos (Point));
    end Release;
+
+   procedure Check_Take_Barrier_State_Machine is
+      type Invalid_Point_Array is
+        array (Positive range <>) of Integer;
+      First_Invalid : constant Integer := -1;
+      Last_Invalid  : constant Integer := Take_Barrier_Point'Pos
+        (Take_Barrier_Point'Last) + 1;
+      Did_Arrive    : Boolean;
+   begin
+      --  Static C storage began zeroed before the first reset.
+      Test_Hooks.Arrive (0, Did_Arrive);
+      pragma Assert (not Did_Arrive);
+
+      Test_Hooks.Reset;
+      for Point in Take_Barrier_Point loop
+         declare
+            Position : constant Integer :=
+              Take_Barrier_Point'Pos (Point);
+         begin
+            pragma Assert (not Test_Hooks.Reached (Position));
+            pragma Assert (Test_Hooks.Released (Position));
+
+            Test_Hooks.Arm (Position);
+            pragma Assert (not Test_Hooks.Reached (Position));
+            pragma Assert (not Test_Hooks.Released (Position));
+            Test_Hooks.Arrive (Position, Did_Arrive);
+            pragma Assert (Did_Arrive);
+            pragma Assert (Test_Hooks.Reached (Position));
+            pragma Assert (not Test_Hooks.Released (Position));
+
+            Test_Hooks.Release (Position);
+            pragma Assert (Test_Hooks.Released (Position));
+            Test_Hooks.Arrive (Position, Did_Arrive);
+            pragma Assert (not Did_Arrive);
+            pragma Assert (Test_Hooks.Reached (Position));
+         end;
+      end loop;
+
+      --  Every invalid operation is inert. Queries retain the C defaults:
+      --  not reached, not arrived, and already released.
+      for Point of Invalid_Point_Array'(First_Invalid, Last_Invalid) loop
+         Test_Hooks.Arm (Point);
+         Test_Hooks.Release (Point);
+         Test_Hooks.Arrive (Point, Did_Arrive);
+         pragma Assert (not Did_Arrive);
+         pragma Assert (not Test_Hooks.Reached (Point));
+         pragma Assert (Test_Hooks.Released (Point));
+      end loop;
+   end Check_Take_Barrier_State_Machine;
 
 end Flyology.IO.TLS.Testing;

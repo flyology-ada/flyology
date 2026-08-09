@@ -171,6 +171,7 @@ procedure TLS_Take_Abort is
    end Run_Checked;
 
 begin
+   Testing.Check_Take_Barrier_State_Machine;
    for Model of Models loop
       for Point in Testing.Take_Barrier_Point loop
          Run_Checked (Point, Model);

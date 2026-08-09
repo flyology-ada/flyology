@@ -47,4 +47,8 @@ package Flyology.IO.TLS.Testing is
    --  @param Point Barrier to release
    procedure Release (Point : Take_Barrier_Point);
 
+   --  Check the deterministic flag transitions and invalid-point defaults
+   --  inherited from the former C11 implementation.
+   procedure Check_Take_Barrier_State_Machine;
+
 end Flyology.IO.TLS.Testing;
