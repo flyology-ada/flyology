@@ -79,7 +79,7 @@
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">i</span>
-            <p>The relocatable leaf packages do not own mappings. <code>Flyology.Shared_Memory</code> now supplies focused backing, mapping, named-segment, and Unix descriptor-handoff primitives; applications still own peer discovery, transaction, trust, and process-lifecycle policy.</p>
+            <p>The relocatable leaf packages do not own mappings. <code>Flyology.Shared_Memory</code> supplies focused backing, mapping, named-segment, and Unix descriptor-handoff primitives. Follow the <a href="../shared-memory/">shared-memory segments guide</a> for their complete ownership and lifecycle flow; applications still own peer discovery, transaction, trust, and process-lifecycle policy.</p>
           </aside>
 
           <section id="contract">
@@ -311,6 +311,7 @@ Vectors.Attach
           <section id="segments">
             <span class="step-label">STORAGE 06</span>
             <h2>Name race-safe extents inside an owned shared mapping.</h2>
+            <p>The <a href="../shared-memory/">shared-memory segments guide</a> covers backing-mode selection, namespace races, mapping ownership, segment initialization, Unix descriptor handoff, persistence, and ordered teardown. This section focuses on the point where a named extent meets a relocatable leaf.</p>
             <p><code>Flyology.Shared_Memory</code> creates anonymous, named POSIX, or regular-file backing objects, maps them without execute permission or a fixed address, and attaches a <code>Regions.View</code> without exposing <code>System.Address</code>. Linux anonymous objects use <code>memfd_create</code> with immutable size seals and the runtime-supported no-execute seal; access is capability-based, so inode mode bits are not reported as an owner-only boundary. Darwin uses an unpredictable exclusive mode-0600 POSIX shm name and unlinks it before returning. Named objects and files retain explicit unlink ownership.</p>
             <p><code>Shared_Memory.Segments</code> persists a fixed-capacity registry before the payload area. The header records magic, version, application schema, complete extent, registry capacity, maximum name length, slot geometry, and alignment. A lookup checks the hash, exact length, and every name byte. Colliding hashes cannot alias different names.</p>
             <figure class="code-panel">
@@ -471,7 +472,7 @@ end case;</code></pre>
             </ul>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">→</span>
-              <p>Return to the <a href="../">main guide</a> for runtime setup, or use the <a href="../benchmarking/">benchmarking guide</a> when measuring a chosen structure and contention pattern.</p>
+              <p>Continue with the <a href="../shared-memory/">shared-memory segments guide</a> for backing and mapping ownership, return to the <a href="../">main guide</a> for runtime setup, or use the <a href="../benchmarking/">benchmarking guide</a> when measuring a chosen structure and contention pattern.</p>
             </aside>
           </section>
         </article>
@@ -481,7 +482,7 @@ end case;</code></pre>
     <footer class="site-footer">
       <div class="footer-inner">
         <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
-        <div class="footer-links"><a href="../">Guide</a><a href="../benchmarking/">Benchmarking</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+        <div class="footer-links"><a href="../">Guide</a><a href="../shared-memory/">Shared memory</a><a href="../benchmarking/">Benchmarking</a><a href="../../api/">API reference</a></div>
       </div>
     </footer>
   </body>

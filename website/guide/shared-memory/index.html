@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Create, map, hand off, persist, and safely populate Flyology shared-memory segments with race-safe named extents and relocatable data structures.">
+    <meta name="theme-color" content="#17213d">
+    <title>Shared-memory segments · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/shared-memory/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Shared-memory segments</li></ol>
+          <h1>Give relocatable structures an owned shared home.</h1>
+        </div>
+        <p class="doc-hero-copy">Create an exact-size backing object, map it at an operating-system-selected address, initialize or attach its persisted registry, publish named extents without exposing partial objects, and detach every borrowed view in order.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#model">Layer the ownership model</a></li>
+            <li><a href="#backing">Choose a backing mode</a></li>
+            <li><a href="#mapping">Map and attach</a></li>
+            <li><a href="#registry">Initialize the registry</a></li>
+            <li><a href="#objects">Publish a relocatable object</a></li>
+            <li><a href="#peers">Open or hand off to peers</a></li>
+            <li><a href="#lifecycle">Detach and persist</a></li>
+            <li><a href="#limits">Trust and recovery limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p>This guide owns the bytes and names extents inside them. The companion <a href="../data-structures/">relocatable data-structures guide</a> explains the arenas, rings, maps, vectors, slabs, and strings placed in those extents.</p>
+          </aside>
+
+          <section id="model">
+            <span class="step-label">SEGMENT 01</span>
+            <h2>Keep five lifetimes distinct.</h2>
+            <p><a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html"><code>Flyology.Shared_Memory</code></a> is the ownership boundary that <code>Data_Structures.Regions</code> deliberately omits. It owns descriptors and mappings, while <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html"><code>Shared_Memory.Segments</code></a> owns a persisted directory inside the mapped bytes. A relocatable leaf borrows one directory extent through a process-local region view.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Namespace</dt><dd>A POSIX shm name or file path locates a backing object. Unlinking that name is explicit and does not remove a mapping or a registry entry.</dd></div>
+                <div class="decision-row"><dt>Backing object</dt><dd>A limited owner closes exactly one descriptor. Closing it does not invalidate mappings already derived from it.</dd></div>
+                <div class="decision-row"><dt>Mapping</dt><dd>A limited owner unmaps one process-local virtual range. The operating system chooses its base; public operations never request execute permission or a fixed address.</dd></div>
+                <div class="decision-row"><dt>Segment registry</dt><dd>A process-local view validates the persisted header and coordinates exact-name allocation, publication, lookup, removal, and reuse.</dd></div>
+                <div class="decision-row"><dt>Relocatable leaf</dt><dd>An arena, string, vector, map, slab, or ring stores offsets, indices, generations, counters, and bytes rather than native addresses.</dd></div>
+              </dl>
+            </div>
+            <p>The normal direction is backing object, mapping, segment, region, leaf. Teardown reverses the borrowed portion: detach the leaf, region, and segment before unmapping. Descriptor close may happen while the mapping is still live.</p>
+          </section>
+
+          <section id="backing">
+            <span class="step-label">SEGMENT 02</span>
+            <h2>Choose the backing mode by discovery and persistence.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Anonymous capability</dt><dd>Use <code>Create_Anonymous</code> when peers receive a descriptor rather than discover a name. Linux uses a size-sealed <code>memfd</code>; Darwin immediately unlinks an exclusive mode-0600 POSIX shm object.</dd></div>
+                <div class="decision-row"><dt>Named POSIX object</dt><dd>Use <code>Create_Named</code>, <code>Open_Named</code>, or <code>Create_Or_Open_Named</code> when an application already owns a POSIX name protocol. Size and type must match exactly.</dd></div>
+                <div class="decision-row"><dt>Regular file</dt><dd>Use <code>Create_File</code> and <code>Open_File</code> for explicit filesystem persistence. Opens reject a final symlink where the host supports <code>O_NOFOLLOW</code> and require a regular file of the exact expected size.</dd></div>
+              </dl>
+            </div>
+            <p>Creation permissions default to 0600. Every acquired descriptor must report <code>FD_CLOEXEC</code>. Linux anonymous storage also reports whether immutable size seals and the runtime-supported no-execute seal were applied. Set <code>Require_No_Execute_Seal</code> when absence of that Linux property must fail closed.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>A namespace is not an initialization protocol.</strong> A named opener that races the creator before sizing receives <code>Initialization_In_Progress</code> with no owned descriptor. It does not resize, repair, or overwrite the object.</p>
+            </aside>
+          </section>
+
+          <section id="mapping">
+            <span class="step-label">SEGMENT 03</span>
+            <h2>Map once, then attach local views.</h2>
+            <figure class="code-panel">
+              <figcaption>anonymous backing and one shared mapping</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.Data_Structures.Regions;
+with Flyology.Shared_Memory;
+
+procedure Map_Shared_Bytes is
+   package Regions renames Flyology.Data_Structures.Regions;
+   package Shared  renames Flyology.Shared_Memory;
+
+   Backing : Shared.Backing_Object;
+   Map     : Shared.Mapping;
+   Region  : Regions.View;
+begin
+   Shared.Create_Anonymous (Backing, Length =&gt; 1_048_576);
+   Shared.Map (Map, Backing);
+   Shared.Attach_Region (Map, Region);
+
+   --  Attach relocatable structures through Region here.
+
+   Regions.Detach (Region);
+   Shared.Unmap (Map);
+   Shared.Close (Backing);
+end Map_Shared_Bytes;</code></pre>
+            </figure>
+            <p><code>Map</code> borrows the descriptor only for the mapping call. The descriptor can close immediately afterward if the application no longer needs handoff, flush, or explicit unlink. Named objects and files must keep it open through <code>Unlink</code>, because the descriptor supplies the identity used to reject a detectable namespace replacement.</p>
+            <p>Each mapping has its own native base. Attach a distinct region, segment, and leaf view in each process or mapping. Stored offsets remain the same even when the virtual addresses differ.</p>
+          </section>
+
+          <section id="registry">
+            <span class="step-label">SEGMENT 04</span>
+            <h2>Initialize one fixed-capacity registry.</h2>
+            <p>The registry header persists its magic, layout version, application schema, complete mapping extent, slot capacity, maximum name length, slot geometry, and allocation alignment. <code>Create_Or_Attach</code> checks all of them exactly. Only a mapping derived from exclusive backing creation may claim an all-zero lifecycle.</p>
+            <figure class="code-panel">
+              <figcaption>segment configuration and attachment</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config : constant Segments.Configuration :=
+  (Schema                 =&gt; 16#4D59_4150_5000_0001#,
+   Registry_Capacity      =&gt; 64,
+   Maximum_Name_Length    =&gt; 96,
+   Allocation_Alignment   =&gt; 64);
+
+Segments.Create_Or_Attach (Segment, Map, Config, Segment_Open);
+
+case Segment_Open is
+   when Segments.Initialized_New |
+        Segments.Attached_Existing =&gt;
+      Segments.Attach_Region (Segment, Region);
+
+   when Segments.Initialization_In_Progress =&gt;
+      --  Retry only at an application-selected scheduling point.
+      null;
+end case;</code></pre>
+            </figure>
+            <p>Opened and received mappings that see zero report initialization in progress. They never reinterpret an abandoned object as virgin. A nonzero incompatible or corrupt header raises <code>Segment_Error</code>; attachment is validation, not migration or recovery.</p>
+          </section>
+
+          <section id="objects">
+            <span class="step-label">SEGMENT 05</span>
+            <h2>Publish the leaf only after initialization completes.</h2>
+            <p><code>Try_Find_Or_Create</code> compares the hash, exact length, and every name byte. Hash collisions cannot alias different names. Exactly one racing participant receives a limited <code>Creation_Claim</code>; other participants observe the ready extent, initialization in progress, a published failure, contention, mismatch, or bounded exhaustion.</p>
+            <figure class="code-panel">
+              <figcaption>named relocatable byte string</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Segments.Try_Find_Or_Create
+  (Segment, "status", Byte_Strings.Required_Storage (256),
+   Handle, Claim, Named_Open, Failure);
+
+case Named_Open is
+   when Segments.Created =&gt;
+      Segments.Claimed_Extent (Segment, Claim, Location, Extent);
+      Byte_Strings.Initialize
+        (Value, Region, Location, Maximum_Length =&gt; 256);
+      Byte_Strings.Assign
+        (Value, Ada.Streams.Stream_Element_Array'
+          (1 =&gt; 16#72#, 2 =&gt; 16#65#, 3 =&gt; 16#61#, 4 =&gt; 16#64#,
+           5 =&gt; 16#79#));
+      Segments.Publish (Segment, Claim);
+
+   when Segments.Attached_Existing =&gt;
+      Segments.Resolve (Segment, Handle, Location, Extent);
+      Byte_Strings.Attach
+        (Value, Region, Location, Maximum_Length =&gt; 256);
+
+   when Segments.Registry_Busy |
+        Segments.Initialization_In_Progress =&gt;
+      --  Yield or retry according to application policy.
+      null;
+
+   when others =&gt;
+      --  Handle failure, mismatch, or bounded exhaustion explicitly.
+      null;
+end case;</code></pre>
+            </figure>
+            <p>Call <code>Publish</code> only after the nested leaf is ready. If initialization fails while the creator is still alive, call <code>Publish_Failure</code> with a nonzero application code. The failed name remains visible until explicit removal; no later participant silently overwrites it.</p>
+            <p>Removal invalidates the registry handle but does not destroy application bytes or unlink the OS object. A later fitting reuse advances a nonwrapping generation, so stale handles fail. The <a href="../data-structures/#choose">relocatable data-structures guide</a> explains how to select and initialize the leaf placed in each extent.</p>
+          </section>
+
+          <section id="peers">
+            <span class="step-label">SEGMENT 06</span>
+            <h2>Let peers open a name or receive one capability.</h2>
+            <p>A named-object peer calls <code>Open_Named</code> with the exact expected length, maps the returned descriptor, then calls segment <code>Create_Or_Attach</code>. Because that mapping is not an exclusive creator, it can attach a ready registry but cannot claim zero storage.</p>
+            <p>For capability handoff, <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html"><code>Shared_Memory.Unix_Sockets</code></a> sends exactly one descriptor over an already connected Unix-domain socket with <code>SCM_RIGHTS</code>.</p>
+            <figure class="code-panel">
+              <figcaption>send and receive one backing capability</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Sender: Borrow keeps Backing open; Transfer closes it after send.
+Unix_Sockets.Send
+  (Socket, Backing, Ownership =&gt; Unix_Sockets.Borrow);
+
+--  Receiver: Item gains exactly one newly owned descriptor.
+Unix_Sockets.Receive
+  (Socket,
+   Expected_Length        =&gt; 1_048_576,
+   Item                   =&gt; Received,
+   Require_Immutable_Size =&gt; True);
+Shared.Map (Peer_Map, Received);
+Shared.Close (Received);</code></pre>
+            </figure>
+            <p>Receive establishes <code>FD_CLOEXEC</code>, validates regular-file type and exact size, and can require Linux immutable-size seals. Malformed, missing, extra, or truncated ancillary data closes every received descriptor before raising.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Unix-socket handoff is synchronous.</strong> <code>sendmsg</code> and <code>recvmsg</code> may block. Use a native-task boundary unless the application has independently established nonblocking readiness.</p>
+            </aside>
+          </section>
+
+          <section id="lifecycle">
+            <span class="step-label">SEGMENT 07</span>
+            <h2>Detach borrows before releasing owners.</h2>
+            <ol>
+              <li>Detach every relocatable leaf view borrowing a named extent.</li>
+              <li>Detach the region view.</li>
+              <li>Detach the segment view.</li>
+              <li>Unmap the process-local mapping.</li>
+              <li>For a named object or file, call <code>Unlink</code> while its descriptor remains open if this owner is responsible for namespace removal.</li>
+              <li>Close the backing descriptor. Explicit <code>Close</code> and <code>Unmap</code> are idempotent; finalization is a non-raising fallback and never implicitly unlinks.</li>
+            </ol>
+            <p>File-backed mappings expose two writeback operations. <code>Flush (Map)</code> requests mapping-page writeback through <code>msync</code>; <code>Flush (Backing)</code> requests descriptor-level persistence through <code>fsync</code>. Use both when the application requires those respective effects.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p><strong>Writeback is not a transaction.</strong> These calls do not make several registry and leaf updates atomically crash-consistent. Supply an application journal or another explicit transaction protocol when several writes must commit together.</p>
+            </aside>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">SEGMENT 08</span>
+            <h2>Keep trust, blocking, and recovery visible.</h2>
+            <ul>
+              <li>Namespace creation, open, unlink, mapping, unmapping, and flush are synchronous metadata or virtual-memory syscalls. They may occupy a lightweight task's event-loop pthread.</li>
+              <li><code>Unlink</code> requires external exclusion of concurrent namespace replacement because identity comparison and unlink are separate operations. Darwin POSIX shm exposes no stable per-object identity for that comparison.</li>
+              <li>A dead creator can leave the registry guard or a named extent initializing. Flyology does not detect process death, steal ownership, or infer participant quiescence.</li>
+              <li>Recovery requires independently authorized owner-death detection and quiescence. Replacing the complete backing object is often the simplest valid policy.</li>
+              <li>The fixed registry does not grow. Capacity, name length, alignment, and total segment extent are persisted schema decisions.</li>
+              <li>Names are exact Ada <code>String</code> bytes. The registry performs no Unicode normalization and treats different byte sequences as different names.</li>
+              <li>Shared memory does not provide peer discovery, authentication, higher-level permissions, wake channels, schema migration, or durable application transactions.</li>
+              <li>The implementation is experimental and currently tested on Flyology's supported 64-bit Darwin and Linux targets.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Continue with <a href="../data-structures/">relocatable data structures</a> to choose the stored object, or consult the <a href="../../api/">generated API reference</a> for exact outcomes, exceptions, and ownership contracts.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../data-structures/">Relocatable data structures</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
