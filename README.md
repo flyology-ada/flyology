@@ -930,9 +930,13 @@ producer or consumer that terminates after
 claiming an MPMC slot but before publishing its sequence can prevent later
 progress. Core does not detect that death; an external recovery authority can
 poison the ring after establishing quiescence, and exclusive initialization
-then restores an empty ring. Destruction validates every slot sequence after
-the enqueue/dequeue equality check, so an abandoned final consumer claim is not
-mistaken for an empty ring. The bounded structures cache validated geometry in
+then restores an empty ring. A distinct local MPMC view may attach while
+transfers are active: attachment validates only the published immutable
+identity, geometry, and complete extent, because a legitimate claim advances a
+position before publishing its slot sequence. Destruction validates every slot
+sequence after the enqueue/dequeue equality check under caller-established
+quiescence, so an abandoned final consumer claim is not mistaken for an empty
+ring. The bounded structures cache validated geometry in
 each local view and use fixed-stride contiguous storage with no allocation
 after initialization. The dynamic leaves allocate only through an explicitly
 supplied arena. None of these operations performs file opening,

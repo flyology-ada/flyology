@@ -237,7 +237,6 @@ package body Flyology.Data_Structures.Rings.MPMC is
       Core : Layouts.Local_View;
       Header : Layouts.Header_Values;
       Payload_Offset, Stride, Extent : Byte_Count;
-      Enqueue, Dequeue : Interfaces.Unsigned_64;
    begin
       Detach (Item);
       Geometry (Capacity, Payload_Offset, Stride, Extent);
@@ -256,11 +255,12 @@ package body Flyology.Data_Structures.Rings.MPMC is
       end if;
       Set_View
         (Item, Core, Header.Capacity, Payload_Offset, Stride);
-      Enqueue := Atomic.Load_Acquire_U64
-        (Item.Enqueue_Address);
-      Dequeue := Atomic.Load_Acquire_U64
-        (Item.Dequeue_Address);
-      Validate_Sequences (Item, Enqueue, Dequeue);
+      --  Do not validate the mutable claim positions or slot sequences here.
+      --  A producer publishes its position before its slot sequence, while a
+      --  consumer publishes its position before releasing that slot.  Either
+      --  legitimate in-flight state would look corrupt to an independently
+      --  attaching view.  Destroy performs the deep sequence validation only
+      --  after the caller has established quiescence.
    exception
       when others =>
          if Item.Core.Attached then

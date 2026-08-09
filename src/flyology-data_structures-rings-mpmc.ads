@@ -17,7 +17,9 @@ use type Interfaces.Unsigned_64;
 --  A participant that terminates after claiming a slot but before publishing
 --  it can prevent later progress. Core does not detect participant death; an
 --  external recovery authority may poison the ring and reinitialize it after
---  establishing quiescence. Attachment and destruction require quiescence.
+--  establishing quiescence. Attachment validates immutable identity and
+--  geometry and may run while other attached views transfer elements;
+--  destruction still requires quiescence and deeply validates mutable state.
 --  Signed modular sequence ordering assumes that no paused operation is
 --  overtaken by 2**63 completed claims; ordinary 64-bit counter wrap remains
 --  supported within that horizon.
@@ -86,8 +88,8 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  compatible ring. Only the exact zero lifecycle sentinel is eligible for
    --  creation; no existing lifecycle is reinitialized. The operation does
    --  not wait for another initializer.
-   --  Concurrent calls are permitted only while the allocation protocol
-   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  Concurrent calls are permitted while the allocation protocol guarantees
+   --  virgin bytes or the existing ring is ready. A ready ring may be active.
    --  @param Item Attached view, or detached when initialization is in
    --     progress
    --  @param Region Independently attached backing region
@@ -102,13 +104,15 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
       Capacity     : Positive;
       Result       : out Open_Result);
 
-   --  Attach to a quiescent existing MPMC ring and validate configuration and
-   --  claim positions.
+   --  Attach to an existing MPMC ring and validate its published immutable
+   --  identity, configuration, and complete extent. Other views may transfer
+   --  elements concurrently; mutable positions and slot sequences therefore
+   --  receive their deep validation only during quiescent destruction.
    --  @param Item View attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored ring offset
    --  @param Capacity Expected power-of-two element count
-   --  @exception Layout_Error Header, geometry, or positions are corrupt
+   --  @exception Layout_Error Header or geometry is corrupt or incompatible
    procedure Attach
      (Item         : out View;
       Region       : Region_View;
