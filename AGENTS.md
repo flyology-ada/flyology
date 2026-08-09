@@ -191,6 +191,33 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 
 ## Runtime and ABI boundaries
 
+### Native C admission rule
+
+- Ada is the default implementation language. Do not add or expand a native C
+  bridge merely because a system API is declared in a C header.
+- Prefer direct Ada imports for fixed-signature functions and typed Ada records
+  with representation clauses for stable ABI layouts.
+- Retain C only when the boundary inherently requires C semantics or tooling,
+  such as preprocessor-only constants, compile-time layout assertions, variadic
+  calls, opaque foreign callbacks, function-pointer dispatch, or architecture-
+  specific compiler intrinsics unavailable from Ada.
+- C bridge functions must be narrow mechanisms. They must not own retry logic,
+  validation policy, error classification, timeout arithmetic, state machines,
+  ownership decisions, cleanup policy, or syscall sequencing that Ada can
+  express.
+- Header constants and layouts exposed through C should be leaf exports without
+  unrelated behavior. Prefer platform Ada specifications when the ABI value is
+  stable and independently validated.
+- Every new or materially expanded `.c` file requires a repository-grounded
+  explanation of why direct Ada import is unsuitable, an audit of which logic
+  can instead be SPARK, focused ABI and symbol tests for the retained boundary,
+  and a review confirming that no movable policy remains in C.
+- When translating an existing bridge, commit the strict behavioral translation
+  separately from semantic repairs so each can be reviewed independently.
+- Ghost state is not a goal by itself. Use it only when it strengthens a sound
+  abstraction; do not mirror asynchronously changing foreign state with an
+  unsynchronized ghost model.
+
 - Integration is below GNARL at `System.Task_Primitives.Operations`. Keep the
   patch surface minimal and versioned.
 - Event polling, scheduling, and context switching are separate mechanisms.
