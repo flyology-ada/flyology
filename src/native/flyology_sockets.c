@@ -33,24 +33,47 @@
     ((FLYOLOGY_MAX_IP_DATAGRAM + FLYOLOGY_DISCARD_CHUNK - 1U) / \
      FLYOLOGY_DISCARD_CHUNK)
 
-/* flyology_socket_accept return values below every valid descriptor. */
-#define FLYOLOGY_ACCEPT_FAILED (-1)
-#define FLYOLOGY_ACCEPT_DISCARDED (-2)
-
-extern int flyology_accept(int socket, void *address, void *length);
-extern int flyology_connect(int socket, const void *address, unsigned length);
+/* Ada provides 128 bytes of aligned opaque storage for sockaddr values. */
+_Static_assert(sizeof(struct sockaddr_storage) <= 16U * sizeof(uint64_t),
+               "Ada socket-address storage is too small");
+_Static_assert(_Alignof(struct sockaddr_storage) <= _Alignof(uint64_t),
+               "Ada socket-address storage alignment is too small");
+_Static_assert(sizeof(socklen_t) == sizeof(unsigned),
+               "Ada socklen_t binding requires unsigned");
+_Static_assert(sizeof(ssize_t) == sizeof(long),
+               "Ada socket result binding requires long");
 
 static int flyology_socket_domain(int family)
 {
     return family == 6 ? AF_INET6 : family == 4 ? AF_INET : -1;
 }
 
-static int flyology_socket_kind(int mode)
+int flyology_socket_ipv4_domain(void)
 {
-    return mode == 2 ? SOCK_DGRAM : mode == 1 ? SOCK_STREAM : -1;
+    return AF_INET;
 }
 
-static int flyology_socket_configure(int fd, int nonblocking)
+int flyology_socket_ipv6_domain(void)
+{
+    return AF_INET6;
+}
+
+int flyology_socket_local_domain(void)
+{
+    return AF_UNIX;
+}
+
+int flyology_socket_stream_kind(void)
+{
+    return SOCK_STREAM;
+}
+
+int flyology_socket_datagram_kind(void)
+{
+    return SOCK_DGRAM;
+}
+
+int flyology_socket_configure_descriptor(int fd, int nonblocking)
 {
     int descriptor_flags = fcntl(fd, F_GETFD);
     int status_flags;
@@ -80,7 +103,7 @@ static int flyology_socket_configure(int fd, int nonblocking)
     return 0;
 }
 
-static int flyology_socket_make_address(
+int flyology_socket_pack_address(
     int family,
     const unsigned char *address,
     unsigned port,
@@ -110,7 +133,7 @@ static int flyology_socket_make_address(
     return -1;
 }
 
-static int flyology_socket_split_address(
+int flyology_socket_unpack_address(
     const struct sockaddr *address,
     socklen_t length,
     unsigned char *family,
@@ -153,7 +176,7 @@ static int flyology_socket_split_address(
     return -1;
 }
 
-static int flyology_socket_enable_datagram_metadata_impl(int fd)
+int flyology_socket_enable_datagram_metadata_impl(int fd)
 {
     struct sockaddr_storage storage;
     socklen_t length = (socklen_t)sizeof(storage);
@@ -232,93 +255,34 @@ int flyology_socket_errno_no_buffer_space(void)
     return ENOBUFS;
 }
 
-int flyology_socket_create(int family, int mode, int *error)
+int flyology_socket_errno_address_family_not_supported(void)
 {
-    int fd = socket(flyology_socket_domain(family),
-                    flyology_socket_kind(mode), 0);
-    if (fd < 0) {
-        *error = errno;
-        return -1;
-    }
-    if (flyology_socket_configure(fd, 0) < 0 ||
-        (mode == 2 && flyology_socket_enable_datagram_metadata_impl(fd) < 0)) {
-        *error = errno;
-        close(fd);
-        return -1;
-    }
-    *error = 0;
-    return fd;
+    return EAFNOSUPPORT;
 }
 
-int flyology_socket_enable_datagram_metadata(int fd, int *error)
+int flyology_socket_address_family_field_size(void)
 {
-    if (flyology_socket_enable_datagram_metadata_impl(fd) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
+    return (int)sizeof(((struct sockaddr_storage *)0)->ss_family);
 }
 
-int flyology_socket_pair(int mode, int *left, int *right, int *error)
+int flyology_socket_level(void)
 {
-    int descriptors[2];
-    if (socketpair(AF_UNIX, flyology_socket_kind(mode), 0, descriptors) < 0) {
-        *error = errno;
-        return -1;
-    }
-    if (flyology_socket_configure(descriptors[0], 0) < 0 ||
-        flyology_socket_configure(descriptors[1], 0) < 0) {
-        *error = errno;
-        close(descriptors[0]);
-        close(descriptors[1]);
-        return -1;
-    }
-    *left = descriptors[0];
-    *right = descriptors[1];
-    *error = 0;
-    return 0;
+    return SOL_SOCKET;
 }
 
-int flyology_socket_prepare(int fd, int *error)
+int flyology_socket_reuse_address_option(void)
 {
-    if (flyology_socket_configure(fd, 1) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
+    return SO_REUSEADDR;
 }
 
-int flyology_socket_set_nonblocking(int fd, int enabled, int *error)
+int flyology_socket_pending_error_option(void)
 {
-    if (flyology_socket_configure(fd, enabled != 0) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
+    return SO_ERROR;
 }
 
-int flyology_socket_close(int fd, int *error)
+int flyology_socket_no_signal_flag(void)
 {
-    if (close(fd) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
-}
-
-int flyology_socket_set_reuse_address(int fd, int enabled, int *error)
-{
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
-                   &enabled, sizeof(enabled)) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
+    return MSG_NOSIGNAL;
 }
 
 int flyology_socket_set_receive_timeout(int fd, double seconds, int *error)
@@ -333,148 +297,6 @@ int flyology_socket_set_receive_timeout(int fd, double seconds, int *error)
     }
     *error = 0;
     return 0;
-}
-
-int flyology_socket_bind(int fd, int family, const unsigned char *address,
-                         unsigned port, uint32_t scope, int *error)
-{
-    struct sockaddr_storage storage;
-    socklen_t length;
-    if (flyology_socket_make_address(family, address, port, scope,
-                                     &storage, &length) < 0 ||
-        bind(fd, (struct sockaddr *)&storage, length) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
-}
-
-int flyology_socket_listen(int fd, int backlog, int *error)
-{
-    if (listen(fd, backlog) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
-}
-
-int flyology_socket_name(int fd, int peer, unsigned char *family,
-                         unsigned char *address, unsigned *port,
-                         uint32_t *scope, int *error)
-{
-    struct sockaddr_storage storage;
-    socklen_t length = (socklen_t)sizeof(storage);
-    int result = peer
-        ? getpeername(fd, (struct sockaddr *)&storage, &length)
-        : getsockname(fd, (struct sockaddr *)&storage, &length);
-    if (result < 0 ||
-        flyology_socket_split_address((struct sockaddr *)&storage, length,
-                                      family, address, port, scope) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
-}
-
-int flyology_socket_accept(int listener, unsigned char *family,
-                           unsigned char *address, unsigned *port,
-                           uint32_t *scope, int *error)
-{
-    struct sockaddr_storage storage;
-    socklen_t length = (socklen_t)sizeof(storage);
-    int fd = flyology_accept(listener, &storage, &length);
-    if (fd < 0) {
-        *error = errno;
-        return FLYOLOGY_ACCEPT_FAILED;
-    }
-    if (flyology_socket_split_address((struct sockaddr *)&storage, length,
-                                      family, address, port, scope) < 0) {
-        int address_error = errno;
-
-        /* An unsupported or malformed peer address indicates that the
-           listener does not satisfy the Internet-socket contract. */
-        close(fd);
-        *error = address_error;
-        return FLYOLOGY_ACCEPT_FAILED;
-    }
-    if (flyology_socket_configure(fd, 1) < 0) {
-        int setup_error = errno;
-
-        /* The listener accepted successfully.  A reset peer can make later
-           descriptor setup fail (SO_NOSIGPIPE on Darwin and fcntl on either
-           platform), so consume this connection without blaming the
-           listener. */
-        close(fd);
-        *error = setup_error;
-        return FLYOLOGY_ACCEPT_DISCARDED;
-    }
-    *error = 0;
-    return fd;
-}
-
-int flyology_socket_connect(int fd, int family, const unsigned char *address,
-                            unsigned port, uint32_t scope, int *error)
-{
-    struct sockaddr_storage storage;
-    socklen_t length;
-    if (flyology_socket_make_address(family, address, port, scope,
-                                     &storage, &length) < 0 ||
-        flyology_connect(fd, &storage, (unsigned)length) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
-}
-
-int flyology_socket_pending_error(int fd, int *pending, int *error)
-{
-    socklen_t length = (socklen_t)sizeof(*pending);
-    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, pending, &length) < 0) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return 0;
-}
-
-long flyology_socket_receive(int fd, void *buffer, size_t length, int *error)
-{
-    ssize_t result = recv(fd, buffer, length, 0);
-    *error = result < 0 ? errno : 0;
-    return (long)result;
-}
-
-long flyology_socket_receive_from(int fd, void *buffer, size_t length,
-                                  unsigned char *family,
-                                  unsigned char *address, unsigned *port,
-                                  uint32_t *scope, int *error)
-{
-    struct sockaddr_storage storage;
-    socklen_t address_length = (socklen_t)sizeof(storage);
-    memset(&storage, 0, sizeof(storage));
-    *family = 0;
-    memset(address, 0, 16);
-    *port = 0;
-    *scope = 0;
-    ssize_t result = recvfrom(fd, buffer, length, 0,
-                              (struct sockaddr *)&storage, &address_length);
-    if (result < 0) {
-        *error = errno;
-        return -1;
-    }
-    if (address_length >= (socklen_t)sizeof(storage.ss_family) &&
-        flyology_socket_split_address((struct sockaddr *)&storage,
-                                      address_length, family, address, port,
-                                      scope) < 0 && errno != EAFNOSUPPORT) {
-        *error = errno;
-        return -1;
-    }
-    *error = 0;
-    return (long)result;
 }
 
 long flyology_socket_receive_datagram(
@@ -547,11 +369,11 @@ long flyology_socket_receive_datagram(
         *error = EMSGSIZE;
         return -1;
     }
-    if (flyology_socket_split_address(
+    if (flyology_socket_unpack_address(
             (struct sockaddr *)&source_storage, message.msg_namelen,
             source_family, source_address, source_port, source_scope) < 0 ||
         getsockname(fd, (struct sockaddr *)&local_storage, &local_length) < 0 ||
-        flyology_socket_split_address(
+        flyology_socket_unpack_address(
             (struct sockaddr *)&local_storage, local_length,
             destination_family, destination_address,
             destination_port, destination_scope) < 0) {
@@ -617,13 +439,6 @@ long flyology_socket_receive_datagram(
     return (long)result;
 }
 
-long flyology_socket_send(int fd, const void *buffer, size_t length, int *error)
-{
-    ssize_t result = send(fd, buffer, length, MSG_NOSIGNAL);
-    *error = result < 0 ? errno : 0;
-    return (long)result;
-}
-
 #if defined(__linux__)
 long flyology_linux_guarded_sendfile(int socket_fd, int file_fd,
                                      long long offset, size_t length,
@@ -651,24 +466,6 @@ long flyology_linux_guarded_sendfile(int socket_fd, int file_fd,
 }
 #endif
 
-long flyology_socket_send_to(int fd, const void *buffer, size_t length,
-                             int family, const unsigned char *address,
-                             unsigned port, uint32_t scope, int *error)
-{
-    struct sockaddr_storage storage;
-    socklen_t address_length;
-    ssize_t result;
-    if (flyology_socket_make_address(family, address, port, scope,
-                                     &storage, &address_length) < 0) {
-        *error = errno;
-        return -1;
-    }
-    result = sendto(fd, buffer, length, MSG_NOSIGNAL,
-                    (struct sockaddr *)&storage, address_length);
-    *error = result < 0 ? errno : 0;
-    return (long)result;
-}
-
 long flyology_socket_send_datagram(
     int fd, const void *buffer, size_t length,
     int destination_family, const unsigned char *destination_address,
@@ -693,7 +490,7 @@ long flyology_socket_send_datagram(
     struct cmsghdr *header;
     ssize_t result;
 
-    if (flyology_socket_make_address(
+    if (flyology_socket_pack_address(
             destination_family, destination_address, destination_port,
             destination_scope, &destination_storage,
             &destination_length) < 0) {
@@ -716,7 +513,7 @@ long flyology_socket_send_datagram(
         }
         if (getsockname(fd, (struct sockaddr *)&local_storage,
                         &local_length) < 0 ||
-            flyology_socket_split_address(
+            flyology_socket_unpack_address(
                 (struct sockaddr *)&local_storage, local_length,
                 &local_family, local_address, &local_port, &local_scope) < 0) {
             *error = errno;

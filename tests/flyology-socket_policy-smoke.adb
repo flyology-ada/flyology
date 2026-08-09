@@ -1,5 +1,39 @@
 procedure Flyology.Socket_Policy.Smoke is
 begin
+   pragma Assert (not Should_Enable_Datagram_Metadata (1));
+   pragma Assert (Should_Enable_Datagram_Metadata (2));
+
+   pragma Assert
+     (Classify_Post_Accept_Failure (Peer_Address_Decode) = Fail_Listener);
+   pragma Assert
+     (Classify_Post_Accept_Failure (Descriptor_Configuration) =
+        Discard_Accepted_Peer);
+
+   pragma Assert
+     (Classify_Received_Address
+        (Address_Present          => False,
+         Decode_Succeeded         => False,
+         Decode_Error             => 0,
+         Unsupported_Family_Error => 47) = Use_No_Endpoint);
+   pragma Assert
+     (Classify_Received_Address
+        (Address_Present          => True,
+         Decode_Succeeded         => True,
+         Decode_Error             => 0,
+         Unsupported_Family_Error => 47) = Use_Endpoint);
+   pragma Assert
+     (Classify_Received_Address
+        (Address_Present          => True,
+         Decode_Succeeded         => False,
+         Decode_Error             => 47,
+         Unsupported_Family_Error => 47) = Use_No_Endpoint);
+   pragma Assert
+     (Classify_Received_Address
+        (Address_Present          => True,
+         Decode_Succeeded         => False,
+         Decode_Error             => 22,
+         Unsupported_Family_Error => 47) = Fail_Receive);
+
    --  Distinct operating-system values keep their own classification.
    pragma Assert
      (Classify_Error

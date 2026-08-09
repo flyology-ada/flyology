@@ -4,6 +4,7 @@ with Ada.Strings.Fixed;
 with Flyology.Socket_Policy;
 with Flyology.Time_Math;
 with Flyology.Wait_Policy;
+with GNAT.OS_Lib;
 with System;
 
 package body Flyology.IO.Sockets is
@@ -11,6 +12,7 @@ package body Flyology.IO.Sockets is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.long;
+   use type Interfaces.C.unsigned;
    use type Interfaces.C.unsigned_char;
    use type System.Address;
 
@@ -41,42 +43,214 @@ package body Flyology.IO.Sockets is
      (C, C_Errno_No_Buffer_Space,
       "flyology_socket_errno_no_buffer_space");
 
+   function C_Errno_Address_Family_Not_Supported return Interfaces.C.int;
+   pragma Import
+     (C, C_Errno_Address_Family_Not_Supported,
+      "flyology_socket_errno_address_family_not_supported");
+
+   function C_Address_Family_Field_Size return Interfaces.C.int;
+   pragma Import
+     (C, C_Address_Family_Field_Size,
+      "flyology_socket_address_family_field_size");
+
+   function C_Socket_Level return Interfaces.C.int;
+   pragma Import (C, C_Socket_Level, "flyology_socket_level");
+
+   function C_Reuse_Address_Option return Interfaces.C.int;
+   pragma Import
+     (C, C_Reuse_Address_Option,
+      "flyology_socket_reuse_address_option");
+
+   function C_Pending_Error_Option return Interfaces.C.int;
+   pragma Import
+     (C, C_Pending_Error_Option,
+      "flyology_socket_pending_error_option");
+
+   function C_No_Signal_Flag return Interfaces.C.int;
+   pragma Import
+     (C, C_No_Signal_Flag, "flyology_socket_no_signal_flag");
+
+   function C_IPv4_Domain return Interfaces.C.int;
+   pragma Import (C, C_IPv4_Domain, "flyology_socket_ipv4_domain");
+
+   function C_IPv6_Domain return Interfaces.C.int;
+   pragma Import (C, C_IPv6_Domain, "flyology_socket_ipv6_domain");
+
+   function C_Local_Domain return Interfaces.C.int;
+   pragma Import (C, C_Local_Domain, "flyology_socket_local_domain");
+
+   function C_Stream_Kind return Interfaces.C.int;
+   pragma Import (C, C_Stream_Kind, "flyology_socket_stream_kind");
+
+   function C_Datagram_Kind return Interfaces.C.int;
+   pragma Import (C, C_Datagram_Kind, "flyology_socket_datagram_kind");
+
+   function C_Configure_Descriptor
+     (Socket      : Interfaces.C.int;
+      Nonblocking : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import
+     (C, C_Configure_Descriptor,
+      "flyology_socket_configure_descriptor");
+
+   type Socket_Address_Storage is
+     array (Natural range 0 .. 15) of Interfaces.C.unsigned_long_long
+       with Convention => C;
+
+   function C_Pack_Address
+     (Family  : Interfaces.C.int;
+      Address : System.Address;
+      Port    : Interfaces.C.unsigned;
+      Scope   : Interfaces.C.unsigned;
+      Storage : System.Address;
+      Length  : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import
+     (C, C_Pack_Address, "flyology_socket_pack_address");
+
+   function C_Unpack_Address
+     (Storage : System.Address;
+      Length  : Interfaces.C.unsigned;
+      Family  : access Interfaces.C.unsigned_char;
+      Address : System.Address;
+      Port    : access Interfaces.C.unsigned;
+      Scope   : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import
+     (C, C_Unpack_Address, "flyology_socket_unpack_address");
+
+   function C_Enable_Datagram_Metadata_Impl
+     (Socket : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import
+     (C, C_Enable_Datagram_Metadata_Impl,
+      "flyology_socket_enable_datagram_metadata_impl");
+
+   function C_Socket
+     (Domain, Kind, Protocol : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import (C, C_Socket, "socket");
+
+   function C_Socket_Pair_Raw
+     (Domain, Kind, Protocol : Interfaces.C.int;
+      Descriptors            : System.Address) return Interfaces.C.int;
+   pragma Import (C, C_Socket_Pair_Raw, "socketpair");
+
+   function C_Close_Raw (Socket : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import (C, C_Close_Raw, "close");
+
+   function C_Set_Socket_Option
+     (Socket : Interfaces.C.int;
+      Level  : Interfaces.C.int;
+      Option : Interfaces.C.int;
+      Value  : System.Address;
+      Length : Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Set_Socket_Option, "setsockopt");
+
+   function C_Get_Socket_Option
+     (Socket : Interfaces.C.int;
+      Level  : Interfaces.C.int;
+      Option : Interfaces.C.int;
+      Value  : System.Address;
+      Length : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Get_Socket_Option, "getsockopt");
+
+   function C_Bind_Raw
+     (Socket : Interfaces.C.int;
+      Storage : System.Address;
+      Length : Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Bind_Raw, "bind");
+
+   function C_Listen_Raw
+     (Socket, Backlog : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import (C, C_Listen_Raw, "listen");
+
+   function C_Get_Socket_Name_Raw
+     (Socket : Interfaces.C.int;
+      Storage : System.Address;
+      Length : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Get_Socket_Name_Raw, "getsockname");
+
+   function C_Get_Peer_Name_Raw
+     (Socket : Interfaces.C.int;
+      Storage : System.Address;
+      Length : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Get_Peer_Name_Raw, "getpeername");
+
+   function C_Raw_Accept
+     (Socket : Interfaces.C.int;
+      Storage : System.Address;
+      Length : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Raw_Accept, "flyology_accept");
+
+   function C_Raw_Connect
+     (Socket : Interfaces.C.int;
+      Storage : System.Address;
+      Length : Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, C_Raw_Connect, "flyology_connect");
+
+   function C_Recv
+     (Socket : Interfaces.C.int;
+      Buffer : System.Address;
+      Length : Interfaces.C.size_t;
+      Flags  : Interfaces.C.int) return Interfaces.C.long;
+   pragma Import (C, C_Recv, "recv");
+
+   function C_Recv_From_Raw
+     (Socket : Interfaces.C.int;
+      Buffer : System.Address;
+      Length : Interfaces.C.size_t;
+      Flags  : Interfaces.C.int;
+      Storage : System.Address;
+      Address_Length : access Interfaces.C.unsigned)
+      return Interfaces.C.long;
+   pragma Import (C, C_Recv_From_Raw, "recvfrom");
+
+   function C_Send_Raw
+     (Socket : Interfaces.C.int;
+      Buffer : System.Address;
+      Length : Interfaces.C.size_t;
+      Flags  : Interfaces.C.int) return Interfaces.C.long;
+   pragma Import (C, C_Send_Raw, "send");
+
+   function C_Send_To_Raw
+     (Socket : Interfaces.C.int;
+      Buffer : System.Address;
+      Length : Interfaces.C.size_t;
+      Flags  : Interfaces.C.int;
+      Storage : System.Address;
+      Address_Length : Interfaces.C.unsigned) return Interfaces.C.long;
+   pragma Import (C, C_Send_To_Raw, "sendto");
+
+   function C_Memset
+     (Target : System.Address;
+      Value  : Interfaces.C.int;
+      Length : Interfaces.C.size_t) return System.Address;
+   pragma Import (C, C_Memset, "memset");
+
    function C_Create
      (Family : Interfaces.C.int;
       Mode   : Interfaces.C.int;
       Error  : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Create, "flyology_socket_create");
 
    function C_Pair
      (Mode  : Interfaces.C.int;
       Left  : access Interfaces.C.int;
       Right : access Interfaces.C.int;
       Error : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Pair, "flyology_socket_pair");
 
    function C_Prepare
      (Socket : Interfaces.C.int;
       Error  : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Prepare, "flyology_socket_prepare");
 
    function C_Set_Nonblocking
      (Socket  : Interfaces.C.int;
       Enabled : Interfaces.C.int;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import
-     (C, C_Set_Nonblocking, "flyology_socket_set_nonblocking");
 
    function C_Close
      (Socket : Interfaces.C.int;
       Error  : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Close, "flyology_socket_close");
 
    function C_Set_Reuse_Address
      (Socket  : Interfaces.C.int;
       Enabled : Interfaces.C.int;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import
-     (C, C_Set_Reuse_Address, "flyology_socket_set_reuse_address");
 
    function C_Set_Receive_Timeout
      (Socket  : Interfaces.C.int;
@@ -92,13 +266,11 @@ package body Flyology.IO.Sockets is
       Port    : Interfaces.C.unsigned;
       Scope   : Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Bind, "flyology_socket_bind");
 
    function C_Listen
      (Socket  : Interfaces.C.int;
       Backlog : Interfaces.C.int;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Listen, "flyology_socket_listen");
 
    function C_Name
      (Socket  : Interfaces.C.int;
@@ -108,7 +280,6 @@ package body Flyology.IO.Sockets is
       Port    : access Interfaces.C.unsigned;
       Scope   : access Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Name, "flyology_socket_name");
 
    function C_Accept
      (Socket  : Interfaces.C.int;
@@ -117,7 +288,6 @@ package body Flyology.IO.Sockets is
       Port    : access Interfaces.C.unsigned;
       Scope   : access Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Accept, "flyology_socket_accept");
    --  A nonnegative result is the accepted descriptor, -1 means accept(2)
    --  failed, and -2 means C_Accept closed a descriptor that accept(2)
    --  returned but descriptor configuration could not make usable.
@@ -152,21 +322,17 @@ package body Flyology.IO.Sockets is
       Port    : Interfaces.C.unsigned;
       Scope   : Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import (C, C_Connect, "flyology_socket_connect");
 
    function C_Pending_Error
      (Socket  : Interfaces.C.int;
       Pending : access Interfaces.C.int;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import
-     (C, C_Pending_Error, "flyology_socket_pending_error");
 
    function C_Receive
      (Socket : Interfaces.C.int;
       Buffer : System.Address;
       Length : Interfaces.C.size_t;
       Error  : access Interfaces.C.int) return Interfaces.C.long;
-   pragma Import (C, C_Receive, "flyology_socket_receive");
 
    function C_Receive_From
      (Socket  : Interfaces.C.int;
@@ -177,15 +343,10 @@ package body Flyology.IO.Sockets is
       Port    : access Interfaces.C.unsigned;
       Scope   : access Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.long;
-   pragma Import
-     (C, C_Receive_From, "flyology_socket_receive_from");
 
    function C_Enable_Datagram_Metadata
      (Socket : Interfaces.C.int;
       Error  : access Interfaces.C.int) return Interfaces.C.int;
-   pragma Import
-     (C, C_Enable_Datagram_Metadata,
-      "flyology_socket_enable_datagram_metadata");
 
    function C_Receive_Datagram
      (Socket              : Interfaces.C.int;
@@ -209,7 +370,6 @@ package body Flyology.IO.Sockets is
       Buffer : System.Address;
       Length : Interfaces.C.size_t;
       Error  : access Interfaces.C.int) return Interfaces.C.long;
-   pragma Import (C, C_Send, "flyology_socket_send");
 
    function C_Send_To
      (Socket  : Interfaces.C.int;
@@ -220,7 +380,6 @@ package body Flyology.IO.Sockets is
       Port    : Interfaces.C.unsigned;
       Scope   : Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.long;
-   pragma Import (C, C_Send_To, "flyology_socket_send_to");
 
    function C_Send_Datagram
      (Socket              : Interfaces.C.int;
@@ -299,6 +458,420 @@ package body Flyology.IO.Sockets is
 
    function Mode_Code (Mode : Socket_Mode) return Interfaces.C.int is
      (Flyology.Socket_Policy.Mode_Code (Mode = Socket_Datagram));
+
+   function Native_Domain
+     (Family : Interfaces.C.int) return Interfaces.C.int
+   is
+     (if Family = 6 then C_IPv6_Domain
+      elsif Family = 4 then C_IPv4_Domain
+      else -1);
+
+   function Native_Kind (Mode : Interfaces.C.int) return Interfaces.C.int is
+     (if Mode = 2 then C_Datagram_Kind
+      elsif Mode = 1 then C_Stream_Kind
+      else -1);
+
+   function Current_Errno return Interfaces.C.int is
+     (Interfaces.C.int (GNAT.OS_Lib.Errno));
+
+   procedure Close_Ignoring_Errors (Socket : Interfaces.C.int) is
+      Result : constant Interfaces.C.int := C_Close_Raw (Socket);
+      pragma Unreferenced (Result);
+   begin
+      null;
+   end Close_Ignoring_Errors;
+
+   function C_Create
+     (Family : Interfaces.C.int;
+      Mode   : Interfaces.C.int;
+      Error  : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Socket : constant Interfaces.C.int :=
+        C_Socket (Native_Domain (Family), Native_Kind (Mode), 0);
+   begin
+      if Socket < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      if C_Configure_Descriptor (Socket, 0) < 0
+        or else
+          (Flyology.Socket_Policy.Should_Enable_Datagram_Metadata (Mode)
+           and then C_Enable_Datagram_Metadata_Impl (Socket) < 0)
+      then
+         Error.all := Current_Errno;
+         Close_Ignoring_Errors (Socket);
+         return -1;
+      end if;
+      Error.all := 0;
+      return Socket;
+   end C_Create;
+
+   function C_Pair
+     (Mode  : Interfaces.C.int;
+      Left  : access Interfaces.C.int;
+      Right : access Interfaces.C.int;
+      Error : access Interfaces.C.int) return Interfaces.C.int
+   is
+      type Descriptor_Array is
+        array (Natural range 0 .. 1) of aliased Interfaces.C.int
+          with Convention => C;
+      Descriptors : aliased Descriptor_Array := (others => -1);
+   begin
+      if C_Socket_Pair_Raw
+           (C_Local_Domain, Native_Kind (Mode), 0, Descriptors'Address) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      if C_Configure_Descriptor (Descriptors (0), 0) < 0
+        or else C_Configure_Descriptor (Descriptors (1), 0) < 0
+      then
+         Error.all := Current_Errno;
+         Close_Ignoring_Errors (Descriptors (0));
+         Close_Ignoring_Errors (Descriptors (1));
+         return -1;
+      end if;
+      Left.all := Descriptors (0);
+      Right.all := Descriptors (1);
+      Error.all := 0;
+      return 0;
+   end C_Pair;
+
+   function C_Prepare
+     (Socket : Interfaces.C.int;
+      Error  : access Interfaces.C.int) return Interfaces.C.int
+   is
+   begin
+      if C_Configure_Descriptor (Socket, 1) < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Prepare;
+
+   function C_Set_Nonblocking
+     (Socket  : Interfaces.C.int;
+      Enabled : Interfaces.C.int;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+   begin
+      if C_Configure_Descriptor
+           (Socket, (if Enabled = 0 then 0 else 1)) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Set_Nonblocking;
+
+   function C_Close
+     (Socket : Interfaces.C.int;
+      Error  : access Interfaces.C.int) return Interfaces.C.int
+   is
+   begin
+      if C_Close_Raw (Socket) < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Close;
+
+   function C_Set_Reuse_Address
+     (Socket  : Interfaces.C.int;
+      Enabled : Interfaces.C.int;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Value : aliased Interfaces.C.int := Enabled;
+   begin
+      if C_Set_Socket_Option
+           (Socket, C_Socket_Level, C_Reuse_Address_Option,
+            Value'Address,
+            Interfaces.C.unsigned (Interfaces.C.int'Size / 8)) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Set_Reuse_Address;
+
+   function C_Bind
+     (Socket  : Interfaces.C.int;
+      Family  : Interfaces.C.int;
+      Address : System.Address;
+      Port    : Interfaces.C.unsigned;
+      Scope   : Interfaces.C.unsigned;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Length  : aliased Interfaces.C.unsigned := 0;
+   begin
+      if C_Pack_Address
+           (Family, Address, Port, Scope, Storage'Address, Length'Access) < 0
+        or else C_Bind_Raw (Socket, Storage'Address, Length) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Bind;
+
+   function C_Listen
+     (Socket  : Interfaces.C.int;
+      Backlog : Interfaces.C.int;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+   begin
+      if C_Listen_Raw (Socket, Backlog) < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Listen;
+
+   function C_Name
+     (Socket  : Interfaces.C.int;
+      Peer    : Interfaces.C.int;
+      Family  : access Interfaces.C.unsigned_char;
+      Address : System.Address;
+      Port    : access Interfaces.C.unsigned;
+      Scope   : access Interfaces.C.unsigned;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Length  : aliased Interfaces.C.unsigned :=
+        Interfaces.C.unsigned (Socket_Address_Storage'Size / 8);
+      Result  : Interfaces.C.int;
+   begin
+      Result :=
+        (if Peer = 0
+         then C_Get_Socket_Name_Raw
+           (Socket, Storage'Address, Length'Access)
+         else C_Get_Peer_Name_Raw
+           (Socket, Storage'Address, Length'Access));
+      if Result < 0
+        or else C_Unpack_Address
+          (Storage'Address, Length, Family, Address, Port, Scope) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Name;
+
+   function Failed_Accept_Status
+     (Stage : Flyology.Socket_Policy.Post_Accept_Failure_Stage)
+      return Interfaces.C.int
+   is
+     (case Flyology.Socket_Policy.Classify_Post_Accept_Failure (Stage) is
+         when Flyology.Socket_Policy.Fail_Listener => -1,
+         when Flyology.Socket_Policy.Discard_Accepted_Peer =>
+            Accept_Discarded);
+
+   function C_Accept
+     (Socket  : Interfaces.C.int;
+      Family  : access Interfaces.C.unsigned_char;
+      Address : System.Address;
+      Port    : access Interfaces.C.unsigned;
+      Scope   : access Interfaces.C.unsigned;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Length  : aliased Interfaces.C.unsigned :=
+        Interfaces.C.unsigned (Socket_Address_Storage'Size / 8);
+      Accepted : constant Interfaces.C.int :=
+        C_Raw_Accept (Socket, Storage'Address, Length'Access);
+   begin
+      if Accepted < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      if C_Unpack_Address
+           (Storage'Address, Length, Family, Address, Port, Scope) < 0
+      then
+         Error.all := Current_Errno;
+         Close_Ignoring_Errors (Accepted);
+         return Failed_Accept_Status
+           (Flyology.Socket_Policy.Peer_Address_Decode);
+      end if;
+      if C_Configure_Descriptor (Accepted, 1) < 0 then
+         Error.all := Current_Errno;
+         Close_Ignoring_Errors (Accepted);
+         return Failed_Accept_Status
+           (Flyology.Socket_Policy.Descriptor_Configuration);
+      end if;
+      Error.all := 0;
+      return Accepted;
+   end C_Accept;
+
+   function C_Connect
+     (Socket  : Interfaces.C.int;
+      Family  : Interfaces.C.int;
+      Address : System.Address;
+      Port    : Interfaces.C.unsigned;
+      Scope   : Interfaces.C.unsigned;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Length  : aliased Interfaces.C.unsigned := 0;
+   begin
+      if C_Pack_Address
+           (Family, Address, Port, Scope, Storage'Address, Length'Access) < 0
+        or else C_Raw_Connect (Socket, Storage'Address, Length) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Connect;
+
+   function C_Pending_Error
+     (Socket  : Interfaces.C.int;
+      Pending : access Interfaces.C.int;
+      Error   : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Length : aliased Interfaces.C.unsigned :=
+        Interfaces.C.unsigned (Interfaces.C.int'Size / 8);
+   begin
+      if C_Get_Socket_Option
+           (Socket, C_Socket_Level, C_Pending_Error_Option,
+            Pending.all'Address, Length'Access) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Pending_Error;
+
+   function C_Receive
+     (Socket : Interfaces.C.int;
+      Buffer : System.Address;
+      Length : Interfaces.C.size_t;
+      Error  : access Interfaces.C.int) return Interfaces.C.long
+   is
+      Result : constant Interfaces.C.long :=
+        C_Recv (Socket, Buffer, Length, 0);
+   begin
+      Error.all := (if Result < 0 then Current_Errno else 0);
+      return Result;
+   end C_Receive;
+
+   function C_Receive_From
+     (Socket  : Interfaces.C.int;
+      Buffer  : System.Address;
+      Length  : Interfaces.C.size_t;
+      Family  : access Interfaces.C.unsigned_char;
+      Address : System.Address;
+      Port    : access Interfaces.C.unsigned;
+      Scope   : access Interfaces.C.unsigned;
+      Error   : access Interfaces.C.int) return Interfaces.C.long
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Address_Length : aliased Interfaces.C.unsigned :=
+        Interfaces.C.unsigned (Socket_Address_Storage'Size / 8);
+      Result : Interfaces.C.long;
+      Address_Present : Boolean;
+      Decode_Succeeded : Boolean := False;
+      Decode_Error : Interfaces.C.int := 0;
+      Ignored : System.Address;
+      pragma Unreferenced (Ignored);
+   begin
+      Family.all := 0;
+      Ignored := C_Memset (Address, 0, 16);
+      Port.all := 0;
+      Scope.all := 0;
+      Result := C_Recv_From_Raw
+        (Socket, Buffer, Length, 0, Storage'Address, Address_Length'Access);
+      if Result < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Address_Present :=
+        Address_Length >= Interfaces.C.unsigned (C_Address_Family_Field_Size);
+      if Address_Present then
+         Decode_Succeeded := C_Unpack_Address
+           (Storage'Address, Address_Length, Family, Address, Port, Scope) = 0;
+         if not Decode_Succeeded then
+            Decode_Error := Current_Errno;
+         end if;
+      end if;
+      case Flyology.Socket_Policy.Classify_Received_Address
+        (Address_Present,
+         Decode_Succeeded,
+         Decode_Error,
+         C_Errno_Address_Family_Not_Supported)
+      is
+         when Flyology.Socket_Policy.Use_Endpoint |
+              Flyology.Socket_Policy.Use_No_Endpoint =>
+            Error.all := 0;
+            return Result;
+         when Flyology.Socket_Policy.Fail_Receive =>
+            Error.all := Decode_Error;
+            return -1;
+      end case;
+   end C_Receive_From;
+
+   function C_Enable_Datagram_Metadata
+     (Socket : Interfaces.C.int;
+      Error  : access Interfaces.C.int) return Interfaces.C.int
+   is
+   begin
+      if C_Enable_Datagram_Metadata_Impl (Socket) < 0 then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Enable_Datagram_Metadata;
+
+   function C_Send
+     (Socket : Interfaces.C.int;
+      Buffer : System.Address;
+      Length : Interfaces.C.size_t;
+      Error  : access Interfaces.C.int) return Interfaces.C.long
+   is
+      Result : constant Interfaces.C.long :=
+        C_Send_Raw (Socket, Buffer, Length, C_No_Signal_Flag);
+   begin
+      Error.all := (if Result < 0 then Current_Errno else 0);
+      return Result;
+   end C_Send;
+
+   function C_Send_To
+     (Socket  : Interfaces.C.int;
+      Buffer  : System.Address;
+      Length  : Interfaces.C.size_t;
+      Family  : Interfaces.C.int;
+      Address : System.Address;
+      Port    : Interfaces.C.unsigned;
+      Scope   : Interfaces.C.unsigned;
+      Error   : access Interfaces.C.int) return Interfaces.C.long
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Address_Length : aliased Interfaces.C.unsigned := 0;
+      Result : Interfaces.C.long;
+   begin
+      if C_Pack_Address
+           (Family, Address, Port, Scope,
+            Storage'Address, Address_Length'Access) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Result := C_Send_To_Raw
+        (Socket, Buffer, Length, C_No_Signal_Flag,
+         Storage'Address, Address_Length);
+      Error.all := (if Result < 0 then Current_Errno else 0);
+      return Result;
+   end C_Send_To;
 
    protected body Accept_Return_Bridge is
       procedure Invoke

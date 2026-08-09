@@ -7,6 +7,35 @@ is
    function Mode_Code (Datagram : Boolean) return C.int is
      (if Datagram then 2 else 1);
 
+   function Should_Enable_Datagram_Metadata
+     (Mode : C.int) return Boolean
+   is (Mode = 2);
+
+   function Classify_Post_Accept_Failure
+     (Stage : Post_Accept_Failure_Stage) return Post_Accept_Failure_Action
+   is
+     (case Stage is
+         when Peer_Address_Decode => Fail_Listener,
+         when Descriptor_Configuration => Discard_Accepted_Peer);
+
+   function Classify_Received_Address
+     (Address_Present          : Boolean;
+      Decode_Succeeded         : Boolean;
+      Decode_Error             : C.int;
+      Unsupported_Family_Error : C.int) return Received_Address_Action
+   is
+   begin
+      if not Address_Present then
+         return Use_No_Endpoint;
+      elsif Decode_Succeeded then
+         return Use_Endpoint;
+      elsif Decode_Error = Unsupported_Family_Error then
+         return Use_No_Endpoint;
+      else
+         return Fail_Receive;
+      end if;
+   end Classify_Received_Address;
+
    function Classify_Error
      (Error_Code                : C.int;
       Would_Block_Error        : C.int;

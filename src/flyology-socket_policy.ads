@@ -24,6 +24,12 @@ is
 
    type IO_Error_Action is (Wait_For_Ready, Retry_Operation, Fail_Operation);
    type Connect_Error_Action is (Wait_For_Connection, Connected, Fail_Connect);
+   type Post_Accept_Failure_Stage is
+     (Peer_Address_Decode, Descriptor_Configuration);
+   type Post_Accept_Failure_Action is
+     (Fail_Listener, Discard_Accepted_Peer);
+   type Received_Address_Action is
+     (Use_Endpoint, Use_No_Endpoint, Fail_Receive);
 
    function Family_Code (IPv6 : Boolean) return C.int
    with
@@ -34,6 +40,40 @@ is
    with
      Global => null,
      Post => Mode_Code'Result = (if Datagram then 2 else 1);
+
+   function Should_Enable_Datagram_Metadata
+     (Mode : C.int) return Boolean
+   with
+     Global => null,
+     Post => Should_Enable_Datagram_Metadata'Result = (Mode = 2);
+
+   function Classify_Post_Accept_Failure
+     (Stage : Post_Accept_Failure_Stage) return Post_Accept_Failure_Action
+   with
+     Global => null,
+     Contract_Cases =>
+       (Stage = Peer_Address_Decode =>
+          Classify_Post_Accept_Failure'Result = Fail_Listener,
+        Stage = Descriptor_Configuration =>
+          Classify_Post_Accept_Failure'Result = Discard_Accepted_Peer);
+
+   function Classify_Received_Address
+     (Address_Present          : Boolean;
+      Decode_Succeeded         : Boolean;
+      Decode_Error             : C.int;
+      Unsupported_Family_Error : C.int) return Received_Address_Action
+   with
+     Global => null,
+     Contract_Cases =>
+       (not Address_Present =>
+          Classify_Received_Address'Result = Use_No_Endpoint,
+        Address_Present and then Decode_Succeeded =>
+          Classify_Received_Address'Result = Use_Endpoint,
+        Address_Present and then not Decode_Succeeded
+          and then Decode_Error = Unsupported_Family_Error =>
+            Classify_Received_Address'Result = Use_No_Endpoint,
+        others =>
+          Classify_Received_Address'Result = Fail_Receive);
 
    function Classify_Error
      (Error_Code                : C.int;
