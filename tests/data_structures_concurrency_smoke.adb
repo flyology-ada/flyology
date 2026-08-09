@@ -673,6 +673,7 @@ procedure Data_Structures_Concurrency_Smoke is
       Views : View_Array (1 .. Worker_Count);
       type View_Access is access all Byte_Strings.View;
       Finished : Completion (Worker_Count);
+      Attach_Finished : Completion (1);
 
       task type Worker_Task
         (Identifier : Positive; Item : not null View_Access)
@@ -696,6 +697,33 @@ procedure Data_Structures_Concurrency_Smoke is
       type Worker_Access is access Worker_Task;
       type Worker_Array is array (Positive range <>) of Worker_Access;
       Workers : Worker_Array (1 .. Worker_Count);
+
+      task type Attach_Task is
+         pragma Task_Info (Flyology.Native_Task);
+      end Attach_Task;
+
+      task body Attach_Task is
+         Candidate : Byte_Strings.View;
+      begin
+         for Attempt in 1 .. 10_000 loop
+            pragma Unreferenced (Attempt);
+            Byte_Strings.Attach
+              (Candidate, Region_B, String_Location, Capacity);
+            if Byte_Strings.Capacity (Candidate) /= Capacity then
+               raise Program_Error with
+                 "concurrent byte-string attachment lost its capacity";
+            end if;
+            Byte_Strings.Detach (Candidate);
+         end loop;
+         Attach_Finished.Done (True);
+      exception
+         when others =>
+            Byte_Strings.Detach (Candidate);
+            Attach_Finished.Done (False);
+      end Attach_Task;
+
+      type Attach_Access is access Attach_Task;
+      Attacher : Attach_Access;
       Seen : Seen_Array (1 .. Total) := (others => False);
       Data : Ada.Streams.Stream_Element_Array
         (1 .. Ada.Streams.Stream_Element_Offset (Capacity));
@@ -715,6 +743,7 @@ procedure Data_Structures_Concurrency_Smoke is
       for Index in Workers'Range loop
          Workers (Index) := new Worker_Task (Index, Views (Index)'Access);
       end loop;
+      Attacher := new Attach_Task;
       select
          Finished.Await_All;
       or
@@ -727,6 +756,17 @@ procedure Data_Structures_Concurrency_Smoke is
       end select;
       Assert
         (Finished.Passed, "internally synchronized byte-string tasks failed");
+      select
+         Attach_Finished.Await_All;
+      or
+         delay 15.0;
+         abort Attacher.all;
+         raise Program_Error with
+           "concurrent byte-string attachment test timed out";
+      end select;
+      Assert
+        (Attach_Finished.Passed,
+         "byte-string attachment raced a synchronized operation");
       Assert
         (Byte_Strings.Length (Views (1)) = Capacity,
          "internally synchronized byte string lost bytes");

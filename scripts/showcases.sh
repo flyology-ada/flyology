@@ -33,7 +33,6 @@ do
   "$project_root/scripts/run-with-timeout.sh" 60 \
     "$project_root/showcases/bin/$showcase"
 done
-
 printf '\n== event_loop_pool ==\n'
 "$project_root/showcases/run_event_loop_pool.sh"
 
@@ -73,3 +72,68 @@ printf '\n== data_structures_benchmark ==\n'
 
 printf '\n== data_structures_allocator_memory ==\n'
 "$project_root/showcases/run_data_structures_allocator_memory.sh"
+
+printf '\n== shared_image_index ==\n'
+shared_image_output=$(
+  NO_COLOR=1 \
+    "$project_root/showcases/run_shared_image_index.sh" 8 256 64 64 128 8 6
+)
+printf '%s\n' "$shared_image_output"
+for shared_image_marker in \
+  "stored segment layout:" \
+  "jobs/pending" \
+  "jobs/results" \
+  "index/by-image" \
+  "workers/shared-startup" \
+  "completed epochs:      6" \
+  "generated images total: 1536" \
+  "peak workers:          12" \
+  "one segment remained live while workers joined on saturation and drained after recovery"
+do
+  case "$shared_image_output" in
+    *"$shared_image_marker"*) ;;
+    *)
+      printf '%s\n' \
+        "shared image index did not report $shared_image_marker" >&2
+      exit 1
+      ;;
+  esac
+done
+dynamic_transitions=$(
+  printf '%s\n' "$shared_image_output" |
+    sed -n 's/^  dynamic joins\/leaves:  //p'
+)
+case "$dynamic_transitions" in
+  *[!0-9/]*|''|0/*|*/0)
+    printf '%s\n' \
+      "shared image index did not complete dynamic joins and leaves" >&2
+    exit 1
+    ;;
+esac
+if [ "${dynamic_transitions%/*}" -ne "${dynamic_transitions#*/}" ]; then
+  printf '%s\n' \
+    "shared image index join/leave counts are unbalanced" >&2
+  exit 1
+fi
+dynamic_worker_images=$(
+  printf '%s\n' "$shared_image_output" |
+    sed -n 's/^  dynamic-worker images: //p'
+)
+case "$dynamic_worker_images" in
+  ''|*[!0-9]*|0)
+    printf '%s\n' \
+      "shared image index did not assign work to dynamic workers" >&2
+    exit 1
+    ;;
+esac
+producer_backoffs=$(
+  printf '%s\n' "$shared_image_output" |
+    sed -n 's/^  producer saturation backoffs: //p'
+)
+case "$producer_backoffs" in
+  ''|*[!0-9]*|0)
+    printf '%s\n' \
+      "shared image index did not exercise producer backoff" >&2
+    exit 1
+    ;;
+esac

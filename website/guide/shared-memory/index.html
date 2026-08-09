@@ -69,6 +69,7 @@
             <li><a href="#registry">Initialize the registry</a></li>
             <li><a href="#objects">Publish a relocatable object</a></li>
             <li><a href="#worker-status">Share worker status</a></li>
+            <li><a href="#image-index-showcase">Run the image index</a></li>
             <li><a href="#peers">Hand off one capability safely</a></li>
             <li><a href="#lifecycle">Detach and persist</a></li>
             <li><a href="#import-checkpoint">Reopen an import checkpoint</a></li>
@@ -445,6 +446,84 @@ end if;</code></pre>
             <p>The coordinator can read the updated value through its retained <code>Status</code> view. Shared memory supplies no notification, so the application must choose how the coordinator learns that the value changed. It can poll at an application scheduling point or use a separate readiness channel. This example selects <code>Trusted_Peer</code> because the coordinator created and exec'd the worker; that declaration is application policy, not authentication performed by Flyology. A Linux deployment that receives from an untrusted peer selects <code>Untrusted_Peer</code>, which automatically requires memfd size seals. Process creation must also respect Flyology's post-tasking rule: after Ada tasking starts, a fork child performs only async-signal-safe work before <code>exec</code> or <code>_exit</code>.</p>
           </section>
 
+          <section id="image-index-showcase">
+            <span class="step-label">RUNNABLE SHOWCASE</span>
+            <h2>Index real image files through one shared segment.</h2>
+            <p>The maintained image-index showcase turns the ownership model into a loaded process workload. A producer continuously writes and queues a bounded set of 2,000 deterministic random P6 PPM files while eight native worker processes analyze earlier files. At the pipeline high-water mark, generation pauses and admits four more workers. After they help restore low pressure and the producer sustains a recovery interval, those workers drain and leave. The original segment remains mapped throughout.</p>
+
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>Files outside, coordination inside</strong><span>bounded queues create visible backpressure</span></figcaption>
+              <svg role="img" aria-labelledby="index-showcase-title index-showcase-desc" viewBox="0 0 760 420">
+                <title id="index-showcase-title">Shared image-index showcase data flow</title>
+                <desc id="index-showcase-desc">A coordinator continuously generates PPM files through a high-water and low-water pipeline and initializes a shared segment containing pending and result MPMC rings, a relocatable image hash map, and a safety gate. Independently executed workers receive the segment capability, consume image jobs, and publish results. The population grows from eight to twelve workers and drains back to eight during each epoch.</desc>
+                <defs>
+                  <marker id="index-flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="index-flow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="24" y="38" width="178" height="122" rx="14"/>
+                <text x="113" y="68" text-anchor="middle" font-size="14" font-weight="620">Coordinator</text>
+                <text class="diagram-code diagram-muted" x="113" y="94" text-anchor="middle">2,000 P6 images</text>
+                <text class="diagram-muted" x="113" y="118" text-anchor="middle">create · map · publish</text>
+                <text class="diagram-muted" x="113" y="141" text-anchor="middle">enqueue · verify</text>
+
+                <rect class="diagram-header" x="256" y="26" width="248" height="348" rx="16"/>
+                <text x="380" y="57" text-anchor="middle" font-size="14" font-weight="620">Anonymous shared segment</text>
+                <text class="diagram-label" x="380" y="78" text-anchor="middle">EXACT-SIZE · RELOCATABLE</text>
+                <rect class="diagram-box" x="280" y="98" width="200" height="48" rx="9"/>
+                <text class="diagram-code" x="380" y="127" text-anchor="middle">jobs/pending · MPMC</text>
+                <rect class="diagram-box" x="280" y="158" width="200" height="48" rx="9"/>
+                <text class="diagram-code" x="380" y="187" text-anchor="middle">jobs/results · MPMC</text>
+                <rect class="diagram-payload" x="280" y="218" width="200" height="62" rx="9"/>
+                <text class="diagram-code" x="380" y="244" text-anchor="middle">index/by-image · map</text>
+                <text class="diagram-muted" x="380" y="264" text-anchor="middle">shared hot-key contention</text>
+                <rect class="diagram-violet" x="280" y="292" width="200" height="24" rx="7"/>
+                <text class="diagram-code" x="380" y="309" text-anchor="middle">workers/gate · epoch + limit</text>
+                <rect class="diagram-violet" x="280" y="322" width="200" height="26" rx="7"/>
+                <text class="diagram-code" x="380" y="340" text-anchor="middle">shared-startup · creator=1</text>
+
+                <rect class="diagram-box" x="558" y="38" width="178" height="296" rx="14"/>
+                <text x="647" y="68" text-anchor="middle" font-size="14" font-weight="620">Exec'd workers</text>
+                <text class="diagram-label" x="647" y="90" text-anchor="middle">8 ↔ 12 NATIVE PROCESSES</text>
+                <rect class="diagram-violet" x="582" y="108" width="130" height="40" rx="8"/>
+                <text class="diagram-code" x="647" y="133" text-anchor="middle">SCM_RIGHTS</text>
+                <text class="diagram-muted" x="647" y="180" text-anchor="middle">map elsewhere</text>
+                <text class="diagram-muted" x="647" y="205" text-anchor="middle">attach local views</text>
+                <text class="diagram-muted" x="647" y="230" text-anchor="middle">read full pixels × 128</text>
+                <text class="diagram-muted" x="647" y="255" text-anchor="middle">publish hash + totals</text>
+                <text class="diagram-muted" x="647" y="281" text-anchor="middle">join / drain mid-epoch</text>
+                <text class="diagram-muted" x="647" y="306" text-anchor="middle">no stored addresses</text>
+
+                <path class="diagram-line" d="M202 112h54" marker-end="url(#index-flow-arrow)"/>
+                <path class="diagram-line-violet" d="M504 128h54" marker-end="url(#index-flow-arrow)"/>
+                <path class="diagram-line-teal" d="M558 250h-54" marker-end="url(#index-flow-teal)"/>
+                <path class="diagram-dashed" d="M202 324c26 54 53 70 86 70h266c37 0 65-18 83-60" marker-end="url(#index-flow-arrow)"/>
+                <text class="diagram-label" x="380" y="411" text-anchor="middle">ATTACH ACKNOWLEDGMENT BEFORE SENDER SOCKET CLOSE</text>
+              </svg>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>generate, contend, verify, and clean up</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-shell"># A terminal keeps the rolling pipeline live until q or Esc requests a drain.
+./showcases/run_shared_image_index.sh
+
+# Fast regression shape: workers images width height passes index-rounds
+NO_COLOR=1 ./showcases/run_shared_image_index.sh 4 64 64 64 2 8
+
+# Optional seventh argument: run exactly three safety epochs.
+NO_COLOR=1 ./showcases/run_shared_image_index.sh 8 2000 256 256 128 32 3</code></pre>
+            </figure>
+
+            <p>The two 64-slot MPMC rings are intentionally smaller than the corpus, so producers and consumers observe real full, empty, and CAS-contention outcomes. Generation and indexing are one pipeline rather than separate display modes. The deterministic source emits irregular bursts with short gaps. Once outstanding work reaches the 32-image logical high-water mark, the producer enters <code>BACKOFF</code> and admits four extra workers; they help drain to the 16-image low-water mark. Generation then returns to <code>FLOW</code>, and the extra workers remain through a stable recovery interval before draining and leaving. Workers also publish through one hot hash-map key before storing each image's final entry. The coordinator creates one segment for the whole session: its mapping, registry entries, rings, and hash map remain live throughout.</p>
+            <p>The shared gate stores both the current safety-epoch identity and the permitted worker-ID limit. A joiner maps and validates the segment, resolves the registry, and publishes both acknowledgments while the old limit still excludes it. Only then does the coordinator raise the limit, allowing that worker to enter the job ring. To remove workers, the coordinator lowers the limit. Each worker samples it immediately before dequeue; a worker already analyzing an image finishes and publishes that result before sampling again, acknowledging departure, and detaching. The sampling and limit update can race one dequeue, so the drain bound is one additional claimed image per departing worker—not instantaneous cancellation or abandoned work.</p>
+            <p>Pressing <code>q</code> or Esc records a stop request without interrupting active work. Once the current population has consumed exactly one epoch-end marker each and reported quiescence, the coordinator advances the safety identity and may reuse the bounded PPM corpus. Mid-epoch membership changes do not advance that identity and do not expose partially processed images.</p>
+            <p>The terminal mode keeps one fixed canvas through generation, backoff, handoff, registry contention, indexing, topology changes, and completion. Workload, shared-segment, and worker windows stay in place while their values change; detached worker slots remain visible instead of shrinking the screen. Each throttled refresh is assembled as one frame, with synchronized terminal updates on supporting terminals, instead of painting the interface line by line. On exit, the runner restores the terminal and prints cumulative session totals, saturation backoffs, join/leave counts, peak and final worker populations, final-epoch contention and timing, and the unchanged stored segment layout as ordinary text.</p>
+            <p>The dashboard reports producer backoffs and contention outcomes rather than hiding them behind blocking calls. Its live segment panel shows the validated header and each published registry entry—name, offset, reserved length, structure kind, and current activity. Non-terminal and <code>NO_COLOR=1</code> runs execute one deterministic epoch and produce stable line output; a seventh argument requests a specific finite epoch count. The <a href="../data-structures/#choose">relocatable data-structures guide</a> explains the ring and map layout contracts exercised here.</p>
+            <p>The coordinator retains each handoff socket until that worker publishes an attached event through the result ring. This matters: successful <code>sendmsg</code> means the local kernel queued the descriptor, not that the worker validated or mapped it. The socket closes after that acknowledgment, but the coordinator retains the backing descriptor so later joiners can receive the capability. At final shutdown it closes the descriptor first, then advances the gate with a zero worker limit; every process proves that its already-established mapping remains usable long enough to detach cleanly. The temporary corpus is removed when the runner exits.</p>
+            <p>The runner prepares Flyology with the native project default because mapping, metadata calls, ordinary file reads, and pixel analysis are synchronous here; placing that work directly in a lightweight task could occupy its event-loop pthread. Runtime inputs and compiler identity are fingerprinted, and the executables use normal incremental builds, so unchanged preparation and compilation report cache hits. Corpus generation is intentionally repeated because it is part of the workload being demonstrated.</p>
+          </section>
+
           <section id="peers">
             <span class="step-label">SEGMENT 06</span>
             <h2>Give descriptor handoff an owned protocol boundary.</h2>
@@ -522,8 +601,11 @@ Unix_Sockets.Send
 
 --  Success means the local kernel accepted the record. It does not prove
 --  that the worker received, validated, mapped, or attached the segment.
---  A one-shot handoff can close its channel now; a protocol that sends more
---  capabilities may retain it and serialize later Send calls.
+--  Keep the endpoint connected until an application acknowledgment proves
+--  the worker has at least received and validated the record. The image-index
+--  showcase keeps it through mapping and segment attachment. Closing earlier
+--  can race receiver peer validation, particularly on Darwin.
+Wait_For_Worker_Attached;
 Unix_Sockets.Close (Sender);</code></pre>
             </figure>
 
@@ -593,7 +675,7 @@ Shared.Unmap (Peer_Map);</code></pre>
             <h3>Choose the handoff pattern from the deployment.</h3>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Coordinator launches a worker</dt><dd>Create the socket pair before spawning or exec'ing the worker, pass one endpoint through the launch contract, and adopt both ends as <code>Trusted_Peer</code>. Send an anonymous segment with <code>Transfer</code> when the coordinator no longer needs its descriptor. Existing mappings remain live. Use a separate status extent plus a readiness signal or acknowledgment when the coordinator must know that attachment completed.</dd></div>
+                <div class="decision-row"><dt>Coordinator launches a worker</dt><dd>Create the socket pair before spawning or exec'ing the worker, pass one endpoint through the launch contract, and adopt both ends as <code>Trusted_Peer</code>. Successful send is only local kernel acceptance. Retain the connected sender until an application acknowledgment proves the worker received and validated the record; the <a href="#image-index-showcase">image-index showcase</a> retains it through mapping and segment attachment. <code>Transfer</code> may still close the backing descriptor because existing mappings have independent lifetimes.</dd></div>
                 <div class="decision-row"><dt>Linux service accepts a less-trusted peer</dt><dd>Authenticate and authorize the connection outside Flyology, then adopt the receiving endpoint as <code>Untrusted_Peer</code>. Receive automatically requires immutable Linux size seals, so use an exact-size sealed anonymous <code>memfd</code>. Do not downgrade to <code>Trusted_Peer</code> merely to accept a regular file. Darwin deliberately has no equivalent untrusted mode.</dd></div>
                 <div class="decision-row"><dt>Peers reopen persistent state</dt><dd>Use <code>Open_Named</code> for a POSIX shared-memory name or <code>Open_File</code> for a stable file path when namespace discovery and persistence are intentional. Validate the exact size, map, and attach the segment registry. <code>SCM_RIGHTS</code> is useful when possession of an already-open descriptor is the capability; it is not required merely because two processes share the same persisted segment.</dd></div>
               </dl>

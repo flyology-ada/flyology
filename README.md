@@ -1130,7 +1130,12 @@ and backing behavior.
 
 The package does not create or authenticate the socket, interpret peer
 credentials, or acknowledge remote attachment. Successful `Send` means local
-kernel acceptance only. The website's shared-memory guide has the complete
+kernel acceptance only. Keep the connected sender endpoint alive until an
+application acknowledgment establishes the receiver milestone the protocol
+needs; closing it immediately can race receiver peer validation on Darwin.
+The loaded image-index showcase acknowledges completed mapping and segment
+attachment before closing each sender endpoint. The website's shared-memory
+guide has the complete
 [SCM_RIGHTS edge-case ledger](https://flyology.org/guide/shared-memory/#peers),
 including stream-range association, short reads, descriptor-count and alignment
 hazards, multiple control headers, Darwin limits, and the reason the owned
@@ -3030,11 +3035,52 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_task_snapshot_contention.sh
 ./showcases/run_dormant_stack_pressure.sh 128 64
 ./showcases/run_file_transfer_benchmark.sh
+./showcases/run_shared_image_index.sh
 ./showcases/run_http_benchmark.sh
 ```
 
 The examples demonstrate:
 
+- a loaded shared image-index pipeline that continuously feeds 2,000
+  deterministic P6 image slots, execs eight independent native workers, and
+  hands each the same anonymous segment with `SCM_RIGHTS`. It coordinates
+  bounded MPMC job/result rings, a
+  race-safe named-extent claim, and a deliberately contended relocatable hash
+  map. The coordinator creates the segment once and reuses its registry
+  entries, rings, and map across every safety epoch. Generation and indexing
+  overlap: an irregular deterministic source emits bursts and short gaps. At
+  the logical high-water mark the producer pauses and admits four extra
+  workers; at the low-water mark it resumes. The extra workers remain through
+  a stable recovery interval, then drain and leave. Joiners receive the
+  retained segment capability, attach new mappings, acknowledge
+  attachment and registry resolution, then enter the job ring. A departing
+  worker stops dequeuing, publishes its possible in-flight image, acknowledges
+  departure, detaches, and exits. In a terminal the showcase keeps producing
+  until `q` or Esc requests a drained stop. One fixed ANSI canvas reports
+  generation, throughput, per-worker progress, queue pressure, registry
+  retries, and map-guard retries without switching layouts between phases.
+  Workload, segment, and worker windows are rendered as one buffered, throttled
+  frame, using synchronized terminal updates where supported to avoid
+  line-by-line tearing. After the requested stop completes, the runner restores
+  the terminal and prints cumulative session totals, final-epoch statistics,
+  and the stored segment layout as ordinary text. Its
+  segment panel shows the validated header and every published registry extent
+  with its offset, length, relocatable structure kind, and current activity;
+  the last completed layout remains visible after exit. A safety-epoch value in
+  the shared gate holds each worker after exactly one end marker; once every
+  active worker reports quiescence, the coordinator publishes the next epoch
+  identity and safely reuses the bounded image files. The gate's worker limit
+  also changes within an epoch to admit acknowledged joiners on saturation and
+  request drained departures after recovery. Because a worker samples the
+  limit before dequeue, a lowering can race at most one newly claimed job;
+  that job is completed and published before departure. Detached worker slots
+  remain visible so the terminal canvas does not change height.
+  `NO_COLOR=1` selects one deterministic epoch with stable line output.
+  Six positional arguments override workers, images, width, height, analysis
+  passes, and index rounds; a seventh positive argument selects an exact epoch
+  count for a non-interactive run. The runner fingerprints the native RTS
+  inputs and uses incremental executable builds, so unchanged setup phases are
+  cache hits while each epoch deliberately regenerates its image corpus;
 - a producer/transform/sink pipeline using entry calls;
 - uncontended and shared protected-procedure, protected-entry, and rendezvous
   costs across one lightweight execution group, two lightweight groups, native

@@ -18,7 +18,7 @@ project Showcases is
    for Languages use ("Ada", "C");
    for Runtime ("Ada") use
      external ("FLYOLOGY_RTS_DIR", "../build/rts");
-   for Source_Dirs use (".");
+   for Source_Dirs use (".", "native");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Main use
@@ -42,6 +42,8 @@ project Showcases is
       "many_lightweight_tasks.adb",
       "priority_scheduling.adb",
       "runtime_observability.adb",
+      "shared_image_index.adb",
+      "shared_image_index_worker.adb",
       "stall_watchdog.adb",
       "synchronization_benchmark.adb",
       "task_snapshot_contention.adb",

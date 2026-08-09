@@ -54,8 +54,8 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  compatible string. Only the exact zero lifecycle sentinel is eligible
    --  for creation; incomplete, destroyed, corrupt, or incompatible bytes are
    --  never overwritten. The operation does not wait for another initializer.
-   --  Concurrent calls are permitted only while the allocation protocol
-   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  Concurrent calls are permitted while the allocation protocol guarantees
+   --  virgin bytes or the published string is ready.
    --  @param Item Attached view, or detached when initialization is in
    --     progress
    --  @param Region Independently attached backing region
@@ -70,13 +70,15 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
       Maximum_Length : Positive;
       Result         : out Open_Result);
 
-   --  Attach to a quiescent existing string and validate its expected
-   --  capacity.
+   --  Attach to an existing string and validate its immutable identity,
+   --  extent, and capacity. Attachment may overlap synchronized string
+   --  operations; the mutable guard and length are validated under the guard
+   --  by each operation before payload access.
    --  @param Item View attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored string offset
    --  @param Maximum_Length Expected payload capacity
-   --  @exception Layout_Error Header, capacity, or current length is corrupt
+   --  @exception Layout_Error Immutable header or capacity is corrupt
    procedure Attach
      (Item           : out View;
       Region         : Region_View;
