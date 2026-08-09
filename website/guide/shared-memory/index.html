@@ -53,9 +53,9 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Shared-memory segments</li></ol>
-          <h1>Give relocatable structures an owned shared home.</h1>
+          <h1>Create and use shared-memory segments.</h1>
         </div>
-        <p class="doc-hero-copy">Create an exact-size backing object, map it at an operating-system-selected address, initialize or attach its persisted registry, publish named extents without exposing partial objects, and detach every borrowed view in order.</p>
+        <p class="doc-hero-copy">Use <code>Flyology.Shared_Memory</code> to create or open an exact-size backing object, map it, initialize or attach a persisted segment registry, and publish named extents for relocatable data structures.</p>
       </header>
 
       <div class="docs-layout">
@@ -76,7 +76,7 @@
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">→</span>
-            <p>This guide owns the bytes and names extents inside them. The companion <a href="../data-structures/">relocatable data-structures guide</a> explains the arenas, rings, maps, vectors, slabs, and strings placed in those extents.</p>
+            <p>This guide covers backing and mapping ownership, plus named extents inside a segment. The companion <a href="../data-structures/">relocatable data-structures guide</a> covers the arenas, rings, maps, vectors, slabs, and strings placed in those extents.</p>
           </aside>
 
           <section id="model">
