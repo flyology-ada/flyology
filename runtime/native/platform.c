@@ -380,7 +380,7 @@ int flyology_in_fork_child(void) {
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 36
+#define FLYOLOGY_FAULT_POINT_COUNT 37
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
@@ -395,6 +395,8 @@ static struct flyology_fault_plan
 static atomic_uint flyology_final_reap_state;
 /* 0 idle, 1 creator parked, 2 creator released, 3 creator holds its shard. */
 static atomic_uint flyology_create_race_state;
+static atomic_uint flyology_automatic_placement_state;
+static atomic_int flyology_automatic_claim_group;
 static atomic_uint flyology_file_cancel_counts
     [FLYOLOGY_FILE_CANCEL_BACKENDS + 1]
     [FLYOLOGY_FILE_CANCEL_DISPOSITIONS + 1][2];
@@ -498,6 +500,10 @@ void flyology_test_fault_reset(void) {
     atomic_store_explicit(&flyology_final_reap_state, 0,
                           memory_order_release);
     atomic_store_explicit(&flyology_create_race_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_automatic_placement_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_automatic_claim_group, -1,
                           memory_order_release);
     for (backend = 1; backend <= FLYOLOGY_FILE_CANCEL_BACKENDS; ++backend) {
         for (disposition = 1;
@@ -623,6 +629,42 @@ int flyology_test_create_race_parked(void) {
                                 memory_order_acquire) == 1;
 }
 
+void flyology_test_note_automatic_placement_claim(int group) {
+    atomic_store_explicit(&flyology_automatic_claim_group, group,
+                          memory_order_release);
+}
+
+int flyology_test_automatic_placement_claim_group(void) {
+    return atomic_load_explicit(&flyology_automatic_claim_group,
+                                memory_order_acquire);
+}
+
+int flyology_test_pause_automatic_placement(void) {
+    atomic_store_explicit(&flyology_automatic_placement_state, 1,
+                          memory_order_release);
+    for (unsigned attempt = 0; attempt < 5000; ++attempt) {
+        if (atomic_load_explicit(&flyology_automatic_placement_state,
+                                 memory_order_acquire) == 2) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+int flyology_test_automatic_placement_parked(void) {
+    return atomic_load_explicit(&flyology_automatic_placement_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_automatic_placement(void) {
+    if (atomic_load_explicit(&flyology_automatic_placement_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_automatic_placement_state, 2,
+                              memory_order_release);
+    }
+}
+
 /* Release the parked creator and wait until it owns its registry shard, so
    the finalizing thread resumes with the creator inside the window rather
    than before it. */
@@ -642,6 +684,25 @@ void flyology_test_release_create_registration(void) {
     }
 }
 #else
+void flyology_test_note_automatic_placement_claim(int group) {
+    (void)group;
+}
+
+int flyology_test_automatic_placement_claim_group(void) {
+    return -1;
+}
+
+int flyology_test_pause_automatic_placement(void) {
+    return -1;
+}
+
+int flyology_test_automatic_placement_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_automatic_placement(void) {
+}
+
 unsigned flyology_test_atomic_store_model_count(int model) {
     (void)model;
     return 0;

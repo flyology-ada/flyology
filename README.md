@@ -160,8 +160,8 @@ FLYOLOGY_LOOP_POOL_SIZE=4 ./application
 
 The launch value must be an integer in `1 .. 128`. It is captured once at
 application startup, before library-level tasks activate. An absent value
-defaults to `1`; an invalid value fails application initialization. The pool
-never shrinks, but an application may explicitly grow it later:
+defaults to `1`; an invalid value fails application initialization. An
+application may explicitly grow the automatic-placement ceiling later:
 
 ```ada
 Flyology.Execution_Groups.Grow_Configured_Pool (8);
@@ -171,6 +171,26 @@ Growth is thread-safe and idempotent. Concurrent calls converge on the largest
 requested size. Existing tasks remain on their current groups, future automatic
 placements use the enlarged pool, and newly included groups stay lazy until
 work first selects them.
+
+An application may also lower the ceiling without waiting for drainage:
+
+```ada
+Result := Flyology.Execution_Groups.Request_Pool_Reduction (2);
+Status := Flyology.Execution_Groups.Pool_Reduction;
+```
+
+The cutover applies to future automatic placements immediately. Automatically
+managed tasks in removed groups migrate to group 0 when they next become ready
+at an unpinned cooperative dispatch point. Waiting tasks must first wake,
+pinned tasks must first unpin and yield, and a CPU-bound task that never
+suspends can delay completion indefinitely. `Pool_Reduction` reports the phase
+and blocker counts so callers can poll under their own deadline. Tasks selected
+with a `CPU` aspect or moved explicitly with `Migrate` remain where the
+application placed them. Drainage retains already-created event-loop threads;
+it does not reclaim them. When automatic tasks or pre-cutover placement claims
+require migration, the request may synchronously start group 0 and wait for
+that destination's startup. An already-drained reduction starts no group,
+preserving native-only inertness.
 
 Pool groups are created independently and lazily: configuration inspection
 does not start them, and a four-loop configuration owns no event pthreads until
@@ -2073,7 +2093,7 @@ async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 | Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first lightweight task pays the one-time group startup handshake |
 | Finalize loops only at GNARL's process boundary | Suspended stacks, in-flight file buffers, and Ada masters must outlive their tasks | There is no arbitrary shutdown/restart API; unsafe cleanup is deferred to OS exit |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
-| Place undesignated lightweight tasks through a grow-only loop pool | High-I/O applications can select initial parallelism at startup and add automatic groups without encoding a `CPU` aspect into every task declaration | The default remains one loop; growth never moves existing tasks or starts an unused group, and round-robin balances task count rather than measured work |
+| Place undesignated lightweight tasks through a configurable loop pool | High-I/O applications can select initial parallelism at startup, add automatic groups, or cooperatively drain automatically managed tasks from removed groups without encoding a `CPU` aspect into every task declaration | The default remains one loop; reduction can be delayed indefinitely by waiting, pinned, or CPU-bound tasks, retains created loop threads, and round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Configure loop pthread placement separately | Logical co-location and physical scheduling are different policies | Linux can verify a strict one-CPU mask; Darwin exposes only a capability-checked advisory cache tag, and requests become immutable once startup begins |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
@@ -2497,8 +2517,9 @@ into a directory that Flyology does not own.
 At application startup, `FLYOLOGY_LOOP_POOL_SIZE` accepts `1 .. 128` and
 defaults to `1`. It is captured once before task activation. An empty,
 malformed, or out-of-range value fails application initialization. The
-grow-only `Grow_Configured_Pool` operation may increase the effective size
-later.
+`Grow_Configured_Pool` operation may increase the effective size later;
+`Request_Pool_Reduction` may lower the automatic-placement ceiling and drain
+eligible automatically managed tasks cooperatively.
 `FLYOLOGY_PLACEMENT` currently accepts `round_robin`.
 `FLYOLOGY_LOOP_PLACEMENT` accepts `none`, `strict`, or `advisory`, and
 `FLYOLOGY_LOOP_PLACEMENT_MAP` supplies unique `GROUP:VALUE` pairs. `strict` is

@@ -104,6 +104,13 @@ remain the live integration boundary.
 
 - [x] Pre-change application policy suite (level 1, mode all)
 - [x] Pre-change runtime scheduling policy suite (level 1, mode all)
+- [x] Automatic-pool reduction scheduling policy (level 1, mode all)
+  - [x] Strict-decrease request serialization
+  - [x] Completion requires no outside-target automatic task or placement claim
+  - [x] Initial phase is complete exactly when no migration destination is needed
+  - [x] Drain eligibility requires automatic ownership, a shared removed group,
+        an unpinned movable task, and an available destination
+  - [x] Whole `System.Flyology.Scheduling_Policy` unit widening
 - [x] Production-used task-result lifecycle policy (level 1, mode all)
   - [x] Completion transition from running to terminal
   - [x] Normal, exceptional, and abnormal cause encoding

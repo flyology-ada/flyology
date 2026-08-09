@@ -36,6 +36,25 @@ package body Fault_Control is
    function Calls (At_Point : Point) return Natural is
      (Natural (C_Calls (Id (At_Point))));
 
+   function Create_Registration_Parked return Boolean is
+     (C_Create_Registration_Parked /= 0);
+
+   function Automatic_Placement_Parked return Boolean is
+     (C_Automatic_Placement_Parked /= 0);
+
+   function Automatic_Placement_Claim_Group return Integer is
+     (Integer (C_Automatic_Placement_Claim_Group));
+
+   procedure Release_Create_Registration is
+   begin
+      C_Release_Create_Registration;
+   end Release_Create_Registration;
+
+   procedure Release_Automatic_Placement is
+   begin
+      C_Release_Automatic_Placement;
+   end Release_Automatic_Placement;
+
    function File_Cancel_Count
      (Backend     : File_Cancel_Backend;
       Disposition : File_Cancel_Disposition;

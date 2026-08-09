@@ -59,8 +59,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   pool size is `1 .. 128` and currently uses deterministic round robin. The
   RTS reads `FLYOLOGY_LOOP_POOL_SIZE` once at process startup, falls back to
   the prepared value when absent, and establishes the initial size before task
-  activation. `Grow_Configured_Pool` may only increase it under the topology
-  lock; growth moves no existing task and starts no group by itself.
+  activation. The ceiling may grow under the topology lock or cooperatively
+  drain automatically managed tasks to a smaller size. Drainage retains
+  already-created event-loop threads. A reduction with no automatic task or
+  pre-cutover placement claim outside its target starts no group, preserving
+  the dormant native-only path.
 - Ada reserves `CPU => 0` as `Not_A_Specific_CPU`, so only `1 .. 127` name a
   group. `CPU => 0` and an absent aspect both take automatic placement; group
   0 is reachable only through automatic placement or migration. Do not
@@ -299,9 +302,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   - `FLYOLOGY_SANITIZER`: `none` or `address`.
   - `FLYOLOGY_TEST_FAULTS` and `FLYOLOGY_TEST_DENY_IO_URING`: test-only `0/1`
     switches; never enable them in a production runtime.
-- The loop-pool size is the only application-startup override. It is read once
-  and cannot resize a running process. Other settings are compiled into the
-  prepared RTS and are not read dynamically by the application.
+- The loop-pool size is the only application-startup override and is read once.
+  The public execution-group API may change the effective automatic-placement
+  ceiling later. Other settings are compiled into the prepared RTS and are not
+  read dynamically by the application.
 - The Alire dependency action reads persisted settings from the ignored
   `build/flyology-rts.conf`. Only an explicit `prepare-alire-rts.sh
   --configure` captures the current `FLYOLOGY_*` settings; ordinary `alr build`

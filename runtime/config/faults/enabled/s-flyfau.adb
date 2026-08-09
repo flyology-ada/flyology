@@ -1,5 +1,3 @@
-with Interfaces.C;
-
 package body System.Flyology.Faults is
 
    use type Interfaces.C.int;
@@ -28,6 +26,19 @@ package body System.Flyology.Faults is
       Test_Note_Create_Registering,
       "flyology_test_note_create_registering");
 
+   procedure Test_Note_Automatic_Placement_Claim
+     (Group : Interfaces.C.int);
+   pragma Import
+     (C,
+      Test_Note_Automatic_Placement_Claim,
+      "flyology_test_note_automatic_placement_claim");
+
+   function Test_Pause_Automatic_Placement return Interfaces.C.int;
+   pragma Import
+     (C,
+      Test_Pause_Automatic_Placement,
+      "flyology_test_pause_automatic_placement");
+
    procedure Test_Release_Create_Registration;
    pragma Import
      (C,
@@ -47,6 +58,14 @@ package body System.Flyology.Faults is
 
    function Pause_Create_Registration return Boolean is
      (Test_Pause_Create_Registration = 0);
+
+   procedure Note_Automatic_Placement_Claim (Group : Interfaces.C.int) is
+   begin
+      Test_Note_Automatic_Placement_Claim (Group);
+   end Note_Automatic_Placement_Claim;
+
+   function Pause_Automatic_Placement return Boolean is
+     (Test_Pause_Automatic_Placement = 0);
 
    procedure Note_Create_Registering is
    begin

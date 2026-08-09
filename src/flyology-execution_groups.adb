@@ -5,6 +5,7 @@ package body Flyology.Execution_Groups is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type C.unsigned_long_long;
 
    type Runtime_Placement_Status is record
       Mode       : C.int;
@@ -13,6 +14,16 @@ package body Flyology.Execution_Groups is
       Error_Code : C.int;
    end record;
    pragma Convention (C, Runtime_Placement_Status);
+
+   type Runtime_Pool_Reduction_Status is record
+      Phase                   : C.int;
+      Target_Size             : C.int;
+      Automatic_Tasks         : C.unsigned_long_long;
+      Pinned_Automatic_Tasks  : C.unsigned_long_long;
+      Waiting_Automatic_Tasks : C.unsigned_long_long;
+      Explicit_Tasks          : C.unsigned_long_long;
+      Placement_Claims        : C.unsigned_long_long;
+   end record with Convention => C;
 
    function Runtime_Current_Group return C.int;
    pragma Import
@@ -30,6 +41,21 @@ package body Flyology.Execution_Groups is
      (C,
       Runtime_Grow_Configured_Pool,
       "flyology_runtime_grow_configured_pool");
+
+   function Runtime_Request_Pool_Reduction
+     (Maximum_Size : C.int) return C.int;
+   pragma Import
+     (C,
+      Runtime_Request_Pool_Reduction,
+      "flyology_runtime_request_pool_reduction");
+
+   function Runtime_Query_Pool_Reduction
+     (Status      : System.Address;
+      Status_Size : C.size_t) return C.int;
+   pragma Import
+     (C,
+      Runtime_Query_Pool_Reduction,
+      "flyology_runtime_query_pool_reduction");
 
    function Runtime_Configured_Placement return C.int;
    pragma Import
@@ -161,6 +187,56 @@ package body Flyology.Execution_Groups is
          raise Group_Error with "cannot grow configured event-loop pool";
       end if;
    end Grow_Configured_Pool;
+
+   function Request_Pool_Reduction
+     (Maximum_Size : Loop_Pool_Size) return Pool_Reduction_Request_Result
+   is
+   begin
+      case Runtime_Request_Pool_Reduction (C.int (Maximum_Size)) is
+         when 0 => return Reduction_Started;
+         when 1 => return Already_At_Or_Below;
+         when 2 => return Reduction_In_Progress;
+         when others =>
+            raise Group_Error with "cannot reduce configured event-loop pool";
+      end case;
+   end Request_Pool_Reduction;
+
+   function Pool_Reduction return Pool_Reduction_Status is
+      Raw : aliased Runtime_Pool_Reduction_Status;
+
+      function Count (Value : C.unsigned_long_long) return Natural;
+
+      function Count (Value : C.unsigned_long_long) return Natural is
+      begin
+         if Value > C.unsigned_long_long (Natural'Last) then
+            raise Group_Error with "invalid event-loop reduction count";
+         end if;
+         return Natural (Value);
+      end Count;
+   begin
+      if Runtime_Query_Pool_Reduction
+        (Raw'Address, C.size_t (Raw'Size / 8)) /= 0
+        or else Raw.Target_Size < C.int (Loop_Pool_Size'First)
+        or else Raw.Target_Size > C.int (Loop_Pool_Size'Last)
+      then
+         raise Group_Error with "cannot query event-loop pool reduction";
+      end if;
+      return
+        (Phase =>
+           (case Raw.Phase is
+               when 0 => No_Reduction,
+               when 1 => Draining,
+               when 2 => Drained,
+               when others =>
+                 raise Group_Error with
+                   "invalid event-loop pool reduction phase"),
+         Target_Size => Loop_Pool_Size (Raw.Target_Size),
+         Automatic_Tasks => Count (Raw.Automatic_Tasks),
+         Pinned_Automatic_Tasks => Count (Raw.Pinned_Automatic_Tasks),
+         Waiting_Automatic_Tasks => Count (Raw.Waiting_Automatic_Tasks),
+         Explicit_Tasks => Count (Raw.Explicit_Tasks),
+         Placement_Claims => Count (Raw.Placement_Claims));
+   end Pool_Reduction;
 
    function Configured_Placement return Automatic_Placement_Policy is
    begin

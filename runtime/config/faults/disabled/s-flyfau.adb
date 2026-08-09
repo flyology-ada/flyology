@@ -12,6 +12,12 @@ package body System.Flyology.Faults is
 
    function Pause_Create_Registration return Boolean is (True);
 
+   procedure Note_Automatic_Placement_Claim
+     (Group : Interfaces.C.int)
+   is null;
+
+   function Pause_Automatic_Placement return Boolean is (True);
+
    procedure Note_Create_Registering is null;
 
    procedure Release_Create_Registration is null;

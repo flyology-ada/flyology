@@ -37,6 +37,7 @@ package body System.Flyology.Scheduler is
    use type Scheduling.Destruction_Plan;
    use type Scheduling.File_Cancel_Plan;
    use type Scheduling.Ready_Placement;
+   use type Scheduling.Reduction_Phase;
    use type SSE.Integer_Address;
    use type SSE.Storage_Offset;
 
@@ -65,6 +66,20 @@ package body System.Flyology.Scheduler is
      access all Runtime_Placement_Status;
    function To_Runtime_Placement_Status is new Ada.Unchecked_Conversion
      (System.Address, Runtime_Placement_Status_Access);
+
+   type Runtime_Pool_Reduction_Status is record
+      Phase                  : C.int;
+      Target_Size            : C.int;
+      Automatic_Tasks        : C.unsigned_long_long;
+      Pinned_Automatic_Tasks : C.unsigned_long_long;
+      Waiting_Automatic_Tasks : C.unsigned_long_long;
+      Explicit_Tasks         : C.unsigned_long_long;
+      Placement_Claims       : C.unsigned_long_long;
+   end record with Convention => C;
+   type Runtime_Pool_Reduction_Status_Access is
+     access all Runtime_Pool_Reduction_Status;
+   function To_Runtime_Pool_Reduction_Status is new Ada.Unchecked_Conversion
+     (System.Address, Runtime_Pool_Reduction_Status_Access);
 
    --  A prime-sized table avoids clustering when aligned ATCB allocations
    --  advance by a regular stride. For the expected task populations,
@@ -259,6 +274,7 @@ package body System.Flyology.Scheduler is
       Destroy_Requested : Boolean := False;
       Reaping     : Boolean := False;
       Can_Migrate : Boolean := True;
+      Automatic_Placement : Boolean := False;
       Thread_Pin_Count : Natural := 0;
       Dormancy_Policy : Dormancy_Advice := Prompt_Advice;
       Dormancy_Minimum_Wait : Duration := 1.0;
@@ -348,6 +364,7 @@ package body System.Flyology.Scheduler is
    end record;
 
    type Group_Array is array (Group_Index) of Loop_Group_Access;
+   type Automatic_Claim_Array is array (Group_Index) of Natural;
    type Registry_Bucket_Array is
      array (Registry_Bucket_Index) of Fiber_Access;
    type Registry_Shard_Lock_Array is
@@ -405,6 +422,17 @@ package body System.Flyology.Scheduler is
    Fiber_Registry : Registry_Bucket_Array := (others => null);
    Automatic_Pool_Size : Positive := Pool_Config.Prepared_Pool_Size;
    pragma Atomic (Automatic_Pool_Size);
+   Automatic_Placement_Claims : Automatic_Claim_Array := (others => 0);
+   --  Reduction fields are written under Topology_Lock. Event loops read the
+   --  atomics only to decide whether a ready fiber should be transferred at
+   --  the next cooperative dispatch point.
+   Reduction_Phase_Code : C.int :=
+     C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
+   pragma Atomic (Reduction_Phase_Code);
+   Reduction_Target : C.int := C.int (Pool_Config.Prepared_Pool_Size);
+   pragma Atomic (Reduction_Target);
+   Reduction_Destination : System.Address := System.Null_Address;
+   pragma Atomic (Reduction_Destination);
    Next_Automatic_Group : C.unsigned_long_long := 0;
    Thread_Group   : Loop_Group_Access := null;
    pragma Thread_Local_Storage (Thread_Group);
@@ -481,6 +509,16 @@ package body System.Flyology.Scheduler is
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
    function Ensure_Placement_Platform return C.int;
    function Select_Automatic_Group return C.int;
+   procedure Release_Automatic_Placement_Claim (Group : C.int);
+   procedure Count_Pool_Reduction_Population_Locked
+     (Target_Size      : C.int;
+      Automatic_Tasks  : out Natural;
+      Pinned_Tasks     : out Natural;
+      Waiting_Tasks    : out Natural;
+      Explicit_Tasks   : out Natural;
+      Placement_Claims : out Natural);
+   procedure Collect_Pool_Reduction_Status_Locked
+     (Status : out Runtime_Pool_Reduction_Status);
    function Startup_Pool_Size return C.int;
    --  Registry operations require the bucket's shard lock after bootstrap
    --  publishes Initialized. The environment task is deliberately absent
@@ -940,12 +978,38 @@ package body System.Flyology.Scheduler is
           (Next_Automatic_Group
            mod C.unsigned_long_long (Automatic_Pool_Size));
       Next_Automatic_Group := Next_Automatic_Group + 1;
+      if Automatic_Placement_Claims (Group_Index (Selected)) = Natural'Last
+      then
+         Fatal;
+      end if;
+      Automatic_Placement_Claims (Group_Index (Selected)) :=
+        Automatic_Placement_Claims (Group_Index (Selected)) + 1;
+      if Faults.Enabled then
+         Faults.Note_Automatic_Placement_Claim (Selected);
+      end if;
       Unlock_Topology;
       return Selected;
    exception
       when others =>
          Fatal;
    end Select_Automatic_Group;
+
+   procedure Release_Automatic_Placement_Claim (Group : C.int) is
+   begin
+      if not Scheduling.Shared_Group (Group) then
+         Fatal;
+      end if;
+      Lock_Topology;
+      if Automatic_Placement_Claims (Group_Index (Group)) = 0 then
+         Fatal;
+      end if;
+      Automatic_Placement_Claims (Group_Index (Group)) :=
+        Automatic_Placement_Claims (Group_Index (Group)) - 1;
+      Unlock_Topology;
+   exception
+      when others =>
+         Fatal;
+   end Release_Automatic_Placement_Claim;
 
    function Registry_Bucket_For
      (T : System.Address) return Registry_Bucket_Index
@@ -1991,6 +2055,11 @@ package body System.Flyology.Scheduler is
       --  designated lightweight task is activated. Until then native programs
       --  stay on the stock GNARL execution path.
       Automatic_Pool_Size := Positive (Pool_Size);
+      Automatic_Placement_Claims := (others => 0);
+      Reduction_Phase_Code :=
+        C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
+      Reduction_Target := Pool_Size;
+      Reduction_Destination := System.Null_Address;
       Initialized := True;
       Fork_Child_State := 0;
       Lifecycle_State := 0;
@@ -2235,6 +2304,8 @@ package body System.Flyology.Scheduler is
       Target : Loop_Group_Access;
       Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
       Group_Id : C.int := Group;
+      Automatic : constant Boolean := Group < 0;
+      Automatic_Claimed : Boolean := False;
 
       procedure Release_Claim;
       --  Give back the registry-shard creation claim taken below.
@@ -2258,10 +2329,7 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
 
-      if Group_Id < 0 then
-         Group_Id := Select_Automatic_Group;
-      end if;
-      if not Scheduling.Shared_Group (Group_Id) then
+      if not Automatic and then not Scheduling.Shared_Group (Group_Id) then
          return -1;
       end if;
 
@@ -2279,13 +2347,35 @@ package body System.Flyology.Scheduler is
       Registry_Creators (Shard) := Registry_Creators (Shard) + 1;
       Unlock_Registry_Shard (Shard);
 
+      if Automatic then
+         --  Select only after the lifecycle claim is visible. A reduction
+         --  that wins before this point changes the modulus; one that wins
+         --  afterward observes the per-group placement claim below.
+         Group_Id := Select_Automatic_Group;
+         Automatic_Claimed := True;
+         if Faults.Enabled
+           and then Faults.Fail (Faults.Automatic_Placement_Window)
+           and then not Faults.Pause_Automatic_Placement
+         then
+            Release_Automatic_Placement_Claim (Group_Id);
+            Release_Claim;
+            return -1;
+         end if;
+      end if;
+
       Target := Ensure_Group (Group_Id, Dedicated => False);
       if Target = null then
+         if Automatic_Claimed then
+            Release_Automatic_Placement_Claim (Group_Id);
+         end if;
          Release_Claim;
          return -1;
       end if;
 
       if Faults.Enabled and then Faults.Fail (Faults.Fiber_Allocation) then
+         if Automatic_Claimed then
+            Release_Automatic_Placement_Claim (Group_Id);
+         end if;
          Release_Claim;
          return -1;
       end if;
@@ -2294,6 +2384,7 @@ package body System.Flyology.Scheduler is
       Item.Wrapper := Wrapper;
       Item.Priority := Priority;
       Item.Group := Target;
+      Item.Automatic_Placement := Automatic;
       Item.Context :=
         Contexts.Create
           (Stack_Size,
@@ -2302,6 +2393,9 @@ package body System.Flyology.Scheduler is
            Target.Scheduler_Context);
       if Item.Context = null then
          Free_Fiber (Item);
+         if Automatic_Claimed then
+            Release_Automatic_Placement_Claim (Group_Id);
+         end if;
          Release_Claim;
          return -1;
       end if;
@@ -2315,6 +2409,9 @@ package body System.Flyology.Scheduler is
       then
          Contexts.Destroy (Item.Context);
          Free_Fiber (Item);
+         if Automatic_Claimed then
+            Release_Automatic_Placement_Claim (Group_Id);
+         end if;
          Release_Claim;
          return -1;
       end if;
@@ -2329,6 +2426,10 @@ package body System.Flyology.Scheduler is
       if not Scheduling.Creation_Admitted (Lifecycle_State)
         or else Find (T) /= null
       then
+         if Automatic_Claimed then
+            Release_Automatic_Placement_Claim (Group_Id);
+            Automatic_Claimed := False;
+         end if;
          Unlock_Registry_Shard (Shard);
          Contexts.Destroy (Item.Context);
          Free_Fiber (Item);
@@ -2347,6 +2448,10 @@ package body System.Flyology.Scheduler is
       --  violation, which aborts the process.
       if Target.Stop_Requested then
          Unlock_Group (Target);
+         if Automatic_Claimed then
+            Release_Automatic_Placement_Claim (Group_Id);
+            Automatic_Claimed := False;
+         end if;
          Unlock_Registry_Shard (Shard);
          Contexts.Destroy (Item.Context);
          Free_Fiber (Item);
@@ -2358,6 +2463,13 @@ package body System.Flyology.Scheduler is
       Enqueue (Target, Item);
       Event_Runtime_Active := 1;
       Unlock_Group (Target);
+      if Automatic_Claimed then
+         --  Keep the claim until membership is visible. Holding the registry
+         --  shard prevents finalization from destroying Topology_Lock before
+         --  this release.
+         Release_Automatic_Placement_Claim (Group_Id);
+         Automatic_Claimed := False;
+      end if;
       Unlock_Registry_Shard (Shard);
       if not Pollers.Wake (Target.Scheduler_Poller) then
          Fatal (Poller_Failure);
@@ -2477,8 +2589,108 @@ package body System.Flyology.Scheduler is
    function Configured_Pool_Size return C.int is
      (C.int (Automatic_Pool_Size));
 
+   procedure Count_Pool_Reduction_Population_Locked
+     (Target_Size      : C.int;
+      Automatic_Tasks  : out Natural;
+      Pinned_Tasks     : out Natural;
+      Waiting_Tasks    : out Natural;
+      Explicit_Tasks   : out Natural;
+      Placement_Claims : out Natural)
+   is
+      Group : Loop_Group_Access;
+      Item  : Fiber_Access;
+   begin
+      Automatic_Tasks := 0;
+      Pinned_Tasks := 0;
+      Waiting_Tasks := 0;
+      Explicit_Tasks := 0;
+      Placement_Claims := 0;
+
+      for Index in Group_Index range
+        Natural (Target_Size) .. Natural (Dedicated_First_Id - 1)
+      loop
+         Placement_Claims :=
+           Placement_Claims + Automatic_Placement_Claims (Index);
+         Group := Groups (Index);
+         if Group /= null then
+            Lock_Group (Group);
+            Item := Group.Fibers;
+            while Item /= null loop
+               if Item.Automatic_Placement then
+                  Automatic_Tasks := Automatic_Tasks + 1;
+                  if Item.Thread_Pin_Count /= 0 then
+                     Pinned_Tasks := Pinned_Tasks + 1;
+                  end if;
+                  if Item.State = Waiting then
+                     Waiting_Tasks := Waiting_Tasks + 1;
+                  end if;
+               else
+                  Explicit_Tasks := Explicit_Tasks + 1;
+               end if;
+               Item := Item.Next_Group;
+            end loop;
+            Unlock_Group (Group);
+         end if;
+      end loop;
+   end Count_Pool_Reduction_Population_Locked;
+
+   procedure Collect_Pool_Reduction_Status_Locked
+     (Status : out Runtime_Pool_Reduction_Status)
+   is
+      Automatic_Tasks : Natural := 0;
+      Pinned_Tasks    : Natural := 0;
+      Waiting_Tasks   : Natural := 0;
+      Explicit_Tasks  : Natural := 0;
+      Claims          : Natural := 0;
+      Phase           : Scheduling.Reduction_Phase :=
+        Scheduling.Reduction_Phase'Val (Integer (Reduction_Phase_Code));
+   begin
+      Status :=
+        (Phase                   =>
+           C.int (Scheduling.Reduction_Phase'Pos (Phase)),
+         Target_Size             => Reduction_Target,
+         Automatic_Tasks         => 0,
+         Pinned_Automatic_Tasks  => 0,
+         Waiting_Automatic_Tasks => 0,
+         Explicit_Tasks          => 0,
+         Placement_Claims        => 0);
+
+      if Phase = Scheduling.No_Reduction then
+         Status.Target_Size := C.int (Automatic_Pool_Size);
+         return;
+      end if;
+
+      Count_Pool_Reduction_Population_Locked
+        (Target_Size      => Reduction_Target,
+         Automatic_Tasks  => Automatic_Tasks,
+         Pinned_Tasks     => Pinned_Tasks,
+         Waiting_Tasks    => Waiting_Tasks,
+         Explicit_Tasks   => Explicit_Tasks,
+         Placement_Claims => Claims);
+
+      if Phase = Scheduling.Reduction_Draining
+        and then Scheduling.Reduction_Drained (Automatic_Tasks, Claims)
+      then
+         Phase := Scheduling.Reduction_Complete;
+         Reduction_Phase_Code :=
+           C.int (Scheduling.Reduction_Phase'Pos (Phase));
+         Reduction_Destination := System.Null_Address;
+      end if;
+
+      Status :=
+        (Phase                   =>
+           C.int (Scheduling.Reduction_Phase'Pos (Phase)),
+         Target_Size             => Reduction_Target,
+         Automatic_Tasks         => C.unsigned_long_long (Automatic_Tasks),
+         Pinned_Automatic_Tasks  => C.unsigned_long_long (Pinned_Tasks),
+         Waiting_Automatic_Tasks => C.unsigned_long_long (Waiting_Tasks),
+         Explicit_Tasks          => C.unsigned_long_long (Explicit_Tasks),
+         Placement_Claims        => C.unsigned_long_long (Claims));
+   end Collect_Pool_Reduction_Status_Locked;
+
    function Grow_Configured_Pool (Minimum_Size : C.int) return C.int is
       Result : C.int := -1;
+      Status : Runtime_Pool_Reduction_Status;
    begin
       if In_Fork_Child
         or else not Initialized
@@ -2492,11 +2704,30 @@ package body System.Flyology.Scheduler is
       if Initialized
         and then Scheduling.Creation_Admitted (Lifecycle_State)
       then
-         Automatic_Pool_Size := Positive
-           (Scheduling.Growth_Target
-              (Scheduling.Pool_Size (Automatic_Pool_Size),
-               Scheduling.Pool_Size (Minimum_Size)));
-         Result := 0;
+         if Reduction_Phase_Code =
+           C.int
+             (Scheduling.Reduction_Phase'Pos
+                (Scheduling.Reduction_Draining))
+         then
+            Collect_Pool_Reduction_Status_Locked (Status);
+         end if;
+         if Reduction_Phase_Code /=
+           C.int
+             (Scheduling.Reduction_Phase'Pos
+                (Scheduling.Reduction_Draining))
+         then
+            Automatic_Pool_Size := Positive
+              (Scheduling.Growth_Target
+                 (Scheduling.Pool_Size (Automatic_Pool_Size),
+                  Scheduling.Pool_Size (Minimum_Size)));
+            Reduction_Phase_Code :=
+              C.int
+                (Scheduling.Reduction_Phase'Pos
+                   (Scheduling.No_Reduction));
+            Reduction_Target := C.int (Automatic_Pool_Size);
+            Reduction_Destination := System.Null_Address;
+            Result := 0;
+         end if;
       end if;
       Unlock_Topology;
       return Result;
@@ -2504,6 +2735,138 @@ package body System.Flyology.Scheduler is
       when others =>
          Fatal;
    end Grow_Configured_Pool;
+
+   function Request_Pool_Reduction (Maximum_Size : C.int) return C.int is
+      Decision : Scheduling.Reduction_Decision;
+      Status   : Runtime_Pool_Reduction_Status;
+      Target   : Loop_Group_Access;
+      Start_Phase     : Scheduling.Reduction_Phase;
+      Automatic_Tasks : Natural;
+      Pinned_Tasks    : Natural;
+      Waiting_Tasks   : Natural;
+      Explicit_Tasks  : Natural;
+      Claims          : Natural;
+   begin
+      if In_Fork_Child
+        or else not Initialized
+        or else Maximum_Size < 1
+        or else Maximum_Size > Dedicated_First_Id
+      then
+         return -1;
+      end if;
+
+      Lock_Topology;
+      if Reduction_Phase_Code =
+        C.int
+          (Scheduling.Reduction_Phase'Pos
+             (Scheduling.Reduction_Draining))
+      then
+         Collect_Pool_Reduction_Status_Locked (Status);
+      end if;
+      Decision := Scheduling.Plan_Reduction
+        (Scheduling.Pool_Size (Automatic_Pool_Size),
+         Scheduling.Pool_Size (Maximum_Size),
+         Scheduling.Reduction_Phase'Val
+           (Integer (Reduction_Phase_Code)));
+      case Decision is
+         when Scheduling.Already_At_Or_Below =>
+            Unlock_Topology;
+            return 1;
+         when Scheduling.Reduction_In_Progress =>
+            Unlock_Topology;
+            return 2;
+         when Scheduling.Start_Reduction =>
+            Count_Pool_Reduction_Population_Locked
+              (Target_Size      => Maximum_Size,
+               Automatic_Tasks  => Automatic_Tasks,
+               Pinned_Tasks     => Pinned_Tasks,
+               Waiting_Tasks    => Waiting_Tasks,
+               Explicit_Tasks   => Explicit_Tasks,
+               Placement_Claims => Claims);
+            Start_Phase := Scheduling.Reduction_Start_Phase
+              (Automatic_Tasks, Claims);
+            if Start_Phase = Scheduling.Reduction_Complete then
+               --  No automatic work or pre-cutover selection needs a drainage
+               --  destination. Publish the completed cutover without starting
+               --  group 0, preserving the dormant native-only path.
+               Reduction_Target := Maximum_Size;
+               Automatic_Pool_Size := Positive (Maximum_Size);
+               Reduction_Destination := System.Null_Address;
+               Reduction_Phase_Code :=
+                 C.int (Scheduling.Reduction_Phase'Pos (Start_Phase));
+               Unlock_Topology;
+               return 0;
+            end if;
+      end case;
+      Unlock_Topology;
+
+      --  Establish the destination before publishing the smaller ceiling. A
+      --  startup failure therefore leaves the existing configuration intact
+      --  instead of creating a reduction that can never make progress.
+      Target := Ensure_Group (0, Dedicated => False);
+      if Target = null then
+         return -1;
+      end if;
+
+      Lock_Topology;
+      if Reduction_Phase_Code =
+        C.int
+          (Scheduling.Reduction_Phase'Pos
+             (Scheduling.Reduction_Draining))
+      then
+         Collect_Pool_Reduction_Status_Locked (Status);
+      end if;
+      Decision := Scheduling.Plan_Reduction
+        (Scheduling.Pool_Size (Automatic_Pool_Size),
+         Scheduling.Pool_Size (Maximum_Size),
+         Scheduling.Reduction_Phase'Val
+           (Integer (Reduction_Phase_Code)));
+      case Decision is
+         when Scheduling.Already_At_Or_Below =>
+            Unlock_Topology;
+            return 1;
+         when Scheduling.Reduction_In_Progress =>
+            Unlock_Topology;
+            return 2;
+         when Scheduling.Start_Reduction =>
+            Reduction_Destination := Group_To_Address (Target);
+            Reduction_Target := Maximum_Size;
+            Automatic_Pool_Size := Positive (Maximum_Size);
+            Reduction_Phase_Code :=
+              C.int
+                (Scheduling.Reduction_Phase'Pos
+                   (Scheduling.Reduction_Draining));
+            Collect_Pool_Reduction_Status_Locked (Status);
+            Unlock_Topology;
+            return 0;
+      end case;
+   exception
+      when others =>
+         Fatal;
+   end Request_Pool_Reduction;
+
+   function Query_Pool_Reduction
+     (Status      : System.Address;
+      Status_Size : C.size_t) return C.int
+   is
+      Output : constant Runtime_Pool_Reduction_Status_Access :=
+        To_Runtime_Pool_Reduction_Status (Status);
+   begin
+      if In_Fork_Child
+        or else not Initialized
+        or else Status = System.Null_Address
+        or else Status_Size /= Runtime_Pool_Reduction_Status'Size / 8
+      then
+         return -1;
+      end if;
+      Lock_Topology;
+      Collect_Pool_Reduction_Status_Locked (Output.all);
+      Unlock_Topology;
+      return 0;
+   exception
+      when others =>
+         Fatal;
+   end Query_Pool_Reduction;
 
    function Configured_Placement return C.int is (0);
 
@@ -3025,6 +3388,9 @@ package body System.Flyology.Scheduler is
       end if;
 
       Item.Migration_Target := Target;
+      --  An explicit migration transfers placement ownership to the caller.
+      --  Later automatic-pool reductions must not undo that choice.
+      Item.Automatic_Placement := False;
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlock_Topology;
@@ -3829,30 +4195,49 @@ package body System.Flyology.Scheduler is
             if Next = null then
                Fatal;
             end if;
-            Next.State := Running;
-            Group.Current_Fiber := Next;
-            Group.Dispatches := Group.Dispatches + 1;
-            if Dispatches_Until_Timer_Check = 0 then
-               Fatal;
-            end if;
-            Dispatches_Until_Timer_Check :=
-              Scheduling.After_Dispatch
-                (Positive (Dispatches_Until_Timer_Check));
-            Unlock_Group (Group);
-            --  Own the trampoline cursor only while the fiber holds the
-            --  thread. Control returns here from every suspension point, so
-            --  scheduler work below runs on the thread's own cursor again.
-            Group.Trampoline_Fiber := Next;
-            Contexts.Switch (Group.Scheduler_Context, Next.Context);
-            Group.Trampoline_Fiber := null;
-            Consider_Dormant_Stack (Group, Next);
-
-            if Next.Migration_Target /= null then
-               Transfer (Next, Group);
-            elsif Scheduling.Should_Reap_After_Switch
-              (Phase_Of (Next.State), Next.Destroy_Requested)
+            if Scheduling.Should_Drain
+              (Phase                 =>
+                 Scheduling.Reduction_Phase'Val
+                   (Integer (Reduction_Phase_Code)),
+               Source                => Group.Id,
+               Target                =>
+                 Scheduling.Pool_Size (Reduction_Target),
+               Automatic_Placement   => Next.Automatic_Placement,
+               Pinned                => Next.Thread_Pin_Count /= 0,
+               Can_Migrate           => Next.Can_Migrate,
+               Destination_Available =>
+                 Reduction_Destination /= System.Null_Address)
             then
-               Reap_From_Scheduler (Group, Next);
+               Next.Migration_Target :=
+                 Address_To_Group (Reduction_Destination);
+               Transfer (Next, Group);
+            else
+               Next.State := Running;
+               Group.Current_Fiber := Next;
+               Group.Dispatches := Group.Dispatches + 1;
+               if Dispatches_Until_Timer_Check = 0 then
+                  Fatal;
+               end if;
+               Dispatches_Until_Timer_Check :=
+                 Scheduling.After_Dispatch
+                   (Positive (Dispatches_Until_Timer_Check));
+               Unlock_Group (Group);
+               --  Own the trampoline cursor only while the fiber holds the
+               --  thread. Control returns here from every suspension point,
+               --  so scheduler work below runs on the thread's own cursor
+               --  again.
+               Group.Trampoline_Fiber := Next;
+               Contexts.Switch (Group.Scheduler_Context, Next.Context);
+               Group.Trampoline_Fiber := null;
+               Consider_Dormant_Stack (Group, Next);
+
+               if Next.Migration_Target /= null then
+                  Transfer (Next, Group);
+               elsif Scheduling.Should_Reap_After_Switch
+                 (Phase_Of (Next.State), Next.Destroy_Requested)
+               then
+                  Reap_From_Scheduler (Group, Next);
+               end if;
             end if;
          else
             Group.Current_Fiber := null;

@@ -33,6 +33,40 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @enum Round_Robin Select successive groups in the configured pool
    type Automatic_Placement_Policy is (Round_Robin);
 
+   --  Result of a request to lower the automatic-placement ceiling.
+   --  @enum Reduction_Started New automatic placements now use Target_Size
+   --     and eligible existing tasks will drain cooperatively
+   --  @enum Already_At_Or_Below The current ceiling already satisfies the
+   --     request
+   --  @enum Reduction_In_Progress A previous reduction must finish first
+   type Pool_Reduction_Request_Result is
+     (Reduction_Started, Already_At_Or_Below, Reduction_In_Progress);
+   --  Lifecycle of the most recent automatic-pool reduction.
+   --  @enum No_Reduction No reduction is active or retained for observation
+   --  @enum Draining New placement uses Target_Size while eligible tasks move
+   --  @enum Drained No automatically managed task remains above Target_Size
+   type Pool_Reduction_Phase is (No_Reduction, Draining, Drained);
+   --  Progress and blockers for an automatic-pool reduction. Explicit_Tasks
+   --  reports tasks outside Target_Size that are not managed by the automatic
+   --  pool; they do not prevent Drained. Counts are a momentary snapshot.
+   --  @field Phase Current reduction lifecycle
+   --  @field Target_Size Current automatic-placement ceiling
+   --  @field Automatic_Tasks Automatically managed tasks still above target
+   --  @field Pinned_Automatic_Tasks Such tasks currently pinned to a thread
+   --  @field Waiting_Automatic_Tasks Such tasks suspended until another event
+   --  @field Explicit_Tasks Explicitly placed tasks above the target
+   --  @field Placement_Claims Creations that selected an above-target group
+   --     before the reduction cutover and have not registered yet
+   type Pool_Reduction_Status is record
+      Phase                    : Pool_Reduction_Phase := No_Reduction;
+      Target_Size              : Loop_Pool_Size := Loop_Pool_Size'First;
+      Automatic_Tasks          : Natural := 0;
+      Pinned_Automatic_Tasks   : Natural := 0;
+      Waiting_Automatic_Tasks  : Natural := 0;
+      Explicit_Tasks           : Natural := 0;
+      Placement_Claims         : Natural := 0;
+   end record;
+
    --  Optional placement of an execution group's scheduler thread. This is
    --  independent from an Ada CPU aspect, which selects an execution group.
    --  @enum No_Placement Do not request host placement
@@ -121,16 +155,16 @@ package Flyology.Execution_Groups with Preelaborate is
    --  FLYOLOGY_LOOP_POOL_SIZE is captured once at process startup, defaults to
    --  one when absent, and establishes the initial size before task
    --  activation.
-   --  Grow_Configured_Pool may increase it later. A lightweight task without a
-   --  specific CPU is assigned among groups 0 .. Result - 1.
+   --  Runtime growth or reduction may change it later. A lightweight task
+   --  without a specific CPU is assigned among groups 0 .. Result - 1.
    --  @return Configured shared-group pool size
    --  @exception Group_Error The runtime reports an invalid size
    function Configured_Pool_Size return Loop_Pool_Size;
 
    --  Ensure the automatic pool contains at least Minimum_Size shared groups.
    --  Concurrent calls converge on the largest requested value. A request at
-   --  or below the current size is an idempotent no-op; the pool never
-   --  shrinks.
+   --  or below the current size is an idempotent no-op. Growth is rejected
+   --  while a reduction is still draining.
    --  Existing tasks remain on their current groups, while future automatic
    --  placements use the enlarged pool. Newly included groups remain lazy.
    --  Growing changes the modulus used by Topology.Shard_For_Hash.
@@ -138,6 +172,30 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @exception Group_Error The runtime lifecycle does not permit growth
    procedure Grow_Configured_Pool (Minimum_Size : Loop_Pool_Size)
    with Post => Configured_Pool_Size >= Minimum_Size;
+
+   --  Lower the ceiling used by future automatic placements immediately.
+   --  Automatically managed tasks in removed groups migrate to Default_Group
+   --  when they next become ready at an unpinned cooperative safe point.
+   --  Waiting, pinned, or CPU-bound tasks may delay completion indefinitely.
+   --  Tasks created with a CPU aspect or moved explicitly with Migrate remain
+   --  where the caller put them and are reported as Explicit_Tasks.
+   --  If migration is required, this call may synchronously start
+   --  Default_Group as its drainage destination and wait for that startup. An
+   --  already-drained request starts no group. The call does not wait for
+   --  drainage and does not reclaim threads. Use Pool_Reduction to observe
+   --  drainage with an application deadline.
+   --  @param Maximum_Size New automatic-placement ceiling
+   --  @return Whether reduction started, was already satisfied, or is busy
+   --  @exception Group_Error The runtime lifecycle rejects the request
+   function Request_Pool_Reduction
+     (Maximum_Size : Loop_Pool_Size) return Pool_Reduction_Request_Result;
+
+   --  Return a momentary reduction-progress snapshot without waiting. Calling
+   --  this function also recognizes completion after the final task or
+   --  pre-cutover placement claim drains.
+   --  @return Current reduction lifecycle, target, and blocker counts
+   --  @exception Group_Error The runtime cannot provide a valid snapshot
+   function Pool_Reduction return Pool_Reduction_Status;
 
    --  Return the automatic policy without starting any group.
    --  @return Configured placement policy

@@ -88,6 +88,11 @@ is
 
    subtype Pool_Size is C.int range 1 .. First_Dedicated_Group;
 
+   type Reduction_Phase is
+     (No_Reduction, Reduction_Draining, Reduction_Complete);
+   type Reduction_Decision is
+     (Start_Reduction, Already_At_Or_Below, Reduction_In_Progress);
+
    --  Compute the grow-only automatic-pool transition used while the
    --  scheduler holds the topology lock.
    function Growth_Target
@@ -119,6 +124,63 @@ is
         Post =>
           Growth_Target (Growth_Target (Current, Left), Right) =
           Growth_Target (Growth_Target (Current, Right), Left);
+
+   --  Serialize reduction requests and start only a strict decrease.
+   function Plan_Reduction
+     (Current   : Pool_Size;
+      Requested : Pool_Size;
+      Phase     : Reduction_Phase) return Reduction_Decision
+   with Inline,
+        Post =>
+          Plan_Reduction'Result =
+            (if Phase = Reduction_Draining then Reduction_In_Progress
+             elsif Requested >= Current then Already_At_Or_Below
+             else Start_Reduction);
+
+   --  A reduction is drained only after every pre-cutover automatic placement
+   --  claim and every automatically placed task outside the target is gone.
+   function Reduction_Drained
+     (Automatic_Tasks : Natural;
+      Placement_Claims : Natural) return Boolean
+   with Inline,
+        Post =>
+          Reduction_Drained'Result =
+            (Automatic_Tasks = 0 and then Placement_Claims = 0);
+
+   --  Start in the complete phase when no migration or pre-cutover creation
+   --  remains; otherwise publish the draining phase and its destination.
+   function Reduction_Start_Phase
+     (Automatic_Tasks  : Natural;
+      Placement_Claims : Natural) return Reduction_Phase
+   with Inline,
+        Post =>
+          Reduction_Start_Phase'Result =
+            (if Reduction_Drained (Automatic_Tasks, Placement_Claims) then
+                Reduction_Complete
+             else
+                Reduction_Draining)
+          and then Reduction_Start_Phase'Result /= No_Reduction;
+
+   --  Select only movable, automatically placed ready work owned by a shared
+   --  group that is now outside the automatic-placement ceiling.
+   function Should_Drain
+     (Phase                 : Reduction_Phase;
+      Source                : C.int;
+      Target                : Pool_Size;
+      Automatic_Placement   : Boolean;
+      Pinned                : Boolean;
+      Can_Migrate           : Boolean;
+      Destination_Available : Boolean) return Boolean
+   with Inline,
+        Post =>
+          Should_Drain'Result =
+            (Phase = Reduction_Draining
+             and then Source >= Target
+             and then Source < First_Dedicated_Group
+             and then Automatic_Placement
+             and then not Pinned
+             and then Can_Migrate
+             and then Destination_Available);
 
    function Valid_Group (Group : C.int) return Boolean
    with Inline,

@@ -70,6 +70,19 @@ package System.Flyology.Scheduler is
    pragma Export
      (C, Grow_Configured_Pool, "flyology_runtime_grow_configured_pool");
 
+   function Request_Pool_Reduction
+     (Maximum_Size : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C,
+      Request_Pool_Reduction,
+      "flyology_runtime_request_pool_reduction");
+
+   function Query_Pool_Reduction
+     (Status      : System.Address;
+      Status_Size : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export
+     (C, Query_Pool_Reduction, "flyology_runtime_query_pool_reduction");
+
    function Configured_Placement return Interfaces.C.int;
    pragma Export
      (C, Configured_Placement, "flyology_runtime_configured_placement");

@@ -38,7 +38,8 @@ package Fault_Control is
       Poller_File_Drain_Pause,
       File_Uring_Synchronous_Eventfd,
       Connect_Interrupted,
-      Create_Lifecycle_Window);
+      Create_Lifecycle_Window,
+      Automatic_Placement_Window);
 
    for Point use
      (Fiber_Allocation     => 1,
@@ -76,7 +77,8 @@ package Fault_Control is
       Poller_File_Drain_Pause        => 33,
       File_Uring_Synchronous_Eventfd => 34,
       Connect_Interrupted            => 35,
-      Create_Lifecycle_Window        => 36);
+      Create_Lifecycle_Window        => 36,
+      Automatic_Placement_Window     => 37);
 
    function Enabled return Boolean;
    procedure Reset;
@@ -86,6 +88,13 @@ package Fault_Control is
       Count    : Positive := 1);
    procedure Disarm (At_Point : Point);
    function Calls (At_Point : Point) return Natural;
+
+   --  Create-window controls used by deterministic scheduler race tests.
+   function Create_Registration_Parked return Boolean;
+   function Automatic_Placement_Parked return Boolean;
+   function Automatic_Placement_Claim_Group return Integer;
+   procedure Release_Create_Registration;
+   procedure Release_Automatic_Placement;
 
    type File_Cancel_Backend is (Darwin_AIO, Linux_IO_Uring, Linux_Native_AIO);
    for File_Cancel_Backend use
@@ -141,6 +150,36 @@ private
    function C_Calls
      (At_Point : Interfaces.C.int) return Interfaces.C.unsigned;
    pragma Import (C, C_Calls, "flyology_test_fault_calls");
+
+   function C_Create_Registration_Parked return Interfaces.C.int;
+   pragma Import
+     (C,
+      C_Create_Registration_Parked,
+      "flyology_test_create_race_parked");
+
+   procedure C_Release_Create_Registration;
+   pragma Import
+     (C,
+      C_Release_Create_Registration,
+      "flyology_test_release_create_registration");
+
+   function C_Automatic_Placement_Claim_Group return Interfaces.C.int;
+   pragma Import
+     (C,
+      C_Automatic_Placement_Claim_Group,
+      "flyology_test_automatic_placement_claim_group");
+
+   function C_Automatic_Placement_Parked return Interfaces.C.int;
+   pragma Import
+     (C,
+      C_Automatic_Placement_Parked,
+      "flyology_test_automatic_placement_parked");
+
+   procedure C_Release_Automatic_Placement;
+   pragma Import
+     (C,
+      C_Release_Automatic_Placement,
+      "flyology_test_release_automatic_placement");
 
    function C_File_Cancel_Count
      (Backend     : Interfaces.C.int;

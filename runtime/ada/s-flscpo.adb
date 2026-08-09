@@ -53,6 +53,47 @@ is
       Right   : Pool_Size)
    is null;
 
+   function Plan_Reduction
+     (Current   : Pool_Size;
+      Requested : Pool_Size;
+      Phase     : Reduction_Phase) return Reduction_Decision
+   is
+     (if Phase = Reduction_Draining then Reduction_In_Progress
+      elsif Requested >= Current then Already_At_Or_Below
+      else Start_Reduction);
+
+   function Reduction_Drained
+     (Automatic_Tasks  : Natural;
+      Placement_Claims : Natural) return Boolean
+   is
+     (Automatic_Tasks = 0 and then Placement_Claims = 0);
+
+   function Reduction_Start_Phase
+     (Automatic_Tasks  : Natural;
+      Placement_Claims : Natural) return Reduction_Phase
+   is
+     (if Reduction_Drained (Automatic_Tasks, Placement_Claims) then
+         Reduction_Complete
+      else
+         Reduction_Draining);
+
+   function Should_Drain
+     (Phase                 : Reduction_Phase;
+      Source                : C.int;
+      Target                : Pool_Size;
+      Automatic_Placement   : Boolean;
+      Pinned                : Boolean;
+      Can_Migrate           : Boolean;
+      Destination_Available : Boolean) return Boolean
+   is
+     (Phase = Reduction_Draining
+      and then Source >= Target
+      and then Source < First_Dedicated_Group
+      and then Automatic_Placement
+      and then not Pinned
+      and then Can_Migrate
+      and then Destination_Available);
+
    function Valid_Group (Group : C.int) return Boolean is
      (Group >= First_Shared_Group and then Group <= Last_Group);
 

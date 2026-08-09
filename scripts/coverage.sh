@@ -201,6 +201,8 @@ done
 #  programs against a three-loop RTS. The Flyology library instrumentation is
 #  identical, so all traces consolidate into one report.
 pool_mains='loop_pool_smoke
+pool_reduction_inert_smoke
+pool_reduction_smoke
 semantic_conformance_matrix
 semantic_termination_matrix
 topology_smoke'
@@ -237,10 +239,11 @@ for test_main in $pool_mains; do
   execution_count=$((execution_count + 1))
 done
 
-#  The runtime fault seam deterministically produces accept retry and listener
-#  cleanup outcomes that portable clients cannot request from the host kernel.
-#  Only the two public socket/server policy tests use this configuration.
+#  The runtime fault seam deterministically produces accept retry, listener
+#  cleanup, and automatic-placement cutover windows that portable callers
+#  cannot request from the host scheduler or kernel.
 fault_mains='accept_transient_smoke
+pool_reduction_claim_smoke
 structured_server_reuse_smoke'
 printf '%s\n' "coverage: preparing the portable fault-policy RTS"
 FLYOLOGY_DEFAULT=native \

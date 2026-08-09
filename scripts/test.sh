@@ -359,6 +359,8 @@ wall_clock_wait_smoke'
 
 pool_mains='loop_pool_smoke
 pool_growth_smoke
+pool_reduction_inert_smoke
+pool_reduction_smoke
 topology_smoke
 semantic_conformance_matrix
 semantic_termination_matrix'
@@ -366,6 +368,7 @@ semantic_termination_matrix'
 fault_mains='accept_transient_smoke
 connect_transient_smoke
 create_finalize_race_smoke
+pool_reduction_claim_smoke
 structured_server_reuse_smoke
 task_result_publication_smoke'
 
@@ -585,6 +588,12 @@ done
 #  actual automatic placement without rebuilding the RTS.
 link_test_mains "$test_subdir" "$project_root/build/rts" "$pool_mains"
 FLYOLOGY_LOOP_POOL_SIZE=3 "$test_bin/loop_pool_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_inert_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_smoke"
 FLYOLOGY_LOOP_POOL_SIZE=3 "$test_bin/topology_smoke"
 FLYOLOGY_LOOP_POOL_SIZE=3 \
   "$project_root/scripts/run-with-timeout.sh" 30 \
@@ -613,6 +622,10 @@ FLYOLOGY_PLACEMENT=round_robin \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains "$test_subdir" "$project_root/build/rts" "$pool_mains"
 "$test_bin/loop_pool_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_inert_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_smoke"
 "$test_bin/topology_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/semantic_conformance_matrix"
@@ -676,6 +689,10 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 #  here on its stop invariant, so the timeout also bounds a regression.
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/create_finalize_race_smoke"
+#  Hold an automatic creator between its round-robin claim and group startup;
+#  reduction must retain that claim until the released task drains to group 0.
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_claim_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/connect_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \

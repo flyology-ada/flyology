@@ -1,3 +1,5 @@
+with Interfaces.C;
+
 package System.Flyology.Faults is
    pragma Preelaborate;
 
@@ -38,7 +40,8 @@ package System.Flyology.Faults is
       File_Uring_Post_Setup_Failure,
       Poller_File_Drain_Pause,
       File_Uring_Synchronous_Eventfd,
-      Create_Lifecycle_Window);
+      Create_Lifecycle_Window,
+      Automatic_Placement_Window);
 
    for Fault_Point use
      (Fiber_Allocation     => 1,
@@ -75,7 +78,8 @@ package System.Flyology.Faults is
       File_Uring_Post_Setup_Failure => 32,
       Poller_File_Drain_Pause        => 33,
       File_Uring_Synchronous_Eventfd => 34,
-      Create_Lifecycle_Window        => 36);
+      Create_Lifecycle_Window        => 36,
+      Automatic_Placement_Window     => 37);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);
@@ -88,6 +92,12 @@ package System.Flyology.Faults is
 
    function Pause_Create_Registration return Boolean;
    pragma Inline_Always (Pause_Create_Registration);
+
+   procedure Note_Automatic_Placement_Claim (Group : Interfaces.C.int);
+   pragma Inline_Always (Note_Automatic_Placement_Claim);
+
+   function Pause_Automatic_Placement return Boolean;
+   pragma Inline_Always (Pause_Automatic_Placement);
 
    procedure Note_Create_Registering;
    pragma Inline_Always (Note_Create_Registering);

@@ -17,14 +17,17 @@ package body Create_Race_Support is
 
    Racing_Key : aliased C.int := 0;
    --  Stands in for the racing task's control block. The scheduler uses this
-   --  address only as a registry key. The fiber is never dispatched: an event
-   --  loop reaches its stop check before its next dispatch.
+   --  address only as a registry key. The finalize race never dispatches it;
+   --  the automatic-placement race runs the null wrapper before finalization.
 
    Target_Group : C.int := 0;
    pragma Atomic (Target_Group);
 
    Outcome : C.int := Not_Attempted;
    pragma Atomic (Outcome);
+
+   Observed_Group : C.int := -1;
+   pragma Atomic (Observed_Group);
 
    procedure Racing_Wrapper (T : System.Address);
    pragma Convention (C, Racing_Wrapper);
@@ -54,7 +57,7 @@ package body Create_Race_Support is
    procedure Racing_Wrapper (T : System.Address) is
       pragma Unreferenced (T);
    begin
-      null;
+      Observed_Group := System.Flyology.Scheduler.Current_Group;
    end Racing_Wrapper;
 
    procedure Racing_Create is
@@ -80,6 +83,16 @@ package body Create_Race_Support is
 
    function Start_Racer return Boolean is
      (C_Start_Racer (Racing_Create'Access) = 0);
+
+   function Start_Automatic_Racer return Boolean is
+   begin
+      Target_Group := -1;
+      Outcome := Not_Attempted;
+      Observed_Group := -1;
+      return C_Start_Racer (Racing_Create'Access) = 0;
+   end Start_Automatic_Racer;
+
+   function Racer_Group return Integer is (Integer (Observed_Group));
 
    function Creator_Parked return Boolean is (C_Creator_Parked /= 0);
 

@@ -141,23 +141,42 @@ alr with flyology</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> establishes the initial size at application startup, before library-level tasks activate. It defaults to <code>1</code>. An empty, malformed, or out-of-range value fails application initialization. The pool may grow later but never shrinks.</p>
+              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> establishes the initial size at application startup, before library-level tasks activate. It defaults to <code>1</code>. An empty, malformed, or out-of-range value fails application initialization. The automatic-placement ceiling may grow or drain to a smaller value later.</p>
             </aside>
             <h3 id="grow-pool">Grow the automatic pool later</h3>
-            <p><code>Grow_Configured_Pool</code> ensures that the automatic pool contains at least the requested number of groups. Concurrent calls converge on the largest request, and calls at or below the current size do nothing. Existing tasks stay on their current groups; future automatic placements use the enlarged pool. Growth alone starts no group or OS thread.</p>
+            <p><code>Grow_Configured_Pool</code> ensures that the automatic pool contains at least the requested number of groups. When no reduction is draining, concurrent calls converge on the largest request and calls at or below the current size do nothing. Existing tasks stay on their current groups; future automatic placements use the enlarged pool. Growth alone starts no group or OS thread.</p>
             <figure class="code-panel">
-              <figcaption>grow-only runtime configuration</figcaption>
+              <figcaption>grow runtime configuration</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">Flyology.Execution_Groups.Grow_Configured_Pool (8);</code></pre>
             </figure>
+            <p>While a <a href="#reduce-pool">pool reduction</a> still has automatic tasks or pre-cutover placement claims to drain, every growth request raises <code>Group_Error</code>. The growth call checks that progress itself: if the last blocker has already cleared, it recognizes the completed drain, applies the requested minimum, and resets <code>Pool_Reduction</code> to <code>No_Reduction</code>. Tasks that migrated during drainage stay on their destination group; growth does not redistribute them.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p><strong>Growth changes topology hashing.</strong> <code>Topology.Shard_For_Hash</code> uses the current configured pool size, so persist an independent shard count when keys must keep stable ownership.</p>
+            </aside>
+            <h3 id="reduce-pool">Drain the automatic pool to a smaller size</h3>
+            <p><code>Request_Pool_Reduction</code> lowers the ceiling for new automatic placements immediately, then lets the scheduler move automatically managed tasks from removed groups to group 0 as they reach cooperative dispatch points. When migration is required, the request may synchronously start group 0 and wait for that destination's startup; an already-drained request starts no group. The call does not wait for drainage. Query <code>Pool_Reduction</code> to observe <code>Draining</code> or <code>Drained</code> and the current blocker counts.</p>
+            <figure class="code-panel">
+              <figcaption>request and observe cooperative drainage</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Result := Flyology.Execution_Groups.Request_Pool_Reduction (2);
+Status := Flyology.Execution_Groups.Pool_Reduction;
+
+if Status.Phase = Flyology.Execution_Groups.Draining then
+   --  Poll again under an application-defined deadline.
+   null;
+end if;</code></pre>
+            </figure>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Drainage is cooperative and may not finish.</strong> Waiting tasks move only after they wake, pinned tasks move only after they unpin and yield, and a CPU-bound task that never suspends can remain indefinitely. Tasks selected with a <code>CPU</code> aspect or moved explicitly with <code>Migrate</code> stay where the application put them. A drained reduction retains already-created event-loop threads; thread reclamation is not part of this facility. Once drained, <a href="#grow-pool"><code>Grow_Configured_Pool</code></a> can expand the ceiling again without moving those tasks back.</p>
             </aside>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement at application startup. Groups and their OS threads still start lazily.</dd></div>
                 <div class="decision-row"><dt><a href="#grow-pool"><code>Grow_Configured_Pool</code></a></dt><dd>Raises that minimum later without moving existing tasks or starting unused groups.</dd></div>
+                <div class="decision-row"><dt><a href="#reduce-pool"><code>Request_Pool_Reduction</code></a></dt><dd>Lowers the automatic-placement ceiling immediately and drains eligible automatically managed tasks cooperatively.</dd></div>
               </dl>
             </div>
           </section>
