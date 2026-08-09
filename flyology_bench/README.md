@@ -29,6 +29,9 @@ The initial API provides:
 - persisted raw-sample baselines with compatibility fingerprints;
 - host/toolchain metadata and optional strict Linux or advisory Darwin thread
   placement;
+- selectable wall-time, CPU-time, RSS, fault, context-switch, storage-I/O,
+  Linux hardware-counter, and Flyology scheduler axes sampled around the same
+  retained batches;
 - an optional sustained low-host-CPU gate before warmup;
 - ANSI console result cards, in-place terminal progress, CSV, and
   newline-delimited JSON reporters; and
@@ -179,6 +182,106 @@ call as part of that operation. Volatile state is often clearer for a first
 benchmark. `Clobber_Memory` prevents motion of memory operations across a
 chosen boundary.
 
+## Resource and runtime axes
+
+Wall time remains the calibration and collection-budget clock. `Metrics`
+selects which additional values are retained around those same timed batches:
+
+```ada
+use type Flyology_Bench.Metric_Set;
+
+Config.Metrics :=
+  Flyology_Bench.Process_Resource_Metrics
+  or Flyology_Bench.Linux_Hardware_Metrics;
+```
+
+`Terminal_Mode` adds `Process_Resource_Metrics` to the caller's selection. It
+includes process and current-thread CPU time, current process RSS and its
+across-batch change, minor and major faults, voluntary and involuntary context
+switches, actual storage bytes, and filesystem block-I/O operations. The
+process values include all native threads in the benchmark process. There is no
+OS-level per-thread RSS value, so RSS is process-scoped and its absolute value
+is diagnostic rather than a directional comparison.
+
+On Linux, `Linux_Hardware_Metrics` requests user-space CPU cycles, retired
+instructions, instructions per cycle, cache misses, branches, and branch
+misses through `perf_event_open`. Cycles and instructions form one event group,
+so IPC uses counters enabled, scheduled, and disabled over the same window.
+Events inherit into native tasks or processes created by the executing pthread
+after counter initialization. This covers the maintained example's per-batch
+parallel workers; it does not attach to threads that already existed when the
+run began. Kernel and hypervisor execution are excluded.
+
+Each sample is the difference between a counter read taken while the group is
+disabled and one taken after it is disabled again. The group enable between
+those reads gives cycles and instructions one common start, and the
+multiplexing correction uses enabled and running time deltas from the same
+pair of reads.
+`PERF_EVENT_IOC_RESET` is deliberately not used: it clears an event's own
+count but not the inherited count accumulated from exited child tasks, so a
+reset-and-read-absolute scheme would report totals that grow from sample to
+sample once workers contribute.
+
+An unavailable axis retains a `Metric_Status`: unsupported platform,
+permission denial, unsupported event, unavailable counter resources, or probe
+failure. `perf_event_open` reports `EINVAL` both for a generic event the host
+cannot map and for an attribute combination the kernel rejects, so that case
+is re-probed with only the permission-relevant attributes before being
+classified. Console, long-form CSV, and JSON reporters preserve the same
+reason; the harness never substitutes zero. A lightweight task gets meaningful
+attribution only while it remains on the same event-loop pthread and does not
+suspend so unrelated fibers execute inside the sample. Use a thread pin or
+dedicated execution group when that boundary is part of the benchmark design.
+
+The standalone crate does not depend on Flyology. Scheduler axes therefore use
+an optional callback that returns cumulative counters. The callback runs before
+and after each sample, outside its timestamps:
+
+```ada
+with Flyology.Observability;
+
+procedure Probe
+  (Result : out Flyology_Bench.Flyology_Scheduler_Snapshot)
+is
+   Group : Flyology.Observability.Group_Snapshot;
+begin
+   if Flyology.Observability.Snapshot (0, Group) then
+      Result :=
+        (Available      => True,
+         Dispatches     => Group.Dispatches,
+         Poll_Batches   => Group.Poll_Batches,
+         Poll_Events    => Group.Poll_Events,
+         Wakeups        => Group.Wakeups,
+         Migrations_In  => Group.Migrations_In,
+         Migrations_Out => Group.Migrations_Out);
+   else
+      Result := (others => <>);
+   end if;
+end Probe;
+
+Config.Metrics := Config.Metrics or Flyology_Bench.Flyology_Scheduler_Metrics;
+Config.Scheduler_Probe := Probe'Access;
+```
+
+Define `Probe` at library level to satisfy the callback type's lifetime. A
+caller may sum several group snapshots; in that case inbound plus outbound
+migration values count group-boundary crossings, so one migration between two
+included groups contributes twice.
+
+Every delta is divided by the logical operation count, except absolute RSS and
+the dimensionless IPC value. A paired comparison uses relative ratios only
+when every value on both sides is positive. Zero-containing and signed axes use
+paired absolute differences. Diagnostic axes retain confidence intervals but
+do not claim that either implementation is generally better.
+
+Counter control and snapshot calls are outside the wall-clock timestamps, and
+setup/teardown hooks are outside every selected axis. Enabling several probe
+families can still perturb another family at the boundary: for example,
+stopping Linux perf events takes system calls before the ending process-CPU
+snapshot. Adaptive batches amortize that fixed cost, but they do not make it
+zero. When a small resource difference matters, repeat the comparison with
+only that metric family selected and check that the conclusion remains.
+
 For very small result-producing operations, prefer `Measure_Result_Batched`.
 It passes the batch result to the opaque barrier after the ending clock read, so
 the optimizer must retain the computation without charging the barrier call to
@@ -261,10 +364,10 @@ affinity or a Darwin advisory affinity tag. Placement cannot by itself control
 frequency scaling, thermal state, interrupts, or competing system load, so
 those conditions still belong in the recorded fingerprint and run policy.
 
-Per-operation CPU time, allocation instrumentation, and hardware performance
-counters require platform- or allocator-specific providers and are not inferred
-from wall time. The crate does not label wall-time results as CPU time or
-individual-operation latency.
+Allocation counts still require allocator instrumentation and are not inferred
+from RSS. CPU time, Linux hardware counters, and the resource axes above are
+separate samples with explicit scopes; the crate does not relabel wall time as
+one of them or as individual-operation latency.
 
 Terminal mode keeps progress columns stable and reports process CPU as both a
 percentage and equivalent occupied cores, current RSS and growth, and elapsed
@@ -279,6 +382,18 @@ wait-heavy, and occasionally hiccuping cases so terminal telemetry visibly
 moves. Those cases are an observability demonstration, not interchangeable
 implementations of one algorithm. Its shootout requests three seconds of data
 but caps actual sample collection at two seconds to demonstrate the budget.
+Pass `--metrics=perf` to keep only wall time and Linux hardware counters. Add
+`--require-perf` in validation runs to fail after the first measurement unless
+every selected hardware axis produced samples; the failure names every missing
+axis with its status. `--require-perf=core` is the documented narrower policy
+for a host whose PMU implements cycles and instructions but rejects a generic
+cache or branch event; it still requires cycles, instructions, and IPC:
+
+```sh
+./examples/bin/basic --metrics=perf
+./examples/bin/basic --metrics=perf --require-perf
+./examples/bin/basic --metrics=perf --require-perf=core
+```
 
 For script input, select clean stdout with no progress or ANSI sequences:
 
@@ -287,9 +402,12 @@ FLYOLOGY_BENCH_OUTPUT=csv examples/bin/basic
 FLYOLOGY_BENCH_OUTPUT=json examples/bin/basic
 ```
 
-CSV emits a header plus one row per contender. JSON emits one newline-delimited
-object containing the reference, contenders, environment context, clock data,
-and comparison statistics.
+The original CSV reporters retain their stable latency schemas. The long-form
+`Put_Metrics_CSV` and `Put_Comparison_Metrics_CSV` reporters emit one row per
+axis, including availability status and failure reasons. The multi-way
+long-form reporter emits
+those rows for every contender. JSON measurement, comparison, and multi-way
+objects include metric arrays alongside environment, clock, and latency data.
 
 ## Build and test
 
@@ -299,6 +417,32 @@ From this directory:
 alr build
 alr test
 ```
+
+`alr test` also checks the published machine-readable schemas: every CSV row
+carries exactly the columns its header declares, the long-form metric rows
+agree between `available` and `status`, and each JSON object parses. The
+parse uses `jq` when it is installed and falls back to structural checks
+otherwise, reporting which path ran.
+
+From the repository root, an opt-in Linux container run grants the narrow
+Docker performance-monitoring capability and requires actual PMU samples:
+
+```sh
+FLYOLOGY_LINUX_PERF=1 ./scripts/test-linux-docker.sh
+```
+
+That mode also sets `FLYOLOGY_BENCH_REQUIRE_PERF=1`, which makes the smoke
+test require the hardware axes and compare a serial batch against one that
+starts four worker tasks. Because each worker repeats the serial batch's work,
+an inherited counter reports several times as many cycles per logical
+operation; counting only the calling pthread leaves the two comparable and
+fails the check.
+
+The capability cannot compensate for a Linux virtual machine that does not
+expose a hardware PMU. A guest kernel without one lists no CPU entry under
+`/sys/bus/event_source/devices`, every `PERF_TYPE_HARDWARE` open fails, and
+the required run exits with the specific unavailable status rather than
+reporting a pass.
 
 Or, from an Alire environment with GNAT and GPRbuild available:
 

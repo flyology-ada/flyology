@@ -2674,7 +2674,11 @@ operation selected Linux native AIO. It also builds and runs the standalone
 `FLYOLOGY_GPRBUILD_VERSION` select another pair, and `FLYOLOGY_LINUX_IMAGE`
 overrides its local image name. The script removes its test image when the run
 finishes, including after a test failure. Set `FLYOLOGY_KEEP_LINUX_IMAGE=1` to
-retain it for inspection. To run every Alire release covered by the patch family:
+retain it for inspection. `FLYOLOGY_LINUX_PERF=1` adds Docker's `PERFMON`
+capability, requires the benchmark example to collect every Linux hardware
+counter, and requires the crate's smoke test to show that worker-task work is
+counted; the run fails when the host or virtual machine does not expose a PMU.
+To run every Alire release covered by the patch family:
 
 ```sh
 ./scripts/test-alire-runtime-matrix.sh

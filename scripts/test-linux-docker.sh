@@ -19,11 +19,20 @@ case "${FLYOLOGY_LINUX_ARCH:-$(uname -m)}" in
 esac
 image=${FLYOLOGY_LINUX_IMAGE:-flyology-linux-test-$linux_arch}
 keep_image=${FLYOLOGY_KEEP_LINUX_IMAGE:-0}
+require_perf=${FLYOLOGY_LINUX_PERF:-0}
 case "$keep_image" in
   0|1)
     ;;
   *)
     printf '%s\n' "FLYOLOGY_KEEP_LINUX_IMAGE must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "$require_perf" in
+  0|1)
+    ;;
+  *)
+    printf '%s\n' "FLYOLOGY_LINUX_PERF must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -77,10 +86,26 @@ docker build \
   "$project_root"
 image_built=1
 
-container_id=$(docker container create \
-  --platform "linux/$linux_arch" \
-  --env FLYOLOGY_TEST_DENY_IO_URING=1 \
-  --env FLYOLOGY_EXPECT_FILE_BACKEND=native-aio \
-  "$image")
+if [ "$require_perf" -eq 1 ]; then
+  # CAP_PERFMON lets the container open hardware counters, and
+  # FLYOLOGY_BENCH_REQUIRE_PERF makes the crate's smoke test insist that the
+  # counters are collected and that inherited worker-task work is counted.
+  # A host whose hypervisor exposes no PMU fails here rather than reporting
+  # unavailable counters as a pass.
+  container_id=$(docker container create \
+    --platform "linux/$linux_arch" \
+    --cap-add PERFMON \
+    --env FLYOLOGY_TEST_DENY_IO_URING=1 \
+    --env FLYOLOGY_EXPECT_FILE_BACKEND=native-aio \
+    --env FLYOLOGY_BENCH_REQUIRE_PERF=1 \
+    "$image" \
+    sh -c 'cd flyology_bench && alr --non-interactive test && ./examples/bin/basic --metrics=perf --require-perf && cd .. && ./scripts/test.sh')
+else
+  container_id=$(docker container create \
+    --platform "linux/$linux_arch" \
+    --env FLYOLOGY_TEST_DENY_IO_URING=1 \
+    --env FLYOLOGY_EXPECT_FILE_BACKEND=native-aio \
+    "$image")
+fi
 container_created=1
 docker container start --attach "$container_id"

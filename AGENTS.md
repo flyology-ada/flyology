@@ -305,13 +305,23 @@ required by the changed boundary.
 - `./scripts/showcases.sh`: build and run the maintained showcase set. Re-run a
   benchmark before changing a performance table or claim.
 - `cd flyology_bench && alr test`: build and run the standalone benchmark
-  crate's smoke tests and example.
+  crate's smoke tests and example, and check the published CSV/JSON schemas.
+  Set `FLYOLOGY_BENCH_REQUIRE_PERF=1` to also require Linux hardware counters
+  and the inherited worker-task attribution check.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.
   It removes the successfully built test image on success or failure. Set
   `FLYOLOGY_KEEP_LINUX_IMAGE=1` only when retaining it for inspection.
   `FLYOLOGY_LINUX_ARCH`, `FLYOLOGY_GNAT_VERSION`,
   `FLYOLOGY_GPRBUILD_VERSION`, and `FLYOLOGY_LINUX_IMAGE` select the target and
   image configuration.
+- `FLYOLOGY_LINUX_PERF=1 ./scripts/test-linux-docker.sh`: opt-in Linux run that
+  adds Docker `CAP_PERFMON` and requires real PMU samples instead of accepting
+  unavailable counters. Run it only where the host exposes a hardware PMU. The
+  Apple Virtualization Framework backends used by Docker Desktop and OrbStack
+  on Apple Silicon expose none: the guest lists no CPU entry under
+  `/sys/bus/event_source/devices`, every `PERF_TYPE_HARDWARE` open returns
+  `ENOENT`, and the run correctly fails. Do not weaken the strict mode to make
+  such a host pass.
 - `./scripts/test-alire-runtime-matrix.sh`: exact supported GNAT patch-family
   matrix. Run it when changing GNARL patches, compatibility units, runtime
   preparation, or advertised compiler support.

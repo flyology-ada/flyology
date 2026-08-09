@@ -3,7 +3,7 @@
 
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Characters.Handling;
-with Interfaces;
+with Ada.Unchecked_Deallocation;
 with Interfaces.C;
 with System;
 
@@ -34,10 +34,69 @@ package body Flyology_Bench is
    function Native_Clock_Backend return Interfaces.C.int;
    pragma Import (C, Native_Clock_Backend, "flyology_bench_clock_backend");
 
-   function Native_Process_Usage
-     (CPU_Nanoseconds : access Interfaces.Unsigned_64;
-      Resident_Bytes  : access Interfaces.Unsigned_64) return Interfaces.C.int;
-   pragma Import (C, Native_Process_Usage, "flyology_bench_process_usage");
+   Resource_Value_Count : constant := 11;
+   type Native_Resource_Values is
+     array (Natural range 0 .. Resource_Value_Count - 1)
+       of aliased Interfaces.Unsigned_64
+     with Convention => C;
+
+   function Native_Resource_Snapshot
+     (Values         : System.Address;
+      Capacity       : Interfaces.C.size_t;
+      Available_Mask : access Interfaces.Unsigned_64)
+      return Interfaces.C.int;
+   pragma Import
+     (C, Native_Resource_Snapshot, "flyology_bench_resource_snapshot");
+
+   Perf_Value_Count : constant := 5;
+   type Native_Perf_FDs is
+     array (Natural range 0 .. Perf_Value_Count - 1) of Interfaces.C.int
+     with Convention => C;
+   type Native_Perf_Statuses is
+     array (Natural range 0 .. Perf_Value_Count - 1) of Interfaces.C.int
+     with Convention => C;
+   type Native_Perf_Counters is
+     array (Natural range 0 .. Perf_Value_Count - 1)
+       of Interfaces.Unsigned_64
+     with Convention => C;
+   --  Mirrors struct flyology_bench_perf_state. The baseline fields let the
+   --  bridge report each sample as a difference; inherited counts cannot be
+   --  cleared between samples with PERF_EVENT_IOC_RESET.
+   type Native_Perf_State is record
+      FDs              : Native_Perf_FDs := (others => -1);
+      Available_Mask   : Interfaces.Unsigned_64 := 0;
+      Statuses         : Native_Perf_Statuses := (others => 0);
+      IPC_Grouped      : Interfaces.C.int := 0;
+      Baseline_Value   : Native_Perf_Counters := (others => 0);
+      Baseline_Enabled : Native_Perf_Counters := (others => 0);
+      Baseline_Running : Native_Perf_Counters := (others => 0);
+   end record
+     with Convention => C;
+   type Native_Perf_Values is
+     array (Natural range 0 .. Perf_Value_Count - 1)
+       of aliased Interfaces.Unsigned_64
+     with Convention => C;
+
+   function Native_Perf_Initialize
+     (State          : access Native_Perf_State;
+      Requested_Mask : Interfaces.Unsigned_64) return Interfaces.C.int;
+   pragma Import
+     (C, Native_Perf_Initialize, "flyology_bench_perf_initialize");
+
+   function Native_Perf_Start
+     (State : access Native_Perf_State) return Interfaces.C.int;
+   pragma Import (C, Native_Perf_Start, "flyology_bench_perf_start");
+
+   function Native_Perf_Finish
+     (State          : access Native_Perf_State;
+      Values         : System.Address;
+      Capacity       : Interfaces.C.size_t;
+      Available_Mask : access Interfaces.Unsigned_64)
+      return Interfaces.C.int;
+   pragma Import (C, Native_Perf_Finish, "flyology_bench_perf_finish");
+
+   procedure Native_Perf_Close (State : access Native_Perf_State);
+   pragma Import (C, Native_Perf_Close, "flyology_bench_perf_close");
 
    function Native_Host_CPU_Snapshot
      (Busy_Ticks  : System.Address;
@@ -54,6 +113,199 @@ package body Flyology_Bench is
      with Convention => C;
 
    type Float_Array is array (Positive range <>) of Long_Float;
+
+   procedure Free_Metric_Store is new Ada.Unchecked_Deallocation
+     (Metric_Store, Metric_Store_Access);
+
+   overriding procedure Adjust (Object : in out Metric_Store_Handle) is
+   begin
+      if Object.Data /= null then
+         Object.Data.References := Object.Data.References + 1;
+      end if;
+   end Adjust;
+
+   overriding procedure Finalize (Object : in out Metric_Store_Handle) is
+   begin
+      if Object.Data = null then
+         return;
+      elsif Object.Data.References = 1 then
+         Free_Metric_Store (Object.Data);
+      else
+         Object.Data.References := Object.Data.References - 1;
+         Object.Data := null;
+      end if;
+   end Finalize;
+
+   type Perf_Handle is new Ada.Finalization.Limited_Controlled with record
+      State       : aliased Native_Perf_State;
+      Initialized : Boolean := False;
+   end record;
+
+   overriding procedure Finalize (Object : in out Perf_Handle) is
+   begin
+      if Object.Initialized then
+         Native_Perf_Close (Object.State'Access);
+         Object.Initialized := False;
+      end if;
+   end Finalize;
+
+   type Sample_Probe_State is record
+      Resource_Before      : Native_Resource_Values := (others => 0);
+      Resource_Before_Mask : Interfaces.Unsigned_64 := 0;
+      Scheduler_Before     : Flyology_Scheduler_Snapshot;
+   end record;
+
+   function Has_Any (Set : Metric_Set) return Boolean is
+   begin
+      for Axis in Metric_Axis loop
+         if Set (Axis) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Has_Any;
+
+   function Resource_Metrics_Requested (Config : Configuration) return Boolean
+   is
+   begin
+      for Axis in Process_CPU_Time .. Filesystem_Output_Operations loop
+         if Config.Metrics (Axis) then
+            return True;
+         end if;
+      end loop;
+      return Config.Collect_Process_Telemetry;
+   end Resource_Metrics_Requested;
+
+   function Scheduler_Metrics_Requested
+     (Config : Configuration) return Boolean
+   is
+   begin
+      for Axis in Flyology_Dispatches .. Flyology_Migrations loop
+         if Config.Metrics (Axis) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Scheduler_Metrics_Requested;
+
+   function Mask_Has
+     (Mask : Interfaces.Unsigned_64;
+      Bit  : Natural) return Boolean is
+     ((Mask and Interfaces.Shift_Left (Interfaces.Unsigned_64'(1), Bit)) /= 0);
+
+   function Perf_Status
+     (Perf  : Perf_Handle;
+      Index : Natural) return Metric_Availability
+   is
+      Value : constant Interfaces.C.int := Perf.State.Statuses (Index);
+   begin
+      if Value < 0
+        or else Value > Interfaces.C.int (Metric_Availability'Pos
+          (Metric_Availability'Last))
+      then
+         return Probe_Failed;
+      end if;
+      return Metric_Availability'Val (Natural (Value));
+   end Perf_Status;
+
+   procedure Read_Resource_Snapshot
+     (Values    : out Native_Resource_Values;
+      Mask      : out Interfaces.Unsigned_64;
+      Available : out Boolean) is
+     Local_Mask : aliased Interfaces.Unsigned_64 := 0;
+   begin
+      Values := (others => 0);
+      Available := Native_Resource_Snapshot
+        (Values (Values'First)'Address,
+         Interfaces.C.size_t (Values'Length),
+         Local_Mask'Access) = 0;
+      Mask := Local_Mask;
+   end Read_Resource_Snapshot;
+
+   procedure Initialize_Metrics
+     (Config : Configuration;
+      Result : in out Measurement) is
+   begin
+      if Has_Any (Config.Metrics) then
+         Result.Metric_Data.Data := new Metric_Store'
+           (References => 1,
+            Requested  => Config.Metrics,
+            Available  => Config.Metrics,
+            Status     => (others => Metric_Not_Requested),
+            Values     => (others => (others => 0.0)),
+            Summaries  => (others => (others => <>)));
+         for Axis in Metric_Axis loop
+            if Config.Metrics (Axis) then
+               Result.Metric_Data.Data.Status (Axis) := Metric_Collected;
+            end if;
+         end loop;
+         if Scheduler_Metrics_Requested (Config)
+           and then Config.Scheduler_Probe = null
+         then
+            for Axis in Flyology_Dispatches .. Flyology_Migrations loop
+               Result.Metric_Data.Data.Available (Axis) := False;
+               Result.Metric_Data.Data.Status (Axis) := Probe_Failed;
+            end loop;
+         end if;
+      end if;
+   end Initialize_Metrics;
+
+   procedure Initialize_Perf
+     (Config : Configuration;
+      Perf   : in out Perf_Handle)
+   is
+      Requested : Interfaces.Unsigned_64 := 0;
+   begin
+      for Axis in CPU_Cycles .. Branch_Misses loop
+         if Config.Metrics (Axis) and then Axis /= Instructions_Per_Cycle then
+            declare
+               Index : constant Natural :=
+                 (case Axis is
+                    when CPU_Cycles    => 0,
+                    when Instructions  => 1,
+                    when Cache_Misses  => 2,
+                    when Branches      => 3,
+                    when Branch_Misses => 4,
+                    when others        => 0);
+            begin
+               Requested := Requested or Interfaces.Shift_Left
+                 (Interfaces.Unsigned_64'(1), Index);
+            end;
+         end if;
+      end loop;
+      if Config.Metrics (Instructions_Per_Cycle) then
+         Requested := Requested or 3;
+      end if;
+      if Requested /= 0 then
+         if Native_Perf_Initialize (Perf.State'Access, Requested) /= 0 then
+            raise Program_Error with "Linux perf initialization failed";
+         end if;
+         Perf.Initialized := True;
+      end if;
+   end Initialize_Perf;
+
+   procedure Start_Sample
+     (Config : Configuration;
+      Perf   : in out Perf_Handle;
+      State  : out Sample_Probe_State)
+   is
+      Ignored : Boolean;
+   begin
+      State := (others => <>);
+      if Resource_Metrics_Requested (Config) then
+         Read_Resource_Snapshot
+           (State.Resource_Before, State.Resource_Before_Mask, Ignored);
+      end if;
+      if Scheduler_Metrics_Requested (Config)
+        and then Config.Scheduler_Probe /= null
+      then
+         Config.Scheduler_Probe.all (State.Scheduler_Before);
+      end if;
+      if Perf.Initialized and then Native_Perf_Start (Perf.State'Access) /= 0
+      then
+         raise Program_Error with "Linux perf counter start failed";
+      end if;
+   end Start_Sample;
 
    function Clock_Now return Interfaces.Unsigned_64 is
       Value : aliased Interfaces.Unsigned_64;
@@ -110,20 +362,6 @@ package body Flyology_Bench is
           >= Duration_Nanoseconds (Config.Maximum_Sampling_Time);
    end Sampling_Limit_Reached;
 
-   procedure Read_Process_Usage
-     (CPU       : out Interfaces.Unsigned_64;
-      RSS       : out Interfaces.Unsigned_64;
-      Available : out Boolean)
-   is
-      CPU_Value : aliased Interfaces.Unsigned_64 := 0;
-      RSS_Value : aliased Interfaces.Unsigned_64 := 0;
-   begin
-      Available := Native_Process_Usage
-        (CPU_Value'Access, RSS_Value'Access) = 0;
-      CPU := CPU_Value;
-      RSS := RSS_Value;
-   end Read_Process_Usage;
-
    procedure Record_Process_Telemetry
      (Result           : in out Measurement;
       Index            : Sample_Index;
@@ -162,6 +400,256 @@ package body Flyology_Bench is
         (Result.Telemetry_RSS_Change_Peak,
          Long_Float (RSS_After) - Long_Float (RSS_Before));
    end Record_Process_Telemetry;
+
+   procedure Finish_Sample
+     (Config      : Configuration;
+      Perf        : in out Perf_Handle;
+      State       : Sample_Probe_State;
+      Result      : in out Measurement;
+      Index       : Sample_Index;
+      Iterations  : Iteration_Count;
+      Raw_Elapsed : Long_Float)
+   is
+      Resource_After      : Native_Resource_Values := (others => 0);
+      Resource_After_Mask : Interfaces.Unsigned_64 := 0;
+      Resource_OK         : Boolean := False;
+      Perf_Values         : Native_Perf_Values := (others => 0);
+      Perf_Mask           : aliased Interfaces.Unsigned_64 := 0;
+      Scheduler_After     : Flyology_Scheduler_Snapshot;
+      Per_Operation       : constant Long_Float := Long_Float (Iterations);
+      Reported_Elapsed    : Long_Float := Raw_Elapsed;
+
+      procedure Unavailable
+        (Axis   : Metric_Axis;
+         Reason : Metric_Availability := Probe_Failed) is
+      begin
+         if Result.Metric_Data.Data /= null then
+            if Result.Metric_Data.Data.Available (Axis) then
+               Result.Metric_Data.Data.Status (Axis) := Reason;
+            end if;
+            Result.Metric_Data.Data.Available (Axis) := False;
+         end if;
+      end Unavailable;
+
+      procedure Store (Axis : Metric_Axis; Value : Long_Float) is
+      begin
+         if Result.Metric_Data.Data /= null
+           and then Result.Metric_Data.Data.Requested (Axis)
+           and then Result.Metric_Data.Data.Available (Axis)
+         then
+            Result.Metric_Data.Data.Values (Axis, Index) := Value;
+         end if;
+      end Store;
+
+      procedure Store_Resource_Delta
+        (Axis          : Metric_Axis;
+         Resource_Bit  : Natural)
+      is
+      begin
+         if Mask_Has (State.Resource_Before_Mask, Resource_Bit)
+           and then Mask_Has (Resource_After_Mask, Resource_Bit)
+           and then Resource_After (Resource_Bit)
+             >= State.Resource_Before (Resource_Bit)
+         then
+            Store
+              (Axis,
+               Long_Float
+                 (Resource_After (Resource_Bit)
+                  - State.Resource_Before (Resource_Bit))
+                 / Per_Operation);
+         else
+            Unavailable (Axis);
+         end if;
+      end Store_Resource_Delta;
+
+      function Scheduler_Delta
+        (Before : Interfaces.Unsigned_64;
+         After  : Interfaces.Unsigned_64) return Long_Float is
+      begin
+         if After < Before then
+            raise Constraint_Error with
+              "Flyology scheduler probe counters must be monotonic";
+         end if;
+         return Long_Float (After - Before) / Per_Operation;
+      end Scheduler_Delta;
+   begin
+      if Perf.Initialized
+        and then Native_Perf_Finish
+          (Perf.State'Access,
+           Perf_Values (Perf_Values'First)'Address,
+           Interfaces.C.size_t (Perf_Values'Length),
+           Perf_Mask'Access) /= 0
+      then
+         raise Program_Error with "Linux perf counter read failed";
+      end if;
+      if Scheduler_Metrics_Requested (Config)
+        and then Config.Scheduler_Probe /= null
+      then
+         Config.Scheduler_Probe.all (Scheduler_After);
+      end if;
+      if Resource_Metrics_Requested (Config) then
+         Read_Resource_Snapshot
+           (Resource_After, Resource_After_Mask, Resource_OK);
+      end if;
+
+      if Config.Collect_Process_Telemetry then
+         Record_Process_Telemetry
+           (Result, Index, Raw_Elapsed,
+            State.Resource_Before (0), Resource_After (0),
+            State.Resource_Before (2), Resource_After (2),
+            Resource_OK
+              and then Mask_Has (State.Resource_Before_Mask, 0)
+              and then Mask_Has (Resource_After_Mask, 0)
+              and then Mask_Has (State.Resource_Before_Mask, 2)
+              and then Mask_Has (Resource_After_Mask, 2));
+      end if;
+
+      if Result.Metric_Data.Data = null then
+         return;
+      end if;
+      if Config.Subtract_Timer_Cost
+        and then Raw_Elapsed > Result.Timer_Cost
+      then
+         Reported_Elapsed := Raw_Elapsed - Result.Timer_Cost;
+      end if;
+      Store (Wall_Time, Reported_Elapsed / Per_Operation);
+
+      if Result.Metric_Data.Data.Requested (Process_CPU_Time) then
+         Store_Resource_Delta (Process_CPU_Time, 0);
+      end if;
+      if Result.Metric_Data.Data.Requested (Thread_CPU_Time) then
+         Store_Resource_Delta (Thread_CPU_Time, 1);
+      end if;
+      if Result.Metric_Data.Data.Requested (Process_RSS) then
+         if Resource_OK and then Mask_Has (Resource_After_Mask, 2) then
+            Store (Process_RSS, Long_Float (Resource_After (2)));
+         else
+            Unavailable (Process_RSS);
+         end if;
+      end if;
+      if Result.Metric_Data.Data.Requested (Process_RSS_Change) then
+         if Resource_OK
+           and then Mask_Has (State.Resource_Before_Mask, 2)
+           and then Mask_Has (Resource_After_Mask, 2)
+         then
+            Store
+              (Process_RSS_Change,
+               (Long_Float (Resource_After (2))
+                - Long_Float (State.Resource_Before (2))) / Per_Operation);
+         else
+            Unavailable (Process_RSS_Change);
+         end if;
+      end if;
+      if Result.Metric_Data.Data.Requested (Minor_Page_Faults) then
+         Store_Resource_Delta (Minor_Page_Faults, 3);
+      end if;
+      if Result.Metric_Data.Data.Requested (Major_Page_Faults) then
+         Store_Resource_Delta (Major_Page_Faults, 4);
+      end if;
+      if Result.Metric_Data.Data.Requested (Voluntary_Context_Switches) then
+         Store_Resource_Delta (Voluntary_Context_Switches, 5);
+      end if;
+      if Result.Metric_Data.Data.Requested (Involuntary_Context_Switches) then
+         Store_Resource_Delta (Involuntary_Context_Switches, 6);
+      end if;
+      if Result.Metric_Data.Data.Requested (Disk_Read_Bytes) then
+         Store_Resource_Delta (Disk_Read_Bytes, 7);
+      end if;
+      if Result.Metric_Data.Data.Requested (Disk_Written_Bytes) then
+         Store_Resource_Delta (Disk_Written_Bytes, 8);
+      end if;
+      if Result.Metric_Data.Data.Requested (Filesystem_Input_Operations) then
+         Store_Resource_Delta (Filesystem_Input_Operations, 9);
+      end if;
+      if Result.Metric_Data.Data.Requested (Filesystem_Output_Operations) then
+         Store_Resource_Delta (Filesystem_Output_Operations, 10);
+      end if;
+
+      for Axis in CPU_Cycles .. Branch_Misses loop
+         if Result.Metric_Data.Data.Requested (Axis) then
+            if Axis = Instructions_Per_Cycle then
+               if Mask_Has (Perf_Mask, 0)
+                 and then Mask_Has (Perf_Mask, 1)
+                 and then Perf_Values (0) > 0
+               then
+                  Store
+                    (Axis,
+                     Long_Float (Perf_Values (1))
+                       / Long_Float (Perf_Values (0)));
+               else
+                  Unavailable
+                    (Axis,
+                     (if not Mask_Has (Perf_Mask, 0)
+                      then Perf_Status (Perf, 0)
+                      elsif not Mask_Has (Perf_Mask, 1)
+                      then Perf_Status (Perf, 1)
+                      else Probe_Failed));
+               end if;
+            else
+               declare
+                  Perf_Index : constant Natural :=
+                    (case Axis is
+                       when CPU_Cycles    => 0,
+                       when Instructions  => 1,
+                       when Cache_Misses  => 2,
+                       when Branches      => 3,
+                       when Branch_Misses => 4,
+                       when others        => 0);
+               begin
+                  if Mask_Has (Perf_Mask, Perf_Index) then
+                     Store
+                       (Axis,
+                        Long_Float (Perf_Values (Perf_Index))
+                          / Per_Operation);
+                  else
+                     Unavailable
+                       (Axis, Perf_Status (Perf, Perf_Index));
+                  end if;
+               end;
+            end if;
+         end if;
+      end loop;
+
+      if Scheduler_Metrics_Requested (Config) then
+         if Config.Scheduler_Probe = null
+           or else not State.Scheduler_Before.Available
+           or else not Scheduler_After.Available
+         then
+            for Axis in Flyology_Dispatches .. Flyology_Migrations loop
+               Unavailable (Axis);
+            end loop;
+         else
+            Store
+              (Flyology_Dispatches,
+               Scheduler_Delta
+                 (State.Scheduler_Before.Dispatches,
+                  Scheduler_After.Dispatches));
+            Store
+              (Flyology_Poll_Batches,
+               Scheduler_Delta
+                 (State.Scheduler_Before.Poll_Batches,
+                  Scheduler_After.Poll_Batches));
+            Store
+              (Flyology_Poll_Events,
+               Scheduler_Delta
+                 (State.Scheduler_Before.Poll_Events,
+                  Scheduler_After.Poll_Events));
+            Store
+              (Flyology_Wakeups,
+               Scheduler_Delta
+                 (State.Scheduler_Before.Wakeups,
+                  Scheduler_After.Wakeups));
+            Store
+              (Flyology_Migrations,
+               Scheduler_Delta
+                 (State.Scheduler_Before.Migrations_In,
+                  Scheduler_After.Migrations_In)
+               + Scheduler_Delta
+                 (State.Scheduler_Before.Migrations_Out,
+                  Scheduler_After.Migrations_Out));
+         end if;
+      end if;
+   end Finish_Sample;
 
    procedure Read_Host_CPU
      (Busy      : out Host_CPU_Counters;
@@ -576,6 +1064,237 @@ package body Flyology_Bench is
       end;
    end Analyze;
 
+   procedure Analyze_Metrics (Result : in out Measurement) is
+   begin
+      if Result.Metric_Data.Data = null then
+         return;
+      end if;
+      for Axis in Metric_Axis loop
+         if Result.Metric_Data.Data.Requested (Axis)
+           and then Result.Metric_Data.Data.Available (Axis)
+         then
+            declare
+               Count   : constant Positive := Positive (Result.Sample_Total);
+               Ordered : Float_Array (1 .. Count);
+               Means   : Float_Array (1 .. Bootstrap_Resamples);
+               Sum     : Long_Float := 0.0;
+               State   : Interfaces.Unsigned_64 :=
+                 16#243F_6A88_85A3_08D3# xor
+                 Interfaces.Unsigned_64 (Result.Random_Seed_Value)
+                 xor Interfaces.Unsigned_64 (Metric_Axis'Pos (Axis) + 1);
+               Block_Length : constant Positive :=
+                 Positive'Max
+                   (2, Positive
+                     (Long_Float'Ceiling (Math.Sqrt (Long_Float (Count)))));
+               Summary : Metric_Summary;
+            begin
+               for Sample in Ordered'Range loop
+                  Ordered (Sample) := Result.Metric_Data.Data.Values
+                    (Axis, Sample_Index (Sample));
+                  Sum := Sum + Ordered (Sample);
+               end loop;
+               Sort (Ordered);
+               Summary.Available := True;
+               Summary.Samples := Count;
+               Summary.Minimum := Ordered (Ordered'First);
+               Summary.Maximum := Ordered (Ordered'Last);
+               Summary.Mean := Sum / Long_Float (Count);
+               Summary.Median := Percentile (Ordered, 0.5);
+               Summary.P95 := Percentile (Ordered, 0.95);
+               Summary.P99 := Percentile (Ordered, 0.99);
+
+               for Resample in Means'Range loop
+                  Sum := 0.0;
+                  declare
+                     Drawn : Natural := 0;
+                  begin
+                     while Drawn < Count loop
+                        declare
+                           Start : constant Positive := Positive
+                             (Natural
+                               (Next_Random (State)
+                                mod Interfaces.Unsigned_64 (Count)) + 1);
+                        begin
+                           for Offset in 0 .. Block_Length - 1 loop
+                              exit when Drawn = Count;
+                              declare
+                                 Sample : constant Positive :=
+                                   ((Start - 1 + Offset) mod Count) + 1;
+                              begin
+                                 Sum := Sum + Result.Metric_Data.Data.Values
+                                   (Axis, Sample_Index (Sample));
+                                 Drawn := Drawn + 1;
+                              end;
+                           end loop;
+                        end;
+                     end loop;
+                  end;
+                  Means (Resample) := Sum / Long_Float (Count);
+               end loop;
+               Sort (Means);
+               Summary.Confidence_Low := Percentile (Means, 0.025);
+               Summary.Confidence_High := Percentile (Means, 0.975);
+               Result.Metric_Data.Data.Summaries (Axis) := Summary;
+            end;
+         end if;
+      end loop;
+   end Analyze_Metrics;
+
+   procedure Analyze_Metric_Comparisons (Result : in out Comparison) is
+      Count : constant Positive :=
+        Positive (Result.Reference_Data.Sample_Total);
+   begin
+      for Axis in Metric_Axis loop
+         if Result.Reference_Data.Metric_Data.Data /= null
+           and then Result.Contender_Data.Metric_Data.Data /= null
+           and then Result.Reference_Data.Metric_Data.Data.Available (Axis)
+           and then Result.Contender_Data.Metric_Data.Data.Available (Axis)
+           and then Result.Reference_Data.Metric_Data.Data.Requested (Axis)
+           and then Result.Contender_Data.Metric_Data.Data.Requested (Axis)
+         then
+            declare
+               Samples : Float_Array (1 .. Count);
+               Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+               Positive_Only : Boolean := True;
+               Sum : Long_Float := 0.0;
+               State : Interfaces.Unsigned_64 :=
+                 16#1319_8A2E_0370_7344# xor
+                 Interfaces.Unsigned_64 (Result.Random_Seed_Value)
+                 xor Interfaces.Unsigned_64 (Metric_Axis'Pos (Axis) + 1);
+               Block_Length : constant Positive :=
+                 Positive'Max
+                   (2, Positive
+                     (Long_Float'Ceiling (Math.Sqrt (Long_Float (Count)))));
+               Item : Metric_Comparison_Result;
+            begin
+               Item.Available := True;
+               Item.Reference_Median :=
+                 Result.Reference_Data.Metric_Data.Data.Summaries (Axis).Median;
+               Item.Contender_Median :=
+                 Result.Contender_Data.Metric_Data.Data.Summaries (Axis).Median;
+               for Sample in Samples'Range loop
+                  if Result.Reference_Data.Metric_Data.Data.Values
+                       (Axis, Sample_Index (Sample)) <= 0.0
+                    or else Result.Contender_Data.Metric_Data.Data.Values
+                       (Axis, Sample_Index (Sample)) <= 0.0
+                  then
+                     Positive_Only := False;
+                  end if;
+               end loop;
+
+               if Positive_Only then
+                  Item.Method := Relative_Ratio;
+                  for Sample in Samples'Range loop
+                     Samples (Sample) := Math.Log
+                       (Result.Contender_Data.Metric_Data.Data.Values
+                          (Axis, Sample_Index (Sample))
+                        / Result.Reference_Data.Metric_Data.Data.Values
+                          (Axis, Sample_Index (Sample)));
+                     Sum := Sum + Samples (Sample);
+                  end loop;
+                  Item.Change := 100.0
+                    * (Math.Exp (Sum / Long_Float (Count)) - 1.0);
+               else
+                  Item.Method := Absolute_Difference;
+                  for Sample in Samples'Range loop
+                     Samples (Sample) :=
+                       Result.Contender_Data.Metric_Data.Data.Values
+                         (Axis, Sample_Index (Sample))
+                       - Result.Reference_Data.Metric_Data.Data.Values
+                         (Axis, Sample_Index (Sample));
+                     Sum := Sum + Samples (Sample);
+                  end loop;
+                  Item.Change := Sum / Long_Float (Count);
+               end if;
+
+               for Resample in Bootstrap'Range loop
+                  Sum := 0.0;
+                  declare
+                     Drawn : Natural := 0;
+                  begin
+                     while Drawn < Count loop
+                        declare
+                           Start : constant Positive := Positive
+                             (Natural
+                               (Next_Random (State)
+                                mod Interfaces.Unsigned_64 (Count)) + 1);
+                        begin
+                           for Offset in 0 .. Block_Length - 1 loop
+                              exit when Drawn = Count;
+                              Sum := Sum + Samples
+                                (((Start - 1 + Offset) mod Count) + 1);
+                              Drawn := Drawn + 1;
+                           end loop;
+                        end;
+                     end loop;
+                  end;
+                  if Item.Method = Relative_Ratio then
+                     Bootstrap (Resample) := 100.0
+                       * (Math.Exp (Sum / Long_Float (Count)) - 1.0);
+                  else
+                     Bootstrap (Resample) := Sum / Long_Float (Count);
+                  end if;
+               end loop;
+               Sort (Bootstrap);
+               Item.Confidence_Low := Percentile (Bootstrap, 0.025);
+               Item.Confidence_High := Percentile (Bootstrap, 0.975);
+
+               if Direction (Axis) = Diagnostic then
+                  Item.Verdict := Metric_Diagnostic;
+               elsif Item.Method = Relative_Ratio then
+                  declare
+                     Threshold : constant Long_Float :=
+                       Result.Practical_Threshold;
+                  begin
+                     if Item.Confidence_Low >= -Threshold
+                       and then Item.Confidence_High <= Threshold
+                     then
+                        Item.Verdict := Metric_Practically_Equivalent;
+                     elsif Direction (Axis) = Lower_Is_Better
+                       and then Item.Confidence_High < -Threshold
+                     then
+                        Item.Verdict := Contender_Better;
+                     elsif Direction (Axis) = Lower_Is_Better
+                       and then Item.Confidence_Low > Threshold
+                     then
+                        Item.Verdict := Reference_Better;
+                     elsif Direction (Axis) = Higher_Is_Better
+                       and then Item.Confidence_Low > Threshold
+                     then
+                        Item.Verdict := Contender_Better;
+                     elsif Direction (Axis) = Higher_Is_Better
+                       and then Item.Confidence_High < -Threshold
+                     then
+                        Item.Verdict := Reference_Better;
+                     end if;
+                  end;
+               elsif Item.Confidence_Low = 0.0
+                 and then Item.Confidence_High = 0.0
+               then
+                  Item.Verdict := Metric_Practically_Equivalent;
+               elsif Direction (Axis) = Lower_Is_Better
+                 and then Item.Confidence_High < 0.0
+               then
+                  Item.Verdict := Contender_Better;
+               elsif Direction (Axis) = Lower_Is_Better
+                 and then Item.Confidence_Low > 0.0
+               then
+                  Item.Verdict := Reference_Better;
+               elsif Direction (Axis) = Higher_Is_Better
+                 and then Item.Confidence_Low > 0.0
+               then
+                  Item.Verdict := Contender_Better;
+               elsif Direction (Axis) = Higher_Is_Better
+                 and then Item.Confidence_High < 0.0
+               then
+                  Item.Verdict := Reference_Better;
+               end if;
+               Result.Metric_Comparisons (Axis) := Item;
+            end;
+         end if;
+      end loop;
+   end Analyze_Metric_Comparisons;
+
    procedure Analyze_Comparison (Result : in out Comparison) is
       Count      : constant Positive :=
         Positive (Result.Reference_Data.Sample_Total);
@@ -733,6 +1452,7 @@ package body Flyology_Bench is
             Result.Verdict_Value := Inconclusive;
          end if;
       end;
+      Analyze_Metric_Comparisons (Result);
    end Analyze_Comparison;
 
    generic
@@ -751,6 +1471,7 @@ package body Flyology_Bench is
       Target_NS        : Long_Float;
       Clock_Cost       : Long_Float;
       Calibration_Hits : Natural := 0;
+      Perf             : Perf_Handle;
 
       function Time_Batch (Iterations : Iteration_Count) return Long_Float is
          Started  : Interfaces.Unsigned_64;
@@ -773,6 +1494,34 @@ package body Flyology_Bench is
          Finish_Batch;
          return Elapsed_Nanoseconds (Started, Finished);
       end Time_Batch;
+
+      function Time_Sampled_Batch (Index : Sample_Index) return Long_Float is
+         Probe    : Sample_Probe_State;
+         Started  : Interfaces.Unsigned_64;
+         Finished : Interfaces.Unsigned_64;
+         Elapsed  : Long_Float;
+      begin
+         Prepare_Batch;
+         begin
+            Start_Sample (Config, Perf, Probe);
+            Memory_Barrier;
+            Started := Clock_Now;
+            Run_Batch (Batch_Iterations);
+            Finished := Clock_Now;
+            Memory_Barrier;
+            Elapsed := Elapsed_Nanoseconds (Started, Finished);
+            Finish_Sample
+              (Config, Perf, Probe, Result, Index,
+               Batch_Iterations, Elapsed);
+         exception
+            when others =>
+               Memory_Barrier;
+               Finish_Batch;
+               raise;
+         end;
+         Finish_Batch;
+         return Elapsed;
+      end Time_Sampled_Batch;
 
       procedure Increase_Batch (Elapsed : Long_Float) is
          Scale     : Long_Float;
@@ -808,6 +1557,7 @@ package body Flyology_Bench is
       Result := (others => <>);
       Result.Sample_Total := Config.Samples;
       Result.Random_Seed_Value := Config.Random_Seed;
+      Initialize_Metrics (Config, Result);
       Notify (Config, Starting);
       Await_CPU_Quiescence (Config);
       Characterize_Clock
@@ -871,6 +1621,7 @@ package body Flyology_Bench is
       end loop;
 
       Result.Iterations := Batch_Iterations;
+      Initialize_Perf (Config, Perf);
       declare
          Sampling_Started : constant Interfaces.Unsigned_64 := Clock_Now;
          Completed : Natural := 0;
@@ -878,28 +1629,9 @@ package body Flyology_Bench is
          Notify (Config, Sampling, 0, Natural (Config.Samples));
          for Index in Sample_Index range 1 .. Sample_Index (Config.Samples) loop
             declare
-               CPU_Before : Interfaces.Unsigned_64 := 0;
-               CPU_After : Interfaces.Unsigned_64 := 0;
-               RSS_Before : Interfaces.Unsigned_64 := 0;
-               RSS_After : Interfaces.Unsigned_64 := 0;
-               Before_Available : Boolean := False;
-               After_Available : Boolean := False;
                Elapsed : Long_Float;
-               Raw_Elapsed : Long_Float;
             begin
-               if Config.Collect_Process_Telemetry then
-                  Read_Process_Usage
-                    (CPU_Before, RSS_Before, Before_Available);
-               end if;
-               Elapsed := Time_Batch (Batch_Iterations);
-               Raw_Elapsed := Elapsed;
-               if Config.Collect_Process_Telemetry then
-                  Read_Process_Usage (CPU_After, RSS_After, After_Available);
-                  Record_Process_Telemetry
-                    (Result, Index, Raw_Elapsed,
-                     CPU_Before, CPU_After, RSS_Before, RSS_After,
-                     Before_Available and After_Available);
-               end if;
+               Elapsed := Time_Sampled_Batch (Index);
                if Config.Subtract_Timer_Cost and then Elapsed > Clock_Cost then
                   Elapsed := Elapsed - Clock_Cost;
                end if;
@@ -916,6 +1648,7 @@ package body Flyology_Bench is
       end;
       Notify (Config, Analyzing);
       Analyze (Result);
+      Analyze_Metrics (Result);
       Result.Median_Batch :=
         Result.Median * Long_Float (Result.Iterations);
       Notify (Config, Finished, 1, 1);
@@ -941,6 +1674,7 @@ package body Flyology_Bench is
       Clock_Cost       : Long_Float;
       Calibration_Hits : Natural := 0;
       Slow_Limit_Hits  : Natural := 0;
+      Perf             : Perf_Handle;
       Warmup_State     : Interfaces.Unsigned_64 :=
         16#A076_1D64_78BD_642F# xor
         Interfaces.Unsigned_64 (Config.Random_Seed);
@@ -1075,6 +1809,8 @@ package body Flyology_Bench is
       Result.Contender_Data.Sample_Total := Config.Samples;
       Result.Reference_Data.Random_Seed_Value := Config.Random_Seed;
       Result.Contender_Data.Random_Seed_Value := Config.Random_Seed;
+      Initialize_Metrics (Config, Result.Reference_Data);
+      Initialize_Metrics (Config, Result.Contender_Data);
       Characterize_Clock
         (Backend             => Result.Reference_Data.Clock_Backend_Id,
          Nominal_Resolution  => Result.Reference_Data.Clock_Resolution,
@@ -1210,6 +1946,7 @@ package body Flyology_Bench is
 
       Result.Reference_Data.Iterations := Reference_Count;
       Result.Contender_Data.Iterations := Contender_Count;
+      Initialize_Perf (Config, Perf);
       declare
          Count  : constant Positive := Positive (Config.Samples);
          Orders : Order_Array (1 .. Count);
@@ -1243,11 +1980,32 @@ package body Flyology_Bench is
             declare
                Reference_Time : Long_Float;
                Contender_Time : Long_Float;
+               Reference_Probe : Sample_Probe_State;
+               Contender_Probe : Sample_Probe_State;
             begin
-               Time_Pair
-                 (Reference_First => Orders (Index),
-                  Reference_Time => Reference_Time,
-                  Contender_Time => Contender_Time);
+               if Orders (Index) then
+                  Start_Sample (Config, Perf, Reference_Probe);
+                  Reference_Time := Time_Reference (Reference_Count);
+                  Finish_Sample
+                    (Config, Perf, Reference_Probe, Result.Reference_Data,
+                     Sample_Index (Index), Reference_Count, Reference_Time);
+                  Start_Sample (Config, Perf, Contender_Probe);
+                  Contender_Time := Time_Contender (Contender_Count);
+                  Finish_Sample
+                    (Config, Perf, Contender_Probe, Result.Contender_Data,
+                     Sample_Index (Index), Contender_Count, Contender_Time);
+               else
+                  Start_Sample (Config, Perf, Contender_Probe);
+                  Contender_Time := Time_Contender (Contender_Count);
+                  Finish_Sample
+                    (Config, Perf, Contender_Probe, Result.Contender_Data,
+                     Sample_Index (Index), Contender_Count, Contender_Time);
+                  Start_Sample (Config, Perf, Reference_Probe);
+                  Reference_Time := Time_Reference (Reference_Count);
+                  Finish_Sample
+                    (Config, Perf, Reference_Probe, Result.Reference_Data,
+                     Sample_Index (Index), Reference_Count, Reference_Time);
+               end if;
                Adjust_Timer_Cost (Reference_Time);
                Adjust_Timer_Cost (Contender_Time);
                Result.Reference_Data.Values (Sample_Index (Index)) :=
@@ -1276,6 +2034,8 @@ package body Flyology_Bench is
       Notify (Config, Analyzing);
       Analyze (Result.Reference_Data);
       Analyze (Result.Contender_Data);
+      Analyze_Metrics (Result.Reference_Data);
+      Analyze_Metrics (Result.Contender_Data);
       Result.Reference_Data.Median_Batch :=
         Result.Reference_Data.Median * Long_Float (Reference_Count);
       Result.Contender_Data.Median_Batch :=
@@ -1409,6 +2169,7 @@ package body Flyology_Bench is
         Interfaces.Unsigned_64 (Config.Random_Seed);
       Collected_Samples : Natural := 0;
       Reference_First_Schedule : Schedule_Array := (others => (others => False));
+      Perf : Perf_Handle;
 
       function Iterations_For
         (Index : Comparison_Case_Index) return Iteration_Count is
@@ -1577,6 +2338,8 @@ package body Flyology_Bench is
            Config.Samples;
          Result.Data (Comparison_Case_Index (Index)).Random_Seed_Value :=
            Config.Random_Seed;
+         Initialize_Metrics
+           (Config, Result.Data (Comparison_Case_Index (Index)));
       end loop;
       Characterize_Clock
         (Backend             => Result.Data (1).Clock_Backend_Id,
@@ -1689,6 +2452,8 @@ package body Flyology_Bench is
          end;
       end loop;
 
+      Initialize_Perf (Config, Perf);
+
       declare
          Base_Order : Order_Array (1 .. Count);
          Positions : Position_Array (1 .. Count);
@@ -1706,30 +2471,15 @@ package body Flyology_Bench is
          is
             Case_Index : constant Comparison_Case_Index :=
               Comparison_Case_Index (Case_Number);
-            CPU_Before : Interfaces.Unsigned_64 := 0;
-            CPU_After : Interfaces.Unsigned_64 := 0;
-            RSS_Before : Interfaces.Unsigned_64 := 0;
-            RSS_After : Interfaces.Unsigned_64 := 0;
-            Before_Available : Boolean := False;
-            After_Available : Boolean := False;
+            Probe : Sample_Probe_State;
             Elapsed : Long_Float;
-            Raw_Elapsed : Long_Float;
          begin
-            if Config.Collect_Process_Telemetry then
-               Read_Process_Usage
-                 (CPU_Before, RSS_Before, Before_Available);
-            end if;
+            Start_Sample (Config, Perf, Probe);
             Elapsed := Time_One
               (Case_Id'Val (Case_Number - 1), Iterations_For (Case_Index));
-            Raw_Elapsed := Elapsed;
-            if Config.Collect_Process_Telemetry then
-               Read_Process_Usage (CPU_After, RSS_After, After_Available);
-               Record_Process_Telemetry
-                 (Result.Data (Case_Index), Sample_Index (Sample),
-                  Raw_Elapsed, CPU_Before, CPU_After,
-                  RSS_Before, RSS_After,
-                  Before_Available and After_Available);
-            end if;
+            Finish_Sample
+              (Config, Perf, Probe, Result.Data (Case_Index),
+               Sample_Index (Sample), Iterations_For (Case_Index), Elapsed);
             if Config.Subtract_Timer_Cost and then Elapsed > Clock_Cost then
                Elapsed := Elapsed - Clock_Cost;
             end if;
@@ -1829,6 +2579,7 @@ package body Flyology_Bench is
               Sample_Count (Collected_Samples);
             Result.Data (Case_Index).Iterations := Iterations_For (Case_Index);
             Analyze (Result.Data (Case_Index));
+            Analyze_Metrics (Result.Data (Case_Index));
             Result.Data (Case_Index).Median_Batch :=
               Result.Data (Case_Index).Median
                 * Long_Float (Iterations_For (Case_Index));
@@ -1945,6 +2696,155 @@ package body Flyology_Bench is
       return Result.Values (Index);
    end Sample_Nanoseconds;
 
+   function Metric_Name (Axis : Metric_Axis) return String is
+   begin
+      case Axis is
+         when Wall_Time => return "wall time";
+         when Process_CPU_Time => return "process CPU time";
+         when Thread_CPU_Time => return "thread CPU time";
+         when Process_RSS => return "process RSS";
+         when Process_RSS_Change => return "process RSS change";
+         when Minor_Page_Faults => return "minor page faults";
+         when Major_Page_Faults => return "major page faults";
+         when Voluntary_Context_Switches =>
+            return "voluntary context switches";
+         when Involuntary_Context_Switches =>
+            return "involuntary context switches";
+         when Disk_Read_Bytes => return "disk read bytes";
+         when Disk_Written_Bytes => return "disk written bytes";
+         when Filesystem_Input_Operations => return "filesystem input ops";
+         when Filesystem_Output_Operations => return "filesystem output ops";
+         when CPU_Cycles => return "CPU cycles";
+         when Instructions => return "instructions";
+         when Instructions_Per_Cycle => return "IPC";
+         when Cache_Misses => return "cache misses";
+         when Branches => return "branches";
+         when Branch_Misses => return "branch misses";
+         when Flyology_Dispatches => return "Flyology dispatches";
+         when Flyology_Poll_Batches => return "Flyology poll batches";
+         when Flyology_Poll_Events => return "Flyology poll events";
+         when Flyology_Wakeups => return "Flyology wakeups";
+         when Flyology_Migrations => return "Flyology migrations";
+      end case;
+   end Metric_Name;
+
+   function Metric_Unit (Axis : Metric_Axis) return String is
+   begin
+      case Axis is
+         when Wall_Time | Process_CPU_Time | Thread_CPU_Time =>
+            return "ns/op";
+         when Process_RSS =>
+            return "bytes";
+         when Process_RSS_Change | Disk_Read_Bytes | Disk_Written_Bytes =>
+            return "bytes/op";
+         when Minor_Page_Faults | Major_Page_Faults =>
+            return "faults/op";
+         when Voluntary_Context_Switches |
+              Involuntary_Context_Switches =>
+            return "switches/op";
+         when Filesystem_Input_Operations |
+              Filesystem_Output_Operations =>
+            return "I/O ops/op";
+         when CPU_Cycles =>
+            return "cycles/op";
+         when Instructions =>
+            return "instructions/op";
+         when Instructions_Per_Cycle =>
+            return "instructions/cycle";
+         when Cache_Misses =>
+            return "misses/op";
+         when Branches =>
+            return "branches/op";
+         when Branch_Misses =>
+            return "misses/op";
+         when Flyology_Dispatches | Flyology_Poll_Batches |
+              Flyology_Poll_Events | Flyology_Wakeups |
+              Flyology_Migrations =>
+            return "events/op";
+      end case;
+   end Metric_Unit;
+
+   function Scope (Axis : Metric_Axis) return Metric_Scope is
+   begin
+      case Axis is
+         when Wall_Time =>
+            return Batch_Wall_Clock;
+         when Thread_CPU_Time | CPU_Cycles | Instructions |
+              Instructions_Per_Cycle | Cache_Misses | Branches |
+              Branch_Misses =>
+            if Axis = Thread_CPU_Time then
+               return Current_Native_Thread;
+            end if;
+            return Native_Task_Tree;
+         when Flyology_Dispatches | Flyology_Poll_Batches |
+              Flyology_Poll_Events | Flyology_Wakeups |
+              Flyology_Migrations =>
+            return Flyology_Runtime;
+         when others =>
+            return Benchmark_Process;
+      end case;
+   end Scope;
+
+   function Direction (Axis : Metric_Axis) return Metric_Direction is
+   begin
+      case Axis is
+         when Instructions_Per_Cycle =>
+            return Higher_Is_Better;
+         when Process_RSS | Instructions | Branches | Flyology_Dispatches |
+              Flyology_Poll_Batches | Flyology_Poll_Events |
+              Flyology_Wakeups | Flyology_Migrations =>
+            return Diagnostic;
+         when others =>
+            return Lower_Is_Better;
+      end case;
+   end Direction;
+
+   function Metric_Available
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Boolean is
+     (Result.Metric_Data.Data /= null
+      and then Result.Metric_Data.Data.Requested (Axis)
+      and then Result.Metric_Data.Data.Available (Axis)
+      and then Result.Metric_Data.Data.Summaries (Axis).Available);
+
+   function Metric_Status
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Metric_Availability is
+     (if Result.Metric_Data.Data = null
+      then Metric_Not_Requested
+      else Result.Metric_Data.Data.Status (Axis));
+
+   function Metric_Requested
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Boolean is
+     (Result.Metric_Data.Data /= null
+      and then Result.Metric_Data.Data.Requested (Axis));
+
+   function Metric_Sample
+     (Result : Measurement;
+      Axis   : Metric_Axis;
+      Index  : Sample_Index) return Long_Float
+   is
+   begin
+      if not Metric_Available (Result, Axis) then
+         raise Constraint_Error with "metric axis is unavailable";
+      elsif Index > Result.Sample_Total then
+         raise Constraint_Error with
+           "metric sample index exceeds collected samples";
+      end if;
+      return Result.Metric_Data.Data.Values (Axis, Index);
+   end Metric_Sample;
+
+   function Metric_Statistics
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Metric_Summary is
+   begin
+      if not Metric_Available (Result, Axis) then
+         return (others => <>);
+      end if;
+      return Result.Metric_Data.Data.Summaries (Axis);
+   end Metric_Statistics;
+
    function Reference_Measurement (Result : Comparison) return Measurement is
      (Result.Reference_Data);
 
@@ -1997,6 +2897,11 @@ package body Flyology_Bench is
      (Result.Reference_Win_Total);
 
    function Ties (Result : Comparison) return Natural is (Result.Tie_Total);
+
+   function Compare_Metric
+     (Result : Comparison;
+      Axis   : Metric_Axis) return Metric_Comparison_Result is
+     (Result.Metric_Comparisons (Axis));
 
    function Reference_First_Samples (Result : Comparison) return Natural is
      (Result.Reference_First);

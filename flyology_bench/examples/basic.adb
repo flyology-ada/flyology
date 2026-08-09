@@ -4,11 +4,14 @@
 with Flyology_Bench;
 with Flyology_Bench.Reporters;
 with Interfaces;
+with Ada.Command_Line;
 with Ada.Environment_Variables;
+with Ada.Strings.Unbounded;
 
 procedure Basic is
    use type Interfaces.Unsigned_32;
    use type Flyology_Bench.Iteration_Count;
+   use type Flyology_Bench.Metric_Set;
 
    Reference_Value : Interfaces.Unsigned_32 := 1;
    Contender_Value : Interfaces.Unsigned_32 := 1;
@@ -167,8 +170,64 @@ procedure Basic is
      Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Mix_Case);
    procedure Put_CSV is new
      Flyology_Bench.Reporters.Put_Multi_Comparison_CSV (Mix_Case);
+   procedure Put_Metrics_CSV is new
+     Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV (Mix_Case);
    procedure Put_JSON is new
      Flyology_Bench.Reporters.Put_Multi_Comparison_JSON (Mix_Case);
+
+   Usage : constant String :=
+     "usage: basic [--metrics=all|--metrics=perf] "
+     & "[--require-perf[=core|all]]";
+
+   --  Which hardware axes a strict run insists on. All_Axes keeps the strong
+   --  reading that every selected PMU axis must be collected. Core_Axes is
+   --  the documented opt-out for a host whose PMU implements cycles and
+   --  instructions but rejects a generic cache or branch event.
+   type Perf_Requirement is (No_Requirement, Core_Axes, All_Axes);
+
+   function Metrics_From_Arguments return Flyology_Bench.Metric_Set is
+      Result : Flyology_Bench.Metric_Set :=
+        Flyology_Bench.All_Builtin_Metrics;
+   begin
+      for Index in 1 .. Ada.Command_Line.Argument_Count loop
+         declare
+            Argument : constant String := Ada.Command_Line.Argument (Index);
+         begin
+            if Argument = "--metrics=perf" then
+               Result := Flyology_Bench.Time_Metrics
+                 or Flyology_Bench.Linux_Hardware_Metrics;
+            elsif Argument = "--metrics=all"
+              or else Argument = "--require-perf"
+              or else Argument = "--require-perf=all"
+              or else Argument = "--require-perf=core"
+            then
+               null;
+            else
+               raise Constraint_Error with Usage;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Metrics_From_Arguments;
+
+   function Requirement_From_Arguments return Perf_Requirement is
+      Result : Perf_Requirement := No_Requirement;
+   begin
+      for Index in 1 .. Ada.Command_Line.Argument_Count loop
+         declare
+            Argument : constant String := Ada.Command_Line.Argument (Index);
+         begin
+            if Argument = "--require-perf"
+              or else Argument = "--require-perf=all"
+            then
+               Result := All_Axes;
+            elsif Argument = "--require-perf=core" then
+               Result := Core_Axes;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Requirement_From_Arguments;
 
    Result : Flyology_Bench.Measurement;
    Multi_Result : Flyology_Bench.Multi_Comparison;
@@ -178,6 +237,9 @@ procedure Basic is
    Wait_For_Quiet_CPU : constant Boolean :=
      Ada.Environment_Variables.Value
        ("FLYOLOGY_BENCH_QUIESCENCE", Default => "0") = "1";
+   Selected_Metrics : constant Flyology_Bench.Metric_Set :=
+     Metrics_From_Arguments;
+   Require_Perf : constant Perf_Requirement := Requirement_From_Arguments;
    Single_Base_Config : constant Flyology_Bench.Configuration :=
      (Warmup_Time                  => 0.200,
       Measurement_Time             => 1.000,
@@ -190,6 +252,8 @@ procedure Basic is
       Subtract_Timer_Cost          => False,
       Practical_Threshold_Percent => 1.0,
       Random_Seed                  => 42,
+      Metrics                      => Selected_Metrics,
+      Scheduler_Probe              => null,
       CPU_Quiescence               =>
         (Enabled                     => Wait_For_Quiet_CPU,
          Maximum_Average_CPU_Percent => 20.0,
@@ -227,6 +291,39 @@ begin
       Keep (Worker_Results (Slot));
    end loop;
    Run (Config => Single_Config, Result => Result);
+   if Require_Perf /= No_Requirement then
+      declare
+         use type Ada.Strings.Unbounded.Unbounded_String;
+
+         Last_Required : constant Flyology_Bench.Metric_Axis :=
+           (if Require_Perf = Core_Axes
+            then Flyology_Bench.Instructions_Per_Cycle
+            else Flyology_Bench.Branch_Misses);
+         Missing : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         for Axis in Flyology_Bench.CPU_Cycles .. Last_Required loop
+            if Selected_Metrics (Axis)
+              and then not Flyology_Bench.Metric_Available (Result, Axis)
+            then
+               if Missing /= Ada.Strings.Unbounded.Null_Unbounded_String then
+                  Ada.Strings.Unbounded.Append (Missing, "; ");
+               end if;
+               Ada.Strings.Unbounded.Append
+                 (Missing,
+                  Flyology_Bench.Metric_Name (Axis) & " unavailable: "
+                  & Flyology_Bench.Metric_Availability'Image
+                      (Flyology_Bench.Metric_Status (Result, Axis)));
+            end if;
+         end loop;
+         if Missing /= Ada.Strings.Unbounded.Null_Unbounded_String then
+            raise Program_Error with
+              (if Require_Perf = Core_Axes
+               then "required core hardware metrics: "
+               else "required hardware metrics: ")
+              & Ada.Strings.Unbounded.To_String (Missing);
+         end if;
+      end;
+   end if;
    if Output_Mode = "terminal" then
       Flyology_Bench.Reporters.Put_Console ("integer_mix", Result);
    end if;
@@ -244,6 +341,8 @@ begin
    elsif Output_Mode = "csv" then
       Flyology_Bench.Reporters.Put_Multi_Comparison_CSV_Header;
       Put_CSV (Multi_Result);
+      Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header;
+      Put_Metrics_CSV (Multi_Result);
    elsif Output_Mode = "json" then
       Put_JSON (Multi_Result);
    else

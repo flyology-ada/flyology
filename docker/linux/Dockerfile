@@ -9,6 +9,7 @@ RUN apt-get update \
        ca-certificates \
        curl \
        git \
+       jq \
        libssl-dev \
        pkg-config \
        unzip \

@@ -63,6 +63,22 @@ package Flyology_Bench.Reporters is
       Result : Measurement;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
+   --  Print the long-form schema header used by Put_Metrics_CSV rows.
+   --  @param File Destination text file.
+   procedure Put_Metrics_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one row per requested metric axis. Unavailable axes retain their
+   --  identity, scope, unit, and specific status with an available=false
+   --  marker.
+   --  @param Name Benchmark name.
+   --  @param Result Completed measurement.
+   --  @param File Destination text file.
+   procedure Put_Metrics_CSV
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
    --  Print one benchmark as a newline-delimited JSON object.
    --  @param Name Benchmark name.
    --  @param Result Completed measurement.
@@ -97,6 +113,22 @@ package Flyology_Bench.Reporters is
    --  @param Result Completed paired comparison.
    --  @param File Destination text file.
    procedure Put_Comparison_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the long-form schema header used by comparison metric rows.
+   --  @param File Destination text file.
+   procedure Put_Comparison_Metrics_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one row per requested paired metric comparison.
+   --  @param Reference_Name Reference implementation name.
+   --  @param Contender_Name Contender implementation name.
+   --  @param Result Completed paired comparison.
+   --  @param File Destination text file.
+   procedure Put_Comparison_Metrics_CSV
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
@@ -141,6 +173,17 @@ package Flyology_Bench.Reporters is
    --  @param Result Completed multi-way comparison.
    --  @param File Destination text file.
    procedure Put_Multi_Comparison_CSV
+     (Result : Multi_Comparison;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   generic
+      --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
+   --  Print one long-form comparison metric row per contender and axis. Use
+   --  Put_Comparison_Metrics_CSV_Header for the schema header.
+   --  @param Result Completed multi-way comparison.
+   --  @param File Destination text file.
+   procedure Put_Multi_Comparison_Metrics_CSV
      (Result : Multi_Comparison;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 

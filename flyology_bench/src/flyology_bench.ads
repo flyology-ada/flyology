@@ -1,7 +1,9 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
+with Ada.Finalization;
 with Ada.Strings.Unbounded;
+with Interfaces;
 
 --  Measures adaptive batches and paired comparisons of Ada operations.
 package Flyology_Bench is
@@ -74,6 +76,221 @@ package Flyology_Bench is
    --  @enum Sequential_Cases Collect one implementation's block at a time.
    type Shootout_Schedule_Policy is (Balanced_Rounds, Sequential_Cases);
 
+   --  One independently sampled measurement axis. Wall_Time remains the
+   --  calibration and collection-budget clock even when it is not selected
+   --  for reporting. Process counters include every thread in the benchmark
+   --  process; thread CPU covers only the executing pthread. Linux PMU
+   --  counters additionally inherit into child native tasks created after
+   --  counter initialization. Flyology counters require Scheduler_Probe.
+   --  @enum Wall_Time Monotonic elapsed nanoseconds per logical operation.
+   --  @enum Process_CPU_Time User plus system CPU nanoseconds per operation
+   --  across the process.
+   --  @enum Thread_CPU_Time User plus system CPU nanoseconds per operation on
+   --  the calling native pthread.
+   --  @enum Process_RSS Resident bytes observed after the batch.
+   --  @enum Process_RSS_Change Resident-byte change per logical operation.
+   --  @enum Minor_Page_Faults Minor faults per logical operation.
+   --  @enum Major_Page_Faults Major faults per logical operation.
+   --  @enum Voluntary_Context_Switches Voluntary switches per operation.
+   --  @enum Involuntary_Context_Switches Involuntary switches per operation.
+   --  @enum Disk_Read_Bytes Storage bytes read per logical operation.
+   --  @enum Disk_Written_Bytes Storage bytes written per logical operation.
+   --  @enum Filesystem_Input_Operations Filesystem input operations per
+   --  logical operation.
+   --  @enum Filesystem_Output_Operations Filesystem output operations per
+   --  logical operation.
+   --  @enum CPU_Cycles Linux perf CPU cycles per logical operation.
+   --  @enum Instructions Linux perf retired instructions per operation.
+   --  @enum Instructions_Per_Cycle Linux perf instructions divided by cycles.
+   --  @enum Cache_Misses Linux perf cache misses per logical operation.
+   --  @enum Branches Linux perf branch instructions per logical operation.
+   --  @enum Branch_Misses Linux perf branch misses per logical operation.
+   --  @enum Flyology_Dispatches Scheduler dispatches per logical operation.
+   --  @enum Flyology_Poll_Batches Poller batches per logical operation.
+   --  @enum Flyology_Poll_Events Delivered poll events per logical operation.
+   --  @enum Flyology_Wakeups Wake requests per logical operation.
+   --  @enum Flyology_Migrations Inbound plus outbound migrations per logical
+   --  operation.
+   type Metric_Axis is
+     (Wall_Time,
+      Process_CPU_Time,
+      Thread_CPU_Time,
+      Process_RSS,
+      Process_RSS_Change,
+      Minor_Page_Faults,
+      Major_Page_Faults,
+      Voluntary_Context_Switches,
+      Involuntary_Context_Switches,
+      Disk_Read_Bytes,
+      Disk_Written_Bytes,
+      Filesystem_Input_Operations,
+      Filesystem_Output_Operations,
+      CPU_Cycles,
+      Instructions,
+      Instructions_Per_Cycle,
+      Cache_Misses,
+      Branches,
+      Branch_Misses,
+      Flyology_Dispatches,
+      Flyology_Poll_Batches,
+      Flyology_Poll_Events,
+      Flyology_Wakeups,
+      Flyology_Migrations);
+
+   --  Set of axes requested for one run.
+   type Metric_Set is array (Metric_Axis) of Boolean;
+
+   --  Wall-time results only, without additional native probes.
+   Time_Metrics : constant Metric_Set := (Wall_Time => True, others => False);
+   --  Portable Darwin/Linux process, thread, memory, fault, switch, and I/O
+   --  counters in addition to wall time.
+   Process_Resource_Metrics : constant Metric_Set :=
+     (Wall_Time .. Filesystem_Output_Operations => True, others => False);
+   --  Linux perf counters covering the calling pthread and the native tasks
+   --  it creates afterwards. Axes remain unavailable when the kernel, host
+   --  PMU, or perf permissions reject an event; Metric_Status reports which.
+   Linux_Hardware_Metrics : constant Metric_Set :=
+     (CPU_Cycles .. Branch_Misses => True, others => False);
+   --  Counters supplied through Scheduler_Probe.
+   Flyology_Scheduler_Metrics : constant Metric_Set :=
+     (Flyology_Dispatches .. Flyology_Migrations => True, others => False);
+   --  Every built-in axis; Flyology scheduler counters remain opt-in because
+   --  the standalone crate has no dependency on the Flyology runtime.
+   All_Builtin_Metrics : constant Metric_Set :=
+     Process_Resource_Metrics or Linux_Hardware_Metrics;
+
+   --  Collection state retained for each requested metric.
+   --  @enum Metric_Not_Requested The configuration did not select the axis.
+   --  @enum Metric_Collected Every retained sample contains a value.
+   --  @enum Unsupported_Platform The operating system has no backend.
+   --  @enum Permission_Denied The operating system rejected probe access.
+   --  @enum Unsupported_Event The host exposes no counter for the event,
+   --  either because it has no performance monitoring unit or because that
+   --  unit does not implement this event.
+   --  @enum Counter_Resources_Unavailable The event could not be scheduled or
+   --  allocated.
+   --  @enum Probe_Failed A native snapshot, counter control, or read failed,
+   --  or the kernel rejected the requested counter attributes.
+   type Metric_Availability is
+     (Metric_Not_Requested,
+      Metric_Collected,
+      Unsupported_Platform,
+      Permission_Denied,
+      Unsupported_Event,
+      Counter_Resources_Unavailable,
+      Probe_Failed);
+
+   --  Attribution boundary of a metric.
+   --  @enum Batch_Wall_Clock Monotonic elapsed time surrounding the batch.
+   --  @enum Benchmark_Process All native threads in the process.
+   --  @enum Current_Native_Thread Only the pthread executing the probe.
+   --  @enum Native_Task_Tree The executing pthread and child native tasks or
+   --  processes it creates after counter initialization.
+   --  @enum Flyology_Runtime Counters supplied by Flyology observability.
+   type Metric_Scope is
+     (Batch_Wall_Clock, Benchmark_Process, Current_Native_Thread,
+      Native_Task_Tree, Flyology_Runtime);
+
+   --  Whether a smaller or larger value is normally resource-favorable.
+   --  Diagnostic metrics receive no better/worse verdict.
+   --  @enum Lower_Is_Better Smaller resource consumption is favorable.
+   --  @enum Higher_Is_Better Larger efficiency is favorable.
+   --  @enum Diagnostic No general optimization direction is asserted.
+   type Metric_Direction is
+     (Lower_Is_Better, Higher_Is_Better, Diagnostic);
+
+   --  Statistical form used to compare one metric.
+   --  @enum Relative_Ratio Paired positive samples use ratios and percent.
+   --  @enum Absolute_Difference Signed or zero-valued samples use differences.
+   type Metric_Comparison_Method is
+     (Relative_Ratio, Absolute_Difference);
+
+   --  Resource-oriented result of a metric comparison.
+   --  @enum Metric_Inconclusive The interval establishes no direction.
+   --  @enum Metric_Practically_Equivalent A relative interval lies inside the
+   --  configured practical threshold.
+   --  @enum Contender_Better The contender uses less resource or has greater
+   --  efficiency, according to the metric direction.
+   --  @enum Reference_Better The reference is favorable.
+   --  @enum Metric_Diagnostic The axis has no general optimization direction.
+   type Metric_Verdict is
+     (Metric_Inconclusive,
+      Metric_Practically_Equivalent,
+      Contender_Better,
+      Reference_Better,
+      Metric_Diagnostic);
+
+   --  Cumulative Flyology scheduler counters supplied outside timed regions.
+   --  A caller can sum one or more Flyology.Observability.Group_Snapshot
+   --  values. Counters must be process-lifetime monotonic values.
+   --  @field Available Whether the snapshot contains usable counters.
+   --  @field Dispatches Cumulative fiber dispatches.
+   --  @field Poll_Batches Cumulative event-poller batches.
+   --  @field Poll_Events Cumulative host events delivered.
+   --  @field Wakeups Cumulative task wake requests.
+   --  @field Migrations_In Cumulative migrations entering observed groups.
+   --  @field Migrations_Out Cumulative migrations leaving observed groups.
+   type Flyology_Scheduler_Snapshot is record
+      Available      : Boolean := False;
+      Dispatches     : Interfaces.Unsigned_64 := 0;
+      Poll_Batches   : Interfaces.Unsigned_64 := 0;
+      Poll_Events    : Interfaces.Unsigned_64 := 0;
+      Wakeups        : Interfaces.Unsigned_64 := 0;
+      Migrations_In  : Interfaces.Unsigned_64 := 0;
+      Migrations_Out : Interfaces.Unsigned_64 := 0;
+   end record;
+
+   --  Capture cumulative Flyology scheduler counters outside a timed region.
+   --  @param Snapshot Caller-populated cumulative counter snapshot.
+   type Flyology_Scheduler_Probe is access procedure
+     (Snapshot : out Flyology_Scheduler_Snapshot);
+
+   --  Distribution summary for one requested measurement axis.
+   --  @field Available Whether every retained sample has this axis.
+   --  @field Samples Number of retained metric samples.
+   --  @field Minimum Smallest sample in Metric_Unit units.
+   --  @field Maximum Largest sample.
+   --  @field Mean Arithmetic sample mean.
+   --  @field Median Sample median.
+   --  @field P95 Ninety-fifth percentile.
+   --  @field P99 Ninety-ninth percentile.
+   --  @field Confidence_Low Lower endpoint of the bootstrap mean interval.
+   --  @field Confidence_High Upper endpoint of the bootstrap mean interval.
+   type Metric_Summary is record
+      Available       : Boolean := False;
+      Samples         : Natural := 0;
+      Minimum         : Long_Float := 0.0;
+      Maximum         : Long_Float := 0.0;
+      Mean            : Long_Float := 0.0;
+      Median          : Long_Float := 0.0;
+      P95             : Long_Float := 0.0;
+      P99             : Long_Float := 0.0;
+      Confidence_Low  : Long_Float := 0.0;
+      Confidence_High : Long_Float := 0.0;
+   end record;
+
+   --  Paired comparison summary for one metric axis.
+   --  Change is contender relative percent for Relative_Ratio and contender
+   --  minus reference in Metric_Unit units for Absolute_Difference.
+   --  @field Available Whether both sides retained complete axis samples.
+   --  @field Method Relative ratio or signed absolute difference.
+   --  @field Reference_Median Reference median in Metric_Unit units.
+   --  @field Contender_Median Contender median in Metric_Unit units.
+   --  @field Change Point estimate of contender change.
+   --  @field Confidence_Low Lower endpoint in the same change units.
+   --  @field Confidence_High Upper endpoint in the same change units.
+   --  @field Verdict Directional, equivalent, inconclusive, or diagnostic.
+   type Metric_Comparison_Result is record
+      Available         : Boolean := False;
+      Method            : Metric_Comparison_Method := Absolute_Difference;
+      Reference_Median  : Long_Float := 0.0;
+      Contender_Median  : Long_Float := 0.0;
+      Change            : Long_Float := 0.0;
+      Confidence_Low    : Long_Float := 0.0;
+      Confidence_High   : Long_Float := 0.0;
+      Verdict           : Metric_Verdict := Metric_Inconclusive;
+   end record;
+
    --  Controls the optional host CPU preflight gate. When enabled, the harness
    --  samples utilization outside timed regions and proceeds only after both
    --  the host-wide average and busiest logical CPU remain at or below their
@@ -117,6 +334,9 @@ package Flyology_Bench is
    --  @field Practical_Threshold_Percent Smallest relative time change treated
    --  as practically meaningful by paired-comparison verdicts.
    --  @field Random_Seed Seed used for order shuffling and bootstrap sampling.
+   --  @field Metrics Axes retained and compared around each timed batch.
+   --  @field Scheduler_Probe Optional source of cumulative Flyology scheduler
+   --  counters. The callback runs only outside timed regions.
    --  @field CPU_Quiescence Optional sustained low-host-CPU gate performed
    --  before clock characterization and workload warmup.
    --  @field Collect_Process_Telemetry Capture process CPU and RSS around each
@@ -136,6 +356,8 @@ package Flyology_Bench is
       Subtract_Timer_Cost  : Boolean := False;
       Practical_Threshold_Percent : Long_Float := 1.0;
       Random_Seed          : Long_Long_Integer := 1;
+      Metrics              : Metric_Set := Time_Metrics;
+      Scheduler_Probe      : Flyology_Scheduler_Probe := null;
       CPU_Quiescence       : CPU_Quiescence_Policy := (others => <>);
       Collect_Process_Telemetry : Boolean := False;
       Progress             : Progress_Handler := null;
@@ -397,6 +619,71 @@ package Flyology_Bench is
      (Result : Measurement;
       Index  : Sample_Index) return Long_Float;
 
+   --  Return a stable human-readable metric name.
+   --  @param Axis Selected measurement axis.
+   --  @return Stable display name used by reporters.
+   function Metric_Name (Axis : Metric_Axis) return String;
+
+   --  Return the metric's human-readable unit.
+   --  @param Axis Selected measurement axis.
+   --  @return Unit string, including per-operation normalization.
+   function Metric_Unit (Axis : Metric_Axis) return String;
+
+   --  Return the attribution boundary of one metric.
+   --  @param Axis Selected measurement axis.
+   --  @return Wall, process, current-thread, native-task-tree, or Flyology
+   --  runtime scope.
+   function Scope (Axis : Metric_Axis) return Metric_Scope;
+
+   --  Return the resource direction used by comparison verdicts.
+   --  @param Axis Selected measurement axis.
+   --  @return Lower, higher, or diagnostic direction.
+   function Direction (Axis : Metric_Axis) return Metric_Direction;
+
+   --  Test whether complete samples exist for one axis.
+   --  @param Result Completed measurement.
+   --  @param Axis Requested measurement axis.
+   --  @return True when every retained sample has a value.
+   function Metric_Available
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Boolean;
+
+   --  Return why an axis is available, absent, or unusable.
+   --  @param Result Completed measurement.
+   --  @param Axis Measurement axis.
+   --  @return Retained collection state with a specific failure class.
+   function Metric_Status
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Metric_Availability;
+
+   --  Test whether an axis was selected for one measurement.
+   --  @param Result Completed measurement.
+   --  @param Axis Measurement axis.
+   --  @return True when the configuration requested the axis.
+   function Metric_Requested
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Boolean;
+
+   --  Return one retained metric sample.
+   --  @param Result Completed measurement.
+   --  @param Axis Requested measurement axis.
+   --  @param Index One-based retained sample index.
+   --  @return Value in Metric_Unit units.
+   --  @exception Constraint_Error If the axis is unavailable or Index exceeds
+   --  the retained sample count.
+   function Metric_Sample
+     (Result : Measurement;
+      Axis   : Metric_Axis;
+      Index  : Sample_Index) return Long_Float;
+
+   --  Return the distribution summary for one axis.
+   --  @param Result Completed measurement.
+   --  @param Axis Requested measurement axis.
+   --  @return Available or unavailable summary.
+   function Metric_Statistics
+     (Result : Measurement;
+      Axis   : Metric_Axis) return Metric_Summary;
+
    --  Return the reference side of a paired comparison.
    --  @param Result Completed comparison.
    --  @return Reference-side measurement using the shared sample schedule.
@@ -493,6 +780,16 @@ package Flyology_Bench is
    --  @return Pairs with equal reported per-operation time.
    function Ties (Result : Comparison) return Natural;
 
+   --  Compare one retained axis using the same paired sample schedule as wall
+   --  time. Positive-only axes use relative ratios; signed or zero-containing
+   --  axes use paired absolute differences.
+   --  @param Result Completed comparison.
+   --  @param Axis Requested measurement axis.
+   --  @return Available or unavailable paired metric comparison.
+   function Compare_Metric
+     (Result : Comparison;
+      Axis   : Metric_Axis) return Metric_Comparison_Result;
+
    --  Return how many timed pairs ran the reference first.
    --  @param Result Completed comparison.
    --  @return Timed pairs that ran the reference side first.
@@ -561,6 +858,33 @@ package Flyology_Bench is
 private
    type Sample_Array is array (Sample_Index range <>) of Long_Float;
    type Boolean_Sample_Array is array (Sample_Index range <>) of Boolean;
+   type Metric_Sample_Matrix is
+     array (Metric_Axis, Sample_Index) of Long_Float;
+   type Metric_Summary_Array is array (Metric_Axis) of Metric_Summary;
+   type Metric_Comparison_Array is
+     array (Metric_Axis) of Metric_Comparison_Result;
+   type Metric_Availability_Array is
+     array (Metric_Axis) of Metric_Availability;
+
+   type Metric_Store is record
+      References : Positive := 1;
+      Requested  : Metric_Set := Time_Metrics;
+      Available  : Metric_Set := (others => False);
+      Status     : Metric_Availability_Array :=
+        (others => Metric_Not_Requested);
+      Values     : Metric_Sample_Matrix := (others => (others => 0.0));
+      Summaries  : Metric_Summary_Array := (others => (others => <>));
+   end record;
+   type Metric_Store_Access is access Metric_Store;
+   type Metric_Store_Handle is new Ada.Finalization.Controlled with record
+      Data : Metric_Store_Access := null;
+   end record;
+   --  @exclude
+   --  @param Object Internal shared store handle.
+   overriding procedure Adjust (Object : in out Metric_Store_Handle);
+   --  @exclude
+   --  @param Object Internal shared store handle.
+   overriding procedure Finalize (Object : in out Metric_Store_Handle);
 
    type Measurement is record
       Sample_Total       : Sample_Count := Sample_Count'First;
@@ -600,6 +924,7 @@ private
       Telemetry_RSS_Peak  : Long_Float := 0.0;
       Telemetry_RSS_Change_Total : Long_Float := 0.0;
       Telemetry_RSS_Change_Peak : Long_Float := 0.0;
+      Metric_Data         : Metric_Store_Handle;
    end record;
 
    type Comparison is record
@@ -624,6 +949,8 @@ private
       Practical_Threshold  : Long_Float := 1.0;
       Random_Seed_Value    : Long_Long_Integer := 1;
       Verdict_Value        : Comparison_Verdict := Inconclusive;
+      Metric_Comparisons   : Metric_Comparison_Array :=
+        (others => (others => <>));
    end record;
 
    type Measurement_Case_Array is
