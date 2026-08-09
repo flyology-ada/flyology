@@ -18,6 +18,7 @@ with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Rings.MPMC;
 with Flyology.Data_Structures.Rings.SPSC;
 with Flyology.Data_Structures.Slab_Pools;
+with Flyology.Data_Structures.Storage_Types.Elements;
 with Flyology.Data_Structures.Storage_Types.Unsigned_64s;
 with Flyology.Data_Structures.Vectors;
 with Interfaces;
@@ -45,6 +46,58 @@ procedure Data_Structures_Concurrency_Smoke is
      (Element => U64_Elements.Element);
    package MPMC is new DS.Rings.MPMC
      (Element => U64_Elements.Element);
+
+   --  Hold one consumer after it advances Dequeue but before it releases the
+   --  claimed slot, making active-attachment ordering deterministic.
+   protected Paused_Observation is
+      procedure Mark_Entered;
+      entry Await_Entered;
+      entry Continue;
+      procedure Release;
+   private
+      Entered  : Boolean := False;
+      Released : Boolean := False;
+   end Paused_Observation;
+
+   protected body Paused_Observation is
+      procedure Mark_Entered is
+      begin
+         Entered := True;
+      end Mark_Entered;
+
+      entry Await_Entered when Entered is
+      begin
+         null;
+      end Await_Entered;
+
+      entry Continue when Released is
+      begin
+         null;
+      end Continue;
+
+      procedure Release is
+      begin
+         Released := True;
+      end Release;
+   end Paused_Observation;
+
+   function Observe_After_Claim
+     (Item : U64_Elements.Representation.Const_Ref)
+      return Interfaces.Unsigned_64 is
+   begin
+      Paused_Observation.Mark_Entered;
+      Paused_Observation.Continue;
+      return U64_Elements.Value_Of (Item);
+   end Observe_After_Claim;
+
+   package Paused_U64_Element is new DS.Storage_Types.Elements
+     (Representation  => U64_Elements.Representation,
+      Source_Type     => Interfaces.Unsigned_64,
+      Observed_Type   => Interfaces.Unsigned_64,
+      Create_Value    => U64_Elements.Create,
+      Observe_Value   => Observe_After_Claim);
+   package Paused_MPMC is new DS.Rings.MPMC
+     (Element => Paused_U64_Element);
    package Slabs is new DS.Slab_Pools
      (Element => U64_Elements.Element);
    package Vectors is new DS.Vectors
@@ -84,6 +137,7 @@ procedure Data_Structures_Concurrency_Smoke is
    Mapping_Length : constant C.size_t := 4_194_304;
    SPSC_Location : constant DS.Region_Offset := 64;
    MPMC_Location : constant DS.Region_Offset := 131_072;
+   Active_Attach_MPMC_Location : constant DS.Region_Offset := 200_000;
    Slab_Location : constant DS.Region_Offset := 400_000;
    Vector_Location : constant DS.Region_Offset := 524_288;
    String_Location : constant DS.Region_Offset := 700_000;
@@ -500,6 +554,73 @@ procedure Data_Structures_Concurrency_Smoke is
          MPMC.Detach (Consumer_Views (Index));
       end loop;
    end Run_MPMC;
+
+   procedure Run_Active_MPMC_Attach is
+      Owner  : aliased Paused_MPMC.View;
+      Joiner : Paused_MPMC.View;
+      Finished : Completion (1);
+      Observed : Interfaces.Unsigned_64 := 0;
+      Attached : Boolean := True;
+
+      task type Consumer_Task
+        (Ring : not null access Paused_MPMC.View)
+      is
+         pragma Task_Info (Flyology.Native_Task);
+      end Consumer_Task;
+
+      task body Consumer_Task is
+      begin
+         Paused_MPMC.Pop (Ring.all, Observed, 5.0);
+         Finished.Done (True);
+      exception
+         when others => Finished.Done (False);
+      end Consumer_Task;
+
+      type Consumer_Access is access Consumer_Task;
+      Consumer : Consumer_Access;
+   begin
+      Paused_MPMC.Initialize
+        (Owner, Region_A, Active_Attach_MPMC_Location, 2);
+      Paused_MPMC.Push (Owner, 42, 5.0);
+      Consumer := new Consumer_Task (Owner'Access);
+      select
+         Paused_Observation.Await_Entered;
+      or
+         delay 5.0;
+         abort Consumer.all;
+         raise Program_Error with
+           "MPMC consumer did not pause after claiming its slot";
+      end select;
+
+      begin
+         Paused_MPMC.Attach
+           (Joiner, Region_B, Active_Attach_MPMC_Location, 2);
+      exception
+         when DS.Layout_Error => Attached := False;
+         when others =>
+            Paused_Observation.Release;
+            raise;
+      end;
+      Paused_Observation.Release;
+
+      select
+         Finished.Await_All;
+      or
+         delay 5.0;
+         abort Consumer.all;
+         raise Program_Error with "paused MPMC consumer did not resume";
+      end select;
+      Assert
+        (Attached,
+         "MPMC attachment rejected a valid in-flight consumer claim");
+      Assert
+        (Finished.Passed and then Observed = 42,
+         "paused MPMC consumer did not preserve its claimed element");
+      if Paused_MPMC.Is_Attached (Joiner) then
+         Paused_MPMC.Detach (Joiner);
+      end if;
+      Paused_MPMC.Destroy (Owner);
+   end Run_Active_MPMC_Attach;
 
    procedure Run_Slab is
       Worker_Count : constant Positive := 4;
@@ -1533,6 +1654,7 @@ begin
    Run_Create_Or_Attach_Race;
    Run_SPSC;
    Run_MPMC;
+   Run_Active_MPMC_Attach;
    Run_Slab;
    Run_Internally_Synchronized_Vector;
    Run_Internally_Synchronized_String;

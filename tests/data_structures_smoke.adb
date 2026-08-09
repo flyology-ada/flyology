@@ -2609,16 +2609,20 @@ begin
       Failed : Boolean := False;
    begin
       Write_U64 (Base_B, Raw_Offset (MPMC_Location, 192), Saved + 1);
+      MPMC.Attach (Multi_Bad, Region_B, MPMC_Location, 16);
       begin
-         MPMC.Attach (Multi_Bad, Region_B, MPMC_Location, 16);
+         MPMC.Destroy (Multi_Bad);
       exception
          when DS.Layout_Error => Failed := True;
       end;
       Write_U64 (Base_B, Raw_Offset (MPMC_Location, 192), Saved);
-      Assert (Failed, "corrupt MPMC slot sequence was accepted");
       Assert
-        (not MPMC.Is_Attached (Multi_Bad),
-         "failed MPMC attach retained a usable local view");
+        (Failed,
+         "quiescent MPMC destruction accepted a corrupt slot sequence");
+      Assert
+        (MPMC.Is_Attached (Multi_Bad),
+         "failed MPMC destruction detached its diagnostic view");
+      MPMC.Detach (Multi_Bad);
    end;
 
    Slabs.Detach (Slab_A);
