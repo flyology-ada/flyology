@@ -61,6 +61,7 @@ based on the surviving correspondence.
 - [Process lifecycle](#process-lifecycle)
 - [Design decisions](#design-decisions)
 - [Ada, C, and assembly boundary](#ada-c-and-assembly-boundary)
+- [TLA+ concurrency models](#tla-concurrency-models)
 - [SPARK proof boundary](#spark-proof-boundary)
 - [Portability boundaries](#portability-boundaries)
 - [Repository layout](#repository-layout)
@@ -2377,6 +2378,24 @@ callee-saved machine state. Rewriting a system-call declaration in Ada would
 not make the kernel implementation Ada; the useful boundary is to keep policy
 and coordination in Ada while treating the OS ABI as a narrow platform layer.
 
+## TLA+ concurrency models
+
+The executable models under [`formal/tla`](formal/tla/README.md) extract the
+implemented MPMC claim/publication protocol, guarded hash-map attachment, and
+shared-segment registry. Their bounded TLC configurations check the persisted
+guard, claim, publication, exact-name, generation, and extent invariants. Paired
+broken configurations must reproduce the removed active-attachment races and
+the result of dropping the registry's scan-and-reserve guard:
+
+```sh
+TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
+```
+
+This is exhaustive interleaving exploration within the configured bounds, not
+a claim that TLC proves Ada atomics, compiler lowering, platform memory models,
+OS behavior, or unbounded liveness. The model review records each abstraction
+and maps every action back to the production operation it represents.
+
 ## SPARK proof boundary
 
 SPARK can cover the deterministic policy kernels without pretending that the
@@ -2789,6 +2808,7 @@ Run the complete verification suite with:
 ```sh
 ./scripts/test.sh
 ./scripts/prove.sh
+TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 ```
 
 Run the bounded, reproducible concurrency and fault campaign with:

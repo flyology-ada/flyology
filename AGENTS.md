@@ -337,6 +337,8 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - `flyology_bench/`: independent adaptive and paired-comparison benchmark
   crate, reporters, smoke tests, and examples.
 - `proof/`: SPARK-only development crate plus runtime and debug policy proofs.
+- `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and
+  reviewed mappings back to production state transitions.
 - `scripts/`: all supported build, runtime preparation, test, docs, and proof
   entry points.
 - `docker/`: native-architecture Linux validation.
@@ -403,6 +405,8 @@ required by the changed boundary.
 - `FLYOLOGY_LONG_SOAK=1 ./scripts/stress-soak.sh`: opt-in long campaign.
 - `./scripts/prove.sh`: authoritative SPARK proof run. All reported checks must
   prove. Never hardcode the total in prose; it changes with contracts.
+- `./scripts/check-tla.sh`: bounded TLC checks for extracted concurrency state
+  machines plus required counterexamples for deliberately broken variants.
 - `./scripts/docs.sh`: GNATdoc HTML generation. It must produce
   `docs/api/index.html` with zero undocumented-entity warnings or errors.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
