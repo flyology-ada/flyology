@@ -75,6 +75,11 @@ enum {
     FLYOLOGY_PROP_OWNER_ONLY = 1 << 5
 };
 
+enum {
+    FLYOLOGY_HANDOFF_PROTOCOL_ERROR = -5,
+    FLYOLOGY_HANDOFF_CONTROL_FDS = 512
+};
+
 static int flyology_set_cloexec(int fd)
 {
     int flags = fcntl(fd, F_GETFD);
@@ -316,6 +321,7 @@ int flyology_shm_validate_received(int fd, unsigned long long expected,
     int props = 0;
     unsigned long long actual = 0;
     struct stat st;
+    int status_flags;
     int error = flyology_set_cloexec(fd);
     if (error != 0) return error;
     if (fstat(fd, &st) != 0) return errno;
@@ -326,6 +332,9 @@ int flyology_shm_validate_received(int fd, unsigned long long expected,
 #else
     if (!S_ISREG(st.st_mode)) return -2;
 #endif
+    status_flags = fcntl(fd, F_GETFL);
+    if (status_flags < 0) return errno;
+    if ((status_flags & O_ACCMODE) != O_RDWR) return -2;
     error = flyology_descriptor_properties(fd, 0, &props, &actual);
     if (error != 0) return error;
     if (actual != expected) return -1;
@@ -363,6 +372,55 @@ int flyology_shm_unlink_name(int fd, const char *name, int posix)
     return flyology_unlink_matching(fd, name, posix);
 }
 
+int flyology_shm_prepare_handoff_socket(int socket_fd)
+{
+    struct sockaddr_storage local_address;
+    struct sockaddr_storage peer_address;
+    socklen_t local_length = sizeof(local_address);
+    socklen_t peer_length = sizeof(peer_address);
+    socklen_t type_length;
+    int type;
+    int error;
+
+    memset(&local_address, 0, sizeof(local_address));
+    memset(&peer_address, 0, sizeof(peer_address));
+    type_length = sizeof(type);
+    if (getsockopt(socket_fd, SOL_SOCKET, SO_TYPE, &type, &type_length) != 0)
+        return errno == ENOTSOCK ? FLYOLOGY_HANDOFF_PROTOCOL_ERROR : errno;
+    if (type_length != sizeof(type) || type != SOCK_STREAM)
+        return FLYOLOGY_HANDOFF_PROTOCOL_ERROR;
+    if (getsockname(socket_fd, (struct sockaddr *)&local_address,
+                    &local_length) != 0)
+        return errno;
+    if (getpeername(socket_fd, (struct sockaddr *)&peer_address,
+                    &peer_length) != 0)
+        return errno == ENOTCONN ? FLYOLOGY_HANDOFF_PROTOCOL_ERROR : errno;
+    if (local_length < sizeof(sa_family_t) ||
+        peer_length < sizeof(sa_family_t) ||
+        local_address.ss_family != AF_UNIX || peer_address.ss_family != AF_UNIX)
+        return FLYOLOGY_HANDOFF_PROTOCOL_ERROR;
+    error = flyology_set_cloexec(socket_fd);
+    if (error != 0) return error;
+#if defined(__APPLE__) && defined(SO_NOSIGPIPE)
+    {
+        int enabled = 1;
+        if (setsockopt(socket_fd, SOL_SOCKET, SO_NOSIGPIPE,
+                       &enabled, sizeof(enabled)) != 0)
+            return errno;
+    }
+#endif
+    return 0;
+}
+
+int flyology_shm_untrusted_handoff_supported(void)
+{
+#if defined(__linux__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 int flyology_shm_send_fd(int socket_fd, int descriptor)
 {
     unsigned char payload = 0x46;
@@ -370,6 +428,8 @@ int flyology_shm_send_fd(int socket_fd, int descriptor)
     union { struct cmsghdr align; unsigned char bytes[CMSG_SPACE(sizeof(int))]; } control;
     struct msghdr message;
     struct cmsghdr *header;
+    int error = flyology_shm_prepare_handoff_socket(socket_fd);
+    if (error != 0) return error;
     memset(&control, 0, sizeof(control));
     memset(&message, 0, sizeof(message));
     message.msg_iov = &iov;
@@ -381,8 +441,12 @@ int flyology_shm_send_fd(int socket_fd, int descriptor)
     header->cmsg_type = SCM_RIGHTS;
     header->cmsg_len = CMSG_LEN(sizeof(int));
     memcpy(CMSG_DATA(header), &descriptor, sizeof(descriptor));
-    if (sendmsg(socket_fd, &message, MSG_NOSIGNAL) != (ssize_t)sizeof(payload))
+    for (;;) {
+        ssize_t amount = sendmsg(socket_fd, &message, MSG_NOSIGNAL);
+        if (amount == (ssize_t)sizeof(payload)) break;
+        if (amount < 0 && errno == EINTR) continue;
         return errno == 0 ? EIO : errno;
+    }
     return 0;
 }
 
@@ -390,49 +454,101 @@ int flyology_shm_receive_fd(int socket_fd, int *descriptor_out)
 {
     unsigned char payload;
     struct iovec iov = { &payload, sizeof(payload) };
-    union { struct cmsghdr align; unsigned char bytes[CMSG_SPACE(sizeof(int) * 16)]; } control;
+    /* Linux documents SCM_MAX_FD as 253. Darwin does not document a bound and
+       has leaked installed descriptors when a control buffer truncates. Keep
+       a larger aligned buffer as defense in depth, then reject every count but
+       one. Untrusted Darwin receipt is rejected by the Ada policy layer. */
+    union {
+        struct cmsghdr align;
+        unsigned char bytes[CMSG_SPACE(sizeof(int) * FLYOLOGY_HANDOFF_CONTROL_FDS)];
+    } control;
     struct msghdr message;
+    struct msghdr bounded_message;
     struct cmsghdr *header;
-    int received[16];
+    unsigned char *control_end;
+    int received = -1;
     size_t count = 0;
     int malformed = 0;
     ssize_t amount;
-    memset(&control, 0, sizeof(control));
+    int error = flyology_shm_prepare_handoff_socket(socket_fd);
+    if (error != 0) return error;
+    /* Make any kernel-reported-but-unwritten tail decode as invalid rather
+       than as descriptor zero on hosts with broken ancillary lengths. */
+    memset(&control, 0xff, sizeof(control));
     memset(&message, 0, sizeof(message));
     message.msg_iov = &iov;
     message.msg_iovlen = 1;
     message.msg_control = control.bytes;
     message.msg_controllen = sizeof(control.bytes);
-    amount = recvmsg(socket_fd, &message, MSG_CMSG_CLOEXEC);
+    do {
+        amount = recvmsg(socket_fd, &message, MSG_CMSG_CLOEXEC);
+    } while (amount < 0 && errno == EINTR);
     if (amount < 0) return errno;
-    for (header = CMSG_FIRSTHDR(&message); header != NULL;
-         header = CMSG_NXTHDR(&message, header)) {
-        if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS &&
-            header->cmsg_len >= CMSG_LEN(0)) {
-            size_t bytes = header->cmsg_len - CMSG_LEN(0);
-            size_t descriptors = bytes / sizeof(int);
-            size_t index;
-            const unsigned char *data = CMSG_DATA(header);
+    bounded_message = message;
+    if (bounded_message.msg_controllen > sizeof(control.bytes)) {
+        bounded_message.msg_controllen = sizeof(control.bytes);
+        malformed = 1;
+    }
+    control_end = control.bytes + bounded_message.msg_controllen;
+    for (header = CMSG_FIRSTHDR(&bounded_message); header != NULL;
+         header = CMSG_NXTHDR(&bounded_message, header)) {
+        const unsigned char *position = (const unsigned char *)header;
+        size_t available = position <= control_end
+            ? (size_t)(control_end - position) : 0;
+        size_t bounded_length;
+        size_t data_offset;
+        size_t bytes;
+        size_t descriptors;
+        size_t index;
+        const unsigned char *data;
+
+        if (available < CMSG_LEN(0) || header->cmsg_len < CMSG_LEN(0)) {
+            malformed = 1;
+            break;
+        }
+        bounded_length = header->cmsg_len < available
+            ? header->cmsg_len : available;
+        data = CMSG_DATA(header);
+        data_offset = (size_t)(data - position);
+        if (data_offset > bounded_length) {
+            malformed = 1;
+            break;
+        }
+        bytes = bounded_length - data_offset;
+        if (header->cmsg_level != SOL_SOCKET ||
+            header->cmsg_type != SCM_RIGHTS) {
+            malformed = 1;
+        } else {
             if (bytes % sizeof(int) != 0) malformed = 1;
+            descriptors = bytes / sizeof(int);
             for (index = 0; index < descriptors; ++index) {
                 int fd;
                 memcpy(&fd, data + index * sizeof(int), sizeof(fd));
-                if (count < 16) received[count++] = fd;
-                else close(fd);
+                if (fd < 0) {
+                    malformed = 1;
+                } else if (count == 0) {
+                    received = fd;
+                } else {
+                    close(fd);
+                }
+                ++count;
             }
+        }
+        if (header->cmsg_len > available) {
+            malformed = 1;
+            break;
         }
     }
     if (amount != 1 || payload != 0x46 || malformed ||
-        (message.msg_flags & MSG_CTRUNC) != 0 || count != 1) {
-        size_t index;
-        for (index = 0; index < count; ++index) close(received[index]);
-        return EBADMSG;
+        (message.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) != 0 || count != 1) {
+        if (received >= 0) close(received);
+        return FLYOLOGY_HANDOFF_PROTOCOL_ERROR;
     }
     {
-        int error = flyology_set_cloexec(received[0]);
-        if (error != 0) { close(received[0]); return error; }
+        int cloexec_error = flyology_set_cloexec(received);
+        if (cloexec_error != 0) { close(received); return cloexec_error; }
     }
-    *descriptor_out = received[0];
+    *descriptor_out = received;
     return 0;
 }
 

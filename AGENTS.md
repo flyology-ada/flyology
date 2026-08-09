@@ -283,11 +283,22 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   Core never steals it and provides no automatic owner-death recovery. An
   external authority must establish death and quiescence before replacement or
   other recovery.
-- `Shared_Memory.Unix_Sockets` transfers exactly one descriptor with
-  `SCM_RIGHTS`, establishes CLOEXEC, closes all descriptors from malformed or
-  truncated control data, and validates type and exact size before mapping.
-  Its synchronous socket calls require a native-task boundary unless readiness
-  was established independently.
+- `Shared_Memory.Unix_Sockets.Handoff_Channel` owns a dedicated connected
+  `AF_UNIX` `SOCK_STREAM` endpoint for the one-byte, one-`SCM_RIGHTS` protocol.
+  No ordinary I/O, duplicate endpoint, or second protocol may share it. Reject
+  concurrent use without waiting and poison/close after any operation failure.
+  Raw overload callers must enforce the same rules and retire the socket after
+  every exception.
+- Ancillary receipt scans every bounded control header, accepts exactly one
+  descriptor, closes every visible extra, and rejects malformed, unrelated, or
+  truncated control data. Linux untrusted receipt also requires a writable,
+  exact-size, immutable-size-sealed backing. Reject untrusted receipt on Darwin
+  because XNU truncation can install descriptors it does not expose for close.
+  Establish CLOEXEC before returning and suppress process-killing SIGPIPE.
+- Unix-socket handoff calls are synchronous and require a native-task boundary
+  unless readiness was established independently. Send success is only local
+  kernel acceptance; socket creation, peer authentication, remote
+  acknowledgment, and application trust policy remain outside the package.
 - Backing, mapping, flush, and namespace operations are synchronous metadata or
   VM syscalls and may occupy a lightweight task's event-loop pthread. File
   flush is not a crash-consistent application transaction.

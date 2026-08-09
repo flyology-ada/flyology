@@ -9,6 +9,7 @@
 #include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -175,6 +176,88 @@ int flyology_test_send_two_descriptors(int socket_fd, int first, int second)
     header->cmsg_len = CMSG_LEN(sizeof(descriptors));
     memcpy(CMSG_DATA(header), descriptors, sizeof(descriptors));
     return sendmsg(socket_fd, &message, 0) == 1 ? 0 : -1;
+}
+
+int flyology_test_send_split_descriptors(int socket_fd, int first, int second)
+{
+    unsigned char payload = 0x46;
+    struct iovec iov = { &payload, 1 };
+    union {
+        struct cmsghdr align;
+        unsigned char bytes[2 * CMSG_SPACE(sizeof(int))];
+    } control;
+    struct msghdr message;
+    struct cmsghdr *header;
+    ssize_t amount;
+    memset(&control, 0, sizeof(control));
+    memset(&message, 0, sizeof(message));
+    message.msg_iov = &iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control.bytes;
+    message.msg_controllen = sizeof(control.bytes);
+    header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(header), &first, sizeof(first));
+    header = CMSG_NXTHDR(&message, header);
+    if (header == NULL) return -1;
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(header), &second, sizeof(second));
+    amount = sendmsg(socket_fd, &message, 0);
+    if (amount == 1) return 0;
+    return errno == EINVAL ? 1 : -1;
+}
+
+int flyology_test_send_many_descriptors(int socket_fd, int descriptor,
+                                         unsigned int count)
+{
+    unsigned char payload = 0x46;
+    int descriptors[64];
+    struct iovec iov = { &payload, 1 };
+    union {
+        struct cmsghdr align;
+        unsigned char bytes[CMSG_SPACE(sizeof(descriptors))];
+    } control;
+    struct msghdr message;
+    struct cmsghdr *header;
+    unsigned int index;
+    if (count == 0 || count > 64) return -1;
+    for (index = 0; index < count; ++index) descriptors[index] = descriptor;
+    memset(&control, 0, sizeof(control));
+    memset(&message, 0, sizeof(message));
+    message.msg_iov = &iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control.bytes;
+    message.msg_controllen = CMSG_SPACE(sizeof(int) * count);
+    header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(int) * count);
+    memcpy(CMSG_DATA(header), descriptors, sizeof(int) * count);
+    return sendmsg(socket_fd, &message, 0) == 1 ? 0 : -1;
+}
+
+int flyology_test_create_read_only_backing(unsigned long long length,
+                                            int *descriptor_out)
+{
+    char path[] = "/tmp/flyology-read-only-XXXXXX";
+    int writable = mkstemp(path);
+    int readonly;
+    if (writable < 0) return -1;
+    if (ftruncate(writable, (off_t)length) != 0) {
+        close(writable);
+        unlink(path);
+        return -1;
+    }
+    if (close(writable) != 0) { unlink(path); return -1; }
+    readonly = open(path, O_RDONLY | O_CLOEXEC);
+    unlink(path);
+    if (readonly < 0) return -1;
+    *descriptor_out = readonly;
+    return 0;
 }
 
 int flyology_test_size_changes_rejected(int fd, unsigned long long length)
