@@ -11,6 +11,7 @@ with Flyology.Shared_Memory;
 with Flyology.Shared_Memory.Segments;
 with Flyology.Shared_Memory.Testing;
 with Flyology.Shared_Memory.Unix_Sockets;
+with Flyology.Shared_Memory.Unix_Sockets.Testing;
 with Interfaces;
 with Interfaces.C;
 with System;
@@ -23,6 +24,7 @@ procedure Shared_Memory_Smoke is
    package Segments renames Shared.Segments;
    package Testing renames Shared.Testing;
    package Unix_Sockets renames Shared.Unix_Sockets;
+   package Unix_Testing renames Shared.Unix_Sockets.Testing;
    package C renames Interfaces.C;
 
    use type Ada.Streams.Stream_Element_Array;
@@ -1065,6 +1067,96 @@ procedure Shared_Memory_Smoke is
            (not Unix_Sockets.Is_Open (Sender)
             and then not Unix_Sockets.Is_Open (Receiver),
             "owned channel close was not idempotent");
+      end;
+
+      declare
+         Receive_Socket    : Unix_Sockets.Socket_Descriptor;
+         Receiver          : Unix_Sockets.Handoff_Channel;
+         Busy_Observed     : Boolean := False;
+         Busy_Rejected     : Boolean := False;
+         Guard_Preserved   : Boolean := False;
+         Receive_Succeeded : Boolean := False;
+         Unblock_Status    : C.int := -1;
+
+         task Blocking_Receiver
+           with Priority => System.Priority'Last
+         is
+            entry Start;
+            entry Await_Result (Succeeded : out Boolean);
+         end Blocking_Receiver;
+
+         task body Blocking_Receiver is
+            Local_Item : Shared.Backing_Object;
+            Outcome    : Boolean := False;
+         begin
+            accept Start;
+            begin
+               Unix_Sockets.Receive
+                 (Receiver, Mapping_Length, Local_Item);
+               Outcome := Shared.Is_Open (Local_Item);
+               Shared.Close (Local_Item);
+            exception
+               when others =>
+                  if Shared.Is_Open (Local_Item) then
+                     Shared.Close (Local_Item);
+                  end if;
+            end;
+            accept Await_Result (Succeeded : out Boolean) do
+               Succeeded := Outcome;
+            end Await_Result;
+         end Blocking_Receiver;
+      begin
+         Assert
+           (Socketpair (Left'Access, Right'Access) = 0,
+            "busy-channel socketpair failed");
+         Receive_Socket := Unix_Sockets.Socket_Descriptor (Right);
+         Unix_Sockets.Adopt (Receiver, Receive_Socket);
+         Right := C.int (Receive_Socket);
+
+         --  Wait until the native receiver has acquired the guard and blocked
+         --  in recvmsg. The test-only query does not alter channel traffic.
+         Blocking_Receiver.Start;
+         for Attempt in 1 .. 10_000 loop
+            Busy_Observed := Unix_Testing.Is_Busy (Receiver);
+            exit when Busy_Observed;
+            delay 0.0;
+         end loop;
+
+         if Busy_Observed then
+            begin
+               Unix_Sockets.Send (Receiver, Backing, Unix_Sockets.Borrow);
+            exception
+               when Unix_Sockets.Channel_Busy =>
+                  Busy_Rejected := True;
+            end;
+            begin
+               Unix_Sockets.Close (Receiver);
+            exception
+               when Unix_Sockets.Channel_Busy =>
+                  Guard_Preserved := True;
+            end;
+            Unblock_Status := Send_Raw (Left, Testing.Descriptor (Backing));
+         elsif Unix_Sockets.Is_Open (Receiver) then
+            --  Ensure an unexpected setup failure cannot leave the task
+            --  blocked while its enclosing scope waits for termination.
+            Unix_Sockets.Close (Receiver);
+         end if;
+
+         Blocking_Receiver.Await_Result (Receive_Succeeded);
+         if Unix_Sockets.Is_Open (Receiver) then
+            Unix_Sockets.Close (Receiver);
+         end if;
+         Ignored := Close_Socket (Left);
+         Left := -1;
+
+         Assert (Busy_Observed, "receiver did not acquire channel guard");
+         Assert (Busy_Rejected, "concurrent channel send was not rejected");
+         Assert
+           (Guard_Preserved,
+            "rejected send released another operation's channel guard");
+         Assert (Unblock_Status = 0, "busy-channel receive unblock failed");
+         Assert (Receive_Succeeded, "busy-channel receive did not complete");
+         Assert (Ignored = 0, "busy-channel peer close failed");
       end;
 
       declare

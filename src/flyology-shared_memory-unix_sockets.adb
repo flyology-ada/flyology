@@ -124,6 +124,8 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       function Open return Boolean is (State = Ready or else State = Busy);
 
       function Failed return Boolean is (State = Poisoned);
+
+      function Busy_Now return Boolean is (State = Busy);
    end Channel_Controller;
 
    procedure Begin_Operation
@@ -283,26 +285,29 @@ package body Flyology.Shared_Memory.Unix_Sockets is
       Item      : in out Backing_Object;
       Ownership : Send_Ownership := Borrow)
    is
-      Socket : C.int;
-      Trust  : Peer_Trust;
-      Status : C.int;
+      Socket   : C.int;
+      Trust    : Peer_Trust;
+      Status   : C.int;
+      Acquired : Boolean := False;
    begin
       if not Shared_Memory.Is_Open (Item) then
          raise Validation_Error with "backing object is closed";
       end if;
       Begin_Operation (Channel, Socket, Trust);
+      Acquired := True;
       Status := C_Send (Socket, Owned_Descriptor (Item));
       if Status /= 0 then
          Poison_And_Close (Channel);
          Raise_Child_Failure ("SCM_RIGHTS channel send", Status);
       end if;
       Channel.Owner.Controller.Finish;
+      Acquired := False;
       if Ownership = Transfer then
          Shared_Memory.Close (Item);
       end if;
    exception
       when others =>
-         if Channel.Owner.Controller.Open then
+         if Acquired and then Channel.Owner.Controller.Open then
             Channel.Owner.Controller.Finish;
          end if;
          raise;
