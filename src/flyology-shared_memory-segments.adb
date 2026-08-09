@@ -512,12 +512,11 @@ package body Flyology.Shared_Memory.Segments is
    end Create_Or_Attach;
 
    procedure Try_Prepare_Replacement
-     (Source      : View;
-      Target      : Mapping;
-      Config      : Configuration;
-      Quiescence  : Quiescence_Authority;
-      Replacement : in out View;
-      Result      : out Replacement_Result)
+     (Source     : View;
+      Target     : Mapping;
+      Config     : Configuration;
+      Quiescence : Quiescence_Authority;
+      Result     : out Replacement_Result)
    is
       pragma Unreferenced (Quiescence);
       Shape : constant Geometry := Stored_Geometry (Config);
@@ -530,7 +529,6 @@ package body Flyology.Shared_Memory.Segments is
       Has_Initializer : Boolean := False;
    begin
       Require_Ready (Source);
-      Detach (Replacement);
 
       if Is_Mapped (Target) then
          Target_Base := Mapping_Base (Target);
@@ -699,11 +697,15 @@ package body Flyology.Shared_Memory.Segments is
          return;
       end if;
 
-      Memory.Zero (Target_Base, C.size_t (Target_Extent));
       Target_Touched := True;
       Atomic.Store_Release_U32
         (At_Base (Target_Base, Target_Extent, Lifecycle_Offset, 4),
          Initializing_State);
+      Memory.Zero
+        (At_Base
+           (Target_Base, Target_Extent, Version_Offset,
+            Target_Extent - Version_Offset),
+         C.size_t (Target_Extent - Version_Offset));
       Memory.Copy
         (At_Base (Target_Base, Target_Extent, Version_Offset,
                   Frontier - Version_Offset),
@@ -714,9 +716,9 @@ package body Flyology.Shared_Memory.Segments is
          Interfaces.Unsigned_64 (Target_Extent));
       Atomic.Store_Release_U32
         (At_Base (Target_Base, Target_Extent, Guard_Offset, 4), Guard_Free);
-      Set_View (Replacement, Target, Config, Shape);
       Atomic.Store_Release_U32
-        (Address_At (Replacement, Lifecycle_Offset, 4), Ready_State);
+        (At_Base (Target_Base, Target_Extent, Lifecycle_Offset, 4),
+         Ready_State);
       Target_Touched := False;
       Release_Guard (Source);
       Acquired := False;
@@ -731,7 +733,6 @@ package body Flyology.Shared_Memory.Segments is
               (At_Base (Target_Base, Target_Extent, Lifecycle_Offset, 4),
                Poisoned_State);
          end if;
-         Detach (Replacement);
          raise;
    end Try_Prepare_Replacement;
 

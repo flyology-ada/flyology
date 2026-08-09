@@ -288,7 +288,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   registry and every nested object. Replacement preserves configuration,
   offsets, generations, reservations, the allocation frontier, and bytes
   through that frontier; it release-publishes the target lifecycle last and
-  leaves handoff, acknowledgment, cutover, and old-backing retirement explicit.
+  leaves process-local attachment, handoff, acknowledgment, cutover, and
+  old-backing retirement explicit. Successful preparation synchronously zeroes
+  and copies bulk bytes while holding the registry guard; use a native-task
+  boundary unless event-loop pthread occupation is explicitly acceptable.
 - `Shared_Memory.Unix_Sockets.Handoff_Channel` owns a dedicated connected
   `AF_UNIX` `SOCK_STREAM` endpoint for the one-byte, one-`SCM_RIGHTS` protocol.
   No ordinary I/O, duplicate endpoint, or second protocol may share it. Reject

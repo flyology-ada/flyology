@@ -61,9 +61,6 @@ begin
       Failure : Interfaces.Unsigned_32;
       Location : DS.Region_Offset;
       Extent : Shared.Byte_Length;
-      Observed : Ada.Streams.Stream_Element_Array (1 .. 3);
-      Replacement : constant Ada.Streams.Stream_Element_Array :=
-        (1 => 16#49#, 2 => 16#50#, 3 => 16#43#);
       Ignored : C.int;
       Reservation : C.int;
    begin
@@ -88,21 +85,63 @@ begin
       Segments.Attach_Region (Segment, Region);
       loop
          Segments.Try_Find
-           (Segment, "handoff", Handle, Lookup, Failure);
+           (Segment, "replacement-handoff", Handle, Lookup, Failure);
          exit when Lookup /= Segments.Registry_Busy;
          delay 0.0;
       end loop;
-      if Lookup /= Segments.Found or else Failure /= 0 then
-         raise Program_Error with "child did not find handoff extent";
+      if Lookup = Segments.Found then
+         if Failure /= 0 then
+            raise Program_Error with
+              "replacement handoff extent reported failure";
+         end if;
+         Segments.Resolve (Segment, Handle, Location, Extent);
+         Strings.Attach (Object, Region, Location, 64);
+         declare
+            Observed : Ada.Streams.Stream_Element_Array (1 .. 4);
+            Replacement : constant Ada.Streams.Stream_Element_Array :=
+              (1 => 16#65#, 2 => 16#78#, 3 => 16#65#, 4 => 16#63#);
+         begin
+            Strings.Read (Object, Observed);
+            if Observed /=
+              Ada.Streams.Stream_Element_Array'
+                (16#67#, 16#72#, 16#6F#, 16#77#)
+            then
+               raise Program_Error with
+                 "child observed wrong replacement payload";
+            end if;
+            Strings.Assign (Object, Replacement);
+         end;
+      elsif Lookup = Segments.Not_Found then
+         loop
+            Segments.Try_Find
+              (Segment, "handoff", Handle, Lookup, Failure);
+            exit when Lookup /= Segments.Registry_Busy;
+            delay 0.0;
+         end loop;
+         if Lookup /= Segments.Found or else Failure /= 0 then
+            raise Program_Error with "child did not find handoff extent";
+         end if;
+         Segments.Resolve (Segment, Handle, Location, Extent);
+         Strings.Attach (Object, Region, Location, 16);
+         declare
+            Observed : Ada.Streams.Stream_Element_Array (1 .. 3);
+            Replacement : constant Ada.Streams.Stream_Element_Array :=
+              (1 => 16#49#, 2 => 16#50#, 3 => 16#43#);
+         begin
+            Strings.Read (Object, Observed);
+            if Observed /=
+              Ada.Streams.Stream_Element_Array'
+                (16#46#, 16#6C#, 16#79#)
+            then
+               raise Program_Error with
+                 "child observed wrong relocatable payload";
+            end if;
+            Strings.Assign (Object, Replacement);
+         end;
+      else
+         raise Program_Error with
+           "child could not resolve a handoff extent";
       end if;
-      Segments.Resolve (Segment, Handle, Location, Extent);
-      Strings.Attach (Object, Region, Location, 16);
-      Strings.Read (Object, Observed);
-      if Observed /= Ada.Streams.Stream_Element_Array'(16#46#, 16#6C#, 16#79#)
-      then
-         raise Program_Error with "child observed wrong relocatable payload";
-      end if;
-      Strings.Assign (Object, Replacement);
       Strings.Detach (Object);
       Regions.Detach (Region);
       Segments.Detach (Segment);

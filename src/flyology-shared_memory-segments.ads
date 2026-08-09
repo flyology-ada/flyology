@@ -163,10 +163,17 @@ package Flyology.Shared_Memory.Segments is
       Config : Configuration;
       Result : out Segment_Open_Result);
 
-   --  Nonblockingly prepare a larger replacement segment while preserving
-   --  every registry slot, exact name, extent offset, generation, allocation
-   --  frontier, and stored payload byte through the source frontier. Target
-   --  must be a distinct mapping with a virgin lifecycle derived from
+   --  Attempt to prepare a larger replacement segment while preserving every
+   --  registry slot, exact name, extent offset, generation, allocation
+   --  frontier, and stored payload byte through the source frontier. Guard
+   --  contention and an unpublished creation claim return immediately. A
+   --  successful attempt synchronously zeroes Target and copies through the
+   --  source frontier while holding the registry guard. That work is linear in
+   --  the target extent plus the copied frontier, can fault file-backed pages,
+   --  and may occupy a lightweight task's event-loop pthread. Use a native
+   --  task boundary unless occupying that pthread is explicitly acceptable.
+   --
+   --  Target must be a distinct mapping with a virgin lifecycle derived from
    --  exclusive backing creation, must be strictly larger than Source, and
    --  must use the same persisted Configuration. Anonymous, named POSIX, and
    --  file-backed target mappings are all accepted through the common Mapping
@@ -178,16 +185,16 @@ package Flyology.Shared_Memory.Segments is
    --  The source registry guard detects a concurrent registry operation, and
    --  the slot scan detects an unpublished creation claim, but this operation
    --  cannot detect concurrent leaf access. On success it publishes the target
-   --  lifecycle last and attaches Replacement; Source remains ready and
-   --  unchanged. Peer handoff, attachment acknowledgment, cutover, old-view
-   --  detachment, persistence, and old-backing retirement remain explicit
-   --  application protocol steps. Registry capacity, name length, alignment,
-   --  and schema do not grow; only the allocation tail becomes larger.
+   --  lifecycle last; Source remains ready and unchanged. The caller then uses
+   --  Create_Or_Attach to create a process-local target view. Peer handoff,
+   --  attachment acknowledgment, cutover, old-view detachment, persistence,
+   --  and old-backing retirement remain explicit application protocol steps.
+   --  Registry capacity, name length, alignment, and schema do not grow; only
+   --  the allocation tail becomes larger.
    --  @param Source Attached ready source segment kept alive and unchanged
    --  @param Target Distinct virgin mapping from exclusive backing creation
    --  @param Config Exact source and target registry configuration
    --  @param Quiescence Required caller declaration of complete quiescence
-   --  @param Replacement Detached view attached to the ready target on success
    --  @param Result Ready, busy, or unpublished-claim outcome
    --  @exception Constraint_Error Target is not strictly larger or geometry
    --     is not natively representable
@@ -196,12 +203,11 @@ package Flyology.Shared_Memory.Segments is
    --  @exception Segment_Error Source identity, geometry, frontier, slot, or
    --     lifecycle state is corrupt
    procedure Try_Prepare_Replacement
-     (Source      : View;
-      Target      : Mapping;
-      Config      : Configuration;
-      Quiescence  : Quiescence_Authority;
-      Replacement : in out View;
-      Result      : out Replacement_Result);
+     (Source     : View;
+      Target     : Mapping;
+      Config     : Configuration;
+      Quiescence : Quiescence_Authority;
+      Result     : out Replacement_Result);
 
    --  Detach Item without changing the registry or mapping.
    --  @param Item Segment view to detach
