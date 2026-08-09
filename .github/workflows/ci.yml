@@ -94,3 +94,28 @@ jobs:
           proof_log=$(mktemp)
           ./scripts/prove.sh 2>&1 | tee "$proof_log"
           grep -Fqx 'Flyology SPARK proof suite passed' "$proof_log"
+
+  tla:
+    name: TLA+ models / ubuntu-latest / TLC 2.19
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install TLA+ CLI 1.7.4
+        shell: bash
+        run: |
+          tla_jar="$RUNNER_TEMP/tla2tools-1.7.4.jar"
+          curl --fail --location --retry 3 \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar \
+            --output "$tla_jar"
+          printf '%s  %s\n' \
+            '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88' \
+            "$tla_jar" | sha256sum --check -
+          printf 'TLA2TOOLS_JAR=%s\n' "$tla_jar" >> "$GITHUB_ENV"
+      - name: Check TLA+ models
+        run: ./scripts/check-tla.sh
