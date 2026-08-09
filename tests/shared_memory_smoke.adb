@@ -805,11 +805,6 @@ procedure Shared_Memory_Smoke is
    end Check_Exhaustion;
 
    procedure Check_Replacement_Migration is
-      Migration_Config : constant Segments.Configuration :=
-        (Schema               => 16#4D49_4752_4154_0001#,
-         Registry_Capacity    => 4,
-         Maximum_Name_Length  => 24,
-         Allocation_Alignment => 64);
       Old_Length : constant Shared.Byte_Length := 16_384;
       New_Length : constant Shared.Byte_Length := 32_768;
       Registry_Guard_Offset : constant Shared.Byte_Length := 64;
@@ -836,22 +831,30 @@ procedure Shared_Memory_Smoke is
       Extent, Target_Extent : Shared.Byte_Length;
       Payload : constant Ada.Streams.Stream_Element_Array :=
         (1 => 16#67#, 2 => 16#72#, 3 => 16#6F#, 4 => 16#77#);
+      Child_Payload : constant Ada.Streams.Stream_Element_Array :=
+        (1 => 16#65#, 2 => 16#78#, 3 => 16#65#, 4 => 16#63#);
       Observed : Ada.Streams.Stream_Element_Array (Payload'Range);
       Opened_Target_Rejected : Boolean := False;
       Equal_Target_Rejected : Boolean := False;
       Source_Base, Target_Base : Interfaces.Unsigned_64;
+      Left, Right : aliased C.int := -1;
+      Child : aliased C.int := -1;
+      Program : constant C.char_array := C.To_C
+        (Ada.Directories.Containing_Directory
+           (Ada.Command_Line.Command_Name) & "/shared_memory_child");
+      Ignored : C.int;
    begin
       Shared.Create_Anonymous (Source_Backing, Old_Length);
       Shared.Map (Source_Map, Source_Backing);
       Source_Base := Testing.Base_Value (Source_Map);
       Segments.Create_Or_Attach
-        (Source_Segment, Source_Map, Migration_Config, Segment_Result);
+        (Source_Segment, Source_Map, Config, Segment_Result);
       Assert
         (Segment_Result = Segments.Initialized_New,
          "replacement source did not initialize");
       Segments.Attach_Region (Source_Segment, Source_Region);
       Create_Name
-        (Source_Segment, "kept", Strings.Required_Storage (64),
+        (Source_Segment, "replacement-handoff", Strings.Required_Storage (64),
          Handle, Claim);
       Segments.Claimed_Extent
         (Source_Segment, Claim, Location, Extent);
@@ -874,16 +877,15 @@ procedure Shared_Memory_Smoke is
          Segments.Try_Prepare_Replacement
            (Source      => Source_Segment,
             Target      => Equal_Map,
-            Config      => Migration_Config,
+            Config      => Config,
             Quiescence  => Segments.Caller_Established_Quiescence,
-            Replacement => Replacement,
             Result      => Migration_Result);
       exception
          when Constraint_Error =>
             Equal_Target_Rejected := True;
       end;
       Assert
-        (Equal_Target_Rejected and then not Segments.Is_Attached (Replacement),
+        (Equal_Target_Rejected,
          "same-size mapping was accepted as a larger replacement");
       Shared.Unmap (Equal_Map);
       Shared.Close (Equal_Backing);
@@ -896,17 +898,15 @@ procedure Shared_Memory_Smoke is
          Segments.Try_Prepare_Replacement
            (Source      => Source_Segment,
             Target      => Opened_Map,
-            Config      => Migration_Config,
+            Config      => Config,
             Quiescence  => Segments.Caller_Established_Quiescence,
-            Replacement => Replacement,
             Result      => Migration_Result);
       exception
          when Shared.Validation_Error =>
             Opened_Target_Rejected := True;
       end;
       Assert
-        (Opened_Target_Rejected and then
-         not Segments.Is_Attached (Replacement),
+        (Opened_Target_Rejected,
          "opened mapping received exclusive replacement authority");
       Shared.Unmap (Opened_Map);
       Shared.Close (Target_Opened);
@@ -917,26 +917,22 @@ procedure Shared_Memory_Smoke is
       Segments.Try_Prepare_Replacement
         (Source      => Source_Segment,
          Target      => Target_Map,
-         Config      => Migration_Config,
+         Config      => Config,
          Quiescence  => Segments.Caller_Established_Quiescence,
-         Replacement => Replacement,
          Result      => Migration_Result);
       Assert
-        (Migration_Result = Segments.Registry_Busy
-         and then not Segments.Is_Attached (Replacement),
+        (Migration_Result = Segments.Registry_Busy,
          "replacement copied while the source registry guard was owned");
       Testing.Store_Release_U32 (Source_Map, Registry_Guard_Offset, 0);
 
       Segments.Try_Prepare_Replacement
         (Source      => Source_Segment,
          Target      => Target_Map,
-         Config      => Migration_Config,
+         Config      => Config,
          Quiescence  => Segments.Caller_Established_Quiescence,
-         Replacement => Replacement,
          Result      => Migration_Result);
       Assert
-        (Migration_Result = Segments.Initialization_In_Progress
-         and then not Segments.Is_Attached (Replacement),
+        (Migration_Result = Segments.Initialization_In_Progress,
          "replacement exposed an unpublished named extent");
 
       Segments.Publish_Failure (Source_Segment, Pending_Claim, 91);
@@ -947,14 +943,20 @@ procedure Shared_Memory_Smoke is
       Segments.Try_Prepare_Replacement
         (Source      => Source_Segment,
          Target      => Target_Map,
-         Config      => Migration_Config,
+         Config      => Config,
          Quiescence  => Segments.Caller_Established_Quiescence,
-         Replacement => Replacement,
          Result      => Migration_Result);
       Assert
-        (Migration_Result = Segments.Replacement_Ready
-         and then Segments.Is_Attached (Replacement),
+        (Migration_Result = Segments.Replacement_Ready,
          "larger replacement was not published ready");
+      Assert
+        (not Segments.Is_Attached (Replacement),
+         "replacement preparation implicitly attached a process-local view");
+      Segments.Create_Or_Attach
+        (Replacement, Target_Map, Config, Segment_Result);
+      Assert
+        (Segment_Result = Segments.Attached_Existing,
+         "published replacement did not attach as an existing segment");
       Assert
         (Shared.Length (Target_Map) = New_Length,
          "replacement mapping lost its larger extent");
@@ -973,6 +975,37 @@ procedure Shared_Memory_Smoke is
          and then Contains_U64
            (Testing.Base (Target_Map), C.size_t (New_Length), Target_Base) = 0,
          "replacement stored a process-local mapping address");
+      Strings.Detach (Target_String);
+      Regions.Detach (Target_Region);
+
+      Assert (Socketpair (Left'Access, Right'Access) = 0,
+              "replacement handoff socketpair failed");
+      Assert
+        (Spawn_Child
+           (Program, Right, C.unsigned_long_long (Target_Base),
+            C.unsigned_long_long (New_Length), Child'Access) = 0,
+         "replacement handoff helper did not spawn");
+      Ignored := Close_Socket (Right);
+      Assert (Ignored = 0,
+              "parent did not close replacement child socket endpoint");
+      Right := -1;
+      Unix_Sockets.Send
+        (Unix_Sockets.Socket_Descriptor (Left), Target_Backing,
+         Unix_Sockets.Borrow);
+      Assert (Wait_Child (Child) = 0,
+              "replacement handoff helper failed");
+      Child := -1;
+      Ignored := Close_Socket (Left);
+      Assert (Ignored = 0,
+              "parent did not close replacement handoff socket");
+      Left := -1;
+
+      Segments.Attach_Region (Replacement, Target_Region);
+      Strings.Attach (Target_String, Target_Region, Target_Location, 64);
+      Strings.Read (Target_String, Observed);
+      Assert
+        (Observed = Child_Payload,
+         "exec'd helper did not mutate the replacement payload");
       Strings.Detach (Target_String);
       Regions.Detach (Target_Region);
 
@@ -1013,6 +1046,16 @@ procedure Shared_Memory_Smoke is
       Shared.Close (Source_Backing);
    exception
       when others =>
+         if Child >= 0 then
+            Ignored := Kill (Child, 9);
+            Ignored := Wait_Child (Child);
+         end if;
+         if Left >= 0 then
+            Ignored := Close_Socket (Left);
+         end if;
+         if Right >= 0 then
+            Ignored := Close_Socket (Right);
+         end if;
          if Shared.Is_Open (Target_Opened) then
             Shared.Close (Target_Opened);
          end if;

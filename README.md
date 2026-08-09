@@ -1104,6 +1104,7 @@ New_Backing : Flyology.Shared_Memory.Backing_Object;
 New_Map     : Flyology.Shared_Memory.Mapping;
 Replacement : Flyology.Shared_Memory.Segments.View;
 Migrated    : Flyology.Shared_Memory.Segments.Replacement_Result;
+Open        : Flyology.Shared_Memory.Segments.Segment_Open_Result;
 
 --  Application protocol: stop producers, consumers, registry callers, and
 --  every process that may still operate on a nested relocatable object.
@@ -1119,8 +1120,22 @@ Flyology.Shared_Memory.Segments.Try_Prepare_Replacement
       Allocation_Alignment   => 64),
    Quiescence  =>
      Flyology.Shared_Memory.Segments.Caller_Established_Quiescence,
-   Replacement => Replacement,
    Result      => Migrated);
+
+if Migrated = Flyology.Shared_Memory.Segments.Replacement_Ready then
+   --  Stored-byte preparation and this process's view attachment are
+   --  deliberately separate operations.
+   Flyology.Shared_Memory.Segments.Create_Or_Attach
+     (Replacement, New_Map,
+      (Schema                 => 16#4D59_4150_5000_0001#,
+       Registry_Capacity      => 64,
+       Maximum_Name_Length    => 96,
+       Allocation_Alignment   => 64),
+      Open);
+   if Open /= Flyology.Shared_Memory.Segments.Attached_Existing then
+      raise Program_Error with "published replacement did not attach";
+   end if;
+end if;
 ```
 
 The target must be a distinct virgin mapping derived from exclusive backing
@@ -1133,6 +1148,13 @@ lifecycle becomes ready only after the bounded copy and extent update complete.
 The source stays ready and unchanged, which permits handoff plus receiver
 attachment acknowledgments before an application-selected cutover. Participants
 must not resume against both snapshots: after cloning, their mutations diverge.
+
+`Try_Prepare_Replacement` does not wait for registry contention, but a successful
+attempt is not constant-time or event-loop-friendly: it synchronously zeroes the
+whole target and copies every byte through the source frontier while holding the
+registry guard. The work is linear in those byte ranges and may fault or write
+file-backed pages. Run it from a native task unless occupying a lightweight
+task's event-loop pthread for that operation is explicitly acceptable.
 
 The scalar admission classifier is SPARK-proved: an accepted frontier is aligned
 and lies within both mappings, the target is strictly larger, virgin, exclusive,

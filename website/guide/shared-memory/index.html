@@ -365,14 +365,20 @@ Segments.Try_Prepare_Replacement
    Target      =&gt; New_Map,
    Config      =&gt; Segment_Config,
    Quiescence  =&gt; Segments.Caller_Established_Quiescence,
-   Replacement =&gt; New_Segment,
    Result      =&gt; Migration);
 
 case Migration is
    when Segments.Replacement_Ready =&gt;
-      --  Send New_Backing, wait for every peer to attach New_Segment,
+      --  Preparation publishes stored bytes. Attachment separately creates
+      --  this process's local view and cannot alias the source parameter.
+      Segments.Create_Or_Attach
+        (New_Segment, New_Map, Segment_Config, Open);
+      if Open /= Segments.Attached_Existing then
+         raise Program_Error with "published replacement did not attach";
+      end if;
+
+      --  Send New_Backing, wait for every peer to attach and acknowledge,
       --  then direct participants to the new capability and retire the old.
-      null;
    when Segments.Registry_Busy |
         Segments.Initialization_In_Progress =&gt;
       --  Quiescence is incomplete. Do not copy or cut over.
@@ -381,7 +387,9 @@ end case;</code></pre>
             </figure>
 
             <p><code>Caller_Established_Quiescence</code> is deliberately explicit. Flyology acquires the persisted registry guard and rejects every unpublished creation claim, but no generic segment layer can discover application-owned leaf views or know whether another process is still mutating a ring, map, arena, or string. The caller must stop and acknowledge every participant before making this declaration. If it cannot establish quiescence, it must not migrate.</p>
-            <p>The target must be a distinct mapping with a virgin lifecycle derived from exclusive backing creation. An opened or received mapping is rejected, even if its bytes currently happen to be zero. The operation zeroes the target, keeps the configuration fixed, validates every active and reusable slot, copies only through the aligned allocation frontier, changes the persisted total extent, resets the target registry guard, and release-publishes the target lifecycle last. A partial target is poisoned on an exceptional copy failure and must be discarded.</p>
+            <p>The target must be a distinct mapping with a virgin lifecycle derived from exclusive backing creation. An opened or received mapping is rejected, even if its bytes currently happen to be zero. The operation first release-publishes an initializing lifecycle, then zeroes everything after that field, keeps the configuration fixed, validates every active and reusable slot, copies only through the aligned allocation frontier, changes the persisted total extent, resets the target registry guard, and release-publishes ready last. If a later step raises, the target is poisoned and must be discarded; if the creator process dies during a page fault or copy, observers see initialization in progress rather than virgin storage.</p>
+            <p><code>Try_Prepare_Replacement</code> does not wait when the registry guard is busy, but its successful path is synchronous bulk work. It zeroes the whole target and copies through the frontier while holding the guard, so cost is linear in those byte ranges and file-backed pages may fault or be written. Run migration from a native task unless occupying a lightweight task's event-loop pthread for the duration is explicitly acceptable.</p>
+            <p>Preparation and process-local attachment are separate on purpose. After <code>Replacement_Ready</code>, call <code>Create_Or_Attach</code> for the target mapping and require <code>Attached_Existing</code>. This prevents a source view from also serving as an output view and makes the cutover point visible.</p>
             <p>Offsets and generation-stamped handles retain their values, so existing application metadata can resolve immediately in the replacement. Registry capacity and object geometry do not grow; reserve enough registry slots up front, and use the new tail for later extents or arena allocations. The old and new segments are independent snapshots after cloning—resuming writers against both creates divergent state, not mirroring.</p>
             <p>The application still owns peer handoff and cutover. Send the replacement capability, wait for receiver validation and segment-attachment acknowledgments, switch all participants, detach old leaf and segment views, then unmap and close or unlink the old backing. For file-backed targets, flush according to the persistence policy after migration. This is not a durable transaction, schema conversion, automatic owner-death recovery, or namespace-atomic replacement.</p>
             <aside class="callout callout-teal">
