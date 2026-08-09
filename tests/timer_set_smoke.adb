@@ -1,4 +1,6 @@
+with Ada.Exceptions;
 with Ada.Real_Time;
+with Ada.Text_IO;
 with Flyology;
 with Flyology.IO.Timers;
 
@@ -50,7 +52,7 @@ procedure Timer_Set_Smoke is
       Shared := RT.Clock + RT.Milliseconds (20);
       Timers.Arm (Small, 2, Shared);
       Timers.Arm (Small, 3, Shared);
-      Timers.Arm (Small, 4, RT.Clock + RT.Milliseconds (500));
+      Timers.Arm (Small, 4, RT.Time_Last);
       Timers.Sleep_For (0.060);
       Timers.Wait_Next (Small, Small_Batch);
       if Small_Batch.Count /= 2
@@ -81,7 +83,7 @@ procedure Timer_Set_Smoke is
 
       --  A bounded wait leaves later timers armed, while a due timer wins over
       --  a simultaneous zero-time poll and is still delivered exactly once.
-      Timers.Arm (Small, 6, RT.Clock + RT.Milliseconds (100));
+      Timers.Arm (Small, 6, RT.Time_Last);
       Timers.Wait_Next
         (Small, Small_Batch, Timeout => 0.010, Outcome => Outcome);
       if Outcome /= Timers.Wait_Timed_Out or else Small_Batch.Count /= 0
@@ -165,7 +167,12 @@ procedure Timer_Set_Smoke is
       Exercise;
       Results.Finish (True);
    exception
-      when others =>
+      when Error : others =>
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "timer set " & Flyology.Execution_Model'Image (Model)
+            & " failed: " & Ada.Exceptions.Exception_Information (Error));
+         Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
          Results.Finish (False);
    end Worker;
 
