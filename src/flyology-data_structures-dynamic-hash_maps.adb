@@ -409,6 +409,9 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       return Key.Hash (Reference);
    end Stored_Key_Hash;
 
+   procedure Acquire (Item : View);
+   procedure Release_Guard (Item : View);
+
    procedure Validate_Table
      (Item : View; Table : Table_View; Expected_Count : Interfaces.Unsigned_64)
    is
@@ -512,8 +515,10 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Header : Layouts.Header_Values;
       Arena_Epoch : Interfaces.Unsigned_32;
       Current_Capacity : Interfaces.Unsigned_64;
+      Expected_Count : Interfaces.Unsigned_64;
       Current, Retired : Arena_Provider.Allocation_Handle;
       Table, Retired_Table : Table_View;
+      Guard_Acquired : Boolean := False;
    begin
       Validate_Configuration
         (Arena, Initial_Capacity, Metadata,
@@ -531,10 +536,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       then
          raise Layout_Error with
            "dynamic-map creation parameters do not match";
-      elsif Header.Auxiliary = Locked then
-         raise Busy_Error with "dynamic-map guard is active";
-      elsif Header.Auxiliary /= Unlocked
-        or else Bytes.Read_U32
+      elsif Bytes.Read_U32
           (Layouts.Address_At (Core, Reserved_32_Offset, 4, 4)) /= 0
         or else Bytes.Read_U64
           (Layouts.Address_At (Core, Reserved_2_Offset, 8, 8)) /= 0
@@ -544,10 +546,16 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Set_View
         (Item, Core, Header.Capacity, Header.Element_Size, Header.Alignment,
          Header.Word_1, Arena_Epoch, Key_Offset, Value_Offset, Stride);
+      --  Table growth replaces several mutable fields and its arena-backed
+      --  allocation as one guarded operation.  Claim that guard before
+      --  rereading them so attachment never validates a mixed generation.
+      Acquire (Item);
+      Guard_Acquired := True;
       Current_Capacity := Bytes.Read_U64 (Item.Capacity_Address);
+      Expected_Count := Bytes.Read_U64 (Item.Count_Address);
       if Bytes.Read_U64 (Item.Capacity_Check_Address) /=
            Capacity_Check (Current_Capacity)
-        or else Header.Word_2 > Current_Capacity
+        or else Expected_Count > Current_Capacity
         or else Current_Capacity > Interfaces.Unsigned_64 (Natural'Last)
       then
          raise Layout_Error with "dynamic-map count is corrupt";
@@ -556,11 +564,11 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Retired := Read_Handle (Item.Retired_Address);
       Attach_Table (Item, Arena, Current, Current_Capacity, Table);
       if Current = Arena_Provider.Null_Allocation
-        and then Header.Word_2 /= 0
+        and then Expected_Count /= 0
       then
          raise Layout_Error with "empty dynamic-map table has entries";
       elsif Current /= Arena_Provider.Null_Allocation then
-         Validate_Table (Item, Table, Header.Word_2);
+         Validate_Table (Item, Table, Expected_Count);
       end if;
       if Retired /= Arena_Provider.Null_Allocation then
          if Retired = Current then
@@ -569,8 +577,14 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          end if;
          Attach_Table (Item, Arena, Retired, 2, Retired_Table);
       end if;
+      Guard_Acquired := False;
+      Release_Guard (Item);
    exception
       when others =>
+         if Guard_Acquired then
+            Guard_Acquired := False;
+            Release_Guard (Item);
+         end if;
          if Item.Core.Attached then
             Detach (Item);
          end if;

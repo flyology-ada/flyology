@@ -179,6 +179,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   counters and bounded CAS attempts; an external authority may poison and
   exclusively reinitialize a ring only after establishing participant
   quiescence.
+- Fixed and dynamic hash-map attachment must acquire the persisted map guard
+  before rereading counts, handles, and probe tables. Never validate mutable
+  table contents from the earlier generic-header snapshot.
 - Leaf magic/version/schema checks are mandatory. The optional `Envelopes`
   generic adds a stable application-selected 64-bit signature and 64-bit
   contract version without weakening a nested leaf's structural checks.

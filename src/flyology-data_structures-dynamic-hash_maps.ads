@@ -14,7 +14,11 @@ use type Interfaces.Unsigned_64;
 --  process-local allocation view. Insertion grows and rehashes before
 --  publishing a replacement table. One persisted nonblocking map guard
 --  serializes operations across mappings; arena contention is reported in the
---  insertion result. Lifecycle operations and detachment require exclusion.
+--  insertion result. Initialization, destruction, backing-lifetime changes,
+--  and concurrent use of one local view require exclusion. Attachment acquires
+--  the persisted map guard without waiting while it validates a stable table
+--  generation, so another local view may attach while ordinary operations
+--  continue.
 --  @formal Arena_Provider Statically selected relocatable arena instance
 --  @formal Key Immutable key adapter bound once for this map type
 --  @formal Element Immutable mapped-value adapter bound once for this map type
@@ -85,6 +89,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Arena Expected attached arena
    --  @param Initial_Capacity Expected first table capacity
    --  @param Result Creation, attachment, or in-progress outcome
+   --  @exception Busy_Error A ready map's guard is active or abandoned
    procedure Create_Or_Attach
      (Item             : out View;
       Region           : Region_View;
@@ -93,8 +98,10 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
       Initial_Capacity : Positive;
       Result           : out Open_Result);
 
-   --  Attach to a quiescent map and validate its complete probe table and any
-   --  deferred allocation handle.
+   --  Attach to a map, acquiring its shared guard without waiting while
+   --  validating the complete probe table and any deferred allocation handle.
+   --  This may race operations through other views; exclude concurrent use of
+   --  Item itself.
    --  @param Item View attached on success
    --  @param Region Region containing the fixed map header
    --  @param Location Stored map-header offset

@@ -13,12 +13,13 @@ use type Interfaces.Unsigned_64;
 --  serialized
 --  across mappings by one process-capable stored guard. Immediate operations
 --  make one acquisition attempt and raise Busy_Error; timed overloads yield
---  and retry through one explicit timeout. Except for concurrent
---  Create_Or_Attach calls on allocation-certified virgin bytes, lifecycle
---  operations require whole-object quiescence.
---  The application must exclude Attach, Create_Or_Attach, Detach, Initialize,
---  Destroy, and backing-lifetime changes from every use of the same local
---  View. Separate attached views may perform ordinary operations concurrently.
+--  and retry through one explicit timeout. Initialization, destruction, and
+--  backing-lifetime changes require whole-object quiescence.
+--  Attach and ready-object Create_Or_Attach acquire the stored guard while
+--  validating mutable contents. The application must exclude Detach,
+--  Initialize, Destroy, and backing-lifetime changes from every use of the
+--  same local View. Separate views may attach or perform ordinary operations
+--  concurrently.
 --  @formal Key Immutable key adapter
 --  @formal Element Immutable mapped-value adapter
 generic
@@ -76,8 +77,8 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  compatible map. Only the exact zero lifecycle sentinel is eligible for
    --  creation; no existing lifecycle is reinitialized. The operation does
    --  not wait for another initializer or for the map guard.
-   --  Concurrent calls are permitted only while the allocation protocol
-   --  guarantees virgin bytes; if Ready may exist, Attach quiescence applies.
+   --  Concurrent calls may race on allocation-certified virgin bytes or on a
+   --  ready map; ready attachment acquires the shared guard without waiting.
    --  @param Item Attached view, or detached when initialization is in
    --     progress
    --  @param Region Independently attached backing region
@@ -92,9 +93,10 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Capacity   : Positive;
       Result     : out Open_Result);
 
-   --  Attach to a quiescent map, validating its expected geometry, entry
-   --  states and count, fixed-key hashes, linear-probe reachability, and key
-   --  uniqueness.
+   --  Attach to a map, acquiring its shared guard without waiting while
+   --  validating expected geometry, entry states and count, fixed-key hashes,
+   --  linear-probe reachability, and key uniqueness. This may race operations
+   --  through other views; exclude concurrent use of Item itself.
    --  @param Item View attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored map offset

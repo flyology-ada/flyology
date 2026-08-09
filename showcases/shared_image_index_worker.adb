@@ -100,6 +100,34 @@ procedure Shared_Image_Index_Worker is
       end loop;
    end Push_Result;
 
+   procedure Attach_Index
+     (Item     : out Image_Maps.View;
+      Region   : Regions.View;
+      Location : DS.Region_Offset;
+      Capacity : Positive)
+   is
+      Maximum_Attempts : constant Positive := 10_000;
+   begin
+      --  A joining worker races active publishers. Hash-map attachment takes
+      --  the same persisted guard long enough to validate one stable table
+      --  snapshot and reports Busy_Error immediately rather than waiting.
+      --  This executable is a native-task process, so its startup policy may
+      --  choose a bounded retry with a short pthread delay.
+      for Attempt in 1 .. Maximum_Attempts loop
+         begin
+            Image_Maps.Attach (Item, Region, Location, Capacity);
+            return;
+         exception
+            when DS.Busy_Error =>
+               if Attempt = Maximum_Attempts then
+                  raise Program_Error with
+                    "hash map remained busy while worker was joining";
+               end if;
+               delay 0.001;
+         end;
+      end loop;
+   end Attach_Index;
+
    Corpus         : constant String := CLI.Argument (2);
    Worker_Id      : constant Positive := Positive'Value (CLI.Argument (3));
    Mapping_Size   : constant DS.Byte_Count :=
@@ -194,7 +222,7 @@ begin
      (Results, Region, Location, Model.Result_Ring_Capacity);
    Resolve_Name
      (Segment, Model.Index_Name, Location, Resolved_Length);
-   Image_Maps.Attach (Index, Region, Location, Index_Capacity);
+   Attach_Index (Index, Region, Location, Index_Capacity);
    Resolve_Name
      (Segment, Model.Gate_Name, Location, Resolved_Length);
    begin

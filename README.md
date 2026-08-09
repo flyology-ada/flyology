@@ -982,18 +982,21 @@ cryptographic integrity check.
 
 Explicit `Initialize` requires exclusive ownership of the target extent.
 `Create_Or_Attach` requires the caller's allocation protocol to establish that
-an exact zero lifecycle may be treated as virgin. Attachment and destruction
-require the quiescence stated by each leaf; in particular, a
-byte string, vector, or hash map must not be attaching while its shared guard
-or mutable contents can change. Slab attachment accepts valid transitional and
-poisoned slot states only under the same externally established quiescence so a
-new recovery authority does not need a retained pre-failure view.
+an exact zero lifecycle may be treated as virgin. Fixed and dynamic hash-map
+attachment acquires the same persisted guard as ordinary operations and
+validates the count, table, and allocation handles from one stable snapshot;
+it reports immediate `Busy_Error` instead of waiting when another view owns the
+guard. Slab attachment accepts valid transitional and poisoned slot states only
+under externally established quiescence so a new recovery authority does not
+need a retained pre-failure view.
 Attach, Detach, Initialize, Destroy, and backing-region lifetime changes must
-also be excluded from every ordinary operation on the same process-local view;
-internal synchronization coordinates separate attached views, not concurrent
-mutation of one view's cached native fields. A failed attachment leaves its
-output view detached. `Is_Attached` reports only whether those local fields are
-retained, not whether a later reinitialization has made their epoch stale.
+be excluded from every ordinary operation on the same process-local view;
+the guarded hash-map attachment exception applies only to a distinct output
+view. Internal synchronization coordinates separate attached views, not
+concurrent mutation of one view's cached native fields. A failed attachment
+leaves its output view detached. `Is_Attached` reports only whether those local
+fields are retained, not whether a later reinitialization has made their epoch
+stale.
 Every structure view must be detached before its local mapping disappears;
 `Destroy` requires the synchronization stated by the leaf package and marks
 the stored header unusable for every other view. The layouts use the host byte
