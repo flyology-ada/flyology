@@ -547,21 +547,45 @@ Unix_Sockets.Receive
 
 --  Map creates a process-local mapping at any address. Closing the received
 --  descriptor afterward is safe because Peer_Map owns an independent mapping
---  lifetime. Attach the segment and its relocatable objects through Peer_Map.
+--  lifetime. The one-shot channel is independent too, so close it now.
 Shared.Map (Peer_Map, Received);
 Shared.Close (Received);
+Unix_Sockets.Close (Receiver);
+
+--  First attach the segment registry, then derive a relocatable region view
+--  from it. Leaf structures borrow Peer_Region, never a native address.
 Segments.Create_Or_Attach
   (Peer_Segment, Peer_Map, Config, Segment_Open);
 
 if Segment_Open /= Segments.Attached_Existing then
    raise Program_Error with "peer did not receive a ready segment";
 end if;
+Segments.Attach_Region (Peer_Segment, Peer_Region);
 
---  The one-shot handoff channel is no longer needed. Closing it does not
---  affect Peer_Map. Resolve names and attach relocatable leaves next. At the
---  end of that work, detach leaves, region, and segment before unmapping.
---  Close is idempotent; failed channel I/O would already have poisoned it.
-Unix_Sockets.Close (Receiver);</code></pre>
+--  Resolve the exact persisted name and attach the byte string at its offset.
+loop
+   Segments.Try_Find
+     (Peer_Segment, "jobs/image-index/status",
+      Status_Handle, Lookup, Failure);
+   exit when Lookup /= Segments.Registry_Busy;
+   delay 0.0;
+end loop;
+
+if Lookup /= Segments.Found then
+   raise Program_Error with "worker status is not ready";
+end if;
+Segments.Resolve
+  (Peer_Segment, Status_Handle, Location, Extent);
+Byte_Strings.Attach
+  (Status, Peer_Region, Location, Maximum_Length =&gt; 32);
+
+Observe_Status (Byte_Strings.Length (Status));
+
+--  Release borrows from the inside out. The mapping is the last live owner.
+Byte_Strings.Detach (Status);
+Regions.Detach (Peer_Region);
+Segments.Detach (Peer_Segment);
+Shared.Unmap (Peer_Map);</code></pre>
             </figure>
 
             <p><code>Trusted_Peer</code> is a declaration by the application, not authentication. It permits Darwin and permits a mutable regular file because the application promises that the peer will not exploit ancillary truncation, resize a retained duplicate, or mutate shared open-file-description state. <code>Untrusted_Peer</code> is accepted only on Linux and always requires immutable grow, shrink, and seal seals. In practice this narrows an untrusted handoff to an exact-size writable sealed object such as Flyology's anonymous <code>memfd</code>. Darwin rejects that policy: XNU can install excess descriptors during a truncated receive without exposing enough information for user space to close them.</p>

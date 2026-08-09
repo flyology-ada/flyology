@@ -195,6 +195,7 @@ private
          Busy_Now   : out Boolean);
       function Open return Boolean;
       function Failed return Boolean;
+      function Busy_Now return Boolean;
    private
       Descriptor_Value : C.int := -1;
       Trust_Value      : Peer_Trust := Trusted_Peer;
