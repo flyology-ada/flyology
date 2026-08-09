@@ -66,6 +66,7 @@ project Runtime_Smoke is
       "datagram_io_smoke.adb",
       "data_structures_concurrency_smoke.adb",
       "data_structures_smoke.adb",
+      "flyology-data_structures-clock_policy-smoke.adb",
       "descriptor_ownership_smoke.adb",
       "dns_smoke.adb",
       "dns_parser_smoke.adb",

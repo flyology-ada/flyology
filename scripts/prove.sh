@@ -44,6 +44,7 @@ run_gnatprove "$library_log" \
   --report=all \
   -f \
   -u \
+  flyology-data_structures-clock_policy.adb \
   flyology-data_structures-policy.adb \
   flyology-capacity_policy.adb \
   flyology-channel_policy.adb \
