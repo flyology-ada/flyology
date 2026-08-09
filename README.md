@@ -3141,8 +3141,14 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_dormant_stack_pressure.sh 128 64
 ./showcases/run_file_transfer_benchmark.sh
 ./showcases/run_shared_image_index.sh
+./showcases/run_socket_preparation_benchmark.sh 200000
 ./showcases/run_http_benchmark.sh
 ```
+
+The socket-preparation benchmark runs a lightweight UDP echo task against a
+native client with an optimized build and a 16-loop prepared runtime. It
+reports round trips per second and test-only nonblocking descriptor setup
+attempts; the counter is absent from normal library builds.
 
 The examples demonstrate:
 

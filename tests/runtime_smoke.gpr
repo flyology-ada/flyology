@@ -137,6 +137,7 @@ project Runtime_Smoke is
       "stack_size_limits_child.adb",
       "stack_size_limits_smoke.adb",
       "stack_pool_smoke.adb",
+      "socket_preparation_smoke.adb",
       "suspension_object_smoke.adb",
       "task_scope_faults_smoke.adb",
       "task_scopes_smoke.adb",

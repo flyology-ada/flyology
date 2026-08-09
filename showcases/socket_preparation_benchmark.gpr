@@ -1,0 +1,19 @@
+with "../flyology.gpr";
+with "config/flyology_showcases_config.gpr";
+
+project Socket_Preparation_Benchmark is
+   for Languages use ("Ada", "C");
+   for Runtime ("Ada") use external ("FLYOLOGY_RTS_DIR", "../build/rts");
+   for Source_Dirs use (".");
+   for Object_Dir use "obj/socket_preparation_benchmark";
+   for Exec_Dir use "bin";
+   for Main use ("socket_preparation_benchmark.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_Showcases_Config.Ada_Compiler_Switches
+        & ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ");
+      for Default_Switches ("C") use ("-O3", "-Wall", "-Wextra");
+   end Compiler;
+end Socket_Preparation_Benchmark;

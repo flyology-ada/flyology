@@ -79,6 +79,17 @@ project Flyology is
            "-gnateDFLYOLOGY_WALL_CLOCK_TEST_HOOKS=True";
    end case;
 
+   type Socket_Test_Hooks_Type is ("false", "true");
+   Socket_Test_Hooks : Socket_Test_Hooks_Type :=
+     external ("FLYOLOGY_SOCKET_TEST_HOOKS", "false");
+   Socket_Test_Hook_Switch := "-DFLYOLOGY_SOCKET_TEST_HOOKS=0";
+   case Socket_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Socket_Test_Hook_Switch := "-DFLYOLOGY_SOCKET_TEST_HOOKS=1";
+   end case;
+
    for Languages use ("Ada", "C");
 
    for Library_Name use "Flyology";
@@ -205,7 +216,8 @@ project Flyology is
            Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
            Wall_Clock_Test_Hook_Switch, TLS_Ada_Test_Hook_Switch);
       for Default_Switches ("C") use
-        ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch);
+        ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
+         Socket_Test_Hook_Switch);
    end Compiler;
 
    package Binder is

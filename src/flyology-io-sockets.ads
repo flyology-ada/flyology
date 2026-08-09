@@ -260,6 +260,8 @@ package Flyology.IO.Sockets is
      with Post => not Is_Open (Source);
 
    --  Enable nonblocking and close-on-exec modes.
+   --  Configuration is retained by the owning handle and repeated calls for
+   --  the same descriptor generation do not repeat operating-system setup.
    --  @param Socket Open socket to configure
    --  @exception Socket_Error Descriptor configuration fails
    procedure Prepare (Socket : Socket_Type);
@@ -690,6 +692,7 @@ package Flyology.IO.Sockets is
 
 private
    type Socket_Type is limited record
-      Value : Interfaces.C.int := -1;
+      Value       : Interfaces.C.int := -1;
+      Preparation : aliased Interfaces.Unsigned_32 := 0 with Atomic;
    end record;
 end Flyology.IO.Sockets;

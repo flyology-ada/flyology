@@ -6,6 +6,7 @@ with Flyology.Time_Math;
 with Flyology.Wait_Policy;
 with GNAT.OS_Lib;
 with System;
+with System.Atomic_Primitives;
 
 package body Flyology.IO.Sockets is
 
@@ -15,6 +16,32 @@ package body Flyology.IO.Sockets is
    use type Interfaces.C.unsigned;
    use type Interfaces.C.unsigned_char;
    use type System.Address;
+
+   package Atomics renames System.Atomic_Primitives;
+   use type Atomics.uint32;
+
+   Unprepared : constant Atomics.uint32 := 0;
+   Prepared   : constant Atomics.uint32 := 1;
+
+   generic
+      type Atomic_Type is mod <>;
+   procedure Atomic_Store
+     (Address : System.Address;
+      Value   : Atomic_Type;
+      Model   : Atomics.Mem_Model := Atomics.Seq_Cst);
+   pragma Import (Intrinsic, Atomic_Store, "__atomic_store_n");
+
+   procedure Atomic_Store_32 is new Atomic_Store (Atomics.uint32);
+
+   function Preparation_State (Socket : Socket_Type) return Atomics.uint32 is
+     (Atomics.Atomic_Load_32
+        (Socket.Preparation'Address, Atomics.Acquire));
+
+   procedure Set_Preparation_State
+     (Address : System.Address; State : Atomics.uint32) is
+   begin
+      Atomic_Store_32 (Address, State, Atomics.Release);
+   end Set_Preparation_State;
 
    function C_Errno_Would_Block return Interfaces.C.int;
    pragma Import
@@ -237,6 +264,17 @@ package body Flyology.IO.Sockets is
    function C_Prepare
      (Socket : Interfaces.C.int;
       Error  : access Interfaces.C.int) return Interfaces.C.int;
+
+   --  Only the first task-aware operation for one owned descriptor generation
+   --  enters this bridge. The protected action serializes concurrent first
+   --  use and defers abort until descriptor setup and state publication agree.
+   protected Preparation_Bridge is
+      procedure Ensure
+        (Socket : Interfaces.C.int;
+         State  : System.Address;
+         Error  : access Interfaces.C.int;
+         Result : out Interfaces.C.int);
+   end Preparation_Bridge;
 
    function C_Set_Nonblocking
      (Socket  : Interfaces.C.int;
@@ -549,6 +587,26 @@ package body Flyology.IO.Sockets is
       Error.all := 0;
       return 0;
    end C_Prepare;
+
+   protected body Preparation_Bridge is
+      procedure Ensure
+        (Socket : Interfaces.C.int;
+         State  : System.Address;
+         Error  : access Interfaces.C.int;
+         Result : out Interfaces.C.int)
+      is
+      begin
+         if Atomics.Atomic_Load_32 (State, Atomics.Acquire) = Prepared then
+            Error.all := 0;
+            Result := 0;
+            return;
+         end if;
+         Result := C_Prepare (Socket, Error);
+         if Result = 0 then
+            Set_Preparation_State (State, Prepared);
+         end if;
+      end Ensure;
+   end Preparation_Bridge;
 
    function C_Set_Nonblocking
      (Socket  : Interfaces.C.int;
@@ -892,6 +950,8 @@ package body Flyology.IO.Sockets is
             Test_Raw_Accept_Return_Barrier;
 #end if;
             Target.Value := Result;
+            Set_Preparation_State
+              (Target.Preparation'Address, Prepared);
          end if;
       end Invoke;
    end Accept_Return_Bridge;
@@ -1073,7 +1133,10 @@ package body Flyology.IO.Sockets is
          raise Program_Error with "socket move target is open";
       end if;
       Target.Value := Source.Value;
+      Set_Preparation_State
+        (Target.Preparation'Address, Preparation_State (Source));
       Source.Value := -1;
+      Set_Preparation_State (Source.Preparation'Address, Unprepared);
    end Move;
 
    procedure Adopt (Source : in out Descriptor; Target : in out Socket_Type) is
@@ -1084,6 +1147,7 @@ package body Flyology.IO.Sockets is
          raise Program_Error with "socket adopt target is open";
       end if;
       Target.Value := Interfaces.C.int (Source);
+      Set_Preparation_State (Target.Preparation'Address, Unprepared);
       Source := Invalid_Descriptor;
    end Adopt;
 
@@ -1091,6 +1155,7 @@ package body Flyology.IO.Sockets is
    begin
       Target := Descriptor (Source.Value);
       Source.Value := -1;
+      Set_Preparation_State (Source.Preparation'Address, Unprepared);
    end Release;
 
    procedure Create_Socket
@@ -1108,9 +1173,11 @@ package body Flyology.IO.Sockets is
         (Family_Code (Family), Mode_Code (Mode), Error'Access);
       if Result < 0 then
          Socket.Value := -1;
+         Set_Preparation_State (Socket.Preparation'Address, Unprepared);
          Raise_Error ("socket", Error);
       end if;
       Socket.Value := Result;
+      Set_Preparation_State (Socket.Preparation'Address, Unprepared);
    end Create_Socket;
 
    procedure Create_Socket_Pair
@@ -1132,10 +1199,14 @@ package body Flyology.IO.Sockets is
       then
          Left.Value := -1;
          Right.Value := -1;
+         Set_Preparation_State (Left.Preparation'Address, Unprepared);
+         Set_Preparation_State (Right.Preparation'Address, Unprepared);
          Raise_Error ("socketpair", Error);
       end if;
       Left.Value := C_Left;
       Right.Value := C_Right;
+      Set_Preparation_State (Left.Preparation'Address, Unprepared);
+      Set_Preparation_State (Right.Preparation'Address, Unprepared);
    end Create_Socket_Pair;
 
    procedure Close_Socket (Socket : in out Socket_Type) is
@@ -1147,15 +1218,22 @@ package body Flyology.IO.Sockets is
       end if;
       Result := C_Close (Socket.Value, Error'Access);
       Socket.Value := -1;
+      Set_Preparation_State (Socket.Preparation'Address, Unprepared);
       if Result /= 0 then
          Raise_Error ("close", Error);
       end if;
    end Close_Socket;
 
    procedure Prepare (Socket : Socket_Type) is
-      Error : aliased Interfaces.C.int;
+      Error  : aliased Interfaces.C.int;
+      Result : Interfaces.C.int;
    begin
-      if C_Prepare (Socket.Value, Error'Access) /= 0 then
+      if Preparation_State (Socket) = Prepared then
+         return;
+      end if;
+      Preparation_Bridge.Ensure
+        (Socket.Value, Socket.Preparation'Address, Error'Access, Result);
+      if Result /= 0 then
          Raise_Error ("configure socket", Error);
       end if;
    end Prepare;
@@ -1428,6 +1506,11 @@ package body Flyology.IO.Sockets is
             Result := C_Set_Nonblocking
               (Socket.Value, Boolean'Pos (Request.Enabled),
                Error'Access);
+            if Result = 0 then
+               Set_Preparation_State
+                 (Socket.Preparation'Address,
+                  (if Request.Enabled then Prepared else Unprepared));
+            end if;
          when N_Bytes_To_Read =>
             Result := C_Bytes_To_Read
               (Socket.Value, Count'Access, Error'Access);
