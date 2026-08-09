@@ -1,0 +1,68 @@
+.shared-memory-figure figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: 1rem;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.shared-memory-figure svg {
+  min-width: 40rem;
+}
+
+.shared-memory-figure figcaption strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 610;
+}
+
+.shared-memory-figure .diagram-code {
+  font-family: var(--font-mono);
+}
+
+.shared-memory-figure .diagram-label {
+  fill: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.shared-memory-figure .diagram-header {
+  fill: color-mix(in oklch, var(--violet) 11%, var(--paper));
+  stroke: var(--line);
+}
+
+.shared-memory-figure .diagram-payload {
+  fill: color-mix(in oklch, var(--teal) 13%, var(--paper));
+  stroke: var(--teal-deep);
+}
+
+.shared-memory-figure .diagram-line-violet,
+.shared-memory-figure .diagram-line-teal,
+.shared-memory-figure .diagram-dashed {
+  fill: none;
+  stroke-width: 2;
+}
+
+.shared-memory-figure .diagram-line-violet {
+  stroke: var(--violet);
+}
+
+.shared-memory-figure .diagram-line-teal {
+  stroke: var(--teal-deep);
+}
+
+.shared-memory-figure .diagram-dashed {
+  stroke: var(--path);
+  stroke-dasharray: 5 6;
+}
+
+@media (max-width: 640px) {
+  .shared-memory-figure figcaption {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}

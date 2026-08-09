@@ -9,6 +9,7 @@
     <link rel="canonical" href="https://flyology.org/guide/shared-memory/">
     <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="shared-memory.css">
     <script src="../../assets/scripts/ada-highlight.js"></script>
     <script src="../../assets/scripts/site.js"></script>
   </head>
@@ -84,7 +85,7 @@
           <section id="model">
             <span class="step-label">SEGMENT 01</span>
             <h2>Keep five lifetimes distinct.</h2>
-            <p><a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html"><code>Flyology.Shared_Memory</code></a> is the ownership boundary that <code>Data_Structures.Regions</code> deliberately omits. It owns descriptors and mappings, while <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html"><code>Shared_Memory.Segments</code></a> owns a persisted directory inside the mapped bytes. A relocatable leaf borrows one directory extent through a process-local region view.</p>
+            <p>The packages divide the problem by responsibility. <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html"><code>Flyology.Shared_Memory</code></a> answers where the bytes come from and who releases them. <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html"><code>Shared_Memory.Segments</code></a> answers how peers agree on what occupies those bytes. The <a href="../data-structures/"><code>Data_Structures</code> packages</a> answer how stored values remain valid when each process maps the bytes at a different address.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Namespace</dt><dd>A POSIX shm name or file path locates a backing object. Unlinking that name is explicit and does not remove a mapping or a registry entry.</dd></div>
@@ -149,7 +150,52 @@ end Map_Shared_Bytes;</code></pre>
           <section id="registry">
             <span class="step-label">SEGMENT 04</span>
             <h2>Initialize one fixed-capacity registry.</h2>
-            <p>The registry header persists its magic, layout version, application schema, complete mapping extent, slot capacity, maximum name length, slot geometry, and allocation alignment. <code>Create_Or_Attach</code> checks all of them exactly. Only a mapping derived from exclusive backing creation may claim an all-zero lifecycle.</p>
+            <p>An OS name identifies the complete backing object, not the values inside it. The segment registry is the shared directory that lets every mapping resolve an exact application name to the same offset, reserved length, and generation. The payload at that offset remains a relocatable data structure with its own header and validation rules.</p>
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One segment, three stored layers</strong><span>all locations are relative to the mapping</span></figcaption>
+              <svg role="img" aria-labelledby="segment-anatomy-title segment-anatomy-desc" viewBox="0 0 760 500">
+                <title id="segment-anatomy-title">Stored layout of a shared-memory segment</title>
+                <desc id="segment-anatomy-desc">A validated segment header is followed by exact-name registry entries. Each registry entry points by offset to a relocatable byte string, MPMC ring, or hash map in the payload area.</desc>
+                <defs>
+                  <marker id="segment-anatomy-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="18" y="18" width="724" height="464" rx="18"/>
+                <text x="42" y="49" font-size="15" font-weight="620">Shared segment</text>
+                <text class="diagram-label" x="718" y="49" text-anchor="end">exact mapped extent</text>
+
+                <rect class="diagram-header" x="36" y="68" width="688" height="74" rx="10"/>
+                <text x="56" y="94" font-size="14" font-weight="620">Validated header</text>
+                <text class="diagram-code diagram-muted" x="56" y="121">magic · version · schema · total size · capacity · alignment</text>
+
+                <text class="diagram-label" x="46" y="178">FIXED-CAPACITY REGISTRY</text>
+                <rect class="diagram-box" x="36" y="192" width="688" height="145" rx="10"/>
+                <line x1="36" y1="240" x2="724" y2="240" stroke="var(--line)"/>
+                <line x1="36" y1="288" x2="724" y2="288" stroke="var(--line)"/>
+                <text class="diagram-code" x="56" y="222" font-size="12">jobs/image-index/status</text>
+                <text class="diagram-code diagram-muted" x="704" y="222" text-anchor="end">offset 16384 · 128 B · gen 1</text>
+                <text class="diagram-code" x="56" y="270" font-size="12">jobs/image-index/queue</text>
+                <text class="diagram-code diagram-muted" x="704" y="270" text-anchor="end">offset 16512 · 8192 B · gen 1</text>
+                <text class="diagram-code" x="56" y="318" font-size="12">metrics/by-worker</text>
+                <text class="diagram-code diagram-muted" x="704" y="318" text-anchor="end">offset 24704 · 4096 B · gen 3</text>
+
+                <path class="diagram-dashed" d="M170 228v126h-5v22" marker-end="url(#segment-anatomy-arrow)"/>
+                <path class="diagram-dashed" d="M341 276v78h15v22" marker-end="url(#segment-anatomy-arrow)"/>
+                <path class="diagram-dashed" d="M543 324v30h27v22" marker-end="url(#segment-anatomy-arrow)"/>
+
+                <text class="diagram-label" x="46" y="378">RELOCATABLE PAYLOAD EXTENTS</text>
+                <rect class="diagram-payload" x="36" y="394" width="218" height="60" rx="10"/>
+                <text x="145" y="419" text-anchor="middle" font-size="13" font-weight="620">Byte string</text>
+                <text class="diagram-muted" x="145" y="438" text-anchor="middle">status bytes</text>
+                <rect class="diagram-payload" x="272" y="394" width="218" height="60" rx="10"/>
+                <text x="381" y="419" text-anchor="middle" font-size="13" font-weight="620">MPMC ring</text>
+                <text class="diagram-muted" x="381" y="438" text-anchor="middle">queue slots + sequences</text>
+                <rect class="diagram-payload" x="508" y="394" width="216" height="60" rx="10"/>
+                <text x="616" y="419" text-anchor="middle" font-size="13" font-weight="620">Hash map</text>
+                <text class="diagram-muted" x="616" y="438" text-anchor="middle">entries + generations</text>
+              </svg>
+            </figure>
+            <p>The header persists its magic, layout version, application schema, complete mapping extent, slot capacity, maximum name length, slot geometry, and allocation alignment. <code>Create_Or_Attach</code> checks all of them exactly. Only a mapping derived from exclusive backing creation may claim an all-zero lifecycle.</p>
             <figure class="code-panel">
               <figcaption>segment configuration and attachment</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -177,7 +223,52 @@ end case;</code></pre>
           <section id="objects">
             <span class="step-label">SEGMENT 05</span>
             <h2>Publish the leaf only after initialization completes.</h2>
-            <p><code>Try_Find_Or_Create</code> compares the hash, exact length, and every name byte. Hash collisions cannot alias different names. Exactly one racing participant receives a limited <code>Creation_Claim</code>; other participants observe the ready extent, initialization in progress, a published failure, contention, mismatch, or bounded exhaustion.</p>
+            <p><code>Try_Find_Or_Create</code> compares the hash, exact length, and every name byte. Hash collisions cannot alias different names. When several participants race one name, the registry designates exactly one creator. That creator receives a limited claim to reserved but unpublished storage; everyone else receives an explicit outcome rather than a partially initialized leaf.</p>
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One creator, no partial readers</strong><span>every attempt is nonblocking</span></figcaption>
+              <svg role="img" aria-labelledby="publication-title publication-desc" viewBox="0 0 760 430">
+                <title id="publication-title">Race-safe named extent publication</title>
+                <desc id="publication-desc">Four participants race to find or create one exact name. One receives the creation claim and initializes the leaf. Peers see initialization in progress until success is published. The creator can instead publish a visible failure.</desc>
+                <defs>
+                  <marker id="publication-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="publication-violet-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--violet)"/></marker>
+                  <marker id="publication-teal-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <text class="diagram-label" x="32" y="35">RACING PARTICIPANTS</text>
+                <rect class="diagram-box" x="32" y="52" width="112" height="42" rx="9"/><text x="88" y="78" text-anchor="middle" font-size="12">Worker A</text>
+                <rect class="diagram-box" x="32" y="106" width="112" height="42" rx="9"/><text x="88" y="132" text-anchor="middle" font-size="12">Worker B</text>
+                <rect class="diagram-box" x="32" y="160" width="112" height="42" rx="9"/><text x="88" y="186" text-anchor="middle" font-size="12">Worker C</text>
+                <rect class="diagram-box" x="32" y="214" width="112" height="42" rx="9"/><text x="88" y="240" text-anchor="middle" font-size="12">Worker D</text>
+                <path class="diagram-line" d="M144 73h40M144 127h40M144 181h40M144 235h40M184 73v162M184 154h44" marker-end="url(#publication-arrow)"/>
+
+                <rect class="diagram-violet" x="234" y="113" width="220" height="82" rx="13"/>
+                <text class="diagram-code" x="344" y="143" text-anchor="middle" font-size="13" font-weight="620">Try_Find_Or_Create</text>
+                <text class="diagram-code diagram-muted" x="344" y="169" text-anchor="middle">metrics/by-worker</text>
+                <path class="diagram-line-violet" d="M454 154h54" marker-end="url(#publication-violet-arrow)"/>
+
+                <rect class="diagram-violet" x="514" y="106" width="214" height="96" rx="13"/>
+                <text x="621" y="136" text-anchor="middle" font-size="14" font-weight="620">Initializing</text>
+                <text class="diagram-muted" x="621" y="160" text-anchor="middle">one creator owns the claim</text>
+                <text class="diagram-muted" x="621" y="181" text-anchor="middle">reserved bytes are not resolvable</text>
+
+                <path class="diagram-line-teal" d="M580 202v41" marker-end="url(#publication-teal-arrow)"/>
+                <rect class="diagram-teal" x="476" y="250" width="208" height="72" rx="13"/>
+                <text x="580" y="279" text-anchor="middle" font-size="14" font-weight="620">Ready</text>
+                <text class="diagram-muted" x="580" y="302" text-anchor="middle">Publish makes it resolvable</text>
+
+                <path class="diagram-line" d="M514 184c-72 20-88 100-54 148" marker-end="url(#publication-arrow)"/>
+                <rect class="diagram-box" x="234" y="300" width="220" height="76" rx="13"/>
+                <text x="344" y="329" text-anchor="middle" font-size="14" font-weight="620">Explicit peer outcome</text>
+                <text class="diagram-code diagram-muted" x="344" y="350" text-anchor="middle">Initialization_In_Progress</text>
+                <text class="diagram-code diagram-muted" x="344" y="368" text-anchor="middle">or Registry_Busy</text>
+
+                <path class="diagram-dashed" d="M710 202v142" marker-end="url(#publication-arrow)"/>
+                <rect class="diagram-box" x="514" y="350" width="214" height="58" rx="13"/>
+                <text x="621" y="374" text-anchor="middle" font-size="14" font-weight="620">Failed</text>
+                <text class="diagram-code diagram-muted" x="621" y="394" text-anchor="middle">Publish_Failure (code)</text>
+              </svg>
+            </figure>
             <figure class="code-panel">
               <figcaption>named relocatable byte string</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -219,6 +310,48 @@ end case;</code></pre>
             <span class="step-label">EXAMPLE 01</span>
             <h2>Report progress from an exec'd worker.</h2>
             <p>Consider a coordinator that starts a helper process to index a collection of images. The coordinator needs a small status value that survives different virtual addresses and remains valid after it closes the descriptor used for handoff. A named byte string inside an anonymous segment is enough for the stored state.</p>
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One stored value, two process-local mappings</strong><span>descriptor handoff does not transfer an address</span></figcaption>
+              <svg role="img" aria-labelledby="worker-handoff-title worker-handoff-desc" viewBox="0 0 760 390">
+                <title id="worker-handoff-title">Coordinator and exec'd worker sharing one status value</title>
+                <desc id="worker-handoff-desc">The coordinator creates and maps an anonymous segment, publishes a queued status, and sends its descriptor over a Unix-domain socket. The exec'd worker validates and maps the descriptor at another address, then updates the same named byte string to working and complete. The coordinator observes those bytes through its original mapping.</desc>
+                <defs>
+                  <marker id="handoff-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="handoff-violet-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--violet)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="24" y="28" width="278" height="310" rx="16"/>
+                <text x="48" y="60" font-size="15" font-weight="620">Coordinator</text>
+                <text class="diagram-label" x="278" y="60" text-anchor="end">PROCESS A</text>
+                <rect class="diagram-violet" x="48" y="84" width="230" height="58" rx="10"/>
+                <text x="163" y="108" text-anchor="middle" font-size="13" font-weight="620">Backing descriptor</text>
+                <text class="diagram-muted" x="163" y="128" text-anchor="middle">anonymous capability</text>
+                <path class="diagram-line" d="M163 142v31" marker-end="url(#handoff-arrow)"/>
+                <rect class="diagram-box" x="48" y="180" width="230" height="70" rx="10"/>
+                <text x="163" y="207" text-anchor="middle" font-size="13" font-weight="620">Mapping A</text>
+                <text class="diagram-code diagram-muted" x="163" y="230" text-anchor="middle">base 0x0000_104…</text>
+                <rect class="diagram-payload" x="70" y="274" width="186" height="42" rx="9"/>
+                <text class="diagram-code" x="163" y="300" text-anchor="middle" font-size="12">observes "complete"</text>
+
+                <rect class="diagram-box" x="458" y="28" width="278" height="310" rx="16"/>
+                <text x="482" y="60" font-size="15" font-weight="620">Exec'd worker</text>
+                <text class="diagram-label" x="712" y="60" text-anchor="end">PROCESS B</text>
+                <rect class="diagram-violet" x="482" y="84" width="230" height="58" rx="10"/>
+                <text x="597" y="108" text-anchor="middle" font-size="13" font-weight="620">Received descriptor</text>
+                <text class="diagram-muted" x="597" y="128" text-anchor="middle">CLOEXEC + exact-size validation</text>
+                <path class="diagram-line" d="M597 142v31" marker-end="url(#handoff-arrow)"/>
+                <rect class="diagram-box" x="482" y="180" width="230" height="70" rx="10"/>
+                <text x="597" y="207" text-anchor="middle" font-size="13" font-weight="620">Mapping B</text>
+                <text class="diagram-code diagram-muted" x="597" y="230" text-anchor="middle">base 0x0000_7f2…</text>
+                <rect class="diagram-payload" x="504" y="274" width="186" height="42" rx="9"/>
+                <text class="diagram-code" x="597" y="300" text-anchor="middle" font-size="12">writes "complete"</text>
+
+                <path class="diagram-line-violet" d="M278 113h204" marker-end="url(#handoff-violet-arrow)"/>
+                <text class="diagram-code diagram-muted" x="380" y="100" text-anchor="middle">SCM_RIGHTS</text>
+                <path class="diagram-dashed" d="M256 295c70 76 178 76 248 0"/>
+                <text class="diagram-label" x="380" y="374" text-anchor="middle">SAME OFFSET AND BYTES · DIFFERENT NATIVE BASES</text>
+              </svg>
+            </figure>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Coordinator</dt><dd>Creates the anonymous backing, publishes <code>jobs/image-index/status</code> with the value <code>queued</code>, and sends the descriptor over a connected Unix-domain socket.</dd></div>
