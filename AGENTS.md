@@ -56,7 +56,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - A lightweight task’s `CPU` aspect selects a shared Flyology execution group.
   A native task’s `CPU` aspect retains stock GNARL affinity meaning.
 - Shared group ids are `0 .. 127`; dedicated ids are `128 .. 255`. Automatic
-  pool size is `1 .. 128` and currently uses deterministic round robin.
+  pool size is `1 .. 128` and currently uses deterministic round robin. The
+  RTS reads `FLYOLOGY_LOOP_POOL_SIZE` once at process startup, falls back to
+  the prepared value when absent, and freezes it before task activation.
 - Ada reserves `CPU => 0` as `Not_A_Specific_CPU`, so only `1 .. 127` name a
   group. `CPU => 0` and an absent aspect both take automatic placement; group
   0 is reachable only through automatic placement or migration. Do not
@@ -287,15 +289,17 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Important preparation controls:
   - `FLYOLOGY_RTS_DIR`: generated RTS destination.
   - `FLYOLOGY_DEFAULT`: `native` or `lightweight`.
-  - `FLYOLOGY_LOOP_POOL_SIZE`: `1 .. 128`.
+  - `FLYOLOGY_LOOP_POOL_SIZE`: prepared fallback and application-startup
+    override, `1 .. 128`.
   - `FLYOLOGY_PLACEMENT`: currently `round_robin`.
   - `FLYOLOGY_LOOP_PLACEMENT`: `none`, Linux `strict`, or Darwin `advisory`.
   - `FLYOLOGY_LOOP_PLACEMENT_MAP`: unique `GROUP:VALUE` pairs.
   - `FLYOLOGY_SANITIZER`: `none` or `address`.
   - `FLYOLOGY_TEST_FAULTS` and `FLYOLOGY_TEST_DENY_IO_URING`: test-only `0/1`
     switches; never enable them in a production runtime.
-- These settings are compiled into the prepared RTS, not read dynamically by
-  the application.
+- The loop-pool size is the only application-startup override. It is read once
+  and cannot resize a running process. Other settings are compiled into the
+  prepared RTS and are not read dynamically by the application.
 - The Alire dependency action reads persisted settings from the ignored
   `build/flyology-rts.conf`. Only an explicit `prepare-alire-rts.sh
   --configure` captures the current `FLYOLOGY_*` settings; ordinary `alr build`

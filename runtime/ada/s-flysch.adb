@@ -25,6 +25,7 @@ package body System.Flyology.Scheduler is
    package SSE renames System.Storage_Elements;
 
    use type C.int;
+   use type C.char;
    use type C.long_long;
    use type C.size_t;
    use type C.unsigned;
@@ -95,6 +96,8 @@ package body System.Flyology.Scheduler is
    type Runtime_Wait_Request_Array is
      array (Natural range <>) of Runtime_Wait_Request
      with Convention => C;
+   package C_Char_Conversions is new
+     System.Address_To_Access_Conversions (C.char);
    package Wait_Request_Conversions is new
      System.Address_To_Access_Conversions (Runtime_Wait_Request);
 
@@ -400,6 +403,7 @@ package body System.Flyology.Scheduler is
    pragma Atomic (Last_Fatal_Context);
    Groups         : Group_Array := (others => null);
    Fiber_Registry : Registry_Bucket_Array := (others => null);
+   Automatic_Pool_Size : Positive := Pool_Config.Prepared_Pool_Size;
    Next_Automatic_Group : C.unsigned_long_long := 0;
    Thread_Group   : Loop_Group_Access := null;
    pragma Thread_Local_Storage (Thread_Group);
@@ -412,6 +416,8 @@ package body System.Flyology.Scheduler is
    pragma Import (C, Sched_Yield, "sched_yield");
    function Micro_Sleep (Microseconds : C.unsigned) return C.int;
    pragma Import (C, Micro_Sleep, "usleep");
+   function C_Getenv (Name : System.Address) return System.Address;
+   pragma Import (C, C_Getenv, "getenv");
 
    function Initialize_Thread_Placement return C.int;
    pragma Import
@@ -474,6 +480,7 @@ package body System.Flyology.Scheduler is
      (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
    function Ensure_Placement_Platform return C.int;
    function Select_Automatic_Group return C.int;
+   function Startup_Pool_Size return C.int;
    --  Registry operations require the bucket's shard lock after bootstrap
    --  publishes Initialized. The environment task is deliberately absent
    --  from this registry: only lightweight tasks become fibers.
@@ -608,6 +615,46 @@ package body System.Flyology.Scheduler is
 
    function In_Fork_Child return Boolean is
      (Fork_Child_State /= 0);
+
+   function Startup_Pool_Size return C.int is
+      Name : aliased constant C.char_array :=
+        C.To_C ("FLYOLOGY_LOOP_POOL_SIZE");
+      Text : constant System.Address := C_Getenv (Name'Address);
+      Maximum : constant Natural := Natural (Dedicated_First_Id);
+      Value : Natural := 0;
+      Offset : Natural := 0;
+      Item : C.char;
+      Digit : Natural;
+   begin
+      if Text = System.Null_Address then
+         return C.int (Pool_Config.Prepared_Pool_Size);
+      end if;
+
+      loop
+         Item := C_Char_Conversions.To_Pointer
+           (Text + SSE.Storage_Offset (Offset)).all;
+         exit when Item = C.nul;
+         if C.char'Pos (Item) < Character'Pos ('0')
+           or else C.char'Pos (Item) > Character'Pos ('9')
+         then
+            return -1;
+         end if;
+         Digit := C.char'Pos (Item) - Character'Pos ('0');
+         if Value > (Maximum - Digit) / 10 then
+            return -1;
+         end if;
+         Value := Value * 10 + Digit;
+         Offset := Offset + 1;
+      end loop;
+
+      if Offset = 0
+        or else Value = 0
+        or else Value > Maximum
+      then
+         return -1;
+      end if;
+      return C.int (Value);
+   end Startup_Pool_Size;
 
    function Group_Quiescent_Locked
      (Group : not null Loop_Group_Access) return Boolean
@@ -890,7 +937,7 @@ package body System.Flyology.Scheduler is
       Selected :=
         C.int
           (Next_Automatic_Group
-           mod C.unsigned_long_long (Pool_Config.Automatic_Pool_Size));
+           mod C.unsigned_long_long (Automatic_Pool_Size));
       Next_Automatic_Group := Next_Automatic_Group + 1;
       Unlock_Topology;
       return Selected;
@@ -1892,9 +1939,24 @@ package body System.Flyology.Scheduler is
    end Promote_Expired_Timers;
 
    function Initialize (Environment : System.Address) return C.int is
-      Result : C.int;
+      Invalid_Pool_Size_Message : aliased constant String :=
+        "flyology: FLYOLOGY_LOOP_POOL_SIZE must be an integer from 1 through"
+        & " 128" & ASCII.LF;
+      Result    : C.int;
+      Pool_Size : C.int;
+      Written   : C.long;
+      pragma Unreferenced (Written);
    begin
       if Environment = System.Null_Address or else Initialized then
+         return -1;
+      end if;
+
+      Pool_Size := Startup_Pool_Size;
+      if Pool_Size < 1 or else Pool_Size > Dedicated_First_Id then
+         Written := C_Write
+           (2,
+            Invalid_Pool_Size_Message'Address,
+            Invalid_Pool_Size_Message'Length);
          return -1;
       end if;
 
@@ -1927,6 +1989,7 @@ package body System.Flyology.Scheduler is
       --  Ensure_Group creates the complete event machinery when the first
       --  designated lightweight task is activated. Until then native programs
       --  stay on the stock GNARL execution path.
+      Automatic_Pool_Size := Positive (Pool_Size);
       Initialized := True;
       Fork_Child_State := 0;
       Lifecycle_State := 0;
@@ -2411,7 +2474,7 @@ package body System.Flyology.Scheduler is
      (if Contexts.Pageout_Advice_Supported then 1 else 0);
 
    function Configured_Pool_Size return C.int is
-     (C.int (Pool_Config.Automatic_Pool_Size));
+     (C.int (Automatic_Pool_Size));
 
    function Configured_Placement return C.int is (0);
 

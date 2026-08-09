@@ -135,20 +135,25 @@ alr with flyology</code></pre>
             </figure>
             <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock OS-thread execution, and no event machinery starts until a lightweight task is activated.</p>
             <figure class="code-panel">
-              <figcaption>lightweight project default with four shared groups</figcaption>
+              <figcaption>lightweight project default</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>alr exec -- sh -c \
-  'FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=4 "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh"'
+  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
 alr build</code></pre>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>launch with four shared groups</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>FLYOLOGY_LOOP_POOL_SIZE=4 alr run</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p>Preparation settings are compiled into the RTS. They are not read dynamically by the application at startup; after changing one, rerun the preparation command and <code>alr build</code>.</p>
+              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> is captured once at application startup, before library-level tasks activate, and is fixed for the process lifetime. It defaults to <code>1</code>. An empty, malformed, or out-of-range value fails application initialization.</p>
             </aside>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><code>FLYOLOGY_DEFAULT</code></dt><dd>Selects <code>native</code> or <code>lightweight</code> for tasks that do not carry an explicit designation.</dd></div>
-                <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement. Groups and their OS threads still start lazily.</dd></div>
+                <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement at application startup. Groups and their OS threads still start lazily.</dd></div>
                 <div class="decision-row"><dt>Loop placement</dt><dd><code>FLYOLOGY_LOOP_PLACEMENT</code> and <code>FLYOLOGY_LOOP_PLACEMENT_MAP</code> request Linux strict logical-CPU binding or a supported Darwin advisory tag. This places loop threads; it does not change task-to-group assignment.</dd></div>
               </dl>
             </div>
@@ -366,7 +371,7 @@ Flyology.IO.Files.Read_At
                 <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, plan usable stack bytes as peak live tasks multiplied by the observed effective bytes per task. Read <code>Reserved_Bytes</code> for guarded virtual address space and measure RSS for resident memory.</dd></div>
                 <div class="decision-row"><dt>Task-owned regions</dt><dd>Region storage currently grows on demand without a built-in quota. Bound the number and size of admitted phases, sample <code>Statistics</code>, and call <code>Release</code> at the earliest valid lifetime boundary.</dd></div>
                 <div class="decision-row"><dt>Dormant stacks</dt><dd>Choose <code>Minimum_Wait</code> from tolerated wake latency and representative host measurements. Accepted cold or page-out advice does not reduce the configured stack capacity.</dd></div>
-                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> bounds automatic shared groups, not task count. Start near the CPU parallelism the workload can use and compare measurements; each created group adds an OS thread plus poller, scheduler, and kernel-queue resources.</dd></div>
+                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> bounds automatic shared groups, not task count. Set it when launching the application, start near the CPU parallelism the workload can use, and compare measurements; each created group adds an OS thread plus poller, scheduler, and kernel-queue resources.</dd></div>
                 <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These are separate limits: cancellation is not a timeout, and a fairness quantum is not a hard execution deadline.</dd></div>
               </dl>
             </div>

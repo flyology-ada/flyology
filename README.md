@@ -156,20 +156,23 @@ execution resource; it does not create a second tasking language.
 
 A lightweight task whose effective Ada CPU is `Not_A_Specific_CPU` is placed
 automatically. The compatibility configuration has one loop and therefore
-retains the original group-0 behavior. A prepared runtime can instead
-distribute such tasks across a fixed pool with deterministic round-robin
-tickets:
+retains the original group-0 behavior. Set the pool size when launching an
+application to distribute such tasks across a fixed pool with deterministic
+round-robin tickets without rebuilding the RTS:
 
 ```sh
-alr exec -- sh -c \
-  'FLYOLOGY_LOOP_POOL_SIZE=4 FLYOLOGY_PLACEMENT=round_robin "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
-alr build
+FLYOLOGY_LOOP_POOL_SIZE=4 ./application
 ```
+
+The launch value must be an integer in `1 .. 128`. It is captured once at
+application startup, before library-level tasks activate, and is immutable for
+the process lifetime. An absent value defaults to `1`; an invalid value fails
+application initialization.
 
 Pool groups are created independently and lazily: configuration inspection
 does not start them, and a four-loop configuration owns no event pthreads until
 lightweight tasks are activated. `Flyology.Execution_Groups.Configured_Pool_Size`
-and `Configured_Placement` report the compiled policy,
+and `Configured_Placement` report the frozen process policy,
 `In_Configured_Pool` classifies a group, and `Current` reports where the
 calling lightweight task was actually placed. `Flyology.Observability.Snapshot` can
 then inspect each created pool group without creating missing ones.
@@ -362,9 +365,9 @@ begin
 end;
 ```
 
-The default mapping is `Hash mod Configured_Pool_Size`. The pool size is
-compiled into the prepared runtime and does not change while a process is
-running. Preparing another runtime with a different pool size can remap keys.
+The default mapping is `Hash mod Configured_Pool_Size`. The pool size is frozen
+during application startup and does not change while a process is running.
+Launching with a different pool size can remap keys.
 The overload taking an explicit `Shard_Count` is available when an application
 must keep a stored partitioning scheme independent of loop configuration.
 Crossing targets are limited to configured shared-pool ids; dedicated groups
@@ -2068,7 +2071,7 @@ async-signal-safety rules and must not call Ada tasking or Flyology APIs.
 | Start event machinery on first use | A native-only program should not acquire a poller, scheduler context, fiber stack, or loop pthread merely because it links the custom RTS | The first lightweight task pays the one-time group startup handshake |
 | Finalize loops only at GNARL's process boundary | Suspended stacks, in-flight file buffers, and Ada masters must outlive their tasks | There is no arbitrary shutdown/restart API; unsafe cleanup is deferred to OS exit |
 | Keep native threads as a task designation | Some foreign calls, CPU work, and platform APIs genuinely need threads | The runtime is hybrid rather than ideologically thread-free |
-| Place undesignated lightweight tasks through a build-time loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration | The compatibility default remains one loop; round-robin balances task count rather than measured work |
+| Place undesignated lightweight tasks through a startup-configured loop pool | High-I/O applications can use several event-loop pthreads without encoding a `CPU` aspect into every task declaration or rebuilding the RTS | The default remains one loop; the size freezes before task activation, and round-robin balances task count rather than measured work |
 | Map Ada `CPU` aspects to event-loop groups | Existing Ada syntax expresses task co-location without a second annotation system | On macOS the value selects a loop thread, but cannot hard-pin that pthread to a physical core |
 | Configure loop pthread placement separately | Logical co-location and physical scheduling are different policies | Linux can verify a strict one-CPU mask; Darwin exposes only a capability-checked advisory cache tag, and requests become immutable once startup begins |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
@@ -2352,20 +2355,20 @@ Alire makes `flyology.gpr` available to the application and exports
 pre-build action, prepares an RTS matching the selected compiler, current
 Flyology sources, and persisted project policy, and exports a GPR configuration
 that selects it. With no explicit policy the default is native. Configure the
-policy once by passing the compiled RTS settings through the environment and
-adding `--configure`:
+prepared project policy by passing the RTS settings through the environment
+and adding `--configure`:
 
 ```sh
 alr exec -- sh -c \
-  'FLYOLOGY_DEFAULT=lightweight FLYOLOGY_LOOP_POOL_SIZE=4 "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
+  'FLYOLOGY_DEFAULT=lightweight "$FLYOLOGY_ROOT/scripts/prepare-alire-rts.sh" --configure'
 ```
 
 The resolved settings, including defaults for variables not supplied to that
 command, are written to the ignored `build/flyology-rts.conf` file in the
 Flyology dependency checkout. Subsequent plain `alr build` commands use that
-file and do not reinterpret ambient `FLYOLOGY_*` variables. Change the policy
-by running `--configure` again with the complete desired settings, or restore
-the native defaults with:
+file and do not reinterpret ambient `FLYOLOGY_*` variables while building.
+Change the policy by running `--configure` again with the complete desired
+settings, or restore the native defaults with:
 
 ```sh
 alr exec -- sh -c \
@@ -2448,10 +2451,10 @@ as a compatibility fallback:
 alr build
 ./scripts/prepare-rts.sh                       # native project default
 FLYOLOGY_DEFAULT=lightweight ./scripts/prepare-rts.sh
-FLYOLOGY_LOOP_POOL_SIZE=4 ./scripts/prepare-rts.sh
 FLYOLOGY_LOOP_PLACEMENT=strict \
 FLYOLOGY_LOOP_PLACEMENT_MAP=0:2,1:4 ./scripts/prepare-rts.sh  # Linux
 alr exec -- gprbuild --RTS="$PWD/build/rts" -P path/to/application.gpr
+FLYOLOGY_LOOP_POOL_SIZE=4 ./path/to/application
 ```
 
 Generate the public API reference with:
@@ -2489,7 +2492,10 @@ and the project, caller workspace, home directory, or any of their ancestors.
 Every newly prepared tree contains `.flyology-rts-root`; do not copy that marker
 into a directory that Flyology does not own.
 `FLYOLOGY_DEFAULT` accepts only `native` or `lightweight`.
-`FLYOLOGY_LOOP_POOL_SIZE` accepts `1 .. 128` and defaults to `1`;
+At application startup, `FLYOLOGY_LOOP_POOL_SIZE` accepts `1 .. 128` and
+defaults to `1`. It is captured once before task activation and remains fixed
+for the process lifetime. An empty, malformed, or out-of-range value fails
+application initialization.
 `FLYOLOGY_PLACEMENT` currently accepts `round_robin`.
 `FLYOLOGY_LOOP_PLACEMENT` accepts `none`, `strict`, or `advisory`, and
 `FLYOLOGY_LOOP_PLACEMENT_MAP` supplies unique `GROUP:VALUE` pairs. `strict` is
@@ -2497,10 +2503,10 @@ Linux-only; its values are zero-based OS logical CPUs in the process leader's
 current allowed mask and preparation rejects unavailable values. `advisory` is
 Darwin-only, requires positive tags, and is rejected on Apple-silicon hosts
 where the kernel reports `THREAD_AFFINITY_POLICY` unsupported. An empty default
-map adds no placement initialization syscall to a native-only process. These generated policies
-are compiled into the RTS rather than read from the process environment, so
-deployment configuration is stable during elaboration and concurrent task
-activation. The script checks source compatibility by applying the source
+map adds no placement initialization syscall to a native-only process. These
+generated preparation policies are compiled into the RTS rather than read from
+the application environment. The script checks source compatibility by
+applying the source
 patch under `set -e`, so an incompatible runtime source tree fails rather than
 being silently accepted.
 

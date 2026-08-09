@@ -117,8 +117,10 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @exception Group_Error The caller is native or runtime result is invalid
    function Current return Group_Id;
 
-   --  Return the automatic pool size without starting any group. A lightweight
-   --  task without a specific CPU is assigned among groups 0 .. Result - 1.
+   --  Return the automatic pool size without starting any group. The value of
+   --  FLYOLOGY_LOOP_POOL_SIZE is captured once at process startup, defaults to
+   --  one when absent, and freezes before task activation. A lightweight task
+   --  without a specific CPU is assigned among groups 0 .. Result - 1.
    --  @return Configured shared-group pool size
    --  @exception Group_Error The runtime reports an invalid size
    function Configured_Pool_Size return Loop_Pool_Size;

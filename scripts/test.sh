@@ -16,6 +16,10 @@ test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
 FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
 export FLYOLOGY_TEST_TEMP_ROOT
 
+#  The suite controls the prepared fallback and launch-time override
+#  independently so an ambient user setting cannot change test topology.
+unset FLYOLOGY_LOOP_POOL_SIZE || :
+
 cleanup_test_temp () {
   rm -f -- "$test_temp_root/file-transfers-smoke.data"
   rmdir -- "$test_temp_root" 2>/dev/null || true
@@ -575,9 +579,33 @@ for test_main in $ordinary_mains; do
   printf '%s\n' "test: PASS $test_main"
 done
 
-#  Exercise automatic placement separately because the pool policy is compiled
-#  into the prepared RTS. The ordinary suite above intentionally retains the
-#  compatibility default of one lazily created loop.
+#  Exercise the startup override against the compatibility fallback already
+#  prepared for the ordinary suite. This verifies both the reported size and
+#  actual automatic placement without rebuilding the RTS.
+link_test_mains "$test_subdir" "$project_root/build/rts" "$pool_mains"
+FLYOLOGY_LOOP_POOL_SIZE=3 "$test_bin/loop_pool_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 "$test_bin/topology_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/semantic_conformance_matrix"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/semantic_termination_matrix"
+
+for invalid_pool_size in '' 0 129 invalid; do
+  if FLYOLOGY_LOOP_POOL_SIZE=$invalid_pool_size \
+    "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/loop_pool_smoke" >/dev/null 2>&1
+  then
+    printf '%s\n' \
+      "invalid startup event-loop pool size was accepted: $invalid_pool_size" \
+      >&2
+    exit 1
+  fi
+done
+
+#  Preserve coverage of the prepared fallback when no startup override is
+#  present. The compatibility fallback remains one lazily created loop.
 FLYOLOGY_DEFAULT=native \
 FLYOLOGY_LOOP_POOL_SIZE=3 \
 FLYOLOGY_PLACEMENT=round_robin \

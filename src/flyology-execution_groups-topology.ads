@@ -9,17 +9,15 @@ with Interfaces;
 package Flyology.Execution_Groups.Topology with Preelaborate is
 
    --  Shared execution-group identifier eligible for application sharding.
-   --  A value belongs to the prepared pool only when In_Configured_Pool is
+   --  A value belongs to the configured pool only when In_Configured_Pool is
    --  true.
    subtype Shard_Id is Shared_Group_Id;
 
-   --  Map Hash deterministically across the prepared runtime's configured
-   --  shared groups. The compiled pool size is immutable for the process
-   --  lifetime, so a given hash remains on the same shard within one prepared
-   --  runtime.
-   --  Changing FLYOLOGY_LOOP_POOL_SIZE and preparing another runtime may remap
-   --  keys; persist an independent partition count when storage compatibility
-   --  requires it.
+   --  Map Hash deterministically across the process's configured shared
+   --  groups. The pool size is frozen during application startup, so a given
+   --  hash remains on the same shard within one process. Launching with a
+   --  different FLYOLOGY_LOOP_POOL_SIZE may remap keys; persist an independent
+   --  partition count when storage compatibility requires it.
    --  @param Hash Application key or hash to partition
    --  @return Group in 0 .. Configured_Pool_Size - 1
    --  @exception Group_Error The runtime reports an invalid pool size
@@ -28,7 +26,7 @@ package Flyology.Execution_Groups.Topology with Preelaborate is
 
    --  Map Hash across an explicit fixed number of shards without consulting
    --  or starting the runtime. Use this overload when a stored partitioning
-   --  scheme must remain independent of the prepared loop-pool size.
+   --  scheme must remain independent of the startup loop-pool size.
    --  @param Hash Application key or hash to partition
    --  @param Shard_Count Number of zero-based shards in the mapping
    --  @return Group in 0 .. Shard_Count - 1
