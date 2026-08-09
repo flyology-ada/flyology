@@ -175,6 +175,7 @@ procedure Shared_Memory_Smoke is
    procedure Check_Anonymous_And_Registry is
       Backing : Shared.Backing_Object;
       Required : Shared.Backing_Object;
+      Odd_Length_Backing : Shared.Backing_Object;
       Left, Right : Shared.Mapping;
       Segment_Left, Segment_Right : Segments.View;
       Region_Left, Region_Right : Regions.View;
@@ -194,6 +195,7 @@ procedure Shared_Memory_Smoke is
       Observed : Ada.Streams.Stream_Element_Array (Payload'Range);
       Props : Shared.Security_Properties;
       Noexec_Rejected : Boolean := False;
+      Odd_Length_Rejected : Boolean := False;
    begin
       Shared.Create_Anonymous (Backing, Mapping_Length);
       Props := Shared.Properties (Backing);
@@ -213,6 +215,29 @@ procedure Shared_Memory_Smoke is
          Assert
            (Props.Owner_Only_Permissions,
             "Darwin anonymous descriptor permissions are not owner-only");
+      end if;
+
+      --  Linux memfd retains arbitrary exact lengths. Darwin POSIX shared
+      --  memory rounds non-page geometry, so exact-size validation must reject
+      --  rather than silently expose a differently sized object. The image
+      --  index showcase found this boundary with an 11,968-byte segment.
+      begin
+         Shared.Create_Anonymous (Odd_Length_Backing, 11_968);
+      exception
+         when Shared.Validation_Error =>
+            Odd_Length_Rejected := True;
+      end;
+      if Is_Linux = 1 then
+         Assert
+           (Shared.Is_Open (Odd_Length_Backing)
+            and then Shared.Length (Odd_Length_Backing) = 11_968,
+            "Linux anonymous backing lost an arbitrary exact length");
+         Shared.Close (Odd_Length_Backing);
+      else
+         Assert
+           (Odd_Length_Rejected and then
+            not Shared.Is_Open (Odd_Length_Backing),
+            "Darwin accepted rounded anonymous shared-memory geometry");
       end if;
       if Props.No_Execute_Seal_Supported then
          Assert
@@ -843,6 +868,10 @@ procedure Shared_Memory_Smoke is
       Unix_Sockets.Send
         (Unix_Sockets.Socket_Descriptor (Left), Backing,
          Unix_Sockets.Borrow);
+      --  sendmsg acceptance is not receiver acceptance. Keep Left connected
+      --  until the exec'd child has received, validated, mapped, attached, and
+      --  published its mutation. Closing it earlier races peer validation on
+      --  Darwin, where getpeername can report EINVAL after peer shutdown.
       Assert (Wait_Child (Child) = 0, "shared-memory helper failed");
       Child := -1;
       Strings.Read (Object, Observed);

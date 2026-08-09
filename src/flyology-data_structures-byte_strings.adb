@@ -133,13 +133,15 @@ package body Flyology.Data_Structures.Byte_Strings is
       if Header.Capacity /= Interfaces.Unsigned_32 (Maximum_Length)
         or else Header.Element_Size /= 1
         or else Header.Alignment /= 1
-        or else Header.Auxiliary /= 0
         or else Header.Word_2 /= 0
         or else Core.Extent /= Expected
-        or else Header.Word_1 > Interfaces.Unsigned_64 (Header.Capacity)
       then
          raise Layout_Error with "byte-string layout does not match";
       end if;
+      --  Auxiliary is the live guard and Word_1 is the live length.  Another
+      --  process may mutate either after publishing this leaf, so attachment
+      --  must not treat a synchronized operation as static-header corruption.
+      --  Every payload operation acquires and validates them before use.
       Set_View (Item, Core, Header.Capacity);
    end Attach;
 

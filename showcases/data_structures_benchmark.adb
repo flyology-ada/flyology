@@ -2105,6 +2105,8 @@ procedure Data_Structures_Benchmark is
       Practical_Threshold_Percent => 1.0,
       Random_Seed                  => 42,
       Collect_Process_Telemetry    => False,
+      Metrics                      => Bench.Time_Metrics,
+      Scheduler_Probe              => null,
       CPU_Quiescence               => (others => <>),
       Progress                     => null,
       Progress_Name                => <>);

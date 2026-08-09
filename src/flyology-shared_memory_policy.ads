@@ -61,6 +61,11 @@ private package Flyology.Shared_Memory_Policy with SPARK_Mode is
          (Actual_Length = Expected_Length
           and then (Created or else Actual_Length /= 0));
 
+   --  Classify one received carrier and ancillary record. This SPARK function
+   --  proves structural acceptance only: kernel send acceptance does not prove
+   --  that a remote receiver has validated, mapped, or attached the object.
+   --  A higher-level protocol must retain any peer-liveness precondition until
+   --  its own receiver-acceptance acknowledgment.
    function Valid_Handoff
      (Amount                 : Long_Long_Integer;
       Payload                : U8;
