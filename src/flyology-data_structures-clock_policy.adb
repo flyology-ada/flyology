@@ -12,7 +12,11 @@ is
         or else Nanoseconds < 0
         or else Nanoseconds >= C.long (Nanoseconds_Per_Second)
         or else Interfaces.Unsigned_64 (Seconds) >
-          Interfaces.Unsigned_64'Last / Nanoseconds_Per_Second
+          Maximum_Clock_Seconds
+        or else
+          (Interfaces.Unsigned_64 (Seconds) = Maximum_Clock_Seconds
+           and then Interfaces.Unsigned_64 (Nanoseconds) >
+             Maximum_Final_Nanoseconds)
       then
          return Clock_Failure;
       end if;

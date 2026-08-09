@@ -30,10 +30,10 @@ begin
    Expect (0, 0, 1_000_000_000, Clock_Failure);
    Expect (0, Maximum_Seconds + 1, 0, Clock_Failure);
 
-   --  The old uint64_t expression checked multiplication but not addition.
-   --  Preserve its exact modulo behavior at the maximum accepted second.
+   --  The maximum second accepts only the final nanoseconds that fit without
+   --  wrapping. Larger values fail instead of becoming small timestamps.
    Expect
      (0, Maximum_Seconds, 709_551_615, Interfaces.Unsigned_64'Last);
-   Expect (0, Maximum_Seconds, 709_551_616, 0);
-   Expect (0, Maximum_Seconds, 999_999_999, 290_448_383);
+   Expect (0, Maximum_Seconds, 709_551_616, Clock_Failure);
+   Expect (0, Maximum_Seconds, 999_999_999, Clock_Failure);
 end Flyology.Data_Structures.Clock_Policy.Smoke;
