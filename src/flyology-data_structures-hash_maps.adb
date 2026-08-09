@@ -167,6 +167,9 @@ package body Flyology.Data_Structures.Hash_Maps is
       return Key.Hash (Reference);
    end Entry_Key_Hash;
 
+   procedure Acquire (Item : View);
+   procedure Release (Item : View);
+
    procedure Initialize
      (Item       : out View;
       Region     : Region_View;
@@ -256,6 +259,8 @@ package body Flyology.Data_Structures.Hash_Maps is
       Stored_Hash, Candidate_Hash : Interfaces.Unsigned_64;
       Candidate : Interfaces.Unsigned_64;
       Reached : Boolean;
+      Guard_Acquired : Boolean := False;
+      Expected_Count : Interfaces.Unsigned_64;
       Slot_Address, Candidate_Address : System.Address;
    begin
       Detach (Item);
@@ -268,23 +273,21 @@ package body Flyology.Data_Structures.Hash_Maps is
         or else Header.Alignment /= Interfaces.Unsigned_32 (Storage_Alignment)
         or else Header.Auxiliary /= Interfaces.Unsigned_32 (Element.Size)
         or else Header.Word_2 /= Interfaces.Unsigned_64 (Stride)
-        or else Header.Word_1 > Interfaces.Unsigned_64 (Header.Capacity)
         or else Core.Extent /= Extent
       then
          raise Layout_Error with "hash-map layout does not match";
       end if;
       Set_View
         (Item, Core, Header.Capacity, Key_Offset, Value_Offset, Stride);
-      declare
-         Guard : constant Interfaces.Unsigned_32 :=
-           Atomic.Load_Acquire_U32 (Item.Guard_Address);
-      begin
-         if Guard = 1 then
-            raise Busy_Error with "hash map is being used";
-         elsif Guard /= 0 then
-            raise Layout_Error with "hash-map guard is corrupt";
-         end if;
-      end;
+      --  The header snapshot precedes this claim and therefore cannot supply
+      --  the live count.  Hold the same process-capable guard as mutation,
+      --  then reread every mutable field and validate one stable snapshot.
+      Acquire (Item);
+      Guard_Acquired := True;
+      Expected_Count := Bytes.Read_U64 (Item.Count_Address);
+      if Expected_Count > Interfaces.Unsigned_64 (Item.Capacity_Value) then
+         raise Layout_Error with "hash-map count is corrupt";
+      end if;
       for Index in Interfaces.Unsigned_64 range
         0 .. Interfaces.Unsigned_64 (Item.Capacity_Value) - 1
       loop
@@ -297,7 +300,7 @@ package body Flyology.Data_Structures.Hash_Maps is
             raise Layout_Error with "hash-map entry state is corrupt";
          end if;
       end loop;
-      if Occupied /= Header.Word_1 then
+      if Occupied /= Expected_Count then
          raise Layout_Error with "hash-map occupied count is corrupt";
       end if;
 
@@ -360,8 +363,14 @@ package body Flyology.Data_Structures.Hash_Maps is
             end if;
          end if;
       end loop;
+      Guard_Acquired := False;
+      Release (Item);
    exception
       when others =>
+         if Guard_Acquired then
+            Guard_Acquired := False;
+            Release (Item);
+         end if;
          if Item.Core.Attached then
             Detach (Item);
          end if;

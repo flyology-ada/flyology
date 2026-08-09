@@ -802,6 +802,26 @@ procedure Data_Structures_Concurrency_Smoke is
       Views : View_Array (1 .. Worker_Count);
       type View_Access is access all Hash_Maps.View;
       Finished : Completion (Worker_Count);
+      Attach_Finished : Completion (1);
+
+      protected Start_Gate is
+         procedure Arrive;
+         entry Go;
+      private
+         Arrivals : Natural := 0;
+      end Start_Gate;
+
+      protected body Start_Gate is
+         procedure Arrive is
+         begin
+            Arrivals := Arrivals + 1;
+         end Arrive;
+
+         entry Go when Arrivals = Worker_Count + 1 is
+         begin
+            null;
+         end Go;
+      end Start_Gate;
 
       task type Worker_Task
         (Identifier : Positive; Item : not null View_Access)
@@ -813,6 +833,8 @@ procedure Data_Structures_Concurrency_Smoke is
          Outcome : Hash_Maps.Put_Result;
          Value : Interfaces.Unsigned_64;
       begin
+         Start_Gate.Arrive;
+         Start_Gate.Go;
          for Sequence in 1 .. Per_Worker loop
             Value := Interfaces.Unsigned_64
               ((Identifier - 1) * Per_Worker + Sequence);
@@ -831,6 +853,45 @@ procedure Data_Structures_Concurrency_Smoke is
       type Worker_Access is access Worker_Task;
       type Worker_Array is array (Positive range <>) of Worker_Access;
       Workers : Worker_Array (1 .. Worker_Count);
+
+      task type Attach_Task is
+         pragma Task_Info (Flyology.Native_Task);
+      end Attach_Task;
+
+      task body Attach_Task is
+         Candidate : Hash_Maps.View;
+         Successful_Attaches : Natural := 0;
+         Saw_Contention : Boolean := False;
+      begin
+         Start_Gate.Arrive;
+         Start_Gate.Go;
+         while Finished.Completed < Worker_Count
+           or else Successful_Attaches < 64
+         loop
+            begin
+               Hash_Maps.Attach
+                 (Candidate, Region_B, Map_Location, Capacity);
+               Successful_Attaches := Successful_Attaches + 1;
+               Hash_Maps.Detach (Candidate);
+            exception
+               when DS.Busy_Error =>
+                  Saw_Contention := True;
+            end;
+            delay 0.0;
+         end loop;
+         if not Saw_Contention then
+            raise Program_Error with
+              "hash-map attachment race observed no guard contention";
+         end if;
+         Attach_Finished.Done (True);
+      exception
+         when others =>
+            Hash_Maps.Detach (Candidate);
+            Attach_Finished.Done (False);
+      end Attach_Task;
+
+      type Attach_Access is access Attach_Task;
+      Attacher : Attach_Access;
       Data : Interfaces.Unsigned_64;
       Found : Boolean;
    begin
@@ -848,6 +909,7 @@ procedure Data_Structures_Concurrency_Smoke is
       for Index in Workers'Range loop
          Workers (Index) := new Worker_Task (Index, Views (Index)'Access);
       end loop;
+      Attacher := new Attach_Task;
       select
          Finished.Await_All;
       or
@@ -859,6 +921,17 @@ procedure Data_Structures_Concurrency_Smoke is
            "internally synchronized hash-map test timed out";
       end select;
       Assert (Finished.Passed, "internally synchronized hash-map tasks failed");
+      select
+         Attach_Finished.Await_All;
+      or
+         delay 15.0;
+         abort Attacher.all;
+         raise Program_Error with
+           "concurrent hash-map attachment test timed out";
+      end select;
+      Assert
+        (Attach_Finished.Passed,
+         "hash-map attachment raced a synchronized operation");
       Assert
         (Hash_Maps.Length (Views (1)) = Total,
          "internally synchronized hash map lost entries");
@@ -981,6 +1054,26 @@ procedure Data_Structures_Concurrency_Smoke is
          Views : View_Array (1 .. Worker_Count);
          type View_Access is access all Dynamic_Maps.View;
          Finished : Completion (Worker_Count);
+         Attach_Finished : Completion (1);
+
+         protected Start_Gate is
+            procedure Arrive;
+            entry Go;
+         private
+            Arrivals : Natural := 0;
+         end Start_Gate;
+
+         protected body Start_Gate is
+            procedure Arrive is
+            begin
+               Arrivals := Arrivals + 1;
+            end Arrive;
+
+            entry Go when Arrivals = Worker_Count + 1 is
+            begin
+               null;
+            end Go;
+         end Start_Gate;
 
          task type Worker_Task
            (Identifier : Positive;
@@ -994,6 +1087,8 @@ procedure Data_Structures_Concurrency_Smoke is
             Value : Interfaces.Unsigned_64;
             Result : Dynamic_Maps.Put_Result;
          begin
+            Start_Gate.Arrive;
+            Start_Gate.Go;
             for Sequence in 1 .. Per_Worker loop
                Value := Interfaces.Unsigned_64
                  ((Identifier - 1) * Per_Worker + Sequence);
@@ -1023,6 +1118,40 @@ procedure Data_Structures_Concurrency_Smoke is
          type Worker_Access is access Worker_Task;
          type Worker_Array is array (Positive range <>) of Worker_Access;
          Workers : Worker_Array (1 .. Worker_Count);
+
+         task type Attach_Task is
+            pragma Task_Info (Flyology.Native_Task);
+         end Attach_Task;
+
+         task body Attach_Task is
+            Candidate : Dynamic_Maps.View;
+            Successful_Attaches : Natural := 0;
+         begin
+            Start_Gate.Arrive;
+            Start_Gate.Go;
+            while Finished.Completed < Worker_Count
+              or else Successful_Attaches < 32
+            loop
+               begin
+                  Dynamic_Maps.Attach
+                    (Candidate, Region_B, Dynamic_Map_Location,
+                     Arena_Views (2), 2);
+                  Successful_Attaches := Successful_Attaches + 1;
+                  Dynamic_Maps.Detach (Candidate);
+               exception
+                  when DS.Busy_Error => null;
+               end;
+               delay 0.0;
+            end loop;
+            Attach_Finished.Done (True);
+         exception
+            when others =>
+               Dynamic_Maps.Detach (Candidate);
+               Attach_Finished.Done (False);
+         end Attach_Task;
+
+         type Attach_Access is access Attach_Task;
+         Attacher : Attach_Access;
          Data : Interfaces.Unsigned_64;
          Found : Boolean;
       begin
@@ -1039,6 +1168,7 @@ procedure Data_Structures_Concurrency_Smoke is
             Workers (Index) := new Worker_Task
               (Index, Views (Index)'Access, Arena_Views (Index)'Access);
          end loop;
+         Attacher := new Attach_Task;
          select
             Finished.Await_All;
          or
@@ -1050,7 +1180,20 @@ procedure Data_Structures_Concurrency_Smoke is
               "dynamic-map native-task test timed out";
          end select;
          Assert
-           (Finished.Passed and then Dynamic_Maps.Length (Views (1)) = Total,
+           (Finished.Passed, "dynamic-map concurrent insert tasks failed");
+         select
+            Attach_Finished.Await_All;
+         or
+            delay 20.0;
+            abort Attacher.all;
+            raise Program_Error with
+              "concurrent dynamic-map attachment test timed out";
+         end select;
+         Assert
+           (Attach_Finished.Passed,
+            "dynamic-map attachment raced a synchronized operation");
+         Assert
+           (Dynamic_Maps.Length (Views (1)) = Total,
             "dynamic-map concurrent insert lost keys");
          for Value in Interfaces.Unsigned_64 range
            1 .. Interfaces.Unsigned_64 (Total)
