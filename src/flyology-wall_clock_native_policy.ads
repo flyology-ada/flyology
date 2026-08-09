@@ -10,6 +10,8 @@ is
 
    subtype Nanosecond_Part is Interfaces.Integer_64
      range 0 .. 999_999_999;
+   subtype Civil_Day_Count is Interfaces.Integer_64
+     range -25_202 .. 157_053;
 
    type Timestamp is record
       Seconds     : Interfaces.Integer_64;
@@ -52,7 +54,7 @@ is
    function Days_From_Civil
      (Year  : Integer;
       Month : Integer;
-      Day   : Integer) return Interfaces.Integer_64
+      Day   : Integer) return Civil_Day_Count
    with Pre => Year in 1901 .. 2399
      and then Month in 1 .. 12
      and then Day in 1 .. 31;
@@ -81,8 +83,8 @@ is
         (Left.Seconds = Right.Seconds
          and then Left.Nanoseconds < Right.Nanoseconds));
 
-   --  Normalize Value + Amount with the native bridge's former two's-
-   --  complement boundary behavior.
+   --  Normalize Value + Amount. Fits is false instead of allowing the former
+   --  native bridge's signed time_t addition to wrap.
    function Add_Nanoseconds
      (Value  : Timestamp;
       Amount : Interfaces.Integer_64) return Timestamp_Result
@@ -100,8 +102,8 @@ is
      (if Before (Left, Right) then Earlier'Result = Left
       else Earlier'Result = Right);
 
-   --  Return Later - Earlier in nanoseconds with the former native bridge's
-   --  two's-complement boundary behavior.
+   --  Return Later - Earlier in nanoseconds, rejecting signed overflow in the
+   --  seconds subtraction, scaling, or final fractional addition.
    function Difference_Nanoseconds
      (Later, Earlier : Timestamp) return Difference_Result;
 end Flyology.Wall_Clock_Native_Policy;

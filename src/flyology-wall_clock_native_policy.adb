@@ -1,22 +1,7 @@
 package body Flyology.Wall_Clock_Native_Policy
   with SPARK_Mode
 is
-   use type Interfaces.Unsigned_64;
-
    Billion : constant Interfaces.Integer_64 := 1_000_000_000;
-   Sign_Bit : constant Interfaces.Unsigned_64 := 2**63;
-
-   function To_Bits
-     (Value : Interfaces.Integer_64) return Interfaces.Unsigned_64 is
-     (if Value >= 0 then Interfaces.Unsigned_64 (Value)
-      else Sign_Bit + Interfaces.Unsigned_64
-        (Value - Interfaces.Integer_64'First));
-
-   function From_Bits
-     (Value : Interfaces.Unsigned_64) return Interfaces.Integer_64 is
-     (if Value < Sign_Bit then Interfaces.Integer_64 (Value)
-      else Interfaces.Integer_64'First
-        + Interfaces.Integer_64 (Value - Sign_Bit));
 
    function Valid_Arm_Arguments
      (State_Open            : Boolean;
@@ -44,7 +29,7 @@ is
    function Days_From_Civil
      (Year  : Integer;
       Month : Integer;
-      Day   : Integer) return Interfaces.Integer_64
+      Day   : Integer) return Civil_Day_Count
    is
       Adjusted_Year  : constant Integer :=
         Year - Boolean'Pos (Month <= 2);
@@ -97,12 +82,14 @@ is
       Carry         : constant Interfaces.Integer_64 :=
         Boolean'Pos (Value.Nanoseconds + Remainder >= Billion);
    begin
+      if Value.Seconds > Interfaces.Integer_64'Last - Whole_Seconds - Carry
+      then
+         return (Fits => False, Value => Value);
+      end if;
       return
         (Fits => True,
          Value =>
-           (Seconds     => From_Bits
-              (To_Bits (Value.Seconds)
-               + Interfaces.Unsigned_64 (Whole_Seconds + Carry)),
+           (Seconds     => Value.Seconds + Whole_Seconds + Carry,
             Nanoseconds =>
               Value.Nanoseconds + Remainder - Carry * Billion));
    end Add_Nanoseconds;
@@ -116,12 +103,14 @@ is
       Borrow        : constant Interfaces.Integer_64 :=
         Boolean'Pos (Value.Nanoseconds < Remainder);
    begin
+      if Value.Seconds < Interfaces.Integer_64'First + Whole_Seconds + Borrow
+      then
+         return (Fits => False, Value => Value);
+      end if;
       return
         (Fits => True,
          Value =>
-           (Seconds     => From_Bits
-              (To_Bits (Value.Seconds)
-               - Interfaces.Unsigned_64 (Whole_Seconds + Borrow)),
+           (Seconds     => Value.Seconds - Whole_Seconds - Borrow,
             Nanoseconds =>
               Value.Nanoseconds - Remainder + Borrow * Billion));
    end Subtract_Nanoseconds;
@@ -132,15 +121,41 @@ is
    function Difference_Nanoseconds
      (Later, Earlier : Timestamp) return Difference_Result
    is
+      Seconds : Interfaces.Integer_64;
+      Product : Interfaces.Integer_64;
       Fraction : constant Interfaces.Integer_64 :=
         Later.Nanoseconds - Earlier.Nanoseconds;
-      Seconds_Bits : constant Interfaces.Unsigned_64 :=
-        To_Bits (Later.Seconds) - To_Bits (Earlier.Seconds);
-      Result_Bits : constant Interfaces.Unsigned_64 :=
-        Seconds_Bits * Interfaces.Unsigned_64 (Billion) + To_Bits (Fraction);
    begin
+      if
+        (Earlier.Seconds < 0
+         and then
+           Later.Seconds > Interfaces.Integer_64'Last + Earlier.Seconds)
+        or else
+          (Earlier.Seconds > 0
+           and then
+             Later.Seconds < Interfaces.Integer_64'First + Earlier.Seconds)
+      then
+         return (Fits => False, Nanoseconds => 0);
+      end if;
+
+      Seconds := Later.Seconds - Earlier.Seconds;
+      if Seconds > Interfaces.Integer_64'Last / Billion
+        or else Seconds < Interfaces.Integer_64'First / Billion
+      then
+         return (Fits => False, Nanoseconds => 0);
+      end if;
+
+      Product := Seconds * Billion;
+      if (Fraction > 0
+          and then Product > Interfaces.Integer_64'Last - Fraction)
+        or else
+          (Fraction < 0
+           and then Product < Interfaces.Integer_64'First - Fraction)
+      then
+         return (Fits => False, Nanoseconds => 0);
+      end if;
       return
         (Fits        => True,
-         Nanoseconds => From_Bits (Result_Bits));
+         Nanoseconds => Product + Fraction);
    end Difference_Nanoseconds;
 end Flyology.Wall_Clock_Native_Policy;

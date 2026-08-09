@@ -72,10 +72,7 @@ begin
       "normalized addition mismatch");
    Result := Add_Nanoseconds
      ((Interfaces.Integer_64'Last, 999_999_999), 1);
-   Require
-     (Result.Fits
-      and then Result.Value = (Interfaces.Integer_64'First, 0),
-      "addition boundary wrap mismatch");
+   Require (not Result.Fits, "addition overflow accepted");
 
    Result := Subtract_Nanoseconds ((11, 100_000_000), 200_000_001);
    Require
@@ -83,10 +80,7 @@ begin
       "normalized subtraction mismatch");
    Result := Subtract_Nanoseconds
      ((Interfaces.Integer_64'First, 0), 1);
-   Require
-     (Result.Fits
-      and then Result.Value = (Interfaces.Integer_64'Last, 999_999_999),
-      "subtraction boundary wrap mismatch");
+   Require (not Result.Fits, "subtraction overflow accepted");
 
    Require (Earlier ((0, 1), (0, 2)) = (0, 1), "left minimum failed");
    Require (Earlier ((0, 2), (0, 1)) = (0, 1), "right minimum failed");
@@ -102,28 +96,16 @@ begin
       "negative difference mismatch");
    Diff := Difference_Nanoseconds
      ((Interfaces.Integer_64'Last, 0), (-1, 0));
-   Require
-     (Diff.Fits and then Diff.Nanoseconds = 0,
-      "positive subtraction wrap mismatch");
+   Require (not Diff.Fits, "positive subtraction overflow accepted");
    Diff := Difference_Nanoseconds
      ((Interfaces.Integer_64'First, 0), (1, 0));
-   Require
-     (Diff.Fits and then Diff.Nanoseconds = -1_000_000_000,
-      "negative subtraction wrap mismatch");
+   Require (not Diff.Fits, "negative subtraction overflow accepted");
    Diff := Difference_Nanoseconds ((9_223_372_037, 0), (0, 0));
-   Require
-     (Diff.Fits and then Diff.Nanoseconds = -9_223_372_036_709_551_616,
-      "positive multiplication wrap mismatch");
+   Require (not Diff.Fits, "positive multiplication overflow accepted");
    Diff := Difference_Nanoseconds ((-9_223_372_037, 0), (0, 0));
-   Require
-     (Diff.Fits and then Diff.Nanoseconds = 9_223_372_036_709_551_616,
-      "negative multiplication wrap mismatch");
+   Require (not Diff.Fits, "negative multiplication overflow accepted");
    Diff := Difference_Nanoseconds ((9_223_372_036, 999_999_999), (0, 0));
-   Require
-     (Diff.Fits and then Diff.Nanoseconds = -9_223_372_036_709_551_617,
-      "positive final addition wrap mismatch");
+   Require (not Diff.Fits, "positive final addition overflow accepted");
    Diff := Difference_Nanoseconds ((-9_223_372_036, 0), (0, 999_999_999));
-   Require
-     (Diff.Fits and then Diff.Nanoseconds = 9_223_372_036_709_551_617,
-      "negative final addition wrap mismatch");
+   Require (not Diff.Fits, "negative final addition overflow accepted");
 end Flyology.Wall_Clock_Native_Policy.Smoke;
