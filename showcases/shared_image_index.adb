@@ -511,7 +511,8 @@ procedure Shared_Image_Index is
       Batch              : Positive;
       Workers_Ready      : Natural;
       Workers_Done       : Natural;
-      Worker_Count       : Positive;
+      Active_Worker_Count  : Positive;
+      Initial_Worker_Count : Positive;
       Maximum_Worker_Count : Positive;
       Generator_Paused   : Boolean;
       Source_Waiting     : Boolean;
@@ -609,7 +610,7 @@ procedure Shared_Image_Index is
          Put_Value
            (6, "workers",
             Image (Workers_Ready) & " ready  " & Image (Workers_Done) &
-            " done  " & Image (Worker_Count) & " active");
+            " done  " & Image (Active_Worker_Count) & " active");
          Put_Value
            (7, "throughput",
             Showcase_Support.Fixed_Image (Rate, 1) & " images/s  " &
@@ -636,8 +637,12 @@ procedure Shared_Image_Index is
            (if Content_Height > 2 then Content_Height - 2 else 0);
          Visible_Rows : constant Natural :=
            Natural'Min (Maximum_Worker_Count, Available_Rows);
+         --  Keep the scale independent of temporary worker membership so an
+         --  accumulated bar cannot shrink when workers join or retire.
          Expected : constant Positive :=
-           Natural'Max (1, (Total + Worker_Count - 1) / Worker_Count);
+           Natural'Max
+             (1,
+              (Total + Initial_Worker_Count - 1) / Initial_Worker_Count);
          Gauge_Width : constant Natural :=
            (if Content_Width > 29 then Content_Width - 29 else 0);
       begin
@@ -648,7 +653,7 @@ procedure Shared_Image_Index is
            (0, 0,
             Wide
               (Image (Workers_Ready) & " ready  " &
-               Image (Worker_Count) & " active  " &
+               Image (Active_Worker_Count) & " active  " &
                Image (Maximum_Worker_Count) & " slots"),
             Muted_Style);
          if Content_Height > 1 then
@@ -661,7 +666,8 @@ procedure Shared_Image_Index is
             for Worker in 1 .. Visible_Rows loop
                declare
                   Row : constant Natural := Worker + 1;
-                  Active : constant Boolean := Worker <= Worker_Count;
+                  Active : constant Boolean :=
+                    Worker <= Active_Worker_Count;
                   Count : constant Natural := Per_Worker (Worker);
                   Fraction : constant Indicators.Ratio :=
                     Indicators.Ratio
@@ -685,10 +691,11 @@ procedure Shared_Image_Index is
                         (if Active then TUI_Styles.Default else Muted_Style));
                   end if;
                   if Gauge_Width > 0 then
+                     --  The dot and label carry current membership.  The bar
+                     --  retains the work already published by a retired slot.
                      Result.Overlay
                        (Indicators.Gauge
-                          ((if Active then Fraction else 0.0),
-                           Gauge_Width, Dashboard_Theme),
+                          (Fraction, Gauge_Width, Dashboard_Theme),
                         12, Row);
                   end if;
                   Result.Write
@@ -738,7 +745,7 @@ procedure Shared_Image_Index is
                   Indicators.Success_Tone),
                Indicators.Make_Segment
                  (Wide
-                    (Image (Worker_Count) & "/" &
+                    (Image (Active_Worker_Count) & "/" &
                      Image (Maximum_Worker_Count) & " workers"),
                   Indicators.Normal),
                Indicators.Make_Segment
@@ -792,7 +799,7 @@ procedure Shared_Image_Index is
                     ("SHARED SEGMENT",
                      Segment_Body
                        (Layout, Mapped_Length, Queued, Completed, Total,
-                        Workers_Ready, Workers_Done, Worker_Count,
+                        Workers_Ready, Workers_Done, Active_Worker_Count,
                         Queue_Pressure, Index_Retries, Registry_Retries,
                         Left_Width - 4,
                         (if Segment_Height > 6
@@ -824,7 +831,7 @@ procedure Shared_Image_Index is
                    (Workload_Body (Left_Width - 4, Work_Rows),
                     Segment_Body
                       (Layout, Mapped_Length, Queued, Completed, Total,
-                       Workers_Ready, Workers_Done, Worker_Count,
+                       Workers_Ready, Workers_Done, Active_Worker_Count,
                        Queue_Pressure, Index_Retries, Registry_Retries,
                        Left_Width - 4, Segment_Rows));
             begin
@@ -1574,7 +1581,8 @@ procedure Shared_Image_Index is
             Show_Work
               (Generated, Queued, Completed, Image_Count, Positive (Batch),
                Workers_Ready, Workers_Done, Positive (Active_Workers),
-               Maximum_Workers, Generator_Paused, Source_Waiting,
+               Worker_Count, Maximum_Workers, Generator_Paused,
+               Source_Waiting,
                Producer_Backoffs, Source_Gaps, Queue_Pressure, Index_Retries,
                Registry_Retries, Per_Worker, Width, Height, Passes, Layout,
                Mapping_Size, Work_Started, Terminal_Width, Terminal_Height,
