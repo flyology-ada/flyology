@@ -239,6 +239,71 @@ begin
    Result.Wait (Passed);
    pragma Assert (Passed);
 
+   --  Exercise a distinct-descriptor change list rather than the duplicate
+   --  entries above. A timeout must clear every source, the same set must
+   --  rearm immediately, and simultaneous readiness must retain the required
+   --  lowest-index ordering in both lanes.
+   declare
+      task type Batch_Runner (Model : Flyology.Execution_Model) is
+         pragma Task_Info (Model);
+      end Batch_Runner;
+
+      task body Batch_Runner is
+         type Socket_Array is array
+           (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+         Left  : Socket_Array (1 .. 8);
+         Right : Socket_Array (Left'Range);
+         Requests : Flyology.IO.Wait_Request_Array (Left'Range);
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 17];
+         Buffer : Ada.Streams.Stream_Element_Array (Data'Range);
+         Last : Ada.Streams.Stream_Element_Offset;
+         OK : Boolean := False;
+      begin
+         for Index in Left'Range loop
+            Flyology.IO.Sockets.Create_Socket_Pair
+              (Left (Index), Right (Index));
+            Flyology.IO.Sockets.Prepare (Left (Index));
+            Requests (Index) :=
+              (Flyology.IO.Sockets.Native_Descriptor (Left (Index)),
+               Flyology.IO.For_Read);
+         end loop;
+
+         OK := Flyology.IO.Wait_Any (Requests, 0.005) = 0;
+         Flyology.IO.Sockets.Send_Socket (Right (8), Data, Last);
+         OK := OK and then Last = Data'Last
+           and then Flyology.IO.Wait_Any (Requests, 1.0) = 8;
+         Flyology.IO.Sockets.Receive_Socket (Left (8), Buffer, Last);
+
+         Flyology.IO.Sockets.Send_Socket (Right (6), Data, Last);
+         Flyology.IO.Sockets.Send_Socket (Right (2), Data, Last);
+         OK := OK and then Flyology.IO.Wait_Any (Requests, 1.0) = 2;
+
+         for Index in Left'Range loop
+            Flyology.IO.Sockets.Close_Socket (Left (Index));
+            Flyology.IO.Sockets.Close_Socket (Right (Index));
+         end loop;
+         Result.Set (OK);
+      exception
+         when others => Result.Set (False);
+      end Batch_Runner;
+
+   begin
+      declare
+         Native_Batch : Batch_Runner (Flyology.Native_Task);
+         pragma Unreferenced (Native_Batch);
+      begin
+         Result.Wait (Passed);
+         pragma Assert (Passed);
+      end;
+      declare
+         Lightweight_Batch : Batch_Runner (Flyology.Lightweight_Task);
+         pragma Unreferenced (Lightweight_Batch);
+      begin
+         Result.Wait (Passed);
+         pragma Assert (Passed);
+      end;
+   end;
+
    --  Aborting a lightweight task while Wait_Any is suspended must unregister
    --  every kernel interest before its stack-resident wait links disappear.
    --  A second lightweight waiter on the same descriptor checks that the poller

@@ -12,6 +12,7 @@ package body System.Flyology.Poller is
    package SSE renames System.Storage_Elements;
 
    use type C.int;
+   use type C.long_long;
    use type C.short;
    use type C.unsigned_short;
    use type SSE.Integer_Address;
@@ -25,6 +26,7 @@ package body System.Flyology.Poller is
    EV_DELETE   : constant C.unsigned_short := 16#0002#;
    EV_ONESHOT  : constant C.unsigned_short := 16#0010#;
    EV_CLEAR    : constant C.unsigned_short := 16#0020#;
+   EV_RECEIPT  : constant C.unsigned_short := 16#0040#;
    NOTE_TRIGGER : constant C.unsigned := 16#0100_0000#;
    Wake_Ident   : constant SSE.Integer_Address := 1;
 
@@ -41,6 +43,8 @@ package body System.Flyology.Poller is
       Ext    : Extension_Array;
    end record;
    pragma Convention (C, Kevent_Record);
+   type Kevent_Array is array (Positive range <>) of Kevent_Record;
+   pragma Convention (C, Kevent_Array);
 
    function Kqueue return C.int;
    pragma Import (C, Kqueue, "kqueue");
@@ -119,57 +123,111 @@ package body System.Flyology.Poller is
       Descriptor : C.int;
       Condition  : Interest) return Boolean
    is
-      Change : aliased Kevent_Record :=
-        (Ident  => SSE.Integer_Address (Descriptor),
-         Filter =>
-           (if Condition = Readable then EVFILT_READ else EVFILT_WRITE),
-         Flags  => EV_ADD + EV_ONESHOT,
-         Fflags => 0,
-         Data   => 0,
-         Udata  => 0,
-         Ext    => (others => 0));
+      Requests : constant Interest_Request_Array :=
+        [1 => (Descriptor => Descriptor, Condition => Condition)];
    begin
-      if Faults.Enabled and then Faults.Fail (Faults.Poller_Watch) then
-         return False;
-      end if;
-      return Kevent
+      return Watch_Many (Item, Requests);
+   end Watch;
+
+   function Watch_Many
+     (Item     : in out Poller;
+      Requests : Interest_Request_Array) return Boolean
+   is
+      Changes : aliased Kevent_Array (Requests'Range);
+      Result  : C.int;
+   begin
+      for Index in Requests'Range loop
+         --  Keep fault-injection accounting per logical interest even though
+         --  the production path submits the completed change list once.
+         if Faults.Enabled and then Faults.Fail (Faults.Poller_Watch) then
+            return False;
+         end if;
+         Changes (Index) :=
+           (Ident  => SSE.Integer_Address (Requests (Index).Descriptor),
+            Filter =>
+              (if Requests (Index).Condition = Readable
+               then EVFILT_READ else EVFILT_WRITE),
+            Flags  => EV_ADD + EV_ONESHOT,
+            Fflags => 0,
+            Data   => 0,
+            Udata  => 0,
+            Ext    => (others => 0));
+      end loop;
+      Result := Kevent
         (Item.Descriptor,
-         Change'Address,
-         1,
+         Changes'Address,
+         C.int (Changes'Length),
          System.Null_Address,
          0,
          0,
-         System.Null_Address) = 0;
-   end Watch;
+         System.Null_Address);
+      if Result = 0 then
+         return True;
+      end if;
+
+      --  kevent applies a change list in order and can stop after a later
+      --  invalid descriptor. The scheduler clears the complete request set
+      --  and treats a failed rollback as a fatal poller error.
+      return False;
+   end Watch_Many;
 
    function Cancel
      (Item       : in out Poller;
       Descriptor : C.int;
       Condition  : Interest) return Boolean
    is
-      Change : aliased Kevent_Record :=
-        (Ident  => SSE.Integer_Address (Descriptor),
-         Filter =>
-           (if Condition = Readable then EVFILT_READ else EVFILT_WRITE),
-         Flags  => EV_DELETE,
-         Fflags => 0,
-         Data   => 0,
-         Udata  => 0,
-         Ext    => (others => 0));
-      Succeeded : constant Boolean :=
-        Kevent
-          (Item.Descriptor, Change'Address, 1, System.Null_Address, 0, 0,
-           System.Null_Address) = 0;
+      Requests : constant Interest_Request_Array :=
+        [1 => (Descriptor => Descriptor, Condition => Condition)];
    begin
-      --  XNU drops a knote when its descriptor is closed and then answers
-      --  EV_DELETE for that integer with ENOENT, so a close race normally
-      --  arrives here as ENOENT rather than as the EBADF Linux reports. The
-      --  shared classification accepts either: neither leaves a registration
-      --  to cancel, and the scheduler must not treat that as a poller failure.
-      return Poller_Policy.Classify_Cancel
-               (Succeeded, Integer (OSI.errno)) /=
-             Poller_Policy.Cancel_Failed;
+      return Cancel_Many (Item, Requests);
    end Cancel;
+
+   function Cancel_Many
+     (Item     : in out Poller;
+      Requests : Interest_Request_Array) return Boolean
+   is
+      Changes  : aliased Kevent_Array (Requests'Range);
+      Receipts : aliased Kevent_Array (Requests'Range);
+      Result   : C.int;
+      Succeeded : Boolean := True;
+   begin
+      for Index in Requests'Range loop
+         Changes (Index) :=
+           (Ident  => SSE.Integer_Address (Requests (Index).Descriptor),
+            Filter =>
+              (if Requests (Index).Condition = Readable
+               then EVFILT_READ else EVFILT_WRITE),
+            Flags  => EV_DELETE + EV_RECEIPT,
+            Fflags => 0,
+            Data   => 0,
+            Udata  => 0,
+            Ext    => (others => 0));
+      end loop;
+      Result := Kevent
+        (Item.Descriptor,
+         Changes'Address,
+         C.int (Changes'Length),
+         Receipts'Address,
+         C.int (Receipts'Length),
+         0,
+         System.Null_Address);
+      if Result /= C.int (Requests'Length) then
+         return False;
+      end if;
+      for Index in Receipts'Range loop
+         --  XNU drops a knote when its descriptor closes and reports ENOENT
+         --  (or occasionally EBADF) for its receipt. Both mean that no
+         --  registration remains and are successful cancellation outcomes.
+         if Poller_Policy.Classify_Cancel
+              (Receipts (Index).Data = 0,
+               Integer (Receipts (Index).Data)) =
+            Poller_Policy.Cancel_Failed
+         then
+            Succeeded := False;
+         end if;
+      end loop;
+      return Succeeded;
+   end Cancel_Many;
 
    function Submit_File
      (Item        : in out Poller;
@@ -278,8 +336,6 @@ package body System.Flyology.Poller is
       Events              : out Poll_Event_Array;
       Count               : out Natural) return Boolean
    is
-      type Kevent_Array is array (Positive range <>) of Kevent_Record;
-      pragma Convention (C, Kevent_Array);
       Kernel_Events : aliased Kevent_Array (Events'Range);
       Limit         : aliased Time_ABI.Timespec;
       Result        : C.int;

@@ -547,7 +547,10 @@ package body System.Flyology.Scheduler is
       Outcome    : C.int);
    procedure Remove_IO_Waits_Locked
      (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
+      Item  : not null Fiber_Access;
+      Consumed_Descriptor : C.int := -1;
+      Read_Consumed       : Boolean := False;
+      Write_Consumed      : Boolean := False);
    procedure Queue_Pending_File_Locked
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
@@ -1155,11 +1158,36 @@ package body System.Flyology.Scheduler is
 
    procedure Remove_IO_Waits_Locked
      (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
+      Item  : not null Fiber_Access;
+      Consumed_Descriptor : C.int := -1;
+      Read_Consumed       : Boolean := False;
+      Write_Consumed      : Boolean := False)
    is
       Position : IO_Wait_Link_Access;
       Previous : IO_Wait_Link_Access;
       Link     : IO_Wait_Link_Access;
+      Cancellations : Pollers.Interest_Request_Array
+        (1 .. Max_IO_Link_Count);
+      Cancellation_Count : Natural := 0;
+
+      function Already_Listed
+        (Descriptor : C.int;
+         Interest   : Pollers.Interest) return Boolean;
+
+      function Already_Listed
+        (Descriptor : C.int;
+         Interest   : Pollers.Interest) return Boolean
+      is
+      begin
+         for Index in 1 .. Cancellation_Count loop
+            if Cancellations (Index).Descriptor = Descriptor
+              and then Cancellations (Index).Condition = Interest
+            then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Already_Listed;
    begin
       if not Item.IO_Wait then
          return;
@@ -1192,28 +1220,39 @@ package body System.Flyology.Scheduler is
       end loop;
 
       --  Removing one fiber can orphan several one-shot kernel interests.
-      --  The source that triggered this wake may already have been consumed
-      --  by kevent/epoll; Cancel is deliberately idempotent for that case.
-      --  Duplicate links are harmless: the first cancellation removes the
-      --  interest and later duplicates observe it as already absent. A raw
-      --  wait does not own its descriptor, so the owner may also have closed
-      --  it while the interest was armed; Cancel reports that as removed
-      --  rather than as a failure. Fatal is therefore reserved for a poller
-      --  that can no longer manage its own registrations.
+      --  The direction delivered by the poller was consumed atomically with
+      --  that event and needs no delete. Batch every other orphan so Darwin
+      --  submits one kqueue change list rather than one syscall per source.
+      --  A raw wait does not own its descriptor, so Cancel_Many accepts a
+      --  source closed concurrently by its owner as already removed.
       for Kind in 1 .. Item.Active_IO_Link_Count loop
          Link := Active_IO_Link (Item, Kind);
          if Link.Descriptor >= 0
+           and then not
+             (Link.Descriptor = Consumed_Descriptor
+              and then
+                ((Link.Interest = Pollers.Readable and then Read_Consumed)
+                 or else
+                   (Link.Interest = Pollers.Writable and then Write_Consumed)))
            and then not IO_Interest_Registered_Locked
              (Group, Link.Descriptor, Link.Interest)
-           and then not Pollers.Cancel
-             (Group.Scheduler_Poller, Link.Descriptor, Link.Interest)
+           and then not Already_Listed (Link.Descriptor, Link.Interest)
          then
-            Fatal (Poller_Failure);
+            Cancellation_Count := Cancellation_Count + 1;
+            Cancellations (Cancellation_Count) :=
+              (Descriptor => Link.Descriptor, Condition => Link.Interest);
          end if;
          Link.Owner := null;
          Link.Descriptor := -1;
          Link.Outcome := 0;
       end loop;
+      if Cancellation_Count > 0
+        and then not Pollers.Cancel_Many
+          (Group.Scheduler_Poller,
+           Cancellations (1 .. Cancellation_Count))
+      then
+         Fatal (Poller_Failure);
+      end if;
       Item.IO_Wait := False;
       Item.IO_Interrupt_Wait := False;
    end Remove_IO_Waits_Locked;
@@ -3508,9 +3547,13 @@ package body System.Flyology.Scheduler is
       Remainder : C.long_long;
       Timeout   : Duration;
       Links     : aliased IO_Wait_Link_Array (1 .. Max_IO_Link_Count);
+      Kernel_Watches : Pollers.Interest_Request_Array
+        (1 .. Max_IO_Link_Count);
+      Kernel_Watch_Count : Natural := 0;
 
       function Request_At (Index : Positive) return Runtime_Wait_Request;
-      function Arm (Index : Positive) return Boolean;
+      function Plan_Arm (Index : Positive) return Boolean;
+      procedure Register_Arm (Index : Positive);
 
       function Request_At (Index : Positive) return Runtime_Wait_Request is
          Bytes : constant SSE.Storage_Offset :=
@@ -3522,7 +3565,7 @@ package body System.Flyology.Scheduler is
          return Wait_Request_Conversions.To_Pointer (Requests + Bytes).all;
       end Request_At;
 
-      function Arm (Index : Positive) return Boolean is
+      function Plan_Arm (Index : Positive) return Boolean is
          Request : constant Runtime_Wait_Request := Request_At (Index);
          Interest : constant Pollers.Interest :=
            (if Request.For_Write = 0
@@ -3536,17 +3579,34 @@ package body System.Flyology.Scheduler is
          end if;
          Needs_Kernel_Watch := not IO_Interest_Registered_Locked
            (Group, Request.Descriptor, Interest);
-         if Needs_Kernel_Watch
-           and then not Pollers.Watch
-             (Group.Scheduler_Poller, Request.Descriptor, Interest)
-         then
-            return False;
+         if Needs_Kernel_Watch then
+            for Planned in 1 .. Kernel_Watch_Count loop
+               if Kernel_Watches (Planned).Descriptor = Request.Descriptor
+                 and then Kernel_Watches (Planned).Condition = Interest
+               then
+                  Needs_Kernel_Watch := False;
+                  exit;
+               end if;
+            end loop;
          end if;
+         if Needs_Kernel_Watch then
+            Kernel_Watch_Count := Kernel_Watch_Count + 1;
+            Kernel_Watches (Kernel_Watch_Count) :=
+              (Descriptor => Request.Descriptor, Condition => Interest);
+         end if;
+         return True;
+      end Plan_Arm;
+
+      procedure Register_Arm (Index : Positive) is
+         Request : constant Runtime_Wait_Request := Request_At (Index);
+         Interest : constant Pollers.Interest :=
+           (if Request.For_Write = 0
+            then Pollers.Readable else Pollers.Writable);
+      begin
          Register_IO_Wait_Locked
            (Group, Item, Request.Descriptor, Interest,
             IO_Link_Kind (Index), C.int (Index));
-         return True;
-      end Arm;
+      end Register_Arm;
    begin
       --  Current_Fiber belongs exclusively to this event thread until the
       --  locked state transition below.
@@ -3591,8 +3651,7 @@ package body System.Flyology.Scheduler is
       --  Reverse registration preserves the public rule that the lowest
       --  request index wins when duplicate descriptors become ready together.
       for Index in reverse 1 .. Positive (Count) loop
-         if not Arm (Index) then
-            Remove_IO_Waits_Locked (Group, Item);
+         if not Plan_Arm (Index) then
             Remove_Timer_Locked (Group, Item);
             Item.State := Running;
             Item.Active_IO_Links := null;
@@ -3600,6 +3659,27 @@ package body System.Flyology.Scheduler is
             Unlock_Group (Group);
             return -1;
          end if;
+      end loop;
+      if Kernel_Watch_Count > 0
+        and then not Pollers.Watch_Many
+          (Group.Scheduler_Poller,
+           Kernel_Watches (1 .. Kernel_Watch_Count))
+      then
+         if not Pollers.Cancel_Many
+           (Group.Scheduler_Poller,
+            Kernel_Watches (1 .. Kernel_Watch_Count))
+         then
+            Fatal (Poller_Failure);
+         end if;
+         Remove_Timer_Locked (Group, Item);
+         Item.State := Running;
+         Item.Active_IO_Links := null;
+         Item.Active_IO_Link_Count := 0;
+         Unlock_Group (Group);
+         return -1;
+      end if;
+      for Index in reverse 1 .. Positive (Count) loop
+         Register_Arm (Index);
       end loop;
 
       Item.Enqueue_At_Head := False;
@@ -4115,7 +4195,16 @@ package body System.Flyology.Scheduler is
                Remove_Timer_Locked (Group, Item);
                Item.Timed_Out := False;
                Item.IO_Result := Outcome;
-               Remove_IO_Waits_Locked (Group, Item);
+               Remove_IO_Waits_Locked
+                 (Group,
+                  Item,
+                  Consumed_Descriptor => Event.Descriptor,
+                  Read_Consumed =>
+                    Event.Kind in
+                      Pollers.Readable_Event | Pollers.Read_Write_Event,
+                  Write_Consumed =>
+                    Event.Kind in
+                      Pollers.Writable_Event | Pollers.Read_Write_Event);
                Enqueue (Group, Item);
                --  Removing all of Item's links may have changed this bucket at
                --  any position, so restart from its head. Each pass wakes one
