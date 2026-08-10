@@ -23,8 +23,9 @@ package body System.Flyology.Poller is
    EVFILT_READ : constant C.short := C.short (-1);
    EVFILT_WRITE : constant C.short := C.short (-2);
    EV_ADD      : constant C.unsigned_short := 16#0001#;
+   EV_ENABLE   : constant C.unsigned_short := 16#0004#;
    EV_DELETE   : constant C.unsigned_short := 16#0002#;
-   EV_ONESHOT  : constant C.unsigned_short := 16#0010#;
+   EV_DISPATCH : constant C.unsigned_short := 16#0080#;
    EV_CLEAR    : constant C.unsigned_short := 16#0020#;
    EV_RECEIPT  : constant C.unsigned_short := 16#0040#;
    NOTE_TRIGGER : constant C.unsigned := 16#0100_0000#;
@@ -147,7 +148,10 @@ package body System.Flyology.Poller is
             Filter =>
               (if Requests (Index).Condition = Readable
                then EVFILT_READ else EVFILT_WRITE),
-            Flags  => EV_ADD + EV_ONESHOT,
+            --  Dispatch disables the knote after delivery without deleting
+            --  it. A later EV_ADD + EV_ENABLE rearms the same descriptor and
+            --  filter pair, while close still removes the knote in the kernel.
+            Flags  => EV_ADD + EV_ENABLE + EV_DISPATCH,
             Fflags => 0,
             Data   => 0,
             Udata  => 0,

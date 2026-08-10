@@ -116,3 +116,72 @@ measured 70,093.3 requests/s (+32.28%), with p50/p95/p99/p99.9 improved by
 28.43%/21.23%/15.31%/37.25%. Its three-second sample showed one batched watch
 and one batched cancellation call per multi-source wait; it recorded 37,977
 `kevent64` stack occurrences while completing requests at the higher rate.
+
+## Persistent one-shot rearm
+
+Host and toolchain are unchanged from the baseline above. This slice starts at
+`24f3067437e1b0b0c54ef77a2f00d64639954b01`, after batched multi-source
+registration merged. Downstream HTTP/1 profiles localized the next cost to the
+remaining per-wait readiness lifecycle and to protected reads of stable
+cancellation sources. The maintained fixture reproduced 126,729 requests/s in
+an initial million-request, 16-loop, 256-connection run.
+
+Two hypotheses were measured independently:
+
+1. **Cache stable sources for one synchronous operation and use an atomic
+   requested-state snapshot. Rejected.** Three adjacent baseline runs centered
+   at 118,454 requests/s; four candidates centered at 117,616 requests/s
+   (-0.71%). The candidate also increased aggregate system CPU in its first two
+   trials. All source, cancellation, deadline, and check boundaries were kept,
+   but the code was reverted because removing protected calls was not material.
+2. **Retain the kernel's consumed one-shot registration and rearm it. Confirmed.**
+   Darwin uses `EV_DISPATCH`, then `EV_ADD | EV_ENABLE` to rearm the disabled
+   knote. Linux leaves a delivered `EPOLLONESHOT` registration disabled, frees
+   its transient Ada watch record, and uses `EPOLL_CTL_MOD` on the next arm;
+   `ENOENT` falls back to `EPOLL_CTL_ADD` after close or descriptor reuse.
+   Orphaned, timed-out, cancelled, and aborted interests are still deleted, so
+   an event from an older wait cannot satisfy a later wait generation. An
+   initial Darwin experiment omitted `EV_ENABLE` and stalled; it was rejected
+   before measurement and the focused rearm/reuse test covers that boundary.
+
+The final comparison used separately built exact before/after binaries, each
+linked against its own prepared custom RTS. The marker was checked before every
+build. Commands for the 16-loop pairs were:
+
+```sh
+FLYOLOGY_LOOP_POOL_SIZE=16 /usr/bin/time -lp \
+  /tmp/flyology-readiness-before CONNECTIONS
+oha --no-tui --disable-color --http-version 1.1 \
+  -j -n 300000 -c CONNECTIONS http://127.0.0.1:PORT/
+
+FLYOLOGY_LOOP_POOL_SIZE=16 /usr/bin/time -lp \
+  /tmp/flyology-readiness-after CONNECTIONS
+oha --no-tui --disable-color --http-version 1.1 \
+  -j -n 300000 -c CONNECTIONS http://127.0.0.1:PORT/
+```
+
+Three alternating pairs were run at 16 connections and five at 256. The
+one-loop result is the median of three alternating pairs with the same commands
+and `FLYOLOGY_LOOP_POOL_SIZE=1`.
+
+| Loops | Connections | Before req/s | Rearm req/s | Delta |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 16 | 141,224 | 144,391 | +2.24% |
+| 16 | 16 | 70,500 | 80,670 | +14.43% |
+| 16 | 256 | 123,647 | 155,739 | +25.95% |
+
+At 16 loops and 16 connections, median p50/p95/p99 changed from
+210.541/414.417/568.917 microseconds to 184.792/345.042/540.333 microseconds
+(-12.23%/-16.74%/-5.02%). Median server wall time fell 12.42%, aggregate system
+CPU fell 10.85%, and involuntary context switches fell 30.92%.
+
+The higher-concurrency short trials were bimodal: median p50 improved 40.61%,
+while p95 and p99 did not improve consistently. The stable throughput and CPU
+result is therefore the supported claim, not a tail-latency claim. A separate
+million-request candidate completed at 145,935 requests/s with p50/p95/p99 of
+1.502/3.402/7.101 milliseconds. A three-million-request profile completed at
+140,328 requests/s; on one representative loop, 452 of 455 readiness waits
+were in the single batched watch syscall, alongside 707 `recvfrom` samples.
+Stable token/gate protected-lock contention remained visible, confirming that
+the rejected atomic snapshot and the accepted kernel rearm address independent
+costs.

@@ -8,6 +8,7 @@ procedure Wait_Any_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
+   use type Flyology.IO.Descriptor;
    use type Flyology.IO.Wait_Outcome;
 
    protected Result is
@@ -194,6 +195,44 @@ procedure Wait_Any_Smoke is
       Flyology.IO.Sockets.Close_Socket (Right_1);
       Flyology.IO.Sockets.Close_Socket (Left_2);
       Flyology.IO.Sockets.Close_Socket (Right_2);
+
+      --  A delivered one-shot may retain disabled kernel state for cheap
+      --  rearming. Closing its descriptor must still detach that state, and
+      --  immediate integer reuse must establish a new generation rather than
+      --  inheriting or rejecting the old registration.
+      Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
+      Flyology.IO.Sockets.Prepare (Left_1);
+      declare
+         Old_FD : constant Flyology.IO.Descriptor :=
+           Flyology.IO.Sockets.Native_Descriptor (Left_1);
+         Request : constant Flyology.IO.Wait_Request_Array :=
+           [1 => (Old_FD, Flyology.IO.For_Read)];
+         Buffer : Ada.Streams.Stream_Element_Array (Data'Range);
+      begin
+         Flyology.IO.Sockets.Send_Socket (Right_1, Data, Last);
+         Passed := Passed and then Flyology.IO.Wait_Any (Request, 0.1) = 1;
+         Flyology.IO.Sockets.Receive_Socket (Left_1, Buffer, Last);
+         Flyology.IO.Sockets.Close_Socket (Left_1);
+         Flyology.IO.Sockets.Close_Socket (Right_1);
+
+         Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
+         Flyology.IO.Sockets.Prepare (Left_1);
+         Passed := Passed and then
+           Flyology.IO.Sockets.Native_Descriptor (Left_1) = Old_FD;
+         Flyology.IO.Sockets.Send_Socket (Right_1, Data, Last);
+         declare
+            Reused_Request : constant Flyology.IO.Wait_Request_Array :=
+              [1 =>
+                 (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                  Flyology.IO.For_Read)];
+         begin
+            Passed := Passed and then
+              Flyology.IO.Wait_Any (Reused_Request, 0.1) = 1;
+         end;
+         Flyology.IO.Sockets.Receive_Socket (Left_1, Buffer, Last);
+      end;
+      Flyology.IO.Sockets.Close_Socket (Left_1);
+      Flyology.IO.Sockets.Close_Socket (Right_1);
 
       --  A timed-out wait must leave no registration that can act on a later
       --  descriptor generation reusing the same integer.

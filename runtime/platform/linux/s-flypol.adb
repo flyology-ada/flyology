@@ -336,9 +336,26 @@ package body System.Flyology.Poller is
       Result :=
         Epoll_Ctl
           (Item.Descriptor,
-           (if Created then EPOLL_CTL_ADD else EPOLL_CTL_MOD),
+           EPOLL_CTL_MOD,
            Descriptor,
            Mask_For (Watch_Item));
+      if Result /= 0
+        and then Created
+        and then Integer (OSI.errno) =
+          Poller_Policy.Interest_Absent_Error
+      then
+         --  A delivered EPOLLONESHOT registration remains disabled in the
+         --  kernel after its transient Ada bookkeeping record is released.
+         --  MOD rearms that common case. ENOENT means this descriptor is new
+         --  (or its prior owner closed it), so ADD establishes a generation-
+         --  safe registration for the current open file description.
+         Result :=
+           Epoll_Ctl
+             (Item.Descriptor,
+              EPOLL_CTL_ADD,
+              Descriptor,
+              Mask_For (Watch_Item));
+      end if;
       if Result /= 0 then
          Watch_Item.Readable := Was_Readable;
          Watch_Item.Writable := Was_Writable;
@@ -696,12 +713,10 @@ package body System.Flyology.Poller is
                        Descriptor,
                        Mask_For (Watch_Item));
                else
-                  Result :=
-                    Epoll_Ctl
-                      (Item.Descriptor,
-                       EPOLL_CTL_DEL,
-                       Descriptor,
-                       0);
+                  --  EPOLLONESHOT already disabled the delivered
+                  --  registration. Retain it in the kernel for a later MOD,
+                  --  but release the bounded record used only while armed.
+                  Result := 0;
                   Remove (Item, Watch_Item);
                end if;
                if Result /= 0 then

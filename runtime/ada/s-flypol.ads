@@ -34,13 +34,13 @@ package System.Flyology.Poller is
    function Initialize (Item : in out Poller) return Boolean;
    procedure Finalize (Item : in out Poller);
 
-   --  Arm a one-shot readiness notification for Descriptor.
+   --  Arm or rearm a one-shot readiness notification for Descriptor.
    function Watch
      (Item       : in out Poller;
       Descriptor : Interfaces.C.int;
       Condition  : Interest) return Boolean;
 
-   --  Arm one-shot readiness notifications as one logical operation. Success
+   --  Arm or rearm one-shot notifications as one logical operation. Success
    --  means every request is armed. A failure may leave an earlier request
    --  armed, so the caller must pass the complete set to Cancel_Many before
    --  releasing its scheduler state. Repeated pairs are permitted.
