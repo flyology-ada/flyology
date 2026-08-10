@@ -53,9 +53,9 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology Runtime</a></li><li aria-current="page">Guide</li></ol>
-          <h1>From first task to a measured configuration.</h1>
+          <h1>Build and configure Flyology Runtime.</h1>
         </div>
-        <p class="doc-hero-copy">Prepare a version-matched runtime, opt ordinary Ada tasks into the lightweight lane, then manage their stacks, task-owned memory, concurrency, execution groups, deadlines, and cooperative CPU work.</p>
+        <p class="doc-hero-copy">Prepare a version-matched runtime and designate ordinary Ada tasks as lightweight. Then configure stacks, memory, concurrency, execution groups, deadlines, and cooperative CPU work.</p>
       </header>
 
       <div class="docs-layout">
@@ -90,8 +90,8 @@
           </aside>
           <section id="requirements">
             <span class="step-label">STEP 01</span>
-            <h2>Start with an exact toolchain.</h2>
-            <p>Flyology is an Alire crate and requires Alire 2.1 or newer. The crate accepts GNAT 13 through 16 as a dependency range, but runtime preparation supports only the host and release pairs listed below.</p>
+            <h2>Use a supported toolchain.</h2>
+            <p>Flyology is an Alire crate and requires Alire 2.1 or newer. The dependency range accepts GNAT 13 through 16. Runtime preparation supports only the host and release pairs listed below.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>macOS / AArch64</dt><dd>13.2.2, 14.1.3, 14.2.1, and 16.1.0</dd></div>
@@ -108,7 +108,7 @@
           <section id="build">
             <span class="step-label">STEP 02</span>
             <h2>Add Flyology to an Alire application.</h2>
-            <p>Flyology is temporarily published through a separate organization index. Keep the community index enabled for compiler and third-party dependencies, add the Flyology index ahead of it, and add the crate normally.</p>
+            <p>Flyology is published through a separate organization index. Keep the community index enabled for compiler and third-party dependencies. Add the Flyology index before the community index, then add the crate. Flyology might move to the community index later, but no decision has been made.</p>
             <figure class="code-panel">
               <figcaption>shell</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -128,13 +128,13 @@ alr with flyology</code></pre>
           <section id="prepare">
             <span class="step-label">STEP 03</span>
             <h2>Build with a version-matched runtime.</h2>
-            <p>The first build runs Flyology's Alire post-fetch action. It copies the active compiler's installed runtime sources into dependency build output, applies the exact patch family, builds the RTS, and exports a GPR configuration that selects it. The application links against this prepared RTS rather than the stock tasking runtime.</p>
+            <p>The first build runs Flyology's Alire post-fetch action. The action copies the active compiler's installed runtime sources into the dependency build output. It then applies the exact patch family, builds the RTS, and exports a GPR configuration. The application links to this prepared RTS instead of the stock tasking runtime.</p>
             <figure class="code-panel">
               <figcaption>build the application</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>alr build</code></pre>
             </figure>
-            <p>The default is <code>native</code>. This is the compatibility configuration: undesignated tasks stay on stock OS-thread execution, and no event machinery starts until a lightweight task is activated.</p>
+            <p>The default is <code>native</code>. In this compatibility configuration, undesignated tasks use stock OS-thread execution. No event machinery starts until a lightweight task activates.</p>
             <figure class="code-panel">
               <figcaption>launch with four shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -142,22 +142,24 @@ alr with flyology</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> establishes the initial size at application startup, before library-level tasks activate. It defaults to <code>1</code>. An empty, malformed, or out-of-range value fails application initialization. The automatic-placement ceiling may grow or drain to a smaller value later.</p>
+              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> sets the initial size before library-level tasks activate. Its default is <code>1</code>. An empty, malformed, or out-of-range value causes application initialization to fail. The automatic-placement ceiling can change later.</p>
             </aside>
             <h3 id="grow-pool">Grow the automatic pool later</h3>
-            <p><code>Grow_Configured_Pool</code> ensures that the automatic pool contains at least the requested number of groups. When no reduction is draining, concurrent calls converge on the largest request and calls at or below the current size do nothing. Existing tasks stay on their current groups; future automatic placements use the enlarged pool. Growth alone starts no group or OS thread.</p>
+            <p><a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#287e3dd835386f2403c442c7827e7a3b07b4e4be9a5b76fd04cc6f4bc17ba8d7"><code>Grow_Configured_Pool</code></a> sets a minimum number of groups in the automatic pool. When no reduction is active, concurrent calls converge on the largest request, and calls at or below the current size have no effect. Existing tasks stay in their current groups, while future automatic placements use the larger pool. Growth alone starts no group or OS thread.</p>
             <figure class="code-panel">
               <figcaption>grow runtime configuration</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">Flyology.Execution_Groups.Grow_Configured_Pool (8);</code></pre>
             </figure>
-            <p>While a <a href="#reduce-pool">pool reduction</a> still has automatic tasks or pre-cutover placement claims to drain, every growth request raises <code>Group_Error</code>. The growth call checks that progress itself: if the last blocker has already cleared, it recognizes the completed drain, applies the requested minimum, and resets <code>Pool_Reduction</code> to <code>No_Reduction</code>. Tasks that migrated during drainage stay on their destination group; growth does not redistribute them.</p>
+            <p>A growth request raises <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#ca2f30bb12deb30a2ee6a94db92be9b26f6369ee815d4fab9ec10d863a9f6cac"><code>Group_Error</code></a> while a <a href="#reduce-pool">pool reduction</a> still has blockers. Blockers are automatic tasks or placement claims that started before the cutover.</p>
+            <p>The growth call checks the reduction status. If the last blocker has cleared, the call completes the reduction and applies the requested minimum. It also resets <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#c81ba0d929dfa282b5ae431fc3d9026af60c82abecd47965b43fd911549354b7"><code>Pool_Reduction</code></a> to <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#b2a2544887148bc44150ae84487fe09b2617367856af2213ab18eed6cdbfe20b"><code>No_Reduction</code></a>. Tasks that migrated during the reduction stay in their destination group.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Growth changes topology hashing.</strong> <code>Topology.Shard_For_Hash</code> uses the current configured pool size, so persist an independent shard count when keys must keep stable ownership.</p>
+              <p><strong>Growth changes topology hashing.</strong> <a href="../api/1b3bd073f729f7d328d1c0d1ec5c5c6f2bc72e73eb3a88dd7f46367c8122c1e4.html#84ea62bb30a2c4c9cc0c07f082c3b4ee24629751097e367cba56b65b0b45d60c"><code>Topology.Shard_For_Hash</code></a> uses the current configured pool size, so persist an independent shard count when keys must keep stable ownership.</p>
             </aside>
             <h3 id="reduce-pool">Drain the automatic pool to a smaller size</h3>
-            <p><code>Request_Pool_Reduction</code> lowers the ceiling for new automatic placements immediately, then lets the scheduler move automatically managed tasks from removed groups to group 0 as they reach cooperative dispatch points. When migration is required, the request may synchronously start group 0 and wait for that destination's startup; an already-drained request starts no group. The call does not wait for drainage. Query <code>Pool_Reduction</code> to observe <code>Draining</code> or <code>Drained</code> and the current blocker counts.</p>
+            <p><a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#599d53cf7c9d8754494939cc6990374d8ee706549e86fa97ec35cdb1ba89b8be"><code>Request_Pool_Reduction</code></a> immediately lowers the ceiling for new automatic placements. The scheduler then moves eligible tasks from removed groups to group 0 at cooperative dispatch points.</p>
+            <p>If migration is necessary, the request can start group 0 and wait for its startup. A request that needs no migration starts no group. The call does not wait for the complete reduction. Query <code>Pool_Reduction</code> for the phase and blocker counts.</p>
             <figure class="code-panel">
               <figcaption>request and observe cooperative drainage</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -171,7 +173,8 @@ end if;</code></pre>
             </figure>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Drainage is cooperative and may not finish.</strong> Waiting tasks move only after they wake, pinned tasks move only after they unpin and yield, and a CPU-bound task that never suspends can remain indefinitely. Tasks selected with a <code>CPU</code> aspect or moved explicitly with <code>Migrate</code> stay where the application put them. A drained reduction retains already-created event-loop threads; thread reclamation is not part of this facility. Once drained, <a href="#grow-pool"><code>Grow_Configured_Pool</code></a> can expand the ceiling again without moving those tasks back.</p>
+              <p><strong>A reduction is cooperative and might not finish.</strong> Waiting tasks move after they wake, and pinned tasks move after they unpin and yield. A CPU-bound task that never suspends can remain indefinitely.</p>
+              <p>Tasks placed with a <code>CPU</code> aspect or moved with <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#bfa7581a08e48bec5ea8815c8365e1a6079ee8e9110f2f13f3ccc04ea505b45b"><code>Migrate</code></a> stay in their assigned groups. A completed reduction retains existing event-loop threads instead of reclaiming them. After completion, <a href="#grow-pool"><code>Grow_Configured_Pool</code></a> can increase the ceiling without moving those tasks back.</p>
             </aside>
             <div class="decision-list">
               <dl>
@@ -185,7 +188,8 @@ end if;</code></pre>
           <section id="designate">
             <span class="step-label">STEP 04</span>
             <h2>Designate one ordinary Ada task.</h2>
-            <p>Use GNAT <code>Task_Info</code> to select the execution model at task creation. The obsolete-feature warning is deliberate; Flyology projects retain other warnings while using <code>-gnatwJ</code> for this mechanism.</p>
+            <p>Use GNAT <code>Task_Info</code> to select the execution model at task creation. Current GNAT emits an obsolete-feature warning for this mechanism. The warning is an artifact of the current design and GNAT's handling of it, not intended Flyology behavior. Flyology projects use <code>-gnatwJ</code> to suppress that warning class while retaining other warnings.</p>
+            <p>A future design might use another designation mechanism, including an Ada aspect, if GNAT makes one available. Flyology has not selected a replacement.</p>
             <figure class="code-panel">
               <figcaption>worker.ads</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -197,7 +201,7 @@ package Worker is
    end Connection;
 end Worker;</code></pre>
             </figure>
-            <p>Use <code>Flyology.Native_Task</code> and <code>Flyology.Lightweight_Task</code> for explicit task designations. <code>Flyology.Project_Default</code> requests the project default explicitly, which is useful on discriminated task types.</p>
+            <p>Use <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#726aaaac29c58a02cdeb708e96b9a137809dbc3a0f21c93a5a0c6bc74c796d56"><code>Flyology.Native_Task</code></a> and <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#875ae342f1f8100c941ea7f728e5becae505856cfcf5f1325715baca3a04e2fd"><code>Flyology.Lightweight_Task</code></a> for explicit task designations. Both are values of <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#5550ffdd655377a446bc400485f835addf3e208ba07a230e98d2fa1143821e30"><code>Flyology.Execution_Model</code></a>. <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#ffae341f663f8611276214be8783dda019d7a713ef674a79f23f437163208f99"><code>Flyology.Project_Default</code></a> requests the project default explicitly, which is useful on discriminated task types.</p>
             <figure class="code-panel">
               <figcaption>rebuild after changing the application</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -207,8 +211,9 @@ end Worker;</code></pre>
 
           <section id="stacks">
             <span class="step-label">STEP 05</span>
-            <h2>Size each task stack deliberately.</h2>
-            <p>Ada's <code>Storage_Size</code> is the stack-size control for both native and lightweight tasks. Put the pragma in the task or task-type declaration, use a named constant so the choice is reviewable, and size for the deepest real call path: local objects, recursion, exception propagation, and foreign calls all consume stack.</p>
+            <h2>Size each task stack.</h2>
+            <p>Ada <code>Storage_Size</code> controls stack size for native and lightweight tasks. Put the pragma in the task or task-type declaration. Use a named constant so reviewers can identify the selected size.</p>
+            <p>Size the stack for the deepest real call path. Include local objects, recursion, exception propagation, and foreign calls in the estimate.</p>
             <figure class="code-panel">
               <figcaption>a task type with a 64 KiB requested stack</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -219,12 +224,13 @@ task type Worker (Kind : Flyology.Execution_Model) is
    pragma Storage_Size (Worker_Stack_Size);
 end Worker;</code></pre>
             </figure>
-            <p>The requested value is not the task's complete memory footprint or necessarily the final usable mapping size. The tasking runtime adds its conservative alternate-signal-stack allowance, and Flyology rounds a lightweight stack to the host page size. Lightweight stacks are placed in guarded arenas; each slot carries at least 64 KiB of inaccessible guard address space. Native tasks instead retain the host pthread implementation and its platform minimums.</p>
+            <p>The requested value is neither the complete task memory footprint nor necessarily the final usable mapping size. The tasking runtime adds an allowance for the alternate signal stack. Flyology then rounds a lightweight stack to the host page size.</p>
+            <p>Flyology places lightweight stacks in guarded arenas. Each slot has at least 64 KiB of inaccessible guard address space. Native tasks retain the host pthread implementation and its platform minimums.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Do not find the minimum by waiting for a guard fault.</strong> A guard improves failure behavior but cannot prove every stack path safe. Exercise worst-case nesting and exception paths, include margin, and repeat the test on every supported compiler and host.</p>
+              <p><strong>Do not use a guard fault to find the minimum.</strong> A guard improves failure behavior but does not prove that every stack path is safe. Test worst-case nesting and exception paths. Include a margin and repeat the test on every supported compiler and host.</p>
             </aside>
-            <p><code>Flyology.Observability.Stack_Pool</code> reports the effective lightweight result. <code>Live_Usable_Bytes</code> is the aggregate usable size after runtime adjustment and page rounding; <code>Reserved_Bytes</code> is the exact virtual address space held by live arenas, including guards. Reserved address space is not resident memory, so measure process RSS separately.</p>
+            <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#fe93a641b68a9b158ab01eb4525def9fde8d4c7a6ba23c031369acc262122cb1"><code>Flyology.Observability.Stack_Pool</code></a> returns a <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Flyology.Observability.Stack_Pool_Snapshot</code></a> with the effective lightweight stack values. <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Live_Usable_Bytes</code></a> is the total usable size after runtime adjustment and page rounding, while <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Reserved_Bytes</code></a> includes the virtual address space held by live arenas and their guards. Because reserved address space is not resident memory, measure process RSS separately.</p>
             <figure class="code-panel">
               <figcaption>inspect the lightweight stack pool</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -238,24 +244,26 @@ begin
       &amp; " reserved bytes=" &amp; Pool.Reserved_Bytes'Image);
 end;</code></pre>
             </figure>
-            <p>If every live lightweight task in a sample uses the same declaration, divide <code>Live_Usable_Bytes</code> by <code>Live_Stacks</code> to obtain its effective usable size. With mixed task sizes that quotient is only an average. The current structured-server generic owns its handler task type and uses the compiler/runtime default stack size; <code>Storage_Size</code> applies directly to task types declared by the application.</p>
+            <p>If all sampled tasks use the same declaration, divide <code>Live_Usable_Bytes</code> by <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Live_Stacks</code></a>. The result is the effective usable size for that declaration. With mixed task sizes, this calculation gives only an average.</p>
+            <p>The current structured-server generic owns its handler task type and uses the compiler runtime default stack size. <code>Storage_Size</code> applies directly to task types declared by the application.</p>
           </section>
 
           <section id="memory">
             <span class="step-label">STEP 06</span>
-            <h2>Manage memory by lifetime and reclaimability.</h2>
-            <p>Flyology keeps three questions separate: how much virtual address space a task stack reserves, whether a sleeping lightweight task permits best-effort reclamation of resident stack pages, and when task-private heap objects can be finalized and released together. None of these controls is a process memory limit.</p>
+            <h2>Manage stack and task-private memory.</h2>
+            <p>Flyology has separate controls for stack capacity, dormant stack residency, and task-private object lifetime. None of these controls is a process memory limit.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Stack capacity</dt><dd>Use Ada <code>Storage_Size</code> and the stack-pool snapshot described above. This controls usable stack sizing; it does not request paging.</dd></div>
-                <div class="decision-row"><dt>Dormant stack residency</dt><dd>Use <code>Flyology.Dormancy</code> for a lightweight task that will wait only on a sufficiently distant timer and can tolerate a slower wake.</dd></div>
-                <div class="decision-row"><dt>Task-private object lifetime</dt><dd>Use <code>Flyology.Memory_Regions</code> when a group of allocations belongs to one task phase and can be finalized and released together.</dd></div>
+                <div class="decision-row"><dt>Dormant stack residency</dt><dd>Use <a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html"><code>Flyology.Dormancy</code></a> for a lightweight task that will wait only on a sufficiently distant timer and can tolerate a slower wake.</dd></div>
+                <div class="decision-row"><dt>Task-private object lifetime</dt><dd>Use <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html"><code>Flyology.Memory_Regions</code></a> when a group of allocations belongs to one task phase and can be finalized and released together.</dd></div>
                 <div class="decision-row"><dt>Shared or transferred data</dt><dd>Keep it in an explicitly shared owner or bounded pool. A task-owned region is not a shared allocator, and references into it must not outlive the region.</dd></div>
               </dl>
             </div>
 
             <h3>Opt a timer sleeper into stack reclamation</h3>
-            <p><code>Prompt</code> is the default dormancy policy. <code>Reclaimable</code> asks a supporting Linux kernel to mark applicable stack pages cold; <code>Page_Out</code> asks it to reclaim applicable pages through the configured swap path. Both policies apply only after a lightweight task has switched safely to its scheduler stack and is waiting solely on a timer whose remaining delay is at least <code>Minimum_Wait</code>.</p>
+            <p><a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Prompt</code></a> is the default dormancy policy. On supported Linux hosts, <a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Reclaimable</code></a> asks the kernel to mark applicable stack pages as cold. <a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Page_Out</code></a> asks the kernel to reclaim applicable pages through the configured swap path.</p>
+            <p><a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#42845ddc79b68aac0f273f05ae2ad3a0f0cd171e508fbe73d5d9698713028176"><code>Set_Policy</code></a> applies the selected policy to the calling task. Both nondefault policies apply only after a lightweight task switches to its scheduler stack. The task must wait only on a timer with at least <code>Minimum_Wait</code> remaining.</p>
             <figure class="code-panel">
               <figcaption>latency-tolerant timer wait</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -268,16 +276,17 @@ delay 300.0;
 
 Flyology.Dormancy.Set_Policy (Flyology.Dormancy.Prompt);</code></pre>
             </figure>
-            <p>Descriptor waits are excluded because scheduler links may remain on the suspended stack. File waits are excluded because the kernel may still own a stack-backed buffer. Native tasks accept only <code>Prompt</code>. On unsupported hosts the capability queries report false and no page advice is attempted.</p>
+            <p>Descriptor waits are excluded because scheduler links can remain on the suspended stack. File waits are excluded because the kernel can own a stack-backed buffer. Native tasks accept only <code>Prompt</code>. On unsupported hosts, the capability queries return false and Flyology requests no page advice.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Page advice is a latency tradeoff, not an eviction guarantee.</strong> The kernel may ignore individual pages, and a task waking after accepted advice may incur page faults. <code>Prompt</code> also does not lock a stack into physical memory.</p>
+              <p><strong>Page advice trades wake latency for possible memory reclamation.</strong> The kernel can ignore individual pages, and a task can incur page faults after accepted advice. <code>Prompt</code> does not lock a stack into physical memory.</p>
             </aside>
-            <p>Use <code>Cold_Advice_Supported</code> and <code>Pageout_Advice_Supported</code> before presenting a host capability. Group snapshots distinguish eligible timer waits, currently advised stacks and bytes, advice attempts, accepted calls, and failures.</p>
+            <p>Use <a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#6d20531869f4035601cd8538aff053f91c4b87e350c352a3ebe549089b9b59af"><code>Cold_Advice_Supported</code></a> and <a href="../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#ef003bd4fd3e13345f6af2a753b6f9be91df1bd27ae063a88188ecb2e5cc0029"><code>Pageout_Advice_Supported</code></a> before you report a host capability. Group snapshots report eligible timer waits, advised stacks and bytes, attempts, accepted calls, and failures.</p>
 
             <h3>Release task-private allocations as one region</h3>
-            <p><code>Flyology.Memory_Regions.Task_Pool</code> is owned by the native or lightweight task that declares it. Each region grows in backing chunks as named-subpool allocators request storage. Explicit release first finalizes controlled objects and then returns every backing chunk; finalizing the pool releases any regions that remain live.</p>
-            <p>A pool object declared in a task body is finalized when the task ends, so its remaining live regions are released automatically. Call <code>Release</code> when an earlier lifetime boundary matters. A dynamically allocated pool is not reclaimed merely because its owning task ends; the application must arrange for the pool to be finalized and deallocated.</p>
+            <p>The native or lightweight task that declares <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#734416a493360f7f80aa2f278d78751cf4269ef3cfb220db8ef0a0258031ae62"><code>Flyology.Memory_Regions.Task_Pool</code></a> owns it. Each region grows in backing chunks when named-subpool allocators request storage. Explicit release finalizes controlled objects and returns all backing chunks. Pool finalization releases all regions that remain live.</p>
+            <p><a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#dedfd81536d5ae2f7d3e1a69ddabee29d0f3c186e308a5d021197476e34103e7"><code>Create_Region</code></a> returns a <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#bf4399c677b3bc2caea58149239e4c6e0ce0b75d6cde87931901298ed694ca94"><code>Region_Handle</code></a> for allocations that share one lifetime. A pool declared in a task body is finalized when the task ends, and its live regions are released automatically. Call <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#541acddcbcd692c8e890c69f569bdd52ff194aea0247bb64fa874ed21d7891be"><code>Release</code></a> when the region has an earlier lifetime boundary.</p>
+            <p>Task termination does not reclaim a dynamically allocated pool. The application must finalize and deallocate that pool.</p>
             <figure class="code-panel">
               <figcaption>a task-lifetime region released at task termination</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -309,22 +318,23 @@ begin
    null;
 end Memory_Region_Example;</code></pre>
             </figure>
-            <p>Every allocator for an access type associated with the pool must name a region; an unnamed allocator raises <code>Program_Error</code>. Calls from another task raise <code>Ownership_Error</code>. <code>Statistics</code> reports live regions, consumed storage including allocator overhead, and reserved chunk capacity.</p>
+            <p>Every allocator for an access type associated with the pool must name a region. An unnamed allocator raises <code>Program_Error</code>. A call from another task raises <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#c703e367fa2b3d0b087282a36f187e93d757a4386383084b2f682d59a1c94c40"><code>Ownership_Error</code></a>. <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#e48a2b28017e6892f7466c8a22537f960f3916aa6aef2301ffd98281d1e8ff0a"><code>Statistics</code></a> reports live regions, consumed storage with allocator overhead, and reserved chunk capacity.</p>
 
             <h3>Understand the region cost model</h3>
-            <p>The efficiency comes from grouping objects that share a lifetime. The pool replaces repeated general-heap allocation and reclamation with allocation from larger chunks and one collective cleanup boundary.</p>
+            <p>Regions group objects that have the same lifetime. The pool allocates these objects from larger chunks and releases them at one cleanup boundary.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Task pool</dt><dd>Stores fixed ownership and accounting state plus the Ada subpool controller. Flyology adds no per-pool mutex because only the owning task may use it; the tasking runtime briefly takes its lock when a region is attached to or detached from the controller's subpool list.</dd></div>
+                <div class="decision-row"><dt>Task pool</dt><dd>Stores fixed ownership and accounting state with the Ada subpool controller. Flyology adds no per-pool mutex because only the owning task can use the pool. The tasking runtime briefly locks its subpool list during region attachment and detachment.</dd></div>
                 <div class="decision-row"><dt>Region creation</dt><dd>Allocates one Flyology region descriptor and one runtime registration node while attaching it to the pool. The first backing chunk is allocated lazily by the first object.</dd></div>
-                <div class="decision-row"><dt>Common allocation</dt><dd>Checks task ownership, aligns an address, advances the current chunk offset, and updates counters. It takes no region lock and does not call the underlying heap while that chunk has room.</dd></div>
-                <div class="decision-row"><dt>Chunk growth</dt><dd>Allocates and links one new chunk when the current chunk is full. The default payload capacity is 64 KiB; a larger object receives enough capacity for its size and alignment.</dd></div>
-                <div class="decision-row"><dt>Bulk cleanup</dt><dd>Finalizes controlled objects, detaches and frees the runtime registration node, frees each backing chunk, and frees the region descriptor. Explicit <code>Release</code> does this for one region; task-end pool finalization does it for every region still live.</dd></div>
+                <div class="decision-row"><dt>Common allocation</dt><dd>Checks task ownership, aligns an address, advances the current chunk offset, and updates counters. The operation takes no region lock. It does not call the underlying heap while the current chunk has room.</dd></div>
+                <div class="decision-row"><dt>Chunk growth</dt><dd>Allocates and links one new chunk when the current chunk is full. The default payload capacity is 64 KiB. A larger object receives enough capacity for its size and alignment.</dd></div>
+                <div class="decision-row"><dt>Bulk cleanup</dt><dd>Finalizes controlled objects and frees the registration node, backing chunks, and region descriptor. Explicit <code>Release</code> cleans one region. Task-end pool finalization cleans all live regions.</dd></div>
               </dl>
             </div>
-            <p>For <code>N</code> object allocations spread across <code>R</code> regions and <code>K</code> chunks, Flyology and the supported runtime make roughly <code>2R + K</code> underlying management allocations: one descriptor and one registration node per region, plus the chunks. Most of the <code>N</code> object allocations are bump operations inside an existing chunk. Reclamation performs the corresponding management frees, although controlled objects still require individual finalization. This amortization is useful when <code>R + K</code> is much smaller than <code>N</code>.</p>
-            <p>Reclamation is synchronous rather than background work. Ending a lightweight task with many chunks or expensive finalizers can occupy its event-loop pthread until cleanup finishes. The allocator checks only the current chunk, so unused tails in older chunks remain reserved until release. <code>Reserved_Storage</code> counts chunk payload capacity, not region descriptors, chunk headers, or underlying allocator metadata. Use smaller phase regions and explicit release boundaries when cleanup timing or chunk slack matters.</p>
-            <p>The current implementation has no region quota, retained-chunk cache, trimming operation, or automatic connection to dormant-stack advice. It does not redirect ordinary Ada allocation. Set application admission limits around potentially large phases, inspect region statistics before release, and treat every access value into a released region as invalid.</p>
+            <p>For <code>N</code> object allocations in <code>R</code> regions and <code>K</code> chunks, the runtime makes approximately <code>2R + K</code> management allocations: one descriptor and one registration node per region, plus the chunks. Most of the <code>N</code> object allocations are bump operations in an existing chunk, so this arrangement is most useful when <code>R + K</code> is much smaller than <code>N</code>.</p>
+            <p>Reclamation is synchronous and frees the corresponding management allocations, although controlled objects still require individual finalization. A lightweight task with many chunks or expensive finalizers can therefore occupy its event-loop pthread until cleanup finishes. Because the allocator checks only the current chunk, unused space in older chunks remains reserved until release.</p>
+            <p><a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#959b4c7af82611cfd041953335b75120f362d4e388729c10b01f0d43e3f461ad"><code>Reserved_Storage</code></a> counts chunk payload capacity, not region descriptors, chunk headers, or underlying allocator metadata. Use smaller phase regions and explicit release boundaries when cleanup time or unused chunk space matters.</p>
+            <p>The current implementation has no region quota, retained-chunk cache, trimming operation, or connection to dormant-stack advice. It does not redirect ordinary Ada allocation. Set admission limits for potentially large phases and inspect region statistics before release. Every access value into a released region is invalid.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
               <p>Use regions for parsing trees, temporary metadata, and other task-private object graphs. Do not use them as backing storage for a buffer or object whose ownership moves to another task.</p>
@@ -334,7 +344,7 @@ end Memory_Region_Example;</code></pre>
           <section id="groups">
             <span class="step-label">STEP 07</span>
             <h2>Choose an execution group.</h2>
-            <p>A lightweight task without a specific Ada CPU is placed into the configured shared pool by deterministic round robin. A positive <code>CPU</code> aspect selects an exact Flyology execution group instead. Ada reserves <code>CPU =&gt; 0</code> as <code>Not_A_Specific_CPU</code>, so it stays in the pool exactly as an absent aspect does.</p>
+            <p>Flyology places a lightweight task without a specific Ada CPU into the shared pool by deterministic round robin. A positive <code>CPU</code> aspect selects an exact execution group. Ada reserves <code>CPU =&gt; 0</code> as <code>Not_A_Specific_CPU</code>. Therefore, zero has the same effect as an absent aspect.</p>
             <figure class="code-panel">
               <figcaption>explicit shared groups</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -346,10 +356,10 @@ task Writer with CPU =&gt; 2 is
    pragma Task_Info (Flyology.Lightweight_Task);
 end Writer;</code></pre>
             </figure>
-            <p>Tasks in one group share a stable loop thread and schedule cooperatively. Separate groups use separate OS threads and may execute in parallel. Shared group identifiers are <code>0 .. 127</code>; dedicated group identifiers are <code>128 .. 255</code>.</p>
+            <p>Tasks in one group share a stable loop thread and schedule cooperatively. Separate groups use separate OS threads and can execute in parallel. Shared group identifiers are <code>0 .. 127</code>. Dedicated group identifiers are <code>128 .. 255</code>.</p>
             <p>The <a href="#grow-pool">startup pool configuration</a> can be increased at runtime without moving existing tasks.</p>
-            <h3>Migration is an explicit safe point</h3>
-            <p>A lightweight task can move to another group without changing Ada task identity, stack, locals, or exception state. Use a scoped thread pin while holding thread-affine foreign state, and use a dedicated group when exclusive OS-thread ownership is also required.</p>
+            <h3>Migrate only at an explicit safe point</h3>
+            <p>A lightweight task can move to another <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#71d65f68372c8cfb52b136d9019201a86f15f6380d32dcf7aeaec069ce256495"><code>Group_Id</code></a> without changing its Ada task identity, stack, locals, or exception state. <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#c5e1f261ff676b6cf064bdd84fc611e00207ba8b1281ba3452e2c4c9effab60d"><code>Current</code></a> returns the calling lightweight task's group, and <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#6775319179c7d0a626e7e65a5e61b1185e669314bbc03cfa8c3ceac28722f386"><code>For_CPU</code></a> converts a valid Ada CPU selector. Use a scoped thread pin while the task holds thread-affine foreign state. Use a dedicated group when the task also requires exclusive OS-thread ownership.</p>
             <figure class="code-panel">
               <figcaption>explicit migration</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -367,7 +377,7 @@ end;</code></pre>
           <section id="io">
             <span class="step-label">STEP 08</span>
             <h2>Use synchronous I/O calls.</h2>
-            <p>Flyology I/O packages expose normal procedure and function calls from either lane. If a lightweight call would block, only that task waits; the loop thread remains available. A native call may block only its OS thread.</p>
+            <p>Flyology I/O packages provide normal procedure and function calls in both lanes. The example uses <a href="../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#8a9e370645088ab01b24dccb11a21621c47f4688c12f97c7f0edd67224288575"><code>Flyology.IO.Timers.Sleep_For</code></a> and the <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html"><code>Flyology.IO.Sockets.Receive</code></a> and <a href="../api/1392016671c31e0698fc6e05fdd7609934b54772ad7876f02b66ad5b9be29b67.html"><code>Flyology.IO.Files.Read_At</code></a> overload families. If a lightweight call would block, only the lightweight task waits, so the loop thread remains available. If a native call blocks, it blocks only its own OS thread.</p>
             <figure class="code-panel">
               <figcaption>task-aware I/O</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -388,20 +398,20 @@ Flyology.IO.Files.Read_At
           <section id="budgets">
             <span class="step-label">STEP 09</span>
             <h2>Set resource budgets before load testing.</h2>
-            <p>Flyology does not turn one number into a complete capacity plan. Bound the resources the application owns, set latency limits at operation boundaries, and then measure them together under representative peak load.</p>
+            <p>No single value defines an application capacity plan. Bound each resource that the application owns and set latency limits at operation boundaries. Then measure the complete configuration under representative peak load.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Concurrency</dt><dd>Use a structured server or <code>Connections.Server</code> capacity to cap simultaneously owned connections. A structured server creates exactly <code>Capacity</code> handler tasks for the duration of <code>Serve</code>, including while idle.</dd></div>
-                <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, plan usable stack bytes as peak live tasks multiplied by the observed effective bytes per task. Read <code>Reserved_Bytes</code> for guarded virtual address space and measure RSS for resident memory.</dd></div>
-                <div class="decision-row"><dt>Task-owned regions</dt><dd>Region storage currently grows on demand without a built-in quota. Bound the number and size of admitted phases, sample <code>Statistics</code>, and call <code>Release</code> at the earliest valid lifetime boundary.</dd></div>
+                <div class="decision-row"><dt>Concurrency</dt><dd>Use a structured server or <a href="../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#f077c71b5270e3325ac03ea53015029cf422e47926e822d158778a6de401cc4b"><code>Connections.Server</code></a> capacity to limit owned connections. A structured server creates exactly <a href="../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#faf7e17eb0214e4ddd3cd4cd2e4fb9635edd569aa68e3893932fd713442410a4"><code>Capacity</code></a> handler tasks for the complete <a href="../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#904f83f05b6ffe80abc8c7db47a2412c039f6ceef2814366fb56d8c7af4bc4b6"><code>Serve</code></a> operation, including idle periods.</dd></div>
+                <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, multiply peak live tasks by the measured effective bytes per task. Use <code>Reserved_Bytes</code> for guarded virtual address space. Measure RSS for resident memory.</dd></div>
+                <div class="decision-row"><dt>Task-owned regions</dt><dd>Region storage grows on demand and has no built-in quota. Limit the number and size of admitted phases. Sample <a href="../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#e48a2b28017e6892f7466c8a22537f960f3916aa6aef2301ffd98281d1e8ff0a"><code>Statistics</code></a> and call <code>Release</code> at the earliest valid lifetime boundary.</dd></div>
                 <div class="decision-row"><dt>Dormant stacks</dt><dd>Choose <code>Minimum_Wait</code> from tolerated wake latency and representative host measurements. Accepted cold or page-out advice does not reduce the configured stack capacity.</dd></div>
-                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> selects the initial automatic shared groups, not task count. Start near the CPU parallelism the workload can use, grow with <code>Grow_Configured_Pool</code> when measurements justify it, and remember that each created group adds an OS thread plus poller, scheduler, and kernel-queue resources.</dd></div>
-                <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These are separate limits: cancellation is not a timeout, and a fairness quantum is not a hard execution deadline.</dd></div>
+                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> selects the initial automatic shared groups, not the task count. Start near the usable CPU parallelism of the workload. Grow with <code>Grow_Configured_Pool</code> when measurements support the change. Each created group adds an OS thread, poller, scheduler, and kernel-queue resources.</dd></div>
+                <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These controls are separate. Cancellation is not a timeout. A fairness quantum is not a hard execution deadline.</dd></div>
               </dl>
             </div>
 
             <h3>Bound admission, not just the listen backlog</h3>
-            <p>The structured-server capacity is both the maximum active handlers and an eager task-resource budget. Excess work remains in the kernel listen backlog instead of becoming an unbounded user-space task or connection queue.</p>
+            <p>The structured-server capacity limits active handlers and reserves the handler task resources. Excess work remains in the kernel listen backlog. It does not create an unbounded user-space task or connection queue.</p>
             <figure class="code-panel">
               <figcaption>bounded structured service</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -413,11 +423,13 @@ HTTP.Serve
   (Server, Listener, State, Drain_Timeout =&gt; 5.0);</code></pre>
             </figure>
 
-            <h3>Give an operation one meaningful deadline</h3>
-            <p><code>Receive_Exactly</code> and <code>Send_All</code> apply one timeout across the whole multi-step operation rather than restarting it for every partial transfer. DNS resolution similarly applies its overall timeout across family queries, retry rounds, and transport fallback. Prefer finite deadlines at service boundaries; reserve <code>Infinite</code> for scopes whose shutdown and cancellation path is otherwise explicit.</p>
+            <h3>Use one deadline for the complete operation</h3>
+            <p><a href="../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#c3cee1844eef030ab2ffa44083c3f8d691dbd37db73c29ba022075ece5b63cfc"><code>Receive_Exactly</code></a> and <a href="../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#76beff4fc687f191ded93f9375c44f9251c99bbf0ead593723d7ec5388a591f2"><code>Send_All</code></a> apply one timeout to the complete multi-step operation. Partial transfers do not restart the timeout. DNS resolution also applies one timeout to family queries, retry rounds, and transport fallback.</p>
+            <p>Prefer finite deadlines at service boundaries. If the scope does not have an explicit shutdown and cancellation path, do not use <a href="../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#07bae758725b3ef17c925e949e4d0dd924e667dc9ee2d11c2f53c8bff79a7fb9"><code>Infinite</code></a>.</p>
 
             <h3>Add checkpoints to bounded units of CPU work</h3>
-            <p>A CPU-bound lightweight task can monopolize its group until it reaches a runtime suspension, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities choose among ready fibers within a group, but they do not preempt arbitrary lightweight instructions. A new <code>Yield_Budget</code> defaults to a 2 ms quantum; configure it when the service needs a different cooperative slice.</p>
+            <p>A CPU-bound lightweight task can occupy its group until it suspends, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities select among ready fibers in a group, but they do not preempt arbitrary lightweight instructions.</p>
+            <p>A new <a href="../api/abc652020cc71fd692562fe1fa41e61837df980e9a65feb3b869b4466e67d0d8.html#b5279be1a014e7db47e811bbd83d15f752a1f868d72947b52da03cd659bee6e7"><code>Yield_Budget</code></a> uses a 2 ms quantum. Configure a different quantum when the service requires a different cooperative interval.</p>
             <figure class="code-panel">
               <figcaption>time-budgeted fairness</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -429,7 +441,8 @@ while More_Work loop
    Budget.Checkpoint;
 end loop;</code></pre>
             </figure>
-            <p>Choose a quantum below the same-group scheduling delay the application can tolerate, then measure it. The value is elapsed wall-clock time between eligible yields, not reserved CPU time. Put <code>Checkpoint</code> after a bounded unit of work: if <code>Process_One_Item</code> itself can run for 50 ms, a 250 µs quantum cannot take effect until that call returns. Very small quanta also increase clock reads and scheduler transfers.</p>
+            <p>Choose a quantum below the tolerated same-group scheduling delay, then measure it. The value is elapsed wall-clock time between eligible yields, not reserved CPU time.</p>
+            <p>Put <a href="../api/abc652020cc71fd692562fe1fa41e61837df980e9a65feb3b869b4466e67d0d8.html#82ea3299bfb1b461042a23b75cb3a8d2371cf54c06f1606bbaa500ae45ad9501"><code>Checkpoint</code></a> after a bounded unit of work. For example, a 250 µs quantum cannot interrupt a <code>Process_One_Item</code> call that runs for 50 ms. The checkpoint takes effect after the call returns. Very small quanta also increase clock reads and scheduler transfers.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p>An arbitrary blocking foreign call can stop every lightweight task in its group. Put unpredictable blocking work on a native task or migrate to a dedicated group first.</p>
@@ -438,14 +451,15 @@ end loop;</code></pre>
 
           <section id="observe">
             <span class="step-label">STEP 10</span>
-            <h2>Observe, compare, and adjust one knob.</h2>
-            <p>Take snapshots at idle, representative load, and recovery. Group snapshots are coherent but briefly hold scheduler locks and cost <code>O(group members)</code>, so sample periodically rather than per request. Lifetime counters wrap and do not reset; compare two samples instead of treating one cumulative value as a rate.</p>
+            <h2>Observe the runtime and change one setting.</h2>
+            <p>Take snapshots during idle operation, representative load, and recovery. Group snapshots are coherent, but they briefly hold scheduler locks and cost <code>O(group members)</code>. Sample periodically instead of sampling each request.</p>
+            <p>Because lifetime counters wrap and do not reset, compare two samples instead of using one cumulative value as a rate.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Healthy waiting</dt><dd>A high <code>Waiting</code> count accompanied by timer, descriptor, interrupt, or file waits normally means concurrency is parked in the intended kernel-backed path.</dd></div>
-                <div class="decision-row"><dt>Runnable pressure</dt><dd>A persistently high <code>Ready</code> count means runnable work is sharing the group. Compare dispatch progress, CPU use, checkpoint placement, and the result of adding a group.</dd></div>
-                <div class="decision-row"><dt>Possible stall</dt><dd>Ready or running work without changes in dispatch or polling counters is a loop-lag signal. <code>Stall_Watchdogs</code> can sample this condition from a native monitor task; it diagnoses but does not preempt.</dd></div>
-                <div class="decision-row"><dt>File pressure</dt><dd><code>Pending_File_Submissions</code> shows file operations waiting behind the bounded kernel completion queue. It is backpressure, not a hidden worker-thread queue.</dd></div>
+                <div class="decision-row"><dt>Healthy waiting</dt><dd>A high <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Waiting</code></a> count with timer, descriptor, interrupt, or file waits usually means tasks are using the intended kernel-backed wait path.</dd></div>
+                <div class="decision-row"><dt>Runnable pressure</dt><dd>A persistently high <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Ready</code></a> count means runnable work is sharing the group. Compare dispatch progress, CPU use, checkpoint placement, and the result of adding a group.</dd></div>
+                <div class="decision-row"><dt>Possible stall</dt><dd>Ready or running work without dispatch or polling progress indicates possible loop lag. <a href="../api/f6d9a75080afdebcbf9664f2d01c008022931f9310d17c250ae7d2588d88ba6d.html"><code>Stall_Watchdogs</code></a> can sample this condition from a native monitor task. The watchdog diagnoses the condition but does not preempt a task.</dd></div>
+                <div class="decision-row"><dt>File pressure</dt><dd><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Pending_File_Submissions</code></a> shows file operations waiting behind the bounded kernel completion queue. It is backpressure, not a hidden worker-thread queue.</dd></div>
                 <div class="decision-row"><dt>Stack pressure</dt><dd>Track live stacks, effective usable bytes, guarded virtual reservation, process RSS, and task-creation failures together. None of those values alone is a complete memory limit.</dd></div>
                 <div class="decision-row"><dt>Dormant stack effect</dt><dd>Compare candidate bytes, currently advised bytes, cumulative accepted and failed advice, process RSS, and timer wake lateness. Advice counters do not prove that pages were evicted.</dd></div>
                 <div class="decision-row"><dt>Region growth</dt><dd>Read consumed and reserved region storage before release. Reserved minus consumed shows current chunk slack, not leaked memory.</dd></div>
@@ -461,7 +475,8 @@ end loop;</code></pre>
 ./showcases/run_event_loop_pool.sh 1024 20 4
 ./showcases/run_dormant_stack_pressure.sh 128 64</code></pre>
             </figure>
-            <p>The density run compares lightweight and native tasks with the same requested stack size and reports RSS, virtual address space, thread count, and lightweight stack-pool counters. The pool run compares one event loop with a configured pool under repeated readiness waves. The dormant-stack run compares <code>Prompt</code>, <code>Reclaimable</code>, and <code>Page_Out</code> in separate processes while verifying every touched stack payload after wake. Treat each result as a measurement of that host and workload, not a universal sizing constant.</p>
+            <p>The density run compares lightweight and native tasks with the same requested stack size. It reports RSS, virtual address space, thread count, and lightweight stack-pool counters. The pool run compares one event loop with a configured pool under repeated readiness activity.</p>
+            <p>The dormant-stack run compares <code>Prompt</code>, <code>Reclaimable</code>, and <code>Page_Out</code> in separate processes. It verifies every modified stack payload after wake. Treat each result as a measurement of the tested host and workload, not as a universal sizing constant.</p>
           </section>
 
           <section id="verify">
@@ -486,8 +501,8 @@ end loop;</code></pre>
 
           <section id="constraints">
             <span class="step-label">STEP 12</span>
-            <h2>Know when to stay native.</h2>
-            <p>Flyology Runtime is experimental. Keep a task native when its correctness depends on kernel real-time scheduling, forced preemption, native CPU affinity, unpredictable foreign blocking, or a host and compiler combination outside the verified patch matrix.</p>
+            <h2>Know when to use a native task.</h2>
+            <p>Flyology Runtime is experimental. If a task requires kernel real-time scheduling, forced preemption, native CPU affinity, or unpredictable foreign blocking, keep it native. Also keep it native on a host and compiler combination outside the verified patch matrix.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Use lightweight</dt><dd>High I/O concurrency with cooperative work, explicit task-aware waits, and ordinary Ada task semantics.</dd></div>

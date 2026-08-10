@@ -160,9 +160,9 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Benchmarking Ada</li></ol>
-          <h1>High-precision benchmarking.</h1>
+          <h1>Benchmark short Ada operations.</h1>
         </div>
-        <p class="doc-hero-copy"><code>flyology_bench</code> adaptively batches short Ada operations, compares up to sixteen implementations in balanced rounds or sequential blocks, and keeps enough clock, sampling, and host context to interpret a nanosecond-scale result without pretending that a sub-nanosecond interval was directly observed.</p>
+        <p class="doc-hero-copy"><code>flyology_bench</code> adaptively batches short Ada operations and compares up to sixteen implementations. Reports include the clock, sampling, and host context needed to interpret nanosecond-scale results. A fractional nanosecond result is an amortized batch value, not a directly observed interval.</p>
       </header>
 
       <div class="docs-layout">
@@ -192,7 +192,7 @@
 
           <section id="scope">
             <span class="step-label">BENCH 01</span>
-            <h2>Start with the claim you need to test.</h2>
+            <h2>Define the claim to test.</h2>
             <p>A microbenchmark can estimate throughput, compare implementations under a shared local schedule, or expose unstable behavior. It cannot establish end-to-end service latency, production capacity, or a universal result for another host.</p>
             <div class="measurement-rail" aria-label="Benchmark measurement sequence">
               <div><strong>Warm</strong><span>exercise code and data before collection</span></div>
@@ -203,14 +203,14 @@
             <p>The crate uses <code>mach_absolute_time</code> on Darwin and <code>CLOCK_MONOTONIC_RAW</code> on Linux through a narrow C clock bridge. Adaptive calibration aims for useful batch durations while retaining the raw per-operation sample means and the clock characterization needed to audit them.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Keep the work observable.</strong> Use volatile state, return a result through <code>Measure_Result_Batched</code>, or place <code>Do_Not_Optimize</code> outside the timed interval. An optimizer is allowed to remove work whose result cannot affect the program.</p>
+              <p><strong>Keep the work observable.</strong> Use volatile state, return a result through <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#dc6e71be290c31c149b3fb488b04046637fac5e7fd02710655182379fd689bb6"><code>Measure_Result_Batched</code></a>, or place <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#780948c4af34bea6c76ff3b6ee6bd4b09bdb45b1a8fe15143a82857f16e8ac52"><code>Do_Not_Optimize</code></a> outside the timed interval. An optimizer is allowed to remove work whose result cannot affect the program.</p>
             </aside>
           </section>
 
           <section id="first">
             <span class="step-label">BENCH 02</span>
             <h2>Measure one statically bound operation.</h2>
-            <p><code>flyology_bench</code> is currently version <code>0.1.0-dev</code> and will be published through the Flyology organization index. Keep the community index for compiler dependencies, add the Flyology development index ahead of it, then add the crate normally.</p>
+            <p><code>flyology_bench</code> is currently version <code>0.1.0-dev</code> and is published through the Flyology organization index. Keep the community index for compiler dependencies, add the Flyology development index ahead of it, then add the crate normally.</p>
             <figure class="code-panel">
               <figcaption>add the development index and crate</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -221,7 +221,7 @@ alr with flyology_bench</code></pre>
             </figure>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p>The organization index is a development channel until the crate has a community-index release. The source remains available under <code>flyology_bench/</code> in the Flyology repository.</p>
+              <p>The organization index is the current development channel. The crate might eventually move to the community index, but that decision has not been made. The source remains available under <code>flyology_bench/</code> in the Flyology repository.</p>
             </aside>
             <figure class="code-panel">
               <figcaption>bench_mix.adb</figcaption>
@@ -248,12 +248,13 @@ begin
    Flyology_Bench.Reporters.Put_Console ("integer_mix", Result);
 end Bench_Mix;</code></pre>
             </figure>
-            <p><code>Measure</code> is generic, so the operation is statically bound. Use <code>Measure_Batched</code> when one timed batch coordinates tasks or owns a fixture that the harness must not recreate per operation. Use setup and teardown hooks when preparation must stay outside each timed interval. The generated <a href="../../api/flyology_bench/">flyology_bench API reference</a> lists the complete configuration, measurement, comparison, and reporter contracts.</p>
+            <p>The <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html"><code>Flyology_Bench</code></a> package stores output in a <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6dc03e14a97250bc136f3373ae6745dbca142081ed2f3ed1d80ff98c2dcf4ed1"><code>Measurement</code></a> and applies a <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Configuration</code></a>. <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#ba29fc9e6397621399ce9b061b096a2ff2426433e1fb9794afa94910f02019d2"><code>Terminal_Mode</code></a> prepares terminal reporting, and <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#847d8feeb7010347d1dd4f4cedf11b1d0511fa3ba2509165887231bad59393d0"><code>Put_Console</code></a> writes the result.</p>
+            <p><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#b9037b05ec2d92579777bc8c511579e3db89e90a777dc1129416438d645c2a23"><code>Measure</code></a> is generic, so the operation is statically bound. Use <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#041a662dea4372f7fb67e505f31d5196e3ff0f442fc4e3c55f92b0aecdaaf13e"><code>Measure_Batched</code></a> when one timed batch coordinates tasks or owns a fixture that the harness must not recreate per operation. Use setup and teardown hooks when preparation must stay outside each timed interval. The generated <a href="../../api/flyology_bench/">flyology_bench API reference</a> lists the complete configuration, measurement, comparison, and reporter contracts.</p>
           </section>
 
           <section id="read">
             <span class="step-label">BENCH 03</span>
-            <h2>Read one result as a small instrument panel.</h2>
+            <h2>Read the measurement report.</h2>
             <p>Terminal mode keeps labels and numeric columns stable during progress, then prints one row per kind of evidence. The capture below is from the maintained example on Darwin/AArch64. Results will change with the host, compiler, load, and run policy.</p>
             <figure class="benchmark-terminal">
               <figcaption>integer_mix · observed example output</figcaption>
@@ -285,7 +286,7 @@ end Bench_Mix;</code></pre>
           <section id="compare">
             <span class="step-label">BENCH 04</span>
             <h2>Choose balanced rounds or sequential blocks.</h2>
-            <p>Do not infer a comparison by running implementation A for a minute and implementation B later without recording that schedule. <code>Compare</code> alternates which of two implementations runs first. <code>Compare_Many</code> accepts two to sixteen enumeration values and, by default, rotates every implementation through each execution position.</p>
+            <p>Do not infer a comparison by running implementation A for a minute and implementation B later without recording that schedule. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#cab1b3cb5028fe401b4c33aa356fd29ae796e5e2f8a675878a4ff65a208cedca"><code>Compare</code></a> alternates which of two implementations runs first. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#e544e2abb7c6a25b990e07a767621dcecf82c1d76a7ea0feba634551852d1c7b"><code>Compare_Many</code></a> accepts two to sixteen enumeration values and, by default, rotates every implementation through each execution position.</p>
             <figure class="code-panel">
               <figcaption>three implementations, one shared shootout</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -311,12 +312,13 @@ Config.Shootout_Scheduling := Flyology_Bench.Sequential_Cases;
 Compare_All (Config =&gt; Config, Result =&gt; Result);
 Put_All (Result, Show_Individual_Details =&gt; True);</code></pre>
             </figure>
+            <p>The batch receives an <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#3af89ea1f187cf599d9c9c4249d92aa91b277ac769a1fdf7eec710c7a16b20dc"><code>Iteration_Count</code></a>. The generic <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#03a6e1455f5128e6a5141240c610ca8d43d7deb1dc5fc6437fcd7c8c6fbede69"><code>Put_Multi_Comparison_Console</code></a> renders a <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#abb1af9d372833f7e549ba8ec8badac6798b0d64ad7812b7eb6a149b906d9266"><code>Multi_Comparison</code></a>.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>Equal_Time</code></dt><dd>The default. Every implementation calibrates its own iteration count toward an equal share of the timed budget, so faster cases do more operations rather than receiving less observation time.</dd></div>
-                <div class="decision-row"><dt><code>Shared_Iterations</code></dt><dd>Every implementation receives one logical count. Use it for stateful batches that require identical work; elapsed collection time then varies with implementation speed.</dd></div>
-                <div class="decision-row"><dt><code>Balanced_Rounds</code></dt><dd>The default shootout schedule. Cases are interleaved and rotate through execution positions to limit time-order drift.</dd></div>
-                <div class="decision-row"><dt><code>Sequential_Cases</code></dt><dd>One case completes its sample block before the next starts. Telemetry is easier to attribute visually, but thermal and time-order drift can bias separated blocks.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#46229167f202fc5794835f32ebeab81ff65dd48a96e75d30ab9cf0c47ae88987"><code>Equal_Time</code></a></dt><dd>The default. Every implementation calibrates its own iteration count toward an equal share of the timed budget, so faster cases do more operations rather than receiving less observation time.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#46229167f202fc5794835f32ebeab81ff65dd48a96e75d30ab9cf0c47ae88987"><code>Shared_Iterations</code></a></dt><dd>Every implementation receives one logical count. Use it for stateful batches that require identical work; elapsed collection time then varies with implementation speed.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#7eee850e337e0adbde06962366490f57fca0fe093191346f1aeee7c7c45db40d"><code>Balanced_Rounds</code></a></dt><dd>The default shootout schedule. Cases are interleaved and rotate through execution positions to limit time-order drift.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#7eee850e337e0adbde06962366490f57fca0fe093191346f1aeee7c7c45db40d"><code>Sequential_Cases</code></a></dt><dd>One case completes its sample block before the next starts. Telemetry is easier to attribute visually, but thermal and time-order drift can bias separated blocks.</dd></div>
               </dl>
             </div>
             <p>The first enumeration value is the reference. A speedup above <code>1.0x</code> means the contender is faster. The elapsed-time column says the same thing in direct language: less is favorable, more is unfavorable. Color reinforces that verdict in a terminal, but the words and signs carry the meaning independently.</p>
@@ -336,8 +338,8 @@ Put_All (Result, Show_Individual_Details =&gt; True);</code></pre>
 
           <section id="axes">
             <span class="step-label">BENCH 05</span>
-            <h2>Sample resource axes around the same work.</h2>
-            <p>Wall time remains the calibration and collection-budget clock. The <code>Metrics</code> set selects additional counters captured immediately before and after every retained batch, so time, CPU, memory, operating-system activity, and scheduler results use the same sample schedule.</p>
+            <h2>Measure resources with the same sample schedule.</h2>
+            <p>Wall time remains the calibration and collection-budget clock. The <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Metrics</code></a> field holds a <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#32722f085f336d6e1fddabe4cb7288fbe7ebdf5306fe4ab02078f77451cf5892"><code>Metric_Set</code></a>. The predefined <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#38dfc9c99421c0175edf5b339bb3d681f33b3c718cd0015e9982b01f33f08667"><code>Process_Resource_Metrics</code></a> and <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#59e9a9f35135ffe97c67002ab7a017ec5c95e9341003b5614272366f04453ccf"><code>Linux_Hardware_Metrics</code></a> values select additional counters. The harness captures them immediately before and after every retained batch, so time, CPU, memory, operating-system activity, and scheduler results use the same sample schedule.</p>
             <figure class="code-panel">
               <figcaption>request portable resource and Linux hardware axes</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -351,23 +353,24 @@ Config.Metrics :=
               <dl>
                 <div class="decision-row"><dt>CPU and memory</dt><dd>Process CPU includes every native thread. Thread CPU covers the pthread executing the batch. RSS is process-wide (operating systems do not provide meaningful per-thread RSS), so absolute RSS is diagnostic while across-batch RSS change describes retained growth.</dd></div>
                 <div class="decision-row"><dt>OS activity</dt><dd>Minor and major faults, voluntary and involuntary context switches, actual storage bytes, and filesystem block-I/O operations are reported per logical operation.</dd></div>
-                <div class="decision-row"><dt>Linux PMU</dt><dd>CPU cycles, retired instructions, IPC, cache misses, branches, and branch misses use user-space <code>perf_event_open</code>. Cycles and instructions share a synchronized event group. Counters inherit into native tasks or processes created by the executing pthread after initialization, but do not attach to threads that already existed. Each sample is a difference between a baseline read while the group is disabled and a final read after it is disabled again; the group enable between those reads gives cycles and instructions one common start. A counter reset is not used because it clears an event's own count but not the inherited count from exited child tasks.</dd></div>
+                <div class="decision-row"><dt>Linux PMU</dt><dd>CPU cycles, retired instructions, IPC, cache misses, branches, and branch misses use user-space <code>perf_event_open</code>. Cycles and instructions share a synchronized event group. Counters inherit into native tasks or processes created by the executing pthread after initialization, but they do not attach to threads that already existed. Each sample subtracts a baseline read from a final read while the group is disabled; one enable interval between those reads gives cycles and instructions a common start. The implementation does not reset counters because reset clears an event's own count but retains inherited counts from child tasks that have exited.</dd></div>
                 <div class="decision-row"><dt>Comparison method</dt><dd>Positive pairs use relative percent changes. Signed or zero-containing axes use paired absolute differences. Diagnostic axes retain intervals without declaring a generally favorable direction.</dd></div>
               </dl>
             </div>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p><strong>Scope is part of the result.</strong> Thread CPU covers only the executing pthread. Linux PMU rows use task-tree scope, including native children created after counter initialization. For a lightweight task, keep the sample on one event-loop pthread and avoid suspending while unrelated fibers can run; use a thread pin or dedicated execution group when that is part of the experiment.</p>
+              <p><strong>Scope is part of the result.</strong> Thread CPU covers only the executing pthread. Linux PMU rows include native children created after counter initialization. For a lightweight task, keep the sample on one event-loop pthread and do not suspend while unrelated fibers can run. Use a thread pin or dedicated execution group when the experiment requires that constraint.</p>
             </aside>
-            <p>An unavailable axis reports why: unsupported platform, permission denial, unsupported event, unavailable counter resources, or probe failure. The API exposes the same value through <code>Metric_Status</code>, and console, CSV, and JSON output preserve it instead of substituting zero. Because <code>perf_event_open</code> answers <code>EINVAL</code> both for an event the host cannot map and for an attribute combination the kernel rejects, that case is re-probed with only the permission-relevant attributes before it is classified, so a missing counter is not reported as a harness defect or the reverse.</p>
+            <p>An unavailable axis reports why: unsupported platform, permission denial, unsupported event, unavailable counter resources, or probe failure. The API exposes the same value through <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#3ad7205e3a4387bfe49e383f8ee9ea296720467190a46fb5d01c683b6a8b9af0"><code>Metric_Status</code></a>. Console, CSV, and JSON output preserve the value instead of substituting zero.</p>
+            <p><code>perf_event_open</code> returns <code>EINVAL</code> for an unsupported event and for a rejected attribute combination. The harness repeats that probe with only permission-related attributes before it classifies the result. This check distinguishes a missing counter from a harness defect.</p>
             <p>All probes and counter controls stay outside the wall-clock timestamps, and setup or teardown hooks stay outside every selected axis. Probe families can still perturb one another at their boundaries. Adaptive batches amortize that fixed work, but a small resource difference should be repeated with only the relevant metric family selected.</p>
-            <p>Flyology scheduler axes include dispatches, poll batches, poll events, wakeups, and migration boundary crossings. They use <code>Scheduler_Probe</code>. A library-level adapter can copy cumulative values from one or more <code>Flyology.Observability.Group_Snapshot</code> records. The callback runs outside the timed interval, and the standalone benchmark crate keeps no dependency on the Flyology runtime.</p>
+            <p>Flyology scheduler axes include dispatches, poll batches, poll events, wakeups, and migration boundary crossings. They use <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Scheduler_Probe</code></a>. A library-level adapter can copy cumulative values from one or more <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Flyology.Observability.Group_Snapshot</code></a> records. The callback runs outside the timed interval, and the standalone benchmark crate keeps no dependency on the Flyology runtime.</p>
           </section>
 
           <section id="budget">
             <span class="step-label">BENCH 06</span>
-            <h2>Put a wall-time ceiling on collection.</h2>
-            <p><code>Measurement_Time</code> is the target amount of timed work across all cases. <code>Maximum_Sampling_Time</code> is a hard wall-time budget for the collection phase. A value of zero disables the limit.</p>
+            <h2>Set a wall-time limit for collection.</h2>
+            <p><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Measurement_Time</code></a> is the target amount of timed work across all cases. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Maximum_Sampling_Time</code></a> is a hard wall-time budget for the collection phase. A value of zero disables the limit.</p>
             <figure class="code-panel">
               <figcaption>a three-second target with a two-second ceiling</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -381,7 +384,7 @@ Config.Samples := 75;</code></pre>
           <section id="quiescence">
             <span class="step-label">BENCH 07</span>
             <h2>Wait for sustained low CPU load.</h2>
-            <p><code>CPU_Quiescence</code> is an opt-in preflight. Before clock characterization and warmup, it samples host CPU counters until both the host-wide average and the busiest logical CPU remain at or below their limits for one continuous interval. The check runs once for a measurement, comparison, or multi-way shootout.</p>
+            <p><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>CPU_Quiescence</code></a> is an optional preflight check. Before clock characterization and warmup, it samples host CPU counters. The host average and busiest logical CPU must remain within their limits for one continuous interval. The check runs once for each measurement, comparison, or multi-way shootout.</p>
             <figure class="code-panel">
               <figcaption>require one quiet second, but wait no longer than fifteen</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -393,11 +396,11 @@ Config.Samples := 75;</code></pre>
    Poll_Interval               =&gt; 0.100,
    Timeout                     =&gt; 15.0);</code></pre>
             </figure>
-            <p>The terminal progress bar represents the accepted portion of <code>Stable_Time</code>. It returns to zero when either utilization limit is exceeded. If the complete stable interval is not observed before <code>Timeout</code>, the benchmark raises <code>CPU_Quiescence_Timeout</code> without starting warmup or timed collection.</p>
+            <p>The terminal progress bar represents the accepted portion of <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#998654a3ed0739ef5d4fbeee3c001acaf673c0bef1126c8241ac8e4ee92c9a85"><code>Stable_Time</code></a>. It returns to zero when either utilization limit is exceeded. If the complete stable interval is not observed before <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#998654a3ed0739ef5d4fbeee3c001acaf673c0bef1126c8241ac8e4ee92c9a85"><code>Timeout</code></a>, the benchmark raises <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#81982edef2e23b80628f23bca73dbcf0b80b21dc26a72123310c1b896c09aeef"><code>CPU_Quiescence_Timeout</code></a> without starting warmup or timed collection.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Host average</dt><dd>Catches load spread across several logical CPUs. A low average alone can hide one saturated core on a large machine.</dd></div>
-                <div class="decision-row"><dt>Busiest core</dt><dd>Rejects an interval when any logical CPU exceeds <code>Maximum_Core_CPU_Percent</code>.</dd></div>
+                <div class="decision-row"><dt>Busiest core</dt><dd>Rejects an interval when any logical CPU exceeds <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#998654a3ed0739ef5d4fbeee3c001acaf673c0bef1126c8241ac8e4ee92c9a85"><code>Maximum_Core_CPU_Percent</code></a>.</dd></div>
                 <div class="decision-row"><dt>Stable interval</dt><dd>Requires consecutive accepted samples. A single quiet poll is not sufficient.</dd></div>
                 <div class="decision-row"><dt>Timeout</dt><dd>Bounds preflight wall time. The poll interval must not exceed it, and the timeout must cover the requested stable interval.</dd></div>
               </dl>
@@ -411,8 +414,8 @@ Config.Samples := 75;</code></pre>
 
           <section id="telemetry">
             <span class="step-label">BENCH 08</span>
-            <h2>Watch the process without timing the probes.</h2>
-            <p><code>Terminal_Mode</code> enables process telemetry and names every live progress line. During a multi-way collection, a fixed-width implementation field appears between the shootout name and phase, so each sample update says which case just ran without moving the progress bar. The line also reports CPU percentage and occupied cores, current RSS and growth, and elapsed wall time. Final cards retain CPU and RSS sparklines.</p>
+            <h2>Monitor the process outside timed intervals.</h2>
+            <p><a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#ba29fc9e6397621399ce9b061b096a2ff2426433e1fb9794afa94910f02019d2"><code>Terminal_Mode</code></a> enables process telemetry and names every live progress line. During multi-way collection, a fixed-width field identifies the implementation that produced each sample. Its fixed width prevents the progress display from moving. The line also reports CPU percentage, occupied cores, current RSS, RSS growth, and elapsed wall time. Final reports retain CPU and RSS sparklines.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>CPU percentage</dt><dd><code>100%</code> is approximately one occupied core. A tasking benchmark may exceed it; the example's four-worker case reaches roughly four cores.</dd></div>
@@ -429,8 +432,9 @@ Config.Samples := 75;</code></pre>
 
           <section id="recording">
             <span class="step-label">RECORDER</span>
-            <h2>Mark work that the runner does not call.</h2>
-            <p><code>Flyology_Bench.Recording</code> is for a server, consumer, worker pool, or other long-lived process whose own control flow decides when work starts. Register bounded identities before the session, then mark each span inside the application. The benchmark runner remains available for calibrated microbenchmarks; recording does not force request handling through a harness callback.</p>
+            <h2>Record work controlled by the application.</h2>
+            <p><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html"><code>Flyology_Bench.Recording</code></a> is for a server, consumer, worker pool, or other long-lived process whose own control flow decides when work starts. A bounded <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#d153f47d6694818e6f538ec368d400eccf45e26519705fbdc3b23ba9e02a9800"><code>Recorder</code></a> stores identities of type <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#c28efa394495e13e437676c68aee5149b74f3527d0091cab3b2b941b72a89f0e"><code>Benchmark</code></a>. Call <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#eaf9ddb3aebf29ae1ec349eac9686a79e0972c37fe14b2b523b96fbafea4ebce"><code>Register</code></a> before <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#14763066a62545b0a778ad5882382647a06b6e903d50b4eaefaca63c192a6988"><code>Start</code></a>, then mark each span inside the application.</p>
+            <p><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#21551cebd604b6b3dc7dede1c114b2a878aff43ba6c5100af2f17fd9593320bb"><code>Begin_Sample</code></a> initializes a <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#0f62979342c9c8fa3798b93d4862846694d585a1004740e46c19d686e9b370f5"><code>Span</code></a>. Finish it with the <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#4cccd4d891968d94bfd0a4f721f476d54ac9a2a2644199b1df109cb5975f1872"><code>Success</code></a> or <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#4cccd4d891968d94bfd0a4f721f476d54ac9a2a2644199b1df109cb5975f1872"><code>Failure</code></a> outcome. The benchmark runner remains available for calibrated microbenchmarks; recording does not force request handling through a harness callback.</p>
             <figure class="code-panel">
               <figcaption>record one application-owned request</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -458,17 +462,17 @@ begin
    Recording.Finish (Sample, Recording.Success);
 end;</code></pre>
             </figure>
-            <p>Registration allocates the bounded stores. The span path performs no Ada heap allocation. <code>Finish</code> captures its ending timestamp before entering the protected store, so retention work is outside recorded wall time. A snapshot reports observed, retained, omitted, active, abandoned, successful, failed, timed out, and cancelled spans. Each retained row keeps its observation number and outcome aligned with the status and optional value of every requested axis.</p>
+            <p>Registration allocates the bounded stores. The span path performs no Ada heap allocation. <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#33e99551ad3fafbabf28cc12a1c06e4d239133c2d9829c6713c4c8ec7fb1e404"><code>Finish</code></a> captures its ending timestamp before entering the protected store, so retention work is outside recorded wall time. A snapshot reports observed, retained, omitted, active, abandoned, successful, failed, timed out, and cancelled spans. Each retained row keeps its observation number and outcome aligned with the status and optional value of every requested axis.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Individual spans</dt><dd>Recorded p50, p95, and p99 describe individual application spans. They are not the runner's per-operation batch means.</dd></div>
-                <div class="decision-row"><dt>Independent comparison</dt><dd><code>Compare_Independent</code> resamples separately observed distributions. It does not reuse the runner's paired bootstrap or claim correlation that the load schedule did not establish.</dd></div>
+                <div class="decision-row"><dt>Independent comparison</dt><dd><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#5ba052e7e20ef2b82786892f0c697cf67542df68ec5230cc0475e794bd5fc3be"><code>Compare_Independent</code></a> resamples separately observed distributions. It does not reuse the runner's paired bootstrap or claim correlation that the load schedule did not establish.</dd></div>
                 <div class="decision-row"><dt>Partial samples</dt><dd>If only some retained spans have an axis, its status is <code>partially_collected</code> and valid and unavailable counts are reported separately. Raw rows remain aligned, but an independent comparison uses an axis only when both inputs are complete.</dd></div>
-                <div class="decision-row"><dt>Bounded retention</dt><dd><code>Reservoir</code> keeps a bounded sample across the complete session. <code>First_N</code> and <code>Latest_N</code> are available when the beginning or end is the intended window. Aggregate lifecycle and outcome counts still cover every completed span.</dd></div>
+                <div class="decision-row"><dt>Bounded retention</dt><dd><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>Reservoir</code></a> keeps a bounded sample across the complete session. <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>First_N</code></a> and <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>Latest_N</code></a> are available when the beginning or end is the intended window. Aggregate lifecycle and outcome counts still cover every completed span.</dd></div>
                 <div class="decision-row"><dt>Attribution</dt><dd>Wall time has exact span boundaries. Thread CPU requires the same native thread at both boundaries. Process CPU, RSS, faults, switches, and I/O include concurrent process work. Linux PMU values use recorder-owned per-worker groups and retain native task-tree scope; worker exit closes its group.</dd></div>
               </dl>
             </div>
-            <p>The live terminal rewrites one fixed display instead of printing an event log. It shows session elapsed time, current process CPU and occupied cores, RSS, and one row per registered identity with completed spans, active spans, errors, rolling median, and rolling p95.</p>
+            <p>The live terminal rewrites one fixed display instead of printing an event log. It shows elapsed time, process CPU, occupied cores, and RSS. Each registered identity has one row for completed spans, active spans, errors, rolling median, and rolling p95.</p>
             <figure class="benchmark-terminal">
               <figcaption>recording_service · live display</figcaption>
               <div class="terminal-scroll" tabindex="0" aria-label="Scrollable recorder terminal output">
@@ -495,7 +499,7 @@ FLYOLOGY_BENCH_RECORDING_OUTPUT=json ./examples/bin/recording_service</code></pr
 
           <section id="automation">
             <span class="step-label">BENCH 09</span>
-            <h2>Keep machine output clean.</h2>
+            <h2>Emit CSV or JSON without terminal output.</h2>
             <p>CSV and newline-delimited JSON reporters omit progress and ANSI sequences. The maintained example selects the reporter through one environment variable.</p>
             <figure class="code-panel">
               <figcaption>human and script output from the same benchmark</figcaption>
@@ -506,7 +510,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
 ./examples/bin/basic --metrics=perf --require-perf
 ./examples/bin/basic --metrics=perf --require-perf=core</code></pre>
             </figure>
-            <p>The existing CSV tables keep their latency schemas. <code>Put_Metrics_CSV</code>, <code>Put_Comparison_Metrics_CSV</code>, and the multi-way long-form reporter emit one row per requested axis with scope, unit, availability status, summaries, confidence bounds, and verdict. JSON measurement, comparison, and multi-way objects include the same status and metric arrays alongside clock and host/toolchain metadata. For regression history, <code>Flyology_Bench.Baselines</code> stores raw time samples and rejects a comparison when the clock backend or environment fingerprint differs.</p>
+            <p>The existing CSV tables keep their latency schemas. <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#b19a4d68647c7803ecd5581d1d1d976168b4b9a12bf7d7ab1829153992189c4e"><code>Put_Metrics_CSV</code></a>, <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#7ea8208f1eaae6d66aa4e8b177e8e5603a8c7c27578b24512b81c1c9b873ab92"><code>Put_Comparison_Metrics_CSV</code></a>, and the multi-way long-form reporter emit one row per requested axis with scope, unit, availability status, summaries, confidence bounds, and verdict. JSON measurement, comparison, and multi-way objects include the same status and metric arrays alongside clock and host/toolchain metadata. For regression history, <a href="../../api/flyology_bench/824910ac59ceb8fae65b3b9e981bf121c47de3294e68865c509cb3665fa0c62d.html"><code>Flyology_Bench.Baselines</code></a> stores raw time samples and rejects a comparison when the clock backend or environment fingerprint differs.</p>
           </section>
 
           <section id="correctness">
@@ -538,7 +542,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
 alr test
 ./examples/bin/basic</code></pre>
             </figure>
-            <p><code>alr test</code> also checks the published machine-readable schemas, because CSV and JSON are consumed by other programs: every row carries exactly the columns its header declares, the long-form metric rows agree between <code>available</code> and <code>status</code>, and each JSON object parses. The parse uses <code>jq</code> when it is installed and structural checks otherwise, reporting which path ran.</p>
+            <p><code>alr test</code> also checks the published machine-readable schemas. Every CSV row must contain the columns declared by its header. Long-form metric rows must agree between <code>available</code> and <code>status</code>. Each JSON object must parse. The test uses <code>jq</code> when available and reports when it uses structural checks instead.</p>
             <p>From the repository root, <code>FLYOLOGY_LINUX_PERF=1 ./scripts/test-linux-docker.sh</code> grants Docker's <code>PERFMON</code> capability and makes the example require real hardware-counter samples. It also makes the smoke test compare a serial batch against one that starts four worker tasks, so inherited attribution is measured rather than assumed. A virtualized Linux host must also expose its PMU; the capability alone cannot provide missing virtual hardware. A guest kernel without one lists no CPU entry under <code>/sys/bus/event_source/devices</code> and rejects every hardware event, and the run then reports the specific unavailable status instead of passing.</p>
             <p>For a shared report, keep the raw machine output, record the exact command and environment, repeat the full run, and describe only the tested host. Direct <code>Compare</code> or <code>Compare_Many</code> is preferable whenever all implementations can run in one process.</p>
             <aside class="callout callout-teal">

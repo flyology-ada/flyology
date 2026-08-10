@@ -53,7 +53,7 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Supervision</li></ol>
-          <h1>Structured task supervision.</h1>
+          <h1>Supervise restartable task generations.</h1>
         </div>
         <p class="doc-hero-copy">Flyology supervisors own successive task generations, wait for explicit readiness, coordinate dependency recovery, and join their tasks before returning. Policies are typed and bounded. Shared-memory safety and termination of uncooperative tasks remain application concerns.</p>
       </header>
@@ -62,9 +62,9 @@
         <nav class="toc" aria-label="On this page">
           <p class="toc-title">On this page</p>
           <ol>
-            <li><a href="#intro">Why supervision</a></li>
+            <li><a href="#intro">Supervision purpose</a></li>
             <li><a href="#first-example">First example</a></li>
-            <li><a href="#model">Mental model</a></li>
+            <li><a href="#model">Replacement model</a></li>
             <li><a href="#choose">Choose a controller</a></li>
             <li><a href="#identity">Identity and lifecycle</a></li>
             <li><a href="#monitor">Observe one failure</a></li>
@@ -84,7 +84,7 @@
 
         <article class="prose">
           <section id="intro">
-            <span class="step-label">WHY SUPERVISION</span>
+            <span class="step-label">PURPOSE</span>
             <h2>Separate logical services from task generations.</h2>
             <p>A long-running task can return unexpectedly, raise an exception, fail during activation, or never become usable. A supervisor keeps the service identity stable while owning each concrete Ada task object as a separate generation.</p>
             <ol>
@@ -92,9 +92,9 @@
               <li>Wait until the task reports that its resources and application state are ready.</li>
               <li>If it fails, request stop where necessary and wait for task-body cleanup, dependent-task joins, and finalization.</li>
               <li>Consult the bounded restart policy. If recovery is admitted, wait for backoff and construct generation 2 from fresh resources.</li>
-              <li>On shutdown or exhausted policy, join everything the supervisor owns before <code>Run</code> returns.</li>
+              <li>On shutdown or exhausted policy, join everything the supervisor owns before the controller returns.</li>
             </ol>
-            <p>The supervisor does not resurrect a terminated task. It decides whether to construct a replacement and keeps that replacement unpublished until it is ready. This is useful for restart-safe service loops, listeners, polling agents, caches, connection-like dynamic children, and subsystems with declared startup dependencies. It is a poor fit when work cannot be repeated safely, a child borrows shorter-lived state, or partial shared-memory and external effects cannot be reconciled.</p>
+            <p>The supervisor does not restart a terminated task. It decides whether to construct a replacement and keeps that replacement unpublished until it is ready. This is useful for restart-safe service loops, listeners, polling agents, caches, connection-like dynamic children, and subsystems with declared startup dependencies. It is unsuitable when work cannot be repeated safely, a child borrows shorter-lived state, or partial shared-memory or external effects cannot be reconciled.</p>
             <p>Erlang/OTP established supervision trees as a way to separate service work from recovery policy. Flyology applies that idea through application-defined Ada task types, masters, bounded policy, and explicit resource reacquisition. Ada tasks share memory and external resources, so supervision cannot supply process isolation or guaranteed forced termination.</p>
           </section>
 
@@ -102,7 +102,7 @@
             <span class="callout-symbol" aria-hidden="true">i</span>
             <div class="callout-body">
               <p class="callout-lede"><strong>Lightweight and native tasks.</strong> Every Flyology task remains an ordinary Ada task, but it executes in one of two ways. A <em>lightweight task</em> is scheduled cooperatively with other lightweight tasks on an event-loop pthread in a Flyology execution group. A <em>native task</em> runs on its own pthread using the ordinary native task path. Both retain Ada activation, masters, rendezvous, protected objects, exceptions, finalization, abort deferral, and task identity.</p>
-              <p>The task declaration chooses the actual execution model: <code>pragma Task_Info (Flyology.Lightweight_Task)</code> selects a lightweight task, <code>Flyology.Native_Task</code> selects a native task explicitly, and an undesignated task is native by default. For a lightweight task, its <code>CPU</code> aspect selects the Flyology execution group; for a native task, <code>CPU</code> retains its ordinary affinity meaning. The supervision field <code>Task_Model =&gt; Flyology.Lightweight_Task</code> records the same expected model for policy validation and observation; it does not designate, move, or schedule the task. The task declaration remains authoritative.</p>
+              <p>The task declaration remains authoritative for the execution model. <code>pragma Task_Info (</code><a href="../../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#875ae342f1f8100c941ea7f728e5becae505856cfcf5f1325715baca3a04e2fd"><code>Flyology.Lightweight_Task</code></a><code>)</code> selects a lightweight task; <a href="../../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#726aaaac29c58a02cdeb708e96b9a137809dbc3a0f21c93a5a0c6bc74c796d56"><code>Flyology.Native_Task</code></a> explicitly selects a native task; and an undesignated task is native by default. For a lightweight task, the <code>CPU</code> aspect selects the Flyology execution group. For a native task, <code>CPU</code> retains its ordinary affinity meaning. The supervision field <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#251c8dbf1492d36cfda3e8b6251d3183ffaaa7e6ffcac5d477029dbdcd93b759"><code>Task_Model</code></a> only records the expected model for validation and observation. It does not designate, move, or schedule the task.</p>
             </div>
           </aside>
 
@@ -204,13 +204,15 @@ begin
    Metrics_Generation.Run (Context, Control, Result);
 end Run_Generation;</code></pre>
             </figure>
+            <p><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#449470358ae4c7e1f72d26f0e0343f19d03ef50057799e107f4385e2124127ed"><code>Generation_Control</code></a> carries the generation's stop and readiness state. Cooperative cancellation can raise <a href="../../api/80460ee1eee26eb0b52768b2f53b1ca5e65ec852eb5ba8bca123a84d213ca447.html#96e424517d23c1b68d7bcb028a8bbb492be07ac598019be1f30e8e15300d16f1"><code>Operation_Cancelled</code></a>.</p>
+            <p><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#57098ab557dc21d6fd99d29054b610a893cf197017a2c5a77499f0cdf9389d92"><code>Generation_Result</code></a> records the terminal supervision outcome for this generation.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><strong>What the generation operations do.</strong> Each formal subprogram is statically tied to <code>Metrics_Task</code>. <code>Create</code> chooses its discriminants and constructs the exact task object by limited build-in-place return. <code>Task_Identity</code> supplies the identity used to await its task-owned result, and <code>Abort_Task</code> supplies the optional last-resort stop request. Those three operations use the generic's <code>is &lt;&gt;</code> defaults, so compatible directly visible declarations are inferred by name. <code>Initialize</code> stays explicit: omitting it selects the useful null default rather than an inferred startup rendezvous. Together the operations let the generic own a task generation without defining the task's entries, body, or service API.</p>
+              <p><strong>What the generation operations do.</strong> Each formal subprogram is statically tied to <code>Metrics_Task</code>. <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html#ca6ca3490ddc5a6dc57c3399bb6c61e6c660d5ccaa0148b7af62a69a95cb818e"><code>Create</code></a> chooses its discriminants and constructs the exact task object by limited build-in-place return. <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html#602f49145eb13151bf6cf6fc1c180d60889820763deb807cfd3c6d2d5c136101"><code>Task_Identity</code></a> supplies the identity used to await its task-owned result, and <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html#85bf387a488caf56083b6e5b209013fa0f06b64aececc1debd991a9bc4b36918"><code>Abort_Task</code></a> supplies the optional last-resort stop request. Those three operations use the generic's <code>is &lt;&gt;</code> defaults, so compatible directly visible declarations are inferred by name. <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html#d558f29f5c61e0a2c29c355462f9c8dc4f27aad8b1dfbfb6bc48b05cc902d5c6"><code>Initialize</code></a> stays explicit: omitting it selects the useful null default rather than an inferred startup rendezvous. Together the operations let the generic own a task generation without defining the task's entries, body, or service API.</p>
             </aside>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><strong>Exit reporting is automatic.</strong> After task-body cleanup and dependent-task joining, <code>Flyology.Task_Results</code> publishes normal completion, abnormal completion, or an escaping exception with a bounded fully qualified name and message. <code>Task_Generations</code> maps that immutable result into supervision state while the task object is still alive. Explicit <code>Report_*</code> calls are needed only when application code catches and suppresses an outcome but deliberately wants supervision to classify it differently.</p>
+              <p><strong>Exit reporting is automatic.</strong> After task-body cleanup and dependent-task joining, <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html"><code>Flyology.Task_Results</code></a> publishes normal completion, abnormal completion, or an escaping exception with a bounded fully qualified name and message. <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html"><code>Task_Generations</code></a> maps that immutable result into supervision state while the task object is still alive. Explicit <code>Report_*</code> calls are needed only when application code catches and suppresses an outcome but deliberately wants supervision to classify it differently.</p>
             </aside>
             <figure class="code-panel">
               <figcaption>declare the policy, supervisor type, and owner</figcaption>
@@ -317,12 +319,15 @@ begin
    Metrics_Supervision.Run (Node, Context, Result);
 end;</code></pre>
             </figure>
-            <p>The inner block makes <code>Resources</code> finalize while an exception unwinds or before a normal return; GNARL publishes the terminal result afterward. The policy is explicit: an unexpected exception from <code>Sample</code> is a failure, <code>On_Failure</code> admits replacement, and <code>Isolate_Child</code> limits recovery to this child. The task type itself selects lightweight group 2; the policy declares the same placement for bounded observation but cannot inspect or override the task type's actual aspects. The controller joins the failed task, applies <code>Limits</code>, and invokes <code>Run_Generation</code> for a new <code>Metrics_Task</code>. <code>Run</code> synchronously owns the tree; another task may call <code>Request_Shutdown</code>, and <code>Run</code> returns only after every terminable generation and manager has joined.</p>
+            <p><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#d93cff489b32876e334259bfc1e4ef428df9d697ec0d09819629ac95513f9f5f"><code>Recovery_Limits</code></a> bounds retry rate and duration. <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#d7366861600154166ad6d49cea3128dac99c18454eb5215e9d8985cd2a235a23"><code>Default_Stop_Policy</code></a> supplies the standard cooperative-stop and abort-observation intervals.</p>
+            <p>The instantiated <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#f27baa856bd9b0c5691549de522f92abf24e5e577f892830f6e3e312179b8868"><code>Static.Supervisor</code></a> owns the tree. <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#5e4be4479d91053af9edeb80d38750d9a4ad1010adb4c78f9fa18cc97cf544fe"><code>Supervisor_Result</code></a> reports how that synchronous ownership scope ended.</p>
+            <p>The inner block makes <code>Resources</code> finalize while an exception unwinds or before a normal return; GNARL publishes the terminal result afterward. The policy is explicit: an unexpected exception from <code>Sample</code> is a failure, <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#5c549ad9bf17162139aa7b553281133938716fd18457c3bd29c44d25c9330f92"><code>On_Failure</code></a> admits replacement, and <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#3639cb6036ef7bc587c101439316a3aec5d55b6c2debcf32a3bf5c2fd0dcd44b"><code>Isolate_Child</code></a> limits recovery to this child. The task type selects lightweight group 2. The policy declares the same placement for bounded observation but cannot inspect or override the task type's actual aspects.</p>
+            <p>The controller joins the failed task, applies <code>Limits</code>, and invokes <code>Run_Generation</code> for a new <code>Metrics_Task</code>. <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#15a81a0933ce9e816759caf769d1288415b06c9e6de5816e9b7ee989c2e1ef26"><code>Supervision.Static.Run</code></a> synchronously owns the tree. Another task may call <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#15d4ccebb00ea9b6c1edbf5a3dc56e9b184f73e4e7634feb9dc83de5c8c7300d"><code>Request_Shutdown</code></a>, and <code>Run</code> returns only after every terminable generation and manager has joined.</p>
           </section>
 
           <section id="model">
             <span class="step-label">MODEL</span>
-            <h2>A restart is a replacement, never resurrection.</h2>
+            <h2>Restart by creating a replacement task.</h2>
             <p>A terminated Ada task does not start again. Flyology constructs a new object of the application task type, assigns the next generation, and withholds publication until that generation reports readiness. The old generation must finish task-body cleanup and join before replacement construction begins.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="supervision-title supervision-desc" viewBox="0 0 760 350">
@@ -362,12 +367,12 @@ end;</code></pre>
             <h2>Choose by topology, not by expected child count.</h2>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>Supervision.Static</code></dt><dd>Use an enumeration for a heterogeneous tree. Each member may have a different task type, execution model, restart rule, dependency set, and named recovery cohort. Storage includes a fixed dependency matrix.</dd></div>
-                <div class="decision-row"><dt><code>Supervision.Families</code></dt><dd>Use fixed slots for many homogeneous children with one typed request and one common policy. Storage is linear in <code>Maximum_Children</code>; no dense dependency matrix is allocated.</dd></div>
-                <div class="decision-row"><dt>Nested node</dt><dd>Run either controller inside a supervised generation with <code>Run_Nested</code>. A failure carries the same incident, attempt, and absolute recovery deadline into the parent.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html"><code>Supervision.Static</code></a></dt><dd>Use an enumeration for a heterogeneous tree. Each member may have a different task type, execution model, restart rule, dependency set, and named recovery cohort. Storage includes a fixed dependency matrix.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html"><code>Supervision.Families</code></a></dt><dd>Use fixed slots for many homogeneous children with one typed request and one common policy. Storage is linear in <code>Maximum_Children</code>; no dense dependency matrix is allocated.</dd></div>
+                <div class="decision-row"><dt>Nested node</dt><dd>Run either controller inside a supervised generation with <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#7376edac2488693fba4064c15e75d735cefe39e1dea597c42523b36677ae2827"><code>Supervision.Static.Run_Nested</code></a> or <a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html#a78694d8f2eb82711e3c092abc6ef599ad988f52579f374185484084860305f6"><code>Supervision.Families.Run_Nested</code></a>. A failure carries the same incident, attempt, and absolute recovery deadline into the parent.</dd></div>
               </dl>
             </div>
-            <p><code>Child_Id</code> is a nonzero 64-bit logical identity. Each generic instantiation declares its own fixed capacity, so memory use is visible in the type and configuration.</p>
+            <p><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#61aed7254b84e2ff985070d4bb06ab28326dcf720850054b04128ea08ca55fee"><code>Child_Id</code></a> is a nonzero 64-bit logical identity. Each generic instantiation declares its own fixed capacity, so memory use is visible in the type and configuration.</p>
           </section>
 
           <section id="identity">
@@ -376,15 +381,16 @@ end;</code></pre>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><code>Child_Id</code></dt><dd>Stable service or slot identity across replacement. Use it for dashboards and logical lookup.</dd></div>
-                <div class="decision-row"><dt><code>Generation</code></dt><dd>Nonzero 64-bit construction identity. It advances on restart and on dynamic slot reuse, never wraps, and fails closed if its successor space is exhausted.</dd></div>
-                <div class="decision-row"><dt><code>Child_Handle</code></dt><dd>The exact controller, logical id, and generation. A handle from another supervisor is stale even when the displayed id and generation match. A default-constructed handle has invalid controller authority. <code>Stop</code>, manual restart, and health reports require an issued exact handle.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#588e6770769b63d49fb972c1087e1e7cef63bf9003a371c1e65e2ac287960838"><code>Generation</code></a></dt><dd>Nonzero 64-bit construction identity. It advances on restart and on dynamic slot reuse, never wraps, and fails closed if its successor space is exhausted.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#5bb69e676e5e0fe8bfd53c2c15b9e8786611ea959ade7b0ec99e848a88dd564e"><code>Child_Handle</code></a></dt><dd>The exact controller, logical id, and generation. A handle from another supervisor is stale even when the displayed id and generation match. A default-constructed handle has invalid controller authority. Exact-generation stop, manual restart, and health reports require an issued exact handle.</dd></div>
                 <div class="decision-row"><dt><code>Ada.Task_Identification.Task_Id</code></dt><dd>Copied diagnostic identity of the actual task object. It is never used to address a replacement.</dd></div>
               </dl>
             </div>
             <ol class="state-rail" aria-label="Observable supervised child lifecycle">
               <li>Configured</li><li>Starting</li><li>Running</li><li>Stopping</li><li>Terminated</li><li>Backing off</li><li>Restarting</li><li>Starting</li><li>Joined</li>
             </ol>
-            <p>The public state type includes <code>Ready</code> for the readiness handshake, but the current controllers publish that handshake atomically as <code>Starting -&gt; Running</code>; callers do not sample a retained <code>Ready</code> state. Activation alone is never enough. <code>Joined</code> means the task can no longer publish, its task-body finalization and dependent-task joins completed, and supervisor-owned generation state is reclaimable. <code>Stuck</code> is a termination classification, not a claim that a live task was killed.</p>
+            <p>The public state type includes <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#55f7403db09eba973482daf39032cec185a32c238d5793258bbf4b86f9026467"><code>Ready</code></a> for the readiness handshake, but current controllers publish that handshake atomically as <code>Starting -&gt; Running</code>. Callers therefore do not observe a retained <code>Ready</code> state, and activation alone is not sufficient.</p>
+            <p><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#55f7403db09eba973482daf39032cec185a32c238d5793258bbf4b86f9026467"><code>Joined</code></a> means the task can no longer publish, its finalization and dependent-task joins are complete, and the supervisor can reclaim generation state. <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#f5f8af77346a7f2b978c3f3e31b995c0b6b15db917cb90ffa84a10009b79a760"><code>Stuck</code></a> is only a termination classification; it does not claim that a live task was killed.</p>
           </section>
 
           <section id="monitor">
@@ -416,7 +422,8 @@ begin
    Flyology.Task_Results.Detach (Watch);
 end;</code></pre>
             </figure>
-            <p>A task-result monitor names the exact <code>Ada.Task_Identification.Task_Id</code> supplied to <code>Attach</code>. It never follows a later task. Multiple monitors may retain the same fixed sidecar, but each limited monitor must remain alive throughout every <code>Observe</code> or <code>Wait</code> call that borrows it. Concurrent detachment or finalization during either call is erroneous.</p>
+            <p>A <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html#17420c43a1d4026a924264cc676eea7f80da448e804c6ca85b5cc61a3342c31f"><code>Task_Results.Monitor</code></a> names the exact <code>Ada.Task_Identification.Task_Id</code> supplied to <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html#a3cf4f1f743076e26646e56f1c88d1f2605479de1535ed29bda362018872d10b"><code>Attach</code></a>. It never follows a later task. <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html#0f23de936706ce5a0ed3dc3d483712e98a8a56031cee0a9701cd52f34a782cea"><code>Task_Observation</code></a> holds the bounded observation returned by this facility.</p>
+            <p>Multiple monitors may retain the same fixed sidecar, but each limited monitor must remain alive throughout every <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html"><code>Observe</code></a> or <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html"><code>Wait</code></a> call that borrows it. Concurrent detachment, including a call to <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html#12e716ae3c6f018847d057e982c12c37881f8adfc9cdb17a1c64912ea07c6d04"><code>Detach</code></a>, or finalization during either call is erroneous.</p>
             <figure class="code-panel">
               <figcaption>wait for one supervised generation</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -441,6 +448,7 @@ begin
    end case;
 end;</code></pre>
             </figure>
+            <p><a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#738dc1770c84d827bf8cf9266e99eb82f0a3c4cf32de3e474056ce744c11e36d"><code>Static.Wait_Termination</code></a> returns a <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#972d61dedfaf1d4ec3aac50fab952840aafeefd1d79b0be7f32991f957209650"><code>Generation_Observation</code></a>. Its <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#e8143c996cd13a311ba5fbcb541299c7abf5f850e24373e207d0b8005a687d75"><code>Generation_Observation_Status</code></a> is <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#e8143c996cd13a311ba5fbcb541299c7abf5f850e24373e207d0b8005a687d75"><code>Generation_Terminated</code></a>, <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#e8143c996cd13a311ba5fbcb541299c7abf5f850e24373e207d0b8005a687d75"><code>Generation_Replaced</code></a>, or <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#e8143c996cd13a311ba5fbcb541299c7abf5f850e24373e207d0b8005a687d75"><code>Observation_Timed_Out</code></a>.</p>
             <p><code>Monitor_Capacity</code> on each static or family generic bounds concurrent generation waits. A timed-out, aborted, or unwinding waiter releases its registration. Slot tokens prevent late cleanup from canceling a newer waiter that reused the same bounded slot.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">i</span>
@@ -454,7 +462,7 @@ end;</code></pre>
           <section id="publication">
             <span class="step-label">PUBLICATION</span>
             <h2>Publish a typed lease, not an access-to-task value.</h2>
-            <p>A task entry may remain part of the application task type, but a long-lived client must not retain an access value to a task object that will be replaced. <code>Service_Slots</code> instead publishes a fixed scalar lease for one typed service and one exact controller-qualified generation. The application endpoint remains in a protected object or bounded channel owned by the surrounding context.</p>
+            <p>A task entry can remain part of the application task type. However, a long-lived client must not retain access to a task object that can be replaced. <a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html"><code>Service_Slots</code></a> publishes a fixed scalar lease for one typed service and one exact controller-qualified generation. The surrounding context owns the application endpoint in a protected object or bounded channel.</p>
             <figure class="code-panel">
               <figcaption>make one ready endpoint generation available</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -503,13 +511,14 @@ if Observation.Status = Published.Available then
    Context.Endpoint.Submit (Observation.Lease, Request);
 end if;</code></pre>
             </figure>
-            <p><code>Current</code> is useful for observation, but check-then-use is not authority. The protected endpoint operation must validate the lease while it performs the mutation. When the old task finalizes, its controlled publication becomes unavailable. A replacement constructs fresh resources, reports readiness, and publishes a different generation; every copied old lease remains stale.</p>
+            <p><a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html#40d5361d16cff9ba3493484f419f9d7ba67a373784a1902fb4b8acf493e7c53f"><code>Service_Slots.Directory</code></a> stores the current lease. A generation holds a controlled <a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html#6956fb17584a255d4f2fe62c9e73721bb65926230fb00750432524ba044729fa"><code>Publication</code></a> and calls <a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html#3ffaad9277e00f13b6328d94dc430ea9f9da34b13f43316e58ed1bdbfd33a46a"><code>Publish_Ready</code></a> after initialization. Clients call <a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html#8158f2552c69a630e204e39cff6c6a1d3fdc394e5116e2f7955024b04b81a07c"><code>Acquire</code></a>; the <a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html#5689337b935185b7aec2370285aa250c488c6829e1fafff1f7d90ac1051aa6b5"><code>Available</code></a> status means that the returned observation contains a lease.</p>
+            <p><a href="../../api/9504af71f9f90194b5f5fa7d67fa5964ecd0ee0f1e4e09081b0df90a00ab1c4b.html#66b0e58f6e80c2f88eac57f6b3c4e67e6eb4d4a6283c0409f597fc8d4804e90e"><code>Current</code></a> is useful for observation, but check-then-use is not authority. The protected endpoint operation must validate the lease while it performs the mutation. When the old task finalizes, its controlled publication becomes unavailable. A replacement constructs fresh resources, reports readiness, and publishes a different generation; every copied old lease remains stale.</p>
           </section>
 
           <section id="interventions">
             <span class="step-label">OPERATIONS</span>
             <h2>Manual restart and health failure use the same recovery path.</h2>
-            <p>Operational commands never address a logical service alone. Capture <code>Latest</code>, perform the probe against that generation's endpoint, then submit the same exact handle. If replacement won the race, the controller raises <code>Stale_Handle</code> and leaves the new task untouched.</p>
+            <p>Operational commands never address a logical service alone. Capture <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#786178df4906922355ea62ad6beee7039dd7a7abb844b353614f9db3abe221a0"><code>Latest</code></a>, perform the probe against that generation's endpoint, then submit the same exact handle. If replacement won the race, the controller raises <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#4ec670be7285a2b83c91bdd049315d2ae2523f570c22846a2633e3879f8cda47"><code>Stale_Handle</code></a> and leaves the new task untouched.</p>
             <figure class="code-panel">
               <figcaption>act on one exact running generation</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -620,10 +629,10 @@ package Metrics_Supervision is new Flyology.Supervision.Static
    --  every Child_Kind value.
    Run_One_Generation  =&gt; Run_Generation);</code></pre>
             </figure>
-            <p><code>Run_Generation</code> normally calls an instance of <code>Flyology.Supervision.Task_Generations</code>. The first example shows the one-child form; a larger dispatcher uses one package per task type. Inside each task body, acquire and validate the listener, descriptor, buffer, dedicated execution group, or other generation-owned resource, then call <code>Mark_Ready</code>. A failed bind never becomes visible as a running service.</p>
+            <p><code>Run_Generation</code> normally calls an instance of <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html"><code>Flyology.Supervision.Task_Generations</code></a>. The first example shows the one-child form; a larger dispatcher uses one package per task type. Inside each task body, acquire and validate the listener, descriptor, buffer, dedicated execution group, or other generation-owned resource, then call <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#814b57867147d492709d1d116cd4b48baf0b7833aca0bc221d55e46537edf5be"><code>Mark_Ready</code></a>. A failed bind never becomes visible as a running service.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">i</span>
-              <p><strong>Task entries remain local to the generation.</strong> <code>Initialize</code> may use startup entries, and tasks owned inside the generation may use normal lexical references. Do not publish a naked access-to-task value. For a long-lived client API, route typed commands through a protected object or bounded channel in the application context and include the <code>Child_Handle</code> returned by <code>Handle (Control)</code>; the receiver rejects a stale generation.</p>
+              <p><strong>Task entries remain local to the generation.</strong> <code>Initialize</code> can use startup entries, and tasks within the generation can use normal lexical references. Do not publish an access-to-task value. For a long-lived client API, route typed commands through a protected object or bounded channel. Include the <code>Child_Handle</code> returned by <code>Handle (Control)</code> so the receiver can reject a stale generation.</p>
             </aside>
           </section>
 
@@ -634,9 +643,9 @@ package Metrics_Supervision is new Flyology.Supervision.Static
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt><code>Isolate_Child</code></dt><dd>Stop, join, and replace only the failed child.</dd></div>
-                <div class="decision-row"><dt><code>Restart_Cohort</code></dt><dd>Use the typed <code>Cohort_Member</code> relation to restart an explicitly named set.</dd></div>
-                <div class="decision-row"><dt><code>Restart_Dependents</code></dt><dd>Restart the failed prerequisite and every transitive declared user.</dd></div>
-                <div class="decision-row"><dt><code>Escalate</code></dt><dd>Perform no local reconstruction. Stop the node and return the causal incident to its owner.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#3639cb6036ef7bc587c101439316a3aec5d55b6c2debcf32a3bf5c2fd0dcd44b"><code>Restart_Cohort</code></a></dt><dd>Use the typed <code>Cohort_Member</code> relation to restart an explicitly named set.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#3639cb6036ef7bc587c101439316a3aec5d55b6c2debcf32a3bf5c2fd0dcd44b"><code>Restart_Dependents</code></a></dt><dd>Restart the failed prerequisite and every transitive declared user.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#3639cb6036ef7bc587c101439316a3aec5d55b6c2debcf32a3bf5c2fd0dcd44b"><code>Escalate</code></a></dt><dd>Perform no local reconstruction. Stop the node and return the causal incident to its owner.</dd></div>
               </dl>
             </div>
             <figure class="code-panel">
@@ -706,14 +715,14 @@ function Cohort_Member (Trigger, Member : Service) return Boolean is
             <p>For <code>Database -&gt; Cache -&gt; API</code>, a database failure with <code>Restart_Dependents</code> stops API, then Cache, joins Database, waits once, and starts Database, Cache, then API. Each replacement must report readiness before its dependent starts. An unrelated Telemetry child continues.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
-              <p>Configuration rejects an affected child without <code>Restart_Safe</code> and a recovery set that would leave a running dependent attached to a replaced prerequisite. This flag is an application acknowledgement, not a proof of idempotence or shared-state safety.</p>
+              <p>Configuration rejects an affected child without <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#251c8dbf1492d36cfda3e8b6251d3183ffaaa7e6ffcac5d477029dbdcd93b759"><code>Restart_Safe</code></a> and a recovery set that would leave a running dependent attached to a replaced prerequisite. This flag is an application acknowledgement, not a proof of idempotence or shared-state safety.</p>
             </aside>
           </section>
 
           <section id="families">
             <span class="step-label">FAMILIES</span>
             <h2>Manage homogeneous children with fixed linear storage.</h2>
-            <p>A family uses one application task type and one typed request type for every slot. <code>Input_Task_Generations</code> keeps a stable immutable request copy beside the task object through join.</p>
+            <p>A family uses one application task type and one typed request type for every slot. <a href="../../api/e1faae336614134b837acff8ce6602e4d91ebbfa905f6eeac7c1b30ad6a75dbf.html"><code>Input_Task_Generations</code></a> keeps a stable immutable request copy beside the task object through join.</p>
             <p>Admission has two phases. The family reserves a slot under its protected state, copies the request outside that lock, then commits admission. Shutdown waits for every outstanding reservation to commit or roll back; a commit that loses the race with shutdown is rejected and rolled back. Reusing a free slot advances its generation and starts fresh recovery accounting.</p>
             <p>The family allocates one persistent manager lazily for each slot that is ever used. Managers are bounded by <code>Maximum_Children</code>, are reused with their slots, and finish at the family scope's join boundary. Their task-object storage is reclaimed only after termination is observable.</p>
             <figure class="code-panel">
@@ -834,30 +843,32 @@ Sessions.Stop (Family, Exact_Handle);
 Latest := Sessions.Latest
   (Family, Flyology.Supervision.Child (Exact_Handle));</code></pre>
             </figure>
-            <p><code>Current (Family, Handle)</code> is exact and raises <code>Stale_Handle</code> after replacement or reuse. <code>Current (Family, Child_Id)</code> is an observational lookup of the latest occupied generation and does not grant authority to mutate it. Capacity exhaustion raises <code>Constraint_Error</code> before admission.</p>
-            <p>A family policy may isolate one slot or escalate its incident. All slots share the task type, policy, and configured task model or group; use separate family instances when those differ. Named cohorts and dependency closure describe heterogeneous topology, so place the family as a child of a static node when its recovery must coordinate with a database, listener, sibling family, or other service. The containing static node may restart that family child as part of a cohort or dependent closure. The family never infers relationships among independent requests.</p>
+            <p>A caller enters the synchronous <a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html#19ddfc15acf08ff23ff08b38a2f027675ad465bd772fd1fd44d63f60d969b721"><code>Families.Run</code></a> ownership scope before it admits children. <a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html#f55ea5e6e8c680cc0528dae58fdd164287eb9fbab0428559379ee1fbbdd49f9c"><code>Families.Start</code></a> reserves one slot, and <a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html#2feb769e3153ce6050cde0d892f2ce3bbde47e6254444d60ed06b3964d5693bf"><code>Families.Stop</code></a> requires the exact live handle. <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#886a4b7e2403fe366c56510db23adbc93ecc4b0419a0ef9afcff9d9af5b9ae79"><code>Supervision.Child</code></a> extracts the logical child id from that handle.</p>
+            <p><a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html#fa74e5a7553959133b878a96f994a2bb519438fd117dcffcdcaf3f4a6d353cde"><code>Current (Family, Handle)</code></a> is exact and raises <code>Stale_Handle</code> after replacement or reuse. <a href="../../api/4e55837495e6b85015fe64a8f8523756bb5cf617fa21e0c7c73b23906f17766f.html#1d54d79de7355b8908585ccab72a7e11ff366b83bde9b9eb2299e1e8821268ca"><code>Current (Family, Child_Id)</code></a> is an observational lookup of the latest occupied generation and does not grant authority to mutate it. Capacity exhaustion raises <code>Constraint_Error</code> before admission.</p>
+            <p>A family policy can isolate one slot or escalate its incident. All slots share the task type, policy, and configured task model or group. Use separate family instances when these properties differ.</p>
+            <p>Named cohorts and dependency closure describe heterogeneous topology. Place a family under a static node when recovery must coordinate with another service. The static node can restart that family as part of a cohort or dependent closure. A family does not infer relationships among independent requests.</p>
           </section>
 
           <section id="budgets">
             <span class="step-label">BUDGETS</span>
-            <h2>Count one recovery cascade once.</h2>
-            <p>The first recoverable failure creates an <code>Incident_Id</code>, attempt 1, and an absolute monotonic deadline. Cohort members and nested nodes receive that same context. A node records a given incident and attempt at most once, so crossing a tree boundary does not silently multiply the retry allowance.</p>
+            <h2>Reuse one incident across a recovery cascade.</h2>
+            <p>The first recoverable failure creates an <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#6622974ab396cacae8e03fdcc0dbd13091ee97efd750e88a2d8af935c4637dc6"><code>Incident_Id</code></a>, attempt 1, and an absolute monotonic deadline. Cohort members and nested nodes receive that same context. A node records a given incident and attempt at most once, so crossing a tree boundary does not silently multiply the retry allowance.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Burst and window</dt><dd>Reject another attempt after the fixed count within a monotonic window.</dd></div>
                 <div class="decision-row"><dt>Total attempts</dt><dd>Bound all attempts in the incident even when windows roll over.</dd></div>
-                <div class="decision-row"><dt>Backoff</dt><dd>Double the delay after each consecutive attempt and cap it at <code>Maximum_Backoff</code>.</dd></div>
+                <div class="decision-row"><dt>Backoff</dt><dd>Double the delay after each consecutive attempt and cap it at <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#d93cff489b32876e334259bfc1e4ef428df9d697ec0d09819629ac95513f9f5f"><code>Maximum_Backoff</code></a>.</dd></div>
                 <div class="decision-row"><dt>Stability reset</dt><dd>After a replacement remains ready for the child and subtree intervals, close the inherited incident. A later failure starts at attempt 1 with a fresh absolute deadline; a nested escalation reported during the generation is retained.</dd></div>
                 <div class="decision-row"><dt>Recovery deadline</dt><dd>Reject a delay that cannot finish before the inherited absolute deadline.</dd></div>
               </dl>
             </div>
-            <p>Static nodes apply both child and subtree limits. Dynamic families apply the common child policy to each slot and can be placed under a static node when a wider subtree budget is required. Exhaustion stops owned children, records <code>Policy_Exhaustion</code>, and returns <code>Recovery_Exhausted</code> with the same incident.</p>
+            <p>Static nodes apply both child and subtree limits. Dynamic families apply the common child policy to each slot and can be placed under a static node when a wider subtree budget is required. Exhaustion stops owned children, records <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#f5f8af77346a7f2b978c3f3e31b995c0b6b15db917cb90ffa84a10009b79a760"><code>Policy_Exhaustion</code></a>, and returns <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#98e985d2f926e337b414d42c5d26b14a0f002eb94a027672201ae52a4c948591"><code>Recovery_Exhausted</code></a> with the same incident.</p>
           </section>
 
           <section id="stopping">
             <span class="step-label">STOPPING</span>
             <h2>Deadlines classify progress; they do not force completion.</h2>
-            <p>Stopping first publishes scalar stop state, then requests cancellation through the generation's existing token. After <code>Grace</code>, policy may request Ada abort. After <code>Abort_Observation</code>, a still-live generation is classified <code>Stuck</code>. No replacement starts while that old generation or its task-owned finalization remains live.</p>
+            <p>Stopping first publishes scalar stop state, then requests cancellation through the generation's existing token. After <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#92559a2482c8f2a97a8ef9c60213a681e62b22fa0de0d6244ffc4371c16cabf3"><code>Grace</code></a>, policy may request Ada abort. After <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#92559a2482c8f2a97a8ef9c60213a681e62b22fa0de0d6244ffc4371c16cabf3"><code>Abort_Observation</code></a>, a still-live generation is classified <code>Stuck</code>. No replacement starts while that old generation or its task-owned finalization remains live.</p>
             <ul>
               <li>A lightweight task can monopolize its cooperative execution group if it never suspends.</li>
               <li>A native task can remain inside a foreign call that does not return.</li>
@@ -874,7 +885,7 @@ Latest := Sessions.Latest
           <section id="adapters">
             <span class="step-label">ADAPTERS</span>
             <h2>Adapt an existing structured blocking service.</h2>
-            <p><code>Supervision.Adapters</code> accepts a fresh limited service constructor plus its blocking run, shutdown, and readiness operations. One dependent service-owner task executes the blocking call while the supervisor's generation runner observes readiness and forwards supervisor stop. The owner task is the concurrency boundary that leaves <code>Worker_Pools.Run</code>, <code>IO.Structured_Servers.Serve</code>, and application listener-loop APIs unchanged.</p>
+            <p><a href="../../api/dbd1b8b40da83d531bf8e69866e0beae064fe9d1b1ca81617b0ae572a76dfddb.html"><code>Supervision.Adapters</code></a> accepts a fresh limited service constructor plus its blocking run, shutdown, and readiness operations. One dependent service-owner task executes the blocking call while the supervisor's generation runner observes readiness and forwards supervisor stop. The owner task is the concurrency boundary that leaves <a href="../../api/740a1334e19dadfe60c642386f3c5b1adcf8efed9ad20815eedde5c398d69ccb.html#2ccd57848a36dc2e3896b0e6ceade6043780fd97241426463e271fb9cf65357f"><code>Worker_Pools.Run</code></a>, <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#904f83f05b6ffe80abc8c7db47a2412c039f6ceef2814366fb56d8c7af4bc4b6"><code>IO.Structured_Servers.Serve</code></a>, and application listener-loop APIs unchanged.</p>
             <figure class="code-panel">
               <figcaption>adapt a one-shot worker pool</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -992,7 +1003,7 @@ for Index in 1 .. Count loop
    Render_Outside_The_Controller (Events (Index));
 end loop;</code></pre>
             </figure>
-            <p>An event records sequence, monotonic time, logical id, generation, lifecycle transition, task model and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from GNARL's terminal publication path.</p>
+            <p>Each observer owns an <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#a1359a33a15bf82eb14c27655942e5aa5394732a2c5a4ae21611a8a9c048e854"><code>Event_Sequence</code></a> cursor and supplies a bounded <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#f948fdac244e7092e84c129d60b23049a9b46ca19f82351a94de0efaf1f81923"><code>Supervisor_Event_Array</code></a> to <a href="../../api/1ffde55c6efbf4699ae9ba4e7083b3439d3a2ddac4f00e36bbc3c33085b26966.html#fe349bf1327b6aba358fc7eea7248c062d70eff15bf900c7c3d8cfc513021dd5"><code>Static.Read_Events</code></a>. An event records monotonic time, logical id, generation, lifecycle transition, task model and group, termination kind, incident, and admitted backoff. If writers overwrite unread events, <code>Dropped</code> reports the exact sequence gap. The retained state is sufficient to reproduce ordering and restart admission without logging from GNARL's terminal publication path.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">✓</span>
               <div class="callout-body">
@@ -1008,7 +1019,7 @@ end loop;</code></pre>
 
           <section id="limits">
             <span class="step-label">BOUNDARY</span>
-            <h2>State the safety boundary.</h2>
+            <h2>Know what supervision cannot guarantee.</h2>
             <ul>
               <li>Supervision does not isolate memory. Siblings may share protected and unprotected application state, file descriptors, external services, and foreign libraries.</li>
               <li><code>Restart_Safe</code> does not make partial external effects idempotent. Document reconciliation, ownership, and generation boundaries for each restartable child.</li>
@@ -1016,7 +1027,7 @@ end loop;</code></pre>
               <li>Event storage, child slots, dependency matrices, managers, messages, and attempt accounting are bounded by declared types and generic capacities.</li>
               <li>Flyology is experimental. Validate both lightweight and native tasks, startup rollback, cancellation, finalization, resource reacquisition, and stuck behavior for the exact host and compiler release.</li>
             </ul>
-            <p>A marker interface would not make this boundary stronger: an Ada task may still reach shared memory, foreign libraries, and external systems outside that type. The reviewable evidence is structural. Construct a fresh limited task or service object, keep owned resources in its finalized scope, publish only a controller-qualified ready lease, test that old and replacement ownership never overlap, and place reconciliation rules beside the policy that sets <code>Restart_Safe =&gt; True</code>.</p>
+            <p>A marker interface would not strengthen this boundary because an Ada task can still reach shared memory, foreign libraries, and external systems outside that type. Use structural evidence instead: construct a fresh limited task or service object, keep owned resources in its finalized scope, and publish only a controller-qualified ready lease. Test that old and replacement ownership never overlap. Place reconciliation rules beside the policy that sets <code>Restart_Safe =&gt; True</code>.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">→</span>
               <p>Use the <a href="../../api/">generated API reference</a> for exact contracts, and the <a href="../../architecture/">architecture guide</a> for task routing, execution groups, scheduling, and runtime lifecycle.</p>

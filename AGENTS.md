@@ -42,8 +42,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   inertness contract.
 - Explicit designations are `Flyology.Lightweight_Task`,
   `Flyology.Native_Task`, and `Flyology.Project_Default`, supplied through
-  GNAT `Task_Info`. The obsolete-feature warning is deliberate; projects use
-  `-gnatwJ` while retaining other warnings.
+  GNAT `Task_Info`. Current GNAT emits an obsolete-feature warning for this
+  mechanism. The warning is an artifact of the current design and GNAT's
+  handling of it, not intended Flyology behavior. Projects use `-gnatwJ` while
+  retaining other warnings. Alternative designation mechanisms, including Ada
+  aspects, remain open if toolchain support becomes available.
 - A task’s lightweight/native designation is captured at creation and cannot
   change while the task is alive. A lightweight task may migrate between event
   loops; a native task remains on its pthread.
@@ -471,6 +474,9 @@ required by the changed boundary.
 - Document lane-specific blocking, timeout units and deadline scope,
   cancellation latency, ownership/lifecycle, task safety, cooperative fairness,
   and group migration where they affect callers. Do not restate signatures.
+- Hand-written Guide, Architecture, and Journal pages follow `website/AGENTS.md`.
+  Link the first explanatory mention of each public Flyology API entity on a
+  page to its verified generated GNATdoc unit or declaration entry.
 - Runtime specs are maintainer-facing and outside public GNATdoc scope, but
   still need comments for locking, ownership, state transitions, and ABI facts.
 - Tests should assert behavior and resource/lifecycle invariants, not merely

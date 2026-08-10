@@ -61,6 +61,8 @@
           <h1>{{TITLE}}.</h1>
         </div>
         <div>
+          <!-- Use a concise finding and its most important limit. A natural
+               two-sentence summary is preferable to one compressed sentence. -->
           <p class="article-summary">{{SUMMARY_WITH_FINDING_AND_BOUNDARY}}</p>
           <dl class="article-meta">
             <div><dt>Published</dt><dd><time datetime="{{YYYY-MM-DD}}">{{YYYY-MM-DD}}</time></dd></div>
@@ -89,18 +91,23 @@
             </div>
             <span class="step-label">FINDING</span>
             <h2>{{SECTION_ONE}}.</h2>
+            <!-- Explain what prompted the work and what changed in our
+                 understanding. A restrained first-person voice is welcome. -->
             <p>{{FINDING}}</p>
           </section>
 
           <section id="evidence">
             <span class="step-label">EVIDENCE</span>
             <h2>{{SECTION_TWO}}.</h2>
+            <!-- Identify the revision, environment, method, and result. -->
             <p>{{REPRODUCIBLE_EVIDENCE}}</p>
           </section>
 
           <section id="boundary">
             <span class="step-label">BOUNDARY</span>
             <h2>{{SECTION_THREE}}.</h2>
+            <!-- State the limits directly. Do not turn one dated result into a
+                 general performance or portability claim. -->
             <p>{{WHAT_THE_RECORD_DOES_NOT_ESTABLISH}}</p>
           </section>
         </article>

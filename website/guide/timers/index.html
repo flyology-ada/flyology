@@ -53,7 +53,7 @@
       <header class="doc-hero">
         <div>
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Timers</li></ol>
-          <h1>Use the clock that matches the promise.</h1>
+          <h1>Select a clock for each timer contract.</h1>
         </div>
         <p class="doc-hero-copy">Wait for elapsed time, one or many monotonic deadlines, or a civil time on the adjustable wall clock. Batch deadlines without creating one task per timer, and return backward wall-clock movement to the application instead of silently extending its schedule.</p>
       </header>
@@ -83,13 +83,13 @@
           <section id="choose">
             <span class="step-label">TIMER 01</span>
             <h2>Choose by what must remain stable.</h2>
-            <p>The three timer operations answer different questions. Make the clock choice part of the operation's contract rather than treating the APIs as interchangeable.</p>
+            <p>The <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html"><code>Flyology.IO.Timers</code></a> operations answer different questions. Make the clock choice part of the operation's contract rather than treating the APIs as interchangeable.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><code>Sleep_For</code></dt><dd>Wait for an elapsed duration. Use it for simple pacing and short pauses where no reusable absolute deadline is needed.</dd></div>
-                <div class="decision-row"><dt><code>Sleep_Until</code></dt><dd>Wait for an <code>Ada.Real_Time</code> deadline. Use it for timeouts, retry budgets, and periodic work that must not follow civil-clock corrections.</dd></div>
-                <div class="decision-row"><dt><code>Timer_Set</code></dt><dd>Wait for many one-shot <code>Ada.Real_Time</code> deadlines from one task. Use it when one loop should receive complete due batches without creating one task per deadline.</dd></div>
-                <div class="decision-row"><dt><code>Wait_Until</code></dt><dd>Wait for an <code>Ada.Calendar</code> target. Use it when the requested time is a point on the adjustable wall clock and the application must react to a backward correction.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#8a9e370645088ab01b24dccb11a21621c47f4688c12f97c7f0edd67224288575"><code>Sleep_For</code></a></dt><dd>Wait for an elapsed duration. Use it for simple pacing and short pauses where no reusable absolute deadline is needed.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#431c3cd793cb9db3cae9f79c14ea371529d0e7404cf8d259aef583cda1b8f58d"><code>Sleep_Until</code></a></dt><dd>Wait for an <code>Ada.Real_Time</code> deadline. Use it for timeouts, retry budgets, and periodic work that must not follow civil-clock corrections.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#3e671d3d764e7fecadb7c4bdb27bca5d15a7744f8595784d1c3e209f5ad9b01c"><code>Timer_Set</code></a></dt><dd>Wait for many one-shot <code>Ada.Real_Time</code> deadlines from one task. Use it when one loop should receive complete due batches without creating one task per deadline.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#6b149a90f2ef1863da03b4a62447f4da2144d3021e21e1fcdbc20bd3b2b6514a"><code>Wait_Until</code></a></dt><dd>Wait for an <code>Ada.Calendar</code> target. Use it when the requested time is a point on the adjustable wall clock and the application must react to a backward correction.</dd></div>
               </dl>
             </div>
             <aside class="callout">
@@ -137,7 +137,7 @@ Flyology.IO.Timers.Sleep_Until (Deadline);</code></pre>
           <section id="timer-sets">
             <span class="step-label">TIMER 04</span>
             <h2>Wait for many deadlines from one task.</h2>
-            <p><code>Timer_Set</code> is a bounded, caller-owned collection of one-shot monotonic timers. Declare its capacity and a matching <code>Activation_Batch</code>, then arm individual ids or replace the complete set from a one-based deadline array. The set allocates no storage after declaration.</p>
+            <p><code>Timer_Set</code> is a bounded, caller-owned collection of one-shot monotonic timers. Declare its capacity and a matching <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#d4185b5cfd8b10df69857467a10c999ae08159afa17ffc266d48f1921422053a"><code>Activation_Batch</code></a>, then arm individual ids or replace the complete set from a one-based <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#daaeff1db4bdd4d1d2a149d82dbe1e66ebd5cbac7a63443a44661ca757bd69be"><code>Deadline_Array</code></a>. The set allocates no storage after declaration.</p>
             <figure class="code-panel">
               <figcaption>three deadlines, one waiting task</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -164,12 +164,12 @@ begin
    end loop;
 end Wait_For_Timers;</code></pre>
             </figure>
-            <p><code>Wait_Next</code> takes one monotonic-clock sample and returns every timer due at that sample. The ids are disarmed before the call returns, and callers must not depend on their batch order. Re-arm an id after handling it when the application wants another occurrence.</p>
+            <p><a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#d4833677dc23451a82cf2fb259777d0cc224e9c0df9a693775529c33b908bfa4"><code>Wait_Next</code></a> takes one monotonic-clock sample and returns every timer due at that sample. The ids are disarmed before the call returns, and callers must not depend on their batch order. Re-arm an id after handling it when the application wants another occurrence.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">→</span>
               <p>A deadline may pass after the batch's clock sample while the caller processes earlier activations. It remains armed. The next <code>Wait_Next</code> checks all now-due timers before sleeping, so that deadline appears in the next batch rather than being forgotten.</p>
             </aside>
-            <p>The timed overload bounds one wait while preserving later arms. It returns <code>Timers_Activated</code> with a nonempty batch or <code>Wait_Timed_Out</code> with an empty batch. A zero timeout polls once; timers due at that terminal sample take precedence over timeout.</p>
+            <p>The timed <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#a9f12b193eec773f75328420fef324a07558af756bd1a3dc6c43b4d87eec8193"><code>Wait_Next</code></a> overload returns a <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#4290d44859b493c54fc33fd3ddfc32e02bfaeb53f4de5b6af3f5526f44a5eb45"><code>Timer_Wait_Outcome</code></a> while preserving later arms. It reports <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#4290d44859b493c54fc33fd3ddfc32e02bfaeb53f4de5b6af3f5526f44a5eb45"><code>Timers_Activated</code></a> with a nonempty batch or <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#4290d44859b493c54fc33fd3ddfc32e02bfaeb53f4de5b6af3f5526f44a5eb45"><code>Wait_Timed_Out</code></a> with an empty batch. A zero timeout polls once; timers due at that terminal sample take precedence over timeout.</p>
             <figure class="code-panel">
               <figcaption>bounded wait</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -189,17 +189,17 @@ end;</code></pre>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>One scheduler wait</dt><dd>The set keeps an indexed min-heap and registers only its earliest deadline through the calling task's normal delay path.</dd></div>
-                <div class="decision-row"><dt>One-shot delivery</dt><dd>Each arm is returned once unless <code>Cancel</code> or <code>Replace</code> removes it first. <code>Arm</code> replaces the deadline of an already armed id.</dd></div>
+                <div class="decision-row"><dt>One-shot delivery</dt><dd>Each arm is returned once unless <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#1895cef38fa20342fd1c64c3b8c0f612a7720f5d9b6448c7525d571862aabacb"><code>Cancel</code></a> or <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#ce6e7759d0f4372090f3d00ef9973edf1d9c9ab00ea42377be9a7f569ddd3f14"><code>Replace</code></a> removes it first. <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#fb26476bebd6777114bfb9d12b6791324ef4abca262d9cd6feef15277d5cc620"><code>Arm</code></a> replaces the deadline of an already armed id.</dd></div>
                 <div class="decision-row"><dt>Caller ownership</dt><dd>The object is not task safe. One task must serialize arming, cancellation, replacement, inspection, and waiting.</dd></div>
-                <div class="decision-row"><dt>Empty collection</dt><dd>Call <code>Wait_Next</code> only while <code>Armed_Count</code> is positive; there is no event that could wake a wait on a task-confined empty set.</dd></div>
+                <div class="decision-row"><dt>Empty collection</dt><dd>Call <code>Wait_Next</code> only while <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#1121f85cb08ce3b7221e5f9c615a04cbe69f4a51e04821720e0c6ecaf38b3183"><code>Armed_Count</code></a> is positive; there is no event that could wake a wait on a task-confined empty set.</dd></div>
               </dl>
             </div>
           </section>
 
           <section id="wall-clock">
             <span class="step-label">TIMER 05</span>
-            <h2>Wait for a time that hits the clock.</h2>
-            <p><code>Wait_Until</code> accepts an absolute <code>Ada.Calendar.Time</code>. A forward clock change may make the target immediately due. A backward change beyond the selected tolerance returns <code>Clock_Moved_Backward</code>, giving the application a chance to recompute or confirm its civil schedule.</p>
+            <h2>Wait for an adjustable wall-clock target.</h2>
+            <p><code>Wait_Until</code> accepts an absolute <code>Ada.Calendar.Time</code>. A forward clock change may make the target immediately due. A backward change beyond the selected tolerance returns <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#584b5839d84dc6288e9922d68d7a4db08515a1df8eccf69b8770e8a18bd9eaf1"><code>Clock_Moved_Backward</code></a>, giving the application a chance to recompute or confirm its civil schedule.</p>
             <figure class="code-panel">
               <figcaption>wall-clock wait with explicit outcome</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -222,7 +222,7 @@ case Result.Outcome is
          Adjustment =&gt; Result.Backward_Adjustment);
 end case;</code></pre>
             </figure>
-            <p>The result includes the wall-clock sample used for the decision and an estimated lost-progress duration. The adjustment is zero when the target was reached.</p>
+            <p>The <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#e587983fd1b0da42f56b2d4a0cd4f9c782ab1300b237f027ba24810328fb532a"><code>Wall_Clock_Wait_Result</code></a> includes the wall-clock sample used for the decision and an estimated lost-progress duration. The adjustment is zero when the target was reached.</p>
           </section>
 
           <section id="backsteps">
@@ -236,12 +236,12 @@ end case;</code></pre>
   (Target             =&gt; Target,
    Backstep_Tolerance =&gt; 0.010);</code></pre>
             </figure>
-            <p>Detection compares wall-clock progress with monotonic elapsed time. Each wall read is bracketed by two steady reads; broad brackets are retried, brackets wider than one second are rejected, and classification uses the least elapsed time consistent with the accepted brackets. Descheduling between the reads therefore cannot manufacture a backstep. The returned adjustment is a conservative estimate for policy decisions, not an audit record of the system clock.</p>
+            <p>Detection compares wall-clock progress with monotonic elapsed time. Two monotonic reads bracket each wall read; Flyology retries broad brackets and rejects brackets wider than one second. Classification uses the least elapsed time consistent with the accepted brackets, so descheduling between reads cannot create a false backstep. The returned adjustment is a conservative policy estimate, not an audit record of the system clock.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Small backward jitter</dt><dd>Rearm the target and continue waiting.</dd></div>
                 <div class="decision-row"><dt>Material backstep</dt><dd>Return <code>Clock_Moved_Backward</code>; the caller decides whether to recompute, confirm, skip, or wait again.</dd></div>
-                <div class="decision-row"><dt>Forward correction</dt><dd>Return <code>Target_Reached</code> once the observed wall clock is at or beyond the target.</dd></div>
+                <div class="decision-row"><dt>Forward correction</dt><dd>Return <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#584b5839d84dc6288e9922d68d7a4db08515a1df8eccf69b8770e8a18bd9eaf1"><code>Target_Reached</code></a> once the observed wall clock is at or beyond the target.</dd></div>
               </dl>
             </div>
           </section>
@@ -255,7 +255,7 @@ end case;</code></pre>
                 <div class="decision-row"><dt>Lightweight task</dt><dd>The fiber suspends on its execution group's event loop. Other ready tasks in that group may continue on the same loop thread.</dd></div>
                 <div class="decision-row"><dt>Native task</dt><dd>The wait uses the native path and blocks only that task's pthread.</dd></div>
                 <div class="decision-row"><dt>Linux</dt><dd>An absolute <code>timerfd</code> wait uses <code>TFD_TIMER_CANCEL_ON_SET</code> so a discontinuous real-time clock change wakes the wait for classification.</dd></div>
-                <div class="decision-row"><dt>Darwin</dt><dd>A relative Mach-absolute <code>kqueue</code> timer is armed from a fresh wall-clock sample and paired with the system clock-set notification. It uses at-most-one-second active-time slices that continue after resume, so a missing or missed notification has bounded active-time detection latency apart from task scheduling delay.</dd></div>
+                <div class="decision-row"><dt>Darwin</dt><dd>A relative Mach-absolute <code>kqueue</code> timer is armed from a fresh wall-clock sample and paired with the system clock-set notification. The Darwin path uses at-most-one-second active-time slices that continue after resume, so a missing or missed notification has bounded active-time detection latency apart from task scheduling delay.</dd></div>
               </dl>
             </div>
             <p>Both platform paths recheck wall and monotonic time after arming, closing the setup window in which the clock might otherwise change unnoticed.</p>
@@ -280,12 +280,12 @@ end case;</code></pre>
 
           <section id="limits">
             <span class="step-label">TIMER 09</span>
-            <h2>Account for what a timer cannot promise.</h2>
+            <h2>Know what timer waits cannot guarantee.</h2>
             <ul>
               <li>A timer becomes eligible at its deadline; ordinary OS and Flyology scheduling delay may move actual execution later.</li>
               <li>The monotonic clock and kernel waits pause during system sleep. The operation does not wake a suspended computer, and resume-time wall-clock changes are classified when the application runs again.</li>
               <li>Clock-change notifications identify a need to recheck; the wall and monotonic samples determine the public outcome.</li>
-              <li><code>Flyology.IO.Device_Error</code> is raised if wall-clock timer setup or waiting fails.</li>
+              <li><a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#431274841403e6ec9179192f3f49b786f5353edd7e270013584c2e7a9e32e894"><code>Flyology.IO.Device_Error</code></a> is raised if wall-clock timer setup or waiting fails.</li>
               <li>Use the exact contracts in the <a href="../../api/">generated API reference</a> when handling errors or building reusable abstractions.</li>
             </ul>
             <aside class="callout callout-teal">

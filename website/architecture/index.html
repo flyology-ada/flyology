@@ -55,7 +55,7 @@
           <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology Runtime</a></li><li aria-current="page">Architecture</li></ol>
           <h1>How Flyology Runtime extends GNAT tasking.</h1>
         </div>
-        <p class="doc-hero-copy">Flyology changes how a selected task executes without changing what an Ada task means. Task identity, rendezvous, protected objects, activation, masters, abort, and exception behavior retain their ordinary semantics.</p>
+        <p class="doc-hero-copy">Flyology changes how a selected task executes. It preserves ordinary Ada semantics for task identity, rendezvous, protected objects, activation, masters, abort, and exceptions.</p>
       </header>
 
       <div class="docs-layout">
@@ -78,7 +78,7 @@
           <section id="routing">
             <span class="step-label">ROUTING</span>
             <h2>Tasks use either native or lightweight execution.</h2>
-            <p>The integration point is <code class="language-ada">System.Task_Primitives.Operations</code>, beneath GNARL, GNAT's tasking runtime layer. Task creation captures the designation once and routes the task either to a guarded fiber stack managed by an execution group or to the native OS-thread path.</p>
+            <p>Flyology integrates at <code class="language-ada">System.Task_Primitives.Operations</code>, below GNARL, the GNAT tasking runtime layer. Task creation records the designation once. A lightweight task receives a guarded fiber stack managed by an execution group; a native task follows the OS-thread path.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="routing-title routing-desc" viewBox="0 0 760 410">
                 <title id="routing-title">Flyology task routing</title>
@@ -105,18 +105,18 @@
                 <text class="diagram-muted" x="580" y="378" text-anchor="middle">native OS-thread path</text>
               </svg>
             </figure>
-            <p>The environment task is always native. A task cannot change its lightweight or native designation while alive, though a lightweight task can migrate between event-loop groups at an explicit safe point.</p>
+            <p>The environment task is always native. A live task cannot change its lightweight or native designation, but a lightweight task can migrate at an explicit safe point.</p>
           </section>
 
           <section id="mechanisms">
             <span class="step-label">SEPARATION</span>
-            <h2>Polling, scheduling, and switching are different jobs.</h2>
-            <p>Keeping the mechanisms separate makes the portability boundary explicit and keeps scheduler policy in Ada.</p>
+            <h2>Polling, scheduling, and switching have separate functions.</h2>
+            <p>Flyology separates these mechanisms to show the portability boundary and to keep scheduler policy in Ada.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Event polling</dt><dd>Sleeps until socket readiness, file completion, a timer deadline, or a cross-thread wake. Implemented with <code>kqueue</code> on Darwin and <code>epoll</code> on Linux.</dd></div>
-                <div class="decision-row"><dt>Scheduling</dt><dd>Selects the next runnable fiber from per-priority FIFO buckets and promotes expired per-group deadlines. Implemented as Ada runtime policy.</dd></div>
-                <div class="decision-row"><dt>Context switching</dt><dd>Saves ABI-required register and stack state, then restores another guarded stack. Implemented by a small AArch64 or x86-64 register swap.</dd></div>
+                <div class="decision-row"><dt>Event polling</dt><dd>The poller waits for socket readiness, file completion, a timer deadline, or a cross-thread wake. Darwin implements this wait with <code>kqueue</code>; Linux uses <code>epoll</code>.</dd></div>
+                <div class="decision-row"><dt>Scheduling</dt><dd>The Ada scheduler selects the next runnable fiber from per-priority FIFO buckets and promotes expired per-group deadlines.</dd></div>
+                <div class="decision-row"><dt>Context switching</dt><dd>A small AArch64 or x86-64 routine saves the required ABI register and stack state, then restores another guarded stack.</dd></div>
               </dl>
             </div>
             <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">i</span><p>The poller never executes an Ada continuation. It only makes a waiting fiber eligible for the scheduler to resume.</p></aside>
@@ -125,7 +125,7 @@
           <section id="lifecycle">
             <span class="step-label">LIFECYCLE</span>
             <h2>A suspended call keeps its stack.</h2>
-            <p>Each lightweight task owns a guarded stackful context. A wait records the task's deadline and ownership state, switches fully back to the scheduler, and later resumes the original call frame.</p>
+            <p>Each lightweight task owns a guarded stackful context. When a call waits, Flyology records its deadline and ownership state before switching to the scheduler. The task later resumes in the original call frame.</p>
             <ol class="state-rail" aria-label="Lightweight task lifecycle">
               <li>Ready</li><li>Running</li><li>Waiting</li><li>Ready</li><li>Finished</li>
             </ol>
@@ -141,22 +141,23 @@
           <section id="memory">
             <span class="step-label">MEMORY</span>
             <h2>Runtime memory follows task and operation lifetimes.</h2>
-            <p>Flyology does not replace Ada's general heap allocator. It owns the memory needed for lightweight execution: fiber stacks and contexts, scheduler and poller state, and completion records. These resources are created lazily and remain alive while a task or kernel operation can still refer to them.</p>
+            <p>Flyology does not replace the general Ada heap allocator. It creates fiber stacks, contexts, scheduler state, poller state, and completion records as needed. Each resource remains alive while a task or kernel operation can refer to it.</p>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Fiber stacks</dt><dd>Stacks are mapped in guarded arenas of at most 64 slots, targeting 4 MiB before the final guard. A suspended or migrating task retains the same stack, locals, and exception state.</dd></div>
-                <div class="decision-row"><dt>Guarding and reuse</dt><dd>Each usable stack has an inaccessible guard of at least 64 KiB. A released slot is protected before reuse and receives best-effort page-discard advice; a completely empty arena is unmapped.</dd></div>
+                <div class="decision-row"><dt>Fiber stacks</dt><dd>Flyology maps stacks in guarded arenas with at most 64 slots and a 4 MiB target before the final guard. A suspended or migrating task retains its stack, locals, and exception state.</dd></div>
+                <div class="decision-row"><dt>Guarding and reuse</dt><dd>Each usable stack has an inaccessible guard of at least 64 KiB. Before reusing a released slot, Flyology protects it and requests best-effort page discard. Flyology unmaps an arena when it becomes empty.</dd></div>
                 <div class="decision-row"><dt>Kernel operations</dt><dd>A submitted file buffer remains kernel-owned until completion. Cancellation and abort cannot release the buffer or its completion state early.</dd></div>
-                <div class="decision-row"><dt>Runtime teardown</dt><dd>Finished fibers are reaped when their Ada task lifetime permits it. Groups, pollers, queues, and contexts are released only after Ada task masters and controlled library objects are complete.</dd></div>
+                <div class="decision-row"><dt>Runtime teardown</dt><dd>Flyology reaps a finished fiber when the Ada task lifetime permits it. It releases groups, pollers, queues, and contexts after all task masters and controlled library objects complete.</dd></div>
               </dl>
             </div>
-            <p>Stack-pool allocation is process-wide and briefly serialized only during task activation and final reap; scheduling, polling, I/O, and context switching do not take that mutex. <code class="language-ada">Flyology.Observability.Stack_Pool</code> reports current arena, stack, usable-byte, and reserved-byte counts without starting an execution group.</p>
+            <p>Stack-pool allocation is process-wide and briefly serialized by a mutex during task activation and final reap. Scheduling, polling, I/O, and context switching do not use that mutex.</p>
+            <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#fe93a641b68a9b158ab01eb4525def9fde8d4c7a6ba23c031369acc262122cb1"><code class="language-ada">Flyology.Observability.Stack_Pool</code></a> reports current arena, stack, usable-byte, and reserved-byte counts. This operation does not start an execution group.</p>
           </section>
 
           <section id="groups">
             <span class="step-label">TOPOLOGY</span>
             <h2>Each group is a scheduling and ownership domain.</h2>
-            <p>An execution group owns one stable loop thread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work implicitly. Automatic placement, explicit Ada <code class="language-ada">CPU</code> selection, and migration determine where a task runs.</p>
+            <p>An execution group owns one stable loop thread, ready queues, a deadline heap, a descriptor index, and an OS poller. Groups do not steal work. Automatic placement, explicit Ada <code class="language-ada">CPU</code> selection, and migration determine where a task runs.</p>
             <figure class="architecture-figure">
               <svg role="img" aria-labelledby="groups-title groups-desc" viewBox="0 0 760 360">
                 <title id="groups-title">Two independent execution groups</title>
@@ -183,13 +184,13 @@
                 <path class="diagram-accent" d="M320 278c40 35 80 35 120 0" marker-end="url(#groups-arrow)"/>
               </svg>
             </figure>
-            <p>Shared identifiers are <code class="language-ada">0 .. 127</code>. Dedicated identifiers are <code class="language-ada">128 .. 255</code>. Migrating out of a dedicated group consumes its reservation, so a task must call <code class="language-ada">Create_Dedicated</code> again before re-entering.</p>
+            <p>Shared group identifiers are <code class="language-ada">0 .. 127</code>; dedicated identifiers are <code class="language-ada">128 .. 255</code>. Migration out of a dedicated group consumes its reservation, so call <a href="../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#cce48fd40048465350c172c8b089aae29d21ba62cd7fa342a65585d02514a46d"><code class="language-ada">Create_Dedicated</code></a> again before re-entry.</p>
           </section>
 
           <section id="readiness">
             <span class="step-label">SOCKET PATH</span>
             <h2>Readiness resumes the original operation.</h2>
-            <p>A socket call first attempts the nonblocking operating-system operation. If it would block, the lightweight path registers one-shot readiness and a deadline, then switches back to the scheduler. When resumed, the same call retries the operation.</p>
+            <p>A socket call first attempts the nonblocking OS operation. If it would block, the lightweight path registers one-shot readiness and a deadline before switching to the scheduler. When readiness or the deadline wakes the task, the same call retries the operation.</p>
             <ol>
               <li>The Ada task calls receive, send, accept, or connect.</li>
               <li>The nonblocking syscall reports that it would block.</li>
@@ -218,7 +219,7 @@
           <section id="abi">
             <span class="step-label">RUNTIME BOUNDARY</span>
             <h2>Target-specific code stays in the C and assembly bridge.</h2>
-            <p>The C and assembly bridge contains Linux syscall numbers, native <code>epoll_event</code> layout, thread placement, virtual-memory operations, test hooks, and ABI register swaps. Scheduler, queue, timeout, backpressure, file-engine, and retry policy remain in Ada.</p>
+            <p>The C and assembly bridge contains target-specific mechanisms. These include Linux syscall numbers, native <code>epoll_event</code> layout, thread placement, virtual-memory operations, test hooks, and ABI register swaps. Scheduler, queue, timeout, backpressure, file-engine, and retry policy remain in Ada.</p>
             <ul>
               <li><strong>Contexts:</strong> AArch64 and x86-64 implementations preserve all ABI-required callee-saved integer, floating-point, stack, frame, and control state.</li>
               <li><strong>Stacks:</strong> guarded <code>mmap</code> arenas detect overflow through the supported task-runtime signal path and surface Ada <code class="language-ada">Storage_Error</code>.</li>
@@ -230,8 +231,8 @@
           <section id="inertness">
             <span class="step-label">COMPATIBILITY</span>
             <h2>Native-only programs start no event machinery.</h2>
-            <p>The environment task is native, undesignated tasks are native by default, and Flyology creates no poller, event-loop thread, scheduler context, or fiber stack until the first lightweight task is activated.</p>
-            <p>This is a testable contract, not only a configuration preference. The external-consumer suite prepares both native-default and lightweight-default runtimes, then checks that an ordinary native-only program has no event machinery before or after creating a normal Ada task.</p>
+            <p>The environment task is native, and undesignated tasks are native by default. Until the first lightweight task activates, Flyology starts no poller, event-loop thread, scheduler context, or fiber stack.</p>
+            <p>The external-consumer suite tests this contract with native-default and lightweight-default runtimes. In both configurations, an ordinary native-only program remains on the dormant path before and after creating a normal Ada task.</p>
             <aside class="callout callout-teal"><span class="callout-symbol" aria-hidden="true">→</span><p>Ready to evaluate it? Continue with the <a href="../guide/">build and designation guide</a>, then use the <a href="../api/">generated API reference</a> for exact contracts.</p></aside>
           </section>
         </article>
