@@ -28,6 +28,11 @@ if ! command -v oha >/dev/null 2>&1; then
   exit 2
 fi
 
+alr=$("$project_root/scripts/find-alr.sh")
+#  A fresh checkout has no generated config/flyology_config.* yet. Generate
+#  configuration sources before preparing or selecting the benchmark RTS.
+"$alr" build --stop-after=generation >/dev/null
+
 mkdir -p "$(dirname -- "$output")" "$project_root/build/tcp-readiness"
 server_log="$project_root/build/tcp-readiness/server-$loops-$connections.log"
 server_time="$project_root/build/tcp-readiness/server-$loops-$connections.time"
@@ -57,7 +62,6 @@ fi
       --RTS="$rts" -q -f -p -P benchmarks/tcp_readiness_benchmark.gpr \
       -largs -nodefaultrpaths
   else
-    alr=$("$project_root/scripts/find-alr.sh")
     "$alr" exec -- env -u GPR_CONFIG gprbuild \
       --RTS="$rts" -q -f -p -P benchmarks/tcp_readiness_benchmark.gpr
   fi

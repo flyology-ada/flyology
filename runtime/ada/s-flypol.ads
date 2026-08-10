@@ -70,6 +70,13 @@ package System.Flyology.Poller is
       Requests : Interest_Request_Array) return Boolean
    with Pre => Requests'Length > 0;
 
+   --  Report whether an armed one-shot interest may remain after its last
+   --  scheduler waiter detaches. Such an interest can produce at most one
+   --  unmatched readiness hint and is removed by descriptor close. Platforms
+   --  with process-side registration records return False so detachment also
+   --  releases that bookkeeping.
+   function Retains_Orphaned_One_Shots return Boolean;
+
    --  Enqueue positional file I/O and arrange for a File_Event carrying Token
    --  to be returned by Wait_Batch. The buffer must remain valid until that
    --  completion is delivered.

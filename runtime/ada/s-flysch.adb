@@ -1221,10 +1221,13 @@ package body System.Flyology.Scheduler is
 
       --  Removing one fiber can orphan several one-shot kernel interests.
       --  The direction delivered by the poller was consumed atomically with
-      --  that event and needs no delete. Batch every other orphan so Darwin
-      --  submits one kqueue change list rather than one syscall per source.
-      --  A raw wait does not own its descriptor, so Cancel_Many accepts a
-      --  source closed concurrently by its owner as already removed.
+      --  that event and needs no delete. Darwin can safely retain every other
+      --  one-shot knote until it fires once or its descriptor closes; an event
+      --  arriving without a waiter is only a discarded readiness hint. Linux
+      --  still clears orphans because its poller owns one process-side record
+      --  per epoll registration. A raw wait does not own its descriptor, so
+      --  cancellation accepts a source closed concurrently by its owner as
+      --  already removed.
       for Kind in 1 .. Item.Active_IO_Link_Count loop
          Link := Active_IO_Link (Item, Kind);
          if Link.Descriptor >= 0
@@ -1247,6 +1250,7 @@ package body System.Flyology.Scheduler is
          Link.Outcome := 0;
       end loop;
       if Cancellation_Count > 0
+        and then not Pollers.Retains_Orphaned_One_Shots
         and then not Pollers.Cancel_Many
           (Group.Scheduler_Poller,
            Cancellations (1 .. Cancellation_Count))
