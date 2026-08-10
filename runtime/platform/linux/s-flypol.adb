@@ -431,6 +431,8 @@ package body System.Flyology.Poller is
       return Succeeded;
    end Cancel_Many;
 
+   function Retains_Orphaned_One_Shots return Boolean is (False);
+
    function Submit_File
      (Item        : in out Poller;
       Descriptor  : C.int;

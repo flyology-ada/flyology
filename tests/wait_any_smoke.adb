@@ -195,8 +195,9 @@ procedure Wait_Any_Smoke is
       Flyology.IO.Sockets.Close_Socket (Left_2);
       Flyology.IO.Sockets.Close_Socket (Right_2);
 
-      --  A timed-out wait must leave no registration that can act on a later
-      --  descriptor generation reusing the same integer.
+      --  A timed-out wait leaves no scheduler waiter that can act on a later
+      --  descriptor generation reusing the same integer. Darwin may retain
+      --  the kernel one-shot until close, which must remove it before reuse.
       Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
       Flyology.IO.Sockets.Prepare (Left_1);
       declare
@@ -240,9 +241,10 @@ begin
    pragma Assert (Passed);
 
    --  Exercise a distinct-descriptor change list rather than the duplicate
-   --  entries above. A timeout must clear every source, the same set must
-   --  rearm immediately, and simultaneous readiness must retain the required
-   --  lowest-index ordering in both lanes.
+   --  entries above. After timeout the same set must rearm immediately, and
+   --  simultaneous readiness must retain the required lowest-index ordering
+   --  in both lanes. On Darwin this also exercises an event arriving while
+   --  only retained one-shots, and no scheduler waiter, exist.
    declare
       task type Batch_Runner (Model : Flyology.Execution_Model) is
          pragma Task_Info (Model);
@@ -304,10 +306,10 @@ begin
       end;
    end;
 
-   --  Aborting a lightweight task while Wait_Any is suspended must unregister
-   --  every kernel interest before its stack-resident wait links disappear.
-   --  A second lightweight waiter on the same descriptor checks that the poller
-   --  and group registry remain usable after that unwind.
+   --  Aborting a lightweight task while Wait_Any is suspended must detach all
+   --  stack-resident wait links. Darwin may retain the kernel one-shot after
+   --  that detach. A second lightweight waiter on the same descriptor checks
+   --  that rearming, the poller, and the group registry remain usable.
    declare
       protected Started is
          procedure Set;

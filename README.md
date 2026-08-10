@@ -1392,8 +1392,13 @@ task uses `poll` for the equivalent wait, blocking its own pthread but not the
 event-loop thread.
 
 Descriptor registrations are one-shot so the resumed task owns the retry and
-decides whether another wait is needed. Exact reads and complete writes loop
-over partial progress while preserving a single deadline.
+decides whether another wait is needed. On Darwin, an undelivered one-shot
+knote may remain after its last waiter detaches; it can yield at most one
+discarded readiness hint and descriptor close removes it before the integer can
+be reused. This avoids a per-wait delete transaction. Linux still deletes an
+orphaned epoll interest because the poller owns a matching process-side record.
+Exact reads and complete writes loop over partial progress while preserving a
+single deadline.
 
 `Flyology.IO.Wait` and `Flyology.IO.Wait_Interruptibly` deliberately remain raw
 integer-descriptor primitives. They do not own the descriptor or prevent a
@@ -1628,10 +1633,12 @@ The limited owner cannot be copied and closes its socket while releasing the
 admission permit during explicit `Close`, normal scope exit, or exception
 unwinding. Each adoption receives a monotonically wrapping generation tag. A
 concurrent `Close` signals that generation's private wake source, waits for its
-active operation to remove every poller registration, and only then releases
-the OS descriptor. The kernel therefore cannot reuse an integer while an old
-generation can still act on its readiness. An in-flight operation interrupted
-by close raises `Operation_Cancelled` in both native and lightweight lanes.
+active operation to detach every scheduler waiter, and only then releases the
+OS descriptor. Linux has removed the corresponding registrations by that
+point; Darwin descriptor close also drops any retained one-shot knotes. The
+kernel therefore cannot reuse an integer while an old generation can still act
+on a fiber. An in-flight operation interrupted by close raises
+`Operation_Cancelled` in both native and lightweight lanes.
 
 A connection admits one socket operation at a time. Additional operations queue
 at the owner rather than registering duplicate waits, which gives
@@ -1667,8 +1674,9 @@ not at all when neither is supplied. Closing a watched descriptor is therefore
 a liveness hazard for the waiting task, but it is not a runtime error. The
 pollers report the resulting `EBADF` or `ENOENT` cancellation as a removed
 interest, so a close race cannot escalate into a fatal scheduler failure.
-`Connections` avoids the hazard entirely by draining registrations before it
-releases a descriptor.
+`Connections` avoids the hazard entirely by draining scheduler waiters before
+it releases a descriptor; descriptor close then removes any retained Darwin
+one-shot knotes before numeric reuse.
 
 `Flyology.Cancellation.Token` is the canonical one-shot token shared by
 connection and file I/O. `Connections.Cancellation_Token` and
@@ -3067,7 +3075,8 @@ Current smoke coverage includes:
   connections, and blocked native parity despite a ten-second legacy quantum;
 - generation-tagged connection close under forced descriptor-number reuse,
   simultaneous cancellation/close, readiness/timeout races in both lanes,
-  exclusive same-descriptor waiters, and removal of all poller registrations;
+  exclusive same-descriptor waiters, waiter detachment, and descriptor-close
+  cleanup of retained one-shot registrations;
 - provider-neutral ALPN offer ordering, validation, no-selection, `h2`, and
   `http/1.1` fallback outcomes, retained-provider sessions, admitted-connection
   upgrade, timeout, cancellation, and native/lightweight parity;
