@@ -353,6 +353,23 @@ package body System.Flyology.Poller is
          return False;
    end Watch;
 
+   function Watch_Many
+     (Item     : in out Poller;
+      Requests : Interest_Request_Array) return Boolean
+   is
+   begin
+      for Index in Requests'Range loop
+         if not Watch
+           (Item,
+            Requests (Index).Descriptor,
+            Requests (Index).Condition)
+         then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Watch_Many;
+
    function Cancel
      (Item       : in out Poller;
       Descriptor : C.int;
@@ -399,6 +416,20 @@ package body System.Flyology.Poller is
             return False;
       end case;
    end Cancel;
+
+   function Cancel_Many
+     (Item     : in out Poller;
+      Requests : Interest_Request_Array) return Boolean
+   is
+      Succeeded : Boolean := True;
+   begin
+      for Request of Requests loop
+         if not Cancel (Item, Request.Descriptor, Request.Condition) then
+            Succeeded := False;
+         end if;
+      end loop;
+      return Succeeded;
+   end Cancel_Many;
 
    function Submit_File
      (Item        : in out Poller;

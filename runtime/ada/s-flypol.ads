@@ -7,6 +7,12 @@ package System.Flyology.Poller is
 
    type Poller is limited private;
    type Interest is (Readable, Writable);
+   type Interest_Request is record
+      Descriptor : Interfaces.C.int;
+      Condition  : Interest;
+   end record;
+   type Interest_Request_Array is
+     array (Positive range <>) of Interest_Request;
    type Event_Kind is
      (Wake_Event,
       Readable_Event,
@@ -34,6 +40,15 @@ package System.Flyology.Poller is
       Descriptor : Interfaces.C.int;
       Condition  : Interest) return Boolean;
 
+   --  Arm one-shot readiness notifications as one logical operation. Success
+   --  means every request is armed. A failure may leave an earlier request
+   --  armed, so the caller must pass the complete set to Cancel_Many before
+   --  releasing its scheduler state. Repeated pairs are permitted.
+   function Watch_Many
+     (Item     : in out Poller;
+      Requests : Interest_Request_Array) return Boolean
+   with Pre => Requests'Length > 0;
+
    --  Roll back an armed interest that has no scheduler waiters. This is used
    --  transactionally when a later member of a multi-source wait cannot arm,
    --  and again whenever the scheduler removes a waiter that still owns
@@ -46,6 +61,14 @@ package System.Flyology.Poller is
      (Item       : in out Poller;
       Descriptor : Interfaces.C.int;
       Condition  : Interest) return Boolean;
+
+   --  Clear every requested interest, including after a descriptor close or
+   --  an already-consumed one-shot event. All requests are attempted even if
+   --  one reports a hard poller failure.
+   function Cancel_Many
+     (Item     : in out Poller;
+      Requests : Interest_Request_Array) return Boolean
+   with Pre => Requests'Length > 0;
 
    --  Enqueue positional file I/O and arrange for a File_Event carrying Token
    --  to be returned by Wait_Batch. The buffer must remain valid until that
