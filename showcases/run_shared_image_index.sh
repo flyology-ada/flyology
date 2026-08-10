@@ -42,17 +42,7 @@ fi
 
 corpus_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-image-index.XXXXXX")
 summary_file="$corpus_root/final-summary.txt"
-stop_file="$corpus_root/stop-requested"
-terminal_state=
-restore_terminal () {
-  if [ -n "$terminal_state" ]; then
-    printf '\033[?25h'
-    stty "$terminal_state" </dev/tty
-    terminal_state=
-  fi
-}
 cleanup () {
-  restore_terminal
   rm -rf "$corpus_root"
 }
 trap cleanup EXIT HUP INT TERM
@@ -142,40 +132,10 @@ phase "[3/4] Checking the narrow native process boundary"
 
 phase "[4/4] Generating and indexing the image corpus"
 if [ "$interactive" -eq 1 ]; then
-  terminal_state=$(stty -g </dev/tty)
-  stty -icanon -echo min 0 time 1 </dev/tty
-  printf '\033[2J\033[H\033[?25l'
-fi
-if [ "$batch_limit" -eq 0 ]; then
-  continuous_flag=1
-else
-  continuous_flag=0
-fi
-
-escape=$(printf '\033')
-if [ "$interactive" -eq 1 ]; then
-  FLYOLOGY_SHOWCASE_CONTINUOUS="$continuous_flag" \
-    FLYOLOGY_SHOWCASE_MANAGED_SCREEN=1 \
-    FLYOLOGY_SHOWCASE_SUMMARY_FILE="$summary_file" \
-    FLYOLOGY_SHOWCASE_STOP_FILE="$stop_file" \
+  FLYOLOGY_SHOWCASE_SUMMARY_FILE="$summary_file" \
     "$showcase_root/bin/shared_image_index" coordinator \
     "$corpus_root" "$workers" "$images" "$width" "$height" "$passes" \
-    "$index_rounds" "$batch_limit" &
-  session_pid=$!
-  while kill -0 "$session_pid" 2>/dev/null; do
-    key=$(dd if=/dev/tty bs=1 count=1 2>/dev/null || :)
-    case "$key" in
-      q|Q|"$escape")
-        #  Generation stops at the current safety epoch; already admitted
-        #  image jobs drain before workers detach from the shared segment.
-        : >"$stop_file"
-        ;;
-    esac
-  done
-  if ! wait "$session_pid"; then
-    exit 1
-  fi
-  restore_terminal
+    "$index_rounds" "$batch_limit"
   printf '\n\n'
   cat "$summary_file"
 else

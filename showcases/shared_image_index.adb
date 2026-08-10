@@ -1,3 +1,4 @@
+with Ada.Characters.Conversions;
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Environment_Variables;
@@ -6,7 +7,7 @@ with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Strings;
 with Ada.Strings.Fixed;
-with Ada.Strings.Unbounded;
+with Ada.Strings.Wide_Wide_Unbounded;
 with Ada.Text_IO;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Byte_Strings;
@@ -14,16 +15,26 @@ with Flyology.Data_Structures.Regions;
 with Flyology.Shared_Memory;
 with Flyology.Shared_Memory.Segments;
 with Flyology.Shared_Memory.Unix_Sockets;
+with Flyology_TUI.Backends;
+with Flyology_TUI.Backends.POSIX;
+with Flyology_TUI.Colors;
+with Flyology_TUI.Components.Indicators;
+with Flyology_TUI.Components.Tables;
+with Flyology_TUI.Events;
+with Flyology_TUI.Layouts;
+with Flyology_TUI.Styles;
+with Flyology_TUI.Surfaces;
+with Flyology_TUI.Themes;
+with Flyology_TUI.Views;
 with Interfaces;
 with Interfaces.C;
 with Showcase_Support;
 with Shared_Image_Index_Support;
-
 procedure Shared_Image_Index is
    package CLI renames Ada.Command_Line;
    package Directories renames Ada.Directories;
    package Env renames Ada.Environment_Variables;
-   package UStrings renames Ada.Strings.Unbounded;
+   package Wide_Text renames Ada.Strings.Wide_Wide_Unbounded;
    package RT renames Ada.Real_Time;
    package IO renames Ada.Text_IO;
    package C renames Interfaces.C;
@@ -33,11 +44,20 @@ procedure Shared_Image_Index is
    package Shared renames Flyology.Shared_Memory;
    package Segments renames Shared.Segments;
    package Unix renames Shared.Unix_Sockets;
+   package TUI_Backends renames Flyology_TUI.Backends;
+   package TUI_POSIX renames Flyology_TUI.Backends.POSIX;
+   package TUI_Colors renames Flyology_TUI.Colors;
+   package Indicators renames Flyology_TUI.Components.Indicators;
+   package TUI_Events renames Flyology_TUI.Events;
+   package TUI_Layouts renames Flyology_TUI.Layouts;
+   package TUI_Styles renames Flyology_TUI.Styles;
+   package TUI_Surfaces renames Flyology_TUI.Surfaces;
+   package TUI_Themes renames Flyology_TUI.Themes;
+   package TUI_Views renames Flyology_TUI.Views;
    package Model renames Shared_Image_Index_Support;
    package Job_Rings renames Model.Job_Rings;
    package Result_Rings renames Model.Result_Rings;
    package Image_Maps renames Model.Image_Maps;
-
    use type C.int;
    use type Ada.Streams.Stream_Element_Offset;
    use type DS.Byte_Count;
@@ -50,19 +70,18 @@ procedure Shared_Image_Index is
    use type Segments.Find_Or_Create_Result;
    use type Segments.Lookup_Result;
    use type Segments.Segment_Open_Result;
-
-   ESC : constant Character := Character'Val (27);
+   use type TUI_Backends.Input_Status;
+   use type TUI_Events.Key_Kind;
+   use type TUI_Events.Terminal_Event_Kind;
    Segment_Config : constant Segments.Configuration :=
      (Schema               => 16#5348_4F57_494D_4701#,
       Registry_Capacity    => 8,
       Maximum_Name_Length  => 64,
       Allocation_Alignment => 64);
-
    function Socketpair
      (Left, Right : access C.int) return C.int;
    pragma Import
      (C, Socketpair, "flyology_showcase_image_socketpair");
-
    function Spawn_Worker
      (Program        : C.char_array;
       Socket         : C.int;
@@ -77,32 +96,23 @@ procedure Shared_Image_Index is
       PID            : access C.int) return C.int;
    pragma Import
      (C, Spawn_Worker, "flyology_showcase_spawn_image_worker");
-
    function Poll_Worker (PID : C.int) return C.int;
    pragma Import
      (C, Poll_Worker, "flyology_showcase_poll_image_worker");
-
    function Close_Descriptor (Descriptor : C.int) return C.int;
    pragma Import (C, Close_Descriptor, "close");
-
    function Kill_Process (PID, Signal : C.int) return C.int;
    pragma Import (C, Kill_Process, "kill");
-
    function Is_A_Terminal (Descriptor : C.int) return C.int;
    pragma Import (C, Is_A_Terminal, "isatty");
-
    function Trimmed (Value : String) return String is
      (Ada.Strings.Fixed.Trim (Value, Ada.Strings.Both));
-
    function Image (Value : Natural) return String is
      (Trimmed (Natural'Image (Value)));
-
    function Image (Value : DS.Byte_Count) return String is
      (Trimmed (DS.Byte_Count'Image (Value)));
-
    function Image (Value : Model.U64) return String is
      (Trimmed (Model.U64'Image (Value)));
-
    function Pad (Text : String; Width : Positive) return String is
       Result : String (1 .. Width) := (others => ' ');
       Count  : constant Natural := Natural'Min (Text'Length, Width);
@@ -112,38 +122,8 @@ procedure Shared_Image_Index is
       end if;
       return Result;
    end Pad;
-
-   --  Keep the glyph layer ASCII. Ada.Text_IO represents Character as
-   --  Latin-1 on some supported hosts and would otherwise transcode hand-made
-   --  UTF-8 bytes a second time. Color, spacing, and status hierarchy carry
-   --  the presentation while output remains portable and unambiguous.
-   Round_Top_Left     : constant String := "/";
-   Round_Top_Right    : constant String := "\";
-   Round_Bottom_Left  : constant String := "\";
-   Round_Bottom_Right : constant String := "/";
-   Horizontal         : constant String := "-";
-   Vertical           : constant String := "|";
-   Full_Block         : constant String := "#";
-   Light_Block        : constant String := ".";
-   Solid_Dot          : constant String := "o";
-
-   function Repeat (Text : String; Count : Natural) return String is
-      Result : String (1 .. Text'Length * Count);
-   begin
-      for Index in 1 .. Count loop
-         Result
-           ((Index - 1) * Text'Length + 1 .. Index * Text'Length) := Text;
-      end loop;
-      return Result;
-   end Repeat;
-
-   function Paint (Text, Color : String) return String is
-     (ESC & "[" & Color & "m" & Text & ESC & "[0m");
-
-   function Pill (Text, Color : String) return String is
-     (ESC & "[1;38;5;16;48;5;" & Color & "m " & Text & " " &
-      ESC & "[0m");
-
+   function Wide (Value : String) return Wide_Wide_String is
+     (Ada.Characters.Conversions.To_Wide_Wide_String (Value));
    function Batch_Token
      (Batch        : Model.U64;
       Worker_Limit : Natural) return Ada.Streams.Stream_Element_Array
@@ -166,7 +146,6 @@ procedure Shared_Image_Index is
       end loop;
       return Result;
    end Batch_Token;
-
    function Next_Power_Of_Two (Value : Positive) return Positive is
       Result : Positive := 1;
    begin
@@ -178,13 +157,10 @@ procedure Shared_Image_Index is
       end loop;
       return Result;
    end Next_Power_Of_Two;
-
    function Align_64 (Value : DS.Byte_Count) return DS.Byte_Count is
      ((Value + 63) / 64 * 64);
-
    function Align_Mapping (Value : DS.Byte_Count) return DS.Byte_Count is
      ((Value + 65_535) / 65_536 * 65_536);
-
    function Segment_Length (Index_Capacity : Positive) return DS.Byte_Count is
       Total : DS.Byte_Count :=
         Segments.Required_Registry_Storage (Segment_Config);
@@ -205,97 +181,88 @@ procedure Shared_Image_Index is
       --  required 64-byte alignment.
       return Align_Mapping (Total + 4_096);
    end Segment_Length;
-
-   function ANSI_Enabled return Boolean is
-     (Is_A_Terminal (1) = 1
+   function Interactive_Terminal return Boolean is
+     (Is_A_Terminal (0) = 1
+      and then Is_A_Terminal (1) = 1
       and then not Env.Exists ("NO_COLOR")
       and then (not Env.Exists ("TERM") or else Env.Value ("TERM") /= "dumb"));
-
-   function Batch_Status (Batch : Positive) return String is
-      (if Env.Exists ("FLYOLOGY_SHOWCASE_CONTINUOUS")
-        and then Env.Value ("FLYOLOGY_SHOWCASE_CONTINUOUS") = "1"
-      then
-        " Corpus epoch " & Image (Batch) &
-        " | q or Esc requests a drained stop"
-      else " Corpus epoch " & Image (Batch));
-
-   function Managed_Screen return Boolean is
-     (Env.Exists ("FLYOLOGY_SHOWCASE_MANAGED_SCREEN")
-      and then Env.Value ("FLYOLOGY_SHOWCASE_MANAGED_SCREEN") = "1");
-
+   Dashboard_Terminal : TUI_POSIX.POSIX_Backend;
    Dashboard_Active : Boolean := False;
-   Frame : UStrings.Unbounded_String;
-
-   procedure Begin_Dashboard is
+   procedure Begin_Dashboard
+     (Terminal_Width, Terminal_Height : out Natural)
+   is
+      Available : Boolean := False;
    begin
-      if ANSI_Enabled then
-         if not Managed_Screen then
-            IO.Put (ESC & "[2J" & ESC & "[H" & ESC & "[?25l");
+      Terminal_Width := 80;
+      Terminal_Height := 24;
+      if Interactive_Terminal then
+         TUI_POSIX.Open (Dashboard_Terminal);
+         TUI_POSIX.Current_Size
+           (Dashboard_Terminal,
+            Terminal_Width,
+            Terminal_Height,
+            Available);
+         if not Available then
+            Terminal_Width := 80;
+            Terminal_Height := 24;
          end if;
          Dashboard_Active := True;
       end if;
+   exception
+      when others =>
+         TUI_POSIX.Close (Dashboard_Terminal);
+         Dashboard_Active := False;
+         raise;
    end Begin_Dashboard;
-
    procedure End_Dashboard is
    begin
       if Dashboard_Active then
-         if not Managed_Screen then
-            IO.Put (ESC & "[?25h");
-            IO.Flush;
-         end if;
+         TUI_POSIX.Close (Dashboard_Terminal);
          Dashboard_Active := False;
       end if;
    end End_Dashboard;
-
-   procedure Begin_Frame is
-   begin
-      --  Modern terminals buffer synchronized updates until mode 2026 is
-      --  released; older terminals safely ignore the private mode sequence.
-      Frame := UStrings.To_Unbounded_String (ESC & "[?2026h" & ESC & "[H");
-   end Begin_Frame;
-
-   procedure End_Frame is
-   begin
-      UStrings.Append (Frame, ESC & "[?2026l");
-      IO.Put (UStrings.To_String (Frame));
-      IO.Flush;
-   end End_Frame;
-
-   function Meter
-     (Done, Total : Natural; Width : Positive := 32) return String
-   is
-      Filled : constant Natural :=
-        (if Total = 0 then 0 else Natural'Min (Width, Done * Width / Total));
-   begin
-      return Paint (Repeat (Full_Block, Filled), "38;5;212") &
-        Paint (Repeat (Light_Block, Width - Filled), "38;5;238");
-   end Meter;
-
-   procedure ANSI_Line (Text : String; Color : String := "") is
-   begin
-      UStrings.Append (Frame, ESC & "[2K");
-      if Color'Length > 0 then
-         UStrings.Append (Frame, ESC & "[" & Color & "m");
-      end if;
-      UStrings.Append (Frame, Text);
-      if Color'Length > 0 then
-         UStrings.Append (Frame, ESC & "[0m");
-      end if;
-      UStrings.Append (Frame, Character'Val (10));
-   end ANSI_Line;
-
+   Muted_Style : constant TUI_Styles.Style :=
+     TUI_Styles.With_Foreground
+       (TUI_Styles.Default,
+        TUI_Colors.Basic (TUI_Colors.Bright_Black));
+   Border_Style : constant TUI_Styles.Style := Muted_Style;
+   Title_Style : constant TUI_Styles.Style :=
+     TUI_Styles.Emphasized
+       (TUI_Styles.With_Foreground
+          (TUI_Styles.Default, TUI_Colors.True_Color (90, 86, 224)));
+   Movement_Style : constant TUI_Styles.Style :=
+     TUI_Styles.With_Foreground
+       (TUI_Styles.Default, TUI_Colors.True_Color (117, 113, 249));
+   Completion_Style : constant TUI_Styles.Style :=
+     TUI_Styles.Emphasized
+       (TUI_Styles.With_Foreground
+          (TUI_Styles.Default, TUI_Colors.True_Color (0, 170, 118)));
+   Warning_Style : constant TUI_Styles.Style :=
+     TUI_Styles.Emphasized
+       (TUI_Styles.With_Foreground
+          (TUI_Styles.Default, TUI_Colors.True_Color (214, 139, 44)));
+   Error_Style : constant TUI_Styles.Style :=
+     TUI_Styles.Emphasized
+       (TUI_Styles.With_Foreground
+          (TUI_Styles.Default, TUI_Colors.True_Color (198, 40, 80)));
+   Dashboard_Theme : constant TUI_Themes.Theme :=
+     (Primary     => TUI_Styles.Default,
+      Muted       => Muted_Style,
+      Selected    => Completion_Style,
+      Focused     => Warning_Style,
+      Border      => Border_Style,
+      Input       => TUI_Styles.Default,
+      Placeholder => Muted_Style,
+      Error       => Error_Style,
+      Success     => Completion_Style);
    type Count_Array is array (Positive range <>) of Natural;
-
    type Extent_Id is
      (Pending_Jobs, Completed_Results, Image_Index, Start_Gate, Startup_Race);
-
    type Layout_Entry is record
       Location : DS.Region_Offset := 0;
       Length   : DS.Byte_Count := 0;
    end record;
-
    type Segment_Layout is array (Extent_Id) of Layout_Entry;
-
    function Extent_Name (Id : Extent_Id) return String is
      (case Id is
          when Pending_Jobs      => Model.Job_Ring_Name,
@@ -303,16 +270,88 @@ procedure Shared_Image_Index is
          when Image_Index       => Model.Index_Name,
          when Start_Gate        => Model.Gate_Name,
          when Startup_Race      => Model.Race_Name);
-
    function Extent_Kind (Id : Extent_Id) return String is
      (case Id is
          when Pending_Jobs | Completed_Results => "MPMC ring",
          when Image_Index                       => "hash map",
          when Start_Gate | Startup_Race         => "byte string");
 
-   Last_Work_Bucket : Natural := Natural'Last;
+   type Segment_Column is
+     (Name_Column, Offset_Column, Length_Column, Kind_Column,
+      Activity_Column);
 
-   procedure Show_Segment_Layout
+   type Segment_Row is record
+      Id       : Extent_Id;
+      Location : DS.Region_Offset;
+      Length   : DS.Byte_Count;
+      Activity : Wide_Text.Unbounded_Wide_Wide_String;
+   end record;
+
+   function Segment_Row_Id (Item : Segment_Row) return Extent_Id is (Item.Id);
+
+   function Segment_Cell
+     (Item   : Segment_Row;
+      Column : Segment_Column) return Wide_Wide_String
+   is
+     (case Column is
+         when Name_Column     => Wide (Extent_Name (Item.Id)),
+         when Offset_Column   =>
+           Wide ("@" & Image (DS.Byte_Count (Item.Location))),
+         when Length_Column   => Wide ("+" & Image (Item.Length)),
+         when Kind_Column     => Wide (Extent_Kind (Item.Id)),
+         when Activity_Column =>
+           Wide_Text.To_Wide_Wide_String (Item.Activity));
+
+   function Segment_Less
+     (Left, Right : Segment_Row;
+      Column      : Segment_Column) return Boolean
+   is
+      pragma Unreferenced (Column);
+   begin
+      return Left.Id < Right.Id;
+   end Segment_Less;
+
+   package Segment_Tables is new Flyology_TUI.Components.Tables
+     (Item_Type => Segment_Row,
+      Id_Type   => Extent_Id,
+      Column_Id => Segment_Column,
+      Id_Of     => Segment_Row_Id,
+      Cell      => Segment_Cell,
+      Less      => Segment_Less,
+      Capacity  => 5);
+   Last_Work_Bucket : Natural := Natural'Last;
+   function Framed_Panel
+     (Title         : String;
+      Contents      : TUI_Surfaces.Surface;
+      Width, Height : Natural) return TUI_Surfaces.Surface
+   is
+      Inner_Width : constant Natural :=
+        (if Width > 4 then Width - 4 else 0);
+      Inner_Height : constant Natural :=
+        (if Height > 4 then Height - 4 else 0);
+      Content : TUI_Surfaces.Surface :=
+        TUI_Surfaces.Create (Inner_Width, Inner_Height);
+      Frame : constant TUI_Layouts.Block :=
+        (Width      => Width,
+         Height     => Height,
+         Padding    => (Top => 1, Right => 1, Bottom => 1, Left => 1),
+         Border     => TUI_Layouts.Rounded,
+         Appearance => Border_Style,
+         others     => <>);
+   begin
+      if Inner_Height > 0 then
+         Content.Write (0, 0, Wide (Title), Title_Style);
+      end if;
+      if Inner_Height > 1 then
+         Content.Overlay
+           (Indicators.Divider (Inner_Width, Theme => Dashboard_Theme), 0, 1);
+      end if;
+      if Inner_Height > 2 then
+         Content.Overlay (Contents, 0, 2);
+      end if;
+      return TUI_Layouts.Render (Frame, Content);
+   end Framed_Panel;
+   function Segment_Body
      (Layout         : Segment_Layout;
       Mapped_Length  : DS.Byte_Count;
       Queued         : Natural;
@@ -323,72 +362,128 @@ procedure Shared_Image_Index is
       Worker_Count   : Positive;
       Queue_Pressure : Natural;
       Index_Retries  : Natural;
-      Registry_Retries : Natural)
+      Registry_Retries : Natural;
+      Width, Height  : Natural) return TUI_Surfaces.Surface
    is
-      Pulse_Color : constant String :=
-        (case (Queued + Completed) mod 4 is
-            when 0 => "38;5;141",
-            when 1 => "38;5;177",
-            when 2 => "38;5;212",
-            when others => "38;5;177");
-   begin
-      ANSI_Line
-        ("  " & Round_Top_Left & Repeat (Horizontal, 2) &
-         Paint (" shared segment ", "1;38;5;81") &
-         Repeat (Horizontal, 46) & Round_Top_Right, "38;5;240");
-      ANSI_Line
-        ("  " & Vertical & " " & Pill ("VALID", "42") &
-         "  schema SHOWIMG/1   slots 8   align 64", "38;5;252");
-      ANSI_Line
-        ("  " & Vertical & " exact map  " & Image (Mapped_Length) &
-         " bytes", "38;5;245");
-      ANSI_Line
-        ("  " & Vertical & " " & Paint ("REGISTRY", "1;38;5;141") &
-         "  fixed capacity / exact names", "38;5;245");
-      for Id in Extent_Id loop
-         declare
-            Item : Layout_Entry renames Layout (Id);
-            Activity : constant String :=
-              (case Id is
-                  when Pending_Jobs =>
-                    "push=" & Image (Queued) & " pressure=" &
-                    Image (Queue_Pressure),
-                  when Completed_Results =>
-                    "drain=" & Image (Completed) & "/" & Image (Total),
-                  when Image_Index =>
-                    "publish=" & Image (Completed) & " retries=" &
-                    Image (Index_Retries),
-                  when Start_Gate =>
-                    "attached=" & Image (Workers_Ready) & "/" &
-                    Image (Worker_Count),
-                  when Startup_Race =>
-                    "creator=1 retries=" & Image (Registry_Retries));
-            Complete : constant Boolean :=
-              Completed = Total and then Workers_Done = Worker_Count;
-            Marker : constant String :=
-              (if Complete then Paint (Solid_Dot, "38;5;114")
-               else Paint (Solid_Dot, Pulse_Color));
-         begin
-            ANSI_Line
-              ("  " & Vertical & " " & Marker & " " &
-               Paint
-                 (Pad (Extent_Name (Id), 24),
-                  (if Id = Image_Index then "1;38;5;212"
-                   elsif Id in Pending_Jobs | Completed_Results then
-                     "1;38;5;81"
-                   elsif Id = Startup_Race then "1;38;5;141"
-                   else "1;38;5;221")) &
-               "  " & Pad (Image (DS.Byte_Count (Item.Location)), 7) &
-               "  " & Pad (Image (Item.Length), 7) & "  " &
-               Pad (Extent_Kind (Id), 11) & Paint (Activity, "38;5;245"));
-         end;
-      end loop;
-      ANSI_Line
-        ("  " & Round_Bottom_Left & Repeat (Horizontal, 2) &
-         " offsets only / no native addresses " &
-         Repeat (Horizontal, 27) & Round_Bottom_Right, "38;5;240");
-   end Show_Segment_Layout;
+      Result : TUI_Surfaces.Surface := TUI_Surfaces.Create (Width, Height);
+      Valid : constant TUI_Surfaces.Surface :=
+        Indicators.Badge
+          ("VALID", Indicators.Success_Tone, Dashboard_Theme);
 
+      function Activity_For (Id : Extent_Id) return String is
+        (case Id is
+            when Pending_Jobs =>
+              "push " & Image (Queued) & " / pressure " &
+              Image (Queue_Pressure),
+            when Completed_Results =>
+              "drain " & Image (Completed) & "/" & Image (Total),
+            when Image_Index =>
+              "publish " & Image (Completed) & " / retries " &
+              Image (Index_Retries),
+            when Start_Gate =>
+              "attached " & Image (Workers_Ready) & "/" &
+              Image (Worker_Count) & " / done " & Image (Workers_Done),
+            when Startup_Race =>
+              "creator 1 / retries " & Image (Registry_Retries));
+
+      function Make_Row (Id : Extent_Id) return Segment_Row is
+        (Id       => Id,
+         Location => Layout (Id).Location,
+         Length   => Layout (Id).Length,
+         Activity => Wide_Text.To_Unbounded_Wide_Wide_String
+           (Wide (Activity_For (Id))));
+
+      Rows : constant Segment_Tables.Item_Array :=
+        (1 => Make_Row (Pending_Jobs),
+         2 => Make_Row (Completed_Results),
+         3 => Make_Row (Image_Index),
+         4 => Make_Row (Start_Gate),
+         5 => Make_Row (Startup_Race));
+      Table_Y : constant Natural :=
+        (if Height >= 8 then 2 elsif Height >= 7 then 1 else 0);
+      Available_Height : constant Natural := Height - Table_Y;
+      Visible_Rows : constant Natural :=
+        (if Available_Height > 1
+         then Natural'Min (5, Available_Height - 1) else 0);
+      Column_Space : constant Natural :=
+        (if Width > 6 then Width - 6 else 0);
+      Name_Width : constant Natural := Column_Space * 32 / 100;
+      Offset_Width : constant Natural := Column_Space * 14 / 100;
+      Length_Width : constant Natural := Column_Space * 14 / 100;
+      Kind_Width : constant Natural := Column_Space * 18 / 100;
+      Activity_Width : constant Natural :=
+        Column_Space - Name_Width - Offset_Width - Length_Width - Kind_Width;
+      Columns : constant Segment_Tables.Column_Definitions :=
+        [Name_Column =>
+           (Heading       =>
+              Wide_Text.To_Unbounded_Wide_Wide_String ("Name"),
+            Width         => Name_Width,
+            Minimum_Width => 0,
+            Align         => Segment_Tables.Align_Left,
+            Sortable      => False),
+         Offset_Column =>
+           (Heading       =>
+              Wide_Text.To_Unbounded_Wide_Wide_String ("Offset"),
+            Width         => Offset_Width,
+            Minimum_Width => 0,
+            Align         => Segment_Tables.Align_Right,
+            Sortable      => False),
+         Length_Column =>
+           (Heading       =>
+              Wide_Text.To_Unbounded_Wide_Wide_String ("Length"),
+            Width         => Length_Width,
+            Minimum_Width => 0,
+            Align         => Segment_Tables.Align_Right,
+            Sortable      => False),
+         Kind_Column =>
+           (Heading       =>
+              Wide_Text.To_Unbounded_Wide_Wide_String ("Kind"),
+            Width         => Kind_Width,
+            Minimum_Width => 0,
+            Align         => Segment_Tables.Align_Left,
+            Sortable      => False),
+         Activity_Column =>
+           (Heading       =>
+              Wide_Text.To_Unbounded_Wide_Wide_String ("Activity"),
+            Width         => Activity_Width,
+            Minimum_Width => 0,
+            Align         => Segment_Tables.Align_Left,
+            Sortable      => False)];
+      Table : Segment_Tables.Model :=
+        Segment_Tables.Create
+          (Rows, Columns, Viewport_Rows => Visible_Rows, Enabled => True);
+      Table_Look : constant Segment_Tables.Appearance :=
+        (Header   => Muted_Style,
+         Normal   => TUI_Styles.Default,
+         Selected => Title_Style,
+         Focused  => Movement_Style,
+         Muted    => Muted_Style,
+         Divider  => Border_Style);
+   begin
+      if Height = 0 or else Width = 0 then
+         return Result;
+      end if;
+      if Table_Y > 0 then
+         Result.Overlay (Valid, 0, 0);
+      end if;
+      if Table_Y > 0 and then Width > 9 then
+         Result.Write
+           (9, 0,
+            Wide
+              ("SHOWIMG/1  " & Image (Mapped_Length) &
+               " bytes  64-byte alignment"),
+            Muted_Style);
+      end if;
+      if Table_Y > 1 then
+         Result.Write
+           (0, 1, "registry: fixed capacity, exact names, stored offsets",
+            Muted_Style);
+      end if;
+      Segment_Tables.Select_Id (Table, Image_Index);
+      Result.Overlay
+        (Segment_Tables.Render (Table, Table_Look), 0, Table_Y);
+      return Result;
+   end Segment_Body;
    procedure Put_Stored_Layout
      (Layout        : Segment_Layout;
       Mapped_Length : DS.Byte_Count;
@@ -408,7 +503,6 @@ procedure Shared_Image_Index is
             " " & Extent_Kind (Id) & " ready");
       end loop;
    end Put_Stored_Layout;
-
    procedure Show_Work
      (Generated          : Natural;
       Queued             : Natural;
@@ -431,7 +525,10 @@ procedure Shared_Image_Index is
       Passes             : Positive;
       Layout             : Segment_Layout;
       Mapped_Length      : DS.Byte_Count;
-      Started            : RT.Time)
+      Started            : RT.Time;
+      Terminal_Width     : Natural;
+      Terminal_Height    : Natural;
+      Stop_Pending       : Boolean)
    is
       Percent : constant Natural := Completed * 100 / Total;
       Bucket  : constant Natural := Percent / 10;
@@ -442,103 +539,338 @@ procedure Shared_Image_Index is
       MiB     : constant Long_Float :=
         Long_Float (Completed) * Long_Float (Width) * Long_Float (Height) *
         3.0 * Long_Float (Passes) / 1_048_576.0;
-   begin
-      if ANSI_Enabled then
-         Begin_Frame;
-         ANSI_Line
-           ("  " & Paint ("flyology", "1;38;5;212") &
-            Paint (" / shared image index", "1;38;5;255") & "   " &
-            Pill ("LIVE", "42"));
-         ANSI_Line ("  " & Batch_Status (Batch), "38;5;245");
-         ANSI_Line ("");
-         ANSI_Line
-           ("  /--" & Paint (" workload ", "1;38;5;212") &
-            Repeat (Horizontal, 53) & "\", "38;5;240");
-         ANSI_Line
-           ("  | " &
-            Pill
-              ((if Generator_Paused then "BACKOFF"
-                elsif Source_Waiting then "SOURCE"
-                else "FLOW"),
-               (if Generator_Paused then "221"
-                elsif Source_Waiting then "141"
-                else "81")) & Paint
-              ((if Generator_Paused then
-                  "  producer paused at saturation / workers draining"
+      function Workload_Body
+        (Content_Width, Content_Height : Natural)
+         return TUI_Surfaces.Surface
+      is
+         Result : TUI_Surfaces.Surface :=
+           TUI_Surfaces.Create (Content_Width, Content_Height);
+         State_Label : constant Wide_Wide_String :=
+           (if Stop_Pending then "STOPPING"
+            elsif Generator_Paused then "BACKOFF"
+            elsif Source_Waiting then "SOURCE GAP"
+            else "FLOW");
+         State_Tone : constant Indicators.Tone :=
+           (if Stop_Pending then Indicators.Warning_Tone
+            elsif Generator_Paused then Indicators.Warning_Tone
+            elsif Source_Waiting then Indicators.Neutral
+            else Indicators.Success_Tone);
+         State_Badge : constant TUI_Surfaces.Surface :=
+           Indicators.Badge (State_Label, State_Tone, Dashboard_Theme);
+         Gauge_Width : constant Natural :=
+           (if Content_Width > 7 then Content_Width - 7 else Content_Width);
+         Progress : constant Indicators.Ratio :=
+           Indicators.Ratio
+             (Long_Float (Completed) / Long_Float (Total));
+         procedure Put_Value
+           (Row : Natural; Key, Value : String)
+         is
+         begin
+            if Row < Content_Height then
+               Result.Overlay
+                 (Indicators.Key_Value
+                    (Wide (Key), Wide (Value), Content_Width,
+                     Dashboard_Theme),
+                  0, Row);
+            end if;
+         end Put_Value;
+      begin
+         if Content_Height = 0 or else Content_Width = 0 then
+            return Result;
+         end if;
+         Result.Overlay (State_Badge, 0, 0);
+         if Content_Height > 1 then
+            Result.Write
+               (0, 1,
+                (if Stop_Pending then
+                   "generation stopped; admitted work is draining"
+                elsif Generator_Paused then
+                   "producer paused at saturation; extra workers are draining"
                 elsif Source_Waiting then
-                  "  irregular upstream gap / workers keep consuming"
+                   "irregular upstream gap; workers continue consuming"
                 else
-                  "  generating + indexing through one bounded pipeline"),
-               "38;5;252"));
-         ANSI_Line
-           ("  | " & Meter (Completed, Total) & "  " &
-            Paint (Pad (Image (Percent) & "%", 5), "1;38;5;212"));
-         ANSI_Line
-           ("  | generated    " & Image (Generated) & " / " & Image (Total));
-         ANSI_Line
-           ("  | queued       " & Image (Queued) & " / " & Image (Total));
-         ANSI_Line
-           ("  | indexed      " & Image (Completed) & " / " & Image (Total));
-         ANSI_Line
-           ("  | workers      " & Image (Workers_Ready) & " ready, " &
-            Image (Workers_Done) & " epoch done, " & Image (Worker_Count) &
-            " active");
-         ANSI_Line
-           ("  | throughput   " & Showcase_Support.Fixed_Image (Rate, 1) &
-            " images/s, " & Showcase_Support.Fixed_Image
+                   "generation and indexing share one bounded pipeline"),
+               Muted_Style);
+         end if;
+         if Content_Height > 2 then
+            Result.Overlay
+              (Indicators.Gauge
+                 (Progress, Gauge_Width, Dashboard_Theme),
+               0, 2);
+            if Content_Width > Gauge_Width then
+               Result.Write
+                 (Gauge_Width + 1, 2,
+                  Wide (Pad (Image (Percent) & "%", 6)), Title_Style);
+            end if;
+         end if;
+         Put_Value (3, "generated", Image (Generated) & " / " & Image (Total));
+         Put_Value (4, "queued", Image (Queued) & " / " & Image (Total));
+         Put_Value (5, "indexed", Image (Completed) & " / " & Image (Total));
+         Put_Value
+           (6, "workers",
+            Image (Workers_Ready) & " ready  " & Image (Workers_Done) &
+            " done  " & Image (Worker_Count) & " active");
+         Put_Value
+           (7, "throughput",
+            Showcase_Support.Fixed_Image (Rate, 1) & " images/s  " &
+            Showcase_Support.Fixed_Image
               ((if Elapsed <= 0.0 then 0.0
                 else MiB / Long_Float (Elapsed)), 1) & " MiB/s");
-         ANSI_Line
-           ("  | flow         backoffs=" & Image (Producer_Backoffs) &
-            "  source-gaps=" & Image (Source_Gaps), "1;38;5;141");
-         ANSI_Line
-           ("  | contention   queue=" & Image (Queue_Pressure) &
-            "  index-guard=" & Image (Index_Retries) &
-            "  registry=" & Image (Registry_Retries), "1;38;5;141");
-         ANSI_Line
-           ("  \" & Repeat (Horizontal, 67) & "/", "38;5;240");
-         ANSI_Line ("");
-         Show_Segment_Layout
-           (Layout, Mapped_Length, Queued, Completed, Total, Workers_Ready,
-            Workers_Done, Worker_Count, Queue_Pressure, Index_Retries,
-            Registry_Retries);
-         ANSI_Line ("");
-         ANSI_Line
-           ("  /--" & Paint (" workers ", "1;38;5;114") &
-            Repeat (Horizontal, 54) & "\", "38;5;240");
-         for Worker in 1 .. Maximum_Worker_Count loop
-            if Worker <= Worker_Count then
-               ANSI_Line
-                 ("  | " & Paint
-                    (Solid_Dot,
-                     (if Per_Worker (Worker) = 0 then "38;5;240"
-                      else "38;5;114")) &
-                  " worker " & Pad (Image (Worker), 2) & "  " &
-                  Meter
-                    (Per_Worker (Worker),
-                     Natural'Max
-                       (1, (Total + Worker_Count - 1) / Worker_Count), 18) &
-                  "  " & Paint
-                    (Image (Per_Worker (Worker)) & " images", "38;5;245"));
-            else
-               ANSI_Line
-                 ("  | " & Paint
-                    ("o",
-                     (if Per_Worker (Worker) = 0 then "38;5;238"
-                      else "38;5;177")) & " worker " &
-                  Pad (Image (Worker), 2) & "  " & Meter (0, 1, 18) &
-                  "  " & Paint
-                    ((if Per_Worker (Worker) = 0 then
-                        "detached / available slot"
-                      else
-                        "drained + detached after " &
-                        Image (Per_Worker (Worker)) & " images"),
-                     "38;5;240"));
+         Put_Value
+           (8, "flow",
+            Image (Producer_Backoffs) & " backoffs  " &
+            Image (Source_Gaps) & " source gaps");
+         Put_Value
+           (9, "contention",
+            Image (Queue_Pressure) & " queue  " & Image (Index_Retries) &
+            " index  " & Image (Registry_Retries) & " registry");
+         return Result;
+      end Workload_Body;
+      function Workers_Body
+        (Content_Width, Content_Height : Natural)
+         return TUI_Surfaces.Surface
+      is
+         Result : TUI_Surfaces.Surface :=
+           TUI_Surfaces.Create (Content_Width, Content_Height);
+         Available_Rows : constant Natural :=
+           (if Content_Height > 2 then Content_Height - 2 else 0);
+         Visible_Rows : constant Natural :=
+           Natural'Min (Maximum_Worker_Count, Available_Rows);
+         Expected : constant Positive :=
+           Natural'Max (1, (Total + Worker_Count - 1) / Worker_Count);
+         Gauge_Width : constant Natural :=
+           (if Content_Width > 29 then Content_Width - 29 else 0);
+      begin
+         if Content_Height = 0 or else Content_Width = 0 then
+            return Result;
+         end if;
+         Result.Write
+           (0, 0,
+            Wide
+              (Image (Workers_Ready) & " ready  " &
+               Image (Worker_Count) & " active  " &
+               Image (Maximum_Worker_Count) & " slots"),
+            Muted_Style);
+         if Content_Height > 1 then
+            Result.Overlay
+              (Indicators.Divider
+                 (Content_Width, Theme => Dashboard_Theme),
+               0, 1);
+         end if;
+         if Visible_Rows > 0 then
+            for Worker in 1 .. Visible_Rows loop
+               declare
+                  Row : constant Natural := Worker + 1;
+                  Active : constant Boolean := Worker <= Worker_Count;
+                  Count : constant Natural := Per_Worker (Worker);
+                  Fraction : constant Indicators.Ratio :=
+                    Indicators.Ratio
+                      (Long_Float'Min
+                         (1.0, Long_Float (Count) / Long_Float (Expected)));
+                  Count_Label : constant String :=
+                    (if Active then Image (Count) & " images"
+                     elsif Count = 0 then "available"
+                     else "drained " & Image (Count));
+                  Count_X : constant Natural :=
+                    (if Count_Label'Length >= Content_Width then 0
+                     else Content_Width - Count_Label'Length);
+               begin
+                  Result.Put
+                    (0, Row, (if Active then "●" else "○"),
+                     (if Active and then Count > 0 then Completion_Style
+                      elsif Active then Movement_Style else Muted_Style));
+                  if Content_Width > 2 then
+                     Result.Write
+                       (2, Row, Wide ("worker " & Pad (Image (Worker), 2)),
+                        (if Active then TUI_Styles.Default else Muted_Style));
+                  end if;
+                  if Gauge_Width > 0 then
+                     Result.Overlay
+                       (Indicators.Gauge
+                          ((if Active then Fraction else 0.0),
+                           Gauge_Width, Dashboard_Theme),
+                        12, Row);
+                  end if;
+                  Result.Write
+                    (Count_X, Row, Wide (Count_Label),
+                     (if Active then Muted_Style else Border_Style));
+               end;
+            end loop;
+         end if;
+         if Maximum_Worker_Count > Visible_Rows
+           and then Content_Height > 2
+         then
+            Result.Write
+              (0, Content_Height - 1,
+               Wide
+                 ("+" & Image (Maximum_Worker_Count - Visible_Rows) &
+                  " worker slots; resize to inspect"),
+               Muted_Style);
+         end if;
+         return Result;
+      end Workers_Body;
+      function Current_View return TUI_Views.View is
+         Canvas_Width : constant Natural := Natural'Max (1, Terminal_Width);
+         Canvas_Height : constant Natural := Natural'Max (1, Terminal_Height);
+         Canvas : TUI_Surfaces.Surface :=
+           TUI_Surfaces.Create (Canvas_Width, Canvas_Height);
+         Body_Y : constant Natural := Natural'Min (2, Canvas_Height);
+         Body_Height : constant Natural :=
+           (if Canvas_Height > 3 then Canvas_Height - 3 else 0);
+         State_Label : constant String :=
+           (if Stop_Pending then "stopping"
+            elsif Generator_Paused then "backoff"
+            elsif Source_Waiting then "source gap"
+            else "flow");
+         State_Tone : constant Indicators.Tone :=
+           (if Stop_Pending or else Generator_Paused
+            then Indicators.Warning_Tone
+            elsif Source_Waiting then Indicators.Neutral
+            else Indicators.Success_Tone);
+         Status : constant TUI_Surfaces.Surface :=
+           Indicators.Status_Line
+             ([Indicators.Make_Segment
+                 (Wide ("epoch " & Image (Batch)), Indicators.Critical),
+               Indicators.Make_Segment
+                 (Wide (State_Label), Indicators.Critical, State_Tone),
+               Indicators.Make_Segment
+                 (Wide (Image (Percent) & "% indexed"), Indicators.High,
+                  Indicators.Success_Tone),
+               Indicators.Make_Segment
+                 (Wide
+                    (Image (Worker_Count) & "/" &
+                     Image (Maximum_Worker_Count) & " workers"),
+                  Indicators.Normal),
+               Indicators.Make_Segment
+                 (Wide ("segment valid / 5 extents"), Indicators.Low,
+                  Indicators.Success_Tone)],
+              Canvas_Width, Dashboard_Theme);
+         Result : TUI_Views.View;
+      begin
+         Canvas.Write (0, 0, "FLYOLOGY", Title_Style);
+         if Canvas_Width > 10 then
+            Canvas.Write
+              (10, 0, "shared image index", TUI_Styles.Default);
+         end if;
+         if Canvas_Height > 1 then
+            Canvas.Overlay (Status, 0, 1);
+         end if;
+         if Canvas_Width < 44 or else Canvas_Height < 12 then
+            if Canvas_Height > 3 then
+               Canvas.Write
+                 (0, 3, "Terminal too small for the dashboard", Warning_Style);
             end if;
-         end loop;
-         ANSI_Line
-           ("  \" & Repeat (Horizontal, 67) & "/", "38;5;240");
-         End_Frame;
+            if Canvas_Height > 5 then
+               Canvas.Overlay
+                 (Indicators.Gauge
+                    (Indicators.Ratio
+                       (Long_Float (Completed) / Long_Float (Total)),
+                     Canvas_Width, Dashboard_Theme),
+                  0, 5);
+            end if;
+         elsif Canvas_Width >= 108 and then Body_Height >= 26 then
+            declare
+               Right_Width : constant Natural :=
+                 Natural'Max (34, Canvas_Width / 3);
+               Left_Width : constant Natural :=
+                 Canvas_Width - Right_Width - 1;
+               Work_Height : constant Natural :=
+                 Natural'Max (12, (Body_Height - 1) / 2);
+               Segment_Height : constant Natural :=
+                 Body_Height - Work_Height - 1;
+            begin
+               Canvas.Overlay
+                 (Framed_Panel
+                    ("PIPELINE",
+                     Workload_Body
+                       (Left_Width - 4,
+                        (if Work_Height > 6 then Work_Height - 6 else 0)),
+                     Left_Width, Work_Height),
+                  0, Body_Y);
+               Canvas.Overlay
+                 (Framed_Panel
+                    ("SHARED SEGMENT",
+                     Segment_Body
+                       (Layout, Mapped_Length, Queued, Completed, Total,
+                        Workers_Ready, Workers_Done, Worker_Count,
+                        Queue_Pressure, Index_Retries, Registry_Retries,
+                        Left_Width - 4,
+                        (if Segment_Height > 6
+                         then Segment_Height - 6 else 0)),
+                     Left_Width, Segment_Height),
+                  0, Body_Y + Work_Height + 1);
+               Canvas.Overlay
+                 (Framed_Panel
+                    ("WORKERS",
+                     Workers_Body
+                       (Right_Width - 4,
+                        (if Body_Height > 6 then Body_Height - 6 else 0)),
+                     Right_Width, Body_Height),
+                  Left_Width + 1, Body_Y);
+            end;
+         elsif Canvas_Width >= 72 and then Body_Height >= 12 then
+            declare
+               Right_Width : constant Natural :=
+                 Natural'Max (30, Canvas_Width * 2 / 5);
+               Left_Width : constant Natural :=
+                 Canvas_Width - Right_Width - 1;
+               Overview_Height : constant Natural :=
+                 Body_Height - 6;
+               Work_Rows : constant Natural :=
+                 Natural'Min (8, Overview_Height);
+               Segment_Rows : constant Natural := Overview_Height - Work_Rows;
+               Overview : constant TUI_Surfaces.Surface :=
+                 TUI_Layouts.Join_Vertically
+                   (Workload_Body (Left_Width - 4, Work_Rows),
+                    Segment_Body
+                      (Layout, Mapped_Length, Queued, Completed, Total,
+                       Workers_Ready, Workers_Done, Worker_Count,
+                       Queue_Pressure, Index_Retries, Registry_Retries,
+                       Left_Width - 4, Segment_Rows));
+            begin
+               Canvas.Overlay
+                 (Framed_Panel
+                    ("PIPELINE + SEGMENT", Overview,
+                     Left_Width, Body_Height),
+                  0, Body_Y);
+               Canvas.Overlay
+                 (Framed_Panel
+                    ("WORKERS",
+                     Workers_Body
+                       (Right_Width - 4,
+                        (if Body_Height > 6 then Body_Height - 6 else 0)),
+                     Right_Width, Body_Height),
+                  Left_Width + 1, Body_Y);
+            end;
+         else
+            Canvas.Overlay
+              (Framed_Panel
+                 ("PIPELINE",
+                  Workload_Body
+                    (Canvas_Width - 4,
+                     (if Body_Height > 6 then Body_Height - 6 else 0)),
+                  Canvas_Width, Body_Height),
+               0, Body_Y);
+         end if;
+         if Canvas_Height > 0 then
+            Canvas.Write
+               (0, Canvas_Height - 1,
+               (if Stop_Pending then
+                   "stop requested; draining admitted images"
+                else "q / Esc  stop admission and drain"),
+               (if Stop_Pending then Warning_Style else Muted_Style));
+         end if;
+         Result := TUI_Views.From_Surface (Canvas);
+         Result.Alternate_Screen := True;
+         Result.Bracketed_Paste := False;
+         Result.Window_Title :=
+           Wide_Text.To_Unbounded_Wide_Wide_String
+             ("Flyology shared image index");
+         return Result;
+      end Current_View;
+   begin
+      if Dashboard_Active then
+         TUI_POSIX.Render (Dashboard_Terminal, Current_View);
       elsif Bucket /= Last_Work_Bucket then
          IO.Put_Line
            ("index " & Image (Percent) & "% completed=" & Image (Completed) &
@@ -547,7 +879,6 @@ procedure Shared_Image_Index is
          Last_Work_Bucket := Bucket;
       end if;
    end Show_Work;
-
    procedure Reserve
      (Segment          : Segments.View;
       Name             : String;
@@ -576,7 +907,6 @@ procedure Shared_Image_Index is
            "segment reservation is shorter than requested";
       end if;
    end Reserve;
-
    procedure Resolve_Ready_Extent
      (Segment  : Segments.View;
       Name     : String;
@@ -601,7 +931,6 @@ procedure Shared_Image_Index is
       end loop;
       Segments.Resolve (Segment, Handle, Location, Length);
    end Resolve_Ready_Extent;
-
    procedure Run_Coordinator is
       Corpus         : constant String := CLI.Argument (2);
       Worker_Count   : constant Positive := Positive'Value (CLI.Argument (3));
@@ -623,8 +952,6 @@ procedure Shared_Image_Index is
         Image_Maps.Required_Storage (Index_Capacity);
       Gate_Length    : constant DS.Byte_Count :=
         Strings.Required_Storage (Model.Gate_Capacity);
-      Expected_Entries : constant Natural :=
-        Image_Count + (if Index_Rounds > 1 then 1 else 0);
       Mapping_Size   : constant DS.Byte_Count :=
         Segment_Length (Index_Capacity);
       Program        : constant String :=
@@ -672,6 +999,7 @@ procedure Shared_Image_Index is
       Race_Winners   : Natural := 0;
       Extra_Workers_Active : Boolean := False;
       Batch          : Natural := 0;
+      Batch_Target   : Natural := Image_Count;
       Queued         : Natural := 0;
       Sentinels      : Natural := 0;
       Completed      : Natural := 0;
@@ -681,13 +1009,15 @@ procedure Shared_Image_Index is
       Index_Retries  : Natural := 0;
       Registry_Retries : Natural := 0;
       Session_Images : Model.U64 := 0;
+      Session_Image_High_Water : Natural := 0;
       Session_Dynamic_Worker_Images : Model.U64 := 0;
       Session_Queue_Pressure : Model.U64 := 0;
       Session_Producer_Backoffs : Model.U64 := 0;
       Session_Source_Gaps : Model.U64 := 0;
       Session_Index_Retries : Model.U64 := 0;
       Last_Render    : RT.Time;
-
+      Initial_Terminal_Width  : Natural := 80;
+      Initial_Terminal_Height : Natural := 24;
       procedure Stop_Children is
          Ignored : C.int;
       begin
@@ -724,7 +1054,6 @@ procedure Shared_Image_Index is
             delay 0.001;
          end loop;
       end Stop_Children;
-
       procedure Check_Children is
       begin
          for Worker in 1 .. Spawned loop
@@ -745,7 +1074,6 @@ procedure Shared_Image_Index is
             end if;
          end loop;
       end Check_Children;
-
       procedure Consume (Value : Model.Image_Result) is
          Worker : Positive;
       begin
@@ -799,7 +1127,6 @@ procedure Shared_Image_Index is
             raise Program_Error with "result has unknown event flags";
          end if;
       end Consume;
-
       procedure Drain_Results (Limit : Positive := 64) is
          Value   : Model.Image_Result;
          Outcome : Result_Rings.Pop_Result;
@@ -810,7 +1137,6 @@ procedure Shared_Image_Index is
             Consume (Value);
          end loop;
       end Drain_Results;
-
       procedure Wait_For (Target : String) is
          Started : constant RT.Time := RT.Clock;
       begin
@@ -834,7 +1160,6 @@ procedure Shared_Image_Index is
             delay 0.001;
          end loop;
       end Wait_For;
-
       procedure Advance_Gate
         (Next_Batch  : Model.U64;
          Worker_Limit : Natural)
@@ -850,7 +1175,6 @@ procedure Shared_Image_Index is
             end;
          end loop;
       end Advance_Gate;
-
       procedure Start_Worker (Worker : Positive) is
          Left, Right : aliased C.int := -1;
          Status : C.int;
@@ -879,7 +1203,6 @@ procedure Shared_Image_Index is
          Unix.Send (Unix.Socket_Descriptor (Left), Backing, Unix.Borrow);
          Worker_Sockets (Worker) := Left;
       end Start_Worker;
-
       procedure Close_Handoff_Sockets is
       begin
          for Worker in Worker_Sockets'Range loop
@@ -894,7 +1217,6 @@ procedure Shared_Image_Index is
             end if;
          end loop;
       end Close_Handoff_Sockets;
-
       procedure Reap_Departed
         (First_Worker : Positive;
          Last_Worker  : Positive)
@@ -913,7 +1235,6 @@ procedure Shared_Image_Index is
             delay 0.001;
          end loop;
       end Reap_Departed;
-
       procedure Join_Workers (Target_Workers : Positive) is
          Previous_Workers : constant Positive := Positive (Active_Workers);
       begin
@@ -932,7 +1253,6 @@ procedure Shared_Image_Index is
               "registry race designated " & Image (Race_Winners) &
               " creators after dynamic join";
          end if;
-
          --  Joiners wait outside the job ring until these acknowledgments
          --  have arrived.  Raising the limit is their admission event.
          Advance_Gate (Model.U64 (Batch), Target_Workers);
@@ -940,7 +1260,6 @@ procedure Shared_Image_Index is
          Dynamic_Joins :=
            Dynamic_Joins + Target_Workers - Previous_Workers;
       end Join_Workers;
-
       procedure Retire_Workers (Target_Workers : Positive) is
          Previous_Workers : constant Positive := Positive (Active_Workers);
       begin
@@ -948,7 +1267,6 @@ procedure Shared_Image_Index is
             raise Program_Error with
               "dynamic retirement does not reduce workers";
          end if;
-
          --  Lowering the limit tells departing workers to stop dequeuing.
          --  A worker drains and publishes its one possible in-flight job,
          --  then emits Worker_Finished before detaching.
@@ -959,12 +1277,10 @@ procedure Shared_Image_Index is
          Dynamic_Leaves :=
            Dynamic_Leaves + Previous_Workers - Target_Workers;
       end Retire_Workers;
-
-      function Stop_Requested return Boolean is
+      function External_Stop_Requested return Boolean is
         (Env.Exists ("FLYOLOGY_SHOWCASE_STOP_FILE")
          and then Directories.Exists
            (Env.Value ("FLYOLOGY_SHOWCASE_STOP_FILE")));
-
       procedure Put_Summary (File : IO.File_Type) is
       begin
          IO.Put_Line (File, "shared image index session complete");
@@ -973,6 +1289,9 @@ procedure Shared_Image_Index is
          IO.Put_Line
            (File, "  image slots per epoch: " & Image (Image_Count) & " (" &
             Image (Width) & "x" & Image (Height) & " P6 PPM)");
+         IO.Put_Line
+           (File, "  final-epoch admitted: " & Image (Batch_Target) & " / " &
+            Image (Image_Count));
          IO.Put_Line
            (File, "  generated images total: " & Image (Session_Images));
          IO.Put_Line
@@ -1011,7 +1330,8 @@ procedure Shared_Image_Index is
            (File,
             "  verified final map:    " & Image (Image_Maps.Length (Index)) &
             " entries" &
-            (if Index_Rounds > 1 then " (images + contention key)" else ""));
+            (if Index_Rounds > 1 and then Session_Image_High_Water > 0
+             then " (images + contention key)" else ""));
          IO.Put_Line
            (File,
             "  final-epoch processing: " & Showcase_Support.Fixed_Image
@@ -1035,13 +1355,9 @@ procedure Shared_Image_Index is
             "mappings stayed live");
          Put_Stored_Layout (Layout, Mapping_Size, File);
       end Put_Summary;
-
       procedure Write_Summary is
       begin
-         if ANSI_Enabled
-           and then Managed_Screen
-           and then Env.Exists ("FLYOLOGY_SHOWCASE_SUMMARY_FILE")
-         then
+         if Env.Exists ("FLYOLOGY_SHOWCASE_SUMMARY_FILE") then
             declare
                Report : IO.File_Type;
             begin
@@ -1072,26 +1388,24 @@ procedure Shared_Image_Index is
       elsif Width > 2_048 or else Height > 2_048 then
          raise Constraint_Error with "image dimensions must not exceed 2048";
       elsif Batch_Limit = 0
+        and then not Interactive_Terminal
         and then not Env.Exists ("FLYOLOGY_SHOWCASE_STOP_FILE")
       then
          raise Constraint_Error with
            "unbounded coordinator requires a stop-request path";
       end if;
-
       if not Directories.Exists (Corpus) then
          Directories.Create_Path (Corpus);
       elsif Directories.Kind (Corpus) /= Directories.Directory then
          raise Constraint_Error with "corpus path is not a directory";
       end if;
-
-      if not ANSI_Enabled then
+      if not Interactive_Terminal then
          IO.Put_Line
            ("configuration: " & Image (Worker_Count) & " initial / " &
             Image (Maximum_Workers) & " maximum workers, " &
             Image (Image_Count) & " image slots per epoch, " &
             Image (Mapping_Size) & " shared bytes");
       end if;
-
       Shared.Create_Anonymous (Backing, Mapping_Size);
       Shared.Map (Map, Backing);
       Segments.Create_Or_Attach
@@ -1100,7 +1414,6 @@ procedure Shared_Image_Index is
          raise Program_Error with "coordinator did not initialize segment";
       end if;
       Segments.Attach_Region (Segment, Region);
-
       Reserve
         (Segment, Model.Job_Ring_Name, Job_Length, Claim,
          Layout (Pending_Jobs).Location);
@@ -1109,7 +1422,6 @@ procedure Shared_Image_Index is
         (Jobs, Region, Layout (Pending_Jobs).Location,
          Model.Job_Ring_Capacity);
       Segments.Publish (Segment, Claim);
-
       Reserve
         (Segment, Model.Result_Ring_Name, Result_Length, Claim,
          Layout (Completed_Results).Location);
@@ -1118,7 +1430,6 @@ procedure Shared_Image_Index is
         (Results, Region, Layout (Completed_Results).Location,
          Model.Result_Ring_Capacity);
       Segments.Publish (Segment, Claim);
-
       Reserve
         (Segment, Model.Index_Name, Index_Length, Claim,
          Layout (Image_Index).Location);
@@ -1126,7 +1437,6 @@ procedure Shared_Image_Index is
       Image_Maps.Initialize
         (Index, Region, Layout (Image_Index).Location, Index_Capacity);
       Segments.Publish (Segment, Claim);
-
       Reserve
         (Segment, Model.Gate_Name, Gate_Length, Claim,
          Layout (Start_Gate).Location);
@@ -1134,14 +1444,11 @@ procedure Shared_Image_Index is
       Strings.Initialize
         (Gate, Region, Layout (Start_Gate).Location, Model.Gate_Capacity);
       Segments.Publish (Segment, Claim);
-
       for Worker in 1 .. Active_Workers loop
          Start_Worker (Worker);
       end loop;
-
       Wait_For ("attached");
       Close_Handoff_Sockets;
-
       Advance_Gate (1, Active_Workers);
       Wait_For ("raced");
       if Race_Winners /= 1 then
@@ -1151,228 +1458,376 @@ procedure Shared_Image_Index is
       Resolve_Ready_Extent
         (Segment, Model.Race_Name, Layout (Startup_Race).Location,
          Layout (Startup_Race).Length);
-
-      Begin_Dashboard;
-      Batch := 1;
-      loop
-         Queued := 0;
-         Sentinels := 0;
-         Completed := 0;
-         Workers_Done := 0;
-         Queue_Pressure := 0;
-         Producer_Backoffs := 0;
-         Source_Gaps := 0;
-         Index_Retries := 0;
-         Per_Worker := (others => 0);
-         Seen := (others => False);
-         Batch_Done := (others => False);
-         Extra_Workers_Active := False;
-         Last_Work_Bucket := Natural'Last;
-
-         Work_Started := RT.Clock;
-         Last_Render := Work_Started;
-         declare
-            Generator_Paused : Boolean := False;
-            Source_Waiting   : Boolean := False;
-            Pending_Image    : Natural := 0;
-            Recovery_Queued  : Natural := 0;
-            Burst_Remaining  : Natural := 72 + (Batch * 17) mod 32;
-            Source_Resume    : RT.Time := RT.Clock;
-            High_Water       : constant Natural :=
-              Natural'Max (8, Model.Job_Ring_Capacity / 2);
-            Low_Water        : constant Natural :=
-              Natural'Max (1, High_Water / 2);
-         begin
-            while Completed < Image_Count
-              or else Workers_Done < Active_Workers
-            loop
-               if Generator_Paused
-                 and then Queued - Completed <= Low_Water
-               then
-                  Generator_Paused := False;
-                  Recovery_Queued := Queued;
-               end if;
-               if Source_Waiting and then RT.Clock >= Source_Resume then
-                  Source_Waiting := False;
-                  Burst_Remaining := 8 + (Queued * 13 + Batch * 17) mod 96;
-               end if;
-
-               if not Generator_Paused
-                 and then not Source_Waiting
-                 and then Queued < Image_Count
-               then
-                  if Pending_Image = 0 then
-                     Pending_Image := Queued + 1;
-                     Model.Generate_Image
-                       (Model.Image_Path (Corpus, Pending_Image), Width,
-                        Height, Random_State);
-                  end if;
-                  declare
-                     Job : constant Model.Image_Job :=
-                       (Batch_Id => Model.U64 (Batch),
-                        Image_Id => Model.U64 (Pending_Image));
-                     Outcome : Job_Rings.Push_Result;
-                  begin
-                     Job_Rings.Try_Push (Jobs, Job, Outcome);
-                     case Outcome is
-                        when Job_Rings.Pushed =>
-                           Queued := Queued + 1;
-                           Pending_Image := 0;
-                           if Queued - Completed >= High_Water
-                             and then Queued < Image_Count
-                           then
-                              Generator_Paused := True;
-                              Producer_Backoffs := Producer_Backoffs + 1;
-                           end if;
-                           Burst_Remaining := Burst_Remaining - 1;
-                           if Burst_Remaining = 0
-                             and then Queued < Image_Count
-                           then
-                              Source_Waiting := True;
-                              Source_Gaps := Source_Gaps + 1;
-                              Source_Resume := RT.Clock + RT.Milliseconds
-                                (20 + (Queued * 29 + Batch * 11) mod 81);
-                           end if;
-                        when Job_Rings.Full | Job_Rings.Push_Contended =>
-                           Generator_Paused := True;
-                           Producer_Backoffs := Producer_Backoffs + 1;
-                           Queue_Pressure := Queue_Pressure + 1;
-                     end case;
-                  end;
-               elsif Queued = Image_Count
-                 and then Active_Workers = Worker_Count
-                 and then Sentinels < Active_Workers
-               then
-                  declare
-                     Job : constant Model.Image_Job :=
-                       (Batch_Id => Model.U64 (Batch), Image_Id => 0);
-                     Outcome : Job_Rings.Push_Result;
-                  begin
-                     Job_Rings.Try_Push (Jobs, Job, Outcome);
-                     case Outcome is
-                        when Job_Rings.Pushed =>
-                           Sentinels := Sentinels + 1;
-                        when Job_Rings.Full | Job_Rings.Push_Contended =>
-                           Queue_Pressure := Queue_Pressure + 1;
-                     end case;
-                  end;
-               end if;
-               Drain_Results;
-               Check_Children;
-               if Generator_Paused
-                 and then not Extra_Workers_Active
-                 and then Maximum_Workers > Worker_Count
-               then
-                  Join_Workers (Maximum_Workers);
-                  Extra_Workers_Active := True;
-               elsif Extra_Workers_Active
-                 and then not Generator_Paused
-                 and then
-                   (Queued = Image_Count
-                    or else Queued - Recovery_Queued >= High_Water / 2)
-               then
-                  Retire_Workers (Worker_Count);
-                  Extra_Workers_Active := False;
-               end if;
-               if RT.To_Duration (RT.Clock - Last_Render) >= 0.075 then
-                  Show_Work
-                    (Queued + (if Pending_Image = 0 then 0 else 1), Queued,
-                     Completed, Image_Count, Positive (Batch), Workers_Ready,
-                     Workers_Done, Positive (Active_Workers), Maximum_Workers,
-                     Generator_Paused, Source_Waiting, Producer_Backoffs,
-                     Source_Gaps, Queue_Pressure, Index_Retries,
-                     Registry_Retries, Per_Worker, Width, Height, Passes,
-                     Layout, Mapping_Size, Work_Started);
-                  Last_Render := RT.Clock;
-               end if;
-               if RT.To_Duration (RT.Clock - Work_Started) > 900.0 then
-                  raise Program_Error with "shared image index timed out";
-               end if;
-               delay 0.000_5;
-            end loop;
-         end;
-
-         for Image_Id in 1 .. Image_Count loop
-            declare
-               Value : Model.Image_Result;
-               Found : Boolean;
+      Begin_Dashboard
+        (Initial_Terminal_Width, Initial_Terminal_Height);
+      declare
+         protected type Dashboard_Control is
+            procedure Resize (Width, Height : Natural);
+            procedure Request_Stop;
+            function Stop_Requested return Boolean;
+            procedure Dimensions (Width, Height : out Natural);
+            procedure Mark_Input_Stopped (Failed : Boolean);
+            entry Wait_For_Input;
+            function Input_Failed return Boolean;
+         private
+            Current_Width  : Natural := Initial_Terminal_Width;
+            Current_Height : Natural := Initial_Terminal_Height;
+            Stop_Pending   : Boolean := False;
+            Input_Running  : Boolean := True;
+            Input_Did_Fail : Boolean := False;
+         end Dashboard_Control;
+         protected body Dashboard_Control is
+            procedure Resize (Width, Height : Natural) is
             begin
+               Current_Width := Width;
+               Current_Height := Height;
+            end Resize;
+            procedure Request_Stop is
+            begin
+               Stop_Pending := True;
+            end Request_Stop;
+            function Stop_Requested return Boolean is (Stop_Pending);
+            procedure Dimensions (Width, Height : out Natural) is
+            begin
+               Width := Current_Width;
+               Height := Current_Height;
+            end Dimensions;
+            procedure Mark_Input_Stopped (Failed : Boolean) is
+            begin
+               Input_Did_Fail := Failed;
+               Input_Running := False;
+            end Mark_Input_Stopped;
+            entry Wait_For_Input when not Input_Running is
+            begin
+               null;
+            end Wait_For_Input;
+            function Input_Failed return Boolean is (Input_Did_Fail);
+         end Dashboard_Control;
+         Dashboard : Dashboard_Control;
+         task Input_Worker;
+         task body Input_Worker is
+            Event  : TUI_Events.Terminal_Event;
+            Status : TUI_Backends.Input_Status;
+         begin
+            if Dashboard_Active then
                loop
-                  begin
-                     Image_Maps.Get
-                       (Index, Model.U64 (Image_Id), Value, Found);
-                     exit;
-                  exception
-                     when DS.Busy_Error => delay 0.0;
-                  end;
+                  TUI_POSIX.Next_Event
+                    (Dashboard_Terminal, Event, Status);
+                  exit when Status in TUI_Backends.Interrupted |
+                    TUI_Backends.End_Of_Input;
+                  case Event.Kind is
+                     when TUI_Events.Resize =>
+                        Dashboard.Resize (Event.Width, Event.Height);
+                     when TUI_Events.Interrupt =>
+                        Dashboard.Request_Stop;
+                     when TUI_Events.Key_Press =>
+                        case Event.Key.Kind is
+                           when TUI_Events.Escape_Key =>
+                              Dashboard.Request_Stop;
+                           when TUI_Events.Text_Key =>
+                              declare
+                                 Key : constant Wide_Wide_String :=
+                                   Wide_Text.To_Wide_Wide_String
+                                     (Event.Key.Value);
+                              begin
+                                 if Key = "q" or else Key = "Q"
+                                   or else
+                                     (Key = "c"
+                                      and then Event.Key.Modified.Control)
+                                 then
+                                    Dashboard.Request_Stop;
+                                 end if;
+                              end;
+                           when others => null;
+                        end case;
+                     when others => null;
+                  end case;
                end loop;
-               if not Found
-                 or else Value.Batch_Id /= Model.U64 (Batch)
-                 or else Value.Content_Hash /= Expected_Hash (Image_Id)
-               then
-                  raise Program_Error with
-                    "shared index verification failed for epoch " &
-                    Image (Batch) & ", image " & Image (Image_Id);
-               end if;
+            end if;
+            Dashboard.Mark_Input_Stopped (False);
+         exception
+            when others =>
+               Dashboard.Mark_Input_Stopped (True);
+         end Input_Worker;
+         procedure Stop_Dashboard_Input (Check_Failure : Boolean := True) is
+         begin
+            if Dashboard_Active then
+               begin
+                  TUI_POSIX.Interrupt (Dashboard_Terminal);
+               exception
+                  when others => null;
+               end;
+            end if;
+            Dashboard.Wait_For_Input;
+            if Check_Failure and then Dashboard.Input_Failed then
+               raise Program_Error with "terminal input task failed";
+            end if;
+         end Stop_Dashboard_Input;
+         procedure Render_Current
+           (Generated        : Natural;
+            Generator_Paused : Boolean;
+            Source_Waiting   : Boolean)
+         is
+            Terminal_Width, Terminal_Height : Natural;
+         begin
+            Dashboard.Dimensions (Terminal_Width, Terminal_Height);
+            Show_Work
+              (Generated, Queued, Completed, Image_Count, Positive (Batch),
+               Workers_Ready, Workers_Done, Positive (Active_Workers),
+               Maximum_Workers, Generator_Paused, Source_Waiting,
+               Producer_Backoffs, Source_Gaps, Queue_Pressure, Index_Retries,
+               Registry_Retries, Per_Worker, Width, Height, Passes, Layout,
+               Mapping_Size, Work_Started, Terminal_Width, Terminal_Height,
+               Dashboard.Stop_Requested or else External_Stop_Requested);
+         end Render_Current;
+      begin
+         Batch := 1;
+         loop
+            Queued := 0;
+            Sentinels := 0;
+            Completed := 0;
+            Workers_Done := 0;
+            Queue_Pressure := 0;
+            Producer_Backoffs := 0;
+            Source_Gaps := 0;
+            Index_Retries := 0;
+            Per_Worker := (others => 0);
+            Seen := (others => False);
+            Batch_Done := (others => False);
+            Extra_Workers_Active := False;
+            Batch_Target := Image_Count;
+            Last_Work_Bucket := Natural'Last;
+            Work_Started := RT.Clock;
+            Last_Render := Work_Started;
+            declare
+               Generator_Paused : Boolean := False;
+               Source_Waiting   : Boolean := False;
+               Pending_Image    : Natural := 0;
+               Recovery_Queued  : Natural := 0;
+               Burst_Remaining  : Natural := 72 + (Batch * 17) mod 32;
+               Source_Resume    : RT.Time := RT.Clock;
+               High_Water       : constant Natural :=
+                 Natural'Max (8, Model.Job_Ring_Capacity / 2);
+               Low_Water        : constant Natural :=
+                 Natural'Max (1, High_Water / 2);
+               Stop_Observed    : Boolean := False;
+               procedure Observe_Stop is
+               begin
+                  if not Stop_Observed
+                    and then
+                      (Dashboard.Stop_Requested
+                       or else External_Stop_Requested)
+                  then
+                     Stop_Observed := True;
+                     Batch_Target := Queued;
+                     Pending_Image := 0;
+                     Generator_Paused := False;
+                     Source_Waiting := False;
+                  end if;
+               end Observe_Stop;
+            begin
+               while Completed < Batch_Target
+                 or else Workers_Done < Active_Workers
+               loop
+                  Observe_Stop;
+                  if Generator_Paused
+                    and then Queued - Completed <= Low_Water
+                  then
+                     Generator_Paused := False;
+                     Recovery_Queued := Queued;
+                  end if;
+                  if Source_Waiting and then RT.Clock >= Source_Resume then
+                     Source_Waiting := False;
+                     Burst_Remaining := 8 + (Queued * 13 + Batch * 17) mod 96;
+                  end if;
+                  if not Generator_Paused
+                    and then not Source_Waiting
+                    and then not Stop_Observed
+                    and then Queued < Image_Count
+                  then
+                     if Pending_Image = 0 then
+                        Pending_Image := Queued + 1;
+                        Model.Generate_Image
+                          (Model.Image_Path (Corpus, Pending_Image), Width,
+                           Height, Random_State);
+                     end if;
+                     Observe_Stop;
+                     if not Stop_Observed then
+                        declare
+                           Job : constant Model.Image_Job :=
+                             (Batch_Id => Model.U64 (Batch),
+                              Image_Id => Model.U64 (Pending_Image));
+                           Outcome : Job_Rings.Push_Result;
+                        begin
+                           Job_Rings.Try_Push (Jobs, Job, Outcome);
+                           case Outcome is
+                              when Job_Rings.Pushed =>
+                                 Queued := Queued + 1;
+                                 Pending_Image := 0;
+                                 if Queued - Completed >= High_Water
+                                   and then Queued < Image_Count
+                                 then
+                                    Generator_Paused := True;
+                                    Producer_Backoffs :=
+                                      Producer_Backoffs + 1;
+                                 end if;
+                                 Burst_Remaining := Burst_Remaining - 1;
+                                 if Burst_Remaining = 0
+                                   and then Queued < Image_Count
+                                 then
+                                    Source_Waiting := True;
+                                    Source_Gaps := Source_Gaps + 1;
+                                    Source_Resume :=
+                                      RT.Clock + RT.Milliseconds
+                                        (20 + (Queued * 29 + Batch * 11)
+                                         mod 81);
+                                 end if;
+                              when Job_Rings.Full |
+                                Job_Rings.Push_Contended =>
+                                 Generator_Paused := True;
+                                 Producer_Backoffs := Producer_Backoffs + 1;
+                                 Queue_Pressure := Queue_Pressure + 1;
+                           end case;
+                        end;
+                     end if;
+                  elsif (Stop_Observed or else Queued = Image_Count)
+                    and then Active_Workers = Worker_Count
+                    and then Sentinels < Active_Workers
+                  then
+                     declare
+                        Job : constant Model.Image_Job :=
+                          (Batch_Id => Model.U64 (Batch), Image_Id => 0);
+                        Outcome : Job_Rings.Push_Result;
+                     begin
+                        Job_Rings.Try_Push (Jobs, Job, Outcome);
+                        case Outcome is
+                           when Job_Rings.Pushed =>
+                              Sentinels := Sentinels + 1;
+                           when Job_Rings.Full | Job_Rings.Push_Contended =>
+                              Queue_Pressure := Queue_Pressure + 1;
+                        end case;
+                     end;
+                  end if;
+                  Drain_Results;
+                  Check_Children;
+                  if Dashboard.Input_Failed then
+                     raise Program_Error with "terminal input task failed";
+                  end if;
+                  if Generator_Paused
+                    and then not Stop_Observed
+                    and then not Extra_Workers_Active
+                    and then Maximum_Workers > Worker_Count
+                  then
+                     Join_Workers (Maximum_Workers);
+                     Extra_Workers_Active := True;
+                  elsif Extra_Workers_Active
+                    and then
+                      (Stop_Observed
+                       or else
+                         (not Generator_Paused
+                          and then
+                            (Queued = Image_Count
+                             or else
+                               Queued - Recovery_Queued >= High_Water / 2)))
+                  then
+                     Retire_Workers (Worker_Count);
+                     Extra_Workers_Active := False;
+                  end if;
+                  if RT.To_Duration (RT.Clock - Last_Render) >= 0.075 then
+                     Render_Current
+                       (Queued + (if Pending_Image = 0 then 0 else 1),
+                        Generator_Paused, Source_Waiting);
+                     Last_Render := RT.Clock;
+                  end if;
+                  if RT.To_Duration (RT.Clock - Work_Started) > 900.0 then
+                     raise Program_Error with "shared image index timed out";
+                  end if;
+                  delay 0.000_5;
+               end loop;
             end;
-         end loop;
-         if Image_Maps.Length (Index) /= Expected_Entries then
-            raise Program_Error with
-              "shared index contains unexpected entries";
-         end if;
-
-         Last_Batch_Elapsed := RT.To_Duration (RT.Clock - Work_Started);
-         Session_Work_Elapsed :=
-           Session_Work_Elapsed + Last_Batch_Elapsed;
-         Session_Images := Session_Images + Model.U64 (Image_Count);
-         if Maximum_Workers > Worker_Count then
-            for Worker in Worker_Count + 1 .. Maximum_Workers loop
-               Session_Dynamic_Worker_Images :=
-                 Session_Dynamic_Worker_Images +
-                 Model.U64 (Per_Worker (Worker));
+            for Image_Id in 1 .. Batch_Target loop
+               declare
+                  Value : Model.Image_Result;
+                  Found : Boolean;
+               begin
+                  loop
+                     begin
+                        Image_Maps.Get
+                          (Index, Model.U64 (Image_Id), Value, Found);
+                        exit;
+                     exception
+                        when DS.Busy_Error => delay 0.0;
+                     end;
+                  end loop;
+                  if not Found
+                    or else Value.Batch_Id /= Model.U64 (Batch)
+                    or else Value.Content_Hash /= Expected_Hash (Image_Id)
+                  then
+                     raise Program_Error with
+                       "shared index verification failed for epoch " &
+                       Image (Batch) & ", image " & Image (Image_Id);
+                  end if;
+               end;
             end loop;
+            Session_Image_High_Water :=
+              Natural'Max (Session_Image_High_Water, Batch_Target);
+            if Image_Maps.Length (Index) /=
+              Session_Image_High_Water +
+                (if Index_Rounds > 1 and then Session_Image_High_Water > 0
+                 then 1 else 0)
+            then
+               raise Program_Error with
+                 "shared index contains unexpected entries";
+            end if;
+            Last_Batch_Elapsed := RT.To_Duration (RT.Clock - Work_Started);
+            Session_Work_Elapsed :=
+              Session_Work_Elapsed + Last_Batch_Elapsed;
+            Session_Images := Session_Images + Model.U64 (Batch_Target);
+            if Maximum_Workers > Worker_Count then
+               for Worker in Worker_Count + 1 .. Maximum_Workers loop
+                  Session_Dynamic_Worker_Images :=
+                    Session_Dynamic_Worker_Images +
+                    Model.U64 (Per_Worker (Worker));
+               end loop;
+            end if;
+            Session_Queue_Pressure :=
+              Session_Queue_Pressure + Model.U64 (Queue_Pressure);
+            Session_Producer_Backoffs :=
+              Session_Producer_Backoffs + Model.U64 (Producer_Backoffs);
+            Session_Source_Gaps :=
+              Session_Source_Gaps + Model.U64 (Source_Gaps);
+            Session_Index_Retries :=
+              Session_Index_Retries + Model.U64 (Index_Retries);
+            Render_Current (Queued, False, False);
+            exit when Dashboard.Stop_Requested or else External_Stop_Requested
+              or else (Batch_Limit > 0 and then Batch >= Batch_Limit);
+            if Batch = Natural'Last then
+               raise Program_Error with "safety epoch identity exhausted";
+            end if;
+            Batch := Batch + 1;
+            Advance_Gate (Model.U64 (Batch), Active_Workers);
+         end loop;
+         Final_Batch_Workers := Active_Workers;
+         Shared.Close (Backing);
+         Active_Workers := 0;
+         Advance_Gate (Model.U64 (Batch) + 1, 0);
+         Wait_For ("exited");
+         for Attempt in 1 .. 30_000 loop
+            Check_Children;
+            exit when (for all PID of PIDs => PID < 0);
+            delay 0.001;
+         end loop;
+         if not (for all PID of PIDs => PID < 0) then
+            raise Program_Error with "workers did not exit after session stop";
          end if;
-         Session_Queue_Pressure :=
-           Session_Queue_Pressure + Model.U64 (Queue_Pressure);
-         Session_Producer_Backoffs :=
-           Session_Producer_Backoffs + Model.U64 (Producer_Backoffs);
-         Session_Source_Gaps :=
-           Session_Source_Gaps + Model.U64 (Source_Gaps);
-         Session_Index_Retries :=
-           Session_Index_Retries + Model.U64 (Index_Retries);
-         Show_Work
-           (Queued, Queued, Completed, Image_Count, Positive (Batch),
-            Workers_Ready, Workers_Done, Positive (Active_Workers),
-            Maximum_Workers, False, False, Producer_Backoffs, Source_Gaps,
-            Queue_Pressure, Index_Retries, Registry_Retries, Per_Worker,
-            Width, Height, Passes, Layout, Mapping_Size, Work_Started);
-
-         exit when Stop_Requested
-           or else (Batch_Limit > 0 and then Batch >= Batch_Limit);
-         if Batch = Natural'Last then
-            raise Program_Error with "safety epoch identity exhausted";
-         end if;
-         Batch := Batch + 1;
-         Advance_Gate (Model.U64 (Batch), Active_Workers);
-      end loop;
-
-      Final_Batch_Workers := Active_Workers;
-      Shared.Close (Backing);
-      Active_Workers := 0;
-      Advance_Gate (Model.U64 (Batch) + 1, 0);
-      Wait_For ("exited");
-      for Attempt in 1 .. 30_000 loop
-         Check_Children;
-         exit when (for all PID of PIDs => PID < 0);
-         delay 0.001;
-      end loop;
-      if not (for all PID of PIDs => PID < 0) then
-         raise Program_Error with "workers did not exit after session stop";
-      end if;
-
+         Stop_Dashboard_Input;
+      exception
+         when others =>
+            Stop_Dashboard_Input (Check_Failure => False);
+            raise;
+      end;
       End_Dashboard;
       Write_Summary;
-
       Strings.Detach (Gate);
       Image_Maps.Detach (Index);
       Result_Rings.Detach (Results);

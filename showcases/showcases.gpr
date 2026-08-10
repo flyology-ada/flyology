@@ -1,4 +1,5 @@
 with "../flyology.gpr";
+with "flyology_tui";
 with "config/flyology_showcases_config.gpr";
 
 project Showcases is

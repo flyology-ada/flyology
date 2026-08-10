@@ -3234,16 +3234,23 @@ The examples demonstrate:
   attachment and registry resolution, then enter the job ring. A departing
   worker stops dequeuing, publishes its possible in-flight image, acknowledges
   departure, detaches, and exits. In a terminal the showcase keeps producing
-  until `q` or Esc requests a drained stop. One fixed ANSI canvas reports
+  until `q` or Esc stops further image admission and requests a drained stop.
+  The coordinator discards any generated-but-not-queued slot, drains only the
+  jobs already admitted to the ring, and then detaches the workers. The
+  interactive dashboard uses
+  [`flyology_tui`](https://github.com/flyology-ada/flyology-tui) for raw-mode
+  lifecycle, typed input and resize events, color fallback, declarative
+  surfaces, and changed-cell rendering. Its responsive layout reports
   generation, throughput, per-worker progress, queue pressure, registry
-  retries, and map-guard retries without switching layouts between phases.
-  Workload, segment, and worker windows are rendered as one buffered, throttled
-  frame, using synchronized terminal updates where supported to avoid
-  line-by-line tearing. After the requested stop completes, the runner restores
-  the terminal and prints cumulative session totals, final-epoch statistics,
-  and the stored segment layout as ordinary text. Its
-  segment panel shows the validated header and every published registry extent
-  with its offset, length, relocatable structure kind, and current activity;
+  retries, and map-guard retries. Wide terminals show separate workload,
+  segment, and worker panels. Narrow terminals combine or omit secondary
+  detail while retaining current state, progress, and the stop action. After
+  the requested stop completes, the backend restores the terminal and the
+  runner prints cumulative session totals, final-epoch statistics, and the
+  stored segment layout as ordinary text. The
+  segment panel uses the TUI table component to show the validated header and
+  every published registry extent with its offset, length, relocatable
+  structure kind, and current activity;
   the last completed layout remains visible after exit. A safety-epoch value in
   the shared gate holds each worker after exactly one end marker; once every
   active worker reports quiescence, the coordinator publishes the next epoch
@@ -3252,7 +3259,8 @@ The examples demonstrate:
   request drained departures after recovery. Because a worker samples the
   limit before dequeue, a lowering can race at most one newly claimed job;
   that job is completed and published before departure. Detached worker slots
-  remain visible so the terminal canvas does not change height.
+  remain visible when they fit; the worker panel reports hidden slots when the
+  terminal is too short.
   `NO_COLOR=1` selects one deterministic epoch with stable line output.
   Six positional arguments override workers, images, width, height, analysis
   passes, and index rounds; a seventh positive argument selects an exact epoch

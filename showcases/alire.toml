@@ -12,8 +12,14 @@ project-files = ["showcases.gpr"]
 [[depends-on]]
 flyology = "*"
 
+[[depends-on]]
+flyology_tui = "~0.1.0-dev"
+
 [[pins]]
 flyology = { path='..' }
+
+[[pins]]
+flyology_tui = { url='https://github.com/flyology-ada/flyology-tui.git', commit='7be7894dd682e30ffde1ca644bb617f10afc69a1' }
 
 [[actions]]
 type = "pre-build"
