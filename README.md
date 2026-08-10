@@ -3149,12 +3149,21 @@ After they have been built, an individual showcase can be rerun directly:
 ./showcases/run_shared_image_index.sh
 ./showcases/run_socket_preparation_benchmark.sh 200000
 ./showcases/run_http_benchmark.sh
+./scripts/run-tcp-readiness-benchmark.sh \
+  16 16 500000 build/tcp-readiness-oha.json
 ```
 
 The socket-preparation benchmark runs a lightweight UDP echo task against a
 native client with an optimized build and a 16-loop prepared runtime. It
 reports round trips per second and test-only nonblocking descriptor setup
 attempts; the counter is absent from normal library builds.
+
+The TCP readiness benchmark is a persistent HTTP/1.1 request/reply fixture for
+the lightweight socket path. Its runner prepares an optimized custom RTS,
+refuses to build or run without the Flyology RTS ownership marker, and records
+`oha` JSON plus server and client `/usr/bin/time -lp` resource data. The
+adjacent optimization record is in
+[`benchmarks/lightweight-readiness-notebook.md`](benchmarks/lightweight-readiness-notebook.md).
 
 The examples demonstrate:
 
