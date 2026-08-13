@@ -5,7 +5,9 @@ have been tested. `prepare-rts.sh` reads the active compiler release and
 refuses to continue when no matching family exists; it never guesses or falls
 back to an unverified patch.
 
-`gnat-13-16` is verified against these exact Alire `gnat_native` releases:
+`gnat-13-16` is verified against these exact Alire `gnat_native` and
+`gnat_flyology_native` releases. Both compiler identities use the same
+host/release matrix:
 
 | Host | Releases |
 | --- | --- |

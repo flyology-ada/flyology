@@ -51,13 +51,9 @@ fi
 (
   cd "$project_root"
   if [ -n "${FLYOLOGY_GPRBUILD:-}" ]; then
-    if [ -z "${GNAT_NATIVE_ALIRE_PREFIX:-}" ]; then
-      printf '%s\n' \
-        "GNAT_NATIVE_ALIRE_PREFIX is required with FLYOLOGY_GPRBUILD" >&2
-      exit 2
-    fi
+    compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$alr")
     env -u GPR_CONFIG \
-      PATH="$GNAT_NATIVE_ALIRE_PREFIX/bin:$PATH" \
+      PATH="$compiler_prefix/bin:$PATH" \
       "$FLYOLOGY_GPRBUILD" \
       --RTS="$rts" -q -f -p -P benchmarks/tcp_readiness_benchmark.gpr \
       -largs -nodefaultrpaths

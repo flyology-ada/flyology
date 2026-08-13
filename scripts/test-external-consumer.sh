@@ -215,8 +215,8 @@ fi
 "$consumer_root/build/bin/external_consumer" lightweight
 
 #  Reset from outside `alr exec` with misleading PATH tools. The generated GPR
-#  configuration must name the validated gnat_native prefix explicitly, and a
-#  clean runtime replacement must not retain an arbitrary stale unit.
+#  configuration must name the validated supported compiler prefix explicitly,
+#  and a clean runtime replacement must not retain an arbitrary stale unit.
 fake_bin="$consumer_root/mismatched compiler/bin"
 mkdir -p "$fake_bin"
 printf '%s\n' \
@@ -248,7 +248,7 @@ case "$normalized_config" in
   *"$normalized_prefix/bin/gcc"*) ;;
   *)
     printf '%s\n' \
-      "GPR configuration did not bind the validated gnat_native compiler" >&2
+      "GPR configuration did not bind the validated GNAT compiler" >&2
     exit 1
     ;;
 esac

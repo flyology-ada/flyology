@@ -93,10 +93,11 @@ to the exact host and GNAT releases listed under
 [Build and test](#build-and-test) and fails closed for an unverified
 combination.
 
-The current patch family covers exact Alire `gnat_native` releases from 13
-through 16. Linux/AArch64 and Linux/x86-64 support 13.2.2, 14.1.3, 14.2.1,
-15.1.2, 15.3.1, and 16.1.0. macOS supports 13.2.2, 14.1.3, 14.2.1, and
-16.1.0. The event backend is
+The current patch family covers the exact Alire `gnat_native` and
+`gnat_flyology_native` releases from 13 through 16 listed below.
+Linux/AArch64 and Linux/x86-64 support 13.2.2, 14.1.3, 14.2.1, 15.1.2,
+15.3.1, and 16.1.0. macOS supports 13.2.2, 14.1.3, 14.2.1, and 16.1.0.
+The event backend is
 `kqueue` on macOS and `epoll` plus `eventfd` on Linux. Lightweight tasks resume
 through the small ABI-specific context switch described below.
 
@@ -2713,10 +2714,10 @@ older generated runtime. Preparation uses a content stamp covering the
 toolchain, target, compiled configuration, runtime sources, patches, and build
 scripts, so an unchanged build validates and reuses its existing RTS. The
 generated GPR configuration binds the Ada and C drivers from the exact
-validated Alire `gnat_native` prefix even when preparation is invoked outside
-`alr exec`. The archive member and AArch64 unwind root are checked before
-reuse. No checkout-relative source paths or explicit `--RTS` argument is
-needed.
+validated Alire `gnat_native` or `gnat_flyology_native` prefix even when
+preparation is invoked outside `alr exec`. The archive member and AArch64
+unwind root are checked before reuse. No checkout-relative source paths or
+explicit `--RTS` argument is needed.
 
 Concurrent Alire processes that share one path-pinned Flyology checkout
 serialize its RTS preparation with a host advisory lock. The lock is released
@@ -2758,8 +2759,9 @@ cd flyology
 alr build
 ```
 
-Flyology supports Alire 2.1 or newer with the exact `gnat_native` releases shown
-below:
+Flyology supports Alire 2.1 or newer with the exact `gnat_native` and
+`gnat_flyology_native` releases shown below. Each identity has the same host
+matrix:
 
 | Host | Releases |
 | --- | --- |
@@ -2767,10 +2769,12 @@ below:
 | Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 
-The crate declares a generic `gnat >=13 & <17` dependency so Alire can select a
-compiler; runtime preparation then checks the exact host/release pair against
-the versioned patch manifest and fails closed if it has not actually been
-verified. Alire's Darwin GNAT 15 packages bundle a different
+The crate declares a generic `gnat >=13 & <17` dependency so Alire can select
+either compiler provider; no package-specific dependency is required. Runtime
+preparation accepts only package prefixes for those two identities and then
+checks the exact host/release pair against the versioned patch manifest. An
+unknown identity, release, or host/release pair fails closed. Alire's Darwin
+GNAT 15 packages bundle a different
 `s-taprop.adb` source shape and need a separate Darwin patch family before
 they can be enabled. macOS/AArch64 and Linux/x86-64 are the hosted CI reference
 targets; Linux/AArch64 is the native local Docker reference. The source also
@@ -2848,6 +2852,9 @@ applying the source
 patch under `set -e`, so an incompatible runtime source tree fails rather than
 being silently accepted.
 
+`scripts/test-compiler-identities.sh` checks both supported Alire compiler
+environment variables and package-prefix shapes, every approved release, and
+fail-closed rejection of ambiguous, unknown, and unsupported selections.
 `scripts/test-external-consumer.sh` copies a small consumer into a fresh
 temporary workspace, adds Flyology through an Alire path pin, verifies the
 automatic native-default build and persisted lightweight policy, and prepares

@@ -33,6 +33,7 @@ trap 'exit 1' HUP INT TERM
 cd "$project_root"
 
 "$project_root/scripts/test-run-with-timeout.sh"
+"$project_root/scripts/test-compiler-identities.sh"
 "$project_root/flyology_cachelines/scripts/test.sh"
 
 #  DNS lifecycle regressions observe the receive-loop boundary. The project

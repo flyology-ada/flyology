@@ -421,7 +421,7 @@ case "$platform:$compiler_release" in
     ;;
   *)
     printf '%s\n' \
-      "unsupported Flyology host/compiler pair: $platform / gnat_native $compiler_release" \
+      "unsupported Flyology host/compiler pair: $platform / GNAT $compiler_release" \
       "selected Alire release: $compiler_release" \
       "verified on Darwin: 13.2.2, 14.1.3, 14.2.1, 16.1.0" \
       "verified on Linux: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2

@@ -8,8 +8,8 @@ if [ -n "${GPRBUILD_ALIRE_PREFIX:-}" ]; then
   gprbuild_prefix=$GPRBUILD_ALIRE_PREFIX
 else
   #  Resolve the companion GPRbuild installation from the same Flyology
-  #  environment that selects gnat_native. This also works when preparation is
-  #  invoked directly rather than through `alr exec`.
+  #  environment that selects the supported GNAT provider. This also works
+  #  when preparation is invoked directly rather than through `alr exec`.
   gprbuild_prefix=$(
     cd "$project_root"
     "$alr" --non-interactive printenv --unix >/dev/null

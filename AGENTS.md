@@ -388,7 +388,8 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   `build/flyology-rts.conf`. Only an explicit `prepare-alire-rts.sh
   --configure` captures the current `FLYOLOGY_*` settings; ordinary `alr build`
   ignores ambient settings, and `--reset` restores native defaults. Generated
-  GPR configuration must bind the validated `gnat_native` prefix explicitly.
+  GPR configuration must bind the validated `gnat_native` or
+  `gnat_flyology_native` prefix explicitly.
 - Flyology serializes its own Alire RTS preparation within one dependency
   checkout. Alire may still mutate `alire/build_hash_inputs` before dependency
   actions, so concurrent full `alr build` processes must not share one local
