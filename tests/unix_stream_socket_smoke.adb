@@ -1,4 +1,6 @@
 with Ada.Directories;
+with Ada.Strings;
+with Ada.Strings.Fixed;
 with Ada.Streams;
 with Flyology;
 with Flyology.IO;
@@ -15,7 +17,14 @@ procedure Unix_Stream_Socket_Smoke is
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
 
-   Path_Text : constant String := "/tmp/flyology-unix-stream-smoke.sock";
+   function C_Process_ID return Interfaces.C.int;
+   pragma Import (C, C_Process_ID, "getpid");
+
+   Process_ID : constant String :=
+     Ada.Strings.Fixed.Trim
+       (Interfaces.C.int'Image (C_Process_ID), Ada.Strings.Both);
+   Test_Root : constant String := "/tmp/flyology-unix-" & Process_ID;
+   Path_Text : constant String := Test_Root & "/listener.sock";
    Path      : constant Sockets.Unix_Path :=
      Sockets.Unix_Pathname (Path_Text);
 
@@ -29,6 +38,24 @@ procedure Unix_Stream_Socket_Smoke is
    begin
       null;
    end Remove_Path;
+
+   procedure Prepare_Test_Root is
+   begin
+      if Ada.Directories.Exists (Test_Root) then
+         Ada.Directories.Delete_Tree (Test_Root);
+      end if;
+      Ada.Directories.Create_Directory (Test_Root);
+   end Prepare_Test_Root;
+
+   procedure Remove_Test_Root is
+   begin
+      if Ada.Directories.Exists (Test_Root) then
+         Ada.Directories.Delete_Tree (Test_Root);
+      end if;
+   exception
+      when others =>
+         null;
+   end Remove_Test_Root;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
    begin
@@ -105,44 +132,87 @@ procedure Unix_Stream_Socket_Smoke is
 
    procedure Run_Round is
       Listener    : Sockets.Socket_Type;
-      Accepted    : Sockets.Socket_Type;
       Wake        : Flyology.Wake_Sources.Source;
-      Timed_Out   : Boolean := False;
-      Interrupted : Boolean := False;
+      Server_OK   : Boolean := False with Atomic;
       Client_OK   : Boolean := False with Atomic;
       Request     : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
         (16#50#, 16#49#, 16#4E#, 16#47#);
       Response    : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
         (16#50#, 16#4F#, 16#4E#, 16#47#);
+
+      protected Gate is
+         procedure Release;
+         entry Await_Release;
+      private
+         Released : Boolean := False;
+      end Gate;
+
+      protected body Gate is
+         procedure Release is
+         begin
+            Released := True;
+         end Release;
+
+         entry Await_Release when Released is
+         begin
+            null;
+         end Await_Release;
+      end Gate;
    begin
       Open_Listener (Listener);
-
-      begin
-         Sockets.Accept_Connection (Listener, Accepted, Timeout => 0.020);
-      exception
-         when Flyology.IO.Timeout_Error =>
-            Timed_Out := True;
-      end;
-      pragma Assert (Timed_Out and then not Sockets.Is_Open (Accepted));
-
       Flyology.Wake_Sources.Ensure (Wake);
       Flyology.Wake_Sources.Signal (Wake);
-      begin
-         Sockets.Accept_Connection
-           (Listener, Accepted, Timeout => 1.0,
-            Interrupts =>
-              (1 => Flyology.Wake_Sources.Descriptor (Wake)));
-      exception
-         when Sockets.Operation_Interrupted =>
-            Interrupted := True;
-      end;
-      pragma Assert (Interrupted and then not Sockets.Is_Open (Accepted));
-      Flyology.Wake_Sources.Consume (Wake);
 
       declare
+         task Server is
+            pragma Task_Info (Model);
+         end Server;
+
          task Client is
             pragma Task_Info (Model);
          end Client;
+
+         task body Server is
+            Accepted    : Sockets.Socket_Type;
+            Incoming    : Ada.Streams.Stream_Element_Array (Request'Range);
+            Timed_Out   : Boolean := False;
+            Interrupted : Boolean := False;
+         begin
+            begin
+               Sockets.Accept_Connection
+                 (Listener, Accepted, Timeout => 0.020);
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Timed_Out := True;
+            end;
+            pragma Assert
+              (Timed_Out and then not Sockets.Is_Open (Accepted));
+
+            begin
+               Sockets.Accept_Connection
+                 (Listener, Accepted, Timeout => 1.0,
+                  Interrupts =>
+                    (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+            exception
+               when Sockets.Operation_Interrupted =>
+                  Interrupted := True;
+            end;
+            pragma Assert
+              (Interrupted and then not Sockets.Is_Open (Accepted));
+            Flyology.Wake_Sources.Consume (Wake);
+
+            Gate.Release;
+            Sockets.Accept_Connection (Listener, Accepted, Timeout => 2.0);
+            Sockets.Receive_Exactly (Accepted, Incoming, Timeout => 2.0);
+            pragma Assert (Incoming = Request);
+            Sockets.Send_All (Accepted, Response, Timeout => 2.0);
+            Sockets.Close_Socket (Accepted);
+            Server_OK := True;
+         exception
+            when others =>
+               Gate.Release;
+               Close_If_Open (Accepted);
+         end Server;
 
          task body Client is
             Socket : Sockets.Socket_Type;
@@ -150,6 +220,7 @@ procedure Unix_Stream_Socket_Smoke is
             Closed : Ada.Streams.Stream_Element_Array (1 .. 1);
             Last   : Ada.Streams.Stream_Element_Offset;
          begin
+            Gate.Await_Release;
             Sockets.Create_Unix_Stream_Socket (Socket);
             Sockets.Connect (Socket, Path, Timeout => 2.0);
             Sockets.Send_All (Socket, Request, Timeout => 2.0);
@@ -161,21 +232,14 @@ procedure Unix_Stream_Socket_Smoke is
             when others =>
                Close_If_Open (Socket);
          end Client;
-
-         Incoming : Ada.Streams.Stream_Element_Array (Request'Range);
       begin
-         Sockets.Accept_Connection (Listener, Accepted, Timeout => 2.0);
-         Sockets.Receive_Exactly (Accepted, Incoming, Timeout => 2.0);
-         pragma Assert (Incoming = Request);
-         Sockets.Send_All (Accepted, Response, Timeout => 2.0);
-         Sockets.Close_Socket (Accepted);
+         null;
       end;
 
-      pragma Assert (Client_OK);
+      pragma Assert (Server_OK and then Client_OK);
       Sockets.Close_Socket (Listener);
    exception
       when others =>
-         Close_If_Open (Accepted);
          Close_If_Open (Listener);
          raise;
    end Run_Round;
@@ -230,16 +294,12 @@ procedure Unix_Stream_Socket_Smoke is
          raise;
    end Check_Listener_Replacement;
 
+   generic
+      Model : Flyology.Execution_Model;
+   procedure Check_Connect_Deadline_And_Interrupt;
+
    procedure Check_Connect_Deadline_And_Interrupt is
-      type Socket_Array is
-        array (Positive range <>) of Sockets.Socket_Type;
-      Listener   : Sockets.Socket_Type;
-      Fillers    : Socket_Array (1 .. 8);
-      Probe      : Sockets.Socket_Type;
-      Wake       : Flyology.Wake_Sources.Source;
-      Last       : Natural := 0;
-      Timed_Out  : Boolean := False;
-      Interrupted : Boolean := False;
+      Passed : Boolean := False with Atomic;
       pragma Warnings (Off, """Host_OS"" is not modified");
       Host_OS    : String := Flyology_Config.Alire_Host_OS with Volatile;
       pragma Warnings (On, """Host_OS"" is not modified");
@@ -251,58 +311,87 @@ procedure Unix_Stream_Socket_Smoke is
       if Host_OS /= "linux" then
          return;
       end if;
-      Remove_Path;
-      Open_Listener (Listener);
 
-      --  Fill the bounded local accept queue without accepting. The first
-      --  connection that cannot enter it must remain governed by Connect's
-      --  caller deadline rather than blocking its task lane.
-      for Index in Fillers'Range loop
-         Last := Index;
-         Sockets.Create_Unix_Stream_Socket (Fillers (Index));
+      declare
+         task Worker is
+            pragma Task_Info (Model);
+         end Worker;
+
+         task body Worker is
+            type Socket_Array is
+              array (Positive range <>) of Sockets.Socket_Type;
+            Listener    : Sockets.Socket_Type;
+            Fillers     : Socket_Array (1 .. 8);
+            Probe       : Sockets.Socket_Type;
+            Wake        : Flyology.Wake_Sources.Source;
+            Last        : Natural := 0;
+            Timed_Out   : Boolean := False;
+            Interrupted : Boolean := False;
          begin
-            Sockets.Connect (Fillers (Index), Path, Timeout => 0.030);
+            Remove_Path;
+            Open_Listener (Listener);
+
+            --  Fill the bounded local accept queue without accepting. The
+            --  first connection that cannot enter it must remain governed by
+            --  Connect's caller deadline rather than blocking its task lane.
+            for Index in Fillers'Range loop
+               Last := Index;
+               Sockets.Create_Unix_Stream_Socket (Fillers (Index));
+               begin
+                  Sockets.Connect
+                    (Fillers (Index), Path, Timeout => 0.030);
+               exception
+                  when Flyology.IO.Timeout_Error =>
+                     Timed_Out := True;
+                     exit;
+               end;
+            end loop;
+            pragma Assert (Timed_Out);
+
+            --  Keep the saturated queue intact. A second retrying connect
+            --  must observe a readable interrupt source.
+            Flyology.Wake_Sources.Ensure (Wake);
+            Flyology.Wake_Sources.Signal (Wake);
+            Sockets.Create_Unix_Stream_Socket (Probe);
+            begin
+               Sockets.Connect
+                 (Probe, Path, Timeout => 1.0,
+                  Interrupts =>
+                    (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+            exception
+               when Sockets.Operation_Interrupted =>
+                  Interrupted := True;
+            end;
+            pragma Assert (Interrupted);
+            Flyology.Wake_Sources.Consume (Wake);
+
+            Close_If_Open (Probe);
+            for Index in 1 .. Last loop
+               Close_If_Open (Fillers (Index));
+            end loop;
+            Close_If_Open (Listener);
+            Remove_Path;
+            Passed := True;
          exception
-            when Flyology.IO.Timeout_Error =>
-               Timed_Out := True;
-               exit;
-         end;
-      end loop;
-      pragma Assert (Timed_Out);
-
-      --  Keep the saturated queue and timed-out attempt alive. A second
-      --  pending connect must observe a readable interrupt source.
-      Flyology.Wake_Sources.Ensure (Wake);
-      Flyology.Wake_Sources.Signal (Wake);
-      Sockets.Create_Unix_Stream_Socket (Probe);
+            when others =>
+               Close_If_Open (Probe);
+               for Index in 1 .. Last loop
+                  Close_If_Open (Fillers (Index));
+               end loop;
+               Close_If_Open (Listener);
+               Remove_Path;
+         end Worker;
       begin
-         Sockets.Connect
-           (Probe, Path, Timeout => 1.0,
-            Interrupts =>
-              (1 => Flyology.Wake_Sources.Descriptor (Wake)));
-      exception
-         when Sockets.Operation_Interrupted =>
-            Interrupted := True;
+         null;
       end;
-      pragma Assert (Interrupted);
-      Flyology.Wake_Sources.Consume (Wake);
 
-      Close_If_Open (Probe);
-      for Index in 1 .. Last loop
-         Close_If_Open (Fillers (Index));
-      end loop;
-      Close_If_Open (Listener);
-      Remove_Path;
-   exception
-      when others =>
-         Close_If_Open (Probe);
-         for Index in 1 .. Last loop
-            Close_If_Open (Fillers (Index));
-         end loop;
-         Close_If_Open (Listener);
-         Remove_Path;
-         raise;
+      pragma Assert (Passed);
    end Check_Connect_Deadline_And_Interrupt;
+
+   procedure Check_Native_Connect_Deadline is new
+     Check_Connect_Deadline_And_Interrupt (Flyology.Native_Task);
+   procedure Check_Lightweight_Connect_Deadline is new
+     Check_Connect_Deadline_And_Interrupt (Flyology.Lightweight_Task);
 
    function C_Change_Mode
      (Path : Interfaces.C.char_array;
@@ -313,7 +402,7 @@ procedure Unix_Stream_Socket_Smoke is
    pragma Import (C, C_Effective_User, "geteuid");
 
    procedure Check_Permission_Failure is
-      Directory : constant String := "/tmp/flyology-unix-stream-denied";
+      Directory : constant String := Test_Root & "/denied";
       Denied    : constant String := Directory & "/listener.sock";
       C_Dir     : constant Interfaces.C.char_array :=
         Interfaces.C.To_C (Directory);
@@ -354,6 +443,7 @@ procedure Unix_Stream_Socket_Smoke is
    end Check_Permission_Failure;
 
 begin
+   Prepare_Test_Root;
    Remove_Path;
    Check_Path_Validation;
    Check_Missing_Path;
@@ -365,10 +455,13 @@ begin
    Remove_Path;
 
    Check_Listener_Replacement;
-   Check_Connect_Deadline_And_Interrupt;
+   Check_Native_Connect_Deadline;
+   Check_Lightweight_Connect_Deadline;
    Check_Permission_Failure;
+   Remove_Test_Root;
 exception
    when others =>
       Remove_Path;
+      Remove_Test_Root;
       raise;
 end Unix_Stream_Socket_Smoke;
