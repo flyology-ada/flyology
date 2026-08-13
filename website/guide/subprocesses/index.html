@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Spawn, communicate with, stop, and reap native subprocesses from Flyology native and lightweight tasks with bounded capture and process-group ownership.">
+    <meta name="theme-color" content="#17213d">
+    <title>Native subprocesses · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/subprocesses/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Subprocesses</li></ol>
+          <h1>Own native subprocesses in a structured scope.</h1>
+        </div>
+        <p class="doc-hero-copy">Start an executable with typed arguments, exchange bytes through task-aware pipes, classify exit status, and clean up descendants that remain in the owned process group.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#model">Process model</a></li>
+            <li><a href="#choose">Choose an API layer</a></li>
+            <li><a href="#command">Build a command</a></li>
+            <li><a href="#capture">Run bounded capture</a></li>
+            <li><a href="#status">Classify completion</a></li>
+            <li><a href="#pipes">Progress owned pipes</a></li>
+            <li><a href="#deadlines">Deadlines and cancellation</a></li>
+            <li><a href="#stopping">Signals and cleanup</a></li>
+            <li><a href="#failures">Handle failures</a></li>
+            <li><a href="#supervision">Supervised generations</a></li>
+            <li><a href="#durable">Durable external state</a></li>
+            <li><a href="#platforms">Platform boundary</a></li>
+            <li><a href="#limits">Operational limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html"><code>Flyology.Subprocesses</code></a> never parses a shell command string. The executable and each argument remain separate values through <code>posix_spawn</code>. Shell expansion, redirection, and pipelines are not implicit.</p>
+          </aside>
+
+          <section id="model">
+            <span class="step-label">MODEL</span>
+            <h2>Separate the command from the process owner.</h2>
+            <p>A <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#ac18ba65ab67c66e62a71e28951ff316c8731c00cceb329f49a5786f52228ea1"><code>Command</code></a> is a copyable launch description. Build it with <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#eb28b48db71cda8812b4c838c6c0df0e6ecba881b2e2342e60fa2fd10f1e71ea"><code>To_Command</code></a>. It contains the executable, ordered arguments, environment policy, working directory, and path-search policy.</p>
+            <p>A <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#8a0374cda9d507b7103ce1fc3ab88f126b6d2fc788e074eabab70a2a4343c339"><code>Process</code></a> is the limited owner created by <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#a0f5523a772739da08de1f6713b8d79f03a477cfbb113596e5b3dbb8121b955b"><code>Spawn</code></a>. It owns the root process, its process group, the parent ends of three pipes, and the reaper that prevents a zombie.</p>
+            <figure class="architecture-figure">
+              <svg role="img" aria-labelledby="subprocess-title subprocess-desc" viewBox="0 0 760 410">
+                <title id="subprocess-title">One owned subprocess lifecycle</title>
+                <desc id="subprocess-desc">A typed command is spawned into a process owner. The owner connects standard input, output, error, and exit readiness to a native child process group. Observation, termination, and release complete the structured scope.</desc>
+                <defs><marker id="subprocess-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker></defs>
+                <rect class="diagram-violet" x="28" y="44" width="164" height="74" rx="13"/>
+                <text x="110" y="76" text-anchor="middle" font-size="15" font-weight="600">Typed command</text>
+                <text class="diagram-muted" x="110" y="98" text-anchor="middle">executable + argv</text>
+                <path class="diagram-line" d="M192 81h72" marker-end="url(#subprocess-arrow)"/>
+                <rect class="diagram-box" x="270" y="36" width="204" height="90" rx="13"/>
+                <text x="372" y="70" text-anchor="middle" font-size="15" font-weight="600">Process owner</text>
+                <text class="diagram-muted" x="372" y="94" text-anchor="middle">pipes + group + reaper</text>
+                <path class="diagram-line" d="M474 81h72" marker-end="url(#subprocess-arrow)"/>
+                <rect class="diagram-teal" x="552" y="36" width="180" height="90" rx="13"/>
+                <text x="642" y="70" text-anchor="middle" font-size="15" font-weight="600">Native child group</text>
+                <text class="diagram-muted" x="642" y="94" text-anchor="middle">blocking fd 0, 1, 2</text>
+
+                <path class="diagram-line-violet" d="M372 126v55H151v50" marker-end="url(#subprocess-arrow)"/>
+                <path class="diagram-line-teal" d="M372 126v55h0v50" marker-end="url(#subprocess-arrow)"/>
+                <path class="diagram-line" d="M372 126v55h221v50" marker-end="url(#subprocess-arrow)"/>
+                <rect class="diagram-violet" x="58" y="238" width="186" height="74" rx="13"/>
+                <text x="151" y="269" text-anchor="middle" font-size="14" font-weight="600">stdin writer</text>
+                <text class="diagram-muted" x="151" y="291" text-anchor="middle">write, then close for EOF</text>
+                <rect class="diagram-teal" x="279" y="238" width="186" height="74" rx="13"/>
+                <text x="372" y="269" text-anchor="middle" font-size="14" font-weight="600">stdout + stderr readers</text>
+                <text class="diagram-muted" x="372" y="291" text-anchor="middle">drain both to EOF</text>
+                <rect class="diagram-box" x="500" y="238" width="186" height="74" rx="13"/>
+                <text x="593" y="269" text-anchor="middle" font-size="14" font-weight="600">exit wake</text>
+                <text class="diagram-muted" x="593" y="291" text-anchor="middle">reaper publishes status</text>
+
+                <path class="diagram-line" d="M151 312v35h221M372 312v35M593 312v35H372v22" marker-end="url(#subprocess-arrow)"/>
+                <rect class="diagram-box" x="270" y="336" width="204" height="58" rx="13"/>
+                <text x="372" y="371" text-anchor="middle" font-size="14" font-weight="600">Observe or stop, then release</text>
+              </svg>
+            </figure>
+            <p>The child receives blocking descriptors 0, 1, and 2. The parent ends are nonblocking and close-on-exec. A lightweight caller suspends only its task on pipe or exit readiness. A native caller can block only its own pthread.</p>
+          </section>
+
+          <section id="choose">
+            <span class="step-label">CHOICE 01</span>
+            <h2>Choose capture or explicit pipe ownership.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html"><code>Flyology.Subprocesses.Capture</code></a></dt><dd>Use one finite input value and bounded retained output. The helper owns all pipe progress, exit waiting, timeout cleanup, and cancellation cleanup.</dd></div>
+                <div class="decision-row"><dt>Owned <code>Process</code></dt><dd>Use a streaming or interactive protocol, incremental parsing, custom signal policy, or output destinations that should not accumulate in memory.</dd></div>
+                <div class="decision-row"><dt>Native-task boundary</dt><dd>Use this boundary when synchronous spawn latency is not acceptable on an event-loop pthread. Pipe and exit waits remain task-aware after spawn.</dd></div>
+              </dl>
+            </div>
+            <p>Capture is the normal choice for short control commands. Use the low-level owner only when the application must control the stream lifecycle itself.</p>
+          </section>
+
+          <section id="command">
+            <span class="step-label">COMMAND 02</span>
+            <h2>Build argv and launch policy explicitly.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Arguments</dt><dd>Call <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#bed9e7a2808aae6ad5e6363170697a25ca15fe6b6720c45c81ed3fcd644f9564"><code>Append_Argument</code></a> once for each exact <code>argv</code> value. Empty arguments remain present. NUL bytes are rejected.</dd></div>
+                <div class="decision-row"><dt>Environment</dt><dd>The default inherits the complete parent environment. <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#94f5e2e267301bd4134df229287a2af662f507cc9d6ceefad70d89d917e33201"><code>Set_Environment_Variable</code></a> immediately switches to an explicit environment containing only variables set on that command. Call <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#d5b1a117aebc2a53b41c2fa232cd2f4e05f36afdf7d4bd1a619a84a6ba6edd91"><code>Clear_Environment</code></a> first when an intentionally empty starting point makes that choice clearer. <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#f2efa43c1cfd86acf1a4fb63eaa7a5a397f39eb65416026b0963decbc1446326"><code>Inherit_Environment</code></a> restores inheritance.</dd></div>
+                <div class="decision-row"><dt>Directory</dt><dd>The default inherits the parent working directory. <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#09bc44ac1df7ac033359565db179df09a79d3c020bb568f1914380be12075701"><code>Set_Working_Directory</code></a> applies a spawn file action before the executable starts.</dd></div>
+                <div class="decision-row"><dt>Path search</dt><dd>The default requires an executable path. <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#7432713e5f691f9a850551cc761ac49209694794b49262543c36c159f85ad03b"><code>Set_Path_Search</code></a> selects <code>posix_spawnp</code>. Lookup uses the parent process's <code>PATH</code>, even when the child receives an explicit environment.</dd></div>
+              </dl>
+            </div>
+            <p>A value such as <code>"*.txt"</code>, <code>"$HOME"</code>, or <code>"a | b"</code> remains one literal argument. When the application needs a pipeline, start separate processes and pump bytes through their parent pipe operations, or use a separate pipeline adapter.</p>
+          </section>
+
+          <section id="capture">
+            <span class="step-label">CAPTURE 03</span>
+            <h2>Run a finite command with bounded output.</h2>
+            <p><a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#6c174966e468c1338fbd6b9b3774f1a703fa5bb53796b37ac35343e2608f3363"><code>Capture.Run</code></a> progresses stdin, stdout, stderr, process exit, and cancellation in one readiness loop. It returns a bounded <a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#9357a9ea990767caa43763d25a11eaa51a713beb36b06ee5664a3be19bb78895"><code>Result</code></a> only after the root is reaped and all three pipes are closed.</p>
+            <p>Test <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#7973a28863ec4896809537fdb6fc2af5ddf57922d32e27ffe33c70dce808551f"><code>Successful</code></a>, then read <a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#f2be426f0105cf07585b9863889692e77d9427509a139271b0cb94a1081fa0d9"><code>Standard_Output</code></a>. On command failure, inspect <a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#2d88a6785875426336744469149ae469fff5b3402b5af4e632fe63e8c8d041e7"><code>Standard_Error</code></a> and the captured <a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#195fe05e2f970b59e5d0c11d0db247541afe71136ff6ce32680c05e343d0e503"><code>Status</code></a>. That <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#e6ab5f349583506d47f54fef4a1babe44130697fa17b74f8bfc783b7f995d6ff"><code>Exit_Status</code></a> has an <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#3f3c4ddc40cae1228989eed42a68457f162fc808fa7df0ede8fa2a4e130b93b0"><code>Exit_Kind</code></a> and the <code>Kind</code>, <code>Code</code>, and <code>Signal</code> fields used below. Treat <a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#6fe0cdb4e11727a19d7fc851e7efa988967ac7d133ab00da7b7e31c845da53fb"><code>Output_Truncated</code></a> or <a href="../../api/51c2b5db40023b1f5e8fda702987451a3b1b33f9c9fc9938a5a98ec9bc2644ee.html#7022850e5259e13fa547cd57346e1a46b2ab0b68ad24c15ba6f31f3a9f83ca9a"><code>Error_Truncated</code></a> as an explicit data-loss condition.</p>
+            <figure class="code-panel">
+              <figcaption>send stdin and check every bounded result</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Ada.Text_IO;
+with Flyology.Subprocesses;
+with Flyology.Subprocesses.Capture;
+
+procedure Uppercase is
+   package Processes renames Flyology.Subprocesses;
+   package Capture   renames Flyology.Subprocesses.Capture;
+   use type Processes.Exit_Kind;
+
+   Command : Processes.Command := Processes.To_Command ("/usr/bin/tr");
+begin
+   Processes.Append_Argument (Command, "[:lower:]");
+   Processes.Append_Argument (Command, "[:upper:]");
+   declare
+      Result : constant Capture.Result := Capture.Run
+        (Command,
+         Standard_Input =&gt; "flyology" &amp; ASCII.LF,
+         Maximum_Output =&gt; 4 * 1_024,
+         Maximum_Error  =&gt; 4 * 1_024,
+         Timeout        =&gt; 5.0);
+      Status : constant Processes.Exit_Status := Capture.Status (Result);
+   begin
+      if Capture.Output_Truncated (Result)
+        or else Capture.Error_Truncated (Result)
+      then
+         raise Program_Error with "tr output exceeded its contract";
+      elsif Processes.Successful (Status) then
+         Ada.Text_IO.Put (Capture.Standard_Output (Result));
+      elsif Status.Kind = Processes.Exited then
+         raise Program_Error with
+           "tr exited" &amp; Natural'Image (Status.Code) &amp; ": "
+           &amp; Capture.Standard_Error (Result);
+      else
+         raise Program_Error with
+           "tr received signal" &amp; Natural'Image (Status.Signal);
+      end if;
+   end;
+end Uppercase;</code></pre>
+            </figure>
+            <p>The program prints <code>FLYOLOGY</code>. It passes each argument separately, writes the complete input, publishes stdin EOF, and verifies both retention bounds.</p>
+            <p>Each bound limits retained bytes, not drained bytes. After a bound fills, capture discards later bytes until EOF. The defaults retain 64 KiB from each output stream and use a 30-second timeout.</p>
+            <p>Continued draining prevents a full pipe from blocking a verbose child. Input writes are interleaved with both output streams, so output-before-input protocols do not create a two-pipe deadlock.</p>
+            <p>Captured strings preserve raw eight-bit values and perform no character decoding. Stdout and stderr remain separate, so their relative byte ordering is not available in the result.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Timeout and cancellation return no partial result.</strong> Capture closes stdin, attempts hard structured cleanup, closes its parent output descriptors, and then propagates the original exception. Cleanup failures are suppressed there; explicit low-level ownership is required when the application must observe them.</p>
+            </aside>
+          </section>
+
+          <section id="status">
+            <span class="step-label">RESULT 04</span>
+            <h2>Classify launch separately from completion.</h2>
+            <p>An <code>Exit_Status</code> describes a root process that was successfully launched and later reaped. Its <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#3f3c4ddc40cae1228989eed42a68457f162fc808fa7df0ede8fa2a4e130b93b0"><code>Exit_Kind</code></a> is <code>Exited</code> or <code>Signaled</code>. A nonzero exit is data, not a spawn exception.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Exited, code 0</dt><dd><code>Successful</code> returns true. The command completed with the conventional success code.</dd></div>
+                <div class="decision-row"><dt>Exited, nonzero code</dt><dd><code>Kind</code> is <code>Exited</code>, and <code>Code</code> contains 1 through 255. Apply command-specific meaning.</dd></div>
+                <div class="decision-row"><dt>Signaled</dt><dd><code>Kind</code> is <code>Signaled</code>. <code>Signal</code> contains the host signal number, and <code>Core_Dumped</code> reports the host wait status.</dd></div>
+              </dl>
+            </div>
+            <p><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#3fb20918cbb6b24fdf115e1ea67340591b5fe615364950d48a3048ea1ccb001e"><code>Identifier</code></a> returns the root's launch-time process identifier for diagnostics. Once the root is reaped, the host can reuse that value for an unrelated process even while the owner remains open. Never use it for signaling or as a durable application identity.</p>
+          </section>
+
+          <section id="pipes">
+            <span class="step-label">LOW LEVEL 05</span>
+            <h2>Loop over partial pipe operations.</h2>
+            <p>The low-level owner exposes synchronous <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#747c61442e3e6456e26443bfead2c9cb90fecaa718798c38a48ea75fb2757708"><code>Write_Standard_Input</code></a>, <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#adbb4a5af09b6bce757760172ff6680406473ddd4def7a575019af5f8c41bccb"><code>Read_Standard_Output</code></a>, and <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#6f5d8b14638a74e495a6468eb4cd3c0dc66ee15576dc7137cdd48869f1c820c3"><code>Read_Standard_Error</code></a> operations. Call <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#18b8025344b5a5cba789cc9d2c27a03a8effdf5a83a5fa66e61ee849fe583caa"><code>Close_Standard_Input</code></a> to publish EOF after the final input byte.</p>
+            <p>One call transfers one available chunk. A write can stop before the end of its source slice. A read reports EOF when <code>Last</code> precedes the destination's first index. Loop until every input byte is accepted and each output stream reaches EOF.</p>
+            <figure class="code-panel">
+              <figcaption>loop conditions for one writer and one reader</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">procedure Write_All
+  (Child : in out Processes.Process;
+   Data  : Ada.Streams.Stream_Element_Array)
+is
+   Next : Ada.Streams.Stream_Element_Offset := Data'First;
+   Last : Ada.Streams.Stream_Element_Offset;
+begin
+   while Next &lt;= Data'Last loop
+      Processes.Write_Standard_Input
+        (Child, Data (Next .. Data'Last), Last, Timeout =&gt; 5.0);
+      Next := Last + 1;
+   end loop;
+   Processes.Close_Standard_Input (Child);
+end Write_All;
+
+procedure Drain_Stdout (Child : in out Processes.Process) is
+   Buffer : Ada.Streams.Stream_Element_Array (1 .. 16 * 1_024);
+   Last   : Ada.Streams.Stream_Element_Offset;
+begin
+   loop
+      Processes.Read_Standard_Output
+        (Child, Buffer, Last, Timeout =&gt; 5.0);
+      exit when Last &lt; Buffer'First;
+      Consume (Buffer (Buffer'First .. Last));
+   end loop;
+end Drain_Stdout;</code></pre>
+            </figure>
+            <p>Run the stdin writer, stdout reader, and stderr reader concurrently. Give each standard stream at most one active operation. A child can otherwise block while writing one full output pipe before another stream is drained.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>stdin owner</dt><dd>Loop over partial writes. Close stdin exactly once after the last byte so the child observes EOF.</dd></div>
+                <div class="decision-row"><dt>stdout owner</dt><dd>Loop until stdout EOF. Parse or forward every returned slice before reusing the buffer.</dd></div>
+                <div class="decision-row"><dt>stderr owner</dt><dd>Run an independent read loop until stderr EOF. Do not wait for stdout to finish first.</dd></div>
+                <div class="decision-row"><dt>scope owner</dt><dd>Start all stream owners, call <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#23519c5477ec80b4e52ef404a58d23c9396b62d4c6462f66d5a04429a8f89a4d"><code>Wait</code></a> after the readers can drain, join all operations, then call <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#2af9c3f209f68f92966116953dec3c5dad2d955557f236524b65d4c95d030be2"><code>Close</code></a>.</dd></div>
+              </dl>
+            </div>
+            <ol class="state-rail" aria-label="Low-level subprocess ownership sequence">
+              <li>Spawn</li><li>Write and drain concurrently</li><li>Close stdin</li><li>Read both EOFs</li><li>Wait</li><li>Join operations</li><li>Close</li>
+            </ol>
+            <p>Join every stream operation before calling <code>Close</code> or finalizing the owner. On exceptional exit, cancel active stream waits and apply a terminal policy with <code>Stop</code> or <code>Kill</code>, then join the operations before closing the owner. A catchable signal alone may be ignored and does not guarantee that a blocked stream operation can finish.</p>
+            <p><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#a1b46a7022553367a39fb52888efbc02d644484256a3a63c15aaea950229bbdb"><code>Close_Standard_Output</code></a> and <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#8f05539b73d020a07130860a0d263506088adae4ec934f04c1244d4618bfa68b"><code>Close_Standard_Error</code></a> abandon unread bytes. Serialize either close after the affected reader returns. A later child write can then fail with <code>EPIPE</code> or terminate under its own <code>SIGPIPE</code> disposition.</p>
+            <p>Pipe readiness uses the existing <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html"><code>Flyology.IO</code></a> descriptor machinery. Each parent write suppresses <code>SIGPIPE</code> for that write on the calling pthread; a closed child read end raises <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#e036e80ad473c9cfcaf50aecb6de031f8372d10dbd1bd3f4a00eff91194c6954"><code>Pipe_Error</code></a> instead.</p>
+          </section>
+
+          <section id="deadlines">
+            <span class="step-label">CONTROL 06</span>
+            <h2>Distinguish waiting from cleanup policy.</h2>
+            <p>Pipe operations and <code>Wait</code> accept a relative monotonic timeout and an optional <a href="../../api/51c61ace40425660cc99e654ee242a7b7a1be129c9414a007676fcefb177c287.html"><code>Flyology.Cancellation.Token</code></a>. A low-level timeout or cancellation ends only that operation. It does not signal or close the process.</p>
+            <p>Each low-level call starts its own deadline. Repeating a five-second read can wait five seconds on every iteration. Compute a remaining duration from one application deadline when the complete protocol needs a shared bound, or use <code>Capture.Run</code>.</p>
+            <p>A negative timeout waits without a deadline. A zero timeout permits only an immediate transfer or readiness observation.</p>
+            <p><code>Capture.Run</code> starts one command-progress deadline before spawn. Synchronous spawn cannot be interrupted by that deadline. After spawn returns, capture checks the deadline and cancellation between readiness operations, even while output remains continuously ready.</p>
+            <p>Any task can call <a href="../../api/51c61ace40425660cc99e654ee242a7b7a1be129c9414a007676fcefb177c287.html#6d76b0e47aafe39be5e91925cca4e6915d6ff9bf0983e47430f72a3c6fe03bdd"><code>Token.Request</code></a>. Pass the token with <code>Token =&gt; Stop'Access</code> to a pipe operation, <code>Wait</code>, or capture.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Keep cancellation sources alive.</strong> A token owns a wake descriptor borrowed by an active wait. The token must outlive every operation that receives its access value.</p>
+            </aside>
+            <p>Structured cleanup runs outside the capture deadline. Signal delivery, root reaping, reaper joining, and kernel task states can therefore delay exception delivery.</p>
+          </section>
+
+          <section id="stopping">
+            <span class="step-label">CONTROL 07</span>
+            <h2>Choose graceful or hard termination explicitly.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#bad3f5ae78c47eecdd9b5bc20206b9fa511c4c2c3e5f7c46c405b050909cca22"><code>Send_Signal</code></a></dt><dd>Send interrupt, graceful termination, or hard kill to the original process group. This operation does not wait or close pipes.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#d35773964a84d98437d670358ba6a120b648a541e3f43f652007a767d59a2724"><code>Kill</code></a></dt><dd>Send the uncatchable hard signal without waiting. Follow it with <code>Wait</code> or <code>Close</code> to reap the root.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#5a7a4ddf0cc05ba1391b8cb361da3071e1b1ff7e5890994d672fb1372dcd8cb1"><code>Stop</code></a></dt><dd>Send graceful termination, wait for the root, and escalate when the grace interval expires. Output pipes remain open for explicit draining or close.</dd></div>
+                <div class="decision-row"><dt><code>Close</code></dt><dd>End ownership. Close stdin, hard-terminate a running group, reap the root, close both output pipes, join the reaper, then release the exit wake source.</dd></div>
+              </dl>
+            </div>
+            <p>A nonpositive <code>Stop</code> interval permits only an immediate root observation before hard termination. The grace interval bounds waiting for the root, not graceful survival of every descendant.</p>
+            <p>The root process starts in a new process group. Before publishing exit readiness, the reaper hard-terminates members that remain after root exit. This cleanup can occur before the <code>Stop</code> grace interval ends because the root already terminated.</p>
+            <p>Finalization performs the same ownership cleanup as <code>Close</code> but does not propagate an exception. Use explicit close when the application must observe cleanup failure.</p>
+          </section>
+
+          <section id="failures">
+            <span class="step-label">FAILURES 08</span>
+            <h2>Handle launch, progress, and command failure separately.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#1c4b5df7d32b7af5e12a3405f105cafd10c63efd2dea5ec63571440b533364d2"><code>Spawn_Error</code></a></dt><dd>The executable, pipes, spawn attributes, working-directory action, exec step, exit-readiness setup, or reaper setup failed. No command result exists.</dd></div>
+                <div class="decision-row"><dt>Nonzero exit</dt><dd>Spawn succeeded. Inspect <code>Exit_Status</code> and command output. Do not catch this as a launch exception.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#a1d57c6f0c9bb5de524ab12da0cb467cbe64b8b45ce0dd791fe3d98e2703b3d8"><code>Flyology.IO.Timeout_Error</code></a></dt><dd>The applicable monotonic deadline expired. Low-level ownership remains open. Capture performs structured cleanup before propagation.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/80460ee1eee26eb0b52768b2f53b1ca5e65ec852eb5ba8bca123a84d213ca447.html#96e424517d23c1b68d7bcb028a8bbb492be07ac598019be1f30e8e15300d16f1"><code>Operation_Cancelled</code></a></dt><dd>The supplied token was requested. Low-level ownership remains open. Capture performs structured cleanup before propagation.</dd></div>
+                <div class="decision-row"><dt><code>Pipe_Error</code></dt><dd>A standard-stream descriptor or transfer failed. Decide whether retained protocol state is still usable, then stop or close the owner.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#de31d37e37837fbfae7bf24b637082d1c851ec9106b5f932d453b82fed5579b4"><code>Process_Error</code></a></dt><dd>Exit observation, signaling, reaping, or explicit cleanup failed. The exception marks an ownership failure, not a child exit code.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#431274841403e6ec9179192f3f49b786f5353edd7e270013584c2e7a9e32e894"><code>Flyology.IO.Device_Error</code></a></dt><dd>The capture readiness multiplexer failed. Capture closes the structured child scope before propagation.</dd></div>
+                <div class="decision-row"><dt>Constraint, storage, or program error</dt><dd>The command description is invalid, allocation failed, or the caller violated owner state. These are caller or runtime failures rather than child results.</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section id="supervision">
+            <span class="step-label">OWNERSHIP 09</span>
+            <h2>Put the process inside one task generation.</h2>
+            <p>A supervised generation should declare its process owner inside the task body. Its callback receives a <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#449470358ae4c7e1f72d26f0e0343f19d03ef50057799e107f4385e2124127ed"><code>Generation_Control</code></a>. Call <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#814b57867147d492709d1d116cd4b48baf0b7833aca0bc221d55e46537edf5be"><code>Mark_Ready</code></a> only after spawn and application validation succeed.</p>
+            <p>Pass <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#7a374afd8fa57da98542337846a95a69931b8f9b5f4e00ff8a9415175e1f3d93"><code>Stopping</code></a> as the wait token. On cancellation, stop the child and close it before the task returns.</p>
+            <figure class="code-panel">
+              <figcaption>generation-owned subprocess</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">procedure Execute
+  (Context : in out Service_Context;
+   Control : not null access Generation_Control)
+is
+   Command : Processes.Command := Build_Command (Context);
+   Child   : Processes.Process;
+   Status  : Processes.Exit_Status;
+begin
+   Processes.Spawn (Command, Child);
+   Validate_Child (Child, Context);
+   Mark_Ready (Control.all);
+
+   begin
+      Processes.Wait
+        (Child, Status, Token =&gt; Stopping (Control.all));
+   exception
+      when Flyology.Cancellation.Operation_Cancelled =&gt;
+         Processes.Stop (Child, Grace =&gt; 2.0, Status =&gt; Status);
+   end;
+
+   Processes.Close (Child);
+end Execute;</code></pre>
+            </figure>
+            <ol class="state-rail" aria-label="Supervised subprocess replacement sequence">
+              <li>Generation N owns child</li><li>Stop requested</li><li>Root reaped</li><li>Pipes closed</li><li>Reaper joined</li><li>Task joined</li><li>Generation N+1 validates</li><li>Generation N+1 may publish</li>
+            </ol>
+            <p>The example has the callback profile of <a href="../../api/5db967fca8a7a2cb5916b4b3307737f13aecb959766d620e220178b395409ea2.html"><code>Flyology.Supervision.Children</code></a>. Its <code>Run</code> call returns only after the generation's Ada master has joined the task and completed task-body finalization. Applications with a custom task type can use <a href="../../api/fdcc045544a3df00de755867827cb7df1e3f36d90f7811dfc655111c187d069a.html"><code>Flyology.Supervision.Task_Generations</code></a> as the lower-level alternative. A controller must cross the chosen join boundary before it publishes replacement readiness.</p>
+            <p>If spawn or validation raises before <code>Mark_Ready</code>, controlled finalization still closes the local process owner. The failed generation never publishes readiness.</p>
+            <p>Process termination remains application policy. Flyology supervision does not automatically kill arbitrary descendants of every supervised Ada task. Only an explicitly declared <code>Process</code> owner applies subprocess cleanup.</p>
+          </section>
+
+          <section id="durable">
+            <span class="step-label">RECOVERY 10</span>
+            <h2>Reconcile externally durable effects before restart.</h2>
+            <p>Process ownership controls one launched operating-system process group. It does not reverse external effects created by that process. A command can modify files, network services, remote state, namespaces, or persistent registries before it exits.</p>
+            <p>Set supervision <a href="../../api/2f74bb2ee745ca6dc2e3043af001dc0684826f965227a33be78e166dce9b8fa1.html#251c8dbf1492d36cfda3e8b6251d3183ffaaa7e6ffcac5d477029dbdcd93b759"><code>Restart_Safe</code></a> only when a replacement can inspect and reconcile those effects. Use stable application identities and idempotent operations. Do not infer external state only from the old process identifier or its exit status.</p>
+            <p>For example, a command can rename a completed report into its final path and exit before the generation publishes readiness. The replacement must inspect the stable path and validate the report. It can adopt a complete result, remove an incomplete temporary file, or report a conflicting result. Starting the command again without that check is not restart-safe.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Identity</dt><dd>Record an application-selected job, resource, or output identity that survives process replacement.</dd></div>
+                <div class="decision-row"><dt>Inspection</dt><dd>Classify the external state as absent, incomplete, complete, or conflicting before publication.</dd></div>
+                <div class="decision-row"><dt>Action</dt><dd>Adopt, finish, replace, or reject that state through an idempotent operation with explicit authority.</dd></div>
+              </dl>
+            </div>
+            <p>If a child deliberately leaves the original process group with <code>setpgid</code> or <code>setsid</code>, Flyology can no longer contain it through that group. Treat that behavior as an external durable resource. Record its identity, reconcile it before publication, and assign its cleanup to an explicit authority.</p>
+          </section>
+
+          <section id="platforms">
+            <span class="step-label">PLATFORM 11</span>
+            <h2>Use the Darwin and Linux POSIX boundary.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Spawn</dt><dd>Darwin and Linux use synchronous <code>posix_spawn</code> or <code>posix_spawnp</code>. Flyology does not call <code>fork</code> and then enter Ada or GNARL state in the child. Spawn resets the child signal mask and catchable dispositions before exec.</dd></div>
+                <div class="decision-row"><dt>Directory</dt><dd>Darwin uses its compatible <code>addchdir</code> spawn action. Supported glibc Linux builds provide <code>posix_spawn_file_actions_addchdir_np</code>. Older glibc versions without that extension are outside the current build matrix; other hosts reject a configured directory.</dd></div>
+                <div class="decision-row"><dt>Pipe waits</dt><dd>Darwin uses <code>kqueue</code>. Linux uses <code>epoll</code>. Native tasks use <code>poll</code> on both hosts.</dd></div>
+                <div class="decision-row"><dt>Exit waits</dt><dd>Each live process owns one native reaper task. The task waits for root exit and signals an ordinary Flyology wake descriptor.</dd></div>
+                <div class="decision-row"><dt>Signals</dt><dd>Signals target the negative process-group identifier. Hard cleanup uses the host <code>SIGKILL</code> value.</dd></div>
+              </dl>
+            </div>
+            <p>The native reaper gives exit readiness the same cancellation and deadline composition as other descriptors. It also consumes one native task and pthread per live subprocess. Keep large subprocess populations outside this initial slice or add a separately designed shared reaper backend.</p>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">LIMITS</span>
+            <h2>Budget the ownership scope before scaling it.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Supported hosts</dt><dd>Darwin and Linux. The API starts native operating-system processes and never runs an Ada callback in the child.</dd></div>
+                <div class="decision-row"><dt>Parent descriptors</dt><dd>A live owner with all streams open holds five Flyology descriptors: stdin, stdout, stderr, and both ends of the exit wake source. Closing streams releases their descriptors before owner close.</dd></div>
+                <div class="decision-row"><dt>Cancellation descriptors</dt><dd>An unrequested token can lazily add a separate two-descriptor wake source when capture or a low-level wait borrows it. The caller owns that token, can share it across operations, and must keep it alive through every call.</dd></div>
+                <div class="decision-row"><dt>Native resources</dt><dd>Each live subprocess owns one native reaper task and pthread. This initial design is not intended for large subprocess populations.</dd></div>
+                <div class="decision-row"><dt>Capture payload</dt><dd>Retained payload is bounded by <code>Maximum_Output + Maximum_Error</code>. Total storage also includes the complete caller-supplied input and command plus implementation-dependent unbounded-string capacity and allocator overhead. Capture uses one 4,096-byte transfer buffer and a temporary retained slice of at most 4,096 bytes.</dd></div>
+                <div class="decision-row"><dt>Stream ordering</dt><dd>Bytes stay ordered within each stream. Capture does not preserve a total order between stdout and stderr.</dd></div>
+                <div class="decision-row"><dt>Descriptor inheritance</dt><dd>Flyology-created descriptors are close-on-exec. Application descriptors without <code>FD_CLOEXEC</code> follow their own inheritance policy.</dd></div>
+                <div class="decision-row"><dt>Spawn latency</dt><dd>Spawn can occupy a lightweight caller's event-loop pthread. Its synchronous work cannot be interrupted by a capture timeout or token.</dd></div>
+                <div class="decision-row"><dt>Containment</dt><dd>Cleanup reaches the root and descendants that remain in its original process group. It cannot reach a deliberate <code>setpgid</code> or <code>setsid</code> escape.</dd></div>
+                <div class="decision-row"><dt>Kernel completion</dt><dd>Finalization may wait indefinitely when the kernel cannot complete hard termination, such as an uninterruptible task state.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Continue to the <a href="../supervision/">supervision guide</a> for generation policies, or use the <a href="../../api/">API reference</a> for exact exceptions and parameter contracts.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

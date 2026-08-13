@@ -128,6 +128,9 @@ stall_watchdog_smoke
 structured_server_smoke
 structured_server_reset_smoke
 structured_server_tls_smoke
+subprocess_fixture
+subprocess_smoke
+flyology-supervision-subprocess_smoke
 thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke

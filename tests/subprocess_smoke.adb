@@ -1,0 +1,439 @@
+with Ada.Command_Line;
+with Ada.Directories;
+with Ada.Exceptions;
+with Ada.Real_Time;
+with Ada.Streams;
+with Flyology;
+with Flyology.Cancellation;
+with Flyology.IO;
+with Flyology.Subprocesses;
+with Flyology.Subprocesses.Capture;
+with Interfaces.C;
+
+procedure Subprocess_Smoke is
+   package Subprocesses renames Flyology.Subprocesses;
+   package Capture renames Flyology.Subprocesses.Capture;
+   package C renames Interfaces.C;
+
+   use type Ada.Real_Time.Time;
+   use type Ada.Real_Time.Time_Span;
+   use type Ada.Streams.Stream_Element_Offset;
+   use type C.int;
+   use type Subprocesses.Exit_Kind;
+
+   function Open_FD_Count return C.int;
+   pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
+
+   function Pid_Exists (Pid : C.int) return C.int;
+   pragma Import
+     (C, Pid_Exists, "flyology_test_subprocess_pid_exists");
+
+   procedure Set_Fail_Reaper_Allocation (Enabled : C.int);
+   pragma Import
+     (C, Set_Fail_Reaper_Allocation,
+      "flyology_test_subprocess_set_fail_reaper_allocation");
+
+   Fixture : constant String := Ada.Directories.Compose
+     (Ada.Directories.Containing_Directory
+        (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name)),
+      "subprocess_fixture");
+
+   procedure Assert (Condition : Boolean; Message : String) is
+   begin
+      if not Condition then
+         raise Program_Error with Message;
+      end if;
+   end Assert;
+
+   function Fixture_Command (Mode : String) return Subprocesses.Command is
+      Item : Subprocesses.Command := Subprocesses.To_Command (Fixture);
+   begin
+      Subprocesses.Append_Argument (Item, Mode);
+      return Item;
+   end Fixture_Command;
+
+   protected Outcome is
+      procedure Reset;
+      procedure Fail (Message : String);
+      procedure Check;
+   private
+      Failed : Boolean := False;
+      Length : Natural := 0;
+      Text   : String (1 .. 512) := (others => ' ');
+   end Outcome;
+
+   protected body Outcome is
+      procedure Reset is
+      begin
+         Failed := False;
+         Length := 0;
+      end Reset;
+
+      procedure Fail (Message : String) is
+      begin
+         Failed := True;
+         Length := Natural'Min (Text'Length, Message'Length);
+         Text (1 .. Length) := Message (Message'First .. Message'First + Length - 1);
+      end Fail;
+
+      procedure Check is
+      begin
+         if Failed then
+            raise Program_Error with Text (1 .. Length);
+         end if;
+      end Check;
+   end Outcome;
+
+   procedure Exercise is
+      Value  : Capture.Result;
+      Status : Subprocesses.Exit_Status;
+
+      procedure Await_Ready (Child : in out Subprocesses.Process) is
+         Buffer : Ada.Streams.Stream_Element_Array (1 .. 5);
+         Last   : Ada.Streams.Stream_Element_Offset;
+         Text   : String (1 .. 5);
+      begin
+         Subprocesses.Read_Standard_Output
+           (Child, Buffer, Last, Timeout => 2.0);
+         Assert (Last = Buffer'Last, "child readiness message was incomplete");
+         for Index in Text'Range loop
+            Text (Index) := Character'Val (Buffer
+              (Buffer'First + Ada.Streams.Stream_Element_Offset (Index - 1)));
+         end loop;
+         Assert (Text = "ready", "child readiness message was invalid");
+      end Await_Ready;
+   begin
+      Value := Capture.Run (Fixture_Command ("capture"));
+      Assert (Subprocesses.Successful (Capture.Status (Value)),
+              "capture child failed");
+      Assert (Capture.Standard_Output (Value) = "stdout-value",
+              "stdout capture mismatch");
+      Assert (Capture.Standard_Error (Value) = "stderr-value",
+              "stderr capture mismatch");
+
+      Value := Capture.Run
+        (Fixture_Command ("stdin"),
+         Standard_Input => "typed stdin",
+         Maximum_Output => 32);
+      Assert (Capture.Standard_Output (Value) = "typed stdin",
+              "stdin round trip mismatch");
+
+      Value := Capture.Run (Fixture_Command ("nonzero"));
+      Assert
+        (Capture.Status (Value).Kind = Subprocesses.Exited
+         and then Capture.Status (Value).Code = 23,
+         "nonzero exit was not classified");
+
+      declare
+         Item : Subprocesses.Command := Subprocesses.To_Command ("true");
+      begin
+         Subprocesses.Set_Path_Search (Item);
+         Value := Capture.Run (Item);
+         Assert
+           (Subprocesses.Successful (Capture.Status (Value)),
+            "PATH search did not find a standard executable");
+      end;
+
+      declare
+         Missing : constant Subprocesses.Command :=
+           Subprocesses.To_Command ("/flyology/missing/executable");
+         Child : Subprocesses.Process;
+         Rejected : Boolean := False;
+         Before : constant C.int := Open_FD_Count;
+      begin
+         begin
+            Subprocesses.Spawn (Missing, Child);
+         exception
+            when Subprocesses.Spawn_Error => Rejected := True;
+         end;
+         Assert (Rejected, "missing executable was accepted");
+         Assert (Open_FD_Count = Before,
+                 "failed spawn leaked descriptors");
+      end;
+
+      declare
+         Child    : Subprocesses.Process;
+         Rejected : Boolean := False;
+         Before   : constant C.int := Open_FD_Count;
+      begin
+         Set_Fail_Reaper_Allocation (1);
+         begin
+            Subprocesses.Spawn (Fixture_Command ("capture"), Child);
+         exception
+            when Subprocesses.Spawn_Error =>
+               Rejected := True;
+            when others =>
+               Set_Fail_Reaper_Allocation (0);
+               raise;
+         end;
+         Set_Fail_Reaper_Allocation (0);
+         Assert (Rejected, "injected reaper failure was not reported");
+         Assert (not Subprocesses.Is_Open (Child),
+                 "reaper failure retained subprocess ownership");
+         Assert (Open_FD_Count = Before,
+                 "reaper failure leaked exit readiness descriptors");
+      exception
+         when others =>
+            Set_Fail_Reaper_Allocation (0);
+            raise;
+      end;
+
+      declare
+         Timed_Out : Boolean := False;
+      begin
+         begin
+            Value := Capture.Run
+              (Fixture_Command ("flood"),
+               Maximum_Output => 32,
+               Timeout => 0.030);
+         exception
+            when Flyology.IO.Timeout_Error => Timed_Out := True;
+         end;
+         Assert
+           (Timed_Out,
+            "continuous output starved the capture deadline");
+      end;
+
+      declare
+         Token : aliased Flyology.Cancellation.Token;
+         task Canceller;
+         task body Canceller is
+         begin
+            delay 0.030;
+            Token.Request;
+         end Canceller;
+         Cancelled : Boolean := False;
+      begin
+         begin
+            Value := Capture.Run
+              (Fixture_Command ("flood"),
+               Maximum_Output => 32,
+               Timeout => 2.0,
+               Token => Token'Access);
+         exception
+            when Flyology.Cancellation.Operation_Cancelled =>
+               Cancelled := True;
+         end;
+         Assert
+           (Cancelled,
+            "continuous output starved capture cancellation");
+      end;
+
+      Value := Capture.Run
+        (Fixture_Command ("output-before-input"),
+         Standard_Input => "I",
+         Maximum_Output => 32,
+         Maximum_Error => 32,
+         Timeout => 2.0);
+      Assert
+        (Capture.Standard_Error (Value) = "I",
+         "continuous stdout starved writable stdin");
+
+      declare
+         Timed_Out : Boolean := False;
+         Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      begin
+         begin
+            Value := Capture.Run
+              (Fixture_Command ("escaped-pipe-holder"), Timeout => 0.030);
+         exception
+            when Flyology.IO.Timeout_Error => Timed_Out := True;
+         end;
+         Assert (Timed_Out, "escaped pipe holder suppressed timeout");
+         Assert
+           (Ada.Real_Time.Clock - Started < Ada.Real_Time.Seconds (1),
+            "escaped pipe holder delayed exceptional cleanup");
+      end;
+
+      Value := Capture.Run
+        (Fixture_Command ("large"),
+         Maximum_Output => 1_000,
+         Maximum_Error  => 777,
+         Timeout => 10.0);
+      Assert (Subprocesses.Successful (Capture.Status (Value)),
+              "large-output child failed");
+      Assert
+        (Capture.Standard_Output (Value)'Length = 1_000
+         and then Capture.Standard_Error (Value)'Length = 777
+         and then Capture.Output_Truncated (Value)
+         and then Capture.Error_Truncated (Value),
+         "bounded capture did not truncate while draining");
+
+      declare
+         Item : Subprocesses.Command := Fixture_Command ("env");
+      begin
+         Subprocesses.Clear_Environment (Item);
+         Subprocesses.Set_Environment_Variable
+           (Item, "FLYOLOGY_CHILD_VALUE", "explicit-value");
+         Value := Capture.Run (Item);
+         Assert (Capture.Standard_Output (Value) = "explicit-value",
+                 "explicit child environment mismatch");
+      end;
+
+      declare
+         Item : Subprocesses.Command := Fixture_Command ("cwd");
+         Directory : constant String :=
+           Ada.Directories.Containing_Directory (Fixture);
+      begin
+         Subprocesses.Set_Working_Directory (Item, Directory);
+         Value := Capture.Run (Item);
+         Assert (Capture.Standard_Output (Value) = Directory,
+                 "child working directory mismatch");
+      end;
+
+      declare
+         Child : Subprocesses.Process;
+         Before : constant C.int := Open_FD_Count;
+      begin
+         Subprocesses.Spawn (Fixture_Command ("graceful"), Child);
+         Await_Ready (Child);
+         Subprocesses.Stop (Child, Grace => 1.0, Status => Status);
+         Assert (Subprocesses.Successful (Status),
+                 "graceful stop did not permit clean exit");
+         Subprocesses.Close (Child);
+         Assert
+           (Open_FD_Count = Before,
+            "Close retained subprocess descriptors before finalization");
+      end;
+
+      declare
+         Child : Subprocesses.Process;
+         Timed_Out : Boolean := False;
+      begin
+         Subprocesses.Spawn (Fixture_Command ("resistant"), Child);
+         Await_Ready (Child);
+         Subprocesses.Send_Signal
+           (Child, Subprocesses.Graceful_Termination);
+         begin
+            Subprocesses.Wait (Child, Status, Timeout => 0.030);
+         exception
+            when Flyology.IO.Timeout_Error => Timed_Out := True;
+         end;
+         Assert (Timed_Out, "signal-resistant child stopped gracefully");
+         Subprocesses.Kill (Child);
+         Subprocesses.Wait (Child, Status);
+         Assert
+           (Status.Kind = Subprocesses.Signaled and then Status.Signal > 0,
+            "hard stop was not signal-classified");
+         Subprocesses.Close (Child);
+      end;
+
+      declare
+         Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+         Descendant : C.int;
+      begin
+         Value := Capture.Run
+           (Fixture_Command ("descendant"), Timeout => 2.0);
+         Descendant := C.int'Value (Capture.Standard_Output (Value));
+         Assert
+           (Ada.Real_Time.Clock - Started < Ada.Real_Time.Seconds (2),
+            "descendant retained capture pipes");
+         for Attempt in 1 .. 100 loop
+            exit when Pid_Exists (Descendant) = 0;
+            delay 0.001;
+         end loop;
+         Assert (Pid_Exists (Descendant) = 0,
+                 "process-group descendant escaped cleanup");
+      end;
+   end Exercise;
+
+   task type Runner (Model : Flyology.Execution_Model) is
+      pragma Task_Info (Model);
+   end Runner;
+
+   task body Runner is
+   begin
+      Exercise;
+   exception
+      when Occurrence : others =>
+         Outcome.Fail
+           (Ada.Exceptions.Exception_Information (Occurrence));
+   end Runner;
+
+   procedure Run_Model (Model : Flyology.Execution_Model) is
+   begin
+      Outcome.Reset;
+      declare
+         Item : Runner (Model);
+      begin
+         null;
+      end;
+      Outcome.Check;
+   end Run_Model;
+
+   protected Parallel_Outcome is
+      procedure Complete;
+      procedure Fail;
+      procedure Check;
+   private
+      Completed : Natural := 0;
+      Failed    : Boolean := False;
+   end Parallel_Outcome;
+
+   protected body Parallel_Outcome is
+      procedure Complete is
+      begin
+         Completed := Completed + 1;
+      end Complete;
+
+      procedure Fail is
+      begin
+         Failed := True;
+      end Fail;
+
+      procedure Check is
+      begin
+         Assert
+           (not Failed and then Completed = 4,
+            "concurrent independent subprocesses failed");
+      end Check;
+   end Parallel_Outcome;
+
+   task type Parallel_Runner (Index : Positive) is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Parallel_Runner;
+
+   task body Parallel_Runner is
+      pragma Unreferenced (Index);
+      Value : Capture.Result;
+   begin
+      Value := Capture.Run (Fixture_Command ("capture"), Timeout => 2.0);
+      if Subprocesses.Successful (Capture.Status (Value))
+        and then Capture.Standard_Output (Value) = "stdout-value"
+      then
+         Parallel_Outcome.Complete;
+      else
+         Parallel_Outcome.Fail;
+      end if;
+   exception
+      when others => Parallel_Outcome.Fail;
+   end Parallel_Runner;
+
+   Before, After : C.int;
+begin
+   Run_Model (Flyology.Lightweight_Task);
+   Run_Model (Flyology.Native_Task);
+
+   declare
+      First  : Parallel_Runner (1);
+      Second : Parallel_Runner (2);
+      Third  : Parallel_Runner (3);
+      Fourth : Parallel_Runner (4);
+   begin
+      null;
+   end;
+   Parallel_Outcome.Check;
+
+   Before := Open_FD_Count;
+   for Iteration in 1 .. 25 loop
+      declare
+         Value : constant Capture.Result :=
+           Capture.Run (Fixture_Command ("capture"));
+      begin
+         Assert (Subprocesses.Successful (Capture.Status (Value)),
+                 "repeated spawn failed");
+      end;
+   end loop;
+   After := Open_FD_Count;
+   Assert (After = Before, "subprocess operations leaked descriptors");
+end Subprocess_Smoke;

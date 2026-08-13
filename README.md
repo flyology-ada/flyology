@@ -50,6 +50,7 @@ based on the surviving correspondence.
 - [Cache-line-aware storage](#cache-line-aware-storage)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
+  - [Native subprocesses](#native-subprocesses)
   - [TLS](#tls)
   - [DNS resolution](#dns-resolution)
   - [Connection lifecycle](#connection-lifecycle)
@@ -1348,6 +1349,10 @@ Flyology exposes synchronous operations in:
   stream sockets with one API for native and lightweight tasks.
 - `Flyology.IO.DNS`: A/AAAA resolution over task-aware UDP and TCP, without a
   resolver worker thread.
+- `Flyology.Subprocesses`: typed native process spawning, owned standard-stream
+  pipes, exit waits, signals, and structured process-group cleanup.
+- `Flyology.Subprocesses.Capture`: bounded concurrent stdin, stdout, and stderr
+  progress for finite commands.
 - `Flyology.IO`: descriptor waits and task-mode detection used by the packages
   above.
 
@@ -1473,6 +1478,48 @@ task-aware `Connect` and the blocking `Connect_Socket` wait for the socket to
 resolve and then report its pending `SO_ERROR`. `Connect` resolves that wait
 within its own deadline; `Connect_Socket` has no deadline and waits until the
 handshake succeeds or fails.
+
+### Native subprocesses
+
+`Flyology.Subprocesses` starts Darwin and Linux executables with `posix_spawn`,
+not a shell command string and not a `fork` followed by Ada runtime work. A
+`Command` retains separate argument values, optional explicit environment
+entries, an optional working directory, and explicit path-search selection.
+Spawn is synchronous and can occupy a lightweight caller's event-loop pthread.
+Use a native-task boundary when that latency is not acceptable. Spawn also
+resets the child signal mask and catchable signal dispositions before exec.
+
+A limited `Process` owns the root process, its new process group, nonblocking
+parent pipe ends, and one native reaper task. Pipe reads and writes use the
+same descriptor readiness path as sockets: a lightweight caller suspends only
+its task, while a native caller may block only its pthread. The reaper converts
+root exit into a normal Flyology wake descriptor, reaps the root, and removes
+ordinary descendants that remain in the original group. A child that
+deliberately leaves the group with `setpgid` or `setsid` is outside this
+cleanup boundary.
+
+Low-level waits, pipe operations, and signals keep process policy explicit.
+`Wait` classifies ordinary exit and signal termination but does not terminate
+the process when a caller deadline expires. `Stop` requests graceful group
+termination and waits for the root for its grace interval. Root exit triggers
+immediate hard cleanup of remaining group members; otherwise `Stop` applies
+hard termination when the grace interval expires. `Close` and
+finalization hard-terminate an unjoined group, reap the root, close every pipe,
+and join the reaper. Finalization can wait indefinitely if the kernel cannot
+complete hard termination.
+
+`Flyology.Subprocesses.Capture.Run` is the bounded structured layer. It
+interleaves stdin writes with stdout and stderr reads under one monotonic
+command-progress deadline and optional cancellation token. After either
+retention bound is full, it continues draining and reports truncation instead
+of allowing a full pipe to deadlock the child. Timeout or cancellation attempts
+hard structured cleanup and closes the parent descriptors before the original
+exception propagates. Cleanup failures are suppressed in that path, and
+cleanup can extend delivery beyond the command-progress deadline.
+
+Each live process currently consumes one native reaper task and pthread. This
+initial backend is intended for bounded subprocess populations. A shared
+high-density reaper remains a separate design boundary.
 
 ### TLS
 

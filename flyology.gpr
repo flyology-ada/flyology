@@ -53,6 +53,19 @@ project Flyology is
            "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=True";
    end case;
 
+   type Subprocess_Test_Hooks_Type is ("false", "true");
+   Subprocess_Test_Hooks : Subprocess_Test_Hooks_Type :=
+     external ("FLYOLOGY_SUBPROCESS_TEST_HOOKS", "false");
+   Subprocess_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_SUBPROCESS_TEST_HOOKS=False";
+   case Subprocess_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Subprocess_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_SUBPROCESS_TEST_HOOKS=True";
+   end case;
+
    type Structured_Server_Test_Hooks_Type is ("false", "true");
    Structured_Server_Test_Hooks : Structured_Server_Test_Hooks_Type :=
      external ("FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS", "false");
@@ -186,6 +199,8 @@ project Flyology is
              "flyology-native_executor_policy.ads",
              "flyology-native_executors.ads",
              "flyology-process_lifecycle.ads",
+            "flyology-subprocesses.ads",
+            "flyology-subprocesses-capture.ads",
             "flyology-supervision.ads",
             "flyology-supervision-children.ads",
             "flyology-supervision-adapters.ads",
@@ -214,7 +229,8 @@ project Flyology is
         Flyology_Config.Ada_Compiler_Switches
         & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
            Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
-           Wall_Clock_Test_Hook_Switch, TLS_Ada_Test_Hook_Switch);
+           Subprocess_Test_Hook_Switch, Wall_Clock_Test_Hook_Switch,
+           TLS_Ada_Test_Hook_Switch);
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
          Socket_Test_Hook_Switch);

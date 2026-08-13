@@ -9,11 +9,13 @@ worker_pool_test_subdir=behavioral-worker-pool-hooks
 structured_server_test_subdir=behavioral-structured-server-hooks
 wall_clock_test_subdir=behavioral-wall-clock-hooks
 socket_test_subdir=behavioral-socket-hooks
+subprocess_test_subdir=behavioral-subprocess-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
 wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
+subprocess_test_bin="$project_root/tests/bin/$subprocess_test_subdir"
 test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
 FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
 export FLYOLOGY_TEST_TEMP_ROOT
@@ -123,6 +125,8 @@ link_test_mains () {
 #  lifetime telemetry.
 FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
+FLYOLOGY_SUBPROCESS_TEST_HOOKS=false
+export FLYOLOGY_SUBPROCESS_TEST_HOOKS
 "$alr" build
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
@@ -130,6 +134,8 @@ assert_archive_includes \
   "$project_root/lib/libFlyology.a" flyology_socket_unix_path_max
 assert_archive_includes \
   "$project_root/lib/libFlyology.a" flyology_socket_pack_unix_path
+"$project_root/scripts/check-subprocess-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
 mkdir -p "$project_root/build/tests"
 cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/tests/probes/shared_memory_abi_probe.c" \
@@ -141,9 +147,15 @@ cc -std=c11 -Wall -Wextra -Werror -pthread \
   "$project_root/src/native/flyology_sockets.c" \
   -o "$project_root/build/tests/unix_socket_abi_probe"
 "$project_root/build/tests/unix_socket_abi_probe"
+cc -std=c11 -Wall -Wextra -Werror \
+  "$project_root/tests/probes/subprocess_abi_probe.c" \
+  "$project_root/src/native/flyology_subprocesses.c" \
+  -pthread \
+  -o "$project_root/build/tests/subprocess_abi_probe"
+"$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_' \
+  'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -340,6 +352,7 @@ flyology-supervision-families_shutdown_smoke
 flyology-supervision-adapters_smoke
 flyology-supervision-adapters_exit_smoke
 flyology-supervision-service_slots_smoke
+flyology-supervision-subprocess_smoke
 flyology-supervision-task_generations_smoke
 flyology-supervision_policy-smoke
 flyology-wall_clock_native_policy-smoke
@@ -380,6 +393,8 @@ stall_watchdog_smoke
 structured_server_smoke
 structured_server_reset_smoke
 structured_server_tls_smoke
+subprocess_fixture
+subprocess_smoke
 thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke
@@ -422,10 +437,13 @@ wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 
 socket_hook_mains=socket_preparation_smoke
 
+subprocess_hook_mains='subprocess_fixture
+subprocess_smoke'
+
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|subprocess_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -456,6 +474,7 @@ unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
 compile_test_mains "$test_subdir" "$all_test_mains"
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
@@ -483,6 +502,11 @@ FLYOLOGY_SOCKET_TEST_HOOKS=true
 export FLYOLOGY_SOCKET_TEST_HOOKS
 compile_test_mains "$socket_test_subdir" "$socket_hook_mains"
 unset FLYOLOGY_SOCKET_TEST_HOOKS
+
+FLYOLOGY_SUBPROCESS_TEST_HOOKS=true
+export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+compile_test_mains "$subprocess_test_subdir" "$subprocess_hook_mains"
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains \
@@ -543,6 +567,13 @@ link_test_mains \
   "$socket_test_subdir" "$project_root/build/rts" "$socket_hook_mains"
 unset FLYOLOGY_SOCKET_TEST_HOOKS
 
+FLYOLOGY_SUBPROCESS_TEST_HOOKS=true
+export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+link_test_mains \
+  "$subprocess_test_subdir" "$project_root/build/rts" \
+  "$subprocess_hook_mains"
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
+
 "$test_bin/default_policy_smoke" native
 "$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
 "$socket_test_bin/socket_preparation_smoke"
@@ -555,6 +586,9 @@ for test_main in $ordinary_mains; do
       ;;
     concurrency_primitives_smoke|task_scope_faults_smoke)
       current_test_bin=$worker_pool_test_bin
+      ;;
+    subprocess_smoke)
+      current_test_bin=$subprocess_test_bin
       ;;
     *)
       current_test_bin=$test_bin
@@ -789,6 +823,7 @@ unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \
