@@ -390,6 +390,42 @@ Flyology.IO.Sockets.Receive
 Flyology.IO.Files.Read_At
   (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
             </figure>
+            <h3 id="unix-sockets">Connect to a pathname Unix socket</h3>
+            <p>Use a <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#180088226241a9ab524ad694fcee75917fa14db078af5938d29c54ae7b203d21"><code>Unix_Path</code></a> for a pathname socket instead of the Internet <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#9f1989e144800f56d7cae428cc26f045c846cb5dca77e1a44d53ac28cd14ff90"><code>Endpoint</code></a> type. <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#68ac23bf4fe8c7b704fbac178d17215c8ea4e4652d62899322a8077410b4bce6"><code>Unix_Pathname</code></a> rejects an empty path, an embedded NUL byte, or a value longer than the host limit. Flyology passes the accepted bytes to the operating system without encoding conversion. <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#cc36d407e2fec51c38fadfeb9f960ef35a0929852a5b8bce702d62c0ff160c01"><code>Maximum_Unix_Path_Length</code></a> reports the maximum pathname byte count, excluding the terminating NUL byte.</p>
+            <p>Create an owned <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#7f60ea9d1590dc545f7fbd6ebae88361924604cac0ccac4ac6fa6262fdccc314"><code>Socket_Type</code></a> with <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#e44f6823772f7ed18b6d72233e1458524aa96a1352c53a08e8395cf922ef3c1a"><code>Create_Unix_Stream_Socket</code></a>. Then call the pathname overload of <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#49d8867b031497a598727d25f62890d72baa909c5032f08937634d053f789ff7"><code>Connect</code></a>. A native task can block its OS thread during the call. A lightweight task suspends while its event loop waits for socket readiness.</p>
+            <p>The timeout covers the complete connection attempt. A readable interrupt descriptor raises <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#42447da94422f56644dfed3cedf5e9951e7b3ea41272ba9f862ed502bfb1f648"><code>Operation_Interrupted</code></a>. Host socket failures raise <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#4ba7f323eda4780c62dd2a7e0f1fd3f4fc53091ab355a75b92ade1dd2fb7d526"><code>Socket_Error</code></a>. Once created, the caller retains closing ownership and must call <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#1a9dcc6bd4ff19abf526a983aaba9a048fd44097252e4ed115a0e609e72d83a1"><code>Close_Socket</code></a> after connection success or failure.</p>
+            <figure class="code-panel">
+              <figcaption>connect to the Docker Unix socket</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO.Sockets;
+
+procedure Use_Docker_Socket is
+   package Sockets renames Flyology.IO.Sockets;
+   Docker : constant Sockets.Unix_Path :=
+     Sockets.Unix_Pathname ("/var/run/docker.sock");
+   Socket : Sockets.Socket_Type;
+begin
+   Sockets.Create_Unix_Stream_Socket (Socket);
+   begin
+      Sockets.Connect (Socket, Docker, Timeout =&gt; 2.0);
+      --  Use Socket for the Docker HTTP exchange here.
+   exception
+      when others =&gt;
+         begin
+            Sockets.Close_Socket (Socket);
+         exception
+            when Sockets.Socket_Error =&gt; null;
+         end;
+         raise;
+   end;
+   Sockets.Close_Socket (Socket);
+end Use_Docker_Socket;</code></pre>
+            </figure>
+            <p>For a local server or a deterministic test, call the pathname overload of <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#d77756d9e4fd7c2713f938c931f0391a92bd8bdc133c7ca0282c9835b7b21025"><code>Bind_Socket</code></a>, then <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#c073e31734e52fe21c46537cad2ab08287b429e70a89472768bc41a75164fb2c"><code>Listen_Socket</code></a> and the address-free <a href="../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#35ee8eb86166e656f53b73edba9b0c5cf3af827ff771230e6206660f1d290ee8"><code>Accept_Connection</code></a> overload. Binding creates a filesystem entry under the process umask and directory permissions. Flyology does not unlink an existing path before bind and does not remove the entry when the listener closes. The application owns stale-entry checks, safe replacement, and final unlink.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Pathname Unix sockets are supported on macOS and Linux. Windows and the Linux abstract namespace are not supported. Filesystem permissions control access to the socket entry, but they do not authenticate the peer. Treat peer credentials and the application protocol as separate security boundaries.</p>
+            </aside>
             <p>For relative waits, monotonic deadlines, adjustable wall-clock targets, and backward-clock detection, continue with the <a href="timers/">timers guide</a>.</p>
             <p>To move positional regular-file regions to connected stream sockets with native <code>sendfile</code>, Linux lightweight <code>SEND_ZC</code>, and completion-driven fallbacks, continue with the <a href="file-transfers/">file-transfer guide</a>.</p>
             <p>Use the ownership-aware connection packages when descriptor lifetime, cancellation, and close races matter. Raw descriptor waits deliberately leave lifetime serialization to the caller.</p>
