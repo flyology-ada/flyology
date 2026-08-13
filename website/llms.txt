@@ -4,6 +4,17 @@
 
 Flyology uses the terms "lightweight task" and "native task." Lightweight scheduling is cooperative, not preemptive. The project does not claim production qualification, universal portability, or hard real-time behavior. Runtime preparation supports only the exact host and compiler release pairs documented by the project; do not infer support from the broader Alire dependency range.
 
+Flyology is currently published through a separate Alire organization index. Keep the community index enabled for compiler and third-party dependencies, then add the Flyology index before it:
+
+```sh
+alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology
+```
+
+The Flyology index is a development channel, not a community-index release. Remove it with `alr index --del flyology` when Flyology is available from the community index.
+
 ## Documentation
 
 - [Overview](https://flyology.org/): Project scope, programming model, included building blocks, and important constraints.
