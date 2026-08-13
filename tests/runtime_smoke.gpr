@@ -160,6 +160,7 @@ project Runtime_Smoke is
       "tls_take_abort.adb",
       "tls_state_model.adb",
       "tcp_native_smoke.adb",
+      "unix_stream_socket_smoke.adb",
       "wake_source_state_model.adb",
       "wait_any_smoke.adb",
       "wall_clock_wait_smoke.adb");

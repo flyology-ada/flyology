@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <netinet/in.h>
+#include <stddef.h>
 #include <stdint.h>
 #if FLYOLOGY_SOCKET_TEST_HOOKS
 #include <stdatomic.h>
@@ -18,6 +19,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include "flyology_tls_signal.h"
@@ -57,6 +59,8 @@ _Static_assert(sizeof(struct sockaddr_storage) <= 16U * sizeof(uint64_t),
                "Ada socket-address storage is too small");
 _Static_assert(_Alignof(struct sockaddr_storage) <= _Alignof(uint64_t),
                "Ada socket-address storage alignment is too small");
+_Static_assert(sizeof(struct sockaddr_un) <= 16U * sizeof(uint64_t),
+               "Ada socket-address storage is too small for sockaddr_un");
 _Static_assert(sizeof(socklen_t) == sizeof(unsigned),
                "Ada socklen_t binding requires unsigned");
 _Static_assert(sizeof(ssize_t) == sizeof(long),
@@ -80,6 +84,48 @@ int flyology_socket_ipv6_domain(void)
 int flyology_socket_local_domain(void)
 {
     return AF_UNIX;
+}
+
+unsigned flyology_socket_unix_path_max(void)
+{
+    return (unsigned)sizeof(((struct sockaddr_un *)0)->sun_path) - 1U;
+}
+
+/* sockaddr_un field order, sun_path capacity, Darwin's sun_len, and the
+   kernel address length are host-header ABI facts. Ada validates the public
+   pathname and owns all bind/connect, retry, deadline, cleanup, and exception
+   policy; this leaf only reproduces the native record representation. */
+int flyology_socket_pack_unix_path(
+    const char *path,
+    unsigned path_length,
+    struct sockaddr_storage *storage,
+    socklen_t *length)
+{
+    struct sockaddr_un *value = (struct sockaddr_un *)storage;
+
+    if (path_length == 0U) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (path_length >= sizeof(value->sun_path)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if (memchr(path, '\0', path_length) != NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    memset(storage, 0, sizeof(*storage));
+    value->sun_family = AF_UNIX;
+    memcpy(value->sun_path, path, path_length);
+    value->sun_path[path_length] = '\0';
+    *length = (socklen_t)(offsetof(struct sockaddr_un, sun_path) +
+                          path_length + 1U);
+#if defined(__APPLE__)
+    value->sun_len = (unsigned char)*length;
+#endif
+    return 0;
 }
 
 int flyology_socket_stream_kind(void)

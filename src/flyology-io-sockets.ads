@@ -15,6 +15,31 @@ with Interfaces.C;
 --  operation.
 package Flyology.IO.Sockets is
 
+   --  Opaque pathname for an AF_UNIX stream socket. Unix_Pathname validates
+   --  the pathname against the host sockaddr_un.sun_path capacity. Bytes are
+   --  passed to the operating system unchanged: Flyology performs no character
+   --  encoding conversion. Abstract Linux namespace addresses are not
+   --  represented.
+   type Unix_Path is private;
+
+   --  Construct a pathname Unix-socket address. Path must be nonempty, contain
+   --  no NUL byte, and be no longer than Maximum_Unix_Path_Length. The limit
+   --  is host-dependent and excludes the terminating NUL.
+   --  @param Path Filesystem pathname bytes
+   --  @return Validated Unix-socket pathname
+   --  @exception Constraint_Error Path is empty, contains NUL, or is too long
+   function Unix_Pathname (Path : String) return Unix_Path;
+
+   --  Return the pathname bytes supplied to Unix_Pathname.
+   --  @param Value Unix-socket pathname
+   --  @return Original pathname bytes
+   function Image (Value : Unix_Path) return String;
+
+   --  Return the host pathname capacity of sockaddr_un.sun_path, excluding
+   --  the terminating NUL.
+   --  @return Maximum accepted Unix pathname length in bytes
+   function Maximum_Unix_Path_Length return Positive;
+
    --  Address family represented by an Internet address or endpoint.
    type Address_Family is
      (IPv4,  --  Internet Protocol version 4
@@ -219,6 +244,16 @@ package Flyology.IO.Sockets is
      with Pre => not Is_Open (Socket),
           Post => Is_Open (Socket);
 
+   --  Create one blocking AF_UNIX SOCK_STREAM socket. Task-aware operations
+   --  configure it as nonblocking before use. Unix pathname sockets are
+   --  supported on macOS and Linux; no Windows backend is provided.
+   --  @param Socket Newly created socket owned by the caller
+   --  @exception Socket_Error Creation or descriptor configuration fails
+   --  @exception Program_Error Socket is already open
+   procedure Create_Unix_Stream_Socket (Socket : in out Socket_Type)
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
+
    --  Create a connected local socket pair for IPC and testing.
    --  @param Left First socket owned by the caller
    --  @param Right Second socket owned by the caller
@@ -318,6 +353,17 @@ package Flyology.IO.Sockets is
    --  @param Address Local endpoint
    --  @exception Socket_Error bind fails
    procedure Bind_Socket (Socket : Socket_Type; Address : Endpoint);
+
+   --  Bind Socket to a pathname Unix address. The operating system creates a
+   --  filesystem entry, normally governed by the process umask and directory
+   --  permissions. Flyology never removes or replaces that entry: its owner
+   --  must unlink stale and final entries, while excluding unsafe namespace
+   --  replacement. Binding does not authenticate future peers.
+   --  @param Socket Open AF_UNIX stream socket
+   --  @param Address Validated filesystem pathname
+   --  @exception Socket_Error bind fails, including an existing entry or a
+   --  directory permission failure
+   procedure Bind_Socket (Socket : Socket_Type; Address : Unix_Path);
 
    --  Mark a stream socket as a listener.
    --  @param Socket Bound stream socket
@@ -673,6 +719,30 @@ package Flyology.IO.Sockets is
        Interrupts'Length < Max_Wait_Requests,
        Post => Is_Open (Socket);
 
+   --  Accept one pathname Unix-stream connection and configure it for
+   --  Flyology I/O. No peer pathname is returned because connected pathname
+   --  clients commonly have no bound address. Filesystem permissions control
+   --  connection admission only; peer credentials and application trust must
+   --  be established separately when required.
+   --  @param Server Open AF_UNIX stream listener; ownership is retained
+   --  @param Socket Newly accepted socket owned by the caller
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before an accept
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails
+   --  @exception Socket_Error Accept or setup fails
+   --  @exception Program_Error Socket is already open
+   procedure Accept_Connection
+     (Server     : Socket_Type;
+      Socket     : in out Socket_Type;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre =>
+       not Is_Open (Socket) and then
+       Interrupts'Length < Max_Wait_Requests,
+       Post => Is_Open (Socket);
+
    --  Connect Socket to Server with task-aware readiness and one deadline. An
    --  attempt that the kernel is still establishing, including one reported as
    --  interrupted by a signal, resolves through the same deadline.
@@ -691,7 +761,32 @@ package Flyology.IO.Sockets is
       Interrupts : Interrupt_Set := No_Interrupts)
      with Pre => Interrupts'Length < Max_Wait_Requests;
 
+   --  Connect Socket to a pathname Unix-stream server with task-aware
+   --  readiness and one deadline. The pathname names a filesystem entry, not
+   --  an authenticated peer; callers remain responsible for peer trust.
+   --  @param Socket Open AF_UNIX stream socket; ownership is retained
+   --  @param Server Validated destination pathname
+   --  @param Timeout Deadline interval in seconds
+   --  @param Interrupts Independent readable lifecycle wake descriptors
+   --  @exception Timeout_Error The deadline expires before connection
+   --  @exception Operation_Interrupted An interrupt descriptor is readable
+   --  @exception Device_Error Readiness polling fails
+   --  @exception Socket_Error Connect or setup fails
+   procedure Connect
+     (Socket     : Socket_Type;
+      Server     : Unix_Path;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre => Interrupts'Length < Max_Wait_Requests;
+
 private
+   Unix_Path_Storage_Capacity : constant := 108;
+   subtype Unix_Path_Bytes is String (1 .. Unix_Path_Storage_Capacity);
+   type Unix_Path is record
+      Length : Natural range 0 .. Unix_Path_Storage_Capacity := 0;
+      Bytes  : Unix_Path_Bytes := (others => Character'Val (0));
+   end record;
+
    type Socket_Type is limited record
       Value       : Interfaces.C.int := -1;
       Preparation : aliased Interfaces.Unsigned_32 := 0 with Atomic;

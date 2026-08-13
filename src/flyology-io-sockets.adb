@@ -15,6 +15,7 @@ package body Flyology.IO.Sockets is
    use type Interfaces.C.long;
    use type Interfaces.C.unsigned;
    use type Interfaces.C.unsigned_char;
+   use type Flyology.Socket_Policy.Error_Kind;
    use type System.Address;
 
    package Atomics renames System.Atomic_Primitives;
@@ -32,6 +33,37 @@ package body Flyology.IO.Sockets is
    pragma Import (Intrinsic, Atomic_Store, "__atomic_store_n");
 
    procedure Atomic_Store_32 is new Atomic_Store (Atomics.uint32);
+
+   function C_Unix_Path_Max return Interfaces.C.unsigned;
+   pragma Import
+     (C, C_Unix_Path_Max, "flyology_socket_unix_path_max");
+
+   function Maximum_Unix_Path_Length return Positive is
+     (Positive (C_Unix_Path_Max));
+
+   function Unix_Pathname (Path : String) return Unix_Path is
+      Limit : constant Positive := Maximum_Unix_Path_Length;
+      Result : Unix_Path;
+   begin
+      if Path'Length = 0 then
+         raise Constraint_Error with "Unix socket pathname is empty";
+      elsif Path'Length > Limit
+        or else Path'Length > Unix_Path_Storage_Capacity
+      then
+         raise Constraint_Error with "Unix socket pathname is too long";
+      end if;
+      for Byte of Path loop
+         if Byte = Character'Val (0) then
+            raise Constraint_Error with "Unix socket pathname contains NUL";
+         end if;
+      end loop;
+      Result.Length := Path'Length;
+      Result.Bytes (1 .. Path'Length) := Path;
+      return Result;
+   end Unix_Pathname;
+
+   function Image (Value : Unix_Path) return String is
+     (Value.Bytes (1 .. Value.Length));
 
    function Preparation_State (Socket : Socket_Type) return Atomics.uint32 is
      (Atomics.Atomic_Load_32
@@ -136,6 +168,14 @@ package body Flyology.IO.Sockets is
       Length  : access Interfaces.C.unsigned) return Interfaces.C.int;
    pragma Import
      (C, C_Pack_Address, "flyology_socket_pack_address");
+
+   function C_Pack_Unix_Path
+     (Path    : System.Address;
+      Length  : Interfaces.C.unsigned;
+      Storage : System.Address;
+      Size    : access Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import
+     (C, C_Pack_Unix_Path, "flyology_socket_pack_unix_path");
 
    function C_Unpack_Address
      (Storage : System.Address;
@@ -325,6 +365,7 @@ package body Flyology.IO.Sockets is
 
    function C_Accept
      (Socket  : Interfaces.C.int;
+      Decode_Address : Interfaces.C.int;
       Family  : access Interfaces.C.unsigned_char;
       Address : System.Address;
       Port    : access Interfaces.C.unsigned;
@@ -348,6 +389,7 @@ package body Flyology.IO.Sockets is
    protected type Accept_Return_Bridge is
       procedure Invoke
         (Listener : Interfaces.C.int;
+         Decode_Address : Interfaces.C.int;
          Family   : access Interfaces.C.unsigned_char;
          Address  : System.Address;
          Port     : access Interfaces.C.unsigned;
@@ -364,6 +406,11 @@ package body Flyology.IO.Sockets is
       Port    : Interfaces.C.unsigned;
       Scope   : Interfaces.C.unsigned;
       Error   : access Interfaces.C.int) return Interfaces.C.int;
+
+   function C_Connect
+     (Socket : Interfaces.C.int;
+      Path   : Unix_Path;
+      Error  : access Interfaces.C.int) return Interfaces.C.int;
 
    function C_Pending_Error
      (Socket  : Interfaces.C.int;
@@ -506,6 +553,7 @@ package body Flyology.IO.Sockets is
    is
      (if Family = 6 then C_IPv6_Domain
       elsif Family = 4 then C_IPv4_Domain
+      elsif Family = 0 then C_Local_Domain
       else -1);
 
    function Native_Kind (Mode : Interfaces.C.int) return Interfaces.C.int is
@@ -701,6 +749,27 @@ package body Flyology.IO.Sockets is
       return 0;
    end C_Bind;
 
+   function C_Bind
+     (Socket : Interfaces.C.int;
+      Path   : Unix_Path;
+      Error  : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Length  : aliased Interfaces.C.unsigned := 0;
+   begin
+      if C_Pack_Unix_Path
+           (Path.Bytes (Path.Bytes'First)'Address,
+            Interfaces.C.unsigned (Path.Length), Storage'Address,
+            Length'Access) < 0
+        or else C_Bind_Raw (Socket, Storage'Address, Length) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Bind;
+
    function C_Listen
      (Socket  : Interfaces.C.int;
       Backlog : Interfaces.C.int;
@@ -757,6 +826,7 @@ package body Flyology.IO.Sockets is
 
    function C_Accept
      (Socket  : Interfaces.C.int;
+      Decode_Address : Interfaces.C.int;
       Family  : access Interfaces.C.unsigned_char;
       Address : System.Address;
       Port    : access Interfaces.C.unsigned;
@@ -773,13 +843,18 @@ package body Flyology.IO.Sockets is
          Error.all := Current_Errno;
          return -1;
       end if;
-      if C_Unpack_Address
-           (Storage'Address, Length, Family, Address, Port, Scope) < 0
+      if Decode_Address /= 0
+        and then C_Unpack_Address
+          (Storage'Address, Length, Family, Address, Port, Scope) < 0
       then
          Error.all := Current_Errno;
          Close_Ignoring_Errors (Accepted);
          return Failed_Accept_Status
            (Flyology.Socket_Policy.Peer_Address_Decode);
+      elsif Decode_Address = 0 then
+         Family.all := 0;
+         Port.all := 0;
+         Scope.all := 0;
       end if;
       if C_Configure_Descriptor (Accepted, 1) < 0 then
          Error.all := Current_Errno;
@@ -804,6 +879,27 @@ package body Flyology.IO.Sockets is
    begin
       if C_Pack_Address
            (Family, Address, Port, Scope, Storage'Address, Length'Access) < 0
+        or else C_Raw_Connect (Socket, Storage'Address, Length) < 0
+      then
+         Error.all := Current_Errno;
+         return -1;
+      end if;
+      Error.all := 0;
+      return 0;
+   end C_Connect;
+
+   function C_Connect
+     (Socket : Interfaces.C.int;
+      Path   : Unix_Path;
+      Error  : access Interfaces.C.int) return Interfaces.C.int
+   is
+      Storage : aliased Socket_Address_Storage := (others => 0);
+      Length  : aliased Interfaces.C.unsigned := 0;
+   begin
+      if C_Pack_Unix_Path
+           (Path.Bytes (Path.Bytes'First)'Address,
+            Interfaces.C.unsigned (Path.Length), Storage'Address,
+            Length'Access) < 0
         or else C_Raw_Connect (Socket, Storage'Address, Length) < 0
       then
          Error.all := Current_Errno;
@@ -957,6 +1053,7 @@ package body Flyology.IO.Sockets is
    protected body Accept_Return_Bridge is
       procedure Invoke
         (Listener : Interfaces.C.int;
+         Decode_Address : Interfaces.C.int;
          Family   : access Interfaces.C.unsigned_char;
          Address  : System.Address;
          Port     : access Interfaces.C.unsigned;
@@ -967,7 +1064,7 @@ package body Flyology.IO.Sockets is
       is
       begin
          Result := C_Accept
-           (Listener, Family, Address, Port, Scope, Error);
+           (Listener, Decode_Address, Family, Address, Port, Scope, Error);
          if Result >= 0 then
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
             Test_Raw_Accept_Return_Barrier;
@@ -1203,6 +1300,23 @@ package body Flyology.IO.Sockets is
       Set_Preparation_State (Socket.Preparation'Address, Unprepared);
    end Create_Socket;
 
+   procedure Create_Unix_Stream_Socket (Socket : in out Socket_Type) is
+      Error  : aliased Interfaces.C.int;
+      Result : Interfaces.C.int;
+   begin
+      if Is_Open (Socket) then
+         raise Program_Error with "socket creation target is open";
+      end if;
+      Result := C_Create (0, Mode_Code (Socket_Stream), Error'Access);
+      if Result < 0 then
+         Socket.Value := -1;
+         Set_Preparation_State (Socket.Preparation'Address, Unprepared);
+         Raise_Error ("socket", Error);
+      end if;
+      Socket.Value := Result;
+      Set_Preparation_State (Socket.Preparation'Address, Unprepared);
+   end Create_Unix_Stream_Socket;
+
    procedure Create_Socket_Pair
      (Left  : in out Socket_Type;
       Right : in out Socket_Type;
@@ -1313,6 +1427,14 @@ package body Flyology.IO.Sockets is
             Interfaces.C.unsigned (Address.Port),
             Interfaces.C.unsigned (Address.Scope), Error'Access) /= 0
       then
+         Raise_Error ("bind", Error);
+      end if;
+   end Bind_Socket;
+
+   procedure Bind_Socket (Socket : Socket_Type; Address : Unix_Path) is
+      Error : aliased Interfaces.C.int;
+   begin
+      if C_Bind (Socket.Value, Address, Error'Access) /= 0 then
          Raise_Error ("bind", Error);
       end if;
    end Bind_Socket;
@@ -1979,12 +2101,13 @@ package body Flyology.IO.Sockets is
       Flyology.Buffers.With_Readable_Data (Item, Borrow'Access);
    end Send_All;
 
-   procedure Accept_Connection
+   procedure Accept_Internal
      (Server     : Socket_Type;
       Socket     : in out Socket_Type;
       Address    : out Endpoint;
-      Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
+      Timeout    : Duration;
+      Interrupts : Interrupt_Set;
+      Decode_Address : Boolean)
    is
       Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Pressure_Backoff : Duration := 0.001;
@@ -2038,6 +2161,7 @@ package body Flyology.IO.Sockets is
          begin
             Bridge.Invoke
               (Server.Value,
+               Boolean'Pos (Decode_Address),
                Family'Access,
                Bytes (Bytes'First)'Address,
                Port'Access,
@@ -2081,12 +2205,14 @@ package body Flyology.IO.Sockets is
                        (Family => IPv4,
                         V4 => (Bytes (1), Bytes (2), Bytes (3), Bytes (4))),
                      Port => Flyology.IO.Sockets.Port (Port), Scope => 0);
-               else
+               elsif Family = 6 then
                   Address :=
                     (Family => IPv6,
                      Address => (Family => IPv6, V6 => Bytes),
                      Port => Flyology.IO.Sockets.Port (Port),
                      Scope => Scope_ID (Scope));
+               else
+                  Address := No_Endpoint;
                end if;
                return;
             end if;
@@ -2098,6 +2224,31 @@ package body Flyology.IO.Sockets is
             Close_Socket (Socket);
          end if;
          raise;
+   end Accept_Internal;
+
+   procedure Accept_Connection
+     (Server     : Socket_Type;
+      Socket     : in out Socket_Type;
+      Address    : out Endpoint;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) is
+   begin
+      Accept_Internal
+        (Server, Socket, Address, Timeout, Interrupts,
+         Decode_Address => True);
+   end Accept_Connection;
+
+   procedure Accept_Connection
+     (Server     : Socket_Type;
+      Socket     : in out Socket_Type;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   is
+      Ignored : Endpoint;
+   begin
+      Accept_Internal
+        (Server, Socket, Ignored, Timeout, Interrupts,
+         Decode_Address => False);
    end Accept_Connection;
 
    procedure Accept_Socket
@@ -2160,6 +2311,71 @@ package body Flyology.IO.Sockets is
       end case;
 
       Complete_Connection (Socket, Started, Timeout, Interrupts);
+   end Connect;
+
+   procedure Connect
+     (Socket     : Socket_Type;
+      Server     : Unix_Path;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   is
+      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Error   : aliased Interfaces.C.int;
+      Result  : Interfaces.C.int;
+
+      procedure Pause_Before_Retry is
+         Requests : Wait_Request_Array (Interrupts'Range);
+         Left     : constant Duration := Remaining (Started, Timeout);
+         Pause    : constant Duration :=
+           (if Timeout < 0.0 then 0.001 else Duration'Min (0.001, Left));
+      begin
+         if Timeout >= 0.0 and then Left <= 0.0 then
+            raise Timeout_Error with "socket operation timed out";
+         end if;
+         for Index in Interrupts'Range loop
+            Requests (Index) :=
+              (FD => Interrupts (Index), Condition => For_Read);
+         end loop;
+         if Requests'Length > 0 then
+            if Wait_Any (Requests, Pause) /= 0 then
+               raise Operation_Interrupted with "socket operation interrupted";
+            end if;
+         else
+            delay Pause;
+         end if;
+         if Timeout >= 0.0 and then Remaining (Started, Timeout) <= 0.0 then
+            raise Timeout_Error with "socket operation timed out";
+         end if;
+      end Pause_Before_Retry;
+   begin
+      Prepare (Socket);
+      loop
+         Result := C_Connect (Socket.Value, Server, Error'Access);
+         if Result = 0 then
+            return;
+         end if;
+         if Policy_Error_Kind (Error) = Flyology.Socket_Policy.Would_Block then
+            --  Linux reports a full AF_UNIX listen queue as EAGAIN rather
+            --  than EINPROGRESS.  No connection is pending in that case, so
+            --  retry under the original deadline while still observing every
+            --  caller interrupt descriptor.
+            Pause_Before_Retry;
+         else
+            case Flyology.Socket_Policy.Classify_Connect_Error
+              (Policy_Error_Kind (Error))
+            is
+               when Flyology.Socket_Policy.Wait_For_Connection =>
+                  Complete_Connection
+                    (Socket, Started, Timeout, Interrupts);
+                  return;
+               when Flyology.Socket_Policy.Connected =>
+                  return;
+               when Flyology.Socket_Policy.Fail_Connect =>
+                  Raise_Error ("connect", Error);
+            end case;
+         end if;
+      end loop;
+
    end Connect;
 
 end Flyology.IO.Sockets;

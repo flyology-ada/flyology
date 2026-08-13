@@ -1362,6 +1362,25 @@ copy an owner. `Move`, `Adopt`, and `Release` transfer ownership explicitly and
 leave their source closed or invalid. Default-initialized handles are closed,
 and `Is_Open` reports whether a handle currently owns a descriptor.
 
+Pathname Unix-domain streams use the separate `Unix_Path` value rather than an
+Internet `Endpoint`. `Unix_Pathname` accepts a nonempty NUL-free Ada `String`
+whose byte length does not exceed `Maximum_Unix_Path_Length`; the bytes are
+passed to the host unchanged, with no encoding conversion. Linux abstract
+namespace addresses are outside this pathname API. `Create_Unix_Stream_Socket`,
+the `Bind_Socket` Unix-path overload, `Listen_Socket`, the address-free
+`Accept_Connection` overload, and the task-aware `Connect` Unix-path overload
+provide synchronous stream calls on macOS and Linux. There is no Windows
+backend.
+
+Binding creates a filesystem entry under the process umask and directory
+permissions. Flyology never unlinks or replaces it: the namespace owner must
+remove stale and final entries and exclude unsafe replacement races. Filesystem
+permissions are an admission boundary, not peer authentication; applications
+that depend on peer identity must apply platform credential checks or another
+application security mechanism. A connected client normally has no bound peer
+pathname, so the Unix accept overload deliberately returns no Internet-style
+address.
+
 `Flyology.IO.Sockets.GNAT_Adapters` provides explicit transfers to and from
 `GNAT.Sockets.Socket_Type`. Its `Adopt` and `Release` procedures invalidate the
 source handle before returning, so integration cannot create two closing

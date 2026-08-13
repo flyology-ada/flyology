@@ -70,6 +70,17 @@ assert_archive_excludes () {
   fi
 }
 
+assert_archive_includes () {
+  archive=$1
+  symbol=$2
+  if ! nm -g "$archive" | awk '{ print $NF }' | \
+       sed 's/^_//' | grep -Fx "$symbol" >/dev/null
+  then
+    printf '%s\n' "production archive omits required symbol: $symbol" >&2
+    exit 1
+  fi
+}
+
 compile_test_mains () {
   test_build_subdir=$1
   test_mains=$2
@@ -115,12 +126,21 @@ export FLYOLOGY_TLS_TEST_HOOKS
 "$alr" build
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
+assert_archive_includes \
+  "$project_root/lib/libFlyology.a" flyology_socket_unix_path_max
+assert_archive_includes \
+  "$project_root/lib/libFlyology.a" flyology_socket_pack_unix_path
 mkdir -p "$project_root/build/tests"
 cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/tests/probes/shared_memory_abi_probe.c" \
   "$project_root/src/native/flyology_shared_memory.c" \
   -o "$project_root/build/tests/shared_memory_abi_probe"
 "$project_root/build/tests/shared_memory_abi_probe"
+cc -std=c11 -Wall -Wextra -Werror -pthread \
+  "$project_root/tests/probes/unix_socket_abi_probe.c" \
+  "$project_root/src/native/flyology_sockets.c" \
+  -o "$project_root/build/tests/unix_socket_abi_probe"
+"$project_root/build/tests/unix_socket_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
   'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_' \
@@ -276,6 +296,7 @@ elif [ "$(uname -s)" = Darwin ]; then
 fi
 
 ordinary_mains='cancellation_wake_smoke
+unix_stream_socket_smoke
 buffer_channel_cancel_smoke
 buffers_smoke
 channel_reentrancy_child
