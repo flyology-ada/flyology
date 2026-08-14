@@ -1,6 +1,7 @@
 with Ada.Exceptions;
 with Ada.Task_Identification;
 with Ada.Unchecked_Deallocation;
+with Flyology.Cancellation;
 with Flyology.Supervision_Policy;
 with Interfaces;
 
@@ -1397,6 +1398,7 @@ package body Flyology.Supervision.Families is
      (Item    : not null access Family;
       Context : aliased in out Application_Context;
       Inherited : Incident_Context;
+      Parent_Stop : access Flyology.Cancellation.Token;
       Result  : out Supervisor_Result)
    is
       Identity : Controller_Id;
@@ -1737,6 +1739,9 @@ package body Flyology.Supervision.Families is
          Incident : Incident_Context;
       begin
          loop
+            if Parent_Stop /= null and then Parent_Stop.Requested then
+               Item.State.Request_Stop;
+            end if;
             Item.State.Take_Start (Available, Slot, Handle, Incident);
             if Available then
                begin
@@ -1769,20 +1774,22 @@ package body Flyology.Supervision.Families is
       Context : aliased in out Application_Context;
       Result  : out Supervisor_Result) is
    begin
-      Run_Internal (Item'Access, Context, No_Incident, Result);
+      Run_Internal (Item'Access, Context, No_Incident, null, Result);
    end Run;
 
    procedure Run_Nested
      (Item    : aliased in out Family;
       Context : aliased in out Application_Context;
-      Parent  : in out Generation_Control;
+      Parent  : aliased in out Generation_Control;
       Result  : out Supervisor_Result)
    is
       Parent_Handle : constant Child_Handle := Handle (Parent);
       Inherited : constant Incident_Context := Recovery_Incident (Parent);
+      Parent_Stop : constant not null access Flyology.Cancellation.Token :=
+        Stopping (Parent);
       pragma Unreferenced (Parent_Handle);
    begin
-      Run_Internal (Item'Access, Context, Inherited, Result);
+      Run_Internal (Item'Access, Context, Inherited, Parent_Stop, Result);
       if Active (Result.Incident)
         and then Result.Outcome /= Shutdown_Completed
       then

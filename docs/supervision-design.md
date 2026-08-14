@@ -129,7 +129,7 @@ package Flyology.Supervision.Static is
    procedure Run_Nested
      (Item    : aliased in out Supervisor;
       Context : aliased in out Application_Context;
-      Parent  : in out Generation_Control;
+      Parent  : aliased in out Generation_Control;
       Result  : out Supervisor_Result);
    procedure Request_Shutdown (Item : in out Supervisor);
 end Flyology.Supervision.Static;
@@ -311,13 +311,20 @@ exit, then their task-object storage is reclaimed only after termination is
 observable.
 Dynamic specifications do not silently survive reconstruction of their owning
 supervisor; an application that wants persistence must keep and replay typed
-requests outside the node.
+requests outside the node. The application must treat every reconstructed
+family as a new incarnation with new controller authority. Old handles remain
+stale even when replay assigns the same slot id and generation value. A
+restart-safe owner reconciles durable state, admits the current desired
+requests, publishes only the new handles, and reports readiness after the
+required family children become ready.
 
 A nested supervisor is a child factory whose one generation runs another
 synchronous supervisor scope. The inner scope completes shutdown and joins
 before its outer generation reaches terminal publication. It receives the same
 incident id and active attempt when escalating; it cannot mint an independent retry
-allowance for that cascade.
+allowance for that cascade. `Run_Nested` observes the parent generation's
+cancellation token and begins ordinary nested shutdown when the parent stops.
+The parent stop does not preserve the nested controller or replay its topology.
 
 ## Startup, readiness, and rollback
 
@@ -618,6 +625,12 @@ stronger implemented boundary is structural and reviewable instead:
 - the application records reconciliation and idempotence rules next to the
   child policy that sets `Restart_Safe => True`.
 
+For a generation that owns a dynamic family, those rules must identify the
+application-owned desired request set, the idempotent persistence operation,
+the publication cutover to new controller-qualified handles, and the readiness
+condition after replay. A family admission is current controller state, not a
+durable declaration of intent.
+
 This deliberately leaves the Boolean as an explicit application assertion
 rather than replacing it with a marker interface that would imply a guarantee
 the Ada type system cannot establish.
@@ -908,6 +921,12 @@ readiness, generation-local health failure, stop forwarding, join, exact task
 identity, original exception diagnostics, abnormal completion, and activation
 failure. Separate regressions reject default handle authority and prove that
 family shutdown cancels backoff without invoking another generation factory.
+The nested-family owner regression restarts a static dependent, forwards the
+parent stop into its family, rejects the old family handle, reconciles persistent
+state idempotently, and admits every desired request into the new incarnation
+before the replacement owner reports readiness. A separate nested-static
+regression proves that a parent stop shuts down and joins a healthy inner static
+node without an application stop bridge.
 The family controller test also orders stop and shutdown before manual restart
 and failed-health commands, then requires every later intervention to be
 rejected even while the affected Ada task has not yet completed. The policy

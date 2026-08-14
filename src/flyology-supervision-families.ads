@@ -45,7 +45,11 @@ package Flyology.Supervision.Families is
    Stale_Handle : exception;
 
    --  One-shot family owner. Run is the Ada master boundary; admitted manager
-   --  and generation tasks cannot outlive it.
+   --  and generation tasks cannot outlive it. Admissions, copied requests,
+   --  handles, recovery state, and events belong to this family incarnation.
+   --  Reconstructing an owner creates an empty family with new controller
+   --  authority; desired requests that must persist belong outside the family
+   --  and must be reconciled and admitted again.
    type Family is limited private;
 
    --  Validate and run until explicit shutdown or terminal policy escalation.
@@ -62,9 +66,11 @@ package Flyology.Supervision.Families is
       Context : aliased in out Application_Context;
       Result  : out Supervisor_Result);
 
-   --  Run a family under Parent's exact recovery incident. A terminal family
+   --  Run a family under Parent's exact recovery incident. A stop request on
+   --  Parent closes admission and begins family shutdown. A terminal family
    --  outcome reports the same incident through Parent rather than minting a
-   --  second hierarchical attempt.
+   --  second hierarchical attempt. Restarting Parent creates a new one-shot
+   --  family; this operation does not replay admissions or preserve handles.
    --  @param Item One-shot nested family owner
    --  @param Context Application state retained by every live generation
    --  @param Parent Owning generation control and incident propagation path
@@ -75,12 +81,14 @@ package Flyology.Supervision.Families is
    procedure Run_Nested
      (Item    : aliased in out Family;
       Context : aliased in out Application_Context;
-      Parent  : in out Generation_Control;
+      Parent  : aliased in out Generation_Control;
       Result  : out Supervisor_Result);
 
    --  Copy Input into a reserved slot and publish admission only after the
    --  copy succeeds. Copy or finalization work is never performed while the
-   --  family lock is held.
+   --  family lock is held. Admission records current controller state rather
+   --  than persistent application intent and is not replayed into another
+   --  Family object.
    --  @param Item Running family with open admission
    --  @param Input Typed generation input copied into family-owned storage
    --  @param Handle Exact logical child and first generation

@@ -83,7 +83,9 @@ package Flyology.Supervision.Static is
       Context : aliased in out Application_Context;
       Result  : out Supervisor_Result);
 
-   --  Run a nested supervisor under Parent's exact recovery incident. If the
+   --  Run a nested supervisor under Parent's exact recovery incident. A stop
+   --  request on Parent begins nested shutdown, and this call returns only
+   --  after every terminable nested generation and manager joins. If the
    --  nested node escalates, the same incident is reported through Parent so
    --  the owning node does not mint or count another attempt.
    --  @param Item One-shot nested supervisor object
@@ -96,7 +98,7 @@ package Flyology.Supervision.Static is
    procedure Run_Nested
      (Item    : aliased in out Supervisor;
       Context : aliased in out Application_Context;
-      Parent  : in out Generation_Control;
+      Parent  : aliased in out Generation_Control;
       Result  : out Supervisor_Result);
 
    --  Idempotently begin reverse dependency order shutdown. A request made

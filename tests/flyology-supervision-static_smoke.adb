@@ -1199,7 +1199,7 @@ begin
    declare
       Context : aliased Inner_Context;
       Item    : aliased Inner_Supervisors.Supervisor;
-      Parent  : Flyology.Supervision.Generation_Control;
+      Parent  : aliased Flyology.Supervision.Generation_Control;
       Result  : Flyology.Supervision.Supervisor_Result;
    begin
       begin

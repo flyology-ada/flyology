@@ -663,6 +663,10 @@ rings. Static trees validate dependencies and named cohorts, start in
 deterministic topological order, stop in reverse order, and coordinate isolated,
 cohort, or transitive-dependent recovery. Each restart constructs a fresh Ada
 task object under a local master; stale handles cannot control its replacement.
+If that generation owns a nested family, reconstruction also creates an empty
+one-shot family with new controller authority. Applications retain desired
+dynamic requests outside the family, reconcile external state idempotently,
+and admit those requests into the new family before reporting readiness.
 Handles also carry a process-local controller identity, so an otherwise equal
 child and generation from another supervisor remains stale. Default-constructed
 handles carry invalid controller authority and are rejected even by the first

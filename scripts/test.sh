@@ -354,6 +354,8 @@ flyology-supervision-static_smoke
 flyology-supervision-handle_smoke
 flyology-supervision-families_smoke
 flyology-supervision-families_shutdown_smoke
+flyology-supervision-nested_family_restart_smoke
+flyology-supervision-nested_static_shutdown_smoke
 flyology-supervision-adapters_smoke
 flyology-supervision-adapters_exit_smoke
 flyology-supervision-service_slots_smoke

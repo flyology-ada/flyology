@@ -1,5 +1,6 @@
 with Ada.Exceptions;
 with Ada.Task_Identification;
+with Flyology.Cancellation;
 with Flyology.Supervision_Policy;
 with Interfaces;
 
@@ -1569,6 +1570,7 @@ package body Flyology.Supervision.Static is
      (Item    : aliased in out Supervisor;
       Context : aliased in out Application_Context;
       Inherited : Incident_Context;
+      Parent_Stop : access Flyology.Cancellation.Token;
       Result  : out Supervisor_Result)
    is
       Specs        : Specification_Array;
@@ -1906,7 +1908,16 @@ package body Flyology.Supervision.Static is
          for Child in Child_Kind loop
             Managers (Child).Start (Child);
          end loop;
-         Item.State.Await_Finished;
+         if Parent_Stop = null then
+            Item.State.Await_Finished;
+         else
+            while not Item.State.Manager_Should_Exit loop
+               if Parent_Stop.Requested then
+                  Item.State.Request_Stop;
+               end if;
+               delay 0.001;
+            end loop;
+         end if;
          Item.State.Await_Managers;
          Result := Item.State.Read_Result;
       exception
@@ -1921,20 +1932,22 @@ package body Flyology.Supervision.Static is
       Context : aliased in out Application_Context;
       Result  : out Supervisor_Result) is
    begin
-      Run_Internal (Item, Context, No_Incident, Result);
+      Run_Internal (Item, Context, No_Incident, null, Result);
    end Run;
 
    procedure Run_Nested
      (Item    : aliased in out Supervisor;
       Context : aliased in out Application_Context;
-      Parent  : in out Generation_Control;
+      Parent  : aliased in out Generation_Control;
       Result  : out Supervisor_Result)
    is
       Parent_Handle : constant Child_Handle := Handle (Parent);
       Inherited : constant Incident_Context := Recovery_Incident (Parent);
+      Parent_Stop : constant not null access Flyology.Cancellation.Token :=
+        Stopping (Parent);
       pragma Unreferenced (Parent_Handle);
    begin
-      Run_Internal (Item, Context, Inherited, Result);
+      Run_Internal (Item, Context, Inherited, Parent_Stop, Result);
       if Active (Result.Incident)
         and then Result.Outcome /= Shutdown_Completed
       then

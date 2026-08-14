@@ -95,6 +95,8 @@ project Runtime_Smoke is
       "flyology-supervision-handle_smoke.adb",
       "flyology-supervision-families_smoke.adb",
       "flyology-supervision-families_shutdown_smoke.adb",
+      "flyology-supervision-nested_family_restart_smoke.adb",
+      "flyology-supervision-nested_static_shutdown_smoke.adb",
       "flyology-supervision-adapters_smoke.adb",
       "flyology-supervision-adapters_exit_smoke.adb",
       "flyology-supervision-service_slots_smoke.adb",

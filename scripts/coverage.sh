@@ -131,6 +131,8 @@ structured_server_tls_smoke
 subprocess_fixture
 subprocess_smoke
 flyology-supervision-subprocess_smoke
+flyology-supervision-nested_family_restart_smoke
+flyology-supervision-nested_static_shutdown_smoke
 thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke

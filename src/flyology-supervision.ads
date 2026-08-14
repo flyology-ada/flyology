@@ -270,7 +270,10 @@ package Flyology.Supervision is
    --  Complete static policy for one logical child.
    --  Restart_Safe is an explicit application acknowledgement that a fresh
    --  generation may safely reacquire its owned resources and resume use of
-   --  shared state. Local automatic restart is rejected when it is False.
+   --  shared state. If the generation owns a nested one-shot controller, the
+   --  acknowledgement also covers reconstruction of that controller and
+   --  application-directed replay of its desired topology. Local automatic
+   --  restart is rejected when it is False.
    --  Task_Model must be explicitly Flyology.Lightweight_Task or
    --  Flyology.Native_Task; Project_Default is rejected because supervision
    --  cannot resolve it to a concrete model for placement validation.
