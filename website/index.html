@@ -213,11 +213,11 @@ Flyology.IO.Sockets.Receive
         <div class="io-inner">
           <div class="capability-copy">
             <p class="eyebrow">Included building blocks</p>
-            <h2 id="io-title">Ordinary calls around task-aware waits.</h2>
-            <p class="io-intro">Flyology Runtime includes task-aware sockets, files, timers, DNS, and TLS alongside bounded ownership-transfer primitives. Deadlines, capacity, and ownership remain explicit at each boundary.</p>
+            <h2 id="io-title">Ordinary calls around explicit boundaries.</h2>
+            <p class="io-intro">Flyology Runtime includes task-aware I/O, execution-group control, bounded ownership transfer, structured supervision, shared-memory mappings, and relocatable data structures. Capacity, ownership, recovery, and blocking remain explicit.</p>
             <div class="capability-links">
-              <a href="guide/#io">I/O guide</a>
-              <a href="https://http.flyology.org/">HTTP library</a>
+              <a href="guide/">Runtime guide</a>
+              <a href="architecture/">Architecture</a>
               <a href="api/">API reference</a>
             </div>
           </div>
@@ -227,9 +227,25 @@ Flyology.IO.Sockets.Receive
                 <strong>Task-aware I/O</strong>
                 <span>Sockets · files · timers · DNS · TLS</span>
               </button>
+              <button class="capability-plaque" type="button" data-preview-sample="groups" data-preview-file="execution_groups.adb" aria-pressed="false" aria-controls="capability-code-preview">
+                <strong>Execution groups</strong>
+                <span>Placement · migration · thread pins</span>
+              </button>
               <button class="capability-plaque" type="button" data-preview-sample="buffers" data-preview-file="buffer_channel.adb" aria-pressed="false" aria-controls="capability-code-preview">
                 <strong>Buffers &amp; channels</strong>
-                <span>Bounded pools · ownership transfer</span>
+                <span>Bounded pools · move-only ownership</span>
+              </button>
+              <button class="capability-plaque" type="button" data-preview-sample="supervision" data-preview-file="task_supervision.adb" aria-pressed="false" aria-controls="capability-code-preview">
+                <strong>Task supervision</strong>
+                <span>Readiness · restart · structured shutdown</span>
+              </button>
+              <button class="capability-plaque" type="button" data-preview-sample="shared-memory" data-preview-file="shared_memory.adb" aria-pressed="false" aria-controls="capability-code-preview">
+                <strong>Shared memory</strong>
+                <span>Backing · mappings · descriptor handoff</span>
+              </button>
+              <button class="capability-plaque" type="button" data-preview-sample="data-structures" data-preview-file="relocatable_ring.adb" aria-pressed="false" aria-controls="capability-code-preview">
+                <strong>Data structures</strong>
+                <span>Arenas · rings · maps · vectors</span>
               </button>
             </div>
             <figure class="capability-code-window" id="capability-code-preview">
@@ -244,6 +260,13 @@ Flyology.IO.Sockets.Receive
 
 Flyology.IO.Files.Read_At
   (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
+              <pre class="capability-code-sample" data-preview-code="groups" hidden><code class="language-ada">package Groups renames Flyology.Execution_Groups;
+Home : constant Groups.Group_Id := Groups.Current;
+
+Groups.Grow_Configured_Pool (4);
+Groups.Migrate (Groups.For_CPU (2));
+Handle_Group_Owned_State;
+Groups.Migrate (Home);</code></pre>
               <pre class="capability-code-sample" data-preview-code="buffers" hidden><code class="language-ada">Pool  : aliased Flyology.Buffers.Pool
   (Block_Size =&gt; 64 * 1_024, Capacity =&gt; 258);
 Queue : Flyology.Buffers.Channels.Channel
@@ -252,6 +275,30 @@ Value : Flyology.Buffers.Unique_Buffer (Pool'Access);
 
 Flyology.Buffers.Acquire (Value);
 Queue.Send_Move (Value);</code></pre>
+              <pre class="capability-code-sample" data-preview-code="supervision" hidden><code class="language-ada">task body Shutdown_Watcher is
+begin
+   Wait_For_Shutdown;
+   Application_Supervision.Request_Shutdown (Supervisor);
+end Shutdown_Watcher;
+
+Application_Supervision.Run (Supervisor, Context, Result);</code></pre>
+              <pre class="capability-code-sample" data-preview-code="shared-memory" hidden><code class="language-ada">Flyology.Shared_Memory.Create_Anonymous
+  (Backing, Length =&gt; 1_048_576);
+Flyology.Shared_Memory.Map (Map, Backing);
+Flyology.Shared_Memory.Attach_Region (Map, Region);
+
+-- Attach relocatable structures through Region.
+
+Flyology.Data_Structures.Regions.Detach (Region);
+Flyology.Shared_Memory.Unmap (Map);
+Flyology.Shared_Memory.Close (Backing);</code></pre>
+              <pre class="capability-code-sample" data-preview-code="data-structures" hidden><code class="language-ada">-- Job_Ring is a typed relocatable ring instance.
+Job_Ring.Try_Push (Queue, Job, Pushed);
+if not Pushed then
+   Apply_Backpressure;
+end if;
+
+Job_Ring.Try_Pop (Queue, Next_Job, Popped);</code></pre>
             </figure>
           </div>
         </div>
