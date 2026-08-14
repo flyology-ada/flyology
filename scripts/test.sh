@@ -339,6 +339,7 @@ fiber_trampoline_abort_smoke
 fiber_trampoline_smoke
 file_cancellation_smoke
 file_transfers_smoke
+file_watches_smoke
 files_smoke
 flyology-counter_policy_smoke
 flyology-file_transfer_policy-smoke

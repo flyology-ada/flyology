@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Watch files and directories from native and lightweight Flyology tasks, with bounded registrations, deadlines, interruption, and explicit recovery from invalidation or lost events.">
+    <meta name="theme-color" content="#17213d">
+    <title>File watching · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/file-watching/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology Runtime</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li><a href="../../">Overview</a></li>
+          <li><a href="../" aria-current="page">Guide</a></li>
+          <li><a href="../../architecture/">Architecture</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../api/">API</a></li>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="https://http.flyology.org/">HTTP</a></li>
+                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">File watching</li></ol>
+          <h1>Watch files and directories.</h1>
+        </div>
+        <p class="doc-hero-copy">Wait for portable change hints without blocking an event-loop pthread. Then reconcile application state after coalescing, invalidation, or lost kernel detail.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#model">Notification model</a></li>
+            <li><a href="#capacity">Capacity and registration</a></li>
+            <li><a href="#lifecycle">Watcher lifecycle</a></li>
+            <li><a href="#wait">Deadlines and interruption</a></li>
+            <li><a href="#interpret">Change categories</a></li>
+            <li><a href="#reconcile">Reconciliation loop</a></li>
+            <li><a href="#lanes">Task lanes and platforms</a></li>
+            <li><a href="#concurrency">Concurrency and ownership</a></li>
+            <li><a href="#limits">Operational limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p><a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html"><code>Flyology.IO.File_Watches</code></a> gives a bounded <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#cb9daa0f9970110a134b3a65e3248bb89f0685156d6bbc4ce8cf0b09c2eb298e"><code>Watcher</code></a> the same synchronous call structure in native and lightweight tasks. The lane changes how <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#9fe2293042451235ca181a414c0720c59a850b6a2aa23398db41cdde815cfb18"><code>Next</code></a> waits. It does not change event interpretation or lifecycle rules.</p>
+          </aside>
+
+          <section id="model">
+            <span class="step-label">PURPOSE</span>
+            <h2>Treat each notification as a reason to inspect.</h2>
+            <p>A file event is a change hint, not an operation log. The kernel can combine many changes into one event. It can also report one operation through more than one category.</p>
+            <p>After every event, inspect the current object and update application state from that observation. Do not count events to infer writes, renames, or directory-entry changes.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>File watch</dt><dd>Use it when content, metadata, or identity changes to one existing object are relevant. Prepare to recreate the registration after a move or deletion.</dd></div>
+                <div class="decision-row"><dt>Directory watch</dt><dd>Use it when files can appear, disappear, or be replaced by an atomic rename. Rescan the relevant pathname after a directory-content hint.</dd></div>
+                <div class="decision-row"><dt>Recursive tree</dt><dd>Create and maintain one registration for each directory. Flyology does not discover new subdirectories or remove obsolete registrations automatically.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Watch the parent directory for atomic replacement.</strong> Many editors write a temporary file and rename it over the target. A parent watch remains useful when the original file watch becomes invalid.</p>
+            </aside>
+          </section>
+
+          <section id="capacity">
+            <span class="step-label">WATCH 01</span>
+            <h2>Set a bound for active registrations.</h2>
+            <p>An unconstrained declaration uses <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#1c94923abc9bf4229221eff2e0e20854e22905cad5f9a5ff8558a05611216070"><code>Default_Capacity</code></a>, which is 64. Set the discriminant when the application needs another bound.</p>
+            <figure class="code-panel">
+              <figcaption>default and explicit watcher capacities</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO.File_Watches;
+
+package Watches renames Flyology.IO.File_Watches;
+
+Configuration_Watcher : Watches.Watcher;
+Tree_Watcher          : Watches.Watcher (Capacity =&gt; 256);</code></pre>
+            </figure>
+            <p>The capacity limits logical registrations in that object. It does not set the kernel queue length, the number of events in one drain, or a recursive-directory limit.</p>
+            <p>The bound is fixed for the object's lifetime. Declare a replacement watcher when the application needs a different bound.</p>
+            <p>Each successful <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#264e1bea9d7bfce624dd9fee71cb7504f519f92eee3b6f00666f1851684fc73c"><code>Add</code></a> returns a distinct <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#8a183038bedb0c906001e3084ba72a087459a2c76917dd46b5fb8ee6e98ebd95"><code>Watch_Id</code></a>. Duplicate pathname registrations consume separate capacity and receive separate logical events.</p>
+            <p><code>Add</code> follows the final symbolic-link component and requires an existing file or directory. It raises <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#431274841403e6ec9179192f3f49b786f5353edd7e270013584c2e7a9e32e894"><code>Device_Error</code></a> for an empty path, an embedded NUL, an exhausted capacity, or an operating-system failure.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>The application bound does not reserve operating-system capacity. A registration can fail before the watcher reaches its bound because host limits remain independent.</p>
+            </aside>
+          </section>
+
+          <section id="lifecycle">
+            <span class="step-label">WATCH 02</span>
+            <h2>Open, register, wait, and close explicitly.</h2>
+            <p>Call <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#c239379f4b2d555a273b1da99970f7b8ea4c99310283ef43fc6fc0fdc1b8aa8d"><code>Open</code></a> before the first registration. Repeated calls are harmless while the watcher remains open.</p>
+            <p>Call <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#c3a5f2e48417470cc08242ce18454c7ce38c790fcf4b0ffe9c10c295d1f28246"><code>Remove</code></a> when a logical registration is no longer needed. The call discards its queued hints. An unknown identifier and <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#276f1fd362a9bd838433a0c46ba9f5297870be8f0a3b3b2dded64c05a3263837"><code>No_Watch</code></a> are errors.</p>
+            <p>Call <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#b941ad7f5fe8bb5d3e5a73ab7ac4b033b50b47b28c8c14c1ff3b31ab8f638fb8"><code>Close</code></a> to release all registrations and the platform queue. Repeated calls are harmless. The watcher becomes closed even when cleanup reports an error.</p>
+            <p>Finalization also releases resources and does not propagate errors. Use explicit <code>Close</code> when the application must observe a cleanup failure. Use <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#dbcda0217e1d316f0ffdff015eef3bae9cb5d3480e8bfd0055b0271a4f2050f4"><code>Is_Open</code></a> only to inspect lifecycle state, not to synchronize tasks.</p>
+            <figure class="code-panel">
+              <figcaption>basic watcher lifecycle</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Monitor : Watches.Watcher;
+   Config_Directory : Watches.Watch_Id;
+begin
+   Monitor.Open;
+   Config_Directory := Monitor.Add ("/etc/my-app");
+
+   --  Call Monitor.Next from the owner task.
+
+   Monitor.Remove (Config_Directory);
+   Monitor.Close;
+end;</code></pre>
+            </figure>
+          </section>
+
+          <section id="wait">
+            <span class="step-label">WATCH 03</span>
+            <h2>Carry one deadline through each wait.</h2>
+            <p><code>Next</code> first returns one pending event. If none is pending, it waits for the platform queue. One monotonic deadline covers readiness retries and stale kernel records.</p>
+            <p>A negative timeout, including <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#07bae758725b3ef17c925e949e4d0dd924e667dc9ee2d11c2f53c8bff79a7fb9"><code>Infinite</code></a>, waits without a deadline. A zero timeout performs an immediate drain. A positive value sets a relative deadline in seconds.</p>
+            <p>The call reports a <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#c4d7c4a535a54dc4798ef2b15b02738f294aa0504cfd8540f5188da8c954ec44"><code>Wait_Outcome</code></a>. <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#c4d7c4a535a54dc4798ef2b15b02738f294aa0504cfd8540f5188da8c954ec44"><code>Ready</code></a> supplies an event. <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#c4d7c4a535a54dc4798ef2b15b02738f294aa0504cfd8540f5188da8c954ec44"><code>Timed_Out</code></a> reports deadline expiry. <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#c4d7c4a535a54dc4798ef2b15b02738f294aa0504cfd8540f5188da8c954ec44"><code>Interrupted</code></a> reports a readable interrupt descriptor.</p>
+            <p>The result is a <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#7f1b4ea649845e8f5e5870bba78674a17704b7c3cdb6515cc6bacebc7073dd6c"><code>File_Event</code></a>. Its <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#ae4d9bd3cea95375a2b45fd08a3a7e52cc827183d375aac673743f075d3315fa"><code>Change_Set</code></a> contains one or more hints when the outcome is <code>Ready</code>. Otherwise, the result contains <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#125fc2417be4f8c336ea54e1f90b324363c0bed9fa42686a3fcb3212793f86b8"><code>No_Changes</code></a> and a <code>No_Watch</code> identifier.</p>
+            <p>Pass an <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#cce81b860a0787601c446ca4547e09cb10822e44be81ae441b7bc2a276909e43"><code>Interrupt_Set</code></a> when shutdown or another lifecycle event must wake the owner task. The watcher observes borrowed descriptors but does not read or close them.</p>
+            <p>After an interrupted wait, consume or reset the application's wake source before waiting again. Otherwise, the readable descriptor can cause another immediate interruption.</p>
+            <figure class="code-panel">
+              <figcaption>bounded and interruptible wait</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Event   : Watches.File_Event;
+   Outcome : Flyology.IO.Wait_Outcome;
+begin
+   Monitor.Next
+     (Result     =&gt; Event,
+      Outcome    =&gt; Outcome,
+      Timeout    =&gt; 30.0,
+      Interrupts =&gt; Shutdown_Descriptors);
+
+   case Outcome is
+      when Flyology.IO.Ready =&gt;
+         Reconcile (Event);
+      when Flyology.IO.Timed_Out =&gt;
+         Run_Periodic_Check;
+      when Flyology.IO.Interrupted =&gt;
+         Consume_Shutdown_Wake;
+   end case;
+end;</code></pre>
+            </figure>
+          </section>
+
+          <section id="interpret">
+            <span class="step-label">WATCH 04</span>
+            <h2>Interpret every change category.</h2>
+            <p>A <code>File_Event</code> identifies one logical registration and supplies a <code>Change_Set</code>. More than one category can be true.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#b4ea49d2a47c1ba1a518577b9620a4b35743bb502d561d3f3bf637cfa011c2a5"><code>Contents_Changed</code></a></dt><dd>File data or directory entries may differ. Read the file again or rescan the relevant directory state.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#b4ea49d2a47c1ba1a518577b9620a4b35743bb502d561d3f3bf637cfa011c2a5"><code>Metadata_Changed</code></a></dt><dd>Attributes or link metadata may differ. Recheck permissions, ownership, size, timestamps, and other metadata that affects the application.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#b4ea49d2a47c1ba1a518577b9620a4b35743bb502d561d3f3bf637cfa011c2a5"><code>Identity_Changed</code></a></dt><dd>The pathname may now identify another object. Stop relying on cached identity or an earlier open-by-name decision.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#b4ea49d2a47c1ba1a518577b9620a4b35743bb502d561d3f3bf637cfa011c2a5"><code>Watch_Invalidated</code></a></dt><dd>The pathname association is no longer portable. Remove the logical registration and add it again only after the path exists.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#b4ea49d2a47c1ba1a518577b9620a4b35743bb502d561d3f3bf637cfa011c2a5"><code>Events_Lost</code></a></dt><dd>The kernel lost detail or Flyology could not preserve a complete batch. Rebuild all state covered by the watcher.</dd></div>
+              </dl>
+            </div>
+            <p>The categories describe possible effects. For example, a rename can report both <code>Identity_Changed</code> and <code>Watch_Invalidated</code>. Handle the strongest recovery requirement in the set.</p>
+          </section>
+
+          <section id="reconcile">
+            <span class="step-label">WATCH 05</span>
+            <h2>Reconcile state instead of replaying events.</h2>
+            <p>A robust monitor stores the desired pathname state separately from watcher registrations. The event loop uses each hint to compare that desired state with the filesystem.</p>
+            <ol>
+              <li>If <code>Events_Lost</code> is set, inspect every pathname covered by the watcher.</li>
+              <li>If <code>Watch_Invalidated</code> is set, forget cached identity and remove the registration.</li>
+              <li>Inspect the current file or directory before publishing new application state.</li>
+              <li>If an invalidated pathname exists again, add a new registration and store its new identifier.</li>
+              <li>Repeat <code>Next</code>. Do not assume that the reconciliation itself generated no new changes.</li>
+            </ol>
+            <p>The following loop watches a configuration directory. It reloads the target from its current pathname after any relevant directory change.</p>
+            <figure class="code-panel">
+              <figcaption>directory-based configuration reconciliation</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO;
+with Flyology.IO.File_Watches;
+
+procedure Monitor_Configuration is
+   package Watches renames Flyology.IO.File_Watches;
+
+   use type Watches.Watch_Id;
+
+   Monitor   : Watches.Watcher;
+   Directory : Watches.Watch_Id;
+   Event     : Watches.File_Event;
+   Outcome   : Flyology.IO.Wait_Outcome;
+begin
+   Monitor.Open;
+   Directory := Monitor.Add ("/etc/my-app");
+
+   loop
+      Monitor.Next
+        (Event,
+         Outcome,
+         Timeout    =&gt; 60.0,
+         Interrupts =&gt; Shutdown_Descriptors);
+      case Outcome is
+         when Flyology.IO.Ready =&gt;
+            if Event.Watch = Directory
+              and then Event.Changes (Watches.Watch_Invalidated)
+            then
+               Monitor.Remove (Directory);
+               exit; --  Recreate the watch after the directory exists again.
+            elsif Event.Watch = Directory
+              and then
+                (Event.Changes (Watches.Contents_Changed)
+                 or else Event.Changes (Watches.Metadata_Changed)
+                 or else Event.Changes (Watches.Events_Lost))
+            then
+               Reload_If_Changed ("/etc/my-app/config.toml");
+            end if;
+
+         when Flyology.IO.Timed_Out =&gt;
+            Verify_Current_Configuration;
+
+         when Flyology.IO.Interrupted =&gt;
+            Consume_Shutdown_Wake;
+            exit;
+      end case;
+   end loop;
+
+   Monitor.Close;
+end Monitor_Configuration;</code></pre>
+            </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p><code>Reload_If_Changed</code>, <code>Verify_Current_Configuration</code>, and the shutdown routines are application policy. Validate the complete new file before replacing live configuration. The watcher does not make a multi-file update atomic.</p>
+            </aside>
+          </section>
+
+          <section id="lanes">
+            <span class="step-label">WATCH 06</span>
+            <h2>Separate waiting from metadata work.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Lightweight task</dt><dd><code>Next</code> suspends only the calling task. The execution group's event-loop pthread can run other lightweight tasks.</dd></div>
+                <div class="decision-row"><dt>Native task</dt><dd><code>Next</code> can block only the calling pthread. The event contract and deadline behavior remain the same.</dd></div>
+                <div class="decision-row"><dt>Linux</dt><dd>One nonblocking close-on-exec <code>inotify</code> descriptor stores persistent registrations and becomes the task-aware readiness source.</dd></div>
+                <div class="decision-row"><dt>macOS</dt><dd>A private close-on-exec <code>kqueue</code> stores persistent <code>EVFILT_VNODE</code> registrations. Flyology waits for that queue through ordinary descriptor readiness.</dd></div>
+              </dl>
+            </div>
+            <p><code>Open</code>, <code>Add</code>, <code>Remove</code>, and <code>Close</code> execute direct operating-system calls in both lanes. Flyology does not move them to a worker task.</p>
+            <p><code>Add</code> resolves the pathname on the calling lane. A slow remote filesystem can therefore occupy an event-loop pthread during registration.</p>
+            <p>Move unpredictable pathname discovery or remote-filesystem metadata work to a native-task boundary. Keep <code>Next</code> in the lightweight lane when its nonblocking wait fits the application structure.</p>
+            <p>The watcher owns one persistent platform queue. A lightweight owner can migrate between execution groups because each wait observes that queue through the destination group's normal poller.</p>
+          </section>
+
+          <section id="concurrency">
+            <span class="step-label">WATCH 07</span>
+            <h2>Give one task exclusive control.</h2>
+            <p>Watcher operations are not task safe. One task must serialize opening, registration changes, waiting, and closing.</p>
+            <p>Do not call <code>Close</code> or <code>Remove</code> concurrently with <code>Next</code>. Instead, wake the owner through an interrupt descriptor. The owner can then consume the wake and change watcher state.</p>
+            <p>Send reconciled application updates through an application-owned channel or protected object. Do not share the watcher as the notification channel.</p>
+            <p>A <code>Watch_Id</code> is stable only during its watcher owner's lifetime. Do not persist it, send it to another process, or reuse it after removal.</p>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">WATCH 08</span>
+            <h2>Keep platform limits visible.</h2>
+            <ul>
+              <li>File watching is available on supported macOS and Linux hosts. Flyology does not provide a Windows backend.</li>
+              <li>Notifications are advisory, coalesced hints. They are not a durable journal or a security boundary.</li>
+              <li>Directory watches are not recursive. The application maintains registrations for a directory tree.</li>
+              <li>The portable event omits Linux child names, rename cookies, and other platform-only detail.</li>
+              <li>The final symbolic-link component is followed. The watch identifies the resulting object, not the link as an independent object.</li>
+              <li>A file can change again between notification and inspection. Use an application protocol when a consistent snapshot is required.</li>
+              <li><code>Events_Lost</code> requires complete reconciliation. Selecting a larger watcher capacity does not increase the kernel queue.</li>
+              <li>Explicit close reports cleanup failures. Finalization remains nonraising and cannot report them.</li>
+              <li>Use the exact exception and parameter contracts in the <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html">generated API reference</a>.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Return to the <a href="../">main guide</a> for task designation and execution groups. Continue to the <a href="../timers/">timers guide</a> for broader monotonic-deadline patterns.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="../">Guide</a><a href="../timers/">Timers</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

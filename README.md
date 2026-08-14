@@ -50,6 +50,7 @@ based on the surviving correspondence.
 - [Cache-line-aware storage](#cache-line-aware-storage)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
+  - [File watching](#file-watching)
   - [Native subprocesses](#native-subprocesses)
   - [TLS](#tls)
   - [DNS resolution](#dns-resolution)
@@ -1478,6 +1479,36 @@ task-aware `Connect` and the blocking `Connect_Socket` wait for the socket to
 resolve and then report its pending `SO_ERROR`. `Connect` resolves that wait
 within its own deadline; `Connect_Socket` has no deadline and waits until the
 handshake succeeds or fails.
+
+### File watching
+
+`Flyology.IO.File_Watches` reports coalesced change hints for existing files
+and directories on macOS and Linux. A watcher owns one persistent platform
+queue and a caller-selected maximum number of registrations; an
+unconstrained declaration accepts 64 paths by default, while a declaration
+such as `Watcher (Capacity => 256)` selects another per-object bound.
+
+Linux uses one nonblocking close-on-exec `inotify` descriptor. macOS uses a
+private close-on-exec `kqueue` with persistent `EVFILT_VNODE` registrations;
+the execution group's ordinary descriptor poller observes that private queue
+for read readiness. The watcher therefore retains changes between `Next`
+calls without binding a registration to one execution group. `Next` suspends
+only a lightweight caller and blocks only a native caller's pthread. No worker
+task, callback thread, or scheduler-specific file-watch ABI is involved.
+
+Events identify the registration and report portable hints for content,
+metadata, pathname identity, invalidation, and lost kernel detail. They are
+advisory and may be coalesced. They do not count filesystem operations, expose
+Linux-only child names or rename cookies, or recursively add new directories.
+An application must inspect the watched object after every hint and rebuild
+the relevant cached state after `Events_Lost`. `Identity_Changed` with
+`Watch_Invalidated` requires removing and recreating the pathname watch.
+
+`Open`, `Add`, `Remove`, and `Close` perform direct metadata syscalls and may
+occupy the calling lane on a slow remote filesystem. Watcher operations are
+unsynchronized; one task must serialize mutation, waiting, and close. The
+optional interrupt set uses the same borrowed readable wake descriptors and
+single monotonic deadline as `Flyology.IO.Wait_Interruptibly`.
 
 ### Native subprocesses
 

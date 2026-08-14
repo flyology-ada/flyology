@@ -77,6 +77,7 @@
             <li><a href="shared-memory/">Shared-memory segments</a></li>
             <li><a href="data-structures/">Relocatable data structures</a></li>
             <li><a href="benchmarking/">Benchmarking Ada</a></li>
+            <li><a href="file-watching/">File watching</a></li>
             <li><a href="file-transfers/">File-to-socket transfers</a></li>
             <li><a href="subprocesses/">Native subprocesses</a></li>
             <li><a href="supervision/">Task supervision</a></li>
@@ -88,7 +89,8 @@
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">→</span>
-            <p>Focused guides cover <a href="shared-memory/">shared-memory segments</a>, <a href="data-structures/">relocatable data structures</a>, <a href="benchmarking/">adaptive and comparative benchmarking</a>, <a href="supervision/">structured task supervision</a>, <a href="file-transfers/">file-to-socket transfers</a>, <a href="subprocesses/">native subprocesses</a>, <a href="timers/">timers and clock changes</a>, and the standalone <a href="cachelines/">cache-line-aware storage crate</a>.</p>
+            <p>Focused guides cover <a href="shared-memory/">shared-memory segments</a>, <a href="data-structures/">relocatable data structures</a>, <a href="benchmarking/">adaptive and comparative benchmarking</a>, and <a href="supervision/">structured task supervision</a>.</p>
+            <p>Other guides cover <a href="file-watching/">file watching</a>, <a href="file-transfers/">file-to-socket transfers</a>, <a href="subprocesses/">native subprocesses</a>, <a href="timers/">timers and clock changes</a>, and the standalone <a href="cachelines/">cache-line-aware storage crate</a>.</p>
           </aside>
           <section id="requirements">
             <span class="step-label">STEP 01</span>
@@ -428,6 +430,7 @@ end Use_Docker_Socket;</code></pre>
               <p>Pathname Unix sockets are supported on macOS and Linux. Windows and the Linux abstract namespace are not supported. Filesystem permissions control access to the socket entry, but they do not authenticate the peer. Treat peer credentials and the application protocol as separate security boundaries.</p>
             </aside>
             <p>For relative waits, monotonic deadlines, adjustable wall-clock targets, and backward-clock detection, continue with the <a href="timers/">timers guide</a>.</p>
+            <p>To observe files and directories through bounded, task-aware registrations, continue with the <a href="file-watching/">file-watching guide</a>.</p>
             <p>To move positional regular-file regions to connected stream sockets with native <code>sendfile</code>, Linux lightweight <code>SEND_ZC</code>, and completion-driven fallbacks, continue with the <a href="file-transfers/">file-transfer guide</a>.</p>
             <p>Use the ownership-aware connection packages when descriptor lifetime, cancellation, and close races matter. Raw descriptor waits deliberately leave lifetime serialization to the caller.</p>
             <p><a href="../api/">Browse the generated API reference</a></p>

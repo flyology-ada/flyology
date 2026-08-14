@@ -12,6 +12,14 @@ showcases/http-comparison/servers/*/config
 showcases/http-comparison/servers/*/obj
 tests/bin
 tests/obj
+flyology_cachelines/alire
+flyology_cachelines/config
+flyology_cachelines/lib
+flyology_cachelines/obj
+flyology_cachelines/tests/alire
+flyology_cachelines/tests/bin
+flyology_cachelines/tests/config
+flyology_cachelines/tests/obj
 flyology_bench/alire
 flyology_bench/config
 flyology_bench/lib
