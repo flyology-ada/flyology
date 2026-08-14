@@ -98,11 +98,37 @@ expect_counterexample()
   printf 'TLC counterexample %-27s %s\n' "$config" "$invariant"
 }
 
+expect_temporal_counterexample()
+{
+  module=$1
+  config=$2
+  property=$3
+  tag=$4
+  if run_tlc "$module" "$config" "$tag"; then
+    printf '%s\n' \
+      "$config unexpectedly satisfied broken property $property" >&2
+    return 1
+  fi
+  if ! grep -Fq "Temporal properties were violated" \
+    "$run_root/$tag.log"
+  then
+    cat "$run_root/$tag.log" >&2
+    printf '%s\n' \
+      "$config failed without the expected $property counterexample" >&2
+    return 1
+  fi
+  printf 'TLC temporal cex  %-27s %s\n' "$config" "$property"
+}
+
 cd "$model_root"
 
 expect_safe MPMCActiveAttach MPMCActiveAttach.cfg mpmc-safe
 expect_safe GuardedMapAttach GuardedMapAttach.cfg map-safe
 expect_safe SegmentRegistry SegmentRegistry.cfg registry-safe
+expect_safe \
+  SupervisionLifecycle SupervisionLifecycle.cfg supervision-safe
+expect_safe \
+  SupervisionLifecycle SupervisionLifecycle_liveness.cfg supervision-live
 
 expect_counterexample \
   MPMCActiveAttach MPMCActiveAttach_legacy.cfg \
@@ -113,5 +139,20 @@ expect_counterexample \
 expect_counterexample \
   SegmentRegistry SegmentRegistry_unlocked.cfg \
   ClaimsMatchInitializingSlot registry-unlocked
+expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_stale.cfg \
+  NoStaleCommandAccepted supervision-stale
+expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_overlap.cfg \
+  ReplacementFollowsJoin supervision-overlap
+expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_incident.cfg \
+  NestedEscalationPreservesIncident supervision-incident
+expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_readmission.cfg \
+  OwnerReadinessFollowsReadmission supervision-readmission
+expect_temporal_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_no_forward.cfg \
+  CooperativeShutdownCompletes supervision-no-forward
 
 printf '%s\n' "Flyology TLA+ model checks passed"

@@ -1016,6 +1016,8 @@ end loop;</code></pre>
                 <ul>
                   <li>Static and family controllers consume proved generation matching for generation-qualified publications and commands. They apply the proved retained-event predicate before recording lifecycle, stop, and restart-admission edges. Proved command gates also reject default controller authority, intervention after stop or shutdown, and generation construction after those states.</li>
                   <li>Family admission is derived from configured, shutdown, and terminal state. The exact-generation stop predicate accepts a queued child or a still-live managed child, never a terminated generation awaiting replacement. The deterministic lowest-id tie-break and exact minimal dependent set remain executable and model-tested.</li>
+                  <li>The bounded <a href="https://github.com/flyology-ada/flyology/tree/main/formal/tla"><code>SupervisionLifecycle</code> TLA+ model</a> composes static recovery with a nested family owner. TLC checks restart ordering, join-before-replacement, exact handle authority, incident propagation, owner readmission, and cooperative shutdown. Deliberately broken configurations must produce invariant or temporal counterexamples.</li>
+                  <li>The model fixes one prerequisite, one dependent owner, two family slots, and two generations for its complete safety search. It is not a refinement proof from compiled Ada and does not prove arbitrary topology size or retry count.</li>
                   <li>Task activation, readiness, protected state, cancelable waiting, stopping, finalization, and resource reclamation are covered by live semantic tests rather than claimed as SPARK-proved.</li>
                 </ul>
               </div>

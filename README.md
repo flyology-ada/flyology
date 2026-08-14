@@ -2537,10 +2537,13 @@ and coordination in Ada while treating the OS ABI as a narrow platform layer.
 
 The executable models under [`formal/tla`](formal/tla/README.md) extract the
 implemented MPMC claim/publication protocol, guarded hash-map attachment, and
-shared-segment registry. Their bounded TLC configurations check the persisted
-guard, claim, publication, exact-name, generation, and extent invariants. Paired
-broken configurations must reproduce the removed active-attachment races and
-the result of dropping the registry's scan-and-reserve guard:
+shared-segment registry. They also extract the composed static-supervisor and
+nested-family lifecycle. Bounded TLC configurations check the persisted guard,
+claim, publication, exact-name, generation, extent, restart-order, authority,
+incident, owner-readmission, shutdown, and join invariants. A weak-fairness
+configuration checks cooperative shutdown liveness. Paired broken
+configurations must reproduce the removed shared-memory races and supervision
+defects:
 
 ```sh
 TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
@@ -2548,8 +2551,9 @@ TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 
 This is exhaustive interleaving exploration within the configured bounds, not
 a claim that TLC proves Ada atomics, compiler lowering, platform memory models,
-OS behavior, or unbounded liveness. The model review records each abstraction
-and maps every action back to the production operation it represents.
+OS behavior, arbitrary topology size, or unbounded liveness. The model review
+records each abstraction and maps every action back to the production operation
+it represents.
 
 ## SPARK proof boundary
 
@@ -3162,8 +3166,8 @@ To run every Alire release covered by the patch family:
   Linux with GNAT 16.1;
 - explicit `epoll` and `io_uring` checks in the Linux behavioral run; and
 - the SPARK proof crate on Linux with GNATprove 16.1; and
-- the bounded TLA+ shared-memory models and their required broken-model
-  counterexamples with TLC 2.19.
+- the bounded TLA+ shared-memory and supervision models, including required
+  invariant and temporal counterexamples, with TLC 2.19.
 
 The official Alire setup action is pinned to its v6.0.0 commit and Alire 2.1.1.
 Its cache key includes runner OS, architecture, Alire revision, and the exact
