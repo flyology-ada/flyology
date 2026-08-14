@@ -1,0 +1,13 @@
+.subprocess-figure .diagram-line-violet,
+.subprocess-figure .diagram-line-teal {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.subprocess-figure .diagram-line-violet {
+  stroke: var(--violet);
+}
+
+.subprocess-figure .diagram-line-teal {
+  stroke: var(--teal-deep);
+}

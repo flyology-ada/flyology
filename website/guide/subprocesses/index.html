@@ -9,6 +9,7 @@
     <link rel="canonical" href="https://flyology.org/guide/subprocesses/">
     <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="subprocesses.css">
     <script src="../../assets/scripts/ada-highlight.js"></script>
     <script src="../../assets/scripts/site.js"></script>
   </head>
@@ -89,7 +90,7 @@
             <h2>Separate the command from the process owner.</h2>
             <p>A <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#ac18ba65ab67c66e62a71e28951ff316c8731c00cceb329f49a5786f52228ea1"><code>Command</code></a> is a copyable launch description. Build it with <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#eb28b48db71cda8812b4c838c6c0df0e6ecba881b2e2342e60fa2fd10f1e71ea"><code>To_Command</code></a>. It contains the executable, ordered arguments, environment policy, working directory, and path-search policy.</p>
             <p>A <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#8a0374cda9d507b7103ce1fc3ab88f126b6d2fc788e074eabab70a2a4343c339"><code>Process</code></a> is the limited owner created by <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#a0f5523a772739da08de1f6713b8d79f03a477cfbb113596e5b3dbb8121b955b"><code>Spawn</code></a>. It owns the root process, its process group, the parent ends of three pipes, and the reaper that prevents a zombie.</p>
-            <figure class="architecture-figure">
+            <figure class="architecture-figure subprocess-figure">
               <svg role="img" aria-labelledby="subprocess-title subprocess-desc" viewBox="0 0 760 410">
                 <title id="subprocess-title">One owned subprocess lifecycle</title>
                 <desc id="subprocess-desc">A typed command is spawned into a process owner. The owner connects standard input, output, error, and exit readiness to a native child process group. Observation, termination, and release complete the structured scope.</desc>
