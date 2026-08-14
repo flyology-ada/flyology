@@ -64,7 +64,11 @@ procedure Pool_Reduction_Smoke is
       end Report_Explicit;
 
       entry Wait_Initial
-        when Initial_Reports = Integer (Initial_Size) and Explicit_Ready
+        when Initial_Reports = Integer (Initial_Size)
+          and Explicit_Ready
+          and Hold_Group_One'Count = 1
+          and Hold_Group_Two'Count = 1
+          and Hold_Explicit'Count = 1
       is
       begin
          null;
@@ -297,4 +301,12 @@ begin
    if not Control.Passed then
       raise Program_Error with "pool reduction behavior failed";
    end if;
+exception
+   when others =>
+      --  Do not let a failed assertion strand dependent workers behind their
+      --  test gates and hide the original failure in task-master cleanup.
+      Control.Release_Group_One;
+      Control.Release_Group_Two;
+      Control.Release_Explicit;
+      raise;
 end Pool_Reduction_Smoke;
