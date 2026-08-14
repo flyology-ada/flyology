@@ -1,6 +1,7 @@
 with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.File_Watch_Native;
+with Flyology.File_Watch_Test_Hooks;
 with Flyology.Time_Math;
 
 package body Flyology.IO.File_Watches is
@@ -42,6 +43,14 @@ package body Flyology.IO.File_Watches is
       Count  : Natural;
    begin
       Native.Read (Item.Native_Source, Events, Count);
+      if Flyology.File_Watch_Test_Hooks.Consume_Events_Lost then
+         if Count < Events'Length then
+            Count := Count + 1;
+         end if;
+         Events (Events'First + Count - 1) :=
+           (Subject => Native.Invalid_Handle,
+            Changes => (Events_Lost => True, others => False));
+      end if;
       for Index in 1 .. Count loop
          if Events (Index).Subject = Native.Invalid_Handle
            and then Events (Index).Changes.Events_Lost
@@ -160,6 +169,9 @@ package body Flyology.IO.File_Watches is
       if Other = null then
          Native.Remove
            (Item.Native_Source, Native.Handle (Position.Subject), Success);
+         if Flyology.File_Watch_Test_Hooks.Consume_Remove_Failure then
+            Success := False;
+         end if;
       else
          --  Linux returns the same inotify watch descriptor when aliases or
          --  repeated paths identify one underlying object. Retain it until
@@ -230,6 +242,7 @@ package body Flyology.IO.File_Watches is
    procedure Release_All (Item : in out Watcher; Success : out Boolean) is
       Position : Watch_Record_Access := Item.First;
       Victim   : Watch_Record_Access;
+      Other    : Watch_Record_Access;
       Removed  : Boolean;
       Closed   : Boolean;
    begin
@@ -237,14 +250,31 @@ package body Flyology.IO.File_Watches is
       while Position /= null loop
          Victim := Position;
          Position := Position.Next;
-         Native.Remove
-           (Item.Native_Source, Native.Handle (Victim.Subject), Removed);
+         Other := Position;
+         while Other /= null loop
+            exit when Other.Subject = Victim.Subject;
+            Other := Other.Next;
+         end loop;
+         if Other = null then
+            Native.Remove
+              (Item.Native_Source, Native.Handle (Victim.Subject), Removed);
+            if Flyology.File_Watch_Test_Hooks.Consume_Remove_Failure then
+               Removed := False;
+            end if;
+         else
+            --  One Linux inotify registration can back repeated logical
+            --  paths. Release the native registration only for its last id.
+            Removed := True;
+         end if;
          Success := Success and then Removed;
          Free (Victim);
       end loop;
       Item.First := null;
       Item.Count := 0;
       Native.Close (Item.Native_Source, Closed);
+      if Flyology.File_Watch_Test_Hooks.Consume_Close_Failure then
+         Closed := False;
+      end if;
       Success := Success and then Closed;
    end Release_All;
 

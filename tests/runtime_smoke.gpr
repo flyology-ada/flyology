@@ -82,6 +82,7 @@ project Runtime_Smoke is
       "fiber_trampoline_abort_smoke.adb",
       "fiber_trampoline_smoke.adb",
       "file_cancellation_smoke.adb",
+      "file_watches_recovery_smoke.adb",
       "file_watches_smoke.adb",
       "files_smoke.adb",
       "flyology-counter_policy_smoke.adb",

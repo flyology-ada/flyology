@@ -1508,7 +1508,10 @@ the relevant cached state after `Events_Lost`. `Identity_Changed` with
 occupy the calling lane on a slow remote filesystem. Watcher operations are
 unsynchronized; one task must serialize mutation, waiting, and close. The
 optional interrupt set uses the same borrowed readable wake descriptors and
-single monotonic deadline as `Flyology.IO.Wait_Interruptibly`.
+single monotonic deadline as `Flyology.IO.Wait_Interruptibly`. `Remove` retires
+its logical identifier even when native cleanup reports an error. `Close`
+invalidates the watcher after it attempts all cleanup, including when it raises
+`Device_Error`.
 
 ### Native subprocesses
 

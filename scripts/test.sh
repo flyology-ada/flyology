@@ -10,12 +10,14 @@ structured_server_test_subdir=behavioral-structured-server-hooks
 wall_clock_test_subdir=behavioral-wall-clock-hooks
 socket_test_subdir=behavioral-socket-hooks
 subprocess_test_subdir=behavioral-subprocess-hooks
+file_watch_test_subdir=behavioral-file-watch-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
 wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
 subprocess_test_bin="$project_root/tests/bin/$subprocess_test_subdir"
+file_watch_test_bin="$project_root/tests/bin/$file_watch_test_subdir"
 test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
 FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
 export FLYOLOGY_TEST_TEMP_ROOT
@@ -155,7 +157,7 @@ cc -std=c11 -Wall -Wextra -Werror \
 "$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper' \
+  'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -339,6 +341,7 @@ fiber_trampoline_abort_smoke
 fiber_trampoline_smoke
 file_cancellation_smoke
 file_transfers_smoke
+file_watches_recovery_smoke
 file_watches_smoke
 files_smoke
 flyology-counter_policy_smoke
@@ -441,10 +444,12 @@ socket_hook_mains=socket_preparation_smoke
 subprocess_hook_mains='subprocess_fixture
 subprocess_smoke'
 
+file_watch_hook_mains=file_watches_recovery_smoke
+
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|subprocess_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|subprocess_smoke|file_watches_recovery_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -476,6 +481,7 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
 compile_test_mains "$test_subdir" "$all_test_mains"
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
@@ -508,6 +514,11 @@ FLYOLOGY_SUBPROCESS_TEST_HOOKS=true
 export FLYOLOGY_SUBPROCESS_TEST_HOOKS
 compile_test_mains "$subprocess_test_subdir" "$subprocess_hook_mains"
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
+
+FLYOLOGY_FILE_WATCH_TEST_HOOKS=true
+export FLYOLOGY_FILE_WATCH_TEST_HOOKS
+compile_test_mains "$file_watch_test_subdir" "$file_watch_hook_mains"
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains \
@@ -575,6 +586,13 @@ link_test_mains \
   "$subprocess_hook_mains"
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
 
+FLYOLOGY_FILE_WATCH_TEST_HOOKS=true
+export FLYOLOGY_FILE_WATCH_TEST_HOOKS
+link_test_mains \
+  "$file_watch_test_subdir" "$project_root/build/rts" \
+  "$file_watch_hook_mains"
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS
+
 "$test_bin/default_policy_smoke" native
 "$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
 "$socket_test_bin/socket_preparation_smoke"
@@ -590,6 +608,9 @@ for test_main in $ordinary_mains; do
       ;;
     subprocess_smoke)
       current_test_bin=$subprocess_test_bin
+      ;;
+    file_watches_recovery_smoke)
+      current_test_bin=$file_watch_test_bin
       ;;
     *)
       current_test_bin=$test_bin
@@ -825,6 +846,7 @@ unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \

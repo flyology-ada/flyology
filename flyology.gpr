@@ -79,6 +79,19 @@ project Flyology is
            "-gnateDFLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=True";
    end case;
 
+   type File_Watch_Test_Hooks_Type is ("false", "true");
+   File_Watch_Test_Hooks : File_Watch_Test_Hooks_Type :=
+     external ("FLYOLOGY_FILE_WATCH_TEST_HOOKS", "false");
+   File_Watch_Test_Hook_Switch :=
+     "-gnateDFLYOLOGY_FILE_WATCH_TEST_HOOKS=False";
+   case File_Watch_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         File_Watch_Test_Hook_Switch :=
+           "-gnateDFLYOLOGY_FILE_WATCH_TEST_HOOKS=True";
+   end case;
+
    type Wall_Clock_Test_Hooks_Type is ("false", "true");
    Wall_Clock_Test_Hooks : Wall_Clock_Test_Hooks_Type :=
      external ("FLYOLOGY_WALL_CLOCK_TEST_HOOKS", "false");
@@ -230,7 +243,8 @@ project Flyology is
         Flyology_Config.Ada_Compiler_Switches
         & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
            Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
-           Subprocess_Test_Hook_Switch, Wall_Clock_Test_Hook_Switch,
+           File_Watch_Test_Hook_Switch, Subprocess_Test_Hook_Switch,
+           Wall_Clock_Test_Hook_Switch,
            TLS_Ada_Test_Hook_Switch);
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,

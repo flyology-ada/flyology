@@ -73,7 +73,9 @@ package Flyology.IO.File_Watches is
    function Add (Item : in out Watcher; Path : String) return Watch_Id;
 
    --  Remove Id and release its platform resources. Queued hints for Id are
-   --  discarded. Removing No_Watch or an unknown identifier is rejected.
+   --  discarded. The logical identifier is retired even when the platform
+   --  removal reports failure, so callers must not retry the same Id.
+   --  Removing No_Watch or an unknown identifier is rejected.
    --  @param Item Open serialized watcher
    --  @param Id Registration to remove
    --  @exception Device_Error Item is closed, Id is unknown, or removal fails
