@@ -68,6 +68,7 @@
             <li><a href="#wait">Deadlines and interruption</a></li>
             <li><a href="#interpret">Change categories</a></li>
             <li><a href="#reconcile">Reconciliation loop</a></li>
+            <li><a href="#recursive">Recursive directory trees</a></li>
             <li><a href="#lanes">Task lanes and platforms</a></li>
             <li><a href="#concurrency">Concurrency and ownership</a></li>
             <li><a href="#limits">Operational limits</a></li>
@@ -89,7 +90,7 @@
               <dl>
                 <div class="decision-row"><dt>File watch</dt><dd>Use it when content, metadata, or identity changes to one existing object are relevant. Prepare to recreate the registration after a move or deletion.</dd></div>
                 <div class="decision-row"><dt>Directory watch</dt><dd>Use it when files can appear, disappear, or be replaced by an atomic rename. Rescan the relevant pathname after a directory-content hint.</dd></div>
-                <div class="decision-row"><dt>Recursive tree</dt><dd>Create and maintain one registration for each directory. Flyology does not discover new subdirectories or remove obsolete registrations automatically.</dd></div>
+                <div class="decision-row"><dt>Recursive tree</dt><dd>Use the recursive child package to discover real directories and reconcile their registrations after each tree hint.</dd></div>
               </dl>
             </div>
             <aside class="callout">
@@ -102,17 +103,22 @@
             <span class="step-label">WATCH 01</span>
             <h2>Set a bound for active registrations.</h2>
             <p>An unconstrained declaration uses <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#1c94923abc9bf4229221eff2e0e20854e22905cad5f9a5ff8558a05611216070"><code>Default_Capacity</code></a>, which is 64. Set the discriminant when the application needs another bound.</p>
+            <p><a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html"><code>Flyology.IO.File_Watches.Recursive</code></a> uses the same default for <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#528c16478daea1db08572ff278025e268f674d5656a58e65697577ac8a961fc9"><code>Recursive_Watcher</code></a>. Set its discriminant to change the maximum directory count.</p>
             <figure class="code-panel">
               <figcaption>default and explicit watcher capacities</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">with Flyology.IO.File_Watches;
+with Flyology.IO.File_Watches.Recursive;
 
 package Watches renames Flyology.IO.File_Watches;
+package Trees renames Flyology.IO.File_Watches.Recursive;
 
 Configuration_Watcher : Watches.Watcher;
-Tree_Watcher          : Watches.Watcher (Capacity =&gt; 256);</code></pre>
+Default_Tree_Watcher  : Trees.Recursive_Watcher;
+Large_Tree_Watcher    : Trees.Recursive_Watcher (Capacity =&gt; 256);</code></pre>
             </figure>
-            <p>The capacity limits logical registrations in that object. It does not set the kernel queue length, the number of events in one drain, or a recursive-directory limit.</p>
+            <p>For <code>Watcher</code>, the capacity limits logical registrations. A recursive watcher needs one capacity slot for the root and each real subdirectory.</p>
+            <p>The capacity does not set the kernel queue length or the number of events in one drain.</p>
             <p>The bound is fixed for the object's lifetime. Declare a replacement watcher when the application needs a different bound.</p>
             <p>Each successful <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#264e1bea9d7bfce624dd9fee71cb7504f519f92eee3b6f00666f1851684fc73c"><code>Add</code></a> returns a distinct <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#8a183038bedb0c906001e3084ba72a087459a2c76917dd46b5fb8ee6e98ebd95"><code>Watch_Id</code></a>. Duplicate pathname registrations consume separate capacity and receive separate logical events.</p>
             <p><code>Add</code> follows the final symbolic-link component and requires an existing file or directory. It raises <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#431274841403e6ec9179192f3f49b786f5353edd7e270013584c2e7a9e32e894"><code>Device_Error</code></a> for an empty path, an embedded NUL, an exhausted capacity, or an operating-system failure.</p>
@@ -268,8 +274,82 @@ end Monitor_Configuration;</code></pre>
             </aside>
           </section>
 
-          <section id="lanes">
+          <section id="recursive">
             <span class="step-label">WATCH 06</span>
+            <h2>Reconcile a bounded directory tree.</h2>
+            <p><code>Flyology.IO.File_Watches.Recursive</code> owns the registrations for one directory tree. A <code>Recursive_Watcher</code> discovers directories and updates its bounded registration set.</p>
+
+            <h3>Open the complete initial tree.</h3>
+            <p>Call the recursive <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#6a8499ad166068fe89367030b663482dac211f3e79931db5bc57ce80cd4176c6"><code>Open</code></a> with an existing directory. The call discovers and registers the root and each real subdirectory. Initial discovery is transactional. If the tree exceeds the capacity, the call raises <code>Device_Error</code> and leaves the watcher closed.</p>
+            <p><code>Open</code> follows a symbolic link in the final component of the root path. Discovery does not traverse symbolic links below the root. This rule prevents a nested link from expanding the tree or creating a traversal cycle.</p>
+            <p>A repeated call with the same root is harmless. A call with another root raises <code>Device_Error</code>. Close the watcher before you select a different root.</p>
+
+            <h3>Use tree-wide events.</h3>
+            <p>The recursive <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#2561344b5d3df3285877feeffea00884e8dd2b4412a1c3eec7ec0169f6a72313"><code>Next</code></a> waits for one hint and then scans the current tree. It removes obsolete registrations and adds discovered directories before it returns.</p>
+            <p>The result is a <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#91768bb4ec6724568162de22fc347b544925f72da2032e757c9e0bcff6c848c6"><code>Recursive_Event</code></a>. Its <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#91768bb4ec6724568162de22fc347b544925f72da2032e757c9e0bcff6c848c6"><code>Changes</code></a> apply to the complete tree. The event does not expose internal watch identifiers.</p>
+            <p><a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#91768bb4ec6724568162de22fc347b544925f72da2032e757c9e0bcff6c848c6"><code>Registrations_Changed</code></a> reports whether reconciliation changed the registration set. <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#91768bb4ec6724568162de22fc347b544925f72da2032e757c9e0bcff6c848c6"><code>Directory_Count</code></a> reports the number of retained logical registrations. The count can include an obsolete path while coverage is incomplete.</p>
+            <p>Use the recursive <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#b7aa51413208f98b264a8b6d115e52ea0a883e2d4698c4d8951d3c0e67d666a3"><code>Is_Open</code></a> query to detect terminal root invalidation. Do not use the query to synchronize tasks.</p>
+
+            <h3>Recover bounded coverage.</h3>
+            <p>Tree growth can exceed the object capacity after <code>Open</code>. A scan can also stop because directory metadata is unavailable. In both cases, reconciliation preserves the existing registration set. The event sets <code>Events_Lost</code> and clears <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#91768bb4ec6724568162de22fc347b544925f72da2032e757c9e0bcff6c848c6"><code>Coverage_Complete</code></a>.</p>
+            <p>Incomplete coverage means that some directories have no registration. Changes below an unregistered directory do not necessarily produce another wake. Use the explicit <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#797df4f1d38002a2977521d00330dc221e740f27a1b04360631bd78016543945"><code>Refresh</code></a> operation from an application retry or periodic check. A later complete scan restores coverage when the tree fits again.</p>
+            <p>The <a href="../../api/8bf7f596eeb06ccfdb39e8c8052f3a295912126fb2afa7bf4265e2667686e395.html#65d769dbd6785bd6356f91785bdfb06449b7e9f2990fc5b11b380910a03bbcfc"><code>Coverage_Is_Complete</code></a> query reports the current state outside an event. Treat a false result as a requirement to reconcile all application state covered by the root.</p>
+
+            <figure class="code-panel">
+              <figcaption>recursive watcher with explicit capacity recovery</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO;
+with Flyology.IO.File_Watches.Recursive;
+
+procedure Monitor_Tree is
+   package Trees renames Flyology.IO.File_Watches.Recursive;
+
+   Tree    : Trees.Recursive_Watcher; --  Capacity defaults to 64.
+   Event   : Trees.Recursive_Event;
+   Outcome : Flyology.IO.Wait_Outcome;
+begin
+   Tree.Open ("/srv/my-app/config");
+
+   loop
+      Tree.Next
+        (Event,
+         Outcome,
+         Timeout    =&gt; 60.0,
+         Interrupts =&gt; Shutdown_Descriptors);
+      case Outcome is
+         when Flyology.IO.Ready =&gt;
+            Reconcile_Complete_Tree;
+            exit when not Tree.Is_Open;
+            if not Event.Coverage_Complete then
+               Schedule_Refresh;
+            end if;
+
+         when Flyology.IO.Timed_Out =&gt;
+            Tree.Refresh (Event);
+            Reconcile_Complete_Tree;
+            exit when not Tree.Is_Open;
+
+         when Flyology.IO.Interrupted =&gt;
+            exit;
+      end case;
+   end loop;
+
+   Tree.Close;
+end Monitor_Tree;</code></pre>
+            </figure>
+            <p><code>Reconcile_Complete_Tree</code> and <code>Schedule_Refresh</code> are application policy. The scheduled refresh must call <code>Refresh</code> without waiting for another filesystem hint.</p>
+
+            <h3>Keep discovery time outside the wait deadline.</h3>
+            <p>The timeout on recursive <code>Next</code> applies only to the readiness wait. Tree discovery and registration reconciliation start after readiness. They do not share that deadline.</p>
+            <p>Discovery performs directory and metadata operations on the calling lane. A large tree or slow remote filesystem can occupy an event-loop pthread. Use a native-task boundary when that delay is not acceptable.</p>
+
+            <h3>Handle removal of the root.</h3>
+            <p>If reconciliation cannot find the root, the event sets <code>Identity_Changed</code> and <code>Watch_Invalidated</code>. The recursive watcher releases its registrations and becomes closed. Recreate the root before you call <code>Open</code> again.</p>
+            <p>Explicit close releases every registration and owned pathname. It reports cleanup failures. Finalization performs the same cleanup without propagating an exception.</p>
+          </section>
+
+          <section id="lanes">
+            <span class="step-label">WATCH 07</span>
             <h2>Separate waiting from metadata work.</h2>
             <div class="decision-list">
               <dl>
@@ -286,7 +366,7 @@ end Monitor_Configuration;</code></pre>
           </section>
 
           <section id="concurrency">
-            <span class="step-label">WATCH 07</span>
+            <span class="step-label">WATCH 08</span>
             <h2>Give one task exclusive control.</h2>
             <p>Watcher operations are not task safe. One task must serialize opening, registration changes, waiting, and closing.</p>
             <p>Do not call <code>Close</code> or <code>Remove</code> concurrently with <code>Next</code>. Instead, wake the owner through an interrupt descriptor. The owner can then consume the wake and change watcher state.</p>
@@ -295,12 +375,12 @@ end Monitor_Configuration;</code></pre>
           </section>
 
           <section id="limits">
-            <span class="step-label">WATCH 08</span>
+            <span class="step-label">WATCH 09</span>
             <h2>Keep platform limits visible.</h2>
             <ul>
               <li>File watching is available on supported macOS and Linux hosts. Flyology does not provide a Windows backend.</li>
               <li>Notifications are advisory, coalesced hints. They are not a durable journal or a security boundary.</li>
-              <li>Directory watches are not recursive. The application maintains registrations for a directory tree.</li>
+              <li>A base directory watch is not recursive. The recursive child package maintains a bounded registration set for a tree.</li>
               <li>The portable event omits Linux child names, rename cookies, and other platform-only detail.</li>
               <li>The final symbolic-link component is followed. The watch identifies the resulting object, not the link as an independent object.</li>
               <li>A file can change again between notification and inspection. Use an application protocol when a consistent snapshot is required.</li>

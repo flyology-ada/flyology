@@ -114,6 +114,13 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Native file callers use direct positional syscalls. `Open` and `Close` are
   direct metadata syscalls in both lanes and may occupy a loop on slow remote
   filesystems.
+- Recursive file watching keeps one bounded registration per real directory,
+  with a default capacity of 64. It follows the final root symlink, skips
+  nested symlinks, and reconciles registrations after each returned hint.
+  Initial overflow is transactional. Later overflow preserves the existing
+  registrations and marks coverage incomplete until a complete refresh.
+  Directory discovery and registration metadata calls execute on the caller's
+  lane; only the readiness wait is task-aware.
 - Linux syscall numbers, native `epoll_event` layout, thread placement, virtual
   memory, test hooks, and the GNAT 13 release-store intrinsic belong in the
   narrow C bridge. Scheduler, queue, timeout, backpressure, file-engine, and

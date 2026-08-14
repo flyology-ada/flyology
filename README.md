@@ -1499,19 +1499,28 @@ task, callback thread, or scheduler-specific file-watch ABI is involved.
 Events identify the registration and report portable hints for content,
 metadata, pathname identity, invalidation, and lost kernel detail. They are
 advisory and may be coalesced. They do not count filesystem operations, expose
-Linux-only child names or rename cookies, or recursively add new directories.
-An application must inspect the watched object after every hint and rebuild
-the relevant cached state after `Events_Lost`. `Identity_Changed` with
-`Watch_Invalidated` requires removing and recreating the pathname watch.
+Linux-only child names, or expose rename cookies. An application must inspect
+the watched object after every hint and rebuild the relevant cached state after
+`Events_Lost`. `Identity_Changed` with `Watch_Invalidated` requires removing
+and recreating the pathname watch.
 
-`Open`, `Add`, `Remove`, and `Close` perform direct metadata syscalls and may
-occupy the calling lane on a slow remote filesystem. Watcher operations are
-unsynchronized; one task must serialize mutation, waiting, and close. The
-optional interrupt set uses the same borrowed readable wake descriptors and
-single monotonic deadline as `Flyology.IO.Wait_Interruptibly`. `Remove` retires
-its logical identifier even when native cleanup reports an error. `Close`
-invalidates the watcher after it attempts all cleanup, including when it raises
-`Device_Error`.
+`Flyology.IO.File_Watches.Recursive` adds bounded directory-tree discovery and
+registration reconciliation. Its capacity counts the root and all real
+subdirectories, defaults to 64, and is selectable with the object discriminant.
+Initial overflow leaves the recursive watcher closed. Later overflow preserves
+the current registrations, reports `Events_Lost`, and marks coverage incomplete
+until a complete refresh succeeds. The final symbolic-link component of the
+root is followed, but nested symbolic links are not traversed. Recursive events
+describe the tree and do not expose internal registration identifiers.
+
+`Open`, `Add`, `Remove`, `Close`, recursive discovery, and reconciliation
+perform direct metadata syscalls. They may occupy the calling lane on a slow
+remote filesystem. Watcher operations are unsynchronized; one task must
+serialize mutation, waiting, and close. The optional interrupt set uses the
+same borrowed readable wake descriptors and single monotonic deadline as
+`Flyology.IO.Wait_Interruptibly`. `Remove` retires its logical identifier even
+when native cleanup reports an error. `Close` invalidates the watcher after it
+attempts all cleanup, including when it raises `Device_Error`.
 
 ### Native subprocesses
 

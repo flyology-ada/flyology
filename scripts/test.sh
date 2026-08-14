@@ -341,6 +341,7 @@ fiber_trampoline_abort_smoke
 fiber_trampoline_smoke
 file_cancellation_smoke
 file_transfers_smoke
+file_watches_recursive_smoke
 file_watches_recovery_smoke
 file_watches_smoke
 files_smoke
