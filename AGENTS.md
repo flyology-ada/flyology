@@ -496,6 +496,30 @@ required by the changed boundary.
 - Keep test fault injection compiled out of production and isolate expected
   aborts/process exits in subprocesses with timeouts.
 
+## Releases
+
+- Automatic index publication is driven by immutable annotated tags named
+  `<crate>/v<version>`, for example `flyology/v0.1.0` or
+  `flyology_debug/v0.1.0`.
+- Before tagging, change that crate's `alire.toml` from the development
+  version to the exact stable version in the tag, replace inappropriate
+  `-dev` dependency constraints with stable constraints, and run the crate's
+  required validation plus `alr show`. The manifest name and version must
+  exactly match the tag's crate and version.
+- Indexed crates in this repository are `flyology`, `flyology_bench`,
+  `flyology_cachelines`, and `flyology_debug`. Tag each released crate
+  independently, even when several tags point to one release commit.
+- Create and push the tag only after the release-ready manifest is committed:
+
+  ```sh
+  git tag -a <crate>/v<version> -m "Release <crate> <version>"
+  git push origin refs/tags/<crate>/v<version>
+  ```
+
+- Never move, replace, or reuse a published release tag. Make any next
+  development-version change in a later commit so the tag continues to identify
+  the exact released sources.
+
 ## Licensing and commits
 
 - Original code, tests, scripts, proof, and artwork are dual MIT/Apache-2.0.
