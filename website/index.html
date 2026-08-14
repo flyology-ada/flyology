@@ -9,6 +9,7 @@
     <link rel="canonical" href="https://flyology.org/">
     <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles/site.css">
+    <link rel="stylesheet" href="assets/styles/ecosystem.css">
     <script src="assets/scripts/ada-highlight.js"></script>
     <script src="assets/scripts/site.js"></script>
   </head>
@@ -29,9 +30,26 @@
           <li>
             <details class="nav-dropdown" data-nav-dropdown>
               <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
-              <ul class="nav-dropdown-menu">
-                <li><a href="https://http.flyology.org/">HTTP</a></li>
-                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              <ul class="nav-dropdown-menu ecosystem-nav-menu">
+                <li class="ecosystem-nav-group">
+                  <span>Built on Flyology</span>
+                  <ul>
+                    <li><a href="https://http.flyology.org/">HTTP</a></li>
+                    <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+                    <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">QUIC</a></li>
+                  </ul>
+                </li>
+                <li class="ecosystem-nav-group">
+                  <span>Standalone libraries</span>
+                  <ul>
+                    <li><a href="https://flyology.org/guide/benchmarking/">Bench</a></li>
+                    <li><a href="https://flyology.org/guide/cachelines/">Cachelines</a></li>
+                    <li><a href="https://flyology.org/api/flyology_debug/">Debug</a></li>
+                    <li><a href="https://http.flyology.org/guide/iri/">IRI</a></li>
+                    <li><a href="https://simd.flyology.org/">SIMD</a></li>
+                    <li><a href="https://tui.flyology.org/">TUI</a></li>
+                  </ul>
+                </li>
               </ul>
             </details>
           </li>
@@ -243,48 +261,87 @@ Queue.Send_Move (Value);</code></pre>
         <div class="ecosystem-heading">
           <div>
             <p class="eyebrow">Ecosystem</p>
-            <h2 id="ecosystem-title">Libraries built on Flyology Runtime.</h2>
+            <h2 id="ecosystem-title">Focused Ada libraries, with or without the runtime.</h2>
           </div>
-          <p>Companion projects use the same synchronous Ada model while adding focused protocol and application layers.</p>
+          <p>The ecosystem includes libraries built on Flyology's task-aware I/O and standalone libraries that can be adopted independently.</p>
         </div>
-        <a class="ecosystem-card" href="https://http.flyology.org/">
-          <span class="ecosystem-card-mark" aria-hidden="true">
-            <span>01</span>
-            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 22h35"/><path d="m36 14 8 8-8 8"/><path d="M56 42H21"/><path d="m28 34-8 8 8 8"/><rect x="6" y="8" width="52" height="48" rx="8"/></svg>
-          </span>
-          <span class="ecosystem-card-copy">
-            <span class="ecosystem-card-type">Application protocol library · native Ada</span>
-            <strong>HTTP</strong>
-            <span class="ecosystem-card-description">HTTP/1.1 clients and servers, with opt-in HTTP/2 client and application-server engines, over Flyology task-aware I/O.</span>
-            <span class="ecosystem-card-tags" aria-label="HTTP library capabilities"><span>HTTP/1.1</span><span>HTTP/2</span><span>Streaming</span><span>WebSockets</span></span>
-          </span>
-          <span class="ecosystem-card-action">http.flyology.org <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
-        </a>
-        <a class="ecosystem-card" href="https://postgres.flyology.org/">
-          <span class="ecosystem-card-mark" aria-hidden="true">
-            <span>02</span>
-            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
-              <ellipse cx="32" cy="15" rx="20" ry="8"/>
-              <path d="M12 15v17c0 4.4 9 8 20 8s20-3.6 20-8V15"/>
-              <path d="M12 32v17c0 4.4 9 8 20 8s20-3.6 20-8V32"/>
-            </svg>
-          </span>
-          <span class="ecosystem-card-copy">
-            <span class="ecosystem-card-type">Protocol library · native Ada</span>
-            <strong>Postgres</strong>
-            <span class="ecosystem-card-description">Client and server primitives for the Postgres frontend/backend protocol over Flyology I/O.</span>
-            <span class="ecosystem-card-tags" aria-label="Postgres library capabilities">
-              <span>Client</span>
-              <span>Server</span>
-              <span>Streaming</span>
-              <span>SCRAM</span>
+        <div class="ecosystem-group">
+          <div class="ecosystem-group-heading">
+            <h3>Built on Flyology</h3>
+            <p>These libraries depend on Flyology Runtime and use its task-aware I/O from native and lightweight tasks.</p>
+          </div>
+          <a class="ecosystem-card" href="https://http.flyology.org/">
+            <span class="ecosystem-card-mark" aria-hidden="true">
+              <span>01</span>
+              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 22h35"/><path d="m36 14 8 8-8 8"/><path d="M56 42H21"/><path d="m28 34-8 8 8 8"/><rect x="6" y="8" width="52" height="48" rx="8"/></svg>
             </span>
-          </span>
-          <span class="ecosystem-card-action">
-            postgres.flyology.org
-            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
-          </span>
-        </a>
+            <span class="ecosystem-card-copy">
+              <span class="ecosystem-card-type">Application protocol library · Ada</span>
+              <strong>HTTP</strong>
+              <span class="ecosystem-card-description">HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines, over Flyology task-aware I/O.</span>
+              <span class="ecosystem-card-tags" aria-label="HTTP library capabilities"><span>HTTP/1.1</span><span>HTTP/2</span><span>HTTP/3</span><span>WebSockets</span></span>
+            </span>
+            <span class="ecosystem-card-action">http.flyology.org <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
+          </a>
+          <a class="ecosystem-card" href="https://postgres.flyology.org/">
+            <span class="ecosystem-card-mark" aria-hidden="true">
+              <span>02</span>
+              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
+                <ellipse cx="32" cy="15" rx="20" ry="8"/>
+                <path d="M12 15v17c0 4.4 9 8 20 8s20-3.6 20-8V15"/>
+                <path d="M12 32v17c0 4.4 9 8 20 8s20-3.6 20-8V32"/>
+              </svg>
+            </span>
+            <span class="ecosystem-card-copy">
+              <span class="ecosystem-card-type">Database protocol library · Ada</span>
+              <strong>Postgres</strong>
+              <span class="ecosystem-card-description">Client and server primitives for the Postgres frontend/backend protocol over Flyology I/O.</span>
+              <span class="ecosystem-card-tags" aria-label="Postgres library capabilities">
+                <span>Client</span>
+                <span>Server</span>
+                <span>Streaming</span>
+                <span>SCRAM</span>
+              </span>
+            </span>
+            <span class="ecosystem-card-action">
+              postgres.flyology.org
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
+            </span>
+          </a>
+          <a class="ecosystem-card" href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">
+            <span class="ecosystem-card-mark" aria-hidden="true">
+              <span>03</span>
+              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 18h28c9 0 16 6 16 14s-7 14-16 14H26"/>
+                <path d="m18 38 8 8-8 8"/>
+                <circle cx="16" cy="18" r="6"/>
+                <path d="M22 18h8"/>
+              </svg>
+            </span>
+            <span class="ecosystem-card-copy">
+              <span class="ecosystem-card-type">Transport library · Ada</span>
+              <strong>QUIC</strong>
+              <span class="ecosystem-card-description">An experimental, bounded QUIC transport for Flyology tasks, with protocol state, streams, recovery, and congestion control in Ada.</span>
+              <span class="ecosystem-card-tags" aria-label="QUIC library capabilities"><span>QUIC v1</span><span>Streams</span><span>TLS 1.3</span><span>Recovery</span></span>
+            </span>
+            <span class="ecosystem-card-action">View source <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
+          </a>
+        </div>
+
+        <div class="ecosystem-group">
+          <div class="ecosystem-group-heading">
+            <h3>Standalone libraries</h3>
+            <p>These projects are part of the Flyology project family, but none requires Flyology Runtime.</p>
+          </div>
+          <ul class="ecosystem-index">
+            <li><a href="guide/benchmarking/"><strong class="ecosystem-index-name">Bench</strong><span class="ecosystem-index-description">Adaptive microbenchmarking and balanced comparisons for Ada workloads.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="guide/cachelines/"><strong class="ecosystem-index-name">Cachelines</strong><span class="ecosystem-index-description">Cache-line-aware storage, ownership-aware groups, and host cache queries.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="api/flyology_debug/"><strong class="ecosystem-index-name">Debug</strong><span class="ecosystem-index-description">Bounded in-memory tracing and persistent gauges for Ada.</span><span class="ecosystem-index-action">API <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://http.flyology.org/guide/iri/"><strong class="ecosystem-index-name">IRI</strong><span class="ecosystem-index-description">Allocation-conscious URI, IRI, and WHATWG URL parsing.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://simd.flyology.org/"><strong class="ecosystem-index-name">SIMD</strong><span class="ecosystem-index-description">Portable, strongly typed SIMD foundations for Ada.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://tui.flyology.org/"><strong class="ecosystem-index-name">TUI</strong><span class="ecosystem-index-description">A typed, declarative terminal user-interface toolkit for Ada.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+          </ul>
+        </div>
       </section>
 
       <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">

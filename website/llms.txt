@@ -29,6 +29,7 @@ The Flyology index is a development channel, not a community-index release. Remo
 - [Benchmarking Ada](https://flyology.org/guide/benchmarking/): Adaptive batching, nanosecond-scale measurement semantics, balanced or sequential comparisons of two to sixteen implementations, externally controlled span recording, live terminal telemetry, collection budgets, and CSV or JSON output.
 - [Cache-line-aware storage](https://flyology.org/guide/cachelines/): Standalone padded values, ownership-aware groups, host cache queries, and the Linux/macOS support boundary.
 - [API reference](https://flyology.org/api/): Generated reference for Flyology's public Ada packages.
+- [flyology_debug API reference](https://flyology.org/api/flyology_debug/): Generated reference for bounded tracing, gauges, snapshots, clearing, and overflow behavior.
 - [flyology_bench API reference](https://flyology.org/api/flyology_bench/): Generated reference for the benchmark configuration, measurement, comparison, baseline, metadata, host-control, and reporting APIs.
 - [flyology_cachelines API reference](https://flyology.org/api/flyology_cachelines/): Generated reference for cache spacing, padded values, ownership-aware groups, grouped arrays, and host cache queries.
 
@@ -40,8 +41,23 @@ The Flyology index is a development channel, not a community-index release. Remo
 - [Alire crate manifest](https://raw.githubusercontent.com/flyology-ada/flyology/main/alire.toml): Package metadata and dependency constraints; these constraints are broader than the verified runtime matrix.
 - [Flyology Cachelines crate](https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines): Standalone `flyology_cachelines` crate, tests, benchmarks, and public API sources.
 
+## Ecosystem libraries
+
+### Built on Flyology
+
+- [Flyology HTTP](https://http.flyology.org/): HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines, built on Flyology task-aware I/O.
+- [Flyology Postgres](https://postgres.flyology.org/): Postgres client and server protocol primitives built on Flyology I/O.
+- [Flyology QUIC](https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic): Experimental, bounded QUIC transport implemented in Ada for Flyology tasks.
+
+### Standalone libraries
+
+- [flyology_bench](https://flyology.org/guide/benchmarking/): Adaptive microbenchmarking and balanced comparisons for Ada workloads.
+- [flyology_cachelines](https://flyology.org/guide/cachelines/): Cache-line-aware storage, ownership-aware groups, and host cache queries.
+- [flyology_debug](https://flyology.org/api/flyology_debug/): Bounded in-memory tracing and persistent gauges for Ada.
+- [flyology_iri](https://http.flyology.org/guide/iri/): Allocation-conscious URI, IRI, and WHATWG URL parsing.
+- [flyology_simd](https://simd.flyology.org/): Portable, strongly typed SIMD foundations for Ada.
+- [flyology_tui](https://tui.flyology.org/): Typed, declarative terminal user-interface toolkit for Ada.
+
 ## Optional
 
 - [Development journal](https://flyology.org/journal/): Reserved for future runtime records, with links to the active HTTP and Postgres library journals.
-- [Flyology HTTP](https://http.flyology.org/): A separate HTTP/1.1 client and application-server library built on Flyology task-aware I/O.
-- [Flyology Postgres](https://postgres.flyology.org/): A separate ecosystem project exploring PostgreSQL access with Flyology.

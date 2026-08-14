@@ -9,6 +9,7 @@
     <link rel="canonical" href="https://flyology.org/guide/cachelines/">
     <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
     <script src="../../assets/scripts/ada-highlight.js"></script>
     <script src="../../assets/scripts/site.js"></script>
   </head>
@@ -29,9 +30,26 @@
           <li>
             <details class="nav-dropdown" data-nav-dropdown>
               <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
-              <ul class="nav-dropdown-menu">
-                <li><a href="https://http.flyology.org/">HTTP</a></li>
-                <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+              <ul class="nav-dropdown-menu ecosystem-nav-menu">
+                <li class="ecosystem-nav-group">
+                  <span>Built on Flyology</span>
+                  <ul>
+                    <li><a href="https://http.flyology.org/">HTTP</a></li>
+                    <li><a href="https://postgres.flyology.org/">Postgres</a></li>
+                    <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">QUIC</a></li>
+                  </ul>
+                </li>
+                <li class="ecosystem-nav-group">
+                  <span>Standalone libraries</span>
+                  <ul>
+                    <li><a href="https://flyology.org/guide/benchmarking/">Bench</a></li>
+                    <li><a href="https://flyology.org/guide/cachelines/">Cachelines</a></li>
+                    <li><a href="https://flyology.org/api/flyology_debug/">Debug</a></li>
+                    <li><a href="https://http.flyology.org/guide/iri/">IRI</a></li>
+                    <li><a href="https://simd.flyology.org/">SIMD</a></li>
+                    <li><a href="https://tui.flyology.org/">TUI</a></li>
+                  </ul>
+                </li>
               </ul>
             </details>
           </li>
