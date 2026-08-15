@@ -2,7 +2,8 @@ with Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel;
 with Flyology_Allocators.Allocation_Algorithms.Contract;
 
 --  Buddy allocation for relocatable arenas. The persisted complete binary
---  tree splits power-of-two blocks and coalesces free siblings. One persisted
+--  tree splits power-of-two blocks and coalesces free siblings lazily when a
+--  later allocation cannot find a large enough retained block. One persisted
 --  nonblocking guard serializes allocation and release across attached views;
 --  payload access requires the handle owner to exclude release. A dead guard
 --  owner leaves the allocator locked until an external authority poisons it,
@@ -17,7 +18,7 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy is new
         Release_Contention    => Allocation_Algorithms.Whole_Allocator,
         In_Band_Metadata      => False,
         Splits_Blocks         => True,
-        Coalesces_On_Release  => True,
+        Coalesces_On_Release  => False,
         Timed_Contention      => True,
         Release_Exclusion     => True),
      Algorithm_Configuration => Buddy_Kernel.Configuration,
