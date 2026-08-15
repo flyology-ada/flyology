@@ -1,5 +1,6 @@
 with Ada.Command_Line;
 with Ada.Environment_Variables;
+with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Text_IO;
 with Flyology;
@@ -47,9 +48,9 @@ procedure Data_Structures_Concurrency_Smoke is
    package MPMC is new DS.Rings.MPMC
      (Element => U64_Elements.Element);
 
-   --  Hold one consumer after it advances Dequeue but before it releases the
-   --  claimed slot, making active-attachment ordering deterministic.
-   protected Paused_Observation is
+   --  Hold an observer after its container claims internal state, making
+   --  active-attachment ordering deterministic without scheduler timing.
+   protected type Observation_Gate is
       procedure Mark_Entered;
       entry Await_Entered;
       entry Continue;
@@ -57,9 +58,9 @@ procedure Data_Structures_Concurrency_Smoke is
    private
       Entered  : Boolean := False;
       Released : Boolean := False;
-   end Paused_Observation;
+   end Observation_Gate;
 
-   protected body Paused_Observation is
+   protected body Observation_Gate is
       procedure Mark_Entered is
       begin
          Entered := True;
@@ -79,7 +80,10 @@ procedure Data_Structures_Concurrency_Smoke is
       begin
          Released := True;
       end Release;
-   end Paused_Observation;
+   end Observation_Gate;
+
+   Paused_Observation     : Observation_Gate;
+   Paused_Map_Observation : Observation_Gate;
 
    function Observe_After_Claim
      (Item : U64_Elements.Representation.Const_Ref)
@@ -98,6 +102,24 @@ procedure Data_Structures_Concurrency_Smoke is
       Observe_Value   => Observe_After_Claim);
    package Paused_MPMC is new DS.Rings.MPMC
      (Element => Paused_U64_Element);
+   function Observe_Map_After_Claim
+     (Item : U64_Elements.Representation.Const_Ref)
+      return Interfaces.Unsigned_64 is
+   begin
+      Paused_Map_Observation.Mark_Entered;
+      Paused_Map_Observation.Continue;
+      return U64_Elements.Value_Of (Item);
+   end Observe_Map_After_Claim;
+
+   package Paused_Map_Element is new DS.Storage_Types.Elements
+     (Representation  => U64_Elements.Representation,
+      Source_Type     => Interfaces.Unsigned_64,
+      Observed_Type   => Interfaces.Unsigned_64,
+      Create_Value    => U64_Elements.Create,
+      Observe_Value   => Observe_Map_After_Claim);
+   package Paused_Hash_Maps is new DS.Hash_Maps
+     (Key     => U64_Elements.Element,
+      Element => Paused_Map_Element);
    package Slabs is new DS.Slab_Pools
      (Element => U64_Elements.Element);
    package Vectors is new DS.Vectors
@@ -925,6 +947,88 @@ procedure Data_Structures_Concurrency_Smoke is
       Finished : Completion (Worker_Count);
       Attach_Finished : Completion (1);
 
+      procedure Run_Deterministic_Attach_Contention is
+         Held_View : aliased Paused_Hash_Maps.View;
+         Candidate : Hash_Maps.View;
+         Get_Finished : Completion (1);
+
+         task type Guard_Holder
+           (Item : not null access Paused_Hash_Maps.View)
+         is
+            pragma Task_Info (Flyology.Native_Task);
+         end Guard_Holder;
+
+         task body Guard_Holder is
+            Value : Interfaces.Unsigned_64;
+            Found : Boolean;
+         begin
+            Paused_Hash_Maps.Get (Item.all, 1, Value, Found);
+            if not Found or else Value /= (1 xor 16#A5A5#) then
+               raise Program_Error with
+                 "guard-holder map lookup returned a wrong value";
+            end if;
+            Get_Finished.Done (True);
+         exception
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "guard-holder map lookup failed: "
+                  & Ada.Exceptions.Exception_Information (Error));
+               Get_Finished.Done (False);
+         end Guard_Holder;
+
+         type Guard_Holder_Access is access Guard_Holder;
+         Holder : Guard_Holder_Access;
+      begin
+         Paused_Hash_Maps.Attach
+           (Held_View, Region_B, Map_Location, Capacity);
+         Holder := new Guard_Holder (Held_View'Access);
+         select
+            Paused_Map_Observation.Await_Entered;
+         or
+            delay 5.0;
+            Paused_Map_Observation.Release;
+            abort Holder.all;
+            Paused_Hash_Maps.Detach (Held_View);
+            raise Program_Error with
+              "guard-holder map lookup did not acquire the guard";
+         end select;
+
+         begin
+            begin
+               Hash_Maps.Attach
+                 (Candidate, Region_A, Map_Location, Capacity);
+               Hash_Maps.Detach (Candidate);
+               raise Program_Error with
+                 "hash-map attachment ignored a held guard";
+            exception
+               when DS.Busy_Error =>
+                  null;
+            end;
+         exception
+            when others =>
+               Paused_Map_Observation.Release;
+               Hash_Maps.Detach (Candidate);
+               Paused_Hash_Maps.Detach (Held_View);
+               raise;
+         end;
+
+         Paused_Map_Observation.Release;
+         select
+            Get_Finished.Await_All;
+         or
+            delay 5.0;
+            abort Holder.all;
+            Paused_Hash_Maps.Detach (Held_View);
+            raise Program_Error with
+              "guard-holder map lookup did not finish";
+         end select;
+         Assert
+           (Get_Finished.Passed,
+            "guard-holder map lookup failed after releasing the guard");
+         Paused_Hash_Maps.Detach (Held_View);
+      end Run_Deterministic_Attach_Contention;
+
       protected Start_Gate is
          procedure Arrive;
          entry Go;
@@ -982,7 +1086,6 @@ procedure Data_Structures_Concurrency_Smoke is
       task body Attach_Task is
          Candidate : Hash_Maps.View;
          Successful_Attaches : Natural := 0;
-         Saw_Contention : Boolean := False;
       begin
          Start_Gate.Arrive;
          Start_Gate.Go;
@@ -996,17 +1099,17 @@ procedure Data_Structures_Concurrency_Smoke is
                Hash_Maps.Detach (Candidate);
             exception
                when DS.Busy_Error =>
-                  Saw_Contention := True;
+                  null;
             end;
             delay 0.0;
          end loop;
-         if not Saw_Contention then
-            raise Program_Error with
-              "hash-map attachment race observed no guard contention";
-         end if;
          Attach_Finished.Done (True);
       exception
-         when others =>
+         when Error : others =>
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "concurrent hash-map attachment failed: "
+               & Ada.Exceptions.Exception_Information (Error));
             Hash_Maps.Detach (Candidate);
             Attach_Finished.Done (False);
       end Attach_Task;
@@ -1065,6 +1168,7 @@ procedure Data_Structures_Concurrency_Smoke is
            (Found and then Data = (Value xor 16#A5A5#),
             "internally synchronized hash map returned a wrong value");
       end loop;
+      Run_Deterministic_Attach_Contention;
       Hash_Maps.Destroy (Views (1));
       for Index in 2 .. Worker_Count loop
          Hash_Maps.Detach (Views (Index));
