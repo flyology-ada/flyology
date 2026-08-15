@@ -455,6 +455,10 @@ required by the changed boundary.
   Alire-generated project configuration. The maintained bare-board check uses
   `FLYOLOGY_ALLOCATORS_TARGET=arm-eabi` and
   `FLYOLOGY_ALLOCATORS_RTS=embedded-stm32f4`.
+- `cd flyology_allocators/benchmarks && ./scripts/run.sh`: optional hosted
+  `flyology_bench` comparison of Buddy, Best-Fit, TLSF, and native
+  `malloc`/`free`. Short settings validate behavior only; use release defaults
+  on a quiet host before making performance claims.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
   Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
   generated traces and reports remain outside version control.

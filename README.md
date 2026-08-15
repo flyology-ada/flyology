@@ -842,6 +842,17 @@ Alire-generated project configuration. Its timed contention path uses
 behavior. The same sources are cross-compiled with GNAT 15 `arm-eabi` and the
 `embedded-stm32f4` bare-board runtime.
 
+An optional hosted benchmark subcrate compares the standalone algorithms with
+native `malloc`/`free` using `flyology_bench` paired multi-way sampling:
+
+```sh
+./flyology_allocators/benchmarks/scripts/run.sh
+```
+
+It measures fixed-size allocation/release cycles and deterministic churn over
+a bounded live allocation set. Its hosted dependencies remain outside the
+standalone allocator library's manifest and bare-board project closure.
+
 `Arenas` is generic over an `Allocation_Algorithms.Contract` instance. The
 selection is compile-time: arena operations are static renames and neither a
 dispatch table nor a callback is stored in the backing bytes. Each standalone
