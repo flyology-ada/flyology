@@ -18,4 +18,8 @@ project Flyology_Allocators is
       for Switches ("Ada") use ("-Es");
    end Binder;
 
+   package Compiler is
+      for Default_Switches ("Ada") use ("-gnat2022");
+   end Compiler;
+
 end Flyology_Allocators;

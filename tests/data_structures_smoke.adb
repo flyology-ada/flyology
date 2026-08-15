@@ -679,6 +679,33 @@ begin
      (Open_Outcome = DS.Attached_Existing, "arena was reinitialized");
 
    declare
+      Saved : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (Arena_Location, 4));
+      Saved_Schema : constant Interfaces.Unsigned_64 := Read_U64
+        (Base_B, Raw_Offset (Arena_Location, 16));
+      Failed : Boolean := False;
+   begin
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 4), 2);
+      Write_U64
+        (Base_B, Raw_Offset (Arena_Location, 16),
+         16#0001_4152_454E_0002#);
+      begin
+         Arenas.Attach
+           (Arena_Bad, Region_B, Arena_Location,
+            (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
+            16#A8E4_7B19_2C63_D501#);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 4), Saved);
+      Write_U64
+        (Base_B, Raw_Offset (Arena_Location, 16), Saved_Schema);
+      Assert
+        (Failed and then not Arenas.Is_Attached (Arena_Bad),
+         "buddy arena accepted the earlier eager-coalescing version");
+   end;
+
+   declare
       Failed : Boolean := False;
    begin
       begin
@@ -1011,7 +1038,9 @@ begin
    end;
 
    Assert
-     (Best_Fit_Arenas.Capabilities.Search =
+     (Arenas.Capabilities.Search = DS.Allocation_Algorithms.Linear
+      and then not Arenas.Capabilities.Coalesces_On_Release
+      and then Best_Fit_Arenas.Capabilities.Search =
         DS.Allocation_Algorithms.Linear
       and then not Best_Fit_Arenas.Capabilities.Coalesces_On_Release
       and then TLSF_Arenas.Capabilities.Search =

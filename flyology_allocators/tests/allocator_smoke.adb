@@ -65,10 +65,12 @@ procedure Allocator_Smoke is
    Buddy_Allocation : FA.Regions.View;
    Buddy_View : Buddy_Arenas.View;
    Buddy_Peer_View : Buddy_Arenas.View;
+   Buddy_Tiny_View : Buddy_Arenas.View;
    Best_Fit_View : Best_Fit_Arenas.View;
    TLSF_View : TLSF_Arenas.View;
    Buddy_Handle : Buddy_Arenas.Allocation_Handle;
    Buddy_Peer_Handle : Buddy_Arenas.Allocation_Handle;
+   Buddy_Tiny_Left, Buddy_Tiny_Right : Buddy_Arenas.Allocation_Handle;
    Buddy_Small_Handles : Buddy_Handle_Array (1 .. 1_024);
    Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
    Best_Fit_Probe : Best_Fit_Arenas.Allocation_Handle;
@@ -88,11 +90,17 @@ procedure Allocator_Smoke is
    Result : FA.Allocation_Algorithms.Allocation_Result;
    Timed_Out : Boolean := False;
    Stale_Rejected : Boolean := False;
+   Destroy_Rejected : Boolean := False;
 begin
    Attach (Buddy_Region, Buddy_Storage);
    Buddy_Arenas.Initialize
      (Buddy_View, Buddy_Region, 64,
       (Usable_Capacity => 65_536, Minimum_Block_Size => 64), 1);
+   Check
+     (Buddy_Arenas.Capabilities.Search =
+        FA.Allocation_Algorithms.Linear
+      and then not Buddy_Arenas.Capabilities.Coalesces_On_Release,
+      "buddy lazy-coalescing capabilities are inaccurate");
    Buddy_Arenas.Try_Allocate (Buddy_View, 65, Buddy_Handle, Result);
    Check
      (Result = FA.Allocation_Algorithms.Allocated
@@ -192,6 +200,23 @@ begin
    Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
    Buddy_Arenas.Detach (Buddy_Peer_View);
 
+   Buddy_Arenas.Try_Allocate (Buddy_View, 64, Buddy_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "buddy live-destroy allocation failed");
+   begin
+      Buddy_Arenas.Destroy (Buddy_View);
+   exception
+      when FA.Layout_Error =>
+         Destroy_Rejected := True;
+   end;
+   Check
+     (Destroy_Rejected
+      and then not Buddy_Arenas.Is_Poisoned (Buddy_View)
+      and then Buddy_Arenas.Block_Capacity (Buddy_View, Buddy_Handle) = 64,
+      "buddy live destroy mutated or poisoned a usable arena");
+   Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
+
    --  The buddy guard is algorithm metadata at offset 44 from the allocator
    --  start. Force contention while no task can own the arena, then verify the
    --  standard-runtime deadline and cooperative retry path.
@@ -208,6 +233,34 @@ begin
      (Buddy_Storage (Buddy_Storage'First + 64 + 44)'Address).all := 0;
    Check (Timed_Out, "timed retry did not expire under contention");
    Buddy_Arenas.Destroy (Buddy_View);
+
+   --  The eager reader accepted this retained state but falsely reported
+   --  exhaustion: a split root with two free leaves must satisfy a root-sized
+   --  request through the coalesce-and-retry fallback.
+   Buddy_Arenas.Initialize
+     (Buddy_Tiny_View, Buddy_Region, 200_000,
+      (Usable_Capacity => 128, Minimum_Block_Size => 64), 4);
+   Buddy_Arenas.Try_Allocate
+     (Buddy_Tiny_View, 64, Buddy_Tiny_Left, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "buddy tiny left allocation failed");
+   Buddy_Arenas.Try_Allocate
+     (Buddy_Tiny_View, 64, Buddy_Tiny_Right, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "buddy tiny right allocation failed");
+   Buddy_Arenas.Release (Buddy_Tiny_View, Buddy_Tiny_Left);
+   Buddy_Arenas.Release (Buddy_Tiny_View, Buddy_Tiny_Right);
+   Buddy_Arenas.Try_Allocate
+     (Buddy_Tiny_View, 128, Buddy_Tiny_Left, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated
+      and then Buddy_Arenas.Block_Capacity
+        (Buddy_Tiny_View, Buddy_Tiny_Left) = 128,
+      "buddy retained two-leaf root falsely exhausted");
+   Buddy_Arenas.Release (Buddy_Tiny_View, Buddy_Tiny_Left);
+   Buddy_Arenas.Destroy (Buddy_Tiny_View);
 
    Attach (Best_Fit_Region, Best_Fit_Storage);
    Best_Fit_Arenas.Initialize
