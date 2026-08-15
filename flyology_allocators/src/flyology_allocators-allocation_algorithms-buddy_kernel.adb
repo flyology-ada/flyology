@@ -3,15 +3,19 @@ with Flyology_Allocators.Policy;
 with Flyology_Allocators.Storage;
 with Flyology_Allocators.Waits;
 with Interfaces.C;
+with System.Storage_Elements;
 
 package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    package Atomic renames Flyology_Allocators.Atomics;
    package Policy renames Flyology_Allocators.Policy;
    package Bytes renames Flyology_Allocators.Storage;
    package Waiting renames Flyology_Allocators.Waits;
+   package Native renames System.Storage_Elements;
 
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
+   use type Native.Integer_Address;
+   use type Native.Storage_Offset;
    use type System.Address;
 
    function Make_Token
@@ -104,34 +108,37 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
         (Configuration.Usable_Capacity,
          Configuration.Minimum_Block_Size).Extent);
 
-   function Node_Relative
-     (Item : View; Node : Interfaces.Unsigned_32) return Byte_Count
-   is
-   begin
-      if Node >= Item.Node_Count then
-         raise Layout_Error with "arena node index is out of range";
-      end if;
-      return Layouts.Checked_Add
-        (Node_Table_Offset,
-         Layouts.Checked_Multiply (Byte_Count (Node), Node_Entry_Size));
-   end Node_Relative;
-   pragma Inline_Always (Node_Relative);
-
    function Node_Address
      (Item     : View;
       Node     : Interfaces.Unsigned_32;
       Relative : Byte_Count;
       Extent   : Byte_Count;
-      Alignment : Byte_Count) return System.Address is
+      Alignment : Byte_Count) return System.Address
+   is
+      Offset : Byte_Count;
    begin
-      if Relative > Node_Entry_Size
+      if not Item.Core.Attached
+        or else Item.Node_Table_Address = System.Null_Address
+      then
+         raise Region_Error with "detached arena view";
+      elsif Node >= Item.Node_Count then
+         raise Layout_Error with "arena node index is out of range";
+      elsif Relative > Node_Entry_Size
         or else Extent > Node_Entry_Size - Relative
       then
          raise Layout_Error with "arena node field extent is corrupt";
+      elsif Alignment = 0
+        or else (Alignment and (Alignment - 1)) /= 0
+        or else Relative mod Alignment /= 0
+      then
+         raise Layout_Error with "arena node field alignment is corrupt";
       end if;
-      return Layouts.Address_At
-        (Item.Core, Layouts.Checked_Add (Node_Relative (Item, Node), Relative),
-         Extent, Alignment);
+      Offset := Byte_Count (Node) * Node_Entry_Size + Relative;
+      if Offset > Byte_Count (Native.Storage_Offset'Last) then
+         raise Region_Error with "arena node offset is not native";
+      end if;
+      return Item.Node_Table_Address
+        + Native.Storage_Offset (Offset);
    end Node_Address;
    pragma Inline_Always (Node_Address);
 
@@ -149,9 +156,24 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
      (Item : out View;
       Core : Layouts.Local_View;
       Values : Geometry_Values;
-      Instance_ID : Interfaces.Unsigned_64) is
+      Instance_ID : Interfaces.Unsigned_64)
+   is
+      Table_Size : constant Byte_Count :=
+        Byte_Count (Values.Nodes) * Node_Entry_Size;
+      Table_Base : Native.Integer_Address;
    begin
       Item.Core := Core;
+      Item.Node_Table_Address := Layouts.Address_At
+        (Core, Node_Table_Offset, Table_Size, 8);
+      if Table_Size > Byte_Count (Native.Storage_Offset'Last) then
+         raise Region_Error with "arena node table is not native";
+      end if;
+      Table_Base := Native.To_Integer (Item.Node_Table_Address);
+      if Table_Size - 1 >
+        Byte_Count (Native.Integer_Address'Last - Table_Base)
+      then
+         raise Region_Error with "arena node table address overflows";
+      end if;
       Item.Guard_Address := Layouts.Address_At (Core, Guard_Offset, 4, 4);
       Item.Counter_Address := Layouts.Address_At
         (Core, Counter_Offset, 8, 8);
@@ -165,6 +187,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    procedure Detach (Item : in out View) is
    begin
       Layouts.Detach (Item.Core);
+      Item.Node_Table_Address := System.Null_Address;
       Item.Guard_Address := System.Null_Address;
       Item.Counter_Address := System.Null_Address;
       Item.Usable_Value := 0;
@@ -685,8 +708,6 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    procedure Release_Unlocked
      (Item : View; Value : Allocation_Handle)
    is
-      Ignored : constant Block_Description := Validate_Handle (Item, Value);
-      pragma Unreferenced (Ignored);
       Node : Interfaces.Unsigned_32 := Token_Node (Value);
       Parent, Buddy : Interfaces.Unsigned_32;
    begin
