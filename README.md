@@ -2610,6 +2610,11 @@ exact-name selection, generations, extents, allocator block partitions,
 free-index consistency, lazy coalescing, retry, restart order, authority,
 incident ownership, readmission, shutdown, and joins. Fairness configurations
 check allocator operation termination and cooperative shutdown liveness.
+For Buddy, Best-Fit, and TLSF, the same runner also executes bounded traces
+through the real standalone Ada kernels and compares every operation-boundary
+state with the corresponding TLC state: physical extents, live allocation
+generations, logical free indexes, TLSF classes and bitmaps, Buddy view-local
+hints, handles, and results.
 Paired broken configurations must reproduce the removed shared-memory races,
 allocator false-exhaustion/index defects, and supervision defects:
 
@@ -2617,12 +2622,13 @@ allocator false-exhaustion/index defects, and supervision defects:
 TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 ```
 
-This is exhaustive interleaving exploration within the configured bounds, not
-a claim that TLC proves Ada atomics, compiler lowering, platform memory models,
-OS behavior, arbitrary topology size, or unbounded liveness. The model review
-records each abstraction and maps every action back to the production
-operation it represents. Allocator termination assumes that no metadata-guard
-owner dies; it is not a wait-free or real-time claim.
+This is exhaustive interleaving exploration within the configured bounds plus
+bounded implementation/model trace conformance, not a claim that TLC proves
+Ada atomics, compiler lowering, platform memory models, OS behavior, arbitrary
+topology size, every implementation execution, or unbounded liveness. The
+model review records each abstraction and maps every action back to the
+production operation it represents. Allocator termination assumes that no
+metadata-guard owner dies; it is not a wait-free or real-time claim.
 
 ## SPARK proof boundary
 
@@ -3252,8 +3258,9 @@ To run every Alire release covered by the patch family:
   Linux with GNAT 16.1;
 - explicit `epoll` and `io_uring` checks in the Linux behavioral run; and
 - the SPARK proof crate on Linux with GNATprove 16.1; and
-- the bounded TLA+ shared-memory and supervision models, including required
-  invariant and temporal counterexamples, with TLC 2.19.
+- the bounded TLA+ shared-memory and supervision models, allocator Ada/TLA+
+  state-trace conformance, and required invariant and temporal
+  counterexamples, with TLC 2.19.
 
 The official Alire setup action is pinned to its v6.0.0 commit and Alire 2.1.1.
 Its cache key includes runner OS, architecture, Alire revision, and the exact

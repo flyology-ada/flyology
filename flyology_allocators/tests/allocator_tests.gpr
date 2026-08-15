@@ -1,10 +1,10 @@
 with "../flyology_allocators.gpr";
 project Allocator_Tests is
-   for Source_Dirs use (".");
+   for Source_Dirs use (".", "refinement");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";
-   for Main use ("allocator_smoke.adb");
+   for Main use ("allocator_smoke.adb", "allocator_refinement.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use

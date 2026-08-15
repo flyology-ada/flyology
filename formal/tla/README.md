@@ -17,7 +17,18 @@ TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 The script also recognizes a standard macOS TLA+ Toolbox installation. It runs
 the current safety and liveness configurations to completion. It then requires
 each broken configuration to produce its named counterexample. TLC's generated
-state is kept in a temporary directory.
+state is kept in a temporary directory. Alire and a native GNAT toolchain are
+also required for the allocator refinement traces described below.
+
+`AllocatorAlgorithmsRefinement` constrains the allocator model and the real
+standalone kernels to the same operation sequences. Test-only child units read
+the real persisted metadata and view-local Buddy hints without entering the
+library or public API. After every public allocation or release, the runner
+compares canonical physical blocks, live allocation generations, logical
+free-index members, real TLSF classes and first/second-level bitmaps, Buddy
+hints, handles, and results with the TLC state. The three no-retry variants
+must prevent trace completion, so the comparison is not allowed to pass merely
+because both trace producers emitted nothing.
 
 ## Extraction map
 
@@ -48,6 +59,7 @@ state is kept in a temporary directory.
 | `freeIndex` | Buddy free-tree frontier or Best-Fit AVL membership, abstracted as exact free block keys |
 | `bins` / `bitmap` | TLSF free-list membership by modeled size class and matching nonempty-class bitmap |
 | `hints` | Buddy per-view, per-order candidate cache whose entry is checked against persisted node state before use |
+| `AllocatorAlgorithmsRefinement` snapshots | Test-only observations of real allocator blocks, free indexes, TLSF classes and bitmaps, Buddy hints, live allocation generations, handles, and results |
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
@@ -153,15 +165,27 @@ The models intentionally omit or coarsen the following details:
   `Reserve` action, and selects nondeterministically among equal best-fit
   reservations. It does not model mapping replacement, flush, OS namespaces,
   descriptor handoff, or independently authorized recovery.
-- The allocator model uses four byte units and an identity TLSF size-class
-  function. It preserves physical adjacency, Buddy alignment and splitting,
+- The general allocator model uses four abstract allocation units, omits the
+  in-band prefix/minimum-fragment arithmetic, and uses an identity TLSF
+  size-class function. The conformance traces instead use eight 64-byte
+  quanta; an in-band model request of `n` quanta calls Ada with an
+  `(n - 1) * 64`-byte payload because one quantum holds the block prefix. The
+  selected 2/4/8-quantum requests therefore have exact production extents.
+  The model preserves physical adjacency, Buddy alignment and splitting,
   Best-Fit size/address choice, TLSF bin/bitmap membership, lazy release,
   miss-triggered coalescing, retry, generation validation, and view-local hint
-  invalidation. It abstracts AVL rotations, TLSF first/second-level bit
-  arithmetic and list order, byte-address checks, payload access, timeout
-  arithmetic, poisoning, destruction, and generation widths beyond the checked
-  bound. Its liveness property assumes no guard owner dies and does not claim
-  wait-free or real-time completion.
+  invalidation. It abstracts AVL rotations, TLSF free-list order, byte-address
+  checks, payload access, the handle token's fixed arena-epoch half, poisoning,
+  destruction, and generation widths beyond the checked bound. Released block
+  headers retain their previous generation bytes in Ada; the model normalizes
+  those bytes to zero because a free state can never validate a handle. The
+  observer still requires every retained generation to be within the global
+  counter. A model client is also limited to one live handle and releases that
+  handle through the same modeled view; transferable handles are not part of
+  this extraction. Guard admission models fair eventual acquisition rather
+  than immediate contention or a concrete timed deadline. Its liveness
+  property assumes no guard owner dies and does not claim wait-free or
+  real-time completion.
 - Crash actions establish the documented failure mode only: a dead owner can
   leave a guard or initialization slot abandoned. There is deliberately no
   recovery or ownership-stealing action and no liveness claim.
@@ -185,8 +209,13 @@ The models intentionally omit or coarsen the following details:
   not claim that Flyology persists payloads, handles, or logical identity
   across that owner boundary.
 - A successful TLC run establishes the properties of this extraction, not an
-  automatic refinement proof from the compiled Ada program. Review must keep
-  each model action aligned with the named implementation transition.
+  unbounded refinement proof from the compiled Ada program. The maintained
+  allocator traces additionally check the extraction against real Ada states
+  at each public operation boundary. They do not observe guarded intermediate
+  writes, raw padding, AVL shape, inactive Buddy descendants, native addresses,
+  TLSF free-list order, guard contention, cross-view handle transfer, or
+  executions outside the bounded traces. Review must still keep each model
+  action aligned with the named implementation transition.
 
 Review a model change by comparing every changed action with the referenced Ada
 body, checking that no implementation-visible intermediate state was collapsed
