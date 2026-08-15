@@ -13,6 +13,7 @@ procedure Allocator_Smoke is
 
    use type FA.Allocation_Algorithms.Allocation_Result;
    use type FA.Allocation_Algorithms.Search_Bound;
+   use type FA.Allocation_Algorithms.Allocation_Handle;
    use type FA.Byte_Count;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_8;
@@ -64,6 +65,15 @@ procedure Allocator_Smoke is
    TLSF_View : TLSF_Arenas.View;
    Buddy_Handle : Buddy_Arenas.Allocation_Handle;
    Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
+   Best_Fit_Probe : Best_Fit_Arenas.Allocation_Handle;
+   type Best_Fit_Handle_Array is array (Positive range <>) of
+     Best_Fit_Arenas.Allocation_Handle;
+   type Index_Array is array (Positive range <>) of Positive;
+   Alternating_Indices : constant Index_Array := [1, 5, 7];
+   Remaining_Indices : constant Index_Array := [1, 2, 5, 6, 7, 8];
+   Best_Fit_Handles : Best_Fit_Handle_Array (1 .. 8);
+   Stale_Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
+   Saw_Stale_Best_Fit : Boolean := False;
    TLSF_Handle : TLSF_Arenas.Allocation_Handle;
    type TLSF_Handle_Array is array (Natural range 0 .. 7) of
      TLSF_Arenas.Allocation_Handle;
@@ -130,15 +140,62 @@ begin
    Attach (Best_Fit_Region, Best_Fit_Storage);
    Best_Fit_Arenas.Initialize
      (Best_Fit_View, Best_Fit_Region, 64,
-      (Usable_Capacity => 65_536, Minimum_Block_Size => 64), 2);
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64), 2);
+   for Index in Best_Fit_Handles'Range loop
+      Best_Fit_Arenas.Try_Allocate
+        (Best_Fit_View, 64, Best_Fit_Handles (Index), Result);
+      Check
+        (Result = FA.Allocation_Algorithms.Allocated,
+         "best-fit fill allocation failed");
+   end loop;
+
+   --  Lazy release keeps both adjacent blocks indexed. Attachment must accept
+   --  and validate that representation, while a larger allocation must merge
+   --  the run and retry rather than report false exhaustion.
+   Stale_Best_Fit_Handle := Best_Fit_Handles (3);
+   Best_Fit_Arenas.Release (Best_Fit_View, Best_Fit_Handles (3));
+   Best_Fit_Arenas.Release (Best_Fit_View, Best_Fit_Handles (4));
+   Best_Fit_Arenas.Detach (Best_Fit_View);
+   Best_Fit_Arenas.Attach
+     (Best_Fit_View, Best_Fit_Region, 64,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64), 2);
    Best_Fit_Arenas.Try_Allocate
-     (Best_Fit_View, 65, Best_Fit_Handle, Result);
+     (Best_Fit_View, 160, Best_Fit_Handle, Result);
    Check
      (Result = FA.Allocation_Algorithms.Allocated
       and then Best_Fit_Arenas.Block_Capacity
-        (Best_Fit_View, Best_Fit_Handle) >= 65,
-      "best-fit allocation failed");
+        (Best_Fit_View, Best_Fit_Handle) >= 160,
+      "best-fit deferred coalescing reported false exhaustion");
+   begin
+      Best_Fit_Arenas.Release (Best_Fit_View, Stale_Best_Fit_Handle);
+   exception
+      when FA.Handle_Error =>
+         Saw_Stale_Best_Fit := True;
+   end;
+   Check (Saw_Stale_Best_Fit, "best-fit accepted a stale merged handle");
+
+   --  Exercise exact-block reuse with alternating physical gaps, then leave
+   --  the arena as multiple adjacent frees for Destroy to canonicalize.
+   for Index of Alternating_Indices loop
+      Best_Fit_Arenas.Release (Best_Fit_View, Best_Fit_Handles (Index));
+   end loop;
+   Best_Fit_Arenas.Try_Allocate
+     (Best_Fit_View, 160, Best_Fit_Probe, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Exhausted
+      and then Best_Fit_Probe = Best_Fit_Arenas.Null_Allocation,
+      "best-fit joined nonadjacent alternating gaps");
+   for Index of Alternating_Indices loop
+      Best_Fit_Arenas.Try_Allocate
+        (Best_Fit_View, 64, Best_Fit_Handles (Index), Result);
+      Check
+        (Result = FA.Allocation_Algorithms.Allocated,
+         "best-fit alternating-gap reuse failed");
+   end loop;
    Best_Fit_Arenas.Release (Best_Fit_View, Best_Fit_Handle);
+   for Index of Remaining_Indices loop
+      Best_Fit_Arenas.Release (Best_Fit_View, Best_Fit_Handles (Index));
+   end loop;
    Best_Fit_Arenas.Destroy (Best_Fit_View);
 
    Attach (TLSF_Region, TLSF_Storage);

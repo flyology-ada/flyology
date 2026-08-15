@@ -5,7 +5,8 @@ private with System;
 --  Provides variable-size best-fit allocation inside a fixed caller-owned
 --  relocatable region. Free blocks are indexed by an in-region AVL tree keyed
 --  by size and arena-relative offset. Physical-neighbor sizes support checked
---  splitting and coalescing. Stored metadata contains only fixed-width scalar
+--  splitting and deferred coalescing. Stored metadata contains only
+--  fixed-width scalar
 --  fields. Allocation and reclamation are serialized across views by one
 --  persisted nonblocking guard; immediate allocation reports contention and
 --  timed overloads yield between attempts. Payload access does not acquire the
@@ -127,7 +128,9 @@ package Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
 
    --  Attempt one variable-size allocation without waiting. Requested_Size is
    --  rounded to the arena quantum. The smallest indexed fitting block is
-   --  split when its remainder can represent another allocation.
+   --  split when its remainder can represent another allocation. If no
+   --  indexed block fits, one validated physical pass coalesces adjacent free
+   --  runs and the search is retried before reporting exhaustion.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Value New handle or Null_Allocation
@@ -139,7 +142,8 @@ package Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Result         : out Allocation_Result);
 
    --  Allocate after waiting only for metadata-guard contention. Genuine
-   --  exhaustion still returns Exhausted after one complete search.
+   --  exhaustion returns Exhausted only after any adjacent free runs have
+   --  been coalesced and searched again.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Timeout Maximum wait; zero permits one immediate attempt
@@ -153,8 +157,9 @@ package Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Value          : out Allocation_Handle;
       Result         : out Allocation_Result);
 
-   --  Release a live allocation and coalesce adjacent free blocks. The caller
-   --  must
+   --  Release a live allocation for immediate exact-block reuse. Adjacent
+   --  free blocks are coalesced on demand before allocation reports
+   --  exhaustion. The caller must
    --  exclude every payload access through Value.
    --  @param Item Any concurrently attached arena view
    --  @param Value Live handle issued by this arena incarnation
