@@ -216,6 +216,7 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
 private
    type View is limited record
       Core          : Layouts.Local_View;
+      Node_Table_Address : System.Address := System.Null_Address;
       Guard_Address : System.Address := System.Null_Address;
       Counter_Address : System.Address := System.Null_Address;
       Usable_Value  : Interfaces.Unsigned_32 := 0;
