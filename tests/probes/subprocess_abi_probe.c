@@ -44,6 +44,10 @@ int main(int argc, char **argv)
     pid_t live_child = -1;
     char byte = 'x';
     int result = 1;
+    int sigpipe_overridden = 0;
+    struct sigaction ignored_pipe;
+    struct sigaction observed_pipe;
+    struct sigaction previous_pipe;
 
     if (argc == 2 && strcmp(argv[1], "--wait-for-signal") == 0) {
         for (;;) pause();
@@ -71,10 +75,22 @@ int main(int argc, char **argv)
 
     close(descriptors[0]);
     descriptors[0] = -1;
+    /* Match launchers that deliberately pass an ignored SIGPIPE to children. */
+    memset(&ignored_pipe, 0, sizeof(ignored_pipe));
+    ignored_pipe.sa_handler = SIG_IGN;
+    sigemptyset(&ignored_pipe.sa_mask);
+    if (sigaction(SIGPIPE, &ignored_pipe, &previous_pipe) != 0)
+        goto cleanup;
+    sigpipe_overridden = 1;
     errno = 0;
     if (flyology_subprocess_write_no_sigpipe
           (descriptors[1], &byte, sizeof(byte)) != -1 || errno != EPIPE)
         goto cleanup;
+    if (sigaction(SIGPIPE, NULL, &observed_pipe) != 0 ||
+        observed_pipe.sa_handler != SIG_IGN ||
+        sigaction(SIGPIPE, &previous_pipe, NULL) != 0)
+        goto cleanup;
+    sigpipe_overridden = 0;
     close(descriptors[1]);
     descriptors[1] = -1;
 
@@ -128,6 +144,8 @@ int main(int argc, char **argv)
     result = 0;
 
 cleanup:
+    if (sigpipe_overridden)
+        (void)sigaction(SIGPIPE, &previous_pipe, NULL);
     if (live_child > 0) {
         (void)kill(-live_child, SIGKILL);
         (void)waitpid(live_child, NULL, 0);

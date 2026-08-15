@@ -216,7 +216,9 @@ long flyology_subprocess_write_no_sigpipe(int descriptor,
     if (sigpending(&pending) == 0) was_pending = sigismember(&pending, SIGPIPE);
     result = write(descriptor, buffer, length);
     saved = errno;
-    if (result < 0 && saved == EPIPE && !was_pending)
+    /* An ignored SIGPIPE is discarded rather than made pending. */
+    if (result < 0 && saved == EPIPE && !was_pending &&
+        sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE))
         (void)sigwait(&blocked, &caught);
     (void)pthread_sigmask(SIG_SETMASK, &previous, NULL);
     errno = saved;
