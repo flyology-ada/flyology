@@ -1,6 +1,6 @@
 name = "flyology_external_consumer"
 description = "Out-of-tree Alire consumer smoke for Flyology"
-version = "0.1.0-dev"
+version = "0.1.1-dev"
 
 authors = ["Flyology maintainers"]
 maintainers = ["Flyology maintainers <noreply@example.com>"]

@@ -49,7 +49,7 @@ persistence, telemetry, or test assertions.
 
 ## Add the crate
 
-Version `0.1.0-dev` is distributed through the Flyology organization index.
+Version `0.1.1-dev` is distributed through the Flyology organization index.
 Keep the community index enabled for the compiler, add the development index
 ahead of it, and add the crate normally:
 

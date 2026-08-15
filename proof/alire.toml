@@ -1,6 +1,6 @@
 name = "flyology_proof"
 description = "Development-only SPARK proof harness for Flyology"
-version = "0.1.0-dev"
+version = "0.1.1-dev"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]

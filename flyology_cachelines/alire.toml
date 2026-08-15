@@ -1,6 +1,6 @@
 name = "flyology_cachelines"
 description = "Cache-line-aware storage and cache information for Ada"
-version = "0.1.0"
+version = "0.1.1-dev"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]

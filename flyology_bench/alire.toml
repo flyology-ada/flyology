@@ -1,6 +1,6 @@
 name = "flyology_bench"
 description = "Adaptive nanosecond-scale benchmarking for Ada"
-version = "0.1.0"
+version = "0.1.1-dev"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]

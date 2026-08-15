@@ -1,6 +1,6 @@
 name = "flyology_showcases"
 description = "Optional dependencies for maintained Flyology showcases"
-version = "0.1.0-dev"
+version = "0.1.1-dev"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
@@ -13,7 +13,7 @@ project-files = ["showcases.gpr"]
 flyology = "*"
 
 [[depends-on]]
-flyology_tui = "~0.1.0-dev"
+flyology_tui = "~0.1.1-dev"
 
 [[pins]]
 flyology = { path='..' }
