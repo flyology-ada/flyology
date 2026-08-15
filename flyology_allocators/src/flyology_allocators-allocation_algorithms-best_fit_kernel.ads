@@ -228,6 +228,7 @@ private
       Usable_Value  : Interfaces.Unsigned_32 := 0;
       Minimum_Value : Interfaces.Unsigned_32 := 0;
       Prefix_Value  : Interfaces.Unsigned_32 := 0;
+      Last_Block_Value : Interfaces.Unsigned_32 := 0;
       Data_Offset   : Byte_Count := 0;
       Instance_Value : Interfaces.Unsigned_64 := 0;
    end record;
