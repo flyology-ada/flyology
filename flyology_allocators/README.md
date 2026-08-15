@@ -12,11 +12,25 @@ remain outside the allocator image.
 
 Three compile-time-selected algorithms are included:
 
-- `Allocation_Algorithms.Buddy` uses an out-of-band buddy tree.
+- `Allocation_Algorithms.Buddy` uses an out-of-band buddy tree with view-local
+  reuse hints.
 - `Allocation_Algorithms.Best_Fit` uses boundary tags and an offset-based AVL
   tree.
 - `Allocation_Algorithms.TLSF` uses boundary tags, bitmaps, and offset-linked
   segregated free lists.
+
+All three return released blocks to the current tree or free index without
+coalescing physical neighbors. A successful fast path uses the algorithm's
+normal hint, tree, or bitmap lookup. Before reporting exhaustion, Buddy and
+TLSF scan and coalesce the stored structure, then retry. Best-Fit scans for
+adjacent free runs and retries if the index changed. The advertised worst-case
+search bound is therefore linear.
+
+The stored field geometry and required extent are unchanged, but the set of
+valid stored states changed. Applications that retain allocator bytes across
+binary versions must supply an outer compatibility contract. Flyology's
+adapters use version-3 identities for these lazy-coalescing states. The
+standalone allocator image still contains no application magic or schema.
 
 Instantiate `Flyology_Allocators.Arenas` with one algorithm:
 
