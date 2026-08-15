@@ -22,6 +22,11 @@ Build and run the release profile:
 ./scripts/run.sh
 ```
 
+The runner forces a clean `-O3` Ada rebuild across the benchmark and both
+imported library projects. GPR default compiler switches apply only to sources
+owned by that project, so selecting the benchmark project's release scenario
+alone does not optimize `flyology_allocators`.
+
 The executable accepts:
 
 ```text
@@ -38,4 +43,3 @@ defaults to 64. For a short behavioral smoke run:
 
 Short runs validate the benchmark; they are not evidence for performance
 claims. Use the defaults on a quiet host for comparisons.
-
