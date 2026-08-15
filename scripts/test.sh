@@ -154,7 +154,8 @@ cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/src/native/flyology_subprocesses.c" \
   -pthread \
   -o "$project_root/build/tests/subprocess_abi_probe"
-"$project_root/build/tests/subprocess_abi_probe"
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
   'flyology__io__tls__(testing|test_barrier_)|flyology__tls_test_hooks|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
