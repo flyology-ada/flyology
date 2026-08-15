@@ -2603,13 +2603,15 @@ and coordination in Ada while treating the OS ABI as a narrow platform layer.
 
 The executable models under [`formal/tla`](formal/tla/README.md) extract the
 implemented MPMC claim/publication protocol, guarded hash-map attachment, and
-shared-segment registry. They also extract the composed static-supervisor and
-nested-family lifecycle. Bounded TLC configurations check the persisted guard,
-claim, publication, exact-name, generation, extent, restart-order, authority,
-incident, owner-readmission, shutdown, and join invariants. A weak-fairness
-configuration checks cooperative shutdown liveness. Paired broken
-configurations must reproduce the removed shared-memory races and supervision
-defects:
+shared-segment registry. They also extract the three standalone allocation
+algorithms and the composed static-supervisor and nested-family lifecycle.
+Bounded TLC configurations check persisted guards, claims, publication,
+exact-name selection, generations, extents, allocator block partitions,
+free-index consistency, lazy coalescing, retry, restart order, authority,
+incident ownership, readmission, shutdown, and joins. Fairness configurations
+check allocator operation termination and cooperative shutdown liveness.
+Paired broken configurations must reproduce the removed shared-memory races,
+allocator false-exhaustion/index defects, and supervision defects:
 
 ```sh
 TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
@@ -2618,8 +2620,9 @@ TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 This is exhaustive interleaving exploration within the configured bounds, not
 a claim that TLC proves Ada atomics, compiler lowering, platform memory models,
 OS behavior, arbitrary topology size, or unbounded liveness. The model review
-records each abstraction and maps every action back to the production operation
-it represents.
+records each abstraction and maps every action back to the production
+operation it represents. Allocator termination assumes that no metadata-guard
+owner dies; it is not a wait-free or real-time claim.
 
 ## SPARK proof boundary
 

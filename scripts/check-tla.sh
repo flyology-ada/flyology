@@ -73,7 +73,7 @@ expect_safe()
   fi
   states=$(sed -n \
     's/.*states generated, \([0-9][0-9]*\) distinct states found.*/\1/p' \
-    "$run_root/$tag.log")
+    "$run_root/$tag.log" | tail -n 1)
   printf 'TLC safe          %-30s %s distinct states\n' \
     "$config" "${states:-checked}"
 }
@@ -129,6 +129,15 @@ expect_safe \
   SupervisionLifecycle SupervisionLifecycle.cfg supervision-safe
 expect_safe \
   SupervisionLifecycle SupervisionLifecycle_liveness.cfg supervision-live
+expect_safe \
+  AllocatorAlgorithms AllocatorAlgorithms_buddy.cfg allocator-buddy
+expect_safe \
+  AllocatorAlgorithms AllocatorAlgorithms_best_fit.cfg allocator-best-fit
+expect_safe \
+  AllocatorAlgorithms AllocatorAlgorithms_tlsf.cfg allocator-tlsf
+expect_safe \
+  AllocatorAlgorithms AllocatorAlgorithms_stale_release_safe.cfg \
+  allocator-stale-release-safe
 
 expect_counterexample \
   MPMCActiveAttach MPMCActiveAttach_legacy.cfg \
@@ -154,5 +163,32 @@ expect_counterexample \
 expect_temporal_counterexample \
   SupervisionLifecycle SupervisionLifecycle_no_forward.cfg \
   CooperativeShutdownCompletes supervision-no-forward
+expect_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_buddy_no_retry.cfg \
+  NoFalseExhaustion allocator-buddy-no-retry
+expect_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_best_fit_no_retry.cfg \
+  NoFalseExhaustion allocator-best-fit-no-retry
+expect_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_tlsf_no_retry.cfg \
+  NoFalseExhaustion allocator-tlsf-no-retry
+expect_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_buddy_stale_hint.cfg \
+  StoredBlocksWellFormed allocator-buddy-stale-hint
+expect_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_tlsf_stale_bitmap.cfg \
+  TLSFBitmapMatchesBins allocator-tlsf-stale-bitmap
+expect_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_stale_release.cfg \
+  HandlesMatchAllocatedBlocks allocator-stale-release
+expect_temporal_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_buddy_nontermination.cfg \
+  OperationTermination allocator-buddy-nontermination
+expect_temporal_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_best_fit_nontermination.cfg \
+  OperationTermination allocator-best-fit-nontermination
+expect_temporal_counterexample \
+  AllocatorAlgorithms AllocatorAlgorithms_tlsf_nontermination.cfg \
+  OperationTermination allocator-tlsf-nontermination
 
 printf '%s\n' "Flyology TLA+ model checks passed"
