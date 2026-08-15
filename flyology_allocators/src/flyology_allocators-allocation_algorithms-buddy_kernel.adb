@@ -182,6 +182,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Item.Node_Count := Values.Nodes;
       Item.Data_Offset := Values.Data_Start;
       Item.Instance_Value := Instance_ID;
+      Item.Cached_Nodes := (others => No_Cached_Node);
    end Set_View;
 
    procedure Detach (Item : in out View) is
@@ -195,6 +196,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Item.Node_Count := 0;
       Item.Data_Offset := 0;
       Item.Instance_Value := 0;
+      Item.Cached_Nodes := (others => No_Cached_Node);
    end Detach;
 
    procedure Initialize_Nodes (Item : View) is
@@ -506,8 +508,51 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Release_Guard (Item);
    end Finish_Failure;
 
+   function Allocate_Cached_Unlocked
+     (Item           : in out View;
+      Requested_Size : Byte_Count;
+      Value          : out Allocation_Handle) return Boolean
+   is
+      Capacity : Byte_Count := Byte_Count (Item.Minimum_Value);
+      Order    : Natural := 0;
+      Node     : Interfaces.Unsigned_32;
+      Counter  : Interfaces.Unsigned_64;
+   begin
+      if Requested_Size > Byte_Count (Item.Usable_Value) then
+         return False;
+      end if;
+      while Capacity < Requested_Size loop
+         Capacity := Capacity * 2;
+         Order := Order + 1;
+      end loop;
+      if Order > Item.Cached_Nodes'Last then
+         return False;
+      end if;
+      Node := Item.Cached_Nodes (Order);
+      Item.Cached_Nodes (Order) := No_Cached_Node;
+      if Node >= Item.Node_Count
+        or else Atomic.Load_Acquire_U32 (State_Address (Item, Node)) /=
+          Free_State
+      then
+         return False;
+      end if;
+      Counter := Bytes.Read_U64 (Item.Counter_Address);
+      if Counter = Interfaces.Unsigned_64'Last then
+         raise Layout_Error with "arena allocation generation exhausted";
+      end if;
+      Counter := Counter + 1;
+      Bytes.Write_U64 (Item.Counter_Address, Counter);
+      Bytes.Write_U64 (Generation_Address (Item, Node), Counter);
+      Atomic.Store_Release_U32
+        (State_Address (Item, Node), Allocated_State);
+      Value :=
+        (Token      => Make_Token (Item.Core.Epoch_Value, Node),
+         Generation => Counter);
+      return True;
+   end Allocate_Cached_Unlocked;
+
    function Allocate_Unlocked
-     (Item           : View;
+     (Item           : in out View;
       Requested_Size : Byte_Count;
       Value          : out Allocation_Handle) return Boolean
    is
@@ -592,7 +637,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       return Visit (0, Byte_Count (Item.Usable_Value));
    end Allocate_Unlocked;
 
-   function Coalesce_Unlocked (Item : View) return Boolean is
+   function Coalesce_Unlocked (Item : in out View) return Boolean is
       function Visit (Node : Interfaces.Unsigned_32) return Boolean is
          State : constant Interfaces.Unsigned_32 :=
            Atomic.Load_Acquire_U32 (State_Address (Item, Node));
@@ -631,6 +676,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
          end case;
       end Visit;
    begin
+      Item.Cached_Nodes := (others => No_Cached_Node);
       return Visit (0);
    end Coalesce_Unlocked;
 
@@ -652,7 +698,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       end;
       begin
          Mutated := Requested_Size <= Natural (Item.Usable_Value);
-         if Allocate_Unlocked (Item, Byte_Count (Requested_Size), Value) then
+         if Allocate_Cached_Unlocked
+           (Item, Byte_Count (Requested_Size), Value)
+           or else Allocate_Unlocked
+             (Item, Byte_Count (Requested_Size), Value)
+         then
             Result := Allocated;
          elsif not Mutated then
             Result := Exhausted;
@@ -691,7 +741,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Acquire (Item, Timeout);
       begin
          Mutated := Requested_Size <= Natural (Item.Usable_Value);
-         if Allocate_Unlocked (Item, Byte_Count (Requested_Size), Value) then
+         if Allocate_Cached_Unlocked
+           (Item, Byte_Count (Requested_Size), Value)
+           or else Allocate_Unlocked
+             (Item, Byte_Count (Requested_Size), Value)
+         then
             Result := Allocated;
          elsif not Mutated then
             Result := Exhausted;
@@ -774,11 +828,22 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    end Validate_Handle;
 
    procedure Release_Unlocked
-     (Item : View; Value : Allocation_Handle)
+     (Item        : in out View;
+      Value       : Allocation_Handle;
+      Description : Block_Description)
    is
       Node : constant Interfaces.Unsigned_32 := Token_Node (Value);
+      Capacity : Byte_Count := Byte_Count (Item.Minimum_Value);
+      Order    : Natural := 0;
    begin
       Atomic.Store_Release_U32 (State_Address (Item, Node), Free_State);
+      while Capacity < Description.Capacity loop
+         Capacity := Capacity * 2;
+         Order := Order + 1;
+      end loop;
+      if Order <= Item.Cached_Nodes'Last then
+         Item.Cached_Nodes (Order) := Node;
+      end if;
    end Release_Unlocked;
 
    procedure Release (Item : in out View; Value : Allocation_Handle) is
@@ -787,12 +852,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Acquire (Item);
       begin
          declare
-            Ignored : constant Block_Description :=
+            Description : constant Block_Description :=
               Validate_Handle (Item, Value);
-            pragma Unreferenced (Ignored);
          begin
             Mutated := True;
-            Release_Unlocked (Item, Value);
+            Release_Unlocked (Item, Value, Description);
          end;
       exception
          when others =>
@@ -812,12 +876,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Acquire (Item, Timeout);
       begin
          declare
-            Ignored : constant Block_Description :=
+            Description : constant Block_Description :=
               Validate_Handle (Item, Value);
-            pragma Unreferenced (Ignored);
          begin
             Mutated := True;
-            Release_Unlocked (Item, Value);
+            Release_Unlocked (Item, Value, Description);
          end;
       exception
          when others =>

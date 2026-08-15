@@ -215,6 +215,11 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    procedure Destroy (Item : in out View);
 
 private
+   No_Cached_Node : constant Interfaces.Unsigned_32 :=
+     Interfaces.Unsigned_32'Last;
+   type Node_Cache is array (Natural range 0 .. 31) of
+     Interfaces.Unsigned_32;
+
    type View is limited record
       Core          : Layouts.Local_View;
       Node_Table_Address : System.Address := System.Null_Address;
@@ -225,5 +230,6 @@ private
       Node_Count    : Interfaces.Unsigned_32 := 0;
       Data_Offset   : Byte_Count := 0;
       Instance_Value : Interfaces.Unsigned_64 := 0;
+      Cached_Nodes  : Node_Cache := (others => No_Cached_Node);
    end record;
 end Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel;

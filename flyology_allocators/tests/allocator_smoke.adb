@@ -64,9 +64,11 @@ procedure Allocator_Smoke is
    Buddy_Region, Best_Fit_Region, TLSF_Region : FA.Regions.View;
    Buddy_Allocation : FA.Regions.View;
    Buddy_View : Buddy_Arenas.View;
+   Buddy_Peer_View : Buddy_Arenas.View;
    Best_Fit_View : Best_Fit_Arenas.View;
    TLSF_View : TLSF_Arenas.View;
    Buddy_Handle : Buddy_Arenas.Allocation_Handle;
+   Buddy_Peer_Handle : Buddy_Arenas.Allocation_Handle;
    Buddy_Small_Handles : Buddy_Handle_Array (1 .. 1_024);
    Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
    Best_Fit_Probe : Best_Fit_Arenas.Allocation_Handle;
@@ -166,6 +168,29 @@ begin
       and then Buddy_Arenas.Block_Capacity (Buddy_View, Buddy_Handle) = 65_536,
       "buddy lazy root coalescing failed");
    Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
+
+   --  A process-local reuse hint may be stale when another attached view
+   --  consumes its node. The persisted state remains authoritative and must
+   --  prevent the first view from allocating the same bytes concurrently.
+   Buddy_Arenas.Attach
+     (Buddy_Peer_View, Buddy_Region, 64,
+      (Usable_Capacity => 65_536, Minimum_Block_Size => 64), 1);
+   Buddy_Arenas.Try_Allocate
+     (Buddy_Peer_View, 65_536, Buddy_Peer_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "buddy peer root allocation failed");
+   Buddy_Arenas.Try_Allocate (Buddy_View, 65_536, Buddy_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Exhausted,
+      "buddy stale local hint duplicated a peer allocation");
+   Buddy_Arenas.Release (Buddy_Peer_View, Buddy_Peer_Handle);
+   Buddy_Arenas.Try_Allocate (Buddy_View, 65_536, Buddy_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "buddy allocation did not recover from a stale local hint");
+   Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
+   Buddy_Arenas.Detach (Buddy_Peer_View);
 
    --  The buddy guard is algorithm metadata at offset 44 from the allocator
    --  start. Force contention while no task can own the arena, then verify the
