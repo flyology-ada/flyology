@@ -182,7 +182,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Item.Node_Count := Values.Nodes;
       Item.Data_Offset := Values.Data_Start;
       Item.Instance_Value := Instance_ID;
-      Item.Cached_Nodes := (others => No_Cached_Node);
+      Item.Cached_Nodes := [others => No_Cached_Node];
    end Set_View;
 
    procedure Detach (Item : in out View) is
@@ -196,7 +196,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Item.Node_Count := 0;
       Item.Data_Offset := 0;
       Item.Instance_Value := 0;
-      Item.Cached_Nodes := (others => No_Cached_Node);
+      Item.Cached_Nodes := [others => No_Cached_Node];
    end Detach;
 
    procedure Initialize_Nodes (Item : View) is
@@ -676,9 +676,38 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
          end case;
       end Visit;
    begin
-      Item.Cached_Nodes := (others => No_Cached_Node);
+      Item.Cached_Nodes := [others => No_Cached_Node];
       return Visit (0);
    end Coalesce_Unlocked;
+
+   function Tree_Is_Free_Unlocked (Item : View) return Boolean is
+      function Visit (Node : Interfaces.Unsigned_32) return Boolean is
+         State : constant Interfaces.Unsigned_32 :=
+           Atomic.Load_Acquire_U32 (State_Address (Item, Node));
+         Left_64 : Interfaces.Unsigned_64;
+         Left : Interfaces.Unsigned_32;
+      begin
+         case State is
+            when Free_State =>
+               return True;
+            when Allocated_State =>
+               return False;
+            when Split_State =>
+               Left_64 := Interfaces.Unsigned_64 (Node) * 2 + 1;
+               if Left_64 + 1 >= Interfaces.Unsigned_64 (Item.Node_Count) then
+                  raise Layout_Error with "arena split node has no children";
+               end if;
+               Left := Interfaces.Unsigned_32 (Left_64);
+               return Visit (Left) and then Visit (Left + 1);
+            when Inactive_State =>
+               raise Layout_Error with "active arena node is inactive";
+            when others =>
+               raise Layout_Error with "arena node state is corrupt";
+         end case;
+      end Visit;
+   begin
+      return Visit (0);
+   end Tree_Is_Free_Unlocked;
 
    procedure Try_Allocate
      (Item           : in out View;
@@ -972,21 +1001,30 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    end Copy;
 
    procedure Destroy (Item : in out View) is
+      Root_Free : Boolean;
    begin
       Acquire (Item);
       begin
          Validate_Tree (Item);
-         declare
-            Ignored : constant Boolean := Coalesce_Unlocked (Item);
-            pragma Unreferenced (Ignored);
-         begin
-            null;
-         end;
-         if Atomic.Load_Acquire_U32 (State_Address (Item, 0)) /=
-           Free_State
-         then
+         if not Tree_Is_Free_Unlocked (Item) then
             raise Layout_Error with "arena still has live allocations";
          end if;
+      exception
+         when others =>
+            Release_Guard (Item);
+            raise;
+      end;
+      begin
+         Root_Free := Coalesce_Unlocked (Item);
+         if not Root_Free then
+            raise Layout_Error with "arena empty-tree coalescing failed";
+         end if;
+      exception
+         when others =>
+            Finish_Failure (Item, Mutated => True);
+            raise;
+      end;
+      begin
          Layouts.Mark_Destroyed (Item.Core);
       exception
          when others =>

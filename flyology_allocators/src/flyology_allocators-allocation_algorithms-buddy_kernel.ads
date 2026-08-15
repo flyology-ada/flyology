@@ -125,7 +125,8 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
 
    --  Attempt one variable-size allocation without waiting. Requested_Size is
    --  rounded to a buddy block and every returned block is aligned to the
-   --  arena's Minimum_Block_Size.
+   --  arena's Minimum_Block_Size. A miss coalesces the complete retained tree
+   --  and retries before reporting exhaustion.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Value New handle or Null_Allocation
@@ -137,7 +138,8 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Result         : out Allocation_Result);
 
    --  Allocate after waiting only for metadata-guard contention. Genuine
-   --  exhaustion still returns Exhausted after one complete search.
+   --  exhaustion returns Exhausted after search, complete-tree coalescing,
+   --  and one retry.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Timeout Maximum wait; zero permits one immediate attempt
@@ -230,6 +232,6 @@ private
       Node_Count    : Interfaces.Unsigned_32 := 0;
       Data_Offset   : Byte_Count := 0;
       Instance_Value : Interfaces.Unsigned_64 := 0;
-      Cached_Nodes  : Node_Cache := (others => No_Cached_Node);
+      Cached_Nodes  : Node_Cache;
    end record;
 end Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel;
