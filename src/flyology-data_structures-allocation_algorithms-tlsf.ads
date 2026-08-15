@@ -3,8 +3,10 @@ with Flyology.Data_Structures.Allocation_Algorithms.Contract;
 
 --  Two-level segregated-fit allocation for relocatable arenas. Fixed-size
 --  bitmaps select offset-linked free lists; in-band boundary metadata supports
---  splitting and adjacent-block coalescing. One persisted nonblocking guard
---  serializes allocation and release across mappings.
+--  splitting and demand-driven adjacent-block coalescing. Release returns a
+--  block directly to its size class; an allocation miss performs a bounded
+--  physical coalescing pass before reporting exhaustion. One persisted
+--  nonblocking guard serializes allocation and release across mappings.
 --  Payload access requires the handle owner to exclude release. A dead guard
 --  owner leaves the allocator locked until an external authority poisons it,
 --  and exclusive reinitialization is the only recovery.
@@ -14,12 +16,12 @@ package Flyology.Data_Structures.Allocation_Algorithms.TLSF is new
      Algorithm_Minimum_Block_Limit =>
        TLSF_Kernel.Minimum_Block_Limit,
      Algorithm_Capabilities =>
-       (Search                => Allocation_Algorithms.Constant_Class_Bound,
+       (Search                => Allocation_Algorithms.Linear,
         Allocation_Contention => Allocation_Algorithms.Whole_Allocator,
         Release_Contention    => Allocation_Algorithms.Whole_Allocator,
         In_Band_Metadata      => True,
         Splits_Blocks         => True,
-        Coalesces_On_Release  => True,
+        Coalesces_On_Release  => False,
         Timed_Contention      => True,
         Release_Exclusion     => True),
      Algorithm_Configuration => TLSF_Kernel.Configuration,

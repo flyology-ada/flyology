@@ -12,6 +12,7 @@ procedure Allocator_Smoke is
    package FA renames Flyology_Allocators;
 
    use type FA.Allocation_Algorithms.Allocation_Result;
+   use type FA.Allocation_Algorithms.Search_Bound;
    use type FA.Byte_Count;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_8;
@@ -141,6 +142,11 @@ begin
    Best_Fit_Arenas.Destroy (Best_Fit_View);
 
    Attach (TLSF_Region, TLSF_Storage);
+   Check
+     (TLSF_Arenas.Capabilities.Search =
+        FA.Allocation_Algorithms.Linear
+      and then not TLSF_Arenas.Capabilities.Coalesces_On_Release,
+      "TLSF lazy-coalescing capabilities are inaccurate");
    TLSF_Arenas.Initialize
      (TLSF_View, TLSF_Region, 64,
       (Usable_Capacity => 65_536, Minimum_Block_Size => 64), 3);
