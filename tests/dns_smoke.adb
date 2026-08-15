@@ -2,6 +2,7 @@ with Ada.Directories;
 with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology;
 with Flyology.IO.DNS;
@@ -14,6 +15,7 @@ procedure DNS_Smoke is
    package DNS renames Flyology.IO.DNS;
    package Sockets renames Flyology.IO.Sockets;
    package Streams renames Ada.Streams;
+   package Unbounded renames Ada.Strings.Unbounded;
 
    use type Streams.Stream_Element_Offset;
    use type Streams.Stream_Element;
@@ -22,6 +24,10 @@ procedure DNS_Smoke is
 
    function Run (Model : Flyology.Execution_Model) return Boolean is
       Cancel_Source : aliased Flyology.Wake_Sources.Source;
+      --  Functional loopback exchanges must tolerate hosted-runner stalls.
+      --  dns_resilience_smoke owns the deliberately narrow deadline checks.
+      Operation_Timeout : constant Duration := 2.0;
+      Attempt_Interval  : constant Duration := 0.5;
       Search_Name   : constant String (1 .. 60) := (others => 'r');
       Bare_Name     : constant String (1 .. 60) := (others => 'b');
       Search_Label  : constant String (1 .. 62) := (others => 's');
@@ -39,7 +45,9 @@ procedure DNS_Smoke is
          procedure Begin_Client;
          entry Await_Start;
          procedure Saw_Cancel_Query;
-         entry Wait_Cancel_Query;
+         entry Wait_Cancel_Or_Finished
+           (Client_Finished : out Boolean;
+            Passed          : out Boolean);
          procedure Missing_Query;
          function Missing_Queries return Natural;
          procedure A_Query;
@@ -180,10 +188,15 @@ procedure DNS_Smoke is
          begin
             Cancel_Seen := True;
          end Saw_Cancel_Query;
-         entry Wait_Cancel_Query when Cancel_Seen is
+         entry Wait_Cancel_Or_Finished
+           (Client_Finished : out Boolean;
+            Passed          : out Boolean)
+           when Cancel_Seen or else Is_Finished
+         is
          begin
-            null;
-         end Wait_Cancel_Query;
+            Client_Finished := Is_Finished;
+            Passed := All_OK;
+         end Wait_Cancel_Or_Finished;
          procedure Missing_Query is
          begin
             Missing_Count := Missing_Count + 1;
@@ -792,34 +805,53 @@ procedure DNS_Smoke is
          Servers : DNS.Name_Server_Array (1 .. 1);
          OK : Boolean := True;
          Cancelled : Boolean := False;
+         Stage : Unbounded.Unbounded_String :=
+           Unbounded.To_Unbounded_String ("startup");
+
+         procedure Set_Stage (Value : String) is
+         begin
+            Stage := Unbounded.To_Unbounded_String (Value);
+         end Set_Stage;
 
          procedure Expect (Name, Address : String);
          procedure Expect (Name, Address : String) is
-            Values : constant DNS.Address_Array := DNS.Resolve_Using
-              (Name, Servers, DNS.IPv4_Only, Timeout => 1.0,
-               Attempts => 2, Retry_Interval => 0.05);
          begin
-            OK := OK and then Values'Length = 1
-              and then Sockets.Image (Values (Values'First)) = Address;
+            Set_Stage ("IPv4 " & Name);
+            declare
+               Values : constant DNS.Address_Array := DNS.Resolve_Using
+                 (Name, Servers, DNS.IPv4_Only,
+                  Timeout => Operation_Timeout,
+                  Attempts => 2, Retry_Interval => Attempt_Interval);
+            begin
+               OK := OK and then Values'Length = 1
+                 and then Sockets.Image (Values (Values'First)) = Address;
+            end;
          end Expect;
 
          procedure Expect_IPv6 (Name, Address : String) is
-            Values : constant DNS.Address_Array := DNS.Resolve_Using
-              (Name, Servers, DNS.IPv6_Only, Timeout => 1.0,
-               Attempts => 2, Retry_Interval => 0.05);
          begin
-            OK := OK and then Values'Length = 1
-              and then Sockets.Image (Values (Values'First)) = Address;
+            Set_Stage ("IPv6 " & Name);
+            declare
+               Values : constant DNS.Address_Array := DNS.Resolve_Using
+                 (Name, Servers, DNS.IPv6_Only,
+                  Timeout => Operation_Timeout,
+                  Attempts => 2, Retry_Interval => Attempt_Interval);
+            begin
+               OK := OK and then Values'Length = 1
+                 and then Sockets.Image (Values (Values'First)) = Address;
+            end;
          end Expect_IPv6;
 
          procedure Expect_Malformed (Name : String) is
             Raised : Boolean := False;
          begin
+            Set_Stage ("malformed " & Name);
             begin
                declare
                   Ignored : constant DNS.Address_Array := DNS.Resolve_Using
-                    (Name, Servers, DNS.IPv4_Only, Timeout => 1.0,
-                     Attempts => 1, Retry_Interval => 0.1);
+                    (Name, Servers, DNS.IPv4_Only,
+                     Timeout => Operation_Timeout,
+                     Attempts => 1, Retry_Interval => Attempt_Interval);
                   pragma Unreferenced (Ignored);
                begin
                   null;
@@ -836,6 +868,7 @@ procedure DNS_Smoke is
          Control.Get_Secondary (Secondary);
          Servers (1) := Server;
          DNS.Clear_Cache;
+         Set_Stage ("local and numeric bypass");
          declare
             Local : constant DNS.Address_Array := DNS.Resolve ("localhost");
             Numeric : constant DNS.Address_Array :=
@@ -871,71 +904,84 @@ procedure DNS_Smoke is
          OK := OK
            and then Control.Recursive_Failure_Queries = 2
            and then DNS.Testing.Post_Close_Receive_Waits = 0;
+         Set_Stage ("server ordering");
          declare
             Ordered : constant DNS.Name_Server_Array := [Server, Secondary];
             Reversed : constant DNS.Name_Server_Array := [Secondary, Server];
             First : constant DNS.Address_Array := DNS.Resolve_Using
-              ("order.test", Ordered, DNS.IPv4_Only, Timeout => 1.0,
-               Attempts => 1, Retry_Interval => 0.1);
+              ("order.test", Ordered, DNS.IPv4_Only,
+               Timeout => Operation_Timeout,
+               Attempts => 1, Retry_Interval => Attempt_Interval);
             Second : constant DNS.Address_Array := DNS.Resolve_Using
-              ("order.test", Reversed, DNS.IPv4_Only, Timeout => 1.0,
-               Attempts => 1, Retry_Interval => 0.1);
+              ("order.test", Reversed, DNS.IPv4_Only,
+               Timeout => Operation_Timeout,
+               Attempts => 1, Retry_Interval => Attempt_Interval);
          begin
             OK := OK
               and then Sockets.Image (First (First'First)) = "192.0.2.20"
               and then Sockets.Image (Second (Second'First)) = "192.0.2.10";
          end;
+         Set_Stage ("TCP failover");
          declare
             Failover : constant DNS.Name_Server_Array := [Server, Secondary];
             Values : constant DNS.Address_Array := DNS.Resolve_Using
               ("tcp-silent.test", Failover, DNS.IPv4_Only,
-               Timeout => 1.0, Attempts => 1, Retry_Interval => 0.1);
+               Timeout => Operation_Timeout,
+               Attempts => 1, Retry_Interval => Attempt_Interval);
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) =
                 "198.51.100.77";
          end;
+         Set_Stage ("dual-family fallback");
          declare
             Values : constant DNS.Address_Array := DNS.Resolve_Using
               ("dual.test", Servers, DNS.Any_Family,
-               Timeout => 0.6, Attempts => 1, Retry_Interval => 0.1);
+               Timeout => Operation_Timeout,
+               Attempts => 1, Retry_Interval => Attempt_Interval);
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.66";
          end;
+         Set_Stage ("dual-family malformed fallback");
          declare
             Values : constant DNS.Address_Array := DNS.Resolve_Using
               ("dual-malformed.test", Servers, DNS.Any_Family,
-               Timeout => 0.6, Attempts => 1, Retry_Interval => 0.1);
+               Timeout => Operation_Timeout,
+               Attempts => 1, Retry_Interval => Attempt_Interval);
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.67";
          end;
+         Set_Stage ("resolver configuration");
          declare
             Values : constant DNS.Address_Array := DNS.Resolve
-              ("config.test", DNS.IPv4_Only, Timeout => 1.0,
+              ("config.test", DNS.IPv4_Only, Timeout => Operation_Timeout,
                Configuration_Path => Config_Path (Server));
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.53";
          end;
+         Set_Stage ("remaining search candidate");
          declare
             Values : constant DNS.Address_Array := DNS.Resolve
-              (Search_Name, DNS.IPv4_Only, Timeout => 1.0,
+              (Search_Name, DNS.IPv4_Only, Timeout => Operation_Timeout,
                Configuration_Path => Config_Path (Server, "-remaining"));
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
          end;
+         Set_Stage ("bare-name fallback");
          declare
             Values : constant DNS.Address_Array := DNS.Resolve
-              (Bare_Name, DNS.IPv4_Only, Timeout => 1.0,
+              (Bare_Name, DNS.IPv4_Only, Timeout => Operation_Timeout,
                Configuration_Path => Config_Path (Server, "-bare"));
          begin
             OK := OK and then Values'Length = 1
               and then Sockets.Image (Values (Values'First)) = "192.0.2.55";
          end;
          DNS.Testing.Use_Deterministic_Transaction_IDs (16#1234#);
+         Set_Stage ("deterministic transaction ID");
          begin
             Expect ("entropy.test", "192.0.2.99");
             DNS.Testing.Use_OS_Transaction_IDs;
@@ -945,6 +991,7 @@ procedure DNS_Smoke is
                raise;
          end;
          begin
+            Set_Stage ("negative cache fill");
             declare
                Ignored : constant DNS.Address_Array := DNS.Resolve_Using
                  ("missing.test", Servers, DNS.IPv4_Only, Timeout => 1.0);
@@ -957,6 +1004,7 @@ procedure DNS_Smoke is
             when others => OK := False;
          end;
          begin
+            Set_Stage ("negative cache hit");
             declare
                Ignored : constant DNS.Address_Array := DNS.Resolve_Using
                  ("missing.test", Servers, DNS.IPv4_Only, Timeout => 1.0);
@@ -969,6 +1017,7 @@ procedure DNS_Smoke is
             when others => OK := False;
          end;
          OK := OK and then Control.Missing_Queries = 1;
+         Set_Stage ("cancellation");
          begin
             declare
                Ignored : constant DNS.Address_Array := DNS.Resolve_Using
@@ -985,7 +1034,13 @@ procedure DNS_Smoke is
          end;
          Control.Finished (OK and Cancelled);
       exception
-         when others => Control.Finished (False);
+         when Error : others =>
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "DNS " & Flyology.Execution_Model'Image (Model)
+               & " client failed at " & Unbounded.To_String (Stage) & ": "
+               & Ada.Exceptions.Exception_Information (Error));
+            Control.Finished (False);
       end Client;
 
       Address : Sockets.Endpoint;
@@ -995,7 +1050,8 @@ procedure DNS_Smoke is
         (1 => Character'Pos ('s'), 2 => Character'Pos ('t'),
          3 => Character'Pos ('o'), 4 => Character'Pos ('p'));
       Last : Streams.Stream_Element_Offset;
-      Passed : Boolean;
+      Passed : Boolean := False;
+      Client_Finished : Boolean := False;
    begin
       Flyology.Wake_Sources.Ensure (Cancel_Source);
       Control.Get_Address (Address);
@@ -1006,19 +1062,22 @@ procedure DNS_Smoke is
       Write_Config (Address, Long_Search, Suffix => "-bare");
       Control.Begin_Client;
       select
-         Control.Wait_Cancel_Query;
+         Control.Wait_Cancel_Or_Finished
+           (Client_Finished, Passed);
       or
          delay 6.0;
       end select;
       --  Signal even after a timed coordination failure so a client that
       --  reached cancellation late can still unwind before scope finalization.
       Flyology.Wake_Sources.Signal (Cancel_Source);
-      select
-         Control.Wait_Finished (Passed);
-      or
-         delay 6.0;
-         Passed := False;
-      end select;
+      if not Client_Finished then
+         select
+            Control.Wait_Finished (Passed);
+         or
+            delay 6.0;
+            Passed := False;
+         end select;
+      end if;
       Sockets.Create_Socket
         (Stopper, Sockets.IPv4, Sockets.Socket_Datagram);
       Sockets.Send_Socket (Stopper, Stop_Data, Last, Address);
