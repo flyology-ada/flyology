@@ -88,8 +88,8 @@ package body Flyology_Bench.Reporters is
    Telemetry_Capacity : constant := 128;
    type Telemetry_Array is array (Positive range 1 .. Telemetry_Capacity)
      of Long_Float;
-   CPU_History : Telemetry_Array := (others => 0.0);
-   RSS_History : Telemetry_Array := (others => 0.0);
+   CPU_History : Telemetry_Array := [others => 0.0];
+   RSS_History : Telemetry_Array := [others => 0.0];
    Telemetry_Count : Natural := 0;
    Telemetry_Ready : Boolean := False;
 
@@ -208,7 +208,7 @@ package body Flyology_Bench.Reporters is
                       (Natural'Image (Percent), Ada.Strings.Both), 3)
                & "%");
          else
-            Ada.Text_IO.Put ("  " & (1 .. 30 => ' '));
+            Ada.Text_IO.Put ("  " & [1 .. 30 => ' ']);
          end if;
          if Phase = Waiting_For_CPU_Quiescence then
             Ada.Text_IO.Put
@@ -1415,7 +1415,7 @@ package body Flyology_Bench.Reporters is
         (File,
          (if Color then Magenta & Bold else "")
          & "-- implementations vs " & Pretty_Name (Case_Id'Image (Case_Id'First))
-         & " " & (1 .. 28 => '-') & End_Style);
+         & " " & [1 .. 28 => '-'] & End_Style);
       Ada.Text_IO.Put_Line
         (File,
          (if Color then Dim else "")

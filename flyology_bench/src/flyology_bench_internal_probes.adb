@@ -31,7 +31,7 @@ package body Flyology_Bench_Internal_Probes is
    is
       Local_Mask : aliased Interfaces.Unsigned_64 := 0;
    begin
-      Values := (others => 0);
+      Values := [others => 0];
       Available := Native_Resource_Snapshot
         (Values (Values'First)'Address,
          Interfaces.C.size_t (Values'Length), Local_Mask'Access) = 0;

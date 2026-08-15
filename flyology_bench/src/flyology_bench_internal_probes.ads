@@ -66,13 +66,13 @@ package Flyology_Bench_Internal_Probes is
      with Convention => C;
    --  @exclude
    type Native_Perf_State is record
-      FDs              : Native_Perf_FDs := (others => -1);
+      FDs              : Native_Perf_FDs := [others => -1];
       Available_Mask   : Interfaces.Unsigned_64 := 0;
-      Statuses         : Native_Perf_Statuses := (others => 0);
+      Statuses         : Native_Perf_Statuses := [others => 0];
       IPC_Grouped      : Interfaces.C.int := 0;
-      Baseline_Value   : Native_Perf_Counters := (others => 0);
-      Baseline_Enabled : Native_Perf_Counters := (others => 0);
-      Baseline_Running : Native_Perf_Counters := (others => 0);
+      Baseline_Value   : Native_Perf_Counters := [others => 0];
+      Baseline_Enabled : Native_Perf_Counters := [others => 0];
+      Baseline_Running : Native_Perf_Counters := [others => 0];
    end record
      with Convention => C;
    --  @exclude

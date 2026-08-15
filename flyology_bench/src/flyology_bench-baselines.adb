@@ -116,7 +116,7 @@ package body Flyology_Bench.Baselines is
             raise Constraint_Error with Field & " is too long";
          end if;
          Length := Value'Length;
-         Buffer := (others => ' ');
+         Buffer := [others => ' '];
          if Length > 0 then
             Buffer (Buffer'First .. Buffer'First + Length - 1) := Value;
          end if;
