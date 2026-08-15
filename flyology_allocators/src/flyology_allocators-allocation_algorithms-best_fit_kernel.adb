@@ -482,7 +482,6 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Cursor      : Block_Ref := 0;
       Previous    : Interfaces.Unsigned_32 := 0;
       Covered     : Interfaces.Unsigned_64 := 0;
-      Previous_Was_Free : Boolean := False;
       Maximum_Blocks : constant Interfaces.Unsigned_32 :=
         Item.Usable_Value / Item.Minimum_Value;
 
@@ -565,12 +564,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
                raise Layout_Error with
                  "arena physical block metadata is corrupt";
             elsif State = Free_State then
-               if Previous_Was_Free then
-                  raise Layout_Error with
-                    "best-fit contains adjacent uncoalesced free blocks";
-               end if;
                Physical_Free := Physical_Free + 1;
-               Previous_Was_Free := True;
             elsif State = Allocated_State then
                Used_Blocks := Used_Blocks + 1;
                if Gen = 0
@@ -582,7 +576,6 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
                   raise Layout_Error with
                     "arena allocated block metadata is corrupt";
                end if;
-               Previous_Was_Free := False;
             else
                raise Layout_Error with "arena block state is corrupt";
             end if;
@@ -984,6 +977,61 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       return Candidate;
    end Find_Best_Fit;
 
+   function Next_Block (Item : View; Block : Block_Ref) return Block_Ref;
+
+   function Combined_Block_Size
+     (Item : View; Left, Right : Interfaces.Unsigned_32)
+      return Interfaces.Unsigned_32
+   is
+      Total : constant Interfaces.Unsigned_64 :=
+        Interfaces.Unsigned_64 (Left) + Interfaces.Unsigned_64 (Right);
+   begin
+      if Total > Interfaces.Unsigned_64 (Item.Usable_Value) then
+         raise Layout_Error with "arena coalesced block size is corrupt";
+      end if;
+      return Interfaces.Unsigned_32 (Total);
+   end Combined_Block_Size;
+   pragma Inline_Always (Combined_Block_Size);
+
+   function Coalesce_All_Free_Runs (Item : View) return Boolean is
+      Block, Next, Following : Block_Ref;
+      Size : Interfaces.Unsigned_32;
+      Changed : Boolean := False;
+   begin
+      --  Lazy release permits adjacent free blocks. Validate both the physical
+      --  chain and the AVL index before mutating either representation; this
+      --  keeps a corrupt no-fit path fail-closed rather than attempting repair.
+      Validate_Index (Item);
+      Block := 0;
+      while Block /= Null_Block loop
+         Next := Next_Block (Item, Block);
+         if Block_State (Item, Block) = Free_State
+           and then Next /= Null_Block
+           and then Block_State (Item, Next) = Free_State
+         then
+            Tree_Remove (Item, Block, Clear_Metadata => False);
+            Size := Block_Size (Item, Block);
+            loop
+               Following := Next_Block (Item, Next);
+               Tree_Remove (Item, Next, Clear_Metadata => False);
+               Size := Combined_Block_Size
+                 (Item, Size, Block_Size (Item, Next));
+               exit when Following = Null_Block
+                 or else Block_State (Item, Following) /= Free_State;
+               Next := Following;
+            end loop;
+            Set_Block_Size (Item, Block, Size);
+            if Following /= Null_Block then
+               Set_Previous_Size (Item, Following, Size);
+            end if;
+            Tree_Insert (Item, Block);
+            Changed := True;
+         end if;
+         Block := Next_Block (Item, Block);
+      end loop;
+      return Changed;
+   end Coalesce_All_Free_Runs;
+
    function Rounded_Block_Size
      (Item : View; Requested : Byte_Count) return Interfaces.Unsigned_32 is
       Payload : constant Byte_Count := Layouts.Align_Up
@@ -1017,6 +1065,9 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       end if;
       Required := Rounded_Block_Size (Item, Requested_Size);
       Block := Find_Best_Fit (Item, Required);
+      if Block = Null_Block and then Coalesce_All_Free_Runs (Item) then
+         Block := Find_Best_Fit (Item, Required);
+      end if;
       if Block = Null_Block then
          return False;
       end if;
@@ -1165,65 +1216,14 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       return Block_Ref (Candidate);
    end Next_Block;
 
-   function Prior_Block (Item : View; Block : Block_Ref) return Block_Ref is
-      Size : constant Interfaces.Unsigned_32 := Previous_Size (Item, Block);
-   begin
-      if Size = 0 then
-         return Null_Block;
-      elsif Size mod Item.Minimum_Value /= 0
-        or else Size / Item.Minimum_Value > Block
-      then
-         raise Layout_Error with "arena previous block is out of range";
-      end if;
-      return Block - Size / Item.Minimum_Value;
-   end Prior_Block;
-
    procedure Release_Unlocked (Item : View; Value : Allocation_Handle) is
-      Block : Block_Ref := Token_Block (Value);
-      Next, Previous, Following : Block_Ref;
-      Size : Interfaces.Unsigned_32 := Block_Size (Item, Block);
+      Block : constant Block_Ref := Token_Block (Value);
       Count : constant Interfaces.Unsigned_64 := Live_Count (Item);
-
-      function Combined_Size
-        (Left, Right : Interfaces.Unsigned_32)
-         return Interfaces.Unsigned_32
-      is
-         Total : constant Interfaces.Unsigned_64 :=
-           Interfaces.Unsigned_64 (Left) + Interfaces.Unsigned_64 (Right);
-      begin
-         if Total > Interfaces.Unsigned_64 (Item.Usable_Value) then
-            raise Layout_Error with "arena coalesced block size is corrupt";
-         end if;
-         return Interfaces.Unsigned_32 (Total);
-      end Combined_Size;
    begin
       if Count = 0 then
          raise Layout_Error with "arena live allocation count underflows";
       end if;
       Set_State (Item, Block, Free_State);
-      Next := Next_Block (Item, Block);
-      if Next /= Null_Block and then Block_State (Item, Next) = Free_State then
-         Tree_Remove (Item, Next, Clear_Metadata => False);
-         Size := Combined_Size (Size, Block_Size (Item, Next));
-         Set_Block_Size (Item, Block, Size);
-         Following := Next_Block (Item, Block);
-         if Following /= Null_Block then
-            Set_Previous_Size (Item, Following, Size);
-         end if;
-      end if;
-      Previous := Prior_Block (Item, Block);
-      if Previous /= Null_Block
-        and then Block_State (Item, Previous) = Free_State
-      then
-         Tree_Remove (Item, Previous, Clear_Metadata => False);
-         Size := Combined_Size (Block_Size (Item, Previous), Size);
-         Set_Block_Size (Item, Previous, Size);
-         Following := Next_Block (Item, Previous);
-         if Following /= Null_Block then
-            Set_Previous_Size (Item, Following, Size);
-         end if;
-         Block := Previous;
-      end if;
       Tree_Insert (Item, Block);
       Set_Live_Count (Item, Count - 1);
    end Release_Unlocked;
@@ -1357,12 +1357,22 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Copy;
 
    procedure Destroy (Item : in out View) is
+      Mutated : Boolean := False;
    begin
       Acquire (Item);
       begin
          Validate_Index (Item);
-         if Live_Count (Item) /= 0
-           or else Root (Item) /= 0
+         if Live_Count (Item) /= 0 then
+            raise Layout_Error with "arena still has live allocations";
+         end if;
+         Mutated := True;
+         declare
+            Changed : constant Boolean := Coalesce_All_Free_Runs (Item);
+            pragma Unreferenced (Changed);
+         begin
+            null;
+         end;
+         if Root (Item) /= 0
            or else Block_State (Item, 0) /= Free_State
            or else Block_Size (Item, 0) /= Item.Usable_Value
          then
@@ -1371,7 +1381,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          Layouts.Mark_Destroyed (Item.Core);
       exception
          when others =>
-            Release_Guard (Item);
+            Finish_Failure (Item, Mutated);
             raise;
       end;
       Release_Guard (Item);

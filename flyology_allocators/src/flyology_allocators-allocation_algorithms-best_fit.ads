@@ -3,8 +3,9 @@ with Flyology_Allocators.Allocation_Algorithms.Contract;
 
 --  Best-fit allocation for relocatable arenas. Free blocks are indexed by an
 --  offset-based AVL tree ordered by size and position; in-band boundary
---  metadata supports splitting and adjacent-block coalescing. One persisted
---  nonblocking guard serializes allocation and release across attached views.
+--  metadata supports splitting and allocation-triggered coalescing. One
+--  persisted nonblocking guard serializes allocation and release across
+--  attached views.
 --  Payload access requires the handle owner to exclude release. A dead guard
 --  owner leaves the allocator locked until an external authority poisons it,
 --  and exclusive reinitialization is the only recovery.
@@ -13,12 +14,12 @@ package Flyology_Allocators.Allocation_Algorithms.Best_Fit is new
     (Algorithm_Minimum_Block_Limit =>
        Best_Fit_Kernel.Minimum_Block_Limit,
      Algorithm_Capabilities =>
-       (Search                => Allocation_Algorithms.Logarithmic,
+       (Search                => Allocation_Algorithms.Linear,
         Allocation_Contention => Allocation_Algorithms.Whole_Allocator,
         Release_Contention    => Allocation_Algorithms.Whole_Allocator,
         In_Band_Metadata      => True,
         Splits_Blocks         => True,
-        Coalesces_On_Release  => True,
+        Coalesces_On_Release  => False,
         Timed_Contention      => True,
         Release_Exclusion     => True),
      Algorithm_Configuration => Best_Fit_Kernel.Configuration,
