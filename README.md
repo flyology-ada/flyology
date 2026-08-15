@@ -887,25 +887,31 @@ Buddy_Arenas.Create_Or_Attach
 Three allocation adapters are provided. `Allocation_Algorithms.Buddy` selects
 the standalone buddy algorithm, which uses a power-of-two managed capacity,
 rounds requests to power-of-two blocks, and stores a complete buddy tree
-outside the managed bytes. Its lookup is logarithmic and its metadata size is
+outside the managed bytes. View-local order hints accelerate exact reuse.
+Release retains split paths; an allocation miss coalesces the complete tree and
+retries, so worst-case search is linear in the node count. Metadata size is
 predictable, at the cost of internal fragmentation and a tree that approaches
 half the managed capacity when the minimum block is 64 bytes.
 `Allocation_Algorithms.Best_Fit` selects in-band boundary tags plus an
 offset-based size/address AVL tree. It accepts a quantized non-power-of-two
-managed capacity, selects the smallest fitting free block, and coalesces
-physical neighbors. `Allocation_Algorithms.TLSF` selects the same boundary-tag
-model with fixed first- and second-level bitmaps and offset-linked free lists.
-Its class lookup has a constant bound, while size-class rounding can leave
-small unusable fragments.
+managed capacity and selects the smallest fitting indexed block. Release keeps
+physical neighbors separate. An allocation miss scans for and coalesces
+adjacent free runs, then retries if the index changed.
+`Allocation_Algorithms.TLSF` selects the same boundary-tag model with fixed
+first- and second-level bitmaps and offset-linked free lists. Its successful
+class lookup has a fixed bound, while an allocation miss also performs a linear
+physical coalescing pass before reporting exhaustion. Size-class rounding can
+leave small unusable fragments.
 
 `Arenas.Capabilities` exposes each selection's search class, contention scope,
 metadata placement, splitting/coalescing behavior, timed-contention support,
 and release-exclusion rule as compile-time data. All three implementations use
-one persisted process-shared metadata guard, support immediate and timed
-allocation/release, and require external owner-death and quiescence authority
-before poisoning. Exclusive initialization is their only recovery. The common
-allocation handle contains an opaque fixed-width token and a nonwrapping 64-bit
-generation. Stored metadata and handles contain no native address.
+one persisted metadata guard shared by all attached views, support immediate
+and timed allocation/release, and require external owner-death and quiescence
+authority before poisoning. Exclusive initialization is their only recovery.
+The common allocation handle contains an opaque fixed-width token and a
+nonwrapping 64-bit generation. Stored metadata and handles contain no native
+address.
 `Attach_Allocation` can produce a process-local `Regions.View` over a live
 block without exposing its base address. Releasing a handle requires exclusion
 from every payload read, write, copy, or nested region derived from it.
