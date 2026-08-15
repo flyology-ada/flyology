@@ -590,7 +590,6 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Cursor        : Block_Ref := 0;
       Previous      : Interfaces.Unsigned_32 := 0;
       Covered       : Interfaces.Unsigned_64 := 0;
-      Previous_Was_Free : Boolean := False;
       Maximum_Blocks : constant Interfaces.Unsigned_32 :=
         Item.Usable_Value / Item.Minimum_Value;
    begin
@@ -621,12 +620,7 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
                raise Layout_Error with
                  "arena physical block metadata is corrupt";
             elsif State = Free_State then
-               if Previous_Was_Free then
-                  raise Layout_Error with
-                    "TLSF contains adjacent uncoalesced free blocks";
-               end if;
                Physical_Free := Physical_Free + 1;
-               Previous_Was_Free := True;
             elsif State = Allocated_State then
                Used_Blocks := Used_Blocks + 1;
                if Gen = 0
@@ -636,7 +630,6 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
                   raise Layout_Error with
                     "arena allocated block metadata is corrupt";
                end if;
-               Previous_Was_Free := False;
             else
                raise Layout_Error with "arena block state is corrupt";
             end if;
@@ -1042,6 +1035,8 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       return Interfaces.Unsigned_32 (Rounded_Total);
    end Rounded_Block_Size;
 
+   procedure Coalesce_All_Free (Item : View);
+
    function Allocate_Unlocked
      (Item : View; Requested_Size : Byte_Count;
       Value : out Allocation_Handle) return Boolean
@@ -1063,7 +1058,11 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Required := Rounded_Block_Size (Item, Requested_Size);
       Block := Find_TLSF (Item, Required, Base, Size);
       if Block = Null_Block then
-         return False;
+         Coalesce_All_Free (Item);
+         Block := Find_TLSF (Item, Required, Base, Size);
+         if Block = Null_Block then
+            return False;
+         end if;
       end if;
       if Counter = Interfaces.Unsigned_64'Last then
          raise Layout_Error with "arena allocation generation exhausted";
@@ -1236,94 +1235,112 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       return Block_Ref (Candidate);
    end Next_Block;
 
-   function Prior_Block
-     (Item : View; Block : Block_Ref; Base : System.Address)
-      return Block_Ref is
-      Size : constant Interfaces.Unsigned_32 := Bytes.Read_U32
-        (Base + Addressing.Storage_Offset (Previous_Size_Offset));
+   procedure Coalesce_All_Free (Item : View) is
+      Cursor : Block_Ref := 0;
+      Next, Following : Block_Ref;
+      Base, Next_Base : System.Address;
+      Size, Next_Size : Interfaces.Unsigned_32;
+      State, Next_State : Interfaces.Unsigned_32;
+      Prior_Size : Interfaces.Unsigned_32 := 0;
+      Steps : Interfaces.Unsigned_64 := 0;
+      Maximum_Steps : constant Interfaces.Unsigned_64 :=
+        2 * Interfaces.Unsigned_64
+          (Item.Usable_Value / Item.Minimum_Value);
    begin
-      if Size = 0 then
-         return Null_Block;
-      elsif Size mod Item.Minimum_Value /= 0
-        or else Size / Item.Minimum_Value > Block
-      then
-         raise Layout_Error with "arena previous block is out of range";
-      end if;
-      return Block - Size / Item.Minimum_Value;
-   end Prior_Block;
+      while Cursor /= Null_Block loop
+         declare
+            Merged : Boolean := False;
+         begin
+            Steps := Steps + 1;
+            if Steps > Maximum_Steps then
+               raise Layout_Error with
+                 "TLSF physical coalescing exceeded its block bound";
+            end if;
+            Base := Block_Base (Item, Cursor);
+            Size := Bytes.Read_U32
+              (Base + Addressing.Storage_Offset (Block_Size_Offset));
+            State := Atomic.Load_Acquire_U32
+              (Base + Addressing.Storage_Offset (Block_State_Offset));
+            if Size < Item.Prefix_Value + Item.Minimum_Value
+              or else Size mod Item.Minimum_Value /= 0
+              or else Bytes.Read_U32
+                (Base + Addressing.Storage_Offset (Previous_Size_Offset)) /=
+                  Prior_Size
+              or else (State /= Free_State and then State /= Allocated_State)
+            then
+               raise Layout_Error with
+                 "TLSF physical coalescing found corrupt block metadata";
+            end if;
+            Next := Next_Block (Item, Cursor, Size);
+            if Next /= Null_Block then
+               Next_Base := Block_Base (Item, Next);
+               Next_State := Atomic.Load_Acquire_U32
+                 (Next_Base
+                  + Addressing.Storage_Offset (Block_State_Offset));
+               if Bytes.Read_U32
+                 (Next_Base
+                  + Addressing.Storage_Offset (Previous_Size_Offset)) /= Size
+                 or else
+                   (Next_State /= Free_State
+                    and then Next_State /= Allocated_State)
+               then
+                  raise Layout_Error with
+                    "TLSF physical coalescing found corrupt neighbors";
+               elsif State = Free_State and then Next_State = Free_State
+               then
+                  Next_Size := Bytes.Read_U32
+                    (Next_Base
+                     + Addressing.Storage_Offset (Block_Size_Offset));
+                  if Next_Size < Item.Prefix_Value + Item.Minimum_Value
+                    or else Next_Size mod Item.Minimum_Value /= 0
+                    or else Interfaces.Unsigned_64 (Size)
+                      + Interfaces.Unsigned_64 (Next_Size) >
+                        Interfaces.Unsigned_64 (Item.Usable_Value)
+                  then
+                     raise Layout_Error with
+                       "TLSF physical coalescing found corrupt neighbors";
+                  end if;
+                  List_Remove (Item, Cursor, Base, Size);
+                  List_Remove (Item, Next, Next_Base, Next_Size);
+                  Size := Size + Next_Size;
+                  Bytes.Write_U32
+                    (Base + Addressing.Storage_Offset (Block_Size_Offset),
+                     Size);
+                  Following := Next_Block (Item, Cursor, Size);
+                  if Following /= Null_Block then
+                     Set_Previous_Size (Item, Following, Size);
+                  end if;
+                  Bytes.Write_U32
+                    (Base + Addressing.Storage_Offset (Next_Free_Offset),
+                     Null_Block);
+                  Bytes.Write_U32
+                    (Base + Addressing.Storage_Offset (Previous_Free_Offset),
+                     Null_Block);
+                  List_Insert (Item, Cursor, Base, Size);
+                  Merged := True;
+               end if;
+            end if;
+            if not Merged then
+               Prior_Size := Size;
+               Cursor := Next;
+            end if;
+         end;
+      end loop;
+   end Coalesce_All_Free;
 
    procedure Release_Unlocked
      (Item : View; Value : Allocation_Handle;
       Description : Block_Description) is
-      Block : Block_Ref := Token_Block (Value);
-      Next, Previous, Following : Block_Ref;
-      Base : System.Address := Description.Base;
-      Neighbor_Base : System.Address;
-      Size : Interfaces.Unsigned_32 := Description.Size;
-      Neighbor_Size : Interfaces.Unsigned_32;
+      Block : constant Block_Ref := Token_Block (Value);
+      Base : constant System.Address := Description.Base;
+      Size : constant Interfaces.Unsigned_32 := Description.Size;
       Count : constant Interfaces.Unsigned_64 := Live_Count (Item);
-
-      function Combined_Size
-        (Left, Right : Interfaces.Unsigned_32)
-         return Interfaces.Unsigned_32
-      is
-         Total : constant Interfaces.Unsigned_64 :=
-           Interfaces.Unsigned_64 (Left) + Interfaces.Unsigned_64 (Right);
-      begin
-         if Total > Interfaces.Unsigned_64 (Item.Usable_Value) then
-            raise Layout_Error with "arena coalesced block size is corrupt";
-         end if;
-         return Interfaces.Unsigned_32 (Total);
-      end Combined_Size;
    begin
       if Count = 0 then
          raise Layout_Error with "arena live allocation count underflows";
       end if;
       Atomic.Store_Release_U32
         (Base + Addressing.Storage_Offset (Block_State_Offset), Free_State);
-      Next := Next_Block (Item, Block, Size);
-      if Next /= Null_Block then
-         Neighbor_Base := Block_Base (Item, Next);
-      end if;
-      if Next /= Null_Block
-        and then Atomic.Load_Acquire_U32
-          (Neighbor_Base + Addressing.Storage_Offset (Block_State_Offset)) =
-            Free_State
-      then
-         Neighbor_Size := Bytes.Read_U32
-           (Neighbor_Base + Addressing.Storage_Offset (Block_Size_Offset));
-         List_Remove (Item, Next, Neighbor_Base, Neighbor_Size);
-         Size := Combined_Size (Size, Neighbor_Size);
-         Bytes.Write_U32
-           (Base + Addressing.Storage_Offset (Block_Size_Offset), Size);
-         Following := Next_Block (Item, Block, Size);
-         if Following /= Null_Block then
-            Set_Previous_Size (Item, Following, Size);
-         end if;
-      end if;
-      Previous := Prior_Block (Item, Block, Base);
-      if Previous /= Null_Block then
-         Neighbor_Base := Block_Base (Item, Previous);
-      end if;
-      if Previous /= Null_Block
-        and then Atomic.Load_Acquire_U32
-          (Neighbor_Base + Addressing.Storage_Offset (Block_State_Offset)) =
-            Free_State
-      then
-         Neighbor_Size := Bytes.Read_U32
-           (Neighbor_Base + Addressing.Storage_Offset (Block_Size_Offset));
-         List_Remove (Item, Previous, Neighbor_Base, Neighbor_Size);
-         Size := Combined_Size (Neighbor_Size, Size);
-         Bytes.Write_U32
-           (Neighbor_Base + Addressing.Storage_Offset (Block_Size_Offset),
-            Size);
-         Following := Next_Block (Item, Previous, Size);
-         if Following /= Null_Block then
-            Set_Previous_Size (Item, Following, Size);
-         end if;
-         Block := Previous;
-         Base := Neighbor_Base;
-      end if;
       Bytes.Write_U32
         (Base + Addressing.Storage_Offset (Next_Free_Offset), Null_Block);
       Bytes.Write_U32
@@ -1459,12 +1476,18 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
    end Copy;
 
    procedure Destroy (Item : in out View) is
+      Mutated : Boolean := False;
    begin
       Acquire (Item);
       begin
          Validate_Index (Item);
-         if Live_Count (Item) /= 0
-           or else Head
+         if Live_Count (Item) /= 0 then
+            raise Layout_Error with "arena still has live allocations";
+         end if;
+         Mutated := True;
+         Coalesce_All_Free (Item);
+         Validate_Index (Item);
+         if Head
              (Item, Class_Of (Item, Item.Usable_Value)) /= 0
            or else Block_State (Item, 0) /= Free_State
            or else Block_Size (Item, 0) /= Item.Usable_Value
@@ -1474,7 +1497,7 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
          Layouts.Mark_Destroyed (Item.Core);
       exception
          when others =>
-            Release_Guard (Item);
+            Finish_Failure (Item, Mutated);
             raise;
       end;
       Release_Guard (Item);

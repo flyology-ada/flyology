@@ -153,8 +153,10 @@ package Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Value          : out Allocation_Handle;
       Result         : out Allocation_Result);
 
-   --  Release a live allocation and coalesce adjacent free blocks. The caller
-   --  must exclude every payload access through Value.
+   --  Release a live allocation for immediate size-class reuse. Adjacent free
+   --  blocks are coalesced when a later allocation cannot otherwise be
+   --  satisfied or when the empty arena is destroyed. The caller must exclude
+   --  every payload access through Value.
    --  @param Item Any concurrently attached arena view
    --  @param Value Live handle issued by this arena incarnation
    --  @exception Busy_Error Another caller owns the metadata guard
