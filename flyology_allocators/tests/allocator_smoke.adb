@@ -29,6 +29,9 @@ procedure Allocator_Smoke is
    package U8_Pointers is new System.Address_To_Access_Conversions
      (Interfaces.Unsigned_8);
 
+   type Buddy_Handle_Array is array (Positive range <>) of
+     Buddy_Arenas.Allocation_Handle;
+
    Storage_Length : constant := 262_144;
    subtype Storage_Range is
      Ada.Streams.Stream_Element_Offset range 1 .. Storage_Length;
@@ -64,6 +67,7 @@ procedure Allocator_Smoke is
    Best_Fit_View : Best_Fit_Arenas.View;
    TLSF_View : TLSF_Arenas.View;
    Buddy_Handle : Buddy_Arenas.Allocation_Handle;
+   Buddy_Small_Handles : Buddy_Handle_Array (1 .. 1_024);
    Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
    Best_Fit_Probe : Best_Fit_Arenas.Allocation_Handle;
    type Best_Fit_Handle_Array is array (Positive range <>) of
@@ -118,6 +122,49 @@ begin
          "forward overlapping copy failed");
    end loop;
    FA.Regions.Detach (Buddy_Allocation);
+   Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
+
+   --  Retained split nodes must not create false exhaustion. Fill every leaf,
+   --  release the left half, and require a half-arena allocation that can be
+   --  satisfied only by lazily joining those released buddies. Then release
+   --  everything and require the same fallback to rebuild the root block.
+   for Index in Buddy_Small_Handles'Range loop
+      Buddy_Arenas.Try_Allocate
+        (Buddy_View, 64, Buddy_Small_Handles (Index), Result);
+      Check
+        (Result = FA.Allocation_Algorithms.Allocated,
+         "buddy leaf fill failed");
+   end loop;
+   for Index in 1 .. 512 loop
+      Buddy_Arenas.Release (Buddy_View, Buddy_Small_Handles (Index));
+   end loop;
+   begin
+      declare
+         Ignored : constant FA.Byte_Count := Buddy_Arenas.Block_Capacity
+           (Buddy_View, Buddy_Small_Handles (1));
+         pragma Unreferenced (Ignored);
+      begin
+         null;
+      end;
+   exception
+      when FA.Handle_Error =>
+         Stale_Rejected := True;
+   end;
+   Check (Stale_Rejected, "buddy lazy release accepted a stale handle");
+   Buddy_Arenas.Try_Allocate (Buddy_View, 32_768, Buddy_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated
+      and then Buddy_Arenas.Block_Capacity (Buddy_View, Buddy_Handle) = 32_768,
+      "buddy lazy half-tree coalescing failed");
+   Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
+   for Index in 513 .. 1_024 loop
+      Buddy_Arenas.Release (Buddy_View, Buddy_Small_Handles (Index));
+   end loop;
+   Buddy_Arenas.Try_Allocate (Buddy_View, 65_536, Buddy_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated
+      and then Buddy_Arenas.Block_Capacity (Buddy_View, Buddy_Handle) = 65_536,
+      "buddy lazy root coalescing failed");
    Buddy_Arenas.Release (Buddy_View, Buddy_Handle);
 
    --  The buddy guard is algorithm metadata at offset 44 from the allocator

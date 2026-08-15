@@ -592,6 +592,48 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       return Visit (0, Byte_Count (Item.Usable_Value));
    end Allocate_Unlocked;
 
+   function Coalesce_Unlocked (Item : View) return Boolean is
+      function Visit (Node : Interfaces.Unsigned_32) return Boolean is
+         State : constant Interfaces.Unsigned_32 :=
+           Atomic.Load_Acquire_U32 (State_Address (Item, Node));
+         Left_64 : Interfaces.Unsigned_64;
+         Left, Right : Interfaces.Unsigned_32;
+         Left_Free, Right_Free : Boolean;
+      begin
+         case State is
+            when Free_State =>
+               return True;
+            when Allocated_State =>
+               return False;
+            when Split_State =>
+               Left_64 := Interfaces.Unsigned_64 (Node) * 2 + 1;
+               if Left_64 + 1 >= Interfaces.Unsigned_64 (Item.Node_Count) then
+                  raise Layout_Error with "arena split node has no children";
+               end if;
+               Left := Interfaces.Unsigned_32 (Left_64);
+               Right := Left + 1;
+               Left_Free := Visit (Left);
+               Right_Free := Visit (Right);
+               if Left_Free and then Right_Free then
+                  Atomic.Store_Release_U32
+                    (State_Address (Item, Left), Inactive_State);
+                  Atomic.Store_Release_U32
+                    (State_Address (Item, Right), Inactive_State);
+                  Atomic.Store_Release_U32
+                    (State_Address (Item, Node), Free_State);
+                  return True;
+               end if;
+               return False;
+            when Inactive_State =>
+               raise Layout_Error with "active arena node is inactive";
+            when others =>
+               raise Layout_Error with "arena node state is corrupt";
+         end case;
+      end Visit;
+   begin
+      return Visit (0);
+   end Coalesce_Unlocked;
+
    procedure Try_Allocate
      (Item           : in out View;
       Requested_Size : Positive;
@@ -612,8 +654,21 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
          Mutated := Requested_Size <= Natural (Item.Usable_Value);
          if Allocate_Unlocked (Item, Byte_Count (Requested_Size), Value) then
             Result := Allocated;
-         else
+         elsif not Mutated then
             Result := Exhausted;
+         else
+            declare
+               Ignored : constant Boolean := Coalesce_Unlocked (Item);
+               pragma Unreferenced (Ignored);
+            begin
+               if Allocate_Unlocked
+                 (Item, Byte_Count (Requested_Size), Value)
+               then
+                  Result := Allocated;
+               else
+                  Result := Exhausted;
+               end if;
+            end;
          end if;
       exception
          when others =>
@@ -638,8 +693,21 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
          Mutated := Requested_Size <= Natural (Item.Usable_Value);
          if Allocate_Unlocked (Item, Byte_Count (Requested_Size), Value) then
             Result := Allocated;
-         else
+         elsif not Mutated then
             Result := Exhausted;
+         else
+            declare
+               Ignored : constant Boolean := Coalesce_Unlocked (Item);
+               pragma Unreferenced (Ignored);
+            begin
+               if Allocate_Unlocked
+                 (Item, Byte_Count (Requested_Size), Value)
+               then
+                  Result := Allocated;
+               else
+                  Result := Exhausted;
+               end if;
+            end;
          end if;
       exception
          when others =>
@@ -708,28 +776,9 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    procedure Release_Unlocked
      (Item : View; Value : Allocation_Handle)
    is
-      Node : Interfaces.Unsigned_32 := Token_Node (Value);
-      Parent, Buddy : Interfaces.Unsigned_32;
+      Node : constant Interfaces.Unsigned_32 := Token_Node (Value);
    begin
       Atomic.Store_Release_U32 (State_Address (Item, Node), Free_State);
-      while Node /= 0 loop
-         if Node not in Policy.Non_Root_Node then
-            raise Layout_Error with "arena buddy node cannot be coalesced";
-         end if;
-         Parent := Policy.Buddy_Parent (Policy.Non_Root_Node (Node));
-         Buddy := Policy.Buddy_Sibling (Policy.Non_Root_Node (Node));
-         exit when Atomic.Load_Acquire_U32 (State_Address (Item, Parent)) /=
-           Split_State;
-         exit when Atomic.Load_Acquire_U32 (State_Address (Item, Buddy)) /=
-           Free_State;
-         Atomic.Store_Release_U32
-           (State_Address (Item, Node), Inactive_State);
-         Atomic.Store_Release_U32
-           (State_Address (Item, Buddy), Inactive_State);
-         Atomic.Store_Release_U32
-           (State_Address (Item, Parent), Free_State);
-         Node := Parent;
-      end loop;
    end Release_Unlocked;
 
    procedure Release (Item : in out View; Value : Allocation_Handle) is
@@ -864,6 +913,12 @@ package body Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Acquire (Item);
       begin
          Validate_Tree (Item);
+         declare
+            Ignored : constant Boolean := Coalesce_Unlocked (Item);
+            pragma Unreferenced (Ignored);
+         begin
+            null;
+         end;
          if Atomic.Load_Acquire_U32 (State_Address (Item, 0)) /=
            Free_State
          then

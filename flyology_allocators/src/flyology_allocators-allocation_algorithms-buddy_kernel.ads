@@ -151,8 +151,9 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Value          : out Allocation_Handle;
       Result         : out Allocation_Result);
 
-   --  Release a live allocation and coalesce free buddies. The caller must
-   --  exclude every payload access through Value.
+   --  Release a live allocation without waiting to coalesce free buddies.
+   --  Allocation coalesces the retained split tree before reporting genuine
+   --  exhaustion. The caller must exclude every payload access through Value.
    --  @param Item Any concurrently attached arena view
    --  @param Value Live handle issued by this arena incarnation
    --  @exception Busy_Error Another caller owns the metadata guard
