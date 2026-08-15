@@ -90,13 +90,13 @@ private
 
    type Baseline is record
       Name_Length        : Natural := 0;
-      Name_Data          : String (1 .. 256) := (others => ' ');
+      Name_Data          : String (1 .. 256) := [others => ' '];
       Fingerprint_Length : Natural := 0;
-      Fingerprint_Data   : String (1 .. 1_024) := (others => ' ');
+      Fingerprint_Data   : String (1 .. 1_024) := [others => ' '];
       Backend_Id_Length  : Natural := 0;
-      Backend_Id         : String (1 .. 64) := (others => ' ');
+      Backend_Id         : String (1 .. 64) := [others => ' '];
       Sample_Total       : Sample_Count := Sample_Count'First;
-      Values             : Stored_Sample_Array := (others => 0.0);
+      Values             : Stored_Sample_Array := [others => 0.0];
    end record;
 
    type Regression is record

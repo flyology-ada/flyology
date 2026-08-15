@@ -398,7 +398,7 @@ private
      of Character;
    type Fixed_Name is record
       Length : Natural range 0 .. Maximum_Name_Length := 0;
-      Data   : Name_Buffer := (others => ' ');
+      Data   : Name_Buffer := [others => ' '];
    end record;
 
    type Recorder_Backend is limited interface;
@@ -431,12 +431,12 @@ private
       Active               : Boolean := False;
       Started_At           : Interfaces.Unsigned_64 := 0;
       Native_Thread        : Interfaces.Unsigned_64 := 0;
-      Resource_Before      : Resource_Values := (others => 0);
+      Resource_Before      : Resource_Values := [others => 0];
       Resource_Before_Mask : Interfaces.Unsigned_64 := 0;
       Scheduler_Before     : Flyology_Scheduler_Snapshot;
-      Perf_Before          : Perf_Values := (others => 0);
-      Perf_Enabled_Before  : Perf_Values := (others => 0);
-      Perf_Running_Before  : Perf_Values := (others => 0);
+      Perf_Before          : Perf_Values := [others => 0];
+      Perf_Enabled_Before  : Perf_Values := [others => 0];
+      Perf_Running_Before  : Perf_Values := [others => 0];
       Perf_Before_Mask     : Interfaces.Unsigned_64 := 0;
       Overlapped           : Boolean := False;
    end record;
@@ -459,11 +459,11 @@ private
    type Recorded_Sample is record
       Observation   : Natural := 0;
       Outcome       : Sample_Outcome := Success;
-      Values        : Sample_Value_Vector := (others => 0.0);
-      Valid         : Sample_Validity_Vector := (others => False);
+      Values        : Sample_Value_Vector := [others => 0.0];
+      Valid         : Sample_Validity_Vector := [others => False];
       Status        : Sample_Status_Vector :=
-        (others => Metric_Not_Requested);
-      Scope_Changed : Sample_Scope_Changed_Vector := (others => False);
+        [others => Metric_Not_Requested];
+      Scope_Changed : Sample_Scope_Changed_Vector := [others => False];
       Overlapped    : Boolean := False;
    end record;
    type Recorded_Sample_Array is array (Positive range <>) of Recorded_Sample;
@@ -476,17 +476,17 @@ private
       Dropped_Total  : Natural := 0;
       In_Flight_Total : Natural := 0;
       Abandoned_Total : Natural := 0;
-      Outcome_Totals : Outcome_Array := (others => 0);
+      Outcome_Totals : Outcome_Array := [others => 0];
       Elapsed_NS     : Interfaces.Unsigned_64 := 0;
-      Requested      : Metric_Set := (others => False);
-      Statuses       : Availability_Array := (others => Metric_Not_Requested);
-      Attributions   : Attribution_Array := (others => Unattributable);
-      Valid_Counts   : Natural_Axis_Array := (others => 0);
-      Invalid_Counts : Natural_Axis_Array := (others => 0);
-      Scope_Changed  : Natural_Axis_Array := (others => 0);
-      Values         : Metric_Value_Store := (others => null);
+      Requested      : Metric_Set := [others => False];
+      Statuses       : Availability_Array := [others => Metric_Not_Requested];
+      Attributions   : Attribution_Array := [others => Unattributable];
+      Valid_Counts   : Natural_Axis_Array := [others => 0];
+      Invalid_Counts : Natural_Axis_Array := [others => 0];
+      Scope_Changed  : Natural_Axis_Array := [others => 0];
+      Values         : Metric_Value_Store := [others => null];
       Samples        : Recorded_Sample_Array_Access := null;
-      Summaries      : Summary_Array := (others => (others => <>));
+      Summaries      : Summary_Array := [others => (others => <>)];
    end record;
    --  @exclude Internal deep-copy hook.
    --  @param Object Internal result.
@@ -509,10 +509,10 @@ private
       Verdict_Value   : Comparison_Verdict := Inconclusive;
       Wall_Available  : Boolean := False;
       Reference_Statuses : Availability_Array :=
-        (others => Metric_Not_Requested);
+        [others => Metric_Not_Requested];
       Contender_Statuses : Availability_Array :=
-        (others => Metric_Not_Requested);
-      Metrics         : Metric_Comparison_Array := (others => (others => <>));
+        [others => Metric_Not_Requested];
+      Metrics         : Metric_Comparison_Array := [others => (others => <>)];
    end record;
 
    type Recorder_Guard

@@ -141,19 +141,19 @@ package Flyology_Bench is
    type Metric_Set is array (Metric_Axis) of Boolean;
 
    --  Wall-time results only, without additional native probes.
-   Time_Metrics : constant Metric_Set := (Wall_Time => True, others => False);
+   Time_Metrics : constant Metric_Set := [Wall_Time => True, others => False];
    --  Portable Darwin/Linux process, thread, memory, fault, switch, and I/O
    --  counters in addition to wall time.
    Process_Resource_Metrics : constant Metric_Set :=
-     (Wall_Time .. Filesystem_Output_Operations => True, others => False);
+     [Wall_Time .. Filesystem_Output_Operations => True, others => False];
    --  Linux perf counters covering the calling pthread and the native tasks
    --  it creates afterwards. Axes remain unavailable when the kernel, host
    --  PMU, or perf permissions reject an event; Metric_Status reports which.
    Linux_Hardware_Metrics : constant Metric_Set :=
-     (CPU_Cycles .. Branch_Misses => True, others => False);
+     [CPU_Cycles .. Branch_Misses => True, others => False];
    --  Counters supplied through Scheduler_Probe.
    Flyology_Scheduler_Metrics : constant Metric_Set :=
-     (Flyology_Dispatches .. Flyology_Migrations => True, others => False);
+     [Flyology_Dispatches .. Flyology_Migrations => True, others => False];
    --  Every built-in axis; Flyology scheduler counters remain opt-in because
    --  the standalone crate has no dependency on the Flyology runtime.
    All_Builtin_Metrics : constant Metric_Set :=
@@ -894,11 +894,11 @@ private
    type Metric_Store is record
       References : Positive := 1;
       Requested  : Metric_Set := Time_Metrics;
-      Available  : Metric_Set := (others => False);
+      Available  : Metric_Set := [others => False];
       Status     : Metric_Availability_Array :=
-        (others => Metric_Not_Requested);
-      Values     : Metric_Sample_Matrix := (others => (others => 0.0));
-      Summaries  : Metric_Summary_Array := (others => (others => <>));
+        [others => Metric_Not_Requested];
+      Values     : Metric_Sample_Matrix := [others => [others => 0.0]];
+      Summaries  : Metric_Summary_Array := [others => (others => <>)];
    end record;
    type Metric_Store_Access is access Metric_Store;
    type Metric_Store_Handle is new Ada.Finalization.Controlled with record
@@ -920,7 +920,7 @@ private
       Observed_Resolution : Long_Float := 0.0;
       Clock_Backend_Id   : Natural := 0;
       Median_Batch       : Long_Float := 0.0;
-      Values             : Sample_Array (Sample_Index'Range) := (others => 0.0);
+      Values             : Sample_Array (Sample_Index'Range) := [others => 0.0];
       Minimum            : Long_Float := 0.0;
       Maximum            : Long_Float := 0.0;
       Mean               : Long_Float := 0.0;
@@ -937,11 +937,11 @@ private
       Random_Seed_Value  : Long_Long_Integer := 1;
       Telemetry_Available : Boolean := False;
       Telemetry_CPU       : Sample_Array (Sample_Index'Range) :=
-        (others => 0.0);
+        [others => 0.0];
       Telemetry_RSS       : Sample_Array (Sample_Index'Range) :=
-        (others => 0.0);
+        [others => 0.0];
       Telemetry_RSS_Delta : Sample_Array (Sample_Index'Range) :=
-        (others => 0.0);
+        [others => 0.0];
       Telemetry_CPU_Total : Long_Float := 0.0;
       Telemetry_Wall_Total : Long_Float := 0.0;
       Telemetry_RSS_Start : Long_Float := 0.0;
@@ -956,9 +956,9 @@ private
       Reference_Data       : Measurement;
       Contender_Data       : Measurement;
       Speedup_Values       : Sample_Array (Sample_Index'Range) :=
-        (others => 0.0);
+        [others => 0.0];
       Reference_First_Order : Boolean_Sample_Array (Sample_Index'Range) :=
-        (others => False);
+        [others => False];
       Geometric_Speedup    : Long_Float := 1.0;
       Median_Speedup_Value : Long_Float := 1.0;
       Speedup_CI_Low       : Long_Float := 1.0;
@@ -975,7 +975,7 @@ private
       Random_Seed_Value    : Long_Long_Integer := 1;
       Verdict_Value        : Comparison_Verdict := Inconclusive;
       Metric_Comparisons   : Metric_Comparison_Array :=
-        (others => (others => <>));
+        [others => (others => <>)];
    end record;
 
    type Measurement_Case_Array is

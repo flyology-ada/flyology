@@ -63,7 +63,7 @@ package body Flyology_Bench is
    end Finalize;
 
    type Sample_Probe_State is record
-      Resource_Before      : Native_Resource_Values := (others => 0);
+      Resource_Before      : Native_Resource_Values := [others => 0];
       Resource_Before_Mask : Interfaces.Unsigned_64 := 0;
       Scheduler_Before     : Flyology_Scheduler_Snapshot;
    end record;
@@ -125,9 +125,9 @@ package body Flyology_Bench is
            (References => 1,
             Requested  => Config.Metrics,
             Available  => Config.Metrics,
-            Status     => (others => Metric_Not_Requested),
-            Values     => (others => (others => 0.0)),
-            Summaries  => (others => (others => <>)));
+            Status     => [others => Metric_Not_Requested],
+            Values     => [others => [others => 0.0]],
+            Summaries  => [others => (others => <>) ]);
          for Axis in Metric_Axis loop
             if Config.Metrics (Axis) then
                Result.Metric_Data.Data.Status (Axis) := Metric_Collected;
@@ -295,10 +295,10 @@ package body Flyology_Bench is
       Iterations  : Iteration_Count;
       Raw_Elapsed : Long_Float)
    is
-      Resource_After      : Native_Resource_Values := (others => 0);
+      Resource_After      : Native_Resource_Values := [others => 0];
       Resource_After_Mask : Interfaces.Unsigned_64 := 0;
       Resource_OK         : Boolean := False;
-      Perf_Values         : Native_Perf_Values := (others => 0);
+      Perf_Values         : Native_Perf_Values := [others => 0];
       Perf_Mask           : aliased Interfaces.Unsigned_64 := 0;
       Scheduler_After     : Flyology_Scheduler_Snapshot;
       Per_Operation       : constant Long_Float := Long_Float (Iterations);
@@ -543,8 +543,8 @@ package body Flyology_Bench is
    is
       Count : aliased Interfaces.C.size_t := 0;
    begin
-      Busy := (others => 0);
-      Total := (others => 0);
+      Busy := [others => 0];
+      Total := [others => 0];
       if Native_Host_CPU_Snapshot
           (Busy (Busy'First)'Address,
            Total (Total'First)'Address,
@@ -605,10 +605,10 @@ package body Flyology_Bench is
    end Host_CPU_Utilization;
 
    procedure Await_CPU_Quiescence (Config : Configuration) is
-      Previous_Busy  : Host_CPU_Counters := (others => 0);
-      Previous_Total : Host_CPU_Counters := (others => 0);
-      Current_Busy   : Host_CPU_Counters := (others => 0);
-      Current_Total  : Host_CPU_Counters := (others => 0);
+      Previous_Busy  : Host_CPU_Counters := [others => 0];
+      Previous_Total : Host_CPU_Counters := [others => 0];
+      Current_Busy   : Host_CPU_Counters := [others => 0];
+      Current_Total  : Host_CPU_Counters := [others => 0];
       Previous_Count : Natural;
       Current_Count  : Natural;
       Started        : Interfaces.Unsigned_64;
@@ -2043,7 +2043,7 @@ package body Flyology_Bench is
       type Case_Time_Array is array (Comparison_Case_Index) of Long_Float;
 
       Batch_Iterations : Iteration_Count := 1;
-      Case_Iterations : Case_Iteration_Array := (others => 1);
+      Case_Iterations : Case_Iteration_Array := [others => 1];
       Target_NS : Long_Float;
       Case_Target_NS : Long_Float;
       Minimum_Case_NS : Long_Float;
@@ -2053,7 +2053,8 @@ package body Flyology_Bench is
         16#E703_7ED1_A0B4_28DB# xor
         Interfaces.Unsigned_64 (Config.Random_Seed);
       Collected_Samples : Natural := 0;
-      Reference_First_Schedule : Schedule_Array := (others => (others => False));
+      Reference_First_Schedule : Schedule_Array :=
+        [others => [others => False]];
       Perf : Perf_Handle;
 
       function Iterations_For
@@ -2347,7 +2348,7 @@ package body Flyology_Bench is
          Sampling_Started : Interfaces.Unsigned_64;
          type Collected_Array is
            array (Comparison_Case_Index) of Natural;
-         Collected_By_Case : Collected_Array := (others => 0);
+         Collected_By_Case : Collected_Array := [others => 0];
 
          procedure Collect_One
            (Case_Number : Positive;

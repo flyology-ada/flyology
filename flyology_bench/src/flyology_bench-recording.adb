@@ -38,7 +38,7 @@ package body Flyology_Bench.Recording is
       Mask   : out Interfaces.Unsigned_64;
       OK     : out Boolean)
    is
-      Native : Native_Resource_Values := (others => 0);
+      Native : Native_Resource_Values := [others => 0];
    begin
       Read_Resource_Snapshot (Native, Mask, OK);
       for Index in Values'Range loop
@@ -126,7 +126,7 @@ package body Flyology_Bench.Recording is
       Retained_Total   : Natural := 0;
       In_Flight_Total  : Natural := 0;
       Abandoned_Total  : Natural := 0;
-      Outcome_Totals   : Outcome_Array := (others => 0);
+      Outcome_Totals   : Outcome_Array := [others => 0];
       Reservoir_State  : Interfaces.Unsigned_64 := 0;
       Reservoir_Ready  : Boolean := False;
    end Sample_Store;
@@ -451,7 +451,7 @@ package body Flyology_Bench.Recording is
       Capacity : Retained_Capacity) is limited new Recorder_Backend with record
       Control : Session_Control;
       Count   : Natural := 0;
-      Stores  : Store_Array (1 .. Maximum) := (others => null);
+      Stores  : Store_Array (1 .. Maximum) := [others => null];
       Names   : Name_Array (1 .. Maximum);
       Config  : Configuration := Default_Configuration;
       Perf_Session : aliased Interfaces.Unsigned_64 := 0;
@@ -638,7 +638,7 @@ package body Flyology_Bench.Recording is
       Allowed    : Boolean := False;
       Overlapped : Boolean;
       Resource_OK : Boolean;
-      Perf_Status : Perf_Status_Values := (others => 0);
+      Perf_Status : Perf_Status_Values := [others => 0];
       Perf_Mask   : aliased Interfaces.Unsigned_64 := 0;
    begin
       if Value.Active then
@@ -705,14 +705,14 @@ package body Flyology_Bench.Recording is
    is
       Finished_At   : Interfaces.Unsigned_64;
       Finished_Thread : Interfaces.Unsigned_64;
-      After         : Resource_Values := (others => 0);
+      After         : Resource_Values := [others => 0];
       After_Mask    : Interfaces.Unsigned_64 := 0;
       Resource_OK   : Boolean := False;
       Scheduler_After : Flyology_Scheduler_Snapshot;
-      Perf_After       : Perf_Values := (others => 0);
-      Perf_Enabled_After : Perf_Values := (others => 0);
-      Perf_Running_After : Perf_Values := (others => 0);
-      Perf_Status      : Perf_Status_Values := (others => 0);
+      Perf_After       : Perf_Values := [others => 0];
+      Perf_Enabled_After : Perf_Values := [others => 0];
+      Perf_Running_After : Perf_Values := [others => 0];
+      Perf_Status      : Perf_Status_Values := [others => 0];
       Perf_Mask        : aliased Interfaces.Unsigned_64 := 0;
       Perf_OK          : Boolean := False;
       Data          : Concrete_Backend_Access;
@@ -1509,7 +1509,7 @@ package body Flyology_Bench.Recording is
       Started, Ended : Interfaces.Unsigned_64;
       Active : Boolean;
       Elapsed : Long_Float := 0.0;
-      Resources : Resource_Values := (others => 0);
+      Resources : Resource_Values := [others => 0];
       Resource_Mask : Interfaces.Unsigned_64 := 0;
       Resource_OK : Boolean := False;
       Current_Wall : constant Interfaces.Unsigned_64 := Clock_Now;
