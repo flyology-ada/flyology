@@ -1,15 +1,15 @@
-with Flyology.Data_Structures.Atomics;
-with Flyology.Data_Structures.Policy;
-with Flyology.Data_Structures.Storage;
-with Flyology.Data_Structures.Waits;
+with Flyology_Allocators.Atomics;
+with Flyology_Allocators.Policy;
+with Flyology_Allocators.Storage;
+with Flyology_Allocators.Waits;
 with Interfaces.C;
 with System.Storage_Elements;
 
-package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
-   package Atomic renames Flyology.Data_Structures.Atomics;
-   package Policy renames Flyology.Data_Structures.Policy;
-   package Bytes renames Flyology.Data_Structures.Storage;
-   package Waiting renames Flyology.Data_Structures.Waits;
+package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
+   package Atomic renames Flyology_Allocators.Atomics;
+   package Policy renames Flyology_Allocators.Policy;
+   package Bytes renames Flyology_Allocators.Storage;
+   package Waiting renames Flyology_Allocators.Waits;
    package Addressing renames System.Storage_Elements;
 
    use type Interfaces.Integer_64;
@@ -393,7 +393,7 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       Check_Instance (Instance_ID);
       Detach (Item);
       Layouts.Begin_Initialize
-        (Core, Region, Location, Identity, Values.Extent,
+        (Core, Region, Location, Values.Extent,
          (Capacity     => Values.Usable,
           Element_Size => Values.Minimum,
           Alignment    => Values.Minimum,
@@ -426,7 +426,7 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       Check_Instance (Instance_ID);
       Detach (Item);
       Layouts.Try_Begin_Initialize
-        (Core, Claim, Region, Location, Identity, Values.Extent,
+        (Core, Claim, Region, Location, Values.Extent,
          (Capacity     => Values.Usable,
           Element_Size => Values.Minimum,
           Alignment    => Values.Minimum,
@@ -549,7 +549,7 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
               Block_State (Item, Cursor);
             Gen : constant Interfaces.Unsigned_64 := Generation (Item, Cursor);
             Counter : constant Interfaces.Unsigned_64 :=
-              Atomic.Load_Relaxed_U64 (Item.Counter_Address);
+              Bytes.Read_U64 (Item.Counter_Address);
          begin
             if Size < Item.Prefix_Value + Item.Minimum_Value
               or else Size mod Item.Minimum_Value /= 0
@@ -613,6 +613,9 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       end if;
    end Validate_Index;
 
+   procedure Acquire (Item : View);
+   procedure Release_Guard (Item : View);
+
    procedure Attach
      (Item          : out View;
       Region        : Region_View;
@@ -628,8 +631,7 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       Check_Instance (Instance_ID);
       Detach (Item);
       Layouts.Attach
-        (Core, Header, Region, Location, Identity,
-         Byte_Count (Values.Minimum));
+        (Core, Header, Region, Location, Byte_Count (Values.Minimum));
       if Header.Capacity /= Values.Usable
         or else Header.Element_Size /= Values.Minimum
         or else Header.Alignment /= Values.Minimum
@@ -637,13 +639,17 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
         or else Core.Extent /= Values.Extent
       then
          raise Layout_Error with "arena creation parameters do not match";
-      elsif Header.Auxiliary = Locked then
-         raise Busy_Error with "arena metadata guard is active";
-      elsif Header.Auxiliary /= Unlocked then
-         raise Layout_Error with "arena metadata guard is corrupt";
       end if;
       Set_View (Item, Core, Values, Instance_ID);
-      Validate_Index (Item);
+      Acquire (Item);
+      begin
+         Validate_Index (Item);
+      exception
+         when others =>
+            Release_Guard (Item);
+            raise;
+      end;
+      Release_Guard (Item);
    exception
       when others =>
          if Item.Core.Attached then
@@ -670,7 +676,7 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
 
    procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
-      Layouts.Poison_At (Region, Location, Identity, 8);
+      Layouts.Poison_At (Region, Location, 8);
    end Poison;
 
    procedure Acquire (Item : View) is
@@ -973,7 +979,7 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       Block, Following, Remainder : Block_Ref;
       Size, Remainder_Size : Interfaces.Unsigned_32;
       Counter : Interfaces.Unsigned_64 :=
-        Atomic.Load_Relaxed_U64 (Item.Counter_Address);
+        Bytes.Read_U64 (Item.Counter_Address);
       Count : Interfaces.Unsigned_64;
    begin
       Value := Null_Allocation;
@@ -1295,81 +1301,6 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       end;
    end Payload_Address;
 
-   function Bind_Allocation
-     (Item : View; Value : Allocation_Handle;
-      Offset, Extent, Alignment : Byte_Count;
-      Signature : Interfaces.Unsigned_64; Version : Interfaces.Unsigned_32;
-      Writable : Boolean) return Immutable_Storage_View
-   is
-      Description : constant Block_Description :=
-        Validate_Handle (Item, Value);
-   begin
-      if Signature = 0
-        or else Version = 0
-        or else Alignment not in 1 | 2 | 4 | 8 | 16 | 32 | 64
-      then
-         raise Constraint_Error with
-           "invalid immutable arena binding contract";
-      end if;
-      return
-        (Base      => Payload_Address
-           (Item, Description, Offset, Extent, Alignment),
-         Extent    => Extent,
-         Signature => Signature,
-         Version   => Version,
-         Writable  => Writable);
-   end Bind_Allocation;
-
-   procedure Read
-     (Item : View; Value : Allocation_Handle; Offset : Byte_Count;
-      Data : out Ada.Streams.Stream_Element_Array)
-   is
-      Description : constant Block_Description :=
-        Validate_Handle (Item, Value);
-      Length : constant Byte_Count := Byte_Count (Data'Length);
-      Native_Length : Interfaces.C.size_t;
-   begin
-      if Offset > Description.Capacity
-        or else Length > Description.Capacity - Offset
-      then
-         raise Constraint_Error with "arena read is out of bounds";
-      elsif Length /= 0 then
-         Native_Length := Interfaces.C.size_t (Length);
-         if Byte_Count (Native_Length) /= Length then
-            raise Constraint_Error with
-              "arena read is not natively representable";
-         end if;
-         Bytes.Copy
-           (Data'Address, Payload_Address (Item, Description, Offset, Length),
-            Native_Length);
-      end if;
-   end Read;
-
-   procedure Write
-     (Item : View; Value : Allocation_Handle; Offset : Byte_Count;
-      Data : Ada.Streams.Stream_Element_Array)
-   is
-      Description : constant Block_Description :=
-        Validate_Handle (Item, Value);
-      Length : constant Byte_Count := Byte_Count (Data'Length);
-      Native_Length : Interfaces.C.size_t;
-   begin
-      if Offset > Description.Capacity
-        or else Length > Description.Capacity - Offset
-      then
-         raise Constraint_Error with "arena write is out of bounds";
-      elsif Length /= 0 then
-         Native_Length := Interfaces.C.size_t (Length);
-         if Byte_Count (Native_Length) /= Length then
-            raise Constraint_Error with
-              "arena write is not natively representable";
-         end if;
-         Bytes.Copy
-           (Payload_Address (Item, Description, Offset, Length), Data'Address,
-            Native_Length);
-      end if;
-   end Write;
-
    procedure Copy
      (Item : View; Source : Allocation_Handle; Source_Offset : Byte_Count;
       Target : Allocation_Handle; Target_Offset, Length : Byte_Count)
@@ -1423,4 +1354,4 @@ package body Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is
       Detach (Item);
    end Destroy;
 
-end Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel;
+end Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel;

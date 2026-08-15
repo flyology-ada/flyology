@@ -20,6 +20,15 @@ cp -R "$fixture_root/." "$concurrent_root/"
 cp "$project_root/alire.toml" "$project_root/flyology.gpr" "$pin_root/"
 cp -R "$project_root/runtime" "$project_root/scripts" "$project_root/src" \
   "$pin_root/"
+mkdir -p "$pin_root/flyology_allocators"
+cp "$project_root/flyology_allocators/alire.toml" \
+  "$project_root/flyology_allocators/flyology_allocators.gpr" \
+  "$project_root/flyology_allocators/LICENSE-APACHE" \
+  "$project_root/flyology_allocators/LICENSE-MIT" \
+  "$project_root/flyology_allocators/NOTICE" \
+  "$pin_root/flyology_allocators/"
+cp -R "$project_root/flyology_allocators/src" \
+  "$pin_root/flyology_allocators/"
 cd "$consumer_root"
 
 sentinel_value='valuable directory contents remain intact'

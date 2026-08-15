@@ -1,0 +1,51 @@
+with Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel;
+with Flyology_Allocators.Allocation_Algorithms.Contract;
+
+--  Two-level segregated-fit allocation for relocatable arenas. Fixed-size
+--  bitmaps select offset-linked free lists; in-band boundary metadata supports
+--  splitting and adjacent-block coalescing. One persisted nonblocking guard
+--  serializes allocation and release across attached views.
+--  Payload access requires the handle owner to exclude release. A dead guard
+--  owner leaves the allocator locked until an external authority poisons it,
+--  and exclusive reinitialization is the only recovery.
+package Flyology_Allocators.Allocation_Algorithms.TLSF is new
+  Flyology_Allocators.Allocation_Algorithms.Contract
+    (Algorithm_Minimum_Block_Limit =>
+       TLSF_Kernel.Minimum_Block_Limit,
+     Algorithm_Capabilities =>
+       (Search                => Allocation_Algorithms.Constant_Class_Bound,
+        Allocation_Contention => Allocation_Algorithms.Whole_Allocator,
+        Release_Contention    => Allocation_Algorithms.Whole_Allocator,
+        In_Band_Metadata      => True,
+        Splits_Blocks         => True,
+        Coalesces_On_Release  => True,
+        Timed_Contention      => True,
+        Release_Exclusion     => True),
+     Algorithm_Configuration => TLSF_Kernel.Configuration,
+     Algorithm_View => TLSF_Kernel.View,
+     Implementation_Usable_Capacity =>
+       TLSF_Kernel.Configuration_Usable_Capacity,
+     Implementation_Minimum_Block_Size =>
+       TLSF_Kernel.Configuration_Minimum_Block_Size,
+     Implementation_Required_Storage =>
+       TLSF_Kernel.Required_Storage,
+     Implementation_Initialize => TLSF_Kernel.Initialize,
+     Implementation_Create_Or_Attach =>
+       TLSF_Kernel.Create_Or_Attach,
+     Implementation_Attach => TLSF_Kernel.Attach,
+     Implementation_Detach => TLSF_Kernel.Detach,
+     Implementation_Is_Attached => TLSF_Kernel.Is_Attached,
+     Implementation_Current_Metadata =>
+       TLSF_Kernel.Current_Metadata,
+     Implementation_Is_Poisoned => TLSF_Kernel.Is_Poisoned,
+     Implementation_Poison => TLSF_Kernel.Poison,
+     Implementation_Try_Allocate_Immediate =>
+       TLSF_Kernel.Try_Allocate,
+     Implementation_Try_Allocate_Timed => TLSF_Kernel.Try_Allocate,
+     Implementation_Release_Immediate => TLSF_Kernel.Release,
+     Implementation_Release_Timed => TLSF_Kernel.Release,
+     Implementation_Block_Capacity => TLSF_Kernel.Block_Capacity,
+     Implementation_Attach_Allocation =>
+       TLSF_Kernel.Attach_Allocation,
+     Implementation_Copy => TLSF_Kernel.Copy,
+     Implementation_Destroy => TLSF_Kernel.Destroy);

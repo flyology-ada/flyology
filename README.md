@@ -834,13 +834,22 @@ concrete byte-sequence containers rather than element collections.
 | `Rings.MPMC` | Bounded immutable fixed-layout elements with per-slot sequences | Multiple producers and consumers; immediate and timed transfer |
 | `Hash_Maps` | Immutable fixed-layout keys and values in open-addressed slots | Shared guard; immediate and timed operations |
 
+The allocation algorithms live in the nested standalone
+`flyology_allocators` crate. That crate accepts caller-owned contiguous storage
+and depends on neither Flyology, shared memory, a hosted operating system, nor
+Alire-generated project configuration. Its timed contention path uses
+`Ada.Real_Time` and `delay 0.0`, so the selected runtime supplies the scheduling
+behavior. The same sources are cross-compiled with GNAT 15 `arm-eabi` and the
+`embedded-stm32f4` bare-board runtime.
+
 `Arenas` is generic over an `Allocation_Algorithms.Contract` instance. The
 selection is compile-time: arena operations are static renames and neither a
-dispatch table nor a callback is stored in the mapping. Each algorithm supplies
-its configuration type, persisted layout identity, validation, allocation and
-release operations, synchronization model, and recovery rules. Algorithm
-identity and every configuration field are checked by `Create_Or_Attach` and
-`Attach`; incompatible bytes fail closed.
+dispatch table nor a callback is stored in the backing bytes. Each standalone
+algorithm supplies its configuration type, geometry validation, allocation and
+release operations, synchronization model, and recovery rules. Flyology's thin
+adapter supplies the outer magic, schema, lifecycle, instance identity, and
+payload-copy policy. Those identity fields and every configuration field are
+checked by `Create_Or_Attach` and `Attach`; incompatible bytes fail closed.
 
 ```ada
 package Buddy_Arenas is new Flyology.Data_Structures.Arenas
@@ -864,18 +873,19 @@ Buddy_Arenas.Create_Or_Attach
    Result        => Arena_Open);
 ```
 
-Three allocation algorithms are provided. `Allocation_Algorithms.Buddy`
-selects a power-of-two managed capacity, rounds requests to power-of-two blocks,
-and stores a complete buddy tree outside the managed bytes. Its lookup is
-logarithmic and its metadata size is predictable, at the cost of internal
-fragmentation and a tree that approaches half the managed capacity when the
-minimum block is 64 bytes. `Allocation_Algorithms.Best_Fit` uses in-band
-boundary tags plus an offset-based size/address AVL tree. It accepts a
-quantized non-power-of-two managed capacity, selects the smallest fitting free
-block, and coalesces physical neighbors. `Allocation_Algorithms.TLSF` uses the
-same boundary-tag model with fixed first- and second-level bitmaps and
-offset-linked free lists. Its class lookup has a constant bound, while size
-class rounding can leave small unusable fragments.
+Three allocation adapters are provided. `Allocation_Algorithms.Buddy` selects
+the standalone buddy algorithm, which uses a power-of-two managed capacity,
+rounds requests to power-of-two blocks, and stores a complete buddy tree
+outside the managed bytes. Its lookup is logarithmic and its metadata size is
+predictable, at the cost of internal fragmentation and a tree that approaches
+half the managed capacity when the minimum block is 64 bytes.
+`Allocation_Algorithms.Best_Fit` selects in-band boundary tags plus an
+offset-based size/address AVL tree. It accepts a quantized non-power-of-two
+managed capacity, selects the smallest fitting free block, and coalesces
+physical neighbors. `Allocation_Algorithms.TLSF` selects the same boundary-tag
+model with fixed first- and second-level bitmaps and offset-linked free lists.
+Its class lookup has a constant bound, while size-class rounding can leave
+small unusable fragments.
 
 `Arenas.Capabilities` exposes each selection's search class, contention scope,
 metadata placement, splitting/coalescing behavior, timed-contention support,
