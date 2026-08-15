@@ -1,6 +1,6 @@
 # TLA+ models
 
-These models extract four concurrency-sensitive state machines from the Ada
+These models extract five concurrency-sensitive state machines from the Ada
 implementation. They are bounded, executable design reviews: TLC explores all
 interleavings within each checked configuration, while the behavioral and
 SPARK suites continue to cover the implementation boundaries that TLA+ does
@@ -39,6 +39,15 @@ state is kept in a temporary directory.
 | `Publish` / `PublishFailure` | claim-stamped CAS publication after extent initialization |
 | `Remove` | exact-name lookup and release store of `Removed_Slot` |
 | `CrashWithGuard` / `CrashCreator` | documented abandoned guard and initialization claim outcomes |
+| `AllocatorAlgorithms.Acquire` / `FinishOperation` | allocator metadata-guard acquisition and release around one complete operation |
+| `SelectCandidate` | Buddy lowest-address tree candidate, Best-Fit smallest size/address candidate, or TLSF first modeled nonempty size class |
+| `SplitBuddyCandidate` | Buddy left-path split with each right sibling retained as a free tree node |
+| `CommitAllocation` | generation advance, block allocation, remainder publication, and generation-stamped handle return |
+| `ValidateRelease` | persisted state/generation validation followed by lazy free publication and Buddy view-local hint update |
+| `BeginCoalesce` / `CoalesceStep` / `FinishCoalesce` | allocation-miss sweep, bounded physical merges, and retry boundary in the three lazy algorithms |
+| `freeIndex` | Buddy free-tree frontier or Best-Fit AVL membership, abstracted as exact free block keys |
+| `bins` / `bitmap` | TLSF free-list membership by modeled size class and matching nonempty-class bitmap |
+| `hints` | Buddy per-view, per-order candidate cache whose entry is checked against persisted node state before use |
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
@@ -77,6 +86,28 @@ explicit result and releases an acquired guard. The unlocked configuration
 lets two creators scan the same free slot and produces a stale first claim when
 the second creator overwrites its generation. This is why the guard covers the
 whole scan-and-reserve interval, not just the final slot store.
+
+`AllocatorAlgorithms` checks the three standalone allocator policies with two
+attached views, bounded physical storage, bounded generations, and repeated
+allocation and release. All configurations check complete nonoverlapping block
+coverage, free-index agreement, guard ownership, one live allocation per
+client, generation-stamped handles, and absence of false exhaustion. Buddy
+also checks power-of-two alignment and validates every view-local hint against
+persisted state. TLSF checks that every free block occurs in its modeled size
+class and that the bitmap exactly names the nonempty classes. Best-Fit uses the
+same size/address ordering as its AVL key. Strong fairness for guard admission
+and weak fairness for work under the guard establish that every started
+operation completes when no owner dies. Every merge reduces the physical block
+count before the bounded retry.
+
+Nine broken allocator configurations are required to fail. Removing the
+coalesce-and-retry boundary produces a false-exhaustion counterexample for each
+algorithm. Trusting a stale Buddy hint produces overlapping live allocations.
+Retaining stale TLSF bitmap bits breaks agreement with its free lists. Ignoring
+a release handle's generation frees a newer allocation at the reused offset.
+Three nonterminating sweep variants retain a mergeable pair while toggling
+local progress state, producing temporal counterexamples for operation
+completion.
 
 `SupervisionLifecycle` composes a fixed two-node static topology with a nested
 bounded family owned by the dependent node. The safety configuration explores
@@ -122,6 +153,15 @@ The models intentionally omit or coarsen the following details:
   `Reserve` action, and selects nondeterministically among equal best-fit
   reservations. It does not model mapping replacement, flush, OS namespaces,
   descriptor handoff, or independently authorized recovery.
+- The allocator model uses four byte units and an identity TLSF size-class
+  function. It preserves physical adjacency, Buddy alignment and splitting,
+  Best-Fit size/address choice, TLSF bin/bitmap membership, lazy release,
+  miss-triggered coalescing, retry, generation validation, and view-local hint
+  invalidation. It abstracts AVL rotations, TLSF first/second-level bit
+  arithmetic and list order, byte-address checks, payload access, timeout
+  arithmetic, poisoning, destruction, and generation widths beyond the checked
+  bound. Its liveness property assumes no guard owner dies and does not claim
+  wait-free or real-time completion.
 - Crash actions establish the documented failure mode only: a dead owner can
   leave a guard or initialization slot abandoned. There is deliberately no
   recovery or ownership-stealing action and no liveness claim.
