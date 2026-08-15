@@ -1,6 +1,6 @@
 name = "flyology"
 description = "Experimental GNAT runtime extension for native and lightweight Ada tasks"
-version = "0.1.0-dev"
+version = "0.1.0"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
