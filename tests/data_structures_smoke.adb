@@ -987,7 +987,8 @@ begin
      (Best_Fit_Arenas.Capabilities.Search =
         DS.Allocation_Algorithms.Logarithmic
       and then TLSF_Arenas.Capabilities.Search =
-        DS.Allocation_Algorithms.Constant_Class_Bound,
+        DS.Allocation_Algorithms.Linear
+      and then not TLSF_Arenas.Capabilities.Coalesces_On_Release,
       "allocator search capabilities are not exposed accurately");
    TLSF_Arenas.Create_Or_Attach
      (TLSF_A, Region_A, TLSF_Arena_Location,
@@ -1001,6 +1002,33 @@ begin
    Assert
      (Open_Outcome = DS.Attached_Existing,
       "TLSF arena was reinitialized");
+   declare
+      Saved_Version : constant Interfaces.Unsigned_32 := Read_U32
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 4));
+      Saved_Schema : constant Interfaces.Unsigned_64 := Read_U64
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 16));
+      Failed : Boolean := False;
+   begin
+      Write_U32
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 4), 2);
+      Write_U64
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 16),
+         16#0001_544C_5346_0002#);
+      begin
+         TLSF_Arenas.Attach
+           (TLSF_Bad, Region_B, TLSF_Arena_Location,
+            TLSF_Configuration, TLSF_Instance);
+      exception
+         when DS.Layout_Error => Failed := True;
+      end;
+      Write_U32
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 4), Saved_Version);
+      Write_U64
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 16), Saved_Schema);
+      Assert
+        (Failed and then not TLSF_Arenas.Is_Attached (TLSF_Bad),
+         "TLSF arena accepted the eager-coalescing identity");
+   end;
    declare
       Failed : Boolean := False;
    begin

@@ -138,8 +138,9 @@ package Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Value          : out Allocation_Handle;
       Result         : out Allocation_Result);
 
-   --  Allocate after waiting only for metadata-guard contention. Genuine
-   --  exhaustion still returns Exhausted after one complete search.
+   --  Allocate after waiting only for metadata-guard contention. Before
+   --  reporting genuine exhaustion, an indexed search miss performs one
+   --  bounded physical coalescing pass and retries the indexed search.
    --  @param Item Any concurrently attached arena view
    --  @param Requested_Size Positive payload bytes requested
    --  @param Timeout Maximum wait; zero permits one immediate attempt
