@@ -49,6 +49,7 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
 
    First_Level_Count  : constant := 32;
    Second_Level_Count : constant := 16;
+   Second_Level_Log   : constant := 4;
    Index_Offset       : constant Byte_Count := Layouts.Header_Size;
    First_Map_Offset   : constant Byte_Count := Index_Offset;
    Index_Reserved     : constant Byte_Count := Index_Offset + 4;
@@ -214,6 +215,13 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
    end Block_Address;
    pragma Inline_Always (Block_Address);
 
+   function Block_Base
+     (Item : View; Block : Block_Ref) return System.Address is
+     (Block_Address
+        (Item, Block, 0, Byte_Count (Item.Prefix_Value),
+         Byte_Count (Item.Minimum_Value)));
+   pragma Inline_Always (Block_Base);
+
    function Read_Field
      (Item : View; Block : Block_Ref; Relative : Byte_Count)
       return Interfaces.Unsigned_32 is
@@ -324,8 +332,10 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       First := Floor_Log_2 (Units);
       Base := Interfaces.Shift_Left (Interfaces.Unsigned_32 (1), First);
       Second := Interfaces.Unsigned_32
-        ((Interfaces.Unsigned_64 (Units - Base) * Second_Level_Count)
-         / Interfaces.Unsigned_64 (Base));
+        (Interfaces.Shift_Right
+           (Interfaces.Shift_Left
+              (Interfaces.Unsigned_64 (Units - Base), Second_Level_Log),
+            First));
       if Second >= Second_Level_Count then
          raise Layout_Error with "TLSF second-level class is corrupt";
       end if;
@@ -428,6 +438,29 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Item.Instance_Value := 0;
    end Detach;
 
+   procedure Initialize_Block_At
+     (Base          : System.Address;
+      Size          : Interfaces.Unsigned_32;
+      Previous      : Interfaces.Unsigned_32;
+      State         : Interfaces.Unsigned_32;
+      Generation_ID : Interfaces.Unsigned_64 := 0) is
+   begin
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Block_Size_Offset), Size);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Previous_Size_Offset), Previous);
+      Bytes.Write_U64
+        (Base + Addressing.Storage_Offset (Generation_Offset), Generation_ID);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Next_Free_Offset), Null_Block);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Previous_Free_Offset), Null_Block);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Block_Reserved_Offset), 0);
+      Atomic.Store_Release_U32
+        (Base + Addressing.Storage_Offset (Block_State_Offset), State);
+   end Initialize_Block_At;
+
    procedure Initialize_Block
      (Item          : View;
       Block         : Block_Ref;
@@ -436,13 +469,8 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       State         : Interfaces.Unsigned_32;
       Generation_ID : Interfaces.Unsigned_64 := 0) is
    begin
-      Set_Block_Size (Item, Block, Size);
-      Set_Previous_Size (Item, Block, Previous);
-      Set_Generation (Item, Block, Generation_ID);
-      Set_Next_Free (Item, Block, Null_Block);
-      Set_Previous_Free (Item, Block, Null_Block);
-      Write_Field (Item, Block, Block_Reserved_Offset, 0);
-      Set_State (Item, Block, State);
+      Initialize_Block_At
+        (Block_Base (Item, Block), Size, Previous, State, Generation_ID);
    end Initialize_Block;
 
    procedure Finish_Initialize
@@ -830,15 +858,32 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Release_Guard (Item);
    end Finish_Failure;
 
-   procedure List_Insert (Item : View; Block : Block_Ref) is
-      Class : constant Size_Class := Class_Of (Item, Block_Size (Item, Block));
+   procedure List_Insert
+     (Item : View; Block : Block_Ref; Base : System.Address;
+      Size : Interfaces.Unsigned_32) is
+      Stored_Size : constant Interfaces.Unsigned_32 := Bytes.Read_U32
+        (Base + Addressing.Storage_Offset (Block_Size_Offset));
+      Class : constant Size_Class := Class_Of (Item, Size);
       Previous_Head : constant Block_Ref := Head (Item, Class);
       Map : Interfaces.Unsigned_32;
    begin
-      Set_Previous_Free (Item, Block, Null_Block);
-      Set_Next_Free (Item, Block, Previous_Head);
+      if Stored_Size /= Size then
+         raise Layout_Error with "TLSF block size changed before insertion";
+      end if;
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Previous_Free_Offset), Null_Block);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Next_Free_Offset), Previous_Head);
       if Previous_Head /= Null_Block then
-         Set_Previous_Free (Item, Previous_Head, Block);
+         declare
+            Previous_Base : constant System.Address :=
+              Block_Base (Item, Previous_Head);
+         begin
+            Bytes.Write_U32
+              (Previous_Base
+               + Addressing.Storage_Offset (Previous_Free_Offset),
+               Block);
+         end;
       end if;
       Set_Head (Item, Class, Block);
       Map := Second_Map (Item, Class.First) or Bit (Class.Second);
@@ -846,33 +891,55 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Set_First_Map (Item, First_Map (Item) or Bit (Class.First));
    end List_Insert;
 
-   procedure List_Remove (Item : View; Block : Block_Ref) is
-      Class : constant Size_Class := Class_Of (Item, Block_Size (Item, Block));
-      Previous : constant Block_Ref := Previous_Free (Item, Block);
-      Following : constant Block_Ref := Next_Free (Item, Block);
+   procedure List_Remove
+     (Item : View; Block : Block_Ref; Base : System.Address;
+      Size : Interfaces.Unsigned_32) is
+      Previous : constant Block_Ref := Bytes.Read_U32
+        (Base + Addressing.Storage_Offset (Previous_Free_Offset));
+      Following : constant Block_Ref := Bytes.Read_U32
+        (Base + Addressing.Storage_Offset (Next_Free_Offset));
+      Class : constant Size_Class := Class_Of (Item, Size);
+      Previous_Base : System.Address := System.Null_Address;
+      Following_Base : System.Address := System.Null_Address;
       Map : Interfaces.Unsigned_32;
    begin
+      if Previous /= Null_Block then
+         Previous_Base := Block_Base (Item, Previous);
+      end if;
+      if Following /= Null_Block then
+         Following_Base := Block_Base (Item, Following);
+      end if;
       if (Previous = Null_Block and then Head (Item, Class) /= Block)
         or else
           (Previous /= Null_Block
-           and then Next_Free (Item, Previous) /= Block)
+           and then Bytes.Read_U32
+             (Previous_Base
+              + Addressing.Storage_Offset (Next_Free_Offset)) /= Block)
         or else
           (Following /= Null_Block
-           and then Previous_Free (Item, Following) /= Block)
+           and then Bytes.Read_U32
+             (Following_Base
+              + Addressing.Storage_Offset (Previous_Free_Offset)) /= Block)
       then
          raise Layout_Error with "TLSF free-list linkage is corrupt";
       end if;
       if Previous = Null_Block then
          Set_Head (Item, Class, Following);
       else
-         Set_Next_Free (Item, Previous, Following);
+         Bytes.Write_U32
+           (Previous_Base + Addressing.Storage_Offset (Next_Free_Offset),
+            Following);
       end if;
       if Following /= Null_Block then
-         Set_Previous_Free (Item, Following, Previous);
+         Bytes.Write_U32
+           (Following_Base
+            + Addressing.Storage_Offset (Previous_Free_Offset), Previous);
       end if;
-      Set_Next_Free (Item, Block, Null_Block);
-      Set_Previous_Free (Item, Block, Null_Block);
-      if Head (Item, Class) = Null_Block then
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Next_Free_Offset), Null_Block);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Previous_Free_Offset), Null_Block);
+      if Previous = Null_Block and then Following = Null_Block then
          Map := Second_Map (Item, Class.First) and not Bit (Class.Second);
          Set_Second_Map (Item, Class.First, Map);
          if Map = 0 then
@@ -900,7 +967,9 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
    pragma Inline_Always (Mask_From);
 
    function Find_TLSF
-     (Item : View; Required : Interfaces.Unsigned_32) return Block_Ref
+     (Item : View; Required : Interfaces.Unsigned_32;
+      Base : out System.Address; Size : out Interfaces.Unsigned_32)
+      return Block_Ref
    is
       Class : Size_Class := Class_Of (Item, Required);
       Map : Interfaces.Unsigned_32 :=
@@ -908,6 +977,8 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       First_Map_Value : Interfaces.Unsigned_32;
       Result : Block_Ref;
    begin
+      Base := System.Null_Address;
+      Size := 0;
       if Map = 0 then
          if Class.First = First_Level'Last then
             return Null_Block;
@@ -922,7 +993,13 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       end if;
       Class.Second := Second_Level (First_Set (Map));
       Result := Head (Item, Class);
-      if Result = Null_Block or else Block_Size (Item, Result) < Required then
+      if Result = Null_Block then
+         raise Layout_Error with "TLSF bitmap selected an empty list";
+      end if;
+      Base := Block_Base (Item, Result);
+      Size := Bytes.Read_U32
+        (Base + Addressing.Storage_Offset (Block_Size_Offset));
+      if Size < Required then
          raise Layout_Error with "TLSF bitmap selected an undersized block";
       end if;
       return Result;
@@ -972,6 +1049,7 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Required : Interfaces.Unsigned_32;
       Block, Following, Remainder : Block_Ref;
       Size, Remainder_Size : Interfaces.Unsigned_32;
+      Base, Remainder_Base : System.Address;
       Counter : Interfaces.Unsigned_64 :=
         Bytes.Read_U64 (Item.Counter_Address);
       Count : Interfaces.Unsigned_64;
@@ -983,7 +1061,7 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
          return False;
       end if;
       Required := Rounded_Block_Size (Item, Requested_Size);
-      Block := Find_TLSF (Item, Required);
+      Block := Find_TLSF (Item, Required, Base, Size);
       if Block = Null_Block then
          return False;
       end if;
@@ -995,25 +1073,30 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
          raise Layout_Error with "arena live allocation count overflows";
       end if;
 
-      Size := Block_Size (Item, Block);
-      List_Remove (Item, Block);
+      List_Remove (Item, Block, Base, Size);
       if Size - Required >= Item.Prefix_Value + Item.Minimum_Value then
          Remainder_Size := Size - Required;
          Remainder := Block + Required / Item.Minimum_Value;
-         Initialize_Block
-           (Item, Remainder, Remainder_Size, Required, Free_State);
+         Remainder_Base := Block_Base (Item, Remainder);
+         Initialize_Block_At
+           (Remainder_Base, Remainder_Size, Required, Free_State);
          Following := Remainder + Remainder_Size / Item.Minimum_Value;
          if Following < Item.Usable_Value / Item.Minimum_Value then
             Set_Previous_Size (Item, Following, Remainder_Size);
          end if;
-         Set_Block_Size (Item, Block, Required);
-         List_Insert (Item, Remainder);
+         Bytes.Write_U32
+           (Base + Addressing.Storage_Offset (Block_Size_Offset), Required);
+         List_Insert
+           (Item, Remainder, Remainder_Base, Remainder_Size);
       end if;
 
       Counter := Counter + 1;
       Bytes.Write_U64 (Item.Counter_Address, Counter);
-      Set_Generation (Item, Block, Counter);
-      Set_State (Item, Block, Allocated_State);
+      Bytes.Write_U64
+        (Base + Addressing.Storage_Offset (Generation_Offset), Counter);
+      Atomic.Store_Release_U32
+        (Base + Addressing.Storage_Offset (Block_State_Offset),
+         Allocated_State);
       Set_Live_Count (Item, Count + 1);
       Value :=
         (Token      => Make_Token (Item.Core.Epoch_Value, Block),
@@ -1076,48 +1159,70 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
    type Block_Description is record
       Capacity : Byte_Count;
       Offset   : Byte_Count;
+      Base     : System.Address;
+      Size     : Interfaces.Unsigned_32;
    end record;
 
-   function Validate_Handle
+   function Validate_Handle_Metadata
      (Item : View; Value : Allocation_Handle) return Block_Description
    is
       Block : constant Block_Ref := Token_Block (Value);
-      Size  : Interfaces.Unsigned_32;
    begin
-      Layouts.Require_Ready (Item.Core);
       if Value = Null_Allocation
         or else Token_Epoch (Value) = 0
         or else Value.Generation = 0
         or else Token_Epoch (Value) /= Item.Core.Epoch_Value
         or else not Valid_Block_Ref (Item, Block)
-        or else Block_State (Item, Block) /= Allocated_State
-        or else Generation (Item, Block) /= Value.Generation
       then
          raise Handle_Error with "arena allocation handle is invalid or stale";
       end if;
-      Size := Block_Size (Item, Block);
-      if Size < Item.Prefix_Value + Item.Minimum_Value
-        or else Size mod Item.Minimum_Value /= 0
-        or else Interfaces.Unsigned_64 (Block) *
-          Interfaces.Unsigned_64 (Item.Minimum_Value)
-          + Interfaces.Unsigned_64 (Size) >
-            Interfaces.Unsigned_64 (Item.Usable_Value)
-      then
-         raise Layout_Error with "arena allocation block extent is corrupt";
-      end if;
-      return
-        (Capacity => Byte_Count (Size - Item.Prefix_Value),
-         Offset   => Layouts.Checked_Add
-           (Layouts.Checked_Multiply
-              (Byte_Count (Block), Byte_Count (Item.Minimum_Value)),
-            Byte_Count (Item.Prefix_Value)));
+      declare
+         Base : constant System.Address := Block_Base (Item, Block);
+         Size : constant Interfaces.Unsigned_32 := Bytes.Read_U32
+           (Base + Addressing.Storage_Offset (Block_Size_Offset));
+      begin
+         if Atomic.Load_Acquire_U32
+              (Base + Addressing.Storage_Offset (Block_State_Offset)) /=
+                Allocated_State
+           or else Bytes.Read_U64
+             (Base + Addressing.Storage_Offset (Generation_Offset)) /=
+               Value.Generation
+         then
+            raise Handle_Error with
+              "arena allocation handle is invalid or stale";
+         elsif Size < Item.Prefix_Value + Item.Minimum_Value
+           or else Size mod Item.Minimum_Value /= 0
+           or else Interfaces.Unsigned_64 (Block) *
+             Interfaces.Unsigned_64 (Item.Minimum_Value)
+             + Interfaces.Unsigned_64 (Size) >
+               Interfaces.Unsigned_64 (Item.Usable_Value)
+         then
+            raise Layout_Error with "arena allocation block extent is corrupt";
+         end if;
+         return
+           (Capacity => Byte_Count (Size - Item.Prefix_Value),
+            Offset   => Layouts.Checked_Add
+              (Layouts.Checked_Multiply
+                 (Byte_Count (Block), Byte_Count (Item.Minimum_Value)),
+               Byte_Count (Item.Prefix_Value)),
+            Base     => Base,
+            Size     => Size);
+      end;
+   end Validate_Handle_Metadata;
+
+   function Validate_Handle
+     (Item : View; Value : Allocation_Handle) return Block_Description is
+   begin
+      Layouts.Require_Ready (Item.Core);
+      return Validate_Handle_Metadata (Item, Value);
    end Validate_Handle;
 
-   function Next_Block (Item : View; Block : Block_Ref) return Block_Ref is
+   function Next_Block
+     (Item : View; Block : Block_Ref; Size : Interfaces.Unsigned_32)
+      return Block_Ref is
       Candidate : constant Interfaces.Unsigned_64 :=
         Interfaces.Unsigned_64 (Block)
-        + Interfaces.Unsigned_64 (Block_Size (Item, Block) /
-            Item.Minimum_Value);
+        + Interfaces.Unsigned_64 (Size / Item.Minimum_Value);
    begin
       if Candidate = Interfaces.Unsigned_64
         (Item.Usable_Value / Item.Minimum_Value)
@@ -1131,8 +1236,11 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       return Block_Ref (Candidate);
    end Next_Block;
 
-   function Prior_Block (Item : View; Block : Block_Ref) return Block_Ref is
-      Size : constant Interfaces.Unsigned_32 := Previous_Size (Item, Block);
+   function Prior_Block
+     (Item : View; Block : Block_Ref; Base : System.Address)
+      return Block_Ref is
+      Size : constant Interfaces.Unsigned_32 := Bytes.Read_U32
+        (Base + Addressing.Storage_Offset (Previous_Size_Offset));
    begin
       if Size = 0 then
          return Null_Block;
@@ -1144,10 +1252,15 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       return Block - Size / Item.Minimum_Value;
    end Prior_Block;
 
-   procedure Release_Unlocked (Item : View; Value : Allocation_Handle) is
+   procedure Release_Unlocked
+     (Item : View; Value : Allocation_Handle;
+      Description : Block_Description) is
       Block : Block_Ref := Token_Block (Value);
       Next, Previous, Following : Block_Ref;
-      Size : Interfaces.Unsigned_32 := Block_Size (Item, Block);
+      Base : System.Address := Description.Base;
+      Neighbor_Base : System.Address;
+      Size : Interfaces.Unsigned_32 := Description.Size;
+      Neighbor_Size : Interfaces.Unsigned_32;
       Count : constant Interfaces.Unsigned_64 := Live_Count (Item);
 
       function Combined_Size
@@ -1166,33 +1279,56 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       if Count = 0 then
          raise Layout_Error with "arena live allocation count underflows";
       end if;
-      Set_State (Item, Block, Free_State);
-      Next := Next_Block (Item, Block);
-      if Next /= Null_Block and then Block_State (Item, Next) = Free_State then
-         List_Remove (Item, Next);
-         Size := Combined_Size (Size, Block_Size (Item, Next));
-         Set_Block_Size (Item, Block, Size);
-         Following := Next_Block (Item, Block);
+      Atomic.Store_Release_U32
+        (Base + Addressing.Storage_Offset (Block_State_Offset), Free_State);
+      Next := Next_Block (Item, Block, Size);
+      if Next /= Null_Block then
+         Neighbor_Base := Block_Base (Item, Next);
+      end if;
+      if Next /= Null_Block
+        and then Atomic.Load_Acquire_U32
+          (Neighbor_Base + Addressing.Storage_Offset (Block_State_Offset)) =
+            Free_State
+      then
+         Neighbor_Size := Bytes.Read_U32
+           (Neighbor_Base + Addressing.Storage_Offset (Block_Size_Offset));
+         List_Remove (Item, Next, Neighbor_Base, Neighbor_Size);
+         Size := Combined_Size (Size, Neighbor_Size);
+         Bytes.Write_U32
+           (Base + Addressing.Storage_Offset (Block_Size_Offset), Size);
+         Following := Next_Block (Item, Block, Size);
          if Following /= Null_Block then
             Set_Previous_Size (Item, Following, Size);
          end if;
       end if;
-      Previous := Prior_Block (Item, Block);
+      Previous := Prior_Block (Item, Block, Base);
+      if Previous /= Null_Block then
+         Neighbor_Base := Block_Base (Item, Previous);
+      end if;
       if Previous /= Null_Block
-        and then Block_State (Item, Previous) = Free_State
+        and then Atomic.Load_Acquire_U32
+          (Neighbor_Base + Addressing.Storage_Offset (Block_State_Offset)) =
+            Free_State
       then
-         List_Remove (Item, Previous);
-         Size := Combined_Size (Block_Size (Item, Previous), Size);
-         Set_Block_Size (Item, Previous, Size);
-         Following := Next_Block (Item, Previous);
+         Neighbor_Size := Bytes.Read_U32
+           (Neighbor_Base + Addressing.Storage_Offset (Block_Size_Offset));
+         List_Remove (Item, Previous, Neighbor_Base, Neighbor_Size);
+         Size := Combined_Size (Neighbor_Size, Size);
+         Bytes.Write_U32
+           (Neighbor_Base + Addressing.Storage_Offset (Block_Size_Offset),
+            Size);
+         Following := Next_Block (Item, Previous, Size);
          if Following /= Null_Block then
             Set_Previous_Size (Item, Following, Size);
          end if;
          Block := Previous;
+         Base := Neighbor_Base;
       end if;
-      Set_Next_Free (Item, Block, Null_Block);
-      Set_Previous_Free (Item, Block, Null_Block);
-      List_Insert (Item, Block);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Next_Free_Offset), Null_Block);
+      Bytes.Write_U32
+        (Base + Addressing.Storage_Offset (Previous_Free_Offset), Null_Block);
+      List_Insert (Item, Block, Base, Size);
       Set_Live_Count (Item, Count - 1);
    end Release_Unlocked;
 
@@ -1202,12 +1338,11 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Acquire (Item);
       begin
          declare
-            Ignored : constant Block_Description :=
-              Validate_Handle (Item, Value);
-            pragma Unreferenced (Ignored);
+            Description : constant Block_Description :=
+              Validate_Handle_Metadata (Item, Value);
          begin
             Mutated := True;
-            Release_Unlocked (Item, Value);
+            Release_Unlocked (Item, Value, Description);
          end;
       exception
          when others =>
@@ -1224,12 +1359,11 @@ package body Flyology_Allocators.Allocation_Algorithms.TLSF_Kernel is
       Acquire (Item, Timeout);
       begin
          declare
-            Ignored : constant Block_Description :=
-              Validate_Handle (Item, Value);
-            pragma Unreferenced (Ignored);
+            Description : constant Block_Description :=
+              Validate_Handle_Metadata (Item, Value);
          begin
             Mutated := True;
-            Release_Unlocked (Item, Value);
+            Release_Unlocked (Item, Value, Description);
          end;
       exception
          when others =>
