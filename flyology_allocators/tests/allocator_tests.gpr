@@ -1,0 +1,13 @@
+with "../flyology_allocators.gpr";
+project Allocator_Tests is
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+   for Main use ("allocator_smoke.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwa", "-gnatW8", "-gnatVa");
+   end Compiler;
+end Allocator_Tests;

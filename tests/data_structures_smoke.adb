@@ -964,11 +964,11 @@ begin
 
    declare
       Saved : constant Interfaces.Unsigned_32 := Read_U32
-        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 164));
+        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 228));
       Failed : Boolean := False;
    begin
       Write_U32
-        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 164), 1);
+        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 228), 1);
       begin
          Best_Fit_Arenas.Attach
            (Best_Fit_Bad, Region_B, Best_Fit_Arena_Location,
@@ -977,7 +977,7 @@ begin
          when DS.Layout_Error => Failed := True;
       end;
       Write_U32
-        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 164), Saved);
+        (Base_B, Raw_Offset (Best_Fit_Arena_Location, 228), Saved);
       Assert
         (Failed and then not Best_Fit_Arenas.Is_Attached (Best_Fit_Bad),
          "best-fit arena accepted corrupt block metadata");
@@ -1099,11 +1099,11 @@ begin
 
    declare
       Saved : constant Interfaces.Unsigned_32 := Read_U32
-        (Base_B, Raw_Offset (TLSF_Arena_Location, 64));
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 128));
       Failed : Boolean := False;
    begin
       Write_U32
-        (Base_B, Raw_Offset (TLSF_Arena_Location, 64), Saved xor 1);
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 128), Saved xor 1);
       begin
          TLSF_Arenas.Attach
            (TLSF_Bad, Region_B, TLSF_Arena_Location,
@@ -1112,7 +1112,7 @@ begin
          when DS.Layout_Error => Failed := True;
       end;
       Write_U32
-        (Base_B, Raw_Offset (TLSF_Arena_Location, 64), Saved);
+        (Base_B, Raw_Offset (TLSF_Arena_Location, 128), Saved);
       Assert
         (Failed and then not TLSF_Arenas.Is_Attached (TLSF_Bad),
          "TLSF accepted a corrupt first-level bitmap");
@@ -1382,7 +1382,7 @@ begin
       Saved_Map_Node : constant Interfaces.Unsigned_32 := Read_U32
         (Base_B, Raw_Offset (Dynamic_Map_Location, 72));
       Saved_Reserved : constant Interfaces.Unsigned_32 := Read_U32
-        (Base_B, Raw_Offset (Arena_Location, 68));
+        (Base_B, Raw_Offset (Arena_Location, 132));
    begin
       begin
          Dynamic_Vectors.Create_Or_Attach
@@ -1460,7 +1460,7 @@ begin
         (Failed and then not Dynamic_Vectors.Is_Attached (Dynamic_Vector_Bad),
          "dynamic vector accepted a corrupt arena handle");
 
-      Write_U32 (Base_B, Raw_Offset (Arena_Location, 68), 1);
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 132), 1);
       Failed := False;
       begin
          Arenas.Attach
@@ -1471,12 +1471,12 @@ begin
          when DS.Layout_Error => Failed := True;
       end;
       Write_U32
-        (Base_B, Raw_Offset (Arena_Location, 68), Saved_Reserved);
+        (Base_B, Raw_Offset (Arena_Location, 132), Saved_Reserved);
       Assert
         (Failed and then not Arenas.Is_Attached (Arena_Bad),
          "arena accepted corrupt buddy-node metadata");
 
-      Write_U32 (Base_B, Raw_Offset (Arena_Location, 44), 1);
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 108), 1);
       Failed := False;
       begin
          Arenas.Attach
@@ -1486,7 +1486,7 @@ begin
       exception
          when DS.Busy_Error => Failed := True;
       end;
-      Write_U32 (Base_B, Raw_Offset (Arena_Location, 44), 0);
+      Write_U32 (Base_B, Raw_Offset (Arena_Location, 108), 0);
       Assert
         (Failed and then not Arenas.Is_Attached (Arena_Bad),
          "arena attached through an owned metadata guard");

@@ -1,4 +1,5 @@
 with "config/flyology_config.gpr";
+with "flyology_allocators.gpr";
 project Flyology is
 
    type DNS_Test_Hooks_Type is ("false", "true");
@@ -268,7 +269,9 @@ project Flyology is
    end Linker;
 
    package Documentation is
-      for Excluded_Project_Files use ("config/flyology_config.gpr");
+      for Excluded_Project_Files use
+        ("config/flyology_config.gpr",
+         "flyology_allocators/flyology_allocators.gpr");
       for Resources_Dir ("html") use "docs/gnatdoc/html";
    end Documentation;
 

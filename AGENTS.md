@@ -146,13 +146,15 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   generations, counters, hashes, and byte payloads; native bases belong only
   to process-local views.
 - `Arenas` is generic over a compile-time `Allocation_Algorithms.Contract`
-  instance. The selected algorithm owns its persisted metadata,
-  synchronization, abandonment, and recovery rules; arena calls introduce no
-  runtime dispatch or stored callback. `Allocation_Algorithms.Buddy`,
-  `Best_Fit`, and `TLSF` provide out-of-band buddy-tree, in-band AVL best-fit,
-  and in-band two-level segregated-fit policies. Allocation handles contain an
-  opaque fixed-width token and nonwrapping generation. Payload access and
-  nested allocation views require the handle owner to exclude release.
+  instance. `flyology_allocators` owns the identity-free algorithm image,
+  synchronization, abandonment, and recovery rules; Flyology's adapter owns
+  the outer magic, schema, lifecycle, instance identity, and payload-copy
+  policy. Arena calls introduce no runtime dispatch or stored callback.
+  `Allocation_Algorithms.Buddy`, `Best_Fit`, and `TLSF` adapt the standalone
+  out-of-band buddy-tree, in-band AVL best-fit, and in-band two-level
+  segregated-fit policies. Allocation handles contain an opaque fixed-width
+  token and nonwrapping generation. Payload access and nested allocation views
+  require the handle owner to exclude release.
 - `Allocation_Pools.Adaptive` grows a bounded table of arena-backed fixed-size
   slab chunks. Its outer guard covers chunk creation only; published chunks
   retain per-slot slab synchronization. Recovery after abandoned growth must
@@ -342,6 +344,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   storage pools. It does not depend on the Flyology runtime and is currently
   available only on Linux and macOS; do not claim or add Windows support
   without a separately scoped port.
+- `flyology_allocators/`: standalone `flyology_allocators` Alire crate and
+  `Flyology_Allocators` Ada hierarchy. It owns caller-backed allocation
+  algorithms, has no Flyology or hosted-OS dependency, and is cross-compiled
+  with GNAT 15 `arm-eabi` against the `embedded-stm32f4` bare-board runtime.
 - `runtime/ada/`: scheduler, contexts, poller interfaces, and runtime policy.
 - `runtime/platform/{darwin,linux}/`: poller and Ada file-engine bodies.
 - `runtime/native/`: context-switch assembly and narrow C/OS ABI bridges.
@@ -420,8 +426,8 @@ Use the smallest relevant checks while iterating, then run the complete checks
 required by the changed boundary.
 
 - `./scripts/test.sh`: authoritative behavioral suite, both project defaults,
-  runtime preparation validation, the nested `flyology_cachelines` and
-  `flyology_numa` tests, and external-consumer test.
+  runtime preparation validation, nested standalone-crate tests, and external
+  consumer test.
 - `./scripts/stress.sh`: bounded deterministic concurrency and fault campaign.
 - `FLYOLOGY_LONG_SOAK=1 ./scripts/stress-soak.sh`: opt-in long campaign.
 - `./scripts/prove.sh`: authoritative SPARK proof run. All reported checks must
@@ -443,6 +449,12 @@ required by the changed boundary.
   them. It needs a Linux host, a kernel image, and qemu, so it is separate from
   `./scripts/test.sh`.
 - `flyology_numa/scripts/docs.sh`: standalone numa GNATdoc build.
+- `flyology_allocators/scripts/test.sh`: standalone allocator algorithms,
+  timed contention, and archive dependency boundary.
+- `flyology_allocators/scripts/cross-build.sh`: direct cross build without
+  Alire-generated project configuration. The maintained bare-board check uses
+  `FLYOLOGY_ALLOCATORS_TARGET=arm-eabi` and
+  `FLYOLOGY_ALLOCATORS_RTS=embedded-stm32f4`.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for
   Flyology-owned Ada library units. It requires the `gnatcov_bin` tool crate;
   generated traces and reports remain outside version control.
@@ -527,9 +539,9 @@ required by the changed boundary.
   required validation plus `alr show`. The manifest name and version must
   exactly match the tag's crate and version.
 - Indexed crates in this repository are `flyology`, `flyology_bench`,
-  `flyology_cachelines`, `flyology_debug`, and `flyology_numa`. Tag each
-  released crate
-  independently, even when several tags point to one release commit.
+  `flyology_allocators`, `flyology_cachelines`, `flyology_debug`, and
+  `flyology_numa`. Tag each released crate independently, even when several
+  tags point to one release commit.
 - Create and push the tag only after the release-ready manifest is committed:
 
   ```sh
@@ -545,6 +557,8 @@ required by the changed boundary.
 
 - Original code, tests, scripts, proof, and artwork are dual MIT/Apache-2.0.
 - `flyology_numa/` is also dual MIT/Apache-2.0.
+- `flyology_allocators/` is also dual MIT/Apache-2.0 and carries crate-local
+  license copies for standalone publication.
 - `flyology_cachelines/` is also dual MIT/Apache-2.0. Preserve its `NOTICE`
   attribution for the spacing policy adapted from Crossbeam.
 - Files under `runtime/patches/` contain GNAT-derived context and are
