@@ -138,6 +138,15 @@ expect_safe \
 expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_stale_release_safe.cfg \
   allocator-stale-release-safe
+expect_safe \
+  AllocatorAlgorithmsRefinement \
+  AllocatorAlgorithms_refinement_buddy.cfg allocator-refinement-buddy
+expect_safe \
+  AllocatorAlgorithmsRefinement \
+  AllocatorAlgorithms_refinement_best_fit.cfg allocator-refinement-best-fit
+expect_safe \
+  AllocatorAlgorithmsRefinement \
+  AllocatorAlgorithms_refinement_tlsf.cfg allocator-refinement-tlsf
 
 expect_counterexample \
   MPMCActiveAttach MPMCActiveAttach_legacy.cfg \
@@ -190,5 +199,57 @@ expect_temporal_counterexample \
 expect_temporal_counterexample \
   AllocatorAlgorithms AllocatorAlgorithms_tlsf_nontermination.cfg \
   OperationTermination allocator-tlsf-nontermination
+expect_temporal_counterexample \
+  AllocatorAlgorithmsRefinement \
+  AllocatorAlgorithms_refinement_buddy_no_retry.cfg \
+  TraceCompletion allocator-refinement-buddy-no-retry
+expect_temporal_counterexample \
+  AllocatorAlgorithmsRefinement \
+  AllocatorAlgorithms_refinement_best_fit_no_retry.cfg \
+  TraceCompletion allocator-refinement-best-fit-no-retry
+expect_temporal_counterexample \
+  AllocatorAlgorithmsRefinement \
+  AllocatorAlgorithms_refinement_tlsf_no_retry.cfg \
+  TraceCompletion allocator-refinement-tlsf-no-retry
+
+if [ -n "${ALR:-}" ]; then
+  alire=$ALR
+else
+  alire=$("$project_root/scripts/find-alr.sh")
+fi
+
+cd "$project_root"
+"$alire" exec -- gprbuild \
+  -P flyology_allocators/tests/allocator_tests.gpr \
+  -p allocator_refinement.adb >/dev/null
+
+compare_refinement()
+{
+  algorithm=$1
+  tag=$2
+  ada_trace="$run_root/$tag-ada.trace"
+  tla_trace="$run_root/$tag-tla.trace"
+
+  "$project_root/flyology_allocators/tests/bin/allocator_refinement" \
+    "$algorithm" >"$ada_trace"
+  sed -n 's/^"\(@@REFINEMENT@@.*\)"$/\1/p' \
+    "$run_root/$tag.log" |
+    awk '!seen[$0]++' >"$tla_trace"
+  if [ ! -s "$tla_trace" ]; then
+    printf '%s\n' "$algorithm TLC refinement trace is empty" >&2
+    return 1
+  fi
+  if ! diff -u "$tla_trace" "$ada_trace"; then
+    printf '%s\n' \
+      "$algorithm Ada state diverges from its TLA+ refinement trace" >&2
+    return 1
+  fi
+  lines=$(wc -l <"$ada_trace" | tr -d ' ')
+  printf 'Ada/TLA+ match    %-30s %s snapshots\n' "$algorithm" "$lines"
+}
+
+compare_refinement Buddy allocator-refinement-buddy
+compare_refinement BestFit allocator-refinement-best-fit
+compare_refinement TLSF allocator-refinement-tlsf
 
 printf '%s\n' "Flyology TLA+ model checks passed"
