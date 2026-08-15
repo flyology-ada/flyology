@@ -64,8 +64,13 @@ procedure Allocator_Smoke is
    Buddy_Handle : Buddy_Arenas.Allocation_Handle;
    Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
    TLSF_Handle : TLSF_Arenas.Allocation_Handle;
+   type TLSF_Handle_Array is array (Natural range 0 .. 7) of
+     TLSF_Arenas.Allocation_Handle;
+   TLSF_Handles : TLSF_Handle_Array :=
+     [others => TLSF_Arenas.Null_Allocation];
    Result : FA.Allocation_Algorithms.Allocation_Result;
    Timed_Out : Boolean := False;
+   Stale_Rejected : Boolean := False;
 begin
    Attach (Buddy_Region, Buddy_Storage);
    Buddy_Arenas.Initialize
@@ -145,6 +150,76 @@ begin
       and then TLSF_Arenas.Block_Capacity (TLSF_View, TLSF_Handle) >= 65,
       "TLSF allocation failed");
    TLSF_Arenas.Release (TLSF_View, TLSF_Handle);
+   TLSF_Arenas.Destroy (TLSF_View);
+
+   --  Fill a small arena so a larger request can succeed only by merging the
+   --  two adjacent blocks released below. Attachment must accept and validate
+   --  the deliberately uncoalesced but fully indexed physical chain.
+   TLSF_Arenas.Initialize
+     (TLSF_View, TLSF_Region, 64,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64), 3);
+   for Index in TLSF_Handles'Range loop
+      TLSF_Arenas.Try_Allocate
+        (TLSF_View, 64, TLSF_Handles (Index), Result);
+      Check (Result = FA.Allocation_Algorithms.Allocated,
+             "TLSF adjacent-coalescing setup failed");
+   end loop;
+   TLSF_Arenas.Release (TLSF_View, TLSF_Handles (0));
+   TLSF_Arenas.Release (TLSF_View, TLSF_Handles (1));
+   begin
+      declare
+         Ignored : constant FA.Byte_Count :=
+           TLSF_Arenas.Block_Capacity (TLSF_View, TLSF_Handles (0));
+      begin
+         Check (Ignored = 0, "released TLSF handle retained capacity");
+      end;
+   exception
+      when FA.Handle_Error =>
+         Stale_Rejected := True;
+   end;
+   Check (Stale_Rejected, "TLSF accepted a released handle");
+   TLSF_Arenas.Detach (TLSF_View);
+   TLSF_Arenas.Attach
+     (TLSF_View, TLSF_Region, 64,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64), 3);
+   TLSF_Arenas.Try_Allocate (TLSF_View, 192, TLSF_Handle, Result);
+   Check (Result = FA.Allocation_Algorithms.Allocated,
+          "TLSF did not coalesce adjacent free blocks on demand");
+   TLSF_Arenas.Release (TLSF_View, TLSF_Handle);
+   for Index in 2 .. TLSF_Handles'Last loop
+      TLSF_Arenas.Release (TLSF_View, TLSF_Handles (Index));
+   end loop;
+   TLSF_Arenas.Destroy (TLSF_View);
+
+   --  Alternating free blocks must remain unavailable to a larger request.
+   --  Releasing the intervening block then makes exactly one sufficient run.
+   TLSF_Arenas.Initialize
+     (TLSF_View, TLSF_Region, 64,
+      (Usable_Capacity => 1_024, Minimum_Block_Size => 64), 3);
+   for Index in TLSF_Handles'Range loop
+      TLSF_Arenas.Try_Allocate
+        (TLSF_View, 64, TLSF_Handles (Index), Result);
+      Check (Result = FA.Allocation_Algorithms.Allocated,
+             "TLSF fragmented-coalescing setup failed");
+   end loop;
+   for Index in TLSF_Handles'Range loop
+      if Index mod 2 = 0 then
+         TLSF_Arenas.Release (TLSF_View, TLSF_Handles (Index));
+      end if;
+   end loop;
+   TLSF_Arenas.Try_Allocate (TLSF_View, 192, TLSF_Handle, Result);
+   Check (Result = FA.Allocation_Algorithms.Exhausted,
+          "TLSF coalesced across an allocated gap");
+   TLSF_Arenas.Release (TLSF_View, TLSF_Handles (1));
+   TLSF_Arenas.Try_Allocate (TLSF_View, 320, TLSF_Handle, Result);
+   Check (Result = FA.Allocation_Algorithms.Allocated,
+          "TLSF did not merge a mixed-size free run");
+   TLSF_Arenas.Release (TLSF_View, TLSF_Handle);
+   for Index in TLSF_Handles'Range loop
+      if Index mod 2 = 1 and then Index /= 1 then
+         TLSF_Arenas.Release (TLSF_View, TLSF_Handles (Index));
+      end if;
+   end loop;
    TLSF_Arenas.Destroy (TLSF_View);
 
    FA.Regions.Detach (Buddy_Region);
