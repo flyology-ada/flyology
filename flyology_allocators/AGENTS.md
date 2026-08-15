@@ -17,3 +17,6 @@
   bare-board toolchain. The maintained cross-check is GNAT 15 `arm-eabi` with
   `embedded-stm32f4`; `No_Exception_Propagation` runtimes are incompatible with
   the public exception contracts.
+- `benchmarks/` is a separate optional hosted Alire subcrate. Its
+  `flyology_bench` and C allocator dependencies must not enter the parent
+  manifest or direct GPR build.

@@ -76,3 +76,11 @@ profile.
 Native verification is `./scripts/test.sh`. It builds the standalone project,
 runs all three allocators including a timed-contention case, and rejects any
 reference to a `Flyology` runtime symbol in the resulting archive.
+
+## Hosted benchmarks
+
+The optional [`benchmarks`](benchmarks) Alire subcrate uses `flyology_bench` to
+compare Buddy, Best-Fit, and TLSF directly with C `malloc`/`free`. Fixed-size
+cycles and a bounded fragmented-churn workload use shared iteration counts and
+balanced paired rounds. Benchmark-only hosted dependencies do not enter this
+crate's manifest or bare-board project closure.
