@@ -94,7 +94,7 @@ procedure Allocator_Smoke is
      TLSF_Arenas.Allocation_Handle;
    TLSF_Handles : TLSF_Handle_Array :=
      [others => TLSF_Arenas.Null_Allocation];
-   Slab_Span_Handle, Stale_Slab_Span_Handle :
+   Slab_Span_Handle, Slab_Span_Other_Handle, Stale_Slab_Span_Handle :
      Slab_Span_Arenas.Allocation_Handle;
    Result : FA.Allocation_Algorithms.Allocation_Result;
    Timed_Out : Boolean := False;
@@ -399,6 +399,79 @@ begin
       when FA.Handle_Error => null;
    end;
    Slab_Span_Arenas.Release (Slab_Span_Peer_View, Slab_Span_Handle);
+   Slab_Span_Arenas.Destroy (Slab_Span_Peer_View);
+
+   --  A corrupt large-span head must not be allowed to claim a neighboring
+   --  live span.  From the arena location, the first descriptor starts after
+   --  the 64-byte allocator header, 8-byte run metadata, and 32 four-byte
+   --  class heads; Span is the fourth 32-bit descriptor field.  Restore the
+   --  injected byte corruption before checking the result so later cleanup
+   --  remains deterministic.
+   Slab_Span_Arenas.Initialize
+     (Slab_Span_Peer_View, Slab_Span_Region, 64,
+      (Usable_Capacity => 8_192,
+       Minimum_Block_Size => 64,
+       Run_Size => 4_096), 5);
+   Slab_Span_Arenas.Try_Allocate
+     (Slab_Span_Peer_View, 4_095, Slab_Span_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "slab/span corrupt-tail setup failed for the first span");
+   Slab_Span_Arenas.Try_Allocate
+     (Slab_Span_Peer_View, 4_095, Slab_Span_Other_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated,
+      "slab/span corrupt-tail setup failed for the neighboring span");
+   declare
+      First_Span_Field_Offset : constant := 64 + 64 + 8 + 32 * 4 + 12;
+      First_Span_Field : constant System.Address :=
+        Slab_Span_Storage
+          (Slab_Span_Storage'First + First_Span_Field_Offset)'Address;
+      Saved_Span : constant Interfaces.Unsigned_32 :=
+        U32_Pointers.To_Pointer (First_Span_Field).all;
+      Capacity_Rejected : Boolean := False;
+      Release_Rejected  : Boolean := False;
+   begin
+      U32_Pointers.To_Pointer (First_Span_Field).all := 2;
+      begin
+         declare
+            Ignored : constant FA.Byte_Count :=
+              Slab_Span_Arenas.Block_Capacity
+                (Slab_Span_Peer_View, Slab_Span_Handle);
+            pragma Unreferenced (Ignored);
+         begin
+            null;
+         end;
+      exception
+         when FA.Layout_Error =>
+            Capacity_Rejected := True;
+      end;
+      U32_Pointers.To_Pointer (First_Span_Field).all := Saved_Span;
+      Check
+        (Capacity_Rejected,
+         "slab/span capacity accepted a head claiming a live neighbor");
+
+      U32_Pointers.To_Pointer (First_Span_Field).all := 2;
+      begin
+         Slab_Span_Arenas.Release
+           (Slab_Span_Peer_View, Slab_Span_Handle);
+      exception
+         when FA.Layout_Error =>
+            Release_Rejected := True;
+      end;
+      U32_Pointers.To_Pointer (First_Span_Field).all := Saved_Span;
+      Check
+        (Release_Rejected,
+         "slab/span release accepted a head claiming a live neighbor");
+      Check
+        (Slab_Span_Arenas.Block_Capacity
+           (Slab_Span_Peer_View, Slab_Span_Other_Handle) = 4_096,
+         "slab/span corrupt release damaged the neighboring allocation");
+   end;
+   Slab_Span_Arenas.Release
+     (Slab_Span_Peer_View, Slab_Span_Handle);
+   Slab_Span_Arenas.Release
+     (Slab_Span_Peer_View, Slab_Span_Other_Handle);
    Slab_Span_Arenas.Destroy (Slab_Span_Peer_View);
 
    --  Fill a small arena so a larger request can succeed only by merging the
