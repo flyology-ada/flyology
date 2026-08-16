@@ -6,6 +6,7 @@ with Flyology_Allocators;
 with Flyology_Allocators.Allocation_Algorithms;
 with Flyology_Allocators.Allocation_Algorithms.Best_Fit;
 with Flyology_Allocators.Allocation_Algorithms.Buddy;
+with Flyology_Allocators.Allocation_Algorithms.Slab_Span;
 with Flyology_Allocators.Allocation_Algorithms.TLSF;
 with Flyology_Allocators.Arenas;
 with Flyology_Allocators.Regions;
@@ -29,6 +30,8 @@ procedure Allocator_Benchmark is
      (FA.Allocation_Algorithms.Best_Fit);
    package TLSF_Arenas is new FA.Arenas
      (FA.Allocation_Algorithms.TLSF);
+   package Slab_Span_Arenas is new FA.Arenas
+     (FA.Allocation_Algorithms.Slab_Span);
 
    use type Bench.Iteration_Count;
    use type FA.Allocation_Algorithms.Allocation_Handle;
@@ -36,7 +39,8 @@ procedure Allocator_Benchmark is
    use type FA.Byte_Count;
    use type System.Address;
 
-   type Allocator_Case is (Native_Malloc, Buddy, Best_Fit, TLSF);
+   type Allocator_Case is
+     (Native_Malloc, Buddy, Best_Fit, TLSF, Slab_Span);
    type Workload_Kind is (Fixed_Cycle, Fragmented_Churn);
    type Run_Mode is (All_Workloads, Fixed_Only, Churn_Only);
 
@@ -106,15 +110,22 @@ procedure Allocator_Benchmark is
    TLSF_Extent : constant FA.Byte_Count :=
      TLSF_Arenas.Required_Storage
        ((Usable_Capacity => Arena_Capacity, Minimum_Block_Size => 64));
+   Slab_Span_Extent : constant FA.Byte_Count :=
+     Slab_Span_Arenas.Required_Storage
+       ((Usable_Capacity => Arena_Capacity,
+         Minimum_Block_Size => 64,
+         Run_Size => 4_096));
 
-   Buddy_Base, Best_Fit_Base, TLSF_Base : System.Address :=
+   Buddy_Base, Best_Fit_Base, TLSF_Base, Slab_Span_Base : System.Address :=
      System.Null_Address;
-   Buddy_Region, Best_Fit_Region, TLSF_Region : Regions.View;
+   Buddy_Region, Best_Fit_Region, TLSF_Region, Slab_Span_Region :
+     Regions.View;
    Buddy_View : Buddy_Arenas.View;
    Best_Fit_View : Best_Fit_Arenas.View;
    TLSF_View : TLSF_Arenas.View;
-   Buddy_Initialized, Best_Fit_Initialized, TLSF_Initialized : Boolean :=
-     False;
+   Slab_Span_View : Slab_Span_Arenas.View;
+   Buddy_Initialized, Best_Fit_Initialized, TLSF_Initialized,
+     Slab_Span_Initialized : Boolean := False;
 
    subtype Slot_Index is Positive range 1 .. Churn_Window;
    type Native_Slot_Array is array (Slot_Index) of System.Address;
@@ -128,6 +139,8 @@ procedure Allocator_Benchmark is
    Best_Fit_Slots : Handle_Array :=
      [others => FA.Allocation_Algorithms.Null_Allocation];
    TLSF_Slots : Handle_Array :=
+     [others => FA.Allocation_Algorithms.Null_Allocation];
+   Slab_Span_Slots : Handle_Array :=
      [others => FA.Allocation_Algorithms.Null_Allocation];
    Churn_Cursors : Cursor_Array := [others => 0];
 
@@ -192,6 +205,16 @@ procedure Allocator_Benchmark is
          (Usable_Capacity => Arena_Capacity, Minimum_Block_Size => 64),
          16#715F_0000_0000_0001#);
       TLSF_Initialized := True;
+
+      Prepare_Region
+        (Slab_Span_Base, Slab_Span_Region, Slab_Span_Extent);
+      Slab_Span_Arenas.Initialize
+        (Slab_Span_View, Slab_Span_Region, Arena_Location,
+         (Usable_Capacity => Arena_Capacity,
+          Minimum_Block_Size => 64,
+          Run_Size => 4_096),
+         16#51AB_0000_0000_0001#);
+      Slab_Span_Initialized := True;
    end Initialize_Arenas;
 
    procedure Fixed_Operation (Which : Allocator_Case; Size : Positive) is
@@ -222,6 +245,13 @@ procedure Allocator_Benchmark is
                raise Program_Error with "TLSF allocation cycle failed";
             end if;
             TLSF_Arenas.Release (TLSF_View, Handle);
+         when Slab_Span =>
+            Slab_Span_Arenas.Try_Allocate
+              (Slab_Span_View, Size, Handle, Result);
+            if Result /= Slab_Span_Arenas.Allocated then
+               raise Program_Error with "slab/span allocation cycle failed";
+            end if;
+            Slab_Span_Arenas.Release (Slab_Span_View, Handle);
       end case;
    end Fixed_Operation;
 
@@ -257,6 +287,13 @@ procedure Allocator_Benchmark is
                raise Program_Error with "TLSF churn allocation failed";
             end if;
             TLSF_Slots (Slot) := Handle;
+         when Slab_Span =>
+            Slab_Span_Arenas.Try_Allocate
+              (Slab_Span_View, Size, Handle, Result);
+            if Result /= Slab_Span_Arenas.Allocated then
+               raise Program_Error with "slab/span churn allocation failed";
+            end if;
+            Slab_Span_Slots (Slot) := Handle;
       end case;
    end Allocate_Slot;
 
@@ -283,6 +320,15 @@ procedure Allocator_Benchmark is
             if TLSF_Slots (Slot) /= TLSF_Arenas.Null_Allocation then
                TLSF_Arenas.Release (TLSF_View, TLSF_Slots (Slot));
                TLSF_Slots (Slot) := TLSF_Arenas.Null_Allocation;
+            end if;
+         when Slab_Span =>
+            if Slab_Span_Slots (Slot) /=
+              Slab_Span_Arenas.Null_Allocation
+            then
+               Slab_Span_Arenas.Release
+                 (Slab_Span_View, Slab_Span_Slots (Slot));
+               Slab_Span_Slots (Slot) :=
+                 Slab_Span_Arenas.Null_Allocation;
             end if;
       end case;
    end Release_Slot;
@@ -402,6 +448,10 @@ procedure Allocator_Benchmark is
          TLSF_Arenas.Destroy (TLSF_View);
          TLSF_Initialized := False;
       end if;
+      if Slab_Span_Initialized then
+         Slab_Span_Arenas.Destroy (Slab_Span_View);
+         Slab_Span_Initialized := False;
+      end if;
       if Regions.Is_Attached (Buddy_Region) then
          Regions.Detach (Buddy_Region);
       end if;
@@ -410,6 +460,9 @@ procedure Allocator_Benchmark is
       end if;
       if Regions.Is_Attached (TLSF_Region) then
          Regions.Detach (TLSF_Region);
+      end if;
+      if Regions.Is_Attached (Slab_Span_Region) then
+         Regions.Detach (Slab_Span_Region);
       end if;
       if Buddy_Base /= System.Null_Address then
          C_Free (Buddy_Base);
@@ -423,6 +476,10 @@ procedure Allocator_Benchmark is
          C_Free (TLSF_Base);
          TLSF_Base := System.Null_Address;
       end if;
+      if Slab_Span_Base /= System.Null_Address then
+         C_Free (Slab_Span_Base);
+         Slab_Span_Base := System.Null_Address;
+      end if;
    end Finalize;
 
 begin
@@ -431,7 +488,8 @@ begin
    TIO.Put_Line
      ("  shared iterations, balanced rounds, malloc reference; lower ns/op is faster");
    TIO.Put_Line
-     ("  arenas use 64-byte minimum blocks; backing and setup are outside timed batches");
+     ("  arenas use 64-byte minimum blocks; slab/span uses 4096-byte runs;"
+      & " backing and setup are outside timed batches");
 
    case Mode is
       when All_Workloads =>

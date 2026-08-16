@@ -2,6 +2,7 @@ with Ada.Streams;
 with Flyology_Allocators;
 with Flyology_Allocators.Allocation_Algorithms.Best_Fit;
 with Flyology_Allocators.Allocation_Algorithms.Buddy;
+with Flyology_Allocators.Allocation_Algorithms.Slab_Span;
 with Flyology_Allocators.Allocation_Algorithms.TLSF;
 with Flyology_Allocators.Arenas;
 with Flyology_Allocators.Regions;
@@ -24,6 +25,8 @@ procedure Allocator_Smoke is
      (FA.Allocation_Algorithms.Best_Fit);
    package TLSF_Arenas is new FA.Arenas
      (FA.Allocation_Algorithms.TLSF);
+   package Slab_Span_Arenas is new FA.Arenas
+     (FA.Allocation_Algorithms.Slab_Span);
    package U32_Pointers is new System.Address_To_Access_Conversions
      (Interfaces.Unsigned_32);
    package U8_Pointers is new System.Address_To_Access_Conversions
@@ -43,6 +46,8 @@ procedure Allocator_Smoke is
      with Alignment => 64;
    TLSF_Storage     : aliased Storage_Array := [others => 0]
      with Alignment => 64;
+   Slab_Span_Storage : aliased Storage_Array := [others => 0]
+     with Alignment => 64;
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -61,13 +66,15 @@ procedure Allocator_Smoke is
          FA.Byte_Count (Storage'Length));
    end Attach;
 
-   Buddy_Region, Best_Fit_Region, TLSF_Region : FA.Regions.View;
+   Buddy_Region, Best_Fit_Region, TLSF_Region, Slab_Span_Region :
+     FA.Regions.View;
    Buddy_Allocation : FA.Regions.View;
    Buddy_View : Buddy_Arenas.View;
    Buddy_Peer_View : Buddy_Arenas.View;
    Buddy_Tiny_View : Buddy_Arenas.View;
    Best_Fit_View : Best_Fit_Arenas.View;
    TLSF_View : TLSF_Arenas.View;
+   Slab_Span_View, Slab_Span_Peer_View : Slab_Span_Arenas.View;
    Buddy_Handle : Buddy_Arenas.Allocation_Handle;
    Buddy_Peer_Handle : Buddy_Arenas.Allocation_Handle;
    Buddy_Tiny_Left, Buddy_Tiny_Right : Buddy_Arenas.Allocation_Handle;
@@ -87,6 +94,8 @@ procedure Allocator_Smoke is
      TLSF_Arenas.Allocation_Handle;
    TLSF_Handles : TLSF_Handle_Array :=
      [others => TLSF_Arenas.Null_Allocation];
+   Slab_Span_Handle, Stale_Slab_Span_Handle :
+     Slab_Span_Arenas.Allocation_Handle;
    Result : FA.Allocation_Algorithms.Allocation_Result;
    Timed_Out : Boolean := False;
    Stale_Rejected : Boolean := False;
@@ -340,6 +349,58 @@ begin
    TLSF_Arenas.Release (TLSF_View, TLSF_Handle);
    TLSF_Arenas.Destroy (TLSF_View);
 
+   Attach (Slab_Span_Region, Slab_Span_Storage);
+   Slab_Span_Arenas.Initialize
+     (Slab_Span_View, Slab_Span_Region, 64,
+      (Usable_Capacity => 65_536,
+       Minimum_Block_Size => 64,
+       Run_Size => 4_096), 4);
+   Check
+     (Slab_Span_Arenas.Capabilities.Search =
+        FA.Allocation_Algorithms.Linear
+      and then not Slab_Span_Arenas.Capabilities.In_Band_Metadata
+      and then not Slab_Span_Arenas.Capabilities.Coalesces_On_Release,
+      "slab/span capabilities are inaccurate");
+   Slab_Span_Arenas.Try_Allocate
+     (Slab_Span_View, 65, Slab_Span_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated
+      and then Slab_Span_Arenas.Block_Capacity
+        (Slab_Span_View, Slab_Span_Handle) = 128,
+      "slab/span small allocation failed");
+   Stale_Slab_Span_Handle := Slab_Span_Handle;
+   Slab_Span_Arenas.Release (Slab_Span_View, Slab_Span_Handle);
+   Slab_Span_Arenas.Detach (Slab_Span_View);
+   Slab_Span_Arenas.Attach
+     (Slab_Span_Peer_View, Slab_Span_Region, 64,
+      (Usable_Capacity => 65_536,
+       Minimum_Block_Size => 64,
+       Run_Size => 4_096), 4);
+   Slab_Span_Arenas.Try_Allocate
+     (Slab_Span_Peer_View, 4_095, Slab_Span_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated
+      and then Slab_Span_Arenas.Block_Capacity
+        (Slab_Span_Peer_View, Slab_Span_Handle) = 4_096,
+      "slab/span did not route an above-small-class request to a span");
+   Slab_Span_Arenas.Release (Slab_Span_Peer_View, Slab_Span_Handle);
+   Slab_Span_Arenas.Try_Allocate
+     (Slab_Span_Peer_View, 65_536, Slab_Span_Handle, Result);
+   Check
+     (Result = FA.Allocation_Algorithms.Allocated
+      and then Slab_Span_Arenas.Block_Capacity
+        (Slab_Span_Peer_View, Slab_Span_Handle) = 65_536,
+      "slab/span did not reclaim an empty slab for a full span");
+   begin
+      Slab_Span_Arenas.Release
+        (Slab_Span_Peer_View, Stale_Slab_Span_Handle);
+      Check (False, "slab/span accepted a stale handle");
+   exception
+      when FA.Handle_Error => null;
+   end;
+   Slab_Span_Arenas.Release (Slab_Span_Peer_View, Slab_Span_Handle);
+   Slab_Span_Arenas.Destroy (Slab_Span_Peer_View);
+
    --  Fill a small arena so a larger request can succeed only by merging the
    --  two adjacent blocks released below. Attachment must accept and validate
    --  the deliberately uncoalesced but fully indexed physical chain.
@@ -413,4 +474,5 @@ begin
    FA.Regions.Detach (Buddy_Region);
    FA.Regions.Detach (Best_Fit_Region);
    FA.Regions.Detach (TLSF_Region);
+   FA.Regions.Detach (Slab_Span_Region);
 end Allocator_Smoke;

@@ -1,7 +1,8 @@
 # Flyology Allocators benchmarks
 
-This optional hosted subcrate compares the standalone Buddy, Best-Fit, and
-TLSF algorithms with the platform C `malloc`/`free` implementation. It depends
+This optional hosted subcrate compares the standalone Buddy, Best-Fit, TLSF,
+and Slab/Span algorithms with the platform C `malloc`/`free` implementation.
+It depends
 on `flyology_bench`; none of its hosted dependencies enter the parent
 `flyology_allocators` crate.
 
@@ -12,7 +13,7 @@ Two workload families are included:
 - fragmented churn keeps 256 allocations live, then replaces one slot per
   operation with a deterministic mix of 8 through 4,096 requested bytes.
 
-All four implementations are sampled in balanced rounds with shared logical
+All five implementations are sampled in balanced rounds with shared logical
 iteration counts. Arena construction, backing allocation, churn prefill, and
 final cleanup occur outside timed batches. `malloc` is always the reference.
 
