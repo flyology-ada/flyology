@@ -1191,6 +1191,37 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
          if Span = 0 or else Span > Item.Run_Count - Run then
             raise Layout_Error with "large span is corrupt";
          end if;
+         if Bytes.Read_U32 (U32_Field (Item, Run, Class_Offset)) /= 0
+           or else Bytes.Read_U32 (U32_Field (Item, Run, Live_Offset)) /= 1
+           or else Bytes.Read_U32
+             (U32_Field (Item, Run, Next_Offset)) /= Null_Run
+           or else Bytes.Read_U32
+             (U32_Field (Item, Run, Reserved_Offset)) /= 0
+           or else Read_Bitmap (Item, Run) /= 0
+         then
+            raise Layout_Error with "large span head is corrupt";
+         end if;
+         if Span > 1 then
+            for Tail in Interfaces.Unsigned_32 range Run + 1 .. Run + Span - 1
+            loop
+               if Atomic.Load_Acquire_U32
+                    (State_Address (Item, Tail)) /= Large_Tail_State
+                 or else Bytes.Read_U32
+                   (U32_Field (Item, Tail, Class_Offset)) /= 0
+                 or else Bytes.Read_U32
+                   (U32_Field (Item, Tail, Live_Offset)) /= 0
+                 or else Bytes.Read_U32
+                   (U32_Field (Item, Tail, Span_Offset)) /= Run
+                 or else Bytes.Read_U32
+                   (U32_Field (Item, Tail, Next_Offset)) /= Null_Run
+                 or else Bytes.Read_U32
+                   (U32_Field (Item, Tail, Reserved_Offset)) /= 0
+                 or else Read_Bitmap (Item, Tail) /= 0
+               then
+                  raise Layout_Error with "large span tail is corrupt";
+               end if;
+            end loop;
+         end if;
          Capacity := Byte_Count (Span) * Byte_Count (Item.Run_Value);
          Class := 0;
          Slot := 0;
