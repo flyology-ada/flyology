@@ -35,6 +35,7 @@ This adds the `flyology` crate and its runtime preparation. Standalone component
 
 - [Project overview](https://flyology.org/): Project purpose, component map, adoption paths, and shared boundaries.
 - [Library directory](https://flyology.org/libraries/): Dependency category, Guide, API, website, and source links for each component.
+- [Complete crate index](https://crates.flyology.org/): Every package published through the Flyology Alire index, including versions, dependencies, availability rules, manifests, JSON records, and compiler builds.
 - [Development journal](https://flyology.org/journal/): Flyology project records and links to component journals.
 - [Source organization](https://github.com/flyology-ada): Repositories for Flyology Runtime and independently maintained libraries.
 
