@@ -11,16 +11,22 @@
 </p>
 
 <p align="center">
-  <a href="https://flyology.org/">Guide</a> ·
+  <a href="https://flyology.org/runtime/">Runtime</a> ·
+  <a href="https://flyology.org/libraries/">Libraries</a> ·
+  <a href="https://flyology.org/guide/">Guide</a> ·
   <a href="https://flyology.org/architecture/">Architecture</a> ·
   <a href="https://flyology.org/journal/">Journal</a> ·
   <a href="https://flyology.org/api/">API reference</a>
 </p>
 
-Flyology Runtime is an experimental GNAT runtime extension for ordinary Ada
-tasking. It provides task-aware I/O and two interoperable execution lanes.
-Undesignated tasks remain native on their pthreads; explicitly designated
-lightweight tasks run cooperatively as fibers on shared event-loop threads. Both
+Flyology is an experimental systems software project for Ada. Flyology Runtime
+is its core GNAT runtime extension for ordinary Ada tasking. The project also
+contains libraries built on the runtime and standalone libraries that can be
+adopted independently.
+
+Flyology Runtime provides task-aware I/O and two interoperable execution lanes.
+By default, undesignated tasks remain native on their pthreads; explicitly
+designated lightweight tasks run cooperatively as fibers on shared event-loop threads. Both
 lanes keep Ada rendezvous, protected objects, exceptions, task activation,
 masters, and normal synchronous control flow. Flyology adds no `async` dialect;
 the closest familiar comparison for its lightweight lane is an opt-in Ada

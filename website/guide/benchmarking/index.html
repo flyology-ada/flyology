@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Measure Ada operations with flyology_bench, compare two to sixteen implementations in balanced or sequential runs, read nanosecond-scale results correctly, and emit CSV or JSON for automation.">
     <meta name="theme-color" content="#17213d">
-    <title>Benchmarking Ada · Flyology Runtime</title>
+    <title>Benchmarking Ada · Flyology</title>
     <link rel="canonical" href="https://flyology.org/guide/benchmarking/">
     <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="../../assets/styles/site.css">
@@ -124,42 +124,24 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+        <a class="brand" href="../../" aria-label="Flyology home">
           <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology Runtime</span>
+          <span>Flyology</span>
         </a>
         <ul class="nav-links" data-nav-links>
-          <li><a href="../../">Overview</a></li>
-          <li><a href="../" aria-current="page">Guide</a></li>
-          <li><a href="../../architecture/">Architecture</a></li>
-          <li><a href="../../journal/">Journal</a></li>
-          <li><a href="../../api/flyology_bench/">API</a></li>
           <li>
             <details class="nav-dropdown" data-nav-dropdown>
-              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
-              <ul class="nav-dropdown-menu ecosystem-nav-menu">
-                <li class="ecosystem-nav-group">
-                  <span>Built on Flyology</span>
-                  <ul>
-                    <li><a href="https://http.flyology.org/">HTTP</a></li>
-                    <li><a href="https://postgres.flyology.org/">Postgres</a></li>
-                    <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">QUIC</a></li>
-                  </ul>
-                </li>
-                <li class="ecosystem-nav-group">
-                  <span>Standalone libraries</span>
-                  <ul>
-                    <li><a href="https://flyology.org/guide/benchmarking/">Bench</a></li>
-                    <li><a href="https://flyology.org/guide/cachelines/">Cachelines</a></li>
-                    <li><a href="https://flyology.org/api/flyology_debug/">Debug</a></li>
-                    <li><a href="https://http.flyology.org/guide/iri/">IRI</a></li>
-                    <li><a href="https://simd.flyology.org/">SIMD</a></li>
-                    <li><a href="https://tui.flyology.org/">TUI</a></li>
-                  </ul>
-                </li>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
               </ul>
             </details>
           </li>
+          <li><a href="../../libraries/" aria-current="page">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
           <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
         </ul>
         <div class="nav-tools">
@@ -177,7 +159,7 @@
     <main id="main" class="page-shell">
       <header class="doc-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Benchmarking Ada</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../libraries/">Libraries</a></li><li aria-current="page">Benchmarking Ada</li></ol>
           <h1>Benchmark short Ada operations.</h1>
         </div>
         <p class="doc-hero-copy"><code>flyology_bench</code> adaptively batches short Ada operations and compares up to sixteen implementations. Reports include the clock, sampling, and host context needed to interpret nanosecond-scale results. A fractional nanosecond result is an amortized batch value, not a directly observed interval.</p>
@@ -565,7 +547,7 @@ alr test
             <p>For a shared report, keep the raw machine output, record the exact command and environment, repeat the full run, and describe only the tested host. Direct <code>Compare</code> or <code>Compare_Many</code> is preferable whenever all implementations can run in one process.</p>
             <aside class="callout callout-teal">
               <span class="callout-symbol" aria-hidden="true">→</span>
-              <p>Read the crate's <a href="https://github.com/flyology-ada/flyology/tree/main/flyology_bench">source and full measurement notes</a>, return to the <a href="../">runtime guide</a>, or use the generated <a href="../../api/flyology_bench/">flyology_bench API reference</a>.</p>
+              <p>Read the crate's <a href="https://github.com/flyology-ada/flyology/tree/main/flyology_bench">source and full measurement notes</a>, return to the <a href="../../libraries/">library directory</a>, or use the generated <a href="../../api/flyology_bench/">flyology_bench API reference</a>.</p>
             </aside>
           </section>
         </article>
@@ -574,8 +556,8 @@ alr test
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology Runtime and flyology_bench are experimental. Validate results on the exact host and compiler configuration you report.</span>
-        <div class="footer-links"><a href="../">Guide</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_bench">Benchmark source</a><a href="../../architecture/">Architecture</a><a href="../../api/flyology_bench/">Benchmark API</a></div>
+        <span>Flyology Bench is experimental. Validate results on the exact host and compiler configuration you report.</span>
+        <div class="footer-links"><a href="../../libraries/">Libraries</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_bench">Benchmark source</a><a href="../../api/flyology_bench/">Benchmark API</a></div>
       </div>
     </footer>
   </body>

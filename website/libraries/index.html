@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Browse Flyology libraries built on Flyology Runtime and standalone Ada libraries that can be adopted independently.">
+    <meta name="theme-color" content="#17213d">
+    <title>Libraries · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/libraries/">
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <link rel="stylesheet" href="../assets/styles/ecosystem.css">
+    <script src="../assets/scripts/ada-highlight.js"></script>
+    <script src="../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home"><img src="../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology</span></a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../runtime/">Overview</a></li>
+                <li><a href="../guide/">Guide</a></li>
+                <li><a href="../architecture/">Architecture</a></li>
+                <li><a href="../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../libraries/" aria-current="page">Libraries</a></li>
+          <li><a href="../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <header class="library-hero page-shell">
+        <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Libraries</li></ol>
+        <div class="library-hero-layout">
+          <div>
+            <p class="eyebrow">Project directory</p>
+            <h1>Libraries for Ada systems work.</h1>
+          </div>
+          <p>Some libraries build directly on Flyology Runtime. Others are standalone crates with no runtime dependency. Start with the capability you need, then check its documented platform and maturity boundaries.</p>
+        </div>
+      </header>
+
+      <section class="library-dependency-key" aria-label="Library dependency key">
+        <div class="library-dependency-key-inner">
+          <div><span class="dependency-mark dependency-mark-runtime" aria-hidden="true"></span><strong>Requires Flyology Runtime</strong><p>Uses the runtime and its task-aware I/O.</p></div>
+          <div><span class="dependency-mark dependency-mark-standalone" aria-hidden="true"></span><strong>Standalone</strong><p>Can be added without preparing or linking the runtime.</p></div>
+        </div>
+      </section>
+
+      <section class="library-section page-shell" aria-labelledby="runtime-libraries-title">
+        <div class="library-section-heading">
+          <div><span>01</span><h2 id="runtime-libraries-title">Built on the runtime</h2></div>
+          <p>These protocol libraries preserve synchronous calls across native and lightweight tasks by using Flyology Runtime task-aware I/O.</p>
+        </div>
+        <ol class="library-ledger">
+          <li>
+            <div class="library-ledger-index">R01</div>
+            <div class="library-ledger-main"><p class="library-kind">Application protocol library</p><h3>Flyology HTTP</h3><p>HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines and WebSocket support.</p></div>
+            <div class="library-ledger-meta"><span class="dependency-label dependency-label-runtime">Requires Runtime</span><a href="https://http.flyology.org/guide/">Guide</a><a href="https://http.flyology.org/api/">API</a><a href="https://http.flyology.org/">Website</a><a href="https://github.com/flyology-ada/flyology-http">Source</a></div>
+          </li>
+          <li>
+            <div class="library-ledger-index">R02</div>
+            <div class="library-ledger-main"><p class="library-kind">Database protocol library</p><h3>Flyology Postgres</h3><p>Client and server primitives for the Postgres frontend/backend protocol, including streaming and SCRAM authentication.</p></div>
+            <div class="library-ledger-meta"><span class="dependency-label dependency-label-runtime">Requires Runtime</span><a href="https://postgres.flyology.org/guide/">Guide</a><a href="https://postgres.flyology.org/api/">Protocol API</a><a href="https://postgres.flyology.org/sql-api/">SQL API</a><a href="https://postgres.flyology.org/">Website</a><a href="https://github.com/flyology-ada/flyology-postgres">Source</a></div>
+          </li>
+          <li>
+            <div class="library-ledger-index">R03</div>
+            <div class="library-ledger-main"><p class="library-kind">Transport library</p><h3>Flyology QUIC</h3><p>An experimental bounded QUIC transport with protocol state, streams, recovery, and congestion control implemented in Ada.</p></div>
+            <div class="library-ledger-meta"><span class="dependency-label dependency-label-runtime">Requires Runtime</span><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">Source</a></div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="library-section page-shell" aria-labelledby="standalone-libraries-title">
+        <div class="library-section-heading">
+          <div><span>02</span><h2 id="standalone-libraries-title">Standalone libraries</h2></div>
+          <p>These crates are part of Flyology but have no dependency on Flyology Runtime.</p>
+        </div>
+        <ol class="library-ledger library-ledger-compact">
+          <li><div class="library-ledger-index">S01</div><div class="library-ledger-main"><p class="library-kind">Measurement</p><h3>Flyology Bench</h3><p>Adaptive microbenchmarking, balanced comparisons, diagnostics, baselines, and machine-readable reports.</p></div><div class="library-ledger-meta"><span class="dependency-label">Standalone</span><a href="../guide/benchmarking/">Guide</a><a href="../api/flyology_bench/">API</a></div></li>
+          <li><div class="library-ledger-index">S02</div><div class="library-ledger-main"><p class="library-kind">Memory layout</p><h3>Flyology Cachelines</h3><p>Cache-line-aware storage, ownership-aware groups, grouped arrays, and host cache queries.</p></div><div class="library-ledger-meta"><span class="dependency-label">Standalone</span><a href="../guide/cachelines/">Guide</a><a href="../api/flyology_cachelines/">API</a></div></li>
+          <li><div class="library-ledger-index">S03</div><div class="library-ledger-main"><p class="library-kind">Observability</p><h3>Flyology Debug</h3><p>Bounded in-memory tracing, producer shards, retained batches, and persistent gauges for Ada.</p></div><div class="library-ledger-meta"><span class="dependency-label">Standalone</span><a href="../api/flyology_debug/">API</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_debug">Source</a></div></li>
+          <li><div class="library-ledger-index">S04</div><div class="library-ledger-main"><p class="library-kind">Identifiers</p><h3>Flyology IRI</h3><p>Allocation-conscious URI, IRI, and WHATWG URL parsing.</p></div><div class="library-ledger-meta"><span class="dependency-label">Standalone</span><a href="https://http.flyology.org/guide/iri/">Guide</a><a href="https://http.flyology.org/iri-api/">API</a></div></li>
+          <li><div class="library-ledger-index">S05</div><div class="library-ledger-main"><p class="library-kind">Data parallelism</p><h3>Flyology SIMD</h3><p>Portable, strongly typed SIMD foundations for Ada.</p></div><div class="library-ledger-meta"><span class="dependency-label">Standalone</span><a href="https://simd.flyology.org/guide/">Guide</a><a href="https://simd.flyology.org/api/">API</a><a href="https://simd.flyology.org/">Website</a><a href="https://github.com/flyology-ada/flyology-simd">Source</a></div></li>
+          <li><div class="library-ledger-index">S06</div><div class="library-ledger-main"><p class="library-kind">Terminal interfaces</p><h3>Flyology TUI</h3><p>A typed, declarative terminal user-interface toolkit for Ada.</p></div><div class="library-ledger-meta"><span class="dependency-label">Standalone</span><a href="https://tui.flyology.org/guide/">Guide</a><a href="https://tui.flyology.org/api/">API</a><a href="https://tui.flyology.org/">Website</a><a href="https://github.com/flyology-ada/flyology-tui">Source</a></div></li>
+        </ol>
+      </section>
+
+      <section class="library-adoption page-shell" aria-labelledby="adoption-title">
+        <div><p class="eyebrow">Adoption</p><h2 id="adoption-title">Add one crate, not the whole project.</h2></div>
+        <div class="code-panel"><div class="code-titlebar"><span>Example: Flyology Cachelines</span></div><pre><code>alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+
+alr with flyology_cachelines
+alr build</code></pre></div>
+        <p>Standalone crates do not trigger Flyology runtime preparation. Follow the selected library's linked documentation and source for its compiler, platform, and release status.</p>
+      </section>
+
+      <section class="final-cta page-shell" aria-labelledby="cta-title">
+        <h2 id="cta-title">Evaluate the execution foundation.</h2>
+        <div class="actions"><a class="button button-primary" href="../runtime/">Evaluate Flyology Runtime</a><a class="button button-secondary" href="https://github.com/flyology-ada">Browse all source</a></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner"><span>Flyology libraries are experimental. Before you adopt a component, check its support and licensing.</span><div class="footer-links"><a href="https://github.com/flyology-ada">Source</a><a href="../runtime/">Runtime</a><a href="../journal/">Journal</a><a href="../api/">API reference</a></div></div>
+    </footer>
+  </body>
+</html>

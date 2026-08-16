@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Flyology Runtime adds native and lightweight task execution, task-aware I/O, and ordinary Ada semantics.">
+    <meta name="description" content="Flyology is an experimental project for contemporary Ada systems programming, focused on performance, interoperability, observability, and explicit control.">
     <meta name="theme-color" content="#17213d">
-    <title>Flyology Runtime · Ordinary Ada tasking</title>
+    <title>Flyology · Systems software for Ada</title>
     <link rel="canonical" href="https://flyology.org/">
     <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles/site.css">
@@ -17,42 +17,24 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="./" aria-label="Flyology Runtime home">
+        <a class="brand" href="./" aria-label="Flyology home">
           <img src="assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology Runtime</span>
+          <span>Flyology</span>
         </a>
         <ul class="nav-links" data-nav-links>
-          <li><a href="./" aria-current="page">Overview</a></li>
-          <li><a href="guide/">Guide</a></li>
-          <li><a href="architecture/">Architecture</a></li>
-          <li><a href="journal/">Journal</a></li>
-          <li><a href="api/">API</a></li>
           <li>
             <details class="nav-dropdown" data-nav-dropdown>
-              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
-              <ul class="nav-dropdown-menu ecosystem-nav-menu">
-                <li class="ecosystem-nav-group">
-                  <span>Built on Flyology</span>
-                  <ul>
-                    <li><a href="https://http.flyology.org/">HTTP</a></li>
-                    <li><a href="https://postgres.flyology.org/">Postgres</a></li>
-                    <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">QUIC</a></li>
-                  </ul>
-                </li>
-                <li class="ecosystem-nav-group">
-                  <span>Standalone libraries</span>
-                  <ul>
-                    <li><a href="https://flyology.org/guide/benchmarking/">Bench</a></li>
-                    <li><a href="https://flyology.org/guide/cachelines/">Cachelines</a></li>
-                    <li><a href="https://flyology.org/api/flyology_debug/">Debug</a></li>
-                    <li><a href="https://http.flyology.org/guide/iri/">IRI</a></li>
-                    <li><a href="https://simd.flyology.org/">SIMD</a></li>
-                    <li><a href="https://tui.flyology.org/">TUI</a></li>
-                  </ul>
-                </li>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="runtime/">Overview</a></li>
+                <li><a href="guide/">Guide</a></li>
+                <li><a href="architecture/">Architecture</a></li>
+                <li><a href="api/">API reference</a></li>
               </ul>
             </details>
           </li>
+          <li><a href="libraries/">Libraries</a></li>
+          <li><a href="journal/">Journal</a></li>
           <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
         </ul>
         <div class="nav-tools">
@@ -64,323 +46,83 @@
             </svg>
           </button>
           <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M4 7h16M4 12h16M4 17h16"/>
-            </svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
           </button>
         </div>
       </nav>
     </header>
 
     <main id="main">
-      <section class="hero page-shell" aria-labelledby="hero-title">
-        <div>
+      <section class="project-hero page-shell" aria-labelledby="hero-title">
+        <div class="project-hero-copy">
           <p class="eyebrow">Systems foundations for Ada</p>
-          <h1 id="hero-title">Flyology Runtime</h1>
-          <p class="hero-lede">
-            Flyology Runtime begins with ordinary Ada tasking. Native tasks keep their OS threads, while lightweight tasks run cooperatively on shared event loops. Around that execution model, Flyology provides synchronous task-aware I/O and bounded building blocks for supervision, ownership transfer, shared memory, and relocatable data structures.
-          </p>
+          <h1 id="hero-title">Flyology</h1>
+          <p class="hero-lede">Flyology is an experimental project for contemporary systems programming in Ada. Its runtime, libraries, and tools focus on performance, interoperability, observability, and explicit control from task execution to application interfaces.</p>
           <div class="actions">
-            <a class="button button-primary" href="guide/">
-              Start with the guide
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
-            </a>
-            <a class="button button-secondary" href="architecture/">See how it works</a>
+            <a class="button button-primary" href="libraries/">Explore the libraries <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></a>
+            <a class="button button-secondary" href="runtime/">Evaluate the runtime</a>
           </div>
         </div>
 
-        <div class="hero-visual" data-code-preview aria-label="A lightweight task moving through an event loop while ordinary Ada code remains unchanged">
-          <div class="orbit" aria-hidden="true">
-            <div class="orbit-ring"></div>
-            <img class="orbit-mark" src="assets/brand/flyology-mark-transparent.svg" alt="">
+        <figure class="project-map" aria-labelledby="project-map-caption">
+          <figcaption id="project-map-caption">One project, two adoption paths</figcaption>
+          <div class="project-map-origin">
+            <img src="assets/brand/flyology-mark-transparent.svg" alt="">
+            <span>Flyology</span>
           </div>
-          <div class="model-switcher" role="group" aria-label="Preview a Flyology task lane">
-            <button class="model-note model-note-light" type="button" data-preview-sample="lightweight" data-preview-file="lightweight_task.adb" aria-pressed="true" aria-controls="hero-code-preview">
-              <strong>Lightweight task</strong>
-              <span class="model-direction">Fiber · shared loop</span>
-              Waits without blocking its shared loop thread.
-            </button>
-            <button class="model-note model-note-native" type="button" data-preview-sample="native" data-preview-file="native_task.adb" aria-pressed="false" aria-controls="hero-code-preview">
-              <strong>Native task</strong>
-              <span class="model-direction">Dedicated OS thread</span>
-              Runs on its own OS thread.
-            </button>
+          <div class="project-map-paths">
+            <section class="project-map-path project-map-runtime">
+              <p>Core component</p>
+              <strong>Runtime</strong>
+              <span>Native and lightweight Ada tasks, task-aware I/O, and bounded systems building blocks.</span>
+              <ul aria-label="Libraries that require Flyology Runtime"><li>HTTP</li><li>Postgres</li><li>QUIC</li></ul>
+            </section>
+            <section class="project-map-path project-map-standalone">
+              <p>No runtime dependency</p>
+              <strong>Standalone libraries</strong>
+              <span>Focused packages that work in ordinary Ada projects.</span>
+              <ul aria-label="Standalone Flyology libraries"><li>Bench</li><li>Cachelines</li><li>Debug</li><li>IRI</li><li>SIMD</li><li>TUI</li></ul>
+            </section>
           </div>
-          <div class="code-window" id="hero-code-preview">
-            <div class="code-titlebar">
-              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-              <span data-preview-filename aria-live="polite">lightweight_task.adb</span>
-            </div>
-            <pre class="hero-code-sample" data-preview-code="lightweight"><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
-   <span class="token-keyword">pragma</span> Task_Info
-     (<span class="token-type">Flyology.Lightweight_Task</span>);
-<span class="token-keyword">end</span> Connection;
-
-<span class="token-comment">-- An ordinary synchronous Ada call.</span>
-Flyology.IO.Sockets.Receive
-  (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
-            <pre class="hero-code-sample" data-preview-code="native" hidden><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
-   <span class="token-keyword">pragma</span> Task_Info
-     (<span class="token-type">Flyology.Native_Task</span>);
-<span class="token-keyword">end</span> Connection;
-
-<span class="token-comment">-- The same synchronous Ada call.</span>
-Flyology.IO.Sockets.Receive
-  (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
-          </div>
-        </div>
+        </figure>
       </section>
 
-      <div class="status-strip" aria-label="Why use Flyology Runtime">
-        <div class="status-inner">
-          <div class="status-item"><strong>Write ordinary Ada</strong>Keep synchronous calls and Ada task semantics.</div>
-          <div class="status-item"><strong>Wait without tying up the loop</strong>A suspended lightweight task leaves its shared thread available.</div>
-          <div class="status-item"><strong>Keep native tasks</strong>Use the stock OS-thread path where blocking or thread affinity calls for it.</div>
-        </div>
-      </div>
-
-      <section class="section page-shell" aria-labelledby="lanes-title">
+      <section class="project-catalogue page-shell" aria-labelledby="catalogue-title">
         <div class="section-heading">
-          <div>
-            <p class="eyebrow">Programming model</p>
-            <h2 id="lanes-title">Native and lightweight tasks share Ada semantics.</h2>
-          </div>
-          <p>An undesignated task stays native. Lightweight execution is explicit and captured at task creation. Both lanes remain ordinary Ada tasking.</p>
+          <div><p class="eyebrow">Project map</p><h2 id="catalogue-title">Choose only the layer you need.</h2></div>
+          <p>The directory identifies each component's runtime dependency and links to its operational boundaries. Independent libraries remain useful outside Flyology applications.</p>
         </div>
 
-        <div class="lane-stage">
-          <div class="lane">
-            <div class="lane-copy">
-              <span class="lane-number">01 / LIGHTWEIGHT</span>
-              <h3>Shared loop thread</h3>
-            </div>
-            <div class="lane-flow" aria-label="Several lightweight tasks share a scheduler and event poller">
-              <div class="task-stack">
-                <span class="flow-node flow-node-violet">task A</span>
-                <span class="flow-node flow-node-violet">task B</span>
-                <span class="flow-node flow-node-violet">task C</span>
-              </div>
-              <span class="flow-arrow" aria-hidden="true"></span>
-              <span class="flow-node">scheduler</span>
-              <span class="flow-arrow" aria-hidden="true"></span>
-              <span class="flow-node flow-node-teal">poller</span>
-            </div>
+        <div class="project-chapter project-chapter-core">
+          <div class="project-chapter-heading">
+            <span>01</span>
+            <div><h3>Runtime core</h3><p>The execution and I/O foundation. With the native project default, undesignated Ada tasks remain native. Explicitly designated lightweight tasks run cooperatively on shared event loops.</p></div>
           </div>
-          <div class="lane">
-            <div class="lane-copy">
-              <span class="lane-number">02 / NATIVE</span>
-              <h3>Dedicated OS thread</h3>
-            </div>
-            <div class="lane-flow" aria-label="A native Ada task uses its own OS thread">
-              <span class="flow-node">Ada task</span>
-              <span class="flow-arrow" aria-hidden="true"></span>
-              <span class="flow-node">task runtime</span>
-              <span class="flow-arrow" aria-hidden="true"></span>
-              <span class="flow-node flow-node-teal">OS thread</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section page-shell mechanics" aria-labelledby="mechanics-title">
-        <div class="mechanics-copy">
-          <p class="eyebrow">Runtime architecture</p>
-          <h2 id="mechanics-title">Each part has a separate responsibility.</h2>
-          <p>The poller reports readiness. The scheduler chooses a runnable fiber. The context switch preserves its stack. Existing Ada tasking machinery continues to define task behavior.</p>
-          <a href="architecture/">Read the architecture guide</a>
-        </div>
-        <ol class="mechanic-list">
-          <li class="mechanic-item">
-            <span class="mechanic-index">01</span>
-            <div><h3>Event polling</h3><p><code>kqueue</code> on Darwin or <code>epoll</code> plus <code>eventfd</code> on Linux waits for sockets, file completions, timers, and cross-thread wakes.</p></div>
-          </li>
-          <li class="mechanic-item">
-            <span class="mechanic-index">02</span>
-            <div><h3>Cooperative scheduling</h3><p>Per-group priority queues and deadline heaps select ready work. A CPU-bound lightweight task must suspend, yield, or call a fairness checkpoint.</p></div>
-          </li>
-          <li class="mechanic-item">
-            <span class="mechanic-index">03</span>
-            <div><h3>Stackful contexts</h3><p>Guarded <code>mmap</code> stacks and a small register swap preserve locals, exception state, Ada task identity, and synchronous control flow.</p></div>
-          </li>
-          <li class="mechanic-item">
-            <span class="mechanic-index">04</span>
-            <div><h3>Ada task semantics</h3><p>Flyology changes where a task executes, not what an Ada task means. Rendezvous, protected objects, activation, masters, abort, and task identity retain their ordinary semantics.</p></div>
-          </li>
-        </ol>
-      </section>
-
-      <section class="io-band" id="included-building-blocks" aria-labelledby="io-title">
-        <div class="io-inner">
-          <div class="capability-copy">
-            <p class="eyebrow">Included building blocks</p>
-            <h2 id="io-title">Ordinary calls around explicit boundaries.</h2>
-            <p class="io-intro">Flyology Runtime includes task-aware I/O, execution-group control, bounded ownership transfer, structured supervision, shared-memory mappings, and relocatable data structures. Capacity, ownership, recovery, and blocking remain explicit.</p>
-            <div class="capability-links">
-              <a href="guide/">Runtime guide</a>
-              <a href="architecture/">Architecture</a>
-              <a href="api/">API reference</a>
-            </div>
-          </div>
-          <div class="capability-demo" data-code-preview>
-            <div class="capability-switcher" role="group" aria-label="Preview an included Flyology building block">
-              <button class="capability-plaque" type="button" data-preview-sample="io" data-preview-file="task_aware_io.adb" aria-pressed="true" aria-controls="capability-code-preview">
-                <strong>Task-aware I/O</strong>
-                <span>Sockets · files · timers · DNS · TLS</span>
-              </button>
-              <button class="capability-plaque" type="button" data-preview-sample="groups" data-preview-file="execution_groups.adb" aria-pressed="false" aria-controls="capability-code-preview">
-                <strong>Execution groups</strong>
-                <span>Placement · migration · thread pins</span>
-              </button>
-              <button class="capability-plaque" type="button" data-preview-sample="buffers" data-preview-file="buffer_channel.adb" aria-pressed="false" aria-controls="capability-code-preview">
-                <strong>Buffers &amp; channels</strong>
-                <span>Bounded pools · move-only ownership</span>
-              </button>
-              <button class="capability-plaque" type="button" data-preview-sample="supervision" data-preview-file="task_supervision.adb" aria-pressed="false" aria-controls="capability-code-preview">
-                <strong>Task supervision</strong>
-                <span>Readiness · restart · structured shutdown</span>
-              </button>
-              <button class="capability-plaque" type="button" data-preview-sample="shared-memory" data-preview-file="shared_memory.adb" aria-pressed="false" aria-controls="capability-code-preview">
-                <strong>Shared memory</strong>
-                <span>Backing · mappings · descriptor handoff</span>
-              </button>
-              <button class="capability-plaque" type="button" data-preview-sample="data-structures" data-preview-file="relocatable_ring.adb" aria-pressed="false" aria-controls="capability-code-preview">
-                <strong>Data structures</strong>
-                <span>Arenas · rings · maps · vectors</span>
-              </button>
-            </div>
-            <figure class="capability-code-window" id="capability-code-preview">
-              <figcaption class="code-titlebar">
-                <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-                <span data-preview-filename aria-live="polite">task_aware_io.adb</span>
-              </figcaption>
-              <pre class="capability-code-sample" data-preview-code="io"><code class="language-ada">Flyology.IO.Timers.Sleep_For (0.050);
-
-Flyology.IO.Sockets.Receive
-  (Socket, Buffer, Last, Timeout =&gt; 1.0);
-
-Flyology.IO.Files.Read_At
-  (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
-              <pre class="capability-code-sample" data-preview-code="groups" hidden><code class="language-ada">package Groups renames Flyology.Execution_Groups;
-Home : constant Groups.Group_Id := Groups.Current;
-
-Groups.Grow_Configured_Pool (4);
-Groups.Migrate (Groups.For_CPU (2));
-Handle_Group_Owned_State;
-Groups.Migrate (Home);</code></pre>
-              <pre class="capability-code-sample" data-preview-code="buffers" hidden><code class="language-ada">Pool  : aliased Flyology.Buffers.Pool
-  (Block_Size =&gt; 64 * 1_024, Capacity =&gt; 258);
-Queue : Flyology.Buffers.Channels.Channel
-  (Owner =&gt; Pool'Access, Capacity =&gt; 256);
-Value : Flyology.Buffers.Unique_Buffer (Pool'Access);
-
-Flyology.Buffers.Acquire (Value);
-Queue.Send_Move (Value);</code></pre>
-              <pre class="capability-code-sample" data-preview-code="supervision" hidden><code class="language-ada">task body Shutdown_Watcher is
-begin
-   Wait_For_Shutdown;
-   Application_Supervision.Request_Shutdown (Supervisor);
-end Shutdown_Watcher;
-
-Application_Supervision.Run (Supervisor, Context, Result);</code></pre>
-              <pre class="capability-code-sample" data-preview-code="shared-memory" hidden><code class="language-ada">Flyology.Shared_Memory.Create_Anonymous
-  (Backing, Length =&gt; 1_048_576);
-Flyology.Shared_Memory.Map (Map, Backing);
-Flyology.Shared_Memory.Attach_Region (Map, Region);
-
--- Attach relocatable structures through Region.
-
-Flyology.Data_Structures.Regions.Detach (Region);
-Flyology.Shared_Memory.Unmap (Map);
-Flyology.Shared_Memory.Close (Backing);</code></pre>
-              <pre class="capability-code-sample" data-preview-code="data-structures" hidden><code class="language-ada">-- Job_Ring is a typed relocatable ring instance.
-Job_Ring.Try_Push (Queue, Job, Pushed);
-if not Pushed then
-   Apply_Backpressure;
-end if;
-
-Job_Ring.Try_Pop (Queue, Next_Job, Popped);</code></pre>
-            </figure>
-          </div>
-        </div>
-      </section>
-
-      <section class="ecosystem-section page-shell" aria-labelledby="ecosystem-title">
-        <div class="ecosystem-heading">
-          <div>
-            <p class="eyebrow">Ecosystem</p>
-            <h2 id="ecosystem-title">Focused Ada libraries, with or without the runtime.</h2>
-          </div>
-          <p>The ecosystem includes libraries built on Flyology's task-aware I/O and standalone libraries that can be adopted independently.</p>
-        </div>
-        <div class="ecosystem-group">
-          <div class="ecosystem-group-heading">
-            <h3>Built on Flyology</h3>
-            <p>These libraries depend on Flyology Runtime and use its task-aware I/O from native and lightweight tasks.</p>
-          </div>
-          <a class="ecosystem-card" href="https://http.flyology.org/">
-            <span class="ecosystem-card-mark" aria-hidden="true">
-              <span>01</span>
-              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 22h35"/><path d="m36 14 8 8-8 8"/><path d="M56 42H21"/><path d="m28 34-8 8 8 8"/><rect x="6" y="8" width="52" height="48" rx="8"/></svg>
-            </span>
-            <span class="ecosystem-card-copy">
-              <span class="ecosystem-card-type">Application protocol library · Ada</span>
-              <strong>HTTP</strong>
-              <span class="ecosystem-card-description">HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines, over Flyology task-aware I/O.</span>
-              <span class="ecosystem-card-tags" aria-label="HTTP library capabilities"><span>HTTP/1.1</span><span>HTTP/2</span><span>HTTP/3</span><span>WebSockets</span></span>
-            </span>
-            <span class="ecosystem-card-action">http.flyology.org <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
-          </a>
-          <a class="ecosystem-card" href="https://postgres.flyology.org/">
-            <span class="ecosystem-card-mark" aria-hidden="true">
-              <span>02</span>
-              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
-                <ellipse cx="32" cy="15" rx="20" ry="8"/>
-                <path d="M12 15v17c0 4.4 9 8 20 8s20-3.6 20-8V15"/>
-                <path d="M12 32v17c0 4.4 9 8 20 8s20-3.6 20-8V32"/>
-              </svg>
-            </span>
-            <span class="ecosystem-card-copy">
-              <span class="ecosystem-card-type">Database protocol library · Ada</span>
-              <strong>Postgres</strong>
-              <span class="ecosystem-card-description">Client and server primitives for the Postgres frontend/backend protocol over Flyology I/O.</span>
-              <span class="ecosystem-card-tags" aria-label="Postgres library capabilities">
-                <span>Client</span>
-                <span>Server</span>
-                <span>Streaming</span>
-                <span>SCRAM</span>
-              </span>
-            </span>
-            <span class="ecosystem-card-action">
-              postgres.flyology.org
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
-            </span>
-          </a>
-          <a class="ecosystem-card" href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">
-            <span class="ecosystem-card-mark" aria-hidden="true">
-              <span>03</span>
-              <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M10 18h28c9 0 16 6 16 14s-7 14-16 14H26"/>
-                <path d="m18 38 8 8-8 8"/>
-                <circle cx="16" cy="18" r="6"/>
-                <path d="M22 18h8"/>
-              </svg>
-            </span>
-            <span class="ecosystem-card-copy">
-              <span class="ecosystem-card-type">Transport library · Ada</span>
-              <strong>QUIC</strong>
-              <span class="ecosystem-card-description">An experimental, bounded QUIC transport for Flyology tasks, with protocol state, streams, recovery, and congestion control in Ada.</span>
-              <span class="ecosystem-card-tags" aria-label="QUIC library capabilities"><span>QUIC v1</span><span>Streams</span><span>TLS 1.3</span><span>Recovery</span></span>
-            </span>
-            <span class="ecosystem-card-action">View source <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
+          <a class="project-feature-row" href="runtime/">
+            <span class="project-row-name">Flyology Runtime</span>
+            <span class="project-row-description">GNAT tasking integration, task-aware I/O, execution groups, bounded buffers, supervision, shared memory, and relocatable data structures.</span>
+            <span class="project-row-action">Runtime overview <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
           </a>
         </div>
 
-        <div class="ecosystem-group">
-          <div class="ecosystem-group-heading">
-            <h3>Standalone libraries</h3>
-            <p>These projects are part of the Flyology project family, but none requires Flyology Runtime.</p>
+        <div class="project-chapter">
+          <div class="project-chapter-heading">
+            <span>02</span>
+            <div><h3>Built on the runtime</h3><p>These libraries require Flyology Runtime and use its task-aware I/O from native and lightweight tasks.</p></div>
           </div>
           <ul class="ecosystem-index">
+            <li><a href="https://http.flyology.org/"><strong class="ecosystem-index-name">HTTP</strong><span class="ecosystem-index-description">HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://postgres.flyology.org/"><strong class="ecosystem-index-name">Postgres</strong><span class="ecosystem-index-description">Client and server primitives for the Postgres frontend/backend protocol.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic"><strong class="ecosystem-index-name">QUIC</strong><span class="ecosystem-index-description">An experimental bounded QUIC transport with protocol state and recovery in Ada.</span><span class="ecosystem-index-action">Source <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+          </ul>
+        </div>
+
+        <div class="project-chapter">
+          <div class="project-chapter-heading">
+            <span>03</span>
+            <div><h3>Standalone libraries</h3><p>These libraries belong to Flyology but do not require Flyology Runtime.</p></div>
+          </div>
+          <ul class="ecosystem-index project-compact-index">
             <li><a href="guide/benchmarking/"><strong class="ecosystem-index-name">Bench</strong><span class="ecosystem-index-description">Adaptive microbenchmarking and balanced comparisons for Ada workloads.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
             <li><a href="guide/cachelines/"><strong class="ecosystem-index-name">Cachelines</strong><span class="ecosystem-index-description">Cache-line-aware storage, ownership-aware groups, and host cache queries.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
             <li><a href="api/flyology_debug/"><strong class="ecosystem-index-name">Debug</strong><span class="ecosystem-index-description">Bounded in-memory tracing and persistent gauges for Ada.</span><span class="ecosystem-index-action">API <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
@@ -388,36 +130,50 @@ Job_Ring.Try_Pop (Queue, Next_Job, Popped);</code></pre>
             <li><a href="https://simd.flyology.org/"><strong class="ecosystem-index-name">SIMD</strong><span class="ecosystem-index-description">Portable, strongly typed SIMD foundations for Ada.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
             <li><a href="https://tui.flyology.org/"><strong class="ecosystem-index-name">TUI</strong><span class="ecosystem-index-description">A typed, declarative terminal user-interface toolkit for Ada.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
           </ul>
+          <a class="project-text-link" href="libraries/">Compare every library and dependency</a>
+        </div>
+      </section>
+
+      <section class="runtime-spotlight" aria-labelledby="runtime-title">
+        <div class="runtime-spotlight-inner">
+          <div>
+            <p class="eyebrow">Core component</p>
+            <h2 id="runtime-title">Ordinary Ada tasks, two execution lanes.</h2>
+            <p>Native tasks keep their OS threads. Lightweight tasks run cooperatively on shared event loops. Both lanes retain Ada rendezvous, protected objects, exceptions, activation, masters, and synchronous control flow.</p>
+            <a href="runtime/">Understand Flyology Runtime</a>
+          </div>
+          <div class="runtime-lanes" aria-label="Flyology Runtime execution lanes">
+            <div><span>Lightweight task</span><strong>Fiber on a shared event loop</strong><small>Explicit designation</small></div>
+            <div><span>Native task</span><strong>Dedicated operating-system thread</strong><small>Default behavior</small></div>
+          </div>
         </div>
       </section>
 
       <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">
         <div class="constraint-lede">
           <p class="eyebrow">Boundaries</p>
-          <h2 id="boundaries-title">Experimental, with documented constraints.</h2>
-          <p>Flyology does not claim hard real-time behavior, preemptive lightweight scheduling, or universal compiler portability. Runtime preparation fails closed when a host and compiler release are not in the verified patch matrix.</p>
-          <a href="guide/#constraints">Review current constraints</a>
+          <h2 id="boundaries-title">Each component documents its limits.</h2>
+          <p>Flyology components differ in runtime dependency, platform support, maturity, and verification scope. Follow each component's linked documentation and source for its stated boundaries.</p>
+          <a href="libraries/">Compare library dependencies</a>
         </div>
         <table class="constraint-table">
-          <thead><tr><th>Concern</th><th>Contract</th></tr></thead>
+          <thead><tr><th>Concern</th><th>Project contract</th></tr></thead>
           <tbody>
-            <tr><td>Compatibility</td><td>Undesignated tasks remain native; event machinery starts lazily.</td></tr>
-            <tr><td>Fairness</td><td>Scheduling within a group is cooperative, with explicit yield points.</td></tr>
-            <tr><td>Foreign calls</td><td>Blocking foreign work belongs on a native task or a dedicated group.</td></tr>
-            <tr><td>Compiler support</td><td>Only exact, versioned compiler patch families are accepted.</td></tr>
+            <tr><td>Adoption</td><td>Standalone libraries do not prepare or link Flyology Runtime.</td></tr>
+            <tr><td>Runtime compatibility</td><td>Only exact, versioned GNAT patch families are accepted.</td></tr>
+            <tr><td>Scheduling</td><td>Lightweight scheduling within one execution group is cooperative.</td></tr>
+            <tr><td>Portability</td><td>Operating-system and toolchain support differs by component.</td></tr>
           </tbody>
         </table>
       </section>
 
       <section class="section page-shell" aria-labelledby="name-title">
         <div class="history">
-          <div class="history-visual">
-            <img src="assets/brand/flyology-one-color.svg" alt="The Flyology flight mark">
-          </div>
+          <div class="history-visual"><img src="assets/brand/flyology-one-color.svg" alt="The Flyology flight mark"></div>
           <div class="history-copy">
             <p class="eyebrow">The name</p>
             <h2 id="name-title">A study of flight, revisited.</h2>
-            <p>In 1828, Ada Lovelace studied bird anatomy, experimented with materials for wings, and planned a book she called <em>Flyology</em>. This project borrows that name for another study in making familiar forms move differently.</p>
+            <p>In 1828, Ada Lovelace studied bird anatomy, experimented with materials for wings, and planned a book she called <em>Flyology</em>. This project borrows that name for systems software that examines how familiar Ada forms can move differently.</p>
             <a href="https://doi.org/10.1080/17498430.2017.1325297">Read the historical source</a>
           </div>
         </div>
@@ -426,33 +182,28 @@ Job_Ring.Try_Pop (Queue, Next_Job, Popped);</code></pre>
       <section class="journal-teaser page-shell" aria-labelledby="journal-title">
         <div class="journal-teaser-heading">
           <p class="eyebrow">Journal</p>
-          <h2 id="journal-title">The runtime journal is ready for its first record.</h2>
-          <p>Library-specific notes already live with HTTP and Postgres. Runtime findings will appear here with their evidence and limits attached.</p>
+          <h2 id="journal-title">Notes from across Flyology.</h2>
+          <p>Runtime findings will appear here. HTTP and Postgres retain their own records, with evidence and limits attached to each result.</p>
         </div>
         <div class="report-method">
-          <strong>No runtime entries yet</strong>
-          <p><a href="journal/">Open the journal</a>, or browse the established <a href="https://http.flyology.org/journal/">HTTP</a> and <a href="https://postgres.flyology.org/journal/">Postgres</a> records.</p>
+          <strong>Project records</strong>
+          <p><a href="journal/">Open the Flyology journal</a>, or browse the <a href="https://http.flyology.org/journal/">HTTP</a> and <a href="https://postgres.flyology.org/journal/">Postgres</a> journals.</p>
         </div>
       </section>
 
       <section class="final-cta page-shell" aria-labelledby="cta-title">
-        <h2 id="cta-title">Build your first lightweight task.</h2>
+        <h2 id="cta-title">Start with the component you need.</h2>
         <div class="actions">
-          <a class="button button-primary" href="guide/">Open the guide</a>
-          <a class="button button-secondary" href="api/">Browse the API</a>
+          <a class="button button-primary" href="libraries/">Explore the libraries</a>
+          <a class="button button-secondary" href="runtime/">Evaluate the runtime</a>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>Flyology Runtime is experimental and dual-licensed under MIT or Apache-2.0, with a runtime patch carve-out.</span>
-        <div class="footer-links">
-          <a href="https://github.com/flyology-ada/flyology">Source</a>
-          <a href="https://github.com/flyology-ada/flyology/actions">CI</a>
-          <a href="journal/">Journal</a>
-          <a href="api/">API reference</a>
-        </div>
+        <span>Flyology is experimental. Support and licensing are documented for each component.</span>
+        <div class="footer-links"><a href="https://github.com/flyology-ada">Source</a><a href="libraries/">Libraries</a><a href="journal/">Journal</a><a href="api/">API reference</a></div>
       </div>
     </footer>
   </body>

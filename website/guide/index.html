@@ -17,42 +17,24 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="../" aria-label="Flyology Runtime home">
+        <a class="brand" href="../" aria-label="Flyology home">
           <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology Runtime</span>
+          <span>Flyology</span>
         </a>
         <ul class="nav-links" data-nav-links>
-          <li><a href="../">Overview</a></li>
-          <li><a href="./" aria-current="page">Guide</a></li>
-          <li><a href="../architecture/">Architecture</a></li>
-          <li><a href="../journal/">Journal</a></li>
-          <li><a href="../api/">API</a></li>
           <li>
             <details class="nav-dropdown" data-nav-dropdown>
-              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
-              <ul class="nav-dropdown-menu ecosystem-nav-menu">
-                <li class="ecosystem-nav-group">
-                  <span>Built on Flyology</span>
-                  <ul>
-                    <li><a href="https://http.flyology.org/">HTTP</a></li>
-                    <li><a href="https://postgres.flyology.org/">Postgres</a></li>
-                    <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">QUIC</a></li>
-                  </ul>
-                </li>
-                <li class="ecosystem-nav-group">
-                  <span>Standalone libraries</span>
-                  <ul>
-                    <li><a href="https://flyology.org/guide/benchmarking/">Bench</a></li>
-                    <li><a href="https://flyology.org/guide/cachelines/">Cachelines</a></li>
-                    <li><a href="https://flyology.org/api/flyology_debug/">Debug</a></li>
-                    <li><a href="https://http.flyology.org/guide/iri/">IRI</a></li>
-                    <li><a href="https://simd.flyology.org/">SIMD</a></li>
-                    <li><a href="https://tui.flyology.org/">TUI</a></li>
-                  </ul>
-                </li>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../runtime/">Overview</a></li>
+                <li><a href="../guide/" aria-current="page">Guide</a></li>
+                <li><a href="../architecture/">Architecture</a></li>
+                <li><a href="../api/">API reference</a></li>
               </ul>
             </details>
           </li>
+          <li><a href="../libraries/">Libraries</a></li>
+          <li><a href="../journal/">Journal</a></li>
           <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
         </ul>
         <div class="nav-tools">
@@ -70,14 +52,14 @@
     <main id="main" class="page-shell">
       <header class="doc-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology Runtime</a></li><li aria-current="page">Guide</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li><a href="../runtime/">Runtime</a></li><li aria-current="page">Guide</li></ol>
           <h1>Build and configure Flyology Runtime.</h1>
         </div>
         <p class="doc-hero-copy">Prepare a version-matched runtime and designate ordinary Ada tasks as lightweight. Then configure stacks, memory, concurrency, execution groups, deadlines, and cooperative CPU work.</p>
       </header>
 
       <div class="docs-layout">
-        <nav class="toc" aria-label="On this page">
+        <nav class="toc" aria-label="On this page" tabindex="0">
           <p class="toc-title">On this page</p>
           <ol>
             <li><a href="#requirements">Requirements</a></li>
@@ -92,23 +74,14 @@
             <li><a href="#observe">Observe and adjust</a></li>
             <li><a href="#verify">Verify behavior</a></li>
             <li><a href="#constraints">Constraints</a></li>
-            <li><a href="shared-memory/">Shared-memory segments</a></li>
-            <li><a href="data-structures/">Relocatable data structures</a></li>
-            <li><a href="benchmarking/">Benchmarking Ada</a></li>
-            <li><a href="file-watching/">File watching</a></li>
-            <li><a href="file-transfers/">File-to-socket transfers</a></li>
-            <li><a href="subprocesses/">Native subprocesses</a></li>
-            <li><a href="supervision/">Task supervision</a></li>
-            <li><a href="timers/">Timers and clock changes</a></li>
-            <li><a href="cachelines/">Cache-line-aware storage</a></li>
           </ol>
         </nav>
 
         <article class="prose">
           <aside class="callout callout-teal">
             <span class="callout-symbol" aria-hidden="true">→</span>
-            <p>Focused guides cover <a href="shared-memory/">shared-memory segments</a>, <a href="data-structures/">relocatable data structures</a>, <a href="benchmarking/">adaptive and comparative benchmarking</a>, and <a href="supervision/">structured task supervision</a>.</p>
-            <p>Other guides cover <a href="file-watching/">file watching</a>, <a href="file-transfers/">file-to-socket transfers</a>, <a href="subprocesses/">native subprocesses</a>, <a href="timers/">timers and clock changes</a>, and the standalone <a href="cachelines/">cache-line-aware storage crate</a>.</p>
+            <p><strong>Runtime topic guides:</strong> <a href="shared-memory/">shared-memory segments</a>, <a href="data-structures/">relocatable data structures</a>, <a href="file-watching/">file watching</a>, <a href="file-transfers/">file-to-socket transfers</a>, <a href="subprocesses/">native subprocesses</a>, <a href="supervision/">task supervision</a>, and <a href="timers/">timers and clock changes</a>.</p>
+            <p>Documentation for standalone components is indexed in <a href="../libraries/">Libraries</a>.</p>
           </aside>
           <section id="requirements">
             <span class="step-label">STEP 01</span>

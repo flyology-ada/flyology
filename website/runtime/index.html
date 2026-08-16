@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Flyology Runtime extends GNAT tasking with interoperable native and lightweight tasks, task-aware I/O, and ordinary Ada semantics.">
+    <meta name="theme-color" content="#17213d">
+    <title>Flyology Runtime · Core component of Flyology</title>
+    <link rel="canonical" href="https://flyology.org/runtime/">
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <link rel="stylesheet" href="../assets/styles/ecosystem.css">
+    <script src="../assets/scripts/ada-highlight.js"></script>
+    <script src="../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home"><img src="../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology</span></a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../runtime/" aria-current="page">Overview</a></li>
+                <li><a href="../guide/">Guide</a></li>
+                <li><a href="../architecture/">Architecture</a></li>
+                <li><a href="../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../libraries/">Libraries</a></li>
+          <li><a href="../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero page-shell runtime-overview-hero" aria-labelledby="hero-title">
+        <div>
+          <ol class="breadcrumb runtime-breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Runtime</li></ol>
+          <p class="eyebrow">Core component</p>
+          <h1 id="hero-title">Flyology Runtime</h1>
+          <p class="hero-lede">An experimental GNAT runtime extension for ordinary Ada tasking. Native tasks keep their OS threads, while explicitly designated lightweight tasks run cooperatively on shared event loops.</p>
+          <div class="actions">
+            <a class="button button-primary" href="../guide/">Start with the runtime guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></a>
+            <a class="button button-secondary" href="../architecture/">Read the runtime architecture</a>
+          </div>
+        </div>
+
+        <div class="hero-visual" data-code-preview aria-label="A lightweight task and a native task using the same synchronous Ada socket call">
+          <div class="orbit" aria-hidden="true"><div class="orbit-ring"></div><img class="orbit-mark" src="../assets/brand/flyology-mark-transparent.svg" alt=""></div>
+          <div class="model-switcher" role="group" aria-label="Preview a Flyology Runtime task lane">
+            <button class="model-note model-note-light" type="button" data-preview-sample="lightweight" data-preview-file="lightweight_task.adb" aria-pressed="true" aria-controls="hero-code-preview"><strong>Lightweight task</strong><span class="model-direction">Fiber · shared event loop</span>Waits without blocking its shared event-loop thread.</button>
+            <button class="model-note model-note-native" type="button" data-preview-sample="native" data-preview-file="native_task.adb" aria-pressed="false" aria-controls="hero-code-preview"><strong>Native task</strong><span class="model-direction">Dedicated OS thread</span>Runs on its own operating-system thread.</button>
+          </div>
+          <div class="code-window" id="hero-code-preview">
+            <div class="code-titlebar"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><span data-preview-filename aria-live="polite">lightweight_task.adb</span></div>
+            <pre class="hero-code-sample" data-preview-code="lightweight"><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
+   <span class="token-keyword">pragma</span> Task_Info
+     (<span class="token-type">Flyology.Lightweight_Task</span>);
+<span class="token-keyword">end</span> Connection;
+
+Flyology.IO.Sockets.Receive
+  (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
+            <pre class="hero-code-sample" data-preview-code="native" hidden><code><span class="token-keyword">task</span> Connection <span class="token-keyword">is</span>
+   <span class="token-keyword">pragma</span> Task_Info
+     (<span class="token-type">Flyology.Native_Task</span>);
+<span class="token-keyword">end</span> Connection;
+
+Flyology.IO.Sockets.Receive
+  (Socket, Buffer, Last, Timeout =&gt; 1.0);</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <div class="status-strip" aria-label="Flyology Runtime guarantees">
+        <div class="status-inner">
+          <div class="status-item"><strong>Native by default</strong>With the native project default, undesignated Ada tasks retain the stock OS-thread path.</div>
+          <div class="status-item"><strong>Ordinary Ada semantics</strong>Both lanes retain task identity, rendezvous, protected objects, and exceptions.</div>
+          <div class="status-item"><strong>Lazy event machinery</strong>No event loop starts until the first lightweight task activates.</div>
+        </div>
+      </div>
+
+      <section class="section page-shell" aria-labelledby="lanes-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Programming model</p><h2 id="lanes-title">Two lanes share one tasking language.</h2></div>
+          <p>The designation changes where a task executes. It does not introduce an async dialect or replace Ada task semantics.</p>
+        </div>
+        <div class="lane-stage">
+          <div class="lane">
+            <div class="lane-copy"><span class="lane-number">01 / LIGHTWEIGHT</span><h3>Shared event-loop thread</h3></div>
+            <div class="lane-flow" aria-label="Several lightweight tasks share a scheduler and event poller"><div class="task-stack"><span class="flow-node flow-node-violet">task A</span><span class="flow-node flow-node-violet">task B</span><span class="flow-node flow-node-violet">task C</span></div><span class="flow-arrow" aria-hidden="true"></span><span class="flow-node">scheduler</span><span class="flow-arrow" aria-hidden="true"></span><span class="flow-node flow-node-teal">poller</span></div>
+          </div>
+          <div class="lane">
+            <div class="lane-copy"><span class="lane-number">02 / NATIVE</span><h3>Dedicated OS thread</h3></div>
+            <div class="lane-flow" aria-label="A native Ada task uses its own operating-system thread"><span class="flow-node">Ada task</span><span class="flow-arrow" aria-hidden="true"></span><span class="flow-node">task runtime</span><span class="flow-arrow" aria-hidden="true"></span><span class="flow-node flow-node-teal">OS thread</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section page-shell mechanics" aria-labelledby="mechanics-title">
+        <div class="mechanics-copy">
+          <p class="eyebrow">Runtime architecture</p>
+          <h2 id="mechanics-title">Each mechanism has one responsibility.</h2>
+          <p>The poller reports readiness. The scheduler selects a runnable fiber. The context switch preserves its stack. GNARL continues to define Ada task behavior.</p>
+          <a href="../architecture/">Read the architecture guide</a>
+        </div>
+        <ol class="mechanic-list">
+          <li class="mechanic-item"><span class="mechanic-index">01</span><div><h3>Event polling</h3><p>The runtime uses <code>kqueue</code> on Darwin to wait for readiness and completion. On Linux, it uses <code>epoll</code> for readiness and <code>eventfd</code> for cross-thread wakes.</p></div></li>
+          <li class="mechanic-item"><span class="mechanic-index">02</span><div><h3>Cooperative scheduling</h3><p>Per-group priority queues and deadline heaps select ready work. CPU-bound lightweight tasks must reach a cooperative safe point.</p></div></li>
+          <li class="mechanic-item"><span class="mechanic-index">03</span><div><h3>Stackful contexts</h3><p>Guarded stacks and a small register swap preserve locals, exception state, task identity, and synchronous control flow.</p></div></li>
+          <li class="mechanic-item"><span class="mechanic-index">04</span><div><h3>Ada task semantics</h3><p>Rendezvous, protected objects, activation, masters, abort, and task identity retain their ordinary meanings.</p></div></li>
+        </ol>
+      </section>
+
+      <section class="io-band" aria-labelledby="included-title">
+        <div class="io-inner runtime-included">
+          <div>
+            <p class="eyebrow">Included building blocks</p>
+            <h2 id="included-title">Synchronous APIs keep operational boundaries explicit.</h2>
+            <p class="io-intro">The runtime crate includes task-aware I/O and bounded systems primitives. Capacity, ownership, recovery, cancellation, and blocking remain explicit.</p>
+            <div class="capability-links"><a href="../guide/">Runtime guide</a><a href="../architecture/">Architecture</a><a href="../api/">API reference</a></div>
+          </div>
+          <dl class="runtime-capability-list">
+            <div><dt>Task-aware I/O</dt><dd>Sockets, files, timers, DNS, TLS, file watching, and subprocess pipes.</dd></div>
+            <div><dt>Execution control</dt><dd>Shared and dedicated groups, migration, pool sizing, and thread pins.</dd></div>
+            <div><dt>Bounded coordination</dt><dd>Ownership-transfer buffers, channels, and structured task supervision.</dd></div>
+            <div><dt>Shared storage</dt><dd>Mappings, descriptor handoff, arenas, rings, maps, vectors, and slab pools.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">
+        <div class="constraint-lede">
+          <p class="eyebrow">Runtime boundaries</p>
+          <h2 id="boundaries-title">Experimental, with documented constraints.</h2>
+          <p>Flyology Runtime does not claim hard real-time behavior, preemptive lightweight scheduling, production qualification, or universal compiler portability.</p>
+          <a href="../guide/#constraints">Review current constraints</a>
+        </div>
+        <table class="constraint-table">
+          <thead><tr><th>Concern</th><th>Contract</th></tr></thead>
+          <tbody>
+            <tr><td>Compatibility</td><td>With the native project default, undesignated tasks remain native. Event machinery starts lazily.</td></tr>
+            <tr><td>Fairness</td><td>Scheduling within a group is cooperative, with explicit safe points.</td></tr>
+            <tr><td>Foreign calls</td><td>Blocking foreign work belongs on a native task or an explicit native boundary.</td></tr>
+            <tr><td>Compiler support</td><td>Runtime preparation accepts only exact verified compiler patch families.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="final-cta page-shell" aria-labelledby="cta-title">
+        <h2 id="cta-title">Build your first lightweight task.</h2>
+        <div class="actions"><a class="button button-primary" href="../guide/">Open the runtime guide</a><a class="button button-secondary" href="../libraries/">Explore the libraries</a></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner"><span>Flyology Runtime is experimental. Original Flyology code is dual-licensed under MIT or Apache-2.0. GNAT-derived files under <code>runtime/patches/</code> are GPL-3.0-or-later WITH GCC-exception-3.1.</span><div class="footer-links"><a href="https://github.com/flyology-ada/flyology">Source</a><a href="../guide/">Guide</a><a href="../architecture/">Architecture</a><a href="../api/">API reference</a></div></div>
+    </footer>
+  </body>
+</html>

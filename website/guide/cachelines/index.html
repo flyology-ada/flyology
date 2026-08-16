@@ -17,43 +17,25 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="brand" href="../../" aria-label="Flyology Runtime home">
+        <a class="brand" href="../../" aria-label="Flyology home">
           <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
-          <span>Flyology Runtime</span>
+          <span>Flyology</span>
         </a>
         <ul class="nav-links" data-nav-links>
-          <li><a href="../../">Overview</a></li>
-          <li><a href="../" aria-current="page">Guide</a></li>
-          <li><a href="../../architecture/">Architecture</a></li>
-          <li><a href="../../journal/">Journal</a></li>
-          <li><a href="../../api/flyology_cachelines/">Cachelines API</a></li>
           <li>
             <details class="nav-dropdown" data-nav-dropdown>
-              <summary>Ecosystem <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
-              <ul class="nav-dropdown-menu ecosystem-nav-menu">
-                <li class="ecosystem-nav-group">
-                  <span>Built on Flyology</span>
-                  <ul>
-                    <li><a href="https://http.flyology.org/">HTTP</a></li>
-                    <li><a href="https://postgres.flyology.org/">Postgres</a></li>
-                    <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic">QUIC</a></li>
-                  </ul>
-                </li>
-                <li class="ecosystem-nav-group">
-                  <span>Standalone libraries</span>
-                  <ul>
-                    <li><a href="https://flyology.org/guide/benchmarking/">Bench</a></li>
-                    <li><a href="https://flyology.org/guide/cachelines/">Cachelines</a></li>
-                    <li><a href="https://flyology.org/api/flyology_debug/">Debug</a></li>
-                    <li><a href="https://http.flyology.org/guide/iri/">IRI</a></li>
-                    <li><a href="https://simd.flyology.org/">SIMD</a></li>
-                    <li><a href="https://tui.flyology.org/">TUI</a></li>
-                  </ul>
-                </li>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
               </ul>
             </details>
           </li>
-          <li><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines">GitHub</a></li>
+          <li><a href="../../libraries/" aria-current="page">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
         </ul>
         <div class="nav-tools">
           <button class="icon-button" type="button" data-theme-toggle>
@@ -70,7 +52,7 @@
     <main id="main" class="page-shell">
       <header class="doc-hero">
         <div>
-          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Guide</a></li><li aria-current="page">Cache-line-aware storage</li></ol>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../libraries/">Libraries</a></li><li aria-current="page">Cache-line-aware storage</li></ol>
           <h1>Use cache-line-aware storage.</h1>
         </div>
         <p class="doc-hero-copy"><a href="../../api/flyology_cachelines/e4837c1e95702bdbbc79412cb9a2640e61abd06bdeab680d7677ff81dc0635c9.html"><code>Flyology_Cachelines</code></a> separates independently written values and groups values that share one owner. The standalone crate does not use the Flyology runtime.</p>
@@ -252,7 +234,7 @@ end;</code></pre>
     <footer class="site-footer">
       <div class="footer-inner">
         <span>Flyology Cachelines is experimental. Test the intended ownership pattern and host.</span>
-        <div class="footer-links"><a href="../">Guide</a><a href="../../api/flyology_cachelines/">Cachelines API</a><a href="../../architecture/">Architecture</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines">Source</a></div>
+        <div class="footer-links"><a href="../../libraries/">Libraries</a><a href="../../api/flyology_cachelines/">Cachelines API</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines">Source</a></div>
       </div>
     </footer>
   </body>

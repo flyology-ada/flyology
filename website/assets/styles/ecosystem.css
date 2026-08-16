@@ -10,6 +10,24 @@
   transform: none;
 }
 
+.nav-dropdown > summary.nav-section-current::after {
+  transform: scaleX(1);
+}
+
+.toc {
+  max-height: calc(100svh - 8.5rem);
+  padding-right: 0.55rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 901px) {
+  .nav-dropdown > summary.nav-section-current {
+    color: var(--ink);
+  }
+}
+
 .ecosystem-nav-group {
   min-width: 0;
 }
@@ -138,6 +156,13 @@
 }
 
 @media (max-width: 900px) {
+  .toc {
+    max-height: none;
+    padding-right: 0;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
   .nav-dropdown-menu.ecosystem-nav-menu {
     display: block;
     width: auto;
@@ -178,5 +203,605 @@
   .ecosystem-index-action {
     grid-column: 2;
     grid-row: 1;
+  }
+}
+
+/* Project-level landing and directory surfaces. Runtime-state colors retain
+   their existing meanings; dependency classes also use labels and geometry. */
+
+.project-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(31rem, 1.18fr);
+  min-height: calc(100svh - 4.75rem);
+  align-items: center;
+  padding-block: clamp(4.5rem, 9vw, 8rem);
+  gap: clamp(3rem, 7vw, 7rem);
+}
+
+.project-hero-copy h1 {
+  max-width: none;
+}
+
+.project-map {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--code-line);
+  border-radius: var(--radius-lg);
+  background: var(--code-bg);
+  color: oklch(93% 0.018 270);
+  box-shadow: 0 1.7rem 4rem oklch(10% 0.04 270 / 0.2);
+}
+
+.project-map figcaption {
+  margin-bottom: 1.5rem;
+  color: oklch(72% 0.03 270);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.project-map-origin {
+  position: relative;
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  margin-inline: auto;
+  padding: 0.7rem 1rem;
+  border: 1px solid oklch(60% 0.07 270);
+  border-radius: var(--radius-sm);
+  gap: 0.65rem;
+  font-weight: 620;
+}
+
+.project-map-origin::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 2.5rem;
+  background: oklch(55% 0.055 270);
+  content: "";
+}
+
+.project-map-origin img {
+  width: 1.8rem;
+  filter: brightness(0) invert(1);
+}
+
+.project-map-paths {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 2.5rem;
+  padding-top: 2.5rem;
+  gap: 0.8rem;
+}
+
+.project-map-paths::before {
+  position: absolute;
+  top: 0;
+  right: 25%;
+  left: 25%;
+  height: 1px;
+  background: oklch(55% 0.055 270);
+  content: "";
+}
+
+.project-map-path {
+  position: relative;
+  min-width: 0;
+  padding: 1.2rem;
+  border: 1px solid oklch(42% 0.06 270);
+  border-radius: var(--radius-md);
+  background: oklch(27% 0.052 270);
+}
+
+.project-map-path::before {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: 1px;
+  height: 2.5rem;
+  background: oklch(55% 0.055 270);
+  content: "";
+}
+
+.project-map-path > p {
+  margin-bottom: 0.35rem;
+  color: oklch(76% 0.035 270);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.project-map-path > strong,
+.project-map-path > span {
+  display: block;
+}
+
+.project-map-path > strong {
+  font-size: clamp(1.2rem, 2.3vw, 1.65rem);
+  line-height: 1.15;
+}
+
+.project-map-path > span {
+  margin-top: 0.55rem;
+  color: oklch(78% 0.025 270);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.project-map-path ul {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 1rem 0 0;
+  padding: 0;
+  gap: 0.35rem;
+  list-style: none;
+}
+
+.project-map-path li {
+  padding: 0.28rem 0.48rem;
+  border: 1px solid oklch(46% 0.055 270);
+  border-radius: 999px;
+  color: oklch(86% 0.025 270);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+}
+
+.project-map-runtime {
+  border-color: color-mix(in oklch, var(--violet) 62%, oklch(42% 0.06 270));
+}
+
+.project-map-standalone {
+  border-color: oklch(54% 0.045 270);
+}
+
+.project-catalogue {
+  padding-block: clamp(6rem, 12vw, 11rem);
+}
+
+.project-chapter + .project-chapter {
+  margin-top: clamp(4.5rem, 9vw, 7rem);
+}
+
+.project-chapter-heading {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  max-width: 54rem;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+}
+
+.project-chapter-heading > span {
+  padding-top: 0.3rem;
+  color: var(--violet);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.project-chapter-heading h3 {
+  margin-bottom: 0.45rem;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+}
+
+.project-chapter-heading p {
+  max-width: 66ch;
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.project-feature-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.65fr) minmax(20rem, 1.5fr) auto;
+  align-items: center;
+  padding: clamp(1.5rem, 4vw, 2.4rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--ink);
+  color: var(--inverse);
+  gap: clamp(1rem, 4vw, 3rem);
+  text-decoration: none;
+  transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+}
+
+.project-feature-row:hover {
+  box-shadow: var(--shadow-low);
+  transform: translateY(-2px);
+}
+
+.project-row-name {
+  font-size: 1.18rem;
+  font-weight: 620;
+}
+
+.project-row-description {
+  color: color-mix(in oklch, var(--inverse) 72%, transparent);
+  font-size: 0.9rem;
+}
+
+.project-row-action {
+  display: inline-flex;
+  align-items: center;
+  color: var(--teal);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  gap: 0.45rem;
+}
+
+.project-row-action svg {
+  width: 1rem;
+}
+
+.project-text-link {
+  display: inline-block;
+  margin-top: 1.4rem;
+  font-size: 0.9rem;
+  font-weight: 590;
+}
+
+.runtime-spotlight {
+  padding-block: clamp(5rem, 10vw, 8rem);
+  background: var(--ink);
+  color: var(--inverse);
+}
+
+.runtime-spotlight-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(28rem, 1.18fr);
+  width: var(--page);
+  align-items: center;
+  margin-inline: auto;
+  gap: clamp(3rem, 8vw, 8rem);
+}
+
+.runtime-spotlight h2 {
+  color: inherit;
+}
+
+.runtime-spotlight p:not(.eyebrow) {
+  max-width: 52ch;
+  color: color-mix(in oklch, var(--inverse) 76%, transparent);
+}
+
+.runtime-spotlight .eyebrow,
+.runtime-spotlight a {
+  color: var(--inverse);
+}
+
+.runtime-lanes {
+  border-block: 1px solid color-mix(in oklch, var(--path) 34%, transparent);
+}
+
+.runtime-lanes > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.62fr) minmax(13rem, 1fr) auto;
+  align-items: baseline;
+  padding-block: 1.6rem;
+  gap: 1.2rem;
+}
+
+.runtime-lanes > div + div {
+  border-top: 1px solid color-mix(in oklch, var(--path) 34%, transparent);
+}
+
+.runtime-lanes span {
+  color: var(--violet);
+  font-size: 0.84rem;
+  font-weight: 620;
+}
+
+.runtime-lanes strong {
+  font-size: 1.05rem;
+}
+
+.runtime-lanes small {
+  color: color-mix(in oklch, var(--inverse) 58%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+
+.runtime-overview-hero {
+  padding-top: clamp(2rem, 5vw, 4rem);
+}
+
+.runtime-breadcrumb {
+  margin-bottom: 2rem;
+}
+
+.runtime-included {
+  align-items: start;
+}
+
+.runtime-capability-list {
+  margin: 0;
+  border-top: 1px solid oklch(96% 0.02 285 / 0.25);
+}
+
+.runtime-capability-list > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.55fr) 1fr;
+  padding-block: 1.2rem;
+  border-bottom: 1px solid oklch(96% 0.02 285 / 0.25);
+  gap: 1.2rem;
+}
+
+.runtime-capability-list dt {
+  font-weight: 620;
+}
+
+.runtime-capability-list dd {
+  margin: 0;
+  color: oklch(93% 0.025 285 / 0.78);
+}
+
+.library-hero {
+  padding-block: clamp(4rem, 9vw, 8rem) clamp(5rem, 10vw, 9rem);
+}
+
+.library-hero .breadcrumb {
+  margin-bottom: clamp(3rem, 8vw, 6rem);
+}
+
+.library-hero-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 0.56fr);
+  align-items: end;
+  gap: clamp(3rem, 8vw, 7rem);
+}
+
+.library-hero-layout h1 {
+  max-width: 10ch;
+  margin-bottom: 0;
+}
+
+.library-hero-layout > p {
+  max-width: 52ch;
+  margin-bottom: 0.6rem;
+  color: var(--ink-soft);
+  font-size: 1.08rem;
+}
+
+.library-dependency-key {
+  border-block: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.library-dependency-key-inner {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: var(--page);
+  margin-inline: auto;
+}
+
+.library-dependency-key-inner > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  padding: 1.2rem clamp(1rem, 4vw, 2rem);
+  gap: 0.1rem 0.8rem;
+}
+
+.library-dependency-key-inner > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.library-dependency-key-inner strong {
+  font-size: 0.88rem;
+}
+
+.library-dependency-key-inner p {
+  grid-column: 2;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.dependency-mark {
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: 0.35rem;
+  border: 1px solid var(--ink-soft);
+  border-radius: 50%;
+}
+
+.dependency-mark-runtime {
+  border-color: var(--violet);
+  background: var(--violet);
+}
+
+.dependency-mark-standalone {
+  background: transparent;
+}
+
+.library-section {
+  padding-block: clamp(6rem, 12vw, 10rem);
+}
+
+.library-section + .library-section {
+  padding-top: 0;
+}
+
+.library-section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(20rem, 0.6fr);
+  align-items: end;
+  margin-bottom: clamp(2.5rem, 6vw, 4.5rem);
+  gap: 3rem;
+}
+
+.library-section-heading > div {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  align-items: start;
+  gap: 1rem;
+}
+
+.library-section-heading span {
+  padding-top: 0.65rem;
+  color: var(--violet);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.library-section-heading h2,
+.library-section-heading p {
+  margin: 0;
+}
+
+.library-section-heading p {
+  max-width: 54ch;
+  color: var(--ink-soft);
+}
+
+.library-ledger {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.library-ledger > li {
+  display: grid;
+  grid-template-columns: 3rem minmax(20rem, 1fr) minmax(10rem, auto);
+  padding-block: clamp(1.8rem, 4vw, 2.8rem);
+  border-bottom: 1px solid var(--line);
+  gap: clamp(1rem, 4vw, 3rem);
+}
+
+.library-ledger-index {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.library-kind {
+  margin-bottom: 0.4rem;
+  color: var(--violet);
+  font-size: 0.7rem;
+  font-weight: 620;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.library-ledger-main h3 {
+  margin-bottom: 0.7rem;
+}
+
+.library-ledger-main > p:last-child {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.library-ledger-meta {
+  display: flex;
+  min-width: 9rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.library-ledger-meta a {
+  font-size: 0.8rem;
+  font-weight: 580;
+}
+
+.dependency-label {
+  display: inline-flex;
+  padding: 0.32rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.dependency-label-runtime {
+  border-color: color-mix(in oklch, var(--violet) 62%, var(--line));
+  color: var(--violet-deep);
+}
+
+.library-adoption {
+  display: grid;
+  grid-template-columns: minmax(0, 0.68fr) minmax(24rem, 1fr);
+  align-items: center;
+  padding-block: clamp(2rem, 6vw, 5rem) clamp(6rem, 12vw, 10rem);
+  gap: clamp(2rem, 6vw, 5rem);
+}
+
+.library-adoption > p {
+  grid-column: 2;
+  max-width: 60ch;
+  margin-top: -1.2rem;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 1000px) {
+  .project-hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .project-hero-copy {
+    max-width: 48rem;
+  }
+
+  .runtime-spotlight-inner {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .project-map-paths,
+  .library-dependency-key-inner,
+  .library-hero-layout,
+  .library-section-heading,
+  .library-adoption {
+    grid-template-columns: 1fr;
+  }
+
+  .project-map-origin::after,
+  .project-map-paths::before,
+  .project-map-path::before {
+    display: none;
+  }
+
+  .project-map-paths {
+    margin-top: 1rem;
+    padding-top: 0;
+  }
+
+  .project-feature-row,
+  .library-ledger > li {
+    grid-template-columns: 1fr;
+  }
+
+  .project-row-action {
+    justify-self: start;
+  }
+
+  .runtime-lanes > div,
+  .runtime-capability-list > div {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .library-dependency-key-inner > div {
+    padding-inline: 0;
+  }
+
+  .library-dependency-key-inner > div + div {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .library-adoption > p {
+    grid-column: 1;
+    margin-top: 0;
   }
 }

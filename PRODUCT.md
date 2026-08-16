@@ -13,12 +13,12 @@ the entire repository.
 
 ## Product Purpose
 
-Flyology Runtime is an experimental GNAT runtime extension for ordinary Ada
-tasking. Its native and lightweight execution lanes share ordinary Ada task
-semantics, synchronous control flow, and task-aware I/O. The public site should
-help a visitor understand the runtime as a whole, what changes between its
-execution lanes, what stays ordinary Ada, where the portability and scheduling
-boundaries lie, and how to evaluate or use the project responsibly.
+Flyology is an experimental systems software project for Ada. Flyology Runtime
+is its core GNAT runtime extension for ordinary Ada tasking. Some libraries use
+the runtime's task-aware I/O, while standalone libraries can be adopted without
+it. The public site should make those dependency boundaries visible, help a
+visitor choose the relevant component, and explain how to evaluate each
+component responsibly.
 
 ## Brand Personality
 
@@ -35,7 +35,10 @@ glassmorphism, and decorative complexity that obscures runtime behavior.
 
 ## Design Principles
 
-- Show the execution model before describing it at length.
+- Show the project topology before describing individual components at length.
+- Present Flyology Runtime as a core component, not as the umbrella brand.
+- State whether each library requires the runtime or has no runtime dependency.
+- Show the runtime execution model before describing it at length.
 - Pair every capability with its operational boundary.
 - Keep ordinary Ada syntax at the center of the story.
 - Use GNAT when the compiler or runtime boundary matters. Reserve GNARL for the

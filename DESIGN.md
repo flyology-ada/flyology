@@ -1,6 +1,6 @@
 ---
-name: Flyology Runtime
-description: A precise, contemporary guide to an experimental GNAT runtime extension for ordinary Ada tasking.
+name: Flyology
+description: A precise, contemporary guide to an experimental Ada systems software project and its runtime and libraries.
 colors:
   ink: "oklch(27% 0.052 270)"
   ink-soft: "oklch(39% 0.043 270)"
@@ -87,7 +87,7 @@ components:
     padding: "0.75rem 1rem"
 ---
 
-# Design System: Flyology Runtime
+# Design System: Flyology
 
 ## 1. Overview
 
@@ -96,11 +96,12 @@ components:
 The visual system is a contemporary working model: precise enough to inspect,
 animated only when motion explains a state transition, and curious enough to
 reward exploration. A visible technical grid, the existing flight-and-event-
-loop mark, ordinary Ada syntax, and runtime topology diagrams make the system
-feel engineered without becoming a terminal simulation.
+loop mark, ordinary Ada syntax, project dependency maps, and runtime topology
+diagrams make the system feel engineered without becoming a terminal
+simulation.
 
-Light mode is designed for a developer reading guides and source-adjacent
-material during the day. Dark mode keeps the same hierarchy for late technical
+Light mode is designed for a developer reading guides and source-code
+documentation during the day. Dark mode keeps the same hierarchy for late technical
 reading, using tonal token overrides rather than a separate aesthetic. The
 history of Ada Lovelace's flight study appears as provenance, never period
 decoration.
@@ -122,7 +123,7 @@ white. Dark mode swaps token values while preserving these semantic roles.
 
 ### Primary
 
-- **Runtime Ink:** body text, dark bands, primary actions, and the native execution lane.
+- **Project Ink:** body text, dark bands, primary actions, and the native execution lane.
 - **Motion Violet:** lightweight designation, migration paths, active navigation, and focus in light mode.
 
 ### Secondary
@@ -191,7 +192,7 @@ never sacrificed for visual quiet.
 ### Buttons
 
 - **Shape:** fully rounded action control (pill radius) with compact, confident padding.
-- **Primary:** Runtime Ink with inverse text and a low ambient response on hover.
+- **Primary:** Project Ink with inverse text and a low ambient response on hover.
 - **Hover / Focus:** a two-pixel upward transform on hover and a three-pixel semantic focus ring with four-pixel offset.
 - **Secondary:** transparent or Paper background with an Ink boundary; never a filled gray duplicate of the primary action.
 
@@ -228,10 +229,18 @@ Violet nodes identify lightweight task movement, teal nodes identify readiness
 or completion, and neutral paths preserve topology. Motion is limited to orbit,
 path, or dashed-flow transforms that describe runtime behavior.
 
+### Project Maps
+
+Project maps distinguish the runtime core, runtime-dependent libraries, and
+standalone libraries through position, connecting paths, and explicit text.
+They do not reuse runtime-state colors as dependency labels. A visitor must be
+able to understand the dependency boundary without color.
+
 ## 6. Do's and Don'ts
 
 ### Do:
 
+- **Do** make project dependencies visible before introducing runtime details.
 - **Do** make runtime relationships visible through diagrams and state changes.
 - **Do** pair every capability with explicit experimental and portability limits.
 - **Do** keep ordinary Ada syntax at the center of the visual story.
@@ -246,3 +255,4 @@ path, or dashed-flow transforms that describe runtime behavior.
 - **Don't** use glassmorphism, gradient text, decorative colored side stripes, or repeated icon cards.
 - **Don't** use violet and teal as decorative substitutes for one another.
 - **Don't** imply production qualification, hard real-time behavior, universal portability, or preemptive lightweight scheduling.
+- **Don't** use Flyology Runtime as the umbrella name for independent libraries.
