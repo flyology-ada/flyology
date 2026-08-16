@@ -64,6 +64,8 @@ because both trace producers emitted nothing.
 | `AllocateLarge` | contiguous free-run selection, head/tail descriptor publication, generation advance, and span handle return in `Allocate_Large` |
 | `BeginReclaim` | `Reclaim_Empty_Slabs`, class-list rebuild, and the single retry boundary in `Allocate_Unlocked` |
 | `ReleaseLive` | bitmap clearing with full-to-partial class reinsertion, or immediate clearing of every descriptor in a large span |
+| `SlabSpanPublication.WriteGeneration` / `PublishBitmap` | small-slot generation update followed by release publication of the containing 32-bit bitmap word |
+| `ReadBitmap` / `ReadGenerationAfterAcquire` | handle validation's acquire bitmap read followed by the generation read it orders |
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
@@ -134,6 +136,14 @@ started operation in the current bounded configuration. Its broken no-retry
 variant reports exhaustion while an empty slab could be reclaimed for a
 larger span. Its broken retry variant toggles progress indefinitely after
 reclamation and produces the required temporal counterexample.
+
+`SlabSpanPublication` isolates the memory-ordering boundary that the logical
+allocator model treats atomically. The safe configuration checks that a stale
+handle cannot observe a newly published slot bit with its old generation when
+the writer release-publishes one 32-bit bitmap word and the reader acquire-loads
+that word before reading the generation. The required broken configuration
+models the former ordinary 64-bit bitmap access and generation-first validation;
+TLC exposes the stale-handle acceptance when the bit becomes visible first.
 
 `SupervisionLifecycle` composes a fixed two-node static topology with a nested
 bounded family owned by the dependent node. The safety configuration explores
@@ -211,6 +221,12 @@ The models intentionally omit or coarsen the following details:
   have a canonical Ada/TLC snapshot trace; its alignment is a reviewed action
   map plus behavioral tests, so no implementation-refinement claim should be
   made for it.
+- The publication model deliberately represents only one reused slot and one
+  stale reader. It models independent visibility for the former ordinary
+  accesses and the ordering edge supplied by the corrected release/acquire
+  bitmap word. Compiler lowering and a complete hardware memory model remain
+  outside TLC and are covered by the maintained 32-bit atomic primitive
+  boundary and bare-board cross-build.
 - Crash actions establish the documented failure mode only: a dead owner can
   leave a guard or initialization slot abandoned. There is deliberately no
   recovery or ownership-stealing action and no liveness claim.
