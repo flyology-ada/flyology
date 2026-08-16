@@ -141,6 +141,8 @@ expect_safe \
 expect_safe \
   SlabSpanAllocator SlabSpanAllocator.cfg allocator-slab-span
 expect_safe \
+  SlabSpanPublication SlabSpanPublication.cfg allocator-slab-publication
+expect_safe \
   AllocatorAlgorithmsRefinement \
   AllocatorAlgorithms_refinement_buddy.cfg allocator-refinement-buddy
 expect_safe \
@@ -207,6 +209,9 @@ expect_counterexample \
 expect_temporal_counterexample \
   SlabSpanAllocator SlabSpanAllocator_nontermination.cfg \
   OperationTermination allocator-slab-span-nontermination
+expect_counterexample \
+  SlabSpanPublication SlabSpanPublication_broken.cfg \
+  NoStaleHandleAccepted allocator-slab-publication-broken
 expect_temporal_counterexample \
   AllocatorAlgorithmsRefinement \
   AllocatorAlgorithms_refinement_buddy_no_retry.cfg \

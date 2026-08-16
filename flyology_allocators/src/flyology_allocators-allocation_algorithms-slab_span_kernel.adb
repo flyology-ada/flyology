@@ -36,6 +36,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
    Next_Offset           : constant Byte_Count := 16;
    Reserved_Offset       : constant Byte_Count := 20;
    Bitmap_Offset         : constant Byte_Count := 24;
+   Bitmap_High_Offset    : constant Byte_Count := Bitmap_Offset + 4;
 
    Guard_Offset   : constant Byte_Count := 44;
    Counter_Offset : constant Byte_Count := 56;
@@ -186,10 +187,76 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
      (Descriptor_Address (Item, Run, Relative, 4, 4));
    pragma Inline_Always (U32_Field);
 
-   function Bitmap_Address
-     (Item : View; Run : Interfaces.Unsigned_32) return System.Address is
-     (Descriptor_Address (Item, Run, Bitmap_Offset, 8, 8));
-   pragma Inline_Always (Bitmap_Address);
+   function Bitmap_Word_Address
+     (Item : View; Run : Interfaces.Unsigned_32; High : Boolean)
+      return System.Address is
+     (Descriptor_Address
+        (Item, Run,
+         (if High then Bitmap_High_Offset else Bitmap_Offset), 4, 4));
+   pragma Inline_Always (Bitmap_Word_Address);
+
+   function Read_Bitmap
+     (Item : View; Run : Interfaces.Unsigned_32)
+      return Interfaces.Unsigned_64
+   is
+      Low : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
+        (Bitmap_Word_Address (Item, Run, High => False));
+      High : constant Interfaces.Unsigned_32 := Atomic.Load_Acquire_U32
+        (Bitmap_Word_Address (Item, Run, High => True));
+   begin
+      return Interfaces.Unsigned_64 (Low)
+        or Interfaces.Shift_Left (Interfaces.Unsigned_64 (High), 32);
+   end Read_Bitmap;
+   pragma Inline_Always (Read_Bitmap);
+
+   procedure Store_Bitmap
+     (Item : View; Run : Interfaces.Unsigned_32;
+      Value : Interfaces.Unsigned_64) is
+   begin
+      Atomic.Store_Release_U32
+        (Bitmap_Word_Address (Item, Run, High => False),
+         Interfaces.Unsigned_32
+           (Value and Interfaces.Unsigned_64 (Interfaces.Unsigned_32'Last)));
+      Atomic.Store_Release_U32
+        (Bitmap_Word_Address (Item, Run, High => True),
+         Interfaces.Unsigned_32 (Interfaces.Shift_Right (Value, 32)));
+   end Store_Bitmap;
+   pragma Inline_Always (Store_Bitmap);
+
+   procedure Publish_Bitmap_Word
+     (Item : View; Run, Slot : Interfaces.Unsigned_32;
+      Value : Interfaces.Unsigned_64) is
+   begin
+      if Slot < 32 then
+         Atomic.Store_Release_U32
+           (Bitmap_Word_Address (Item, Run, High => False),
+            Interfaces.Unsigned_32
+              (Value and Interfaces.Unsigned_64
+                 (Interfaces.Unsigned_32'Last)));
+      else
+         Atomic.Store_Release_U32
+           (Bitmap_Word_Address (Item, Run, High => True),
+            Interfaces.Unsigned_32 (Interfaces.Shift_Right (Value, 32)));
+      end if;
+   end Publish_Bitmap_Word;
+   pragma Inline_Always (Publish_Bitmap_Word);
+
+   function Bitmap_Bit_Is_Set
+     (Item : View; Run, Slot : Interfaces.Unsigned_32) return Boolean
+   is
+      Word : Interfaces.Unsigned_32;
+      Bit : Interfaces.Unsigned_32;
+   begin
+      if Slot >= 64 then
+         raise Layout_Error with "slab slot is out of bitmap range";
+      end if;
+      Word := Atomic.Load_Acquire_U32
+        (Bitmap_Word_Address (Item, Run, High => Slot >= 32));
+      Bit := Interfaces.Shift_Left
+        (Interfaces.Unsigned_32 (1), Natural (Slot mod 32));
+      return (Word and Bit) /= 0;
+   end Bitmap_Bit_Is_Set;
+   pragma Inline_Always (Bitmap_Bit_Is_Set);
 
    function Class_Head_Address
      (Item : View; Class : Interfaces.Unsigned_32) return System.Address is
@@ -313,7 +380,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
          Bytes.Write_U32 (U32_Field (Item, Run, Span_Offset), 0);
          Bytes.Write_U32 (U32_Field (Item, Run, Next_Offset), Null_Run);
          Bytes.Write_U32 (U32_Field (Item, Run, Reserved_Offset), 0);
-         Bytes.Write_U64 (Bitmap_Address (Item, Run), 0);
+         Store_Bitmap (Item, Run, 0);
          Atomic.Store_Release_U32 (State_Address (Item, Run), Free_State);
       end loop;
       for Unit in Interfaces.Unsigned_32 range 0 .. Unit_Count - 1 loop
@@ -493,7 +560,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
             Reserved : constant Interfaces.Unsigned_32 :=
               Bytes.Read_U32 (U32_Field (Item, Run, Reserved_Offset));
             Bitmap : constant Interfaces.Unsigned_64 :=
-              Bytes.Read_U64 (Bitmap_Address (Item, Run));
+              Read_Bitmap (Item, Run);
          begin
             if Reserved /= 0 then
                raise Layout_Error with "slab/span reserved field is corrupt";
@@ -812,7 +879,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       Bytes.Write_U32 (U32_Field (Item, Run, Span_Offset), 0);
       Bytes.Write_U32 (U32_Field (Item, Run, Next_Offset), Null_Run);
       Bytes.Write_U32 (U32_Field (Item, Run, Reserved_Offset), 0);
-      Bytes.Write_U64 (Bitmap_Address (Item, Run), 0);
+      Store_Bitmap (Item, Run, 0);
       Atomic.Store_Release_U32 (State_Address (Item, Run), Free_State);
    end Clear_Descriptor;
 
@@ -915,7 +982,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
          Bytes.Write_U32 (U32_Field (Item, Run, Span_Offset), 0);
          Bytes.Write_U32 (U32_Field (Item, Run, Next_Offset), Null_Run);
          Bytes.Write_U32 (U32_Field (Item, Run, Reserved_Offset), 0);
-         Bytes.Write_U64 (Bitmap_Address (Item, Run), 0);
+         Store_Bitmap (Item, Run, 0);
          Atomic.Store_Release_U32 (State_Address (Item, Run), Small_State);
          Add_To_Class (Item, Run, Class);
       elsif Run >= Item.Run_Count
@@ -926,7 +993,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       end if;
       Slots := Interfaces.Unsigned_32 (Byte_Count (Item.Run_Value) / Capacity);
       Mask := Slot_Mask (Slots);
-      Bitmap := Bytes.Read_U64 (Bitmap_Address (Item, Run));
+      Bitmap := Read_Bitmap (Item, Run);
       Slot := First_Clear_Bit (Bitmap, Mask);
       Bit := Interfaces.Shift_Left (Interfaces.Unsigned_64 (1), Natural (Slot));
       Live := Bytes.Read_U32 (U32_Field (Item, Run, Live_Offset));
@@ -936,7 +1003,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       Unit := Run * Item.Units_Per_Run + Slot * Units_Per_Slot;
       Generation := Next_Generation (Item);
       Bytes.Write_U64 (Unit_Generation_Address (Item, Unit), Generation);
-      Bytes.Write_U64 (Bitmap_Address (Item, Run), Bitmap or Bit);
+      Publish_Bitmap_Word (Item, Run, Slot, Bitmap or Bit);
       Bytes.Write_U32 (U32_Field (Item, Run, Live_Offset), Live + 1);
       if Live + 1 = Slots then Remove_Class_Head (Item, Run, Class); end if;
       Value :=
@@ -982,7 +1049,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
          Bytes.Write_U32 (U32_Field (Item, Run, Span_Offset), Start);
          Bytes.Write_U32 (U32_Field (Item, Run, Next_Offset), Null_Run);
          Bytes.Write_U32 (U32_Field (Item, Run, Reserved_Offset), 0);
-         Bytes.Write_U64 (Bitmap_Address (Item, Run), 0);
+         Store_Bitmap (Item, Run, 0);
          Atomic.Store_Release_U32 (State_Address (Item, Run), Large_Tail_State);
       end loop;
       Bytes.Write_U32 (U32_Field (Item, Start, Class_Offset), 0);
@@ -990,7 +1057,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       Bytes.Write_U32 (U32_Field (Item, Start, Span_Offset), Needed);
       Bytes.Write_U32 (U32_Field (Item, Start, Next_Offset), Null_Run);
       Bytes.Write_U32 (U32_Field (Item, Start, Reserved_Offset), 0);
-      Bytes.Write_U64 (Bitmap_Address (Item, Start), 0);
+      Store_Bitmap (Item, Start, 0);
       Unit := Start * Item.Units_Per_Run;
       Generation := Next_Generation (Item);
       Bytes.Write_U64 (Unit_Generation_Address (Item, Unit), Generation);
@@ -1096,10 +1163,6 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       Run := Unit / Item.Units_Per_Run;
       In_Run := Unit mod Item.Units_Per_Run;
       State := Atomic.Load_Acquire_U32 (State_Address (Item, Run));
-      Generation := Bytes.Read_U64 (Unit_Generation_Address (Item, Unit));
-      if Generation /= Value.Generation then
-         raise Handle_Error with "slab/span handle is reclaimed or stale";
-      end if;
       if State = Small_State then
          Class := Bytes.Read_U32 (U32_Field (Item, Run, Class_Offset));
          Capacity := Class_Capacity (Item, Class);
@@ -1108,16 +1171,13 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
               Interfaces.Unsigned_32 (Capacity / Byte_Count (Item.Minimum_Value));
             Slots : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32
               (Byte_Count (Item.Run_Value) / Capacity);
-            Bitmap : constant Interfaces.Unsigned_64 :=
-              Bytes.Read_U64 (Bitmap_Address (Item, Run));
          begin
             if In_Run mod Units_Per_Slot /= 0 then
                raise Handle_Error with "slab handle is not at a slot boundary";
             end if;
             Slot := In_Run / Units_Per_Slot;
             if Slot >= Slots
-              or else (Bitmap and Interfaces.Shift_Left
-                (Interfaces.Unsigned_64 (1), Natural (Slot))) = 0
+              or else not Bitmap_Bit_Is_Set (Item, Run, Slot)
             then
                raise Handle_Error with "slab handle is reclaimed or stale";
             end if;
@@ -1135,6 +1195,10 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
          Class := 0;
          Slot := 0;
       else
+         raise Handle_Error with "slab/span handle is reclaimed or stale";
+      end if;
+      Generation := Bytes.Read_U64 (Unit_Generation_Address (Item, Unit));
+      if Generation /= Value.Generation then
          raise Handle_Error with "slab/span handle is reclaimed or stale";
       end if;
       return
@@ -1155,15 +1219,15 @@ package body Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
             Live : constant Interfaces.Unsigned_32 := Bytes.Read_U32
               (U32_Field (Item, Description.Run, Live_Offset));
             Bitmap : constant Interfaces.Unsigned_64 :=
-              Bytes.Read_U64 (Bitmap_Address (Item, Description.Run));
+              Read_Bitmap (Item, Description.Run);
             Bit : constant Interfaces.Unsigned_64 := Interfaces.Shift_Left
               (Interfaces.Unsigned_64 (1), Natural (Description.Slot));
          begin
             if Live = 0 or else (Bitmap and Bit) = 0 then
                raise Handle_Error with "slab handle is reclaimed or stale";
             end if;
-            Bytes.Write_U64
-              (Bitmap_Address (Item, Description.Run), Bitmap and not Bit);
+            Publish_Bitmap_Word
+              (Item, Description.Run, Description.Slot, Bitmap and not Bit);
             Bytes.Write_U32
               (U32_Field (Item, Description.Run, Live_Offset), Live - 1);
             if Live = Slots then
