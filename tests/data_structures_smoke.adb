@@ -4,6 +4,7 @@ with Ada.Text_IO;
 with Flyology.Data_Structures;
 with Flyology.Data_Structures.Allocation_Algorithms.Buddy;
 with Flyology.Data_Structures.Allocation_Algorithms.Best_Fit;
+with Flyology.Data_Structures.Allocation_Algorithms.Slab_Span;
 with Flyology.Data_Structures.Allocation_Algorithms.TLSF;
 with Flyology.Data_Structures.Arenas;
 with Flyology.Data_Structures.Allocation_Pools.Adaptive;
@@ -36,6 +37,8 @@ procedure Data_Structures_Smoke is
      (Algorithm => DS.Allocation_Algorithms.Best_Fit);
    package TLSF_Arenas is new DS.Arenas
      (Algorithm => DS.Allocation_Algorithms.TLSF);
+   package Slab_Span_Arenas is new DS.Arenas
+     (Algorithm => DS.Allocation_Algorithms.Slab_Span);
    package Handles renames DS.Handles;
    package Strings renames DS.Byte_Strings;
    package Dynamic_Strings is new DS.Dynamic.Byte_Strings
@@ -322,6 +325,13 @@ procedure Data_Structures_Smoke is
    TLSF_Instance : constant Interfaces.Unsigned_64 :=
      16#715F_17A1_10C8_0001#;
    Adaptive_Pool_Location : constant DS.Region_Offset := 420_032;
+   Slab_Span_Arena_Location : constant DS.Region_Offset := 480_000;
+   Slab_Span_Configuration : constant Slab_Span_Arenas.Configuration :=
+     (Usable_Capacity => 8_192,
+      Minimum_Block_Size => 64,
+      Run_Size => 4_096);
+   Slab_Span_Instance : constant Interfaces.Unsigned_64 :=
+     16#51AB_17A1_10C8_0001#;
    Envelope_Content_Extent : constant DS.Byte_Count :=
      Vectors.Required_Storage (4);
 
@@ -553,6 +563,7 @@ procedure Data_Structures_Smoke is
    Best_Fit_A, Best_Fit_B, Best_Fit_C, Best_Fit_Bad :
      Best_Fit_Arenas.View;
    TLSF_A, TLSF_B, TLSF_C, TLSF_Bad : TLSF_Arenas.View;
+   Slab_Span_A, Slab_Span_B : Slab_Span_Arenas.View;
    Scratch_Arena_A, Scratch_Arena_B : Arenas.View;
    Dynamic_Vector_A, Dynamic_Vector_B, Dynamic_Vector_C :
      Dynamic_Vectors.View;
@@ -601,6 +612,7 @@ procedure Data_Structures_Smoke is
    Arena_Released : Arenas.Allocation_Handle;
    Best_Fit_Handle : Best_Fit_Arenas.Allocation_Handle;
    TLSF_Handle : TLSF_Arenas.Allocation_Handle;
+   Slab_Span_Handle : Slab_Span_Arenas.Allocation_Handle;
    type Adaptive_Handle_Array is
      array (Positive range <>) of Adaptive_U64.Handle;
    Adaptive_Handles : Adaptive_Handle_Array (1 .. 40);
@@ -1202,6 +1214,40 @@ begin
         (Failed and then not TLSF_Arenas.Is_Attached (TLSF_Bad),
          "TLSF accepted a corrupt first-level bitmap");
    end;
+
+   Slab_Span_Arenas.Create_Or_Attach
+     (Slab_Span_A, Region_A, Slab_Span_Arena_Location,
+      Slab_Span_Configuration, Slab_Span_Instance, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Initialized_New,
+      "slab/span Flyology bridge was not created");
+   Slab_Span_Arenas.Create_Or_Attach
+     (Slab_Span_B, Region_B, Slab_Span_Arena_Location,
+      Slab_Span_Configuration, Slab_Span_Instance, Open_Outcome);
+   Assert
+     (Open_Outcome = DS.Attached_Existing,
+      "slab/span Flyology bridge was reinitialized");
+   declare
+      Result : Slab_Span_Arenas.Allocation_Result;
+   begin
+      Slab_Span_Arenas.Try_Allocate
+        (Slab_Span_A, 65, Slab_Span_Handle, Result);
+      Assert
+        (Result = Slab_Span_Arenas.Allocated
+         and then Slab_Span_Arenas.Block_Capacity
+           (Slab_Span_B, Slab_Span_Handle) = 128,
+         "slab/span Flyology bridge allocation failed");
+   end;
+   Slab_Span_Arenas.Write
+     (Slab_Span_A, Slab_Span_Handle, 0, Arena_Data);
+   Slab_Span_Arenas.Read
+     (Slab_Span_B, Slab_Span_Handle, 0, Read_16);
+   Assert
+     (Read_16 = Arena_Data,
+      "slab/span Flyology bridge payload was not shared");
+   Slab_Span_Arenas.Release (Slab_Span_B, Slab_Span_Handle);
+   Slab_Span_Arenas.Destroy (Slab_Span_A);
+   Slab_Span_Arenas.Detach (Slab_Span_B);
 
    Adaptive_U64.Create_Or_Attach
      (Adaptive_A, Region_A, Adaptive_Pool_Location,

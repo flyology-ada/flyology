@@ -150,9 +150,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   synchronization, abandonment, and recovery rules; Flyology's adapter owns
   the outer magic, schema, lifecycle, instance identity, and payload-copy
   policy. Arena calls introduce no runtime dispatch or stored callback.
-  `Allocation_Algorithms.Buddy`, `Best_Fit`, and `TLSF` adapt the standalone
-  out-of-band buddy-tree, in-band AVL best-fit, and in-band two-level
-  segregated-fit policies. Allocation handles contain an opaque fixed-width
+  `Allocation_Algorithms.Buddy`, `Best_Fit`, `TLSF`, and `Slab_Span` adapt the
+  standalone out-of-band buddy-tree, in-band AVL best-fit, in-band two-level
+  segregated-fit, and out-of-band bitmap-slab/contiguous-span policies.
+  Allocation handles contain an opaque fixed-width
   token and nonwrapping generation. Payload access and nested allocation views
   require the handle owner to exclude release.
 - `Allocation_Pools.Adaptive` grows a bounded table of arena-backed fixed-size
@@ -456,7 +457,7 @@ required by the changed boundary.
   `FLYOLOGY_ALLOCATORS_TARGET=arm-eabi` and
   `FLYOLOGY_ALLOCATORS_RTS=embedded-stm32f4`.
 - `cd flyology_allocators/benchmarks && ./scripts/run.sh`: optional hosted
-  `flyology_bench` comparison of Buddy, Best-Fit, TLSF, and native
+  `flyology_bench` comparison of Buddy, Best-Fit, TLSF, Slab/Span, and native
   `malloc`/`free`. Short settings validate behavior only; use release defaults
   on a quiet host before making performance claims.
 - `./scripts/coverage.sh`: GNATcoverage statement and decision baseline for

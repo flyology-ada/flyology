@@ -1,6 +1,6 @@
 # TLA+ models
 
-These models extract five concurrency-sensitive state machines from the Ada
+These models extract six concurrency-sensitive state machines from the Ada
 implementation. They are bounded, executable design reviews: TLC explores all
 interleavings within each checked configuration, while the behavioral and
 SPARK suites continue to cover the implementation boundaries that TLA+ does
@@ -60,6 +60,10 @@ because both trace producers emitted nothing.
 | `bins` / `bitmap` | TLSF free-list membership by modeled size class and matching nonempty-class bitmap |
 | `hints` | Buddy per-view, per-order candidate cache whose entry is checked against persisted node state before use |
 | `AllocatorAlgorithmsRefinement` snapshots | Test-only observations of real allocator blocks, free indexes, TLSF classes and bitmaps, Buddy hints, live allocation generations, handles, and results |
+| `SlabSpanAllocator.AllocateSmall` | `Slab_Span_Kernel.Allocate_Small`: select the persisted class head or a free run, claim the first clear bitmap slot, advance its generation, and remove a full slab from the class head |
+| `AllocateLarge` | contiguous free-run selection, head/tail descriptor publication, generation advance, and span handle return in `Allocate_Large` |
+| `BeginReclaim` | `Reclaim_Empty_Slabs`, class-list rebuild, and the single retry boundary in `Allocate_Unlocked` |
+| `ReleaseLive` | bitmap clearing with full-to-partial class reinsertion, or immediate clearing of every descriptor in a large span |
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
@@ -112,7 +116,8 @@ and weak fairness for work under the guard establish that every started
 operation completes when no owner dies. Every merge reduces the physical block
 count before the bounded retry.
 
-Nine broken allocator configurations are required to fail. Removing the
+The nine broken Buddy/Best-Fit/TLSF configurations are required to fail.
+Removing the
 coalesce-and-retry boundary produces a false-exhaustion counterexample for each
 algorithm. Trusting a stale Buddy hint produces overlapping live allocations.
 Retaining stale TLSF bitmap bits breaks agreement with its free lists. Ignoring
@@ -120,6 +125,15 @@ a release handle's generation frees a newer allocation at the reused offset.
 Three nonterminating sweep variants retain a mergeable pair while toggling
 local progress state, producing temporal counterexamples for operation
 completion.
+
+`SlabSpanAllocator` separately checks the hybrid allocator's run descriptors,
+small-slot bitmaps, contiguous large-span head/tail structure, unique live
+starting units, generation-stamped handles, guard ownership, pressure-driven
+empty-slab reclamation, absence of false exhaustion, and completion of every
+started operation in the current bounded configuration. Its broken no-retry
+variant reports exhaustion while an empty slab could be reclaimed for a
+larger span. Its broken retry variant toggles progress indefinitely after
+reclamation and produces the required temporal counterexample.
 
 `SupervisionLifecycle` composes a fixed two-node static topology with a nested
 bounded family owned by the dependent node. The safety configuration explores
@@ -186,6 +200,17 @@ The models intentionally omit or coarsen the following details:
   than immediate contention or a concrete timed deadline. Its liveness
   property assumes no guard owner dies and does not claim wait-free or
   real-time completion.
+- The slab/span model uses two slots per run and at most two runs. It preserves
+  the production distinction between small bitmap slots and whole-run spans,
+  retained empty slabs, miss-triggered reclamation and retry, head/tail span
+  structure, release behavior, guard ownership, and handle generations. It
+  abstracts the production power-of-two class ladder to one small class,
+  singly linked class-head ordering, exact descriptor byte offsets, attachment
+  validation scans, payload access, poisoning, and generation widths beyond
+  the checked bound. Unlike the three older allocator models, it does not yet
+  have a canonical Ada/TLC snapshot trace; its alignment is a reviewed action
+  map plus behavioral tests, so no implementation-refinement claim should be
+  made for it.
 - Crash actions establish the documented failure mode only: a dead owner can
   leave a guard or initialization slot abandoned. There is deliberately no
   recovery or ownership-stealing action and no liveness claim.

@@ -10,7 +10,7 @@ stores only fixed-width offsets, counters, generations, geometry, and allocator
 bookkeeping in those bytes. Application magic and schema values deliberately
 remain outside the allocator image.
 
-Three compile-time-selected algorithms are included:
+Four compile-time-selected algorithms are included:
 
 - `Allocation_Algorithms.Buddy` uses an out-of-band buddy tree with view-local
   reuse hints.
@@ -18,13 +18,17 @@ Three compile-time-selected algorithms are included:
   tree.
 - `Allocation_Algorithms.TLSF` uses boundary tags, bitmaps, and offset-linked
   segregated free lists.
+- `Allocation_Algorithms.Slab_Span` uses bitmap slots in power-of-two small
+  classes and contiguous fixed-run spans for larger requests.
 
-All three return released blocks to the current tree or free index without
+All four return released blocks to the current tree or free index without
 coalescing physical neighbors. A successful fast path uses the algorithm's
 normal hint, tree, or bitmap lookup. Before reporting exhaustion, Buddy and
 TLSF scan and coalesce the stored structure, then retry. Best-Fit scans for
 adjacent free runs and retries if the index changed. The advertised worst-case
-search bound is therefore linear.
+search bound is therefore linear. Slab/span release immediately frees large
+runs, retains empty small slabs for reuse, and reclaims those slabs when a new
+slab or contiguous span otherwise cannot be found.
 
 The stored field geometry and required extent are unchanged, but the set of
 valid stored states changed. Applications that retain allocator bytes across
@@ -88,13 +92,13 @@ implement this exception-reporting API and are outside the supported runtime
 profile.
 
 Native verification is `./scripts/test.sh`. It builds the standalone project,
-runs all three allocators including a timed-contention case, and rejects any
+runs all four allocators including a timed-contention case, and rejects any
 reference to a `Flyology` runtime symbol in the resulting archive.
 
 ## Hosted benchmarks
 
 The optional [`benchmarks`](benchmarks) Alire subcrate uses `flyology_bench` to
-compare Buddy, Best-Fit, and TLSF directly with C `malloc`/`free`. Fixed-size
-cycles and a bounded fragmented-churn workload use shared iteration counts and
-balanced paired rounds. Benchmark-only hosted dependencies do not enter this
-crate's manifest or bare-board project closure.
+compare Buddy, Best-Fit, TLSF, and Slab/Span directly with C `malloc`/`free`.
+Fixed-size cycles and a bounded fragmented-churn workload use shared iteration
+counts and balanced paired rounds. Benchmark-only hosted dependencies do not
+enter this crate's manifest or bare-board project closure.

@@ -884,7 +884,7 @@ Buddy_Arenas.Create_Or_Attach
    Result        => Arena_Open);
 ```
 
-Three allocation adapters are provided. `Allocation_Algorithms.Buddy` selects
+Four allocation adapters are provided. `Allocation_Algorithms.Buddy` selects
 the standalone buddy algorithm, which uses a power-of-two managed capacity,
 rounds requests to power-of-two blocks, and stores a complete buddy tree
 outside the managed bytes. View-local order hints accelerate exact reuse.
@@ -902,10 +902,16 @@ first- and second-level bitmaps and offset-linked free lists. Its successful
 class lookup has a fixed bound, while an allocation miss also performs a linear
 physical coalescing pass before reporting exhaustion. Size-class rounding can
 leave small unusable fragments.
+`Allocation_Algorithms.Slab_Span` combines out-of-band power-of-two slab
+classes with contiguous fixed-run spans. Small allocations claim bitmap slots;
+requests above the largest small class (`Run_Size / 2`) use whole-run spans.
+Empty slabs remain indexed for hot reuse and are reclaimed under allocation
+pressure. The configured run size is an allocator quantum, not an
+operating-system page dependency.
 
 `Arenas.Capabilities` exposes each selection's search class, contention scope,
 metadata placement, splitting/coalescing behavior, timed-contention support,
-and release-exclusion rule as compile-time data. All three implementations use
+and release-exclusion rule as compile-time data. All four implementations use
 one persisted metadata guard shared by all attached views, support immediate
 and timed allocation/release, and require external owner-death and quiescence
 authority before poisoning. Exclusive initialization is their only recovery.
