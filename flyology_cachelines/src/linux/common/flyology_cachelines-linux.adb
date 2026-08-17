@@ -98,6 +98,47 @@ package body Flyology_Cachelines.Linux is
          return -1;
    end Leading_Index;
 
+   --  Number of CPUs a cpu list names.  The list is a comma-separated set of
+   --  single indexes and inclusive ranges, as in "0,24" or "0-3,8-11".
+   function List_Count (Text : String) return Natural is
+      Total : Natural := 0;
+      First : Natural := Text'First;
+
+      function Bound (From : in out Natural) return Natural is
+         Start : constant Natural := From;
+      begin
+         while From <= Text'Last and then Text (From) in '0' .. '9' loop
+            From := From + 1;
+         end loop;
+         return
+           (if From = Start
+            then 0
+            else Natural'Value (Text (Start .. From - 1)));
+      end Bound;
+   begin
+      while First <= Text'Last loop
+         if Text (First) not in '0' .. '9' then
+            First := First + 1;
+         else
+            declare
+               Low  : constant Natural := Bound (First);
+               High : Natural := Low;
+            begin
+               if First <= Text'Last and then Text (First) = '-' then
+                  First := First + 1;
+                  High := Bound (First);
+               end if;
+               Total := Total + (if High >= Low then High - Low + 1 else 1);
+            end;
+         end if;
+      end loop;
+
+      return Total;
+   exception
+      when others =>
+         return 0;
+   end List_Count;
+
    --  What one CPU reports about itself.  Capacity is zero when the host
    --  publishes none.  Leads_Cache is true when this CPU is the first of
    --  those sharing its L1 data cache, which makes it the representative of
@@ -109,6 +150,8 @@ package body Flyology_Cachelines.Linux is
             Total_Size  : Positive;
             Capacity    : Natural;
             Leads_Cache : Boolean;
+            L2_Size     : Natural;
+            L2_CPUs     : Natural;
          when False =>
             null;
       end case;
@@ -134,6 +177,15 @@ package body Flyology_Cachelines.Linux is
       Capacity      : constant Natural :=
         (if Capacity_Text'Length = 0 then 0
          else Natural'Max (Leading_Index (Capacity_Text), 0));
+      --  The level 2 entry follows the level 1 entries, so both are found in
+      --  one pass over the cache indexes.
+      L2_Size : Natural := 0;
+      L2_CPUs : Natural := 0;
+
+      Found_L1    : Boolean  := False;
+      L1_Line     : Positive := 1;
+      L1_Total    : Positive := 1;
+      L1_Leads    : Boolean  := True;
    begin
       for Index in 0 .. 7 loop
          declare
@@ -145,31 +197,49 @@ package body Flyology_Cachelines.Linux is
             Kind        : constant String :=
               To_String (Read_Trimmed (Path & "type"));
          begin
-            if Level = "1" and then (Kind = "Data" or else Kind = "Unified")
+            if not Found_L1
+              and then Level = "1"
+              and then (Kind = "Data" or else Kind = "Unified")
             then
                declare
-                  Line_Size : constant Positive :=
+                  Shared : constant String :=
+                    To_String (Read_Trimmed (Path & "shared_cpu_list"));
+                  Leader : constant Integer := Leading_Index (Shared);
+               begin
+                  L1_Line :=
                     Parse_Size
                       (To_String
                          (Read_Trimmed (Path & "coherency_line_size")));
-                  Total_Size : constant Positive :=
+                  L1_Total :=
                     Parse_Size (To_String (Read_Trimmed (Path & "size")));
-                  Shared     : constant String :=
-                    To_String (Read_Trimmed (Path & "shared_cpu_list"));
-                  Leader     : constant Integer := Leading_Index (Shared);
-               begin
-                  return
-                    (Available   => True,
-                     Line_Size   => Line_Size,
-                     Total_Size  => Total_Size,
-                     Capacity    => Capacity,
-                     --  An unreadable sharing list makes every CPU its own
-                     --  core, which is right whenever SMT is absent.
-                     Leads_Cache => Leader = CPU or else Leader < 0);
+                  --  An unreadable sharing list makes every CPU its own core,
+                  --  which is right whenever SMT is absent.
+                  L1_Leads := Leader = CPU or else Leader < 0;
+                  Found_L1 := True;
                end;
+            elsif L2_Size = 0
+              and then Level = "2"
+              and then (Kind = "Data" or else Kind = "Unified")
+            then
+               L2_Size :=
+                 Parse_Size (To_String (Read_Trimmed (Path & "size")));
+               L2_CPUs :=
+                 List_Count
+                   (To_String (Read_Trimmed (Path & "shared_cpu_list")));
             end if;
          end;
       end loop;
+
+      if Found_L1 then
+         return
+           (Available   => True,
+            Line_Size   => L1_Line,
+            Total_Size  => L1_Total,
+            Capacity    => Capacity,
+            Leads_Cache => L1_Leads,
+            L2_Size     => L2_Size,
+            L2_CPUs     => L2_CPUs);
+      end if;
 
       return No_CPU_Description;
    exception
@@ -326,7 +396,9 @@ package body Flyology_Cachelines.Linux is
                      --  as unreadable and this count is a floor.
                      Cores      => 1,
                      CPUs       => 1,
-                     Capacity   => Found.Capacity);
+                     Capacity   => Found.Capacity,
+                     L2_Size    => Found.L2_Size,
+                     L2_CPUs    => Found.L2_CPUs);
                end if;
             end if;
          end;

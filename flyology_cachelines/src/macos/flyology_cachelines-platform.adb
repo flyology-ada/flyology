@@ -43,29 +43,55 @@ package body Flyology_Cachelines.Platform is
             begin
                exit when not Size.Available;
 
-               Result.Count := Natural (Class);
-               Result.Classes (Class) :=
-                 (Line_Size  => Result.Line_Size,
-                  Total_Size => Size.Value,
-                  Cores      =>
+               declare
+                  Cores : constant Natural :=
                     Value_Or
                       (Flyology_Cachelines.Macos.Query
-                         (Level_Name (Class, "physicalcpu")), 0),
-                  CPUs       =>
+                         (Level_Name (Class, "physicalcpu")), 0);
+                  CPUs  : constant Natural :=
                     Value_Or
                       (Flyology_Cachelines.Macos.Query
-                         (Level_Name (Class, "logicalcpu")), 0));
+                         (Level_Name (Class, "logicalcpu")), 0);
+
+                  --  cpusperl2 counts logical CPUs, so it becomes a core
+                  --  count through this level's threads-per-core ratio.
+                  Per_L2 : constant Natural :=
+                    Value_Or
+                      (Flyology_Cachelines.Macos.Query
+                         (Level_Name (Class, "cpusperl2")), 0);
+               begin
+                  Result.Count := Natural (Class);
+                  Result.Classes (Class) :=
+                    (Line_Size        => Result.Line_Size,
+                     Total_Size       => Size.Value,
+                     Cores            => Cores,
+                     CPUs             => CPUs,
+                     L2_Size          =>
+                       Value_Or
+                         (Flyology_Cachelines.Macos.Query
+                            (Level_Name (Class, "l2cachesize")), 0),
+                     L2_Sharing_Cores =>
+                       (if Per_L2 = 0 or else Cores = 0 or else CPUs = 0
+                        then 0
+                        else Natural'Max (Per_L2 * Cores / CPUs, 1)));
+               end;
             end;
          end loop;
       end if;
 
+      --  A host publishing no performance level has one class.  Its flat
+      --  hw.l2cachesize is the same value hw.l1dcachesize is: correct on a
+      --  host whose cores are alike, which is the only host reaching here.
       if Result.Count = 0 and then Flat_Size.Available then
          Result.Count := 1;
          Result.Classes (Fastest_Core_Class) :=
-           (Line_Size  => Result.Line_Size,
-            Total_Size => Flat_Size.Value,
-            Cores      => Value_Or (Flat_Cores, 0),
-            CPUs       => Value_Or (Flat_CPUs, 0));
+           (Line_Size        => Result.Line_Size,
+            Total_Size       => Flat_Size.Value,
+            Cores            => Value_Or (Flat_Cores, 0),
+            CPUs             => Value_Or (Flat_CPUs, 0),
+            L2_Size          =>
+              Value_Or (Flyology_Cachelines.Macos.Query ("hw.l2cachesize"), 0),
+            L2_Sharing_Cores => 0);
       end if;
 
       --  Performance levels are the host's own rank, so any order among two

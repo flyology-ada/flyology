@@ -67,6 +67,14 @@ package body Flyology_Cachelines is
      (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
      (Reported (Facts_For (Class).Total_Size));
 
+   function L2_Cache_Size
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
+     (Reported (Facts_For (Class).L2_Size));
+
+   function L2_Sharing_Cores
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
+     (Reported (Facts_For (Class).L2_Sharing_Cores));
+
    function L1_Data_Cache_Slots
      (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
    is

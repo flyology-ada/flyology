@@ -131,6 +131,15 @@ package body Flyology_Cachelines.Linux_Testing is
            and then Capacity.Classes (2).Capacity = 512,
          "capacity fixture did not order by descending capacity");
 
+      --  Each hybrid class shares one L2 across its two cores.
+      Check
+        (Hybrid.Classes (1).L2_Size = 2 * 1_024 * 1_024
+           and then Hybrid.Classes (1).L2_CPUs = 2,
+         "hybrid fixture did not read the larger class L2");
+      Check
+        (Hybrid.Classes (2).L2_Size = 512 * 1_024,
+         "hybrid fixture did not read the smaller class L2");
+
       --  Four CPUs pairwise sharing one L1 data cache are two cores.
       Check (SMT.Count = 1, "SMT fixture did not yield one class");
       Check
@@ -139,6 +148,16 @@ package body Flyology_Cachelines.Linux_Testing is
       Check
         (SMT.Ordering = Unordered,
          "a single class did not report an unordered result");
+
+      --  All four CPUs share one L2, which is two cores rather than four.
+      Check
+        (SMT.Classes (1).L2_CPUs = 4,
+         "SMT fixture did not count the CPUs sharing one L2");
+
+      --  A private L2 per core must not be reported as shared.
+      Check
+        (Sparse.Classes (1).L2_CPUs = 1,
+         "sparse fixture treated a private L2 as shared");
 
       --  present is "0-1,4-5", so enumeration must reach CPU 5 and skip the
       --  absent CPUs 2 and 3 without counting them.

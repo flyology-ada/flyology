@@ -460,6 +460,37 @@ begin
                  or else Cores.Value <= CPUs.Value,
                "a core class reports more cores than CPUs");
 
+            --  L2 holds whole lines, is at least as large as L1, and is
+            --  shared by no more cores than the class contains.
+            declare
+               L2      : constant Flyology_Cachelines.Cache_Query_Result :=
+                 Flyology_Cachelines.L2_Cache_Size (Class);
+               Sharing : constant Flyology_Cachelines.Cache_Query_Result :=
+                 Flyology_Cachelines.L2_Sharing_Cores (Class);
+            begin
+               if L2.Available then
+                  Check
+                    (L2.Value >= Size.Value,
+                     "a core class L2 is smaller than its L1 data cache");
+                  Check
+                    (not Hardware_Query.Available
+                       or else L2.Value mod Hardware_Query.Value = 0,
+                     "a core class L2 is not a whole number of lines");
+               end if;
+
+               if Sharing.Available then
+                  Check
+                    (L2.Available,
+                     "L2 sharing was reported without an L2 capacity");
+                  Check
+                    (Sharing.Value >= 1
+                       and then
+                         (not Cores.Available
+                            or else Sharing.Value <= Cores.Value),
+                     "more cores share an L2 than the class contains");
+               end if;
+            end;
+
             --  Whichever key ordered the classes, a later class may not
             --  report a larger L1 data cache when the order was inferred.
             if Position > 1
@@ -534,7 +565,14 @@ begin
                  (Flyology_Cachelines.Core_Class_Cores (Class)) &
                ", cpus" &
                Image_Or_Unavailable
-                 (Flyology_Cachelines.Core_Class_CPUs (Class)));
+                 (Flyology_Cachelines.Core_Class_CPUs (Class)) &
+               ", l2" &
+               Image_Or_Unavailable
+                 (Flyology_Cachelines.L2_Cache_Size (Class)) &
+               " bytes across" &
+               Image_Or_Unavailable
+                 (Flyology_Cachelines.L2_Sharing_Cores (Class)) &
+               " cores");
          end;
       end loop;
    end if;

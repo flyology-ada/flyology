@@ -24,7 +24,8 @@ private package Flyology_Cachelines.Linux is
    --  under SMT, where sibling CPUs share one L1 data cache: a 24-core host
    --  with two threads per core reports 24 cores and 48 CPUs in one class.
    --  Capacity is the kernel's capacity value, or zero when the host
-   --  publishes none.
+   --  publishes none.  L2_Size is the level 2 capacity and L2_CPUs the number
+   --  of logical CPUs sharing it, both zero when sysfs describes no level 2.
    type Core_Class_Parameters (Available : Boolean := False) is record
       case Available is
          when True =>
@@ -33,6 +34,8 @@ private package Flyology_Cachelines.Linux is
             Cores      : Positive;
             CPUs       : Positive;
             Capacity   : Natural;
+            L2_Size    : Natural;
+            L2_CPUs    : Natural;
          when False =>
             null;
       end case;
