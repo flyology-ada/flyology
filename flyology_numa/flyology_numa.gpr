@@ -1,0 +1,64 @@
+with "config/flyology_numa_config.gpr";
+project Flyology_Numa is
+
+   type Host_OS_Kind is ("macos", "linux", "unsupported");
+   Host_OS : Host_OS_Kind :=
+     external ("FLYOLOGY_NUMA_HOST_OS", Flyology_Numa_Config.Alire_Host_OS);
+
+   --  The sysfs reader is host-independent text processing, so it stays in
+   --  src/ and compiles everywhere.  Only the decision to read the host's own
+   --  sysfs tree, and the placement interface built on it, are platform work.
+   Platform_Directory := "src/unsupported/";
+   case Host_OS is
+      when "macos" =>
+         Platform_Directory := "src/macos/";
+      when "linux" =>
+         Platform_Directory := "src/linux/";
+      when "unsupported" =>
+         null;
+   end case;
+
+   for Source_Dirs use ("src/", "config/", Platform_Directory);
+
+   type Documentation_Mode_Type is ("false", "true");
+   Documentation_Mode : Documentation_Mode_Type :=
+     external ("FLYOLOGY_NUMA_DOCUMENTATION", "false");
+   case Documentation_Mode is
+      when "false" =>
+         null;
+      when "true" =>
+         for Source_Files use ("flyology_numa.ads");
+   end case;
+
+   for Library_Name use "flyology_numa";
+   for Library_Version use Project'Library_Name & ".so." & Flyology_Numa_Config.Crate_Version;
+
+   for Object_Dir use "obj/" & Flyology_Numa_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Library_Dir use "lib";
+
+   type Library_Type_Type is ("relocatable", "static", "static-pic");
+   Library_Type : Library_Type_Type :=
+     external ("FLYOLOGY_NUMA_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
+   for Library_Kind use Library_Type;
+
+   package Compiler is
+      for Default_Switches ("Ada") use Flyology_Numa_Config.Ada_Compiler_Switches;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
+
+   package Install is
+      for Artifacts (".") use ("share");
+   end Install;
+
+   package Documentation is
+      for Excluded_Project_Files use
+        ("config/flyology_numa_config.gpr");
+      for Output_Dir ("html") use "docs/api";
+      for Resources_Dir ("html") use "../docs/gnatdoc-numa/html";
+   end Documentation;
+
+end Flyology_Numa;
