@@ -55,9 +55,15 @@ expect_group_overflow \
   "automatically fitted group payload exceeds its interference region"
 echo "spilling explicit and automatically fitted groups were rejected"
 
-if [ "$(uname -s)" = "Linux" ]
-then
-   "$alr_command" exec -- \
-     gprbuild -p -P linux_detection_tests.gpr
-   "$test_directory/bin/flyology_cachelines-linux_testing-main"
-fi
+case "$(uname -s)" in
+   Linux)
+      "$alr_command" exec -- \
+        gprbuild -p -P linux_detection_tests.gpr
+      "$test_directory/bin/flyology_cachelines-linux_testing-main"
+      ;;
+   Darwin)
+      "$alr_command" exec -- \
+        gprbuild -p -P macos_detection_tests.gpr
+      "$test_directory/bin/flyology_cachelines-macos_testing-main"
+      ;;
+esac

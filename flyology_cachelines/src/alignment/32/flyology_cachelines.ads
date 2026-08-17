@@ -35,11 +35,19 @@ package Flyology_Cachelines is
    function Hardware_Cache_Line_Size return Cache_Query_Result;
 
    --  Return the L1 data-cache capacity in bytes.
+   --
+   --  A host whose cores are not identical has no single L1 data-cache
+   --  capacity, so the result describes one core type.  macOS reports the
+   --  highest-performing core type: an Apple silicon host reports its
+   --  performance-core capacity, not the smaller efficiency-core capacity.
+   --  Linux reports the cache that its own query mechanism describes, which
+   --  is normally the cache of CPU 0.
    --  @return The detected capacity in bytes, or Unavailable.
    function L1_Data_Cache_Size return Cache_Query_Result;
 
    --  Return the number of destructive-interference-sized slots in L1.
-   --  These are spacing-policy slots, not physical cache lines.
+   --  These are spacing-policy slots, not physical cache lines.  The count
+   --  divides L1_Data_Cache_Size and therefore describes the same core type.
    --  @return The derived slot count, or Unavailable.
    function L1_Data_Cache_Slots return Cache_Query_Result;
 
