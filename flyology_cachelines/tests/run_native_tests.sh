@@ -59,7 +59,8 @@ case "$(uname -s)" in
    Linux)
       "$alr_command" exec -- \
         gprbuild -p -P linux_detection_tests.gpr
-      "$test_directory/bin/flyology_cachelines-linux_testing-main"
+      "$test_directory/bin/flyology_cachelines-linux_testing-main" \
+        "$test_directory/fixtures/"
       ;;
    Darwin)
       "$alr_command" exec -- \
