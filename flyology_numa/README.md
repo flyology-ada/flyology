@@ -11,7 +11,9 @@ host declares them to be, and which of them the running process may use.
 This crate is standalone. It does not depend on the Flyology runtime, and the
 runtime does not depend on it.
 
-`Flyology_NUMA` reports the structure. `Flyology_NUMA.Placement` acts on it.
+`Flyology_NUMA` reports the structure, `Flyology_NUMA.Placement` acts on it,
+and `Flyology_NUMA.Pools` puts it where Ada already expects to be told where
+memory comes from — the storage pool of an access type.
 
 Flyology is experimental. See [Boundaries](#boundaries).
 
@@ -158,6 +160,44 @@ whatever the source. `Node_Of_Address` reports which node holds a page —
 but asking about an untouched page causes it to be acquired, because the
 host answers by placing it.
 
+## Allocating on a node
+
+Ada already has a place to say where an object's memory comes from. This
+crate supplies a storage pool whose **subpools are memory nodes**, so the
+node is named at the point the object is created:
+
+```ada
+Arena : Flyology_NUMA.Pools.Node_Pool
+  (Policy => NUMA.Placement.Bound, Extent => 1024 * 1024);
+
+type Sample_Access is access Sample with Storage_Pool => Arena;
+
+Item : constant Sample_Access :=
+  new (Flyology_NUMA.Pools.On_Node (Arena, Near)) Sample'(...);
+```
+
+The pool asks the host for whole pages and places them **before** handing
+any out — placing them afterwards would leave whatever had already been
+written where the host first put it. Memory from the ordinary heap cannot be
+used for this: it may begin partway into a page whose remainder belongs to
+something else, and placing that page would move memory the crate does not
+own.
+
+Allocation advances through pages already obtained. Freeing a single object
+does nothing; memory returns to the host when the subpool is deallocated or
+the pool goes out of scope. That suits a body of memory built up and
+discarded together, which is what a node-bound arena usually is.
+
+`Placement_Reached` reports whether the pages really landed on the node, so
+a host that could not place them is distinguishable from one that did:
+
+```ada
+if not Flyology_NUMA.Pools.Placement_Reached (Arena, Near) then
+   --  Allocation worked; the memory is simply wherever the host chose.
+   null;
+end if;
+```
+
 ## Naming Ada processors
 
 Ada numbers processors from one; hosts number them from zero. GNAT bridges
@@ -175,6 +215,12 @@ CPU : constant System.Multiprocessors.CPU_Range := NUMA.To_CPU (Processor);
 
 ## Boundaries
 
+- **Whole pages.** A node pool obtains memory a page at a time, so a pool
+  with a small extent still holds at least one page per node it is used for.
+- **No per-object free.** `Deallocate` on a node pool does nothing.
+  Memory returns to the host when the subpool is deallocated or the pool is
+  finalized. A plain `new` with no subpool named raises `Program_Error`;
+  name a subpool with `On_Node`.
 - **Memory, not threads.** Placement governs where pages come from. It does
   not move a running thread; a thread is placed with the `CPU` aspect or a
   dispatching domain, using the processors reported for a node.
@@ -226,3 +272,25 @@ reached otherwise: a development machine has one node, and a container on
 one is single-node too. Reading them keeps node numbering, distance-row
 alignment, and restriction handling under test on every host rather than
 only on hardware that happens to have them.
+
+Recorded descriptions cover reading. They cannot cover *placing*, which
+needs a kernel that really has several nodes. For that:
+
+```sh
+./scripts/multinode-check.sh
+```
+
+It boots guests with two and four memory nodes — the four-node guest with
+uneven distances and one node carrying memory with no processor attached —
+and runs the host suite inside them. The parts of the suite that choose
+between nodes do nothing on a one-node machine and run here: memory bound
+to each node in turn, interleaving spread across every node, and a node
+proving further from another than from itself.
+
+The guest runs the architecture it is tested for, so the placement calls it
+makes are the ones that architecture's table names. x86-64 and AArch64 hosts
+are both handled.
+
+It needs a Linux host, the matching `qemu-system-*`, `busybox`, and a kernel
+image (`FLYOLOGY_NUMA_KERNEL`, or the first `/boot/vmlinuz-*`). It is not
+part of `./scripts/test.sh` for that reason.
