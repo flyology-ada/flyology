@@ -1,52 +1,32 @@
-with Interfaces.C;
-with System;
+with Flyology_Cachelines.Macos;
 
 package body Flyology_Cachelines.Platform is
 
-   use type Interfaces.C.int;
-   use type Interfaces.C.size_t;
-
-   function Sysctl_By_Name
-     (Name      : System.Address;
-      Old_Value : System.Address;
-      Old_Len   : System.Address;
-      New_Value : System.Address;
-      New_Len   : Interfaces.C.size_t) return Interfaces.C.int
-     with Import,
-          Convention    => C,
-          External_Name => "sysctlbyname";
-
-   function Query (Name : String) return Cache_Query_Result is
-      C_Name : aliased constant Interfaces.C.char_array :=
-        Interfaces.C.To_C (Name);
-      Value  : aliased Interfaces.C.size_t := 0;
-      Length : aliased Interfaces.C.size_t :=
-        Interfaces.C.size_t (Value'Size / System.Storage_Unit);
-      Result : constant Interfaces.C.int :=
-        Sysctl_By_Name
-          (Name      => C_Name'Address,
-           Old_Value => Value'Address,
-           Old_Len   => Length'Address,
-           New_Value => System.Null_Address,
-           New_Len   => 0);
+   --  macOS 12 and later describe a host whose cores are not identical as
+   --  ordered performance levels, where hw.perflevel0 is the
+   --  highest-performing level.  On Apple silicon the flat hw.l1dcachesize
+   --  reports the efficiency-core capacity, which is smaller than the
+   --  performance-core capacity, so the highest level is preferred.  A host
+   --  that publishes no performance level, including macOS 11 and earlier
+   --  and every Intel Mac, has no hw.perflevel0 name and degrades to the flat
+   --  name.  Querying hw.nperflevels first would add nothing: the per-level
+   --  name exists exactly when the host publishes performance levels.
+   function Detect_L1_Data_Cache_Size return Cache_Query_Result is
+      Fastest : constant Cache_Query_Result :=
+        Flyology_Cachelines.Macos.Query ("hw.perflevel0.l1dcachesize");
    begin
-      if Result /= 0
-        or else Value = 0
-        or else Value > Interfaces.C.size_t (Natural'Last)
-      then
-         return Unavailable;
-      end if;
+      return
+        (if Fastest.Available
+         then Fastest
+         else Flyology_Cachelines.Macos.Query ("hw.l1dcachesize"));
+   end Detect_L1_Data_Cache_Size;
 
-      return (Available => True, Value => Natural (Value));
-   exception
-      when others =>
-         return Unavailable;
-   end Query;
-
+   --  Darwin publishes no per-performance-level line size, and the core types
+   --  of a heterogeneous Apple silicon host share one line size.
    Detected_Hardware_Cache_Line_Size : constant Cache_Query_Result :=
-     Query ("hw.cachelinesize");
+     Flyology_Cachelines.Macos.Query ("hw.cachelinesize");
    Detected_L1_Data_Cache_Size : constant Cache_Query_Result :=
-     Query ("hw.l1dcachesize");
+     Detect_L1_Data_Cache_Size;
 
    function Hardware_Cache_Line_Size return Cache_Query_Result is
      (Detected_Hardware_Cache_Line_Size);

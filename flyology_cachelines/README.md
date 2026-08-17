@@ -248,6 +248,28 @@ The compile-time spacing follows the documented architecture table: 128 bytes
 for x86-64, AArch64, and PowerPC64; 32 bytes for ARM, MIPS, SPARC, and Hexagon;
 16 bytes for m68k; 256 bytes for s390x; and 64 bytes otherwise.
 
+### Hosts with more than one core type
+
+A host whose cores are not identical has no single L1 data-cache capacity, so
+`L1_Data_Cache_Size` reports the capacity of one core type rather than a value
+that holds for every core. `L1_Data_Cache_Slots` divides that capacity by the
+compiled `Destructive_Interference_Size` and describes the same core type.
+
+macOS 12 and later publish per-core-type geometry as ordered *performance
+levels*, where `hw.perflevel0` is the highest-performing level. The crate
+queries `hw.perflevel0.l1dcachesize` and reports the performance-core capacity
+on Apple silicon. The flat `hw.l1dcachesize` reports the efficiency-core
+capacity instead: one 12P/4E Apple silicon host reports 65536 bytes for the
+flat name and 131072 bytes for `hw.perflevel0.l1dcachesize`. The crate falls
+back to the flat name only on a host that publishes no performance level, such
+as macOS 11 and earlier or an Intel Mac. `Hardware_Cache_Line_Size` is
+unaffected, because Darwin publishes no per-level line size and both Apple
+silicon core types use the same 128-byte line.
+
+Linux reports whichever L1 data cache its own query mechanism describes.
+`sysconf` answers for the calling CPU, and the sysfs fallback reads CPU 0.
+Neither is normalized to the largest core.
+
 ## Why these alignment sizes?
 
 The policy is adapted from the `CachePadded` implementation in
@@ -325,7 +347,10 @@ from a successfully detected 64-byte line.
 after normalizing their alignment literal. This prevents the duplicated specs
 from drifting as the public API or its documentation changes. On Linux, it
 also invokes the private `sysconf` and sysfs detectors independently; the
-ordinary native test exercises the public CPUID-first x86-64 path. Compile-fail
+ordinary native test exercises the public CPUID-first x86-64 path. On macOS, it
+invokes the private sysctl reader directly and checks that the reported L1
+capacity is the highest performance level the host publishes, and that the flat
+name is used only when the host publishes no performance level. Compile-fail
 tests verify that explicit and automatically fitted groups which would spill
 beyond one region are rejected.
 
