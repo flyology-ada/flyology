@@ -55,7 +55,8 @@ project Flyology_Numa is
          null;
       when "true" =>
          for Source_Files use
-           ("flyology_numa.ads", "flyology_numa-placement.ads");
+           ("flyology_numa.ads", "flyology_numa-placement.ads",
+            "flyology_numa-pools.ads");
    end case;
 
    for Library_Name use "flyology_numa";
