@@ -43,7 +43,7 @@ package body Flyology_Cachelines.Linux_Testing is
       for Index in 1 .. Classes.Count loop
          declare
             Class : constant Flyology_Cachelines.Linux.Core_Class_Parameters :=
-              Classes.Classes (Index);
+              Classes.Classes (Core_Class (Index));
          begin
             Check
               (Class.Available, "a counted core class has no geometry");
@@ -59,18 +59,18 @@ package body Flyology_Cachelines.Linux_Testing is
                declare
                   Previous : constant
                     Flyology_Cachelines.Linux.Core_Class_Parameters :=
-                      Classes.Classes (Index - 1);
+                      Classes.Classes (Core_Class (Index - 1));
                begin
                   case Classes.Ordering is
-                     when Flyology_Cachelines.Linux.Host_Reported =>
+                     when Host_Reported =>
                         Check
                           (Class.Capacity <= Previous.Capacity,
                            "classes are not ordered by descending capacity");
-                     when Flyology_Cachelines.Linux.Inferred =>
+                     when Inferred =>
                         Check
                           (Class.Total_Size <= Previous.Total_Size,
                            "classes are not ordered by descending L1 size");
-                     when Flyology_Cachelines.Linux.Unordered =>
+                     when Unordered =>
                         null;
                   end case;
                end;
@@ -90,7 +90,6 @@ package body Flyology_Cachelines.Linux_Testing is
    --  Synthetic topologies exercise grouping, ordering, and the SMT
    --  distinction, none of which a uniform test host can reach.
    procedure Check_Fixtures (Fixture_Root : String) is
-      use type Flyology_Cachelines.Linux.Class_Ordering;
 
       function Classes (Name : String)
         return Flyology_Cachelines.Linux.Core_Classes is
@@ -109,7 +108,7 @@ package body Flyology_Cachelines.Linux_Testing is
       --  No capacity published, so ordering falls to the geometry inference.
       Check (Hybrid.Count = 2, "hybrid fixture did not yield two classes");
       Check
-        (Hybrid.Ordering = Flyology_Cachelines.Linux.Inferred,
+        (Hybrid.Ordering = Inferred,
          "hybrid fixture did not report an inferred ordering");
       Check
         (Hybrid.Classes (1).Total_Size = 64 * 1_024
@@ -125,7 +124,7 @@ package body Flyology_Cachelines.Linux_Testing is
         (Capacity.Count = 2,
          "capacity fixture merged two classes sharing one geometry");
       Check
-        (Capacity.Ordering = Flyology_Cachelines.Linux.Host_Reported,
+        (Capacity.Ordering = Host_Reported,
          "capacity fixture did not report a host-reported ordering");
       Check
         (Capacity.Classes (1).Capacity = 1_024
@@ -138,7 +137,7 @@ package body Flyology_Cachelines.Linux_Testing is
         (SMT.Classes (1).CPUs = 4 and then SMT.Classes (1).Cores = 2,
          "SMT fixture counted sibling CPUs as separate cores");
       Check
-        (SMT.Ordering = Flyology_Cachelines.Linux.Unordered,
+        (SMT.Ordering = Unordered,
          "a single class did not report an unordered result");
 
       --  present is "0-1,4-5", so enumeration must reach CPU 5 and skip the

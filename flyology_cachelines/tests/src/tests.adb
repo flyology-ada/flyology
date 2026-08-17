@@ -22,6 +22,8 @@ procedure Tests is
 
    use type System.Storage_Elements.Integer_Address;
    use type Interfaces.Unsigned_8;
+   use type Flyology_Cachelines.Cache_Query_Result;
+   use type Flyology_Cachelines.Class_Ordering;
 
    type Padded_Array is
      array (Positive range <>) of aliased Padded_Integers.Padded;
@@ -142,6 +144,8 @@ procedure Tests is
      Flyology_Cachelines.L1_Data_Cache_Size;
    Slots_Query    : constant Flyology_Cachelines.Cache_Query_Result :=
      Flyology_Cachelines.L1_Data_Cache_Slots;
+   Class_Count    : constant Flyology_Cachelines.Cache_Query_Result :=
+     Flyology_Cachelines.Core_Class_Count;
 begin
    Check
      (Padded_Integers.Padded'Alignment =
@@ -409,6 +413,78 @@ begin
      (Slots_Query.Available = L1_Query.Available,
       "L1 slot-count availability does not match L1 size availability");
 
+   --  The unqualified queries must describe the highest-ranked class, so
+   --  they must agree with the same queries named explicitly.
+   Check
+     (Flyology_Cachelines.L1_Data_Cache_Size
+        (Flyology_Cachelines.Fastest_Core_Class) = L1_Query,
+      "the default L1 query does not describe the fastest core class");
+   Check
+     (Class_Count.Available = L1_Query.Available,
+      "core-class availability does not match L1 size availability");
+
+   if Class_Count.Available then
+      Check
+        (Class_Count.Value >= 1
+           and then Class_Count.Value <= Flyology_Cachelines.Max_Core_Classes,
+         "reported core-class count is outside the representable range");
+
+      --  A single class cannot be ordered, and a host that ranks its classes
+      --  must report more than one of them.
+      Check
+        ((Class_Count.Value = 1) =
+           (Flyology_Cachelines.Core_Class_Ordering =
+              Flyology_Cachelines.Unordered),
+         "core-class ordering does not agree with the class count");
+
+      for Position in 1 .. Class_Count.Value loop
+         declare
+            Class : constant Flyology_Cachelines.Core_Class :=
+              Flyology_Cachelines.Core_Class (Position);
+            Size  : constant Flyology_Cachelines.Cache_Query_Result :=
+              Flyology_Cachelines.L1_Data_Cache_Size (Class);
+            Cores : constant Flyology_Cachelines.Cache_Query_Result :=
+              Flyology_Cachelines.Core_Class_Cores (Class);
+            CPUs  : constant Flyology_Cachelines.Cache_Query_Result :=
+              Flyology_Cachelines.Core_Class_CPUs (Class);
+         begin
+            Check
+              (Size.Available,
+               "a counted core class reports no L1 data-cache size");
+            Check
+              (Size.Value >= 8 * 1_024 and then Size.Value <= 512 * 1_024,
+               "a core class L1 capacity is outside the expected range");
+            Check
+              (not Cores.Available
+                 or else not CPUs.Available
+                 or else Cores.Value <= CPUs.Value,
+               "a core class reports more cores than CPUs");
+
+            --  Whichever key ordered the classes, a later class may not
+            --  report a larger L1 data cache when the order was inferred.
+            if Position > 1
+              and then Flyology_Cachelines.Core_Class_Ordering =
+                         Flyology_Cachelines.Inferred
+            then
+               Check
+                 (Size.Value <=
+                    Flyology_Cachelines.L1_Data_Cache_Size
+                      (Flyology_Cachelines.Core_Class (Position - 1)).Value,
+                  "an inferred class order is not descending by L1 size");
+            end if;
+         end;
+      end loop;
+
+      --  A class the host did not describe is an unanswered question.
+      if Class_Count.Value < Flyology_Cachelines.Max_Core_Classes then
+         Check
+           (not Flyology_Cachelines.L1_Data_Cache_Size
+              (Flyology_Cachelines.Core_Class
+                 (Class_Count.Value + 1)).Available,
+            "a class beyond the reported count returned a value");
+      end if;
+   end if;
+
    if L1_Query.Available then
       Check
         (L1_Query.Value > 0,
@@ -439,5 +515,28 @@ begin
    Ada.Text_IO.Put_Line
      ("L1 data cache:" & Image_Or_Unavailable (L1_Query) &
       (if L1_Query.Available then " bytes" else ""));
+   Ada.Text_IO.Put_Line
+     ("core classes:" & Image_Or_Unavailable (Class_Count) & " (" &
+      Flyology_Cachelines.Core_Class_Ordering'Image & ")");
+   if Class_Count.Available then
+      for Position in 1 .. Class_Count.Value loop
+         declare
+            Class : constant Flyology_Cachelines.Core_Class :=
+              Flyology_Cachelines.Core_Class (Position);
+         begin
+            Ada.Text_IO.Put_Line
+              ("  class" & Position'Image &
+               ": l1d" &
+               Image_Or_Unavailable
+                 (Flyology_Cachelines.L1_Data_Cache_Size (Class)) &
+               " bytes, cores" &
+               Image_Or_Unavailable
+                 (Flyology_Cachelines.Core_Class_Cores (Class)) &
+               ", cpus" &
+               Image_Or_Unavailable
+                 (Flyology_Cachelines.Core_Class_CPUs (Class)));
+         end;
+      end loop;
+   end if;
    Ada.Text_IO.Put_Line ("all flyology_cachelines tests passed");
 end Tests;
