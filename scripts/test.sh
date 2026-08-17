@@ -39,6 +39,7 @@ cd "$project_root"
 "$project_root/scripts/test-run-with-timeout.sh"
 "$project_root/scripts/test-compiler-identities.sh"
 "$project_root/flyology_cachelines/scripts/test.sh"
+"$project_root/flyology_numa/scripts/test.sh"
 
 #  DNS lifecycle regressions observe the receive-loop boundary. The project
 #  default is false, so normal builds compile the observation calls away.

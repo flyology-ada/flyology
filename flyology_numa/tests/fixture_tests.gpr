@@ -1,0 +1,23 @@
+with "config/tests_config.gpr";
+
+--  Builds a test child of Flyology_NUMA, which is how the recorded host
+--  descriptions under fixtures/ are read through the private reader that a
+--  released library keeps to itself.  A child unit reaches its parent's
+--  private part; an ordinary client cannot.
+project Fixture_Tests is
+
+   for Source_Dirs use ("src_fixture/", "config/");
+   for Object_Dir use "obj/fixture/" & Tests_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Exec_Dir use "bin";
+   for Main use ("flyology_numa-fixture_testing-main.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use Tests_Config.Ada_Compiler_Switches;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
+
+end Fixture_Tests;
