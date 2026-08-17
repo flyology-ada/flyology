@@ -5,20 +5,47 @@ project Flyology_Numa is
    Host_OS : Host_OS_Kind :=
      external ("FLYOLOGY_NUMA_HOST_OS", Flyology_Numa_Config.Alire_Host_OS);
 
+   type Host_Arch_Kind is
+     ("x86_64", "aarch64", "arm64ec", "powerpc64",
+      "arm", "mips", "mips32r6", "mips64", "mips64r6", "sparc", "hexagon",
+      "m68k", "s390x", "x86", "wasm32", "wasm64", "riscv32", "riscv64",
+      "sparc64", "avr", "xtensa", "unknown");
+   Host_Arch : Host_Arch_Kind :=
+     external ("FLYOLOGY_NUMA_HOST_ARCH", Flyology_Numa_Config.Alire_Host_Arch);
+
    --  The sysfs reader is host-independent text processing, so it stays in
    --  src/ and compiles everywhere.  Only the decision to read the host's own
    --  sysfs tree, and the placement interface built on it, are platform work.
    Platform_Directory := "src/unsupported/";
+   Placement_Directory := "src/no_placement/";
    case Host_OS is
       when "macos" =>
          Platform_Directory := "src/macos/";
+
       when "linux" =>
-         Platform_Directory := "src/linux/";
+         Platform_Directory := "src/linux/common/";
+
+         --  Placement call numbers differ per architecture, and the x86-64
+         --  table disagrees with the newer shared table on the order of the
+         --  policy calls.  Guessing from the wrong table would reach a
+         --  working but unrelated kernel service, so an architecture whose
+         --  numbers are not recorded gets a table that disables placement
+         --  rather than one borrowed from elsewhere.
+         case Host_Arch is
+            when "x86_64" =>
+               Placement_Directory := "src/linux/x86_64/";
+            when "aarch64" | "riscv64" =>
+               Placement_Directory := "src/linux/generic/";
+            when others =>
+               Placement_Directory := "src/linux/unknown/";
+         end case;
+
       when "unsupported" =>
          null;
    end case;
 
-   for Source_Dirs use ("src/", "config/", Platform_Directory);
+   for Source_Dirs use
+     ("src/", "config/", Platform_Directory, Placement_Directory);
 
    type Documentation_Mode_Type is ("false", "true");
    Documentation_Mode : Documentation_Mode_Type :=
@@ -27,7 +54,8 @@ project Flyology_Numa is
       when "false" =>
          null;
       when "true" =>
-         for Source_Files use ("flyology_numa.ads");
+         for Source_Files use
+           ("flyology_numa.ads", "flyology_numa-placement.ads");
    end case;
 
    for Library_Name use "flyology_numa";

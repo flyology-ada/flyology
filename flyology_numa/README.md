@@ -11,8 +11,9 @@ host declares them to be, and which of them the running process may use.
 This crate is standalone. It does not depend on the Flyology runtime, and the
 runtime does not depend on it.
 
-Flyology is experimental. This crate reads a host description and reports it;
-it does not place memory. See [Boundaries](#boundaries).
+`Flyology_NUMA` reports the structure. `Flyology_NUMA.Placement` acts on it.
+
+Flyology is experimental. See [Boundaries](#boundaries).
 
 ## Reading the host
 
@@ -102,6 +103,61 @@ crate reports directly:
   nodes of one package. A value above 10 therefore does not mean a different
   package. Compare `Package_Of` when package identity is what matters.
 
+## Placing memory
+
+Reading a description always succeeds. Acting on one often does not, so the
+two are separate packages and support is reported before anything is tried:
+
+```ada
+case NUMA.Placement.Support is
+   when NUMA.Placement.Supported        => null;  --  go ahead
+   when NUMA.Placement.Unsupported_Host => null;  --  no such facility here
+   when NUMA.Placement.Denied           => null;  --  facility exists, we may not
+end case;
+```
+
+`Denied` is worth keeping distinct from `Unsupported_Host`. A container
+sandbox commonly refuses these calls while the machine underneath has memory
+nodes and other processes are using them. Reporting that as "this host has no
+NUMA" would be wrong, and it is the failure most easily mistaken for one.
+
+Placement governs where pages come from. It acts on whole pages, so a range
+must begin on a `Page_Size` boundary:
+
+```ada
+NUMA.Placement.Apply_To
+  (Base   => Region_Base,
+   Length => Region_Length,
+   Policy => NUMA.Placement.Interleaved,
+   Nodes  => NUMA.Allowed_Nodes,
+   Result => Outcome);
+```
+
+`Interleaved` spreads pages over the set in rotation, trading a nearby node's
+latency for the combined transfer rate of several — the right choice for
+memory every node reads. `Bound` draws only from the set and fails rather
+than spilling, which can mean running out of memory while other nodes still
+have some. `Preferred` spills instead of failing, but the host's interface
+takes a single node there, so only the lowest-numbered node in the set is
+preferred; use `Bound` or `Interleaved` to name several.
+
+`Local` and `Unrestricted` take no nodes. Passing a set alongside them is
+harmless — it is dropped before the host sees it, because the host rejects a
+policy of either kind that arrives carrying one.
+
+Every operation reports an outcome and none of them raise:
+
+```ada
+type Placement_Outcome is
+  (Applied, Not_Supported, Not_Permitted, Unusable_Nodes,
+   Unaligned, Insufficient_Memory, Failed);
+```
+
+`Apply_To_Thread` places what the calling thread allocates from then on,
+whatever the source. `Node_Of_Address` reports which node holds a page —
+but asking about an untouched page causes it to be acquired, because the
+host answers by placing it.
+
 ## Naming Ada processors
 
 Ada numbers processors from one; hosts number them from zero. GNAT bridges
@@ -119,15 +175,28 @@ CPU : constant System.Multiprocessors.CPU_Range := NUMA.To_CPU (Processor);
 
 ## Boundaries
 
-- **Reporting only.** This crate reads a description. It does not bind
-  memory to a node, migrate pages, or place threads.
+- **Memory, not threads.** Placement governs where pages come from. It does
+  not move a running thread; a thread is placed with the `CPU` aspect or a
+  dispatching domain, using the processors reported for a node.
+- **Later allocations.** `Apply_To` governs the pages a range acquires from
+  then on. Pages it already holds stay where they are unless `Move` is
+  requested, and moving pages shared with another process needs privileges
+  this process may not have.
 - **Read once.** Discovery runs while the package elaborates and is kept for
   the life of the process. Nodes added or removed afterwards are not seen.
 - **Linux and macOS.** Linux is read from `/sys/devices/system/node` and
-  `/proc/self/status`. macOS describes no memory-node structure and exposes
-  no memory-placement interface, so it reports one node. The performance and
-  efficiency processor clusters that macOS does describe are not memory
-  nodes — they share one memory domain — and are not reported here.
+  `/proc/self/status`, and placed through the kernel's memory-policy calls.
+  Those calls have no C library wrapper, and their numbers differ per
+  architecture — the x86-64 table and the table newer architectures share
+  disagree on the order of the policy calls — so an architecture whose
+  numbers this crate does not record reports `Unsupported_Host` rather than
+  calling by a number borrowed from elsewhere. x86-64, AArch64 and RISC-V 64
+  are recorded.
+- **macOS reports one node and places nothing.** It describes no
+  memory-node structure and offers no way to draw memory from a chosen part
+  of the machine. The performance and efficiency processor clusters it does
+  describe are not memory nodes — they share one memory domain — and are not
+  reported here.
 - **Limits.** Nodes above 63 and processors above 4095 are not represented.
   A host that exceeds either reports `Support.Complete` as false, so a
   partial answer can be told apart from a whole one.
