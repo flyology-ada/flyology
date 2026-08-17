@@ -2,36 +2,84 @@ with Flyology_Cachelines.Macos;
 
 package body Flyology_Cachelines.Platform is
 
-   --  macOS 12 and later describe a host whose cores are not identical as
-   --  ordered performance levels, where hw.perflevel0 is the
-   --  highest-performing level.  On Apple silicon the flat hw.l1dcachesize
-   --  reports the efficiency-core capacity, which is smaller than the
-   --  performance-core capacity, so the highest level is preferred.  A host
-   --  that publishes no performance level, including macOS 11 and earlier
-   --  and every Intel Mac, has no hw.perflevel0 name and degrades to the flat
-   --  name.  Querying hw.nperflevels first would add nothing: the per-level
-   --  name exists exactly when the host publishes performance levels.
-   function Detect_L1_Data_Cache_Size return Cache_Query_Result is
-      Fastest : constant Cache_Query_Result :=
-        Flyology_Cachelines.Macos.Query ("hw.perflevel0.l1dcachesize");
+   --  Name of a per-performance-level sysctl.  Level 0 is the
+   --  highest-performing level, so it corresponds to Fastest_Core_Class.
+   function Level_Name (Class : Core_Class; Leaf : String) return String is
+      Level : constant Natural := Natural (Class) - 1;
+      Image : constant String := Natural'Image (Level);
    begin
       return
-        (if Fastest.Available
-         then Fastest
-         else Flyology_Cachelines.Macos.Query ("hw.l1dcachesize"));
-   end Detect_L1_Data_Cache_Size;
+        "hw.perflevel" & Image (Image'First + 1 .. Image'Last) & "." & Leaf;
+   end Level_Name;
 
-   --  Darwin publishes no per-performance-level line size, and the core types
-   --  of a heterogeneous Apple silicon host share one line size.
-   Detected_Hardware_Cache_Line_Size : constant Cache_Query_Result :=
-     Flyology_Cachelines.Macos.Query ("hw.cachelinesize");
-   Detected_L1_Data_Cache_Size : constant Cache_Query_Result :=
-     Detect_L1_Data_Cache_Size;
+   function Detect return Host_Facts is
+      Result : Host_Facts;
 
-   function Hardware_Cache_Line_Size return Cache_Query_Result is
-     (Detected_Hardware_Cache_Line_Size);
+      Levels : constant Cache_Query_Result :=
+        Flyology_Cachelines.Macos.Query ("hw.nperflevels");
+      Line   : constant Cache_Query_Result :=
+        Flyology_Cachelines.Macos.Query ("hw.cachelinesize");
 
-   function L1_Data_Cache_Size return Cache_Query_Result is
-     (Detected_L1_Data_Cache_Size);
+      --  macOS 11 and earlier and every Intel Mac publish no performance
+      --  level.  Such a host has one class, described by the flat names.
+      Flat_Size : constant Cache_Query_Result :=
+        Flyology_Cachelines.Macos.Query ("hw.l1dcachesize");
+      Flat_Cores : constant Cache_Query_Result :=
+        Flyology_Cachelines.Macos.Query ("hw.physicalcpu");
+      Flat_CPUs : constant Cache_Query_Result :=
+        Flyology_Cachelines.Macos.Query ("hw.logicalcpu");
+   begin
+      Result.Line_Size := Value_Or (Line, 0);
+
+      if Levels.Available and then Levels.Value >= 1 then
+         for Class in Core_Class range
+           Fastest_Core_Class ..
+             Core_Class (Natural'Min (Levels.Value, Max_Core_Classes))
+         loop
+            declare
+               Size : constant Cache_Query_Result :=
+                 Flyology_Cachelines.Macos.Query
+                   (Level_Name (Class, "l1dcachesize"));
+            begin
+               exit when not Size.Available;
+
+               Result.Count := Natural (Class);
+               Result.Classes (Class) :=
+                 (Line_Size  => Result.Line_Size,
+                  Total_Size => Size.Value,
+                  Cores      =>
+                    Value_Or
+                      (Flyology_Cachelines.Macos.Query
+                         (Level_Name (Class, "physicalcpu")), 0),
+                  CPUs       =>
+                    Value_Or
+                      (Flyology_Cachelines.Macos.Query
+                         (Level_Name (Class, "logicalcpu")), 0));
+            end;
+         end loop;
+      end if;
+
+      if Result.Count = 0 and then Flat_Size.Available then
+         Result.Count := 1;
+         Result.Classes (Fastest_Core_Class) :=
+           (Line_Size  => Result.Line_Size,
+            Total_Size => Flat_Size.Value,
+            Cores      => Value_Or (Flat_Cores, 0),
+            CPUs       => Value_Or (Flat_CPUs, 0));
+      end if;
+
+      --  Performance levels are the host's own rank, so any order among two
+      --  or more of them is reported rather than inferred.
+      Result.Ordering :=
+        (if Result.Count >= 2 then Host_Reported else Unordered);
+
+      return Result;
+   exception
+      when others =>
+         return (Count     => 0,
+                 Ordering  => Unordered,
+                 Line_Size => 0,
+                 Classes   => (others => (others => 0)));
+   end Detect;
 
 end Flyology_Cachelines.Platform;

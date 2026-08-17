@@ -218,15 +218,19 @@ The root package also exposes:
 
 - `Destructive_Interference_Size`
 - `Hardware_Cache_Line_Size`
-- `L1_Data_Cache_Size`
-- `L1_Data_Cache_Slots`
+- `L1_Data_Cache_Size` and `L1_Data_Cache_Slots`
+- `Core_Class`, `Core_Class_Count`, `Core_Class_Ordering`, `Core_Class_Cores`,
+  and `Core_Class_CPUs`
 - `Cache_Query_Result` and `Value_Or`
 
-Runtime cache detection uses `sysctlbyname` on macOS. Linux x86-64 queries
-CPUID first; other Linux targets query `sysconf`. Both Linux paths fall back
-to `/sys/devices/system/cpu/cpu0/cache` when their primary mechanism cannot
-report the L1 data cache. Results are detected once during package elaboration
-and reused because cache geometry is stable for the life of a process.
+Runtime cache detection uses `sysctlbyname` on macOS and
+`/sys/devices/system/cpu` on Linux. Linux x86-64 queries CPUID and other Linux
+targets query `sysconf` when sysfs describes nothing at all. The host is
+inspected once, on the first query rather than during package elaboration, and
+the result is reused because cache geometry is stable for the life of a
+process. Deferring the inspection matters because describing every core class
+means reading one description per CPU on Linux, which costs tens of
+milliseconds on a host with many CPUs; a program that never asks pays nothing.
 Malformed or failed host queries return `(Available => False)` rather than an
 ambiguous default value or a conversion exception.
 
@@ -248,27 +252,67 @@ The compile-time spacing follows the documented architecture table: 128 bytes
 for x86-64, AArch64, and PowerPC64; 32 bytes for ARM, MIPS, SPARC, and Hexagon;
 16 bytes for m68k; 256 bytes for s390x; and 64 bytes otherwise.
 
-### Hosts with more than one core type
+### Core classes
 
-A host whose cores are not identical has no single L1 data-cache capacity, so
-`L1_Data_Cache_Size` reports the capacity of one core type rather than a value
-that holds for every core. `L1_Data_Cache_Slots` divides that capacity by the
-compiled `Destructive_Interference_Size` and describes the same core type.
+A host whose cores are not identical has no single L1 data-cache capacity. The
+crate groups such a host's cores into *core classes*, one per distinct cache
+geometry, and every cache query names the class it describes:
+
+```ada
+--  Without a class, queries describe the class the host ranks highest.
+Fast : constant Flyology_Cachelines.Cache_Query_Result :=
+  Flyology_Cachelines.L1_Data_Cache_Size;
+
+for Position in 1 .. Flyology_Cachelines.Value_Or
+                       (Flyology_Cachelines.Core_Class_Count, 0)
+loop
+   declare
+      Class : constant Flyology_Cachelines.Core_Class :=
+        Flyology_Cachelines.Core_Class (Position);
+   begin
+      Put_Line
+        (Flyology_Cachelines.L1_Data_Cache_Size (Class)'Image & " bytes across"
+         & Flyology_Cachelines.Core_Class_Cores (Class)'Image & " cores");
+   end;
+end loop;
+```
+
+`Core_Class_Cores` counts physical cores and `Core_Class_CPUs` counts logical
+ones. They differ under simultaneous multithreading, where sibling CPUs share
+one core's L1 data cache: a 24-core host with two threads per core reports 24
+cores and 48 CPUs in one class.
+
+`Hardware_Cache_Line_Size` takes no class. macOS publishes no per-class line
+size, and the core types of current heterogeneous parts share one line size.
+
+#### How much the order means
+
+`Core_Class_Ordering` reports what ordered the classes, because that differs by
+platform and is sometimes an inference rather than a host-reported fact:
+
+| Ordering | Meaning |
+| --- | --- |
+| `Host_Reported` | The host published a performance rank and the classes follow it. |
+| `Inferred` | The host published no rank, so classes are ordered by descending L1 data-cache capacity. |
+| `Unordered` | Fewer than two classes exist, or nothing distinguished them. |
 
 macOS 12 and later publish per-core-type geometry as ordered *performance
-levels*, where `hw.perflevel0` is the highest-performing level. The crate
-queries `hw.perflevel0.l1dcachesize` and reports the performance-core capacity
-on Apple silicon. The flat `hw.l1dcachesize` reports the efficiency-core
-capacity instead: one 12P/4E Apple silicon host reports 65536 bytes for the
-flat name and 131072 bytes for `hw.perflevel0.l1dcachesize`. The crate falls
-back to the flat name only on a host that publishes no performance level, such
-as macOS 11 and earlier or an Intel Mac. `Hardware_Cache_Line_Size` is
-unaffected, because Darwin publishes no per-level line size and both Apple
-silicon core types use the same 128-byte line.
+levels*, where `hw.perflevel0` is the highest-performing level, so macOS
+reports `Host_Reported`. On Apple silicon the flat `hw.l1dcachesize` reports
+the efficiency-core capacity: one 12P/4E host reports 65536 bytes for the flat
+name against 131072 for `hw.perflevel0.l1dcachesize`. The crate uses the flat
+name only on a host publishing no performance level, such as macOS 11 and
+earlier or an Intel Mac.
 
-Linux reports whichever L1 data cache its own query mechanism describes.
-`sysconf` answers for the calling CPU, and the sysfs fallback reads CPU 0.
-Neither is normalized to the largest core.
+Linux publishes per-CPU descriptions and no single ordering. Where the kernel
+publishes `cpuN/cpu_capacity` — its own measure of relative CPU performance,
+normalized to 1024 — that value both separates and orders the classes, and the
+ordering is `Host_Reported`. Architectures selecting the generic topology code
+publish it; x86-64 does not, so an x86-64 hybrid part falls back to ordering by
+descending L1 data-cache capacity and reports `Inferred`. That inference holds
+on current hybrid parts, where the higher-performing core has the larger L1
+data cache, and carries no meaning on a host whose classes differ some other
+way.
 
 ## Why these alignment sizes?
 

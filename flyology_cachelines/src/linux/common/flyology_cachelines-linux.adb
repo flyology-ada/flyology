@@ -227,7 +227,8 @@ package body Flyology_Cachelines.Linux is
    function Separated_By_Capacity (Classes : Core_Classes) return Boolean is
    begin
       for Index in 2 .. Classes.Count loop
-         if Classes.Classes (Index).Capacity /= Classes.Classes (1).Capacity
+         if Classes.Classes (Core_Class (Index)).Capacity /=
+              Classes.Classes (Fastest_Core_Class).Capacity
          then
             return True;
          end if;
@@ -238,8 +239,8 @@ package body Flyology_Cachelines.Linux is
    function Separated_By_Geometry (Classes : Core_Classes) return Boolean is
    begin
       for Index in 2 .. Classes.Count loop
-         if Classes.Classes (Index).Total_Size /=
-              Classes.Classes (1).Total_Size
+         if Classes.Classes (Core_Class (Index)).Total_Size /=
+              Classes.Classes (Fastest_Core_Class).Total_Size
          then
             return True;
          end if;
@@ -258,16 +259,18 @@ package body Flyology_Cachelines.Linux is
       for Index in 2 .. Classes.Count loop
          declare
             Moving : constant Core_Class_Parameters :=
-              Classes.Classes (Index);
+              Classes.Classes (Core_Class (Index));
             Place  : Natural := Index - 1;
          begin
             while Place >= 1
-              and then Key (Classes.Classes (Place)) < Key (Moving)
+              and then Key (Classes.Classes (Core_Class (Place)))
+                         < Key (Moving)
             loop
-               Classes.Classes (Place + 1) := Classes.Classes (Place);
+               Classes.Classes (Core_Class (Place + 1)) :=
+                 Classes.Classes (Core_Class (Place));
                Place := Place - 1;
             end loop;
-            Classes.Classes (Place + 1) := Moving;
+            Classes.Classes (Core_Class (Place + 1)) := Moving;
          end;
       end loop;
    end Order_Classes;
@@ -288,20 +291,22 @@ package body Flyology_Cachelines.Linux is
                --  share a geometry stay separate when the host rates them
                --  differently.
                for Index in 1 .. Result.Count loop
-                  if Result.Classes (Index).Line_Size = Found.Line_Size
-                    and then Result.Classes (Index).Total_Size =
-                               Found.Total_Size
-                    and then Result.Classes (Index).Capacity = Found.Capacity
-                  then
-                     Result.Classes (Index).CPUs :=
-                       Result.Classes (Index).CPUs + 1;
-                     if Found.Leads_Cache then
-                        Result.Classes (Index).Cores :=
-                          Result.Classes (Index).Cores + 1;
+                  declare
+                     Class : Core_Class_Parameters renames
+                       Result.Classes (Core_Class (Index));
+                  begin
+                     if Class.Line_Size = Found.Line_Size
+                       and then Class.Total_Size = Found.Total_Size
+                       and then Class.Capacity = Found.Capacity
+                     then
+                        Class.CPUs := Class.CPUs + 1;
+                        if Found.Leads_Cache then
+                           Class.Cores := Class.Cores + 1;
+                        end if;
+                        Matched := True;
+                        exit;
                      end if;
-                     Matched := True;
-                     exit;
-                  end if;
+                  end;
                end loop;
 
                if not Matched then
@@ -312,7 +317,7 @@ package body Flyology_Cachelines.Linux is
                   end if;
 
                   Result.Count := Result.Count + 1;
-                  Result.Classes (Result.Count) :=
+                  Result.Classes (Core_Class (Result.Count)) :=
                     (Available  => True,
                      Line_Size  => Found.Line_Size,
                      Total_Size => Found.Total_Size,

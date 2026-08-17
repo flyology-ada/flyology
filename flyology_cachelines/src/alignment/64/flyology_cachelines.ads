@@ -30,26 +30,85 @@ package Flyology_Cachelines is
    --  A cache query result with no host value.
    Unavailable : constant Cache_Query_Result := (Available => False);
 
+   --  The largest number of core classes this crate distinguishes.
+   Max_Core_Classes : constant := 8;
+
+   --  One class of cores that report a single cache geometry.
+   --
+   --  A host whose cores are all alike has one class.  A host that combines
+   --  core types has one class per type, ordered so that Fastest_Core_Class
+   --  is the class the host ranks highest.  Consult Core_Class_Ordering
+   --  before relying on that rank: it reports whether the host stated the
+   --  order or the crate inferred it.
+   type Core_Class is range 1 .. Max_Core_Classes;
+
+   --  The class every unqualified cache query describes.
+   Fastest_Core_Class : constant Core_Class := 1;
+
+   --  How much the order of the core classes is worth.
+   --
+   --  @enum Host_Reported The host published a performance rank and the
+   --    classes follow it.  macOS performance levels and the Linux per-CPU
+   --    capacity values are such ranks.
+   --  @enum Inferred The host published no rank, so the classes are ordered
+   --    by descending L1 data-cache capacity.  That holds on current hybrid
+   --    parts, where the higher-performing core has the larger L1 data cache,
+   --    and carries no meaning on a host whose classes differ some other way.
+   --  @enum Unordered Fewer than two classes exist, or nothing distinguished
+   --    them, so the order carries no information.
+   type Class_Ordering is (Host_Reported, Inferred, Unordered);
+
    --  Return the physical cache-line size reported by the host OS.
+   --
+   --  This is not reported per core class.  macOS publishes no per-class line
+   --  size, and the core types of current heterogeneous parts share one line
+   --  size.
    --  @return The detected size in bytes, or Unavailable.
    function Hardware_Cache_Line_Size return Cache_Query_Result;
 
-   --  Return the L1 data-cache capacity in bytes.
+   --  Return the number of core classes the host distinguishes.
+   --  @return The detected class count, or Unavailable.
+   function Core_Class_Count return Cache_Query_Result;
+
+   --  Return what ordered the core classes.
+   --  @return The ordering basis, which is Unordered when the order means
+   --    nothing.
+   function Core_Class_Ordering return Class_Ordering;
+
+   --  Return the number of physical cores in a core class.
+   --  @param Class The core class to describe.
+   --  @return The detected core count, or Unavailable.
+   function Core_Class_Cores
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+
+   --  Return the number of logical CPUs in a core class.
+   --
+   --  This exceeds the core count on a host with simultaneous multithreading,
+   --  where sibling CPUs share one core's L1 data cache.
+   --  @param Class The core class to describe.
+   --  @return The detected CPU count, or Unavailable.
+   function Core_Class_CPUs
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+
+   --  Return the L1 data-cache capacity in bytes for a core class.
    --
    --  A host whose cores are not identical has no single L1 data-cache
-   --  capacity, so the result describes one core type.  macOS reports the
-   --  highest-performing core type: an Apple silicon host reports its
-   --  performance-core capacity, not the smaller efficiency-core capacity.
-   --  Linux reports the cache that its own query mechanism describes, which
-   --  is normally the cache of CPU 0.
+   --  capacity, so the result describes one class rather than every core.
+   --  The default describes the class the host ranks highest: on Apple
+   --  silicon that is a performance core, whose L1 data cache is larger than
+   --  an efficiency core's.
+   --  @param Class The core class to describe.
    --  @return The detected capacity in bytes, or Unavailable.
-   function L1_Data_Cache_Size return Cache_Query_Result;
+   function L1_Data_Cache_Size
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Return the number of destructive-interference-sized slots in L1.
    --  These are spacing-policy slots, not physical cache lines.  The count
-   --  divides L1_Data_Cache_Size and therefore describes the same core type.
+   --  divides L1_Data_Cache_Size and describes the same core class.
+   --  @param Class The core class to describe.
    --  @return The derived slot count, or Unavailable.
-   function L1_Data_Cache_Slots return Cache_Query_Result;
+   function L1_Data_Cache_Slots
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Explicitly choose a fallback for an unavailable query result.
    --  @param Result The cache query result to inspect.
