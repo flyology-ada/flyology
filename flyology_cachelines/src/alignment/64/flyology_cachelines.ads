@@ -110,6 +110,25 @@ package Flyology_Cachelines is
    function L1_Data_Cache_Slots
      (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
+   --  Return the L2 cache capacity in bytes for a core class.
+   --
+   --  L2 is shared between cores on many designs, so this capacity is not
+   --  available to one core alone.  Read L2_Sharing_Cores before sizing a
+   --  per-core working set against it.
+   --  @param Class The core class to describe.
+   --  @return The detected capacity in bytes, or Unavailable.
+   function L2_Cache_Size
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+
+   --  Return how many cores share one L2 cache in a core class.
+   --
+   --  One means each core has its own L2.  A larger count means the capacity
+   --  L2_Cache_Size reports is divided among that many cores.
+   --  @param Class The core class to describe.
+   --  @return The detected core count, or Unavailable.
+   function L2_Sharing_Cores
+     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+
    --  Explicitly choose a fallback for an unavailable query result.
    --  @param Result The cache query result to inspect.
    --  @param Fallback The value to return when Result is unavailable.

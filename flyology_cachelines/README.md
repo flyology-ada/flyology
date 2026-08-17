@@ -219,6 +219,7 @@ The root package also exposes:
 - `Destructive_Interference_Size`
 - `Hardware_Cache_Line_Size`
 - `L1_Data_Cache_Size` and `L1_Data_Cache_Slots`
+- `L2_Cache_Size` and `L2_Sharing_Cores`
 - `Core_Class`, `Core_Class_Count`, `Core_Class_Ordering`, `Core_Class_Cores`,
   and `Core_Class_CPUs`
 - `Cache_Query_Result` and `Value_Or`
@@ -284,6 +285,20 @@ cores and 48 CPUs in one class.
 
 `Hardware_Cache_Line_Size` takes no class. macOS publishes no per-class line
 size, and the core types of current heterogeneous parts share one line size.
+
+#### L2 is shared
+
+`L2_Cache_Size` reports a class's level 2 capacity, and `L2_Sharing_Cores`
+reports how many cores share one such cache. The pair matters because L2 is
+rarely private: a 12P/4E Apple silicon host reports 16 MiB of L2 shared by six
+performance cores and 4 MiB shared by four efficiency cores, so neither figure
+is a per-core budget. A server x86-64 part with two threads per core reports 2
+MiB shared by one core, which is private. Divide by `L2_Sharing_Cores` before
+sizing a per-core working set.
+
+The flat `hw.l2cachesize` on Apple silicon reports the efficiency cluster, so it
+understates the performance cluster by a factor of four — the same defect the
+flat `hw.l1dcachesize` has at a factor of two. Naming a class avoids both.
 
 #### How much the order means
 

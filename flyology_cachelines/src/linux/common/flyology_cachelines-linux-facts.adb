@@ -14,10 +14,12 @@ package body Flyology_Cachelines.Linux.Facts is
             Result.Count := 1;
             Result.Line_Size := Fallback.Line_Size;
             Result.Classes (Fastest_Core_Class) :=
-              (Line_Size  => Fallback.Line_Size,
-               Total_Size => Fallback.Total_Size,
-               Cores      => 0,
-               CPUs       => 0);
+              (Line_Size        => Fallback.Line_Size,
+               Total_Size       => Fallback.Total_Size,
+               Cores            => 0,
+               CPUs             => 0,
+               L2_Size          => 0,
+               L2_Sharing_Cores => 0);
          end if;
 
          return Result;
@@ -37,10 +39,18 @@ package body Flyology_Cachelines.Linux.Facts is
               Classes.Classes (Core_Class (Index));
          begin
             Result.Classes (Core_Class (Index)) :=
-              (Line_Size  => Class.Line_Size,
-               Total_Size => Class.Total_Size,
-               Cores      => Class.Cores,
-               CPUs       => Class.CPUs);
+              (Line_Size        => Class.Line_Size,
+               Total_Size       => Class.Total_Size,
+               Cores            => Class.Cores,
+               CPUs             => Class.CPUs,
+               L2_Size          => Class.L2_Size,
+               --  sysfs counts logical CPUs sharing the cache.  This class's
+               --  own threads-per-core ratio turns that into a core count.
+               L2_Sharing_Cores =>
+                 (if Class.L2_CPUs = 0
+                  then 0
+                  else Natural'Max
+                         (Class.L2_CPUs * Class.Cores / Class.CPUs, 1)));
          end;
       end loop;
 

@@ -3,10 +3,12 @@ private package Flyology_Cachelines.Platform is
    --  What the host reports about one core class.  A zero field is a value
    --  the host did not supply.
    type Class_Facts is record
-      Line_Size  : Natural := 0;
-      Total_Size : Natural := 0;
-      Cores      : Natural := 0;
-      CPUs       : Natural := 0;
+      Line_Size        : Natural := 0;
+      Total_Size       : Natural := 0;
+      Cores            : Natural := 0;
+      CPUs             : Natural := 0;
+      L2_Size          : Natural := 0;
+      L2_Sharing_Cores : Natural := 0;
    end record;
 
    type Class_Facts_Table is array (Core_Class) of Class_Facts;

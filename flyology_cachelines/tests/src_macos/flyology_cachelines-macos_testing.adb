@@ -85,6 +85,18 @@ package body Flyology_Cachelines.Macos_Testing is
               (L1_Data_Cache_Size (Fastest_Core_Class).Value = Fastest.Value,
                "class 1 does not describe performance level 0");
 
+            --  L2 is the level's own, not the flat name.  On Apple silicon
+            --  the flat hw.l2cachesize reports the efficiency cluster, which
+            --  is several times smaller than the performance cluster's.
+            Check
+              (L2_Cache_Size (Fastest_Core_Class).Value =
+                 Query ("hw.perflevel0.l2cachesize").Value,
+               "class 1 does not report performance level 0 L2");
+            Check
+              (L2_Sharing_Cores (Fastest_Core_Class).Value =
+                 Query ("hw.perflevel0.cpusperl2").Value,
+               "class 1 does not report the level 0 L2 sharing");
+
             if Count.Value >= 2 then
                --  Level 1 is the efficiency level on Apple silicon, and the
                --  flat sysctl reports exactly that level.
@@ -95,6 +107,14 @@ package body Flyology_Cachelines.Macos_Testing is
                Check
                  (L1_Data_Cache_Size (2).Value = Flat.Value,
                   "the flat sysctl does not match the last level");
+               Check
+                 (L2_Cache_Size (2).Value =
+                    Query ("hw.l2cachesize").Value,
+                  "the flat L2 sysctl does not match the last level");
+               Check
+                 (L2_Cache_Size (Fastest_Core_Class).Value >=
+                    L2_Cache_Size (2).Value,
+                  "the fastest class reports a smaller L2 than the slowest");
             end if;
 
             for Class in Core_Class range 1 .. Core_Class (Count.Value) loop
