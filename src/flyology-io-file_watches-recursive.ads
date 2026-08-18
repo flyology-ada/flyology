@@ -70,8 +70,7 @@ package Flyology.IO.File_Watches.Recursive is
       Result     : out Recursive_Event;
       Outcome    : out Wait_Outcome;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-   with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Release every directory registration and owned pathname. Repeated calls
    --  are harmless. Item becomes closed even when cleanup reports failure.

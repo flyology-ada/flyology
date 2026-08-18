@@ -1477,6 +1477,21 @@ entries are ready together the lowest index wins. The fixed limit of 32 keeps
 per-fiber scheduler storage predictable and is intended for protocol engines,
 not as a replacement for ownership-aware connection APIs.
 
+`Wait_Request_Array` and `Interrupt_Set` carry that limit in their index
+subtypes. `Wait_Index` spans `1 .. Max_Wait_Requests`. `Interrupt_Index` stops
+one position lower because `Wait_Interruptibly` spends request position 1 on
+its primary descriptor, so a complete interrupt set holds 31 members rather
+than 32. A static bound outside those ranges is a compile-time diagnostic that
+`-gnatwe` promotes to an error; a computed bound outside them raises
+`Constraint_Error` where the array is declared.
+
+Both subtypes constrain index position rather than element count. This is a
+source-incompatible change from flyology 0.1.0, which accepted any `Positive`
+bounds and reported an oversized set as `Device_Error` from inside the call. A
+declaration such as `Wait_Request_Array (100 .. 105)` is now out of range even
+though it holds six elements, so a slice taken at high index positions must be
+rebased to start at 1.
+
 Created and accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are
 exposed to the caller; Linux sends use `MSG_NOSIGNAL`. The nonblocking hot path
 returns ordinary would-block and interrupted results to Ada instead of raising
@@ -1810,8 +1825,10 @@ signal wakes all operations registered with that source.
 The raw I/O boundary represents these independent wake descriptors as an
 `Interrupt_Set` rather than fixed close/shutdown/token parameters. This keeps
 owner-specific policy in `Connections`, TLS, and other structured layers while
-allowing low-level callers to compose a bounded set of lifecycle sources. Raw
-waits observe set members for readability but never consume or close them.
+allowing low-level callers to compose a bounded set of lifecycle sources.
+`Interrupt_Index` bounds that set to 31 positions because the primary
+descriptor occupies the first slot of the request array built inside the wait.
+Raw waits observe set members for readability but never consume or close them.
 
 A raw wait borrows its descriptor rather than owning it, so another task may
 close that descriptor while a poller interest is still armed. The kernel then
@@ -3233,9 +3250,10 @@ Current smoke coverage includes:
   declared and allocator-created tasks, timeoutable native and lightweight
   waiters, concurrent wakeup, and abortable waits;
 - lightweight/native socket-pair transfer, simultaneous read/write watches on one
-  descriptor, bounded multi-descriptor waits, lowest-index simultaneous
-  readiness, partial-registration rollback, abort cleanup, descriptor reuse,
-  and timeout behavior;
+  descriptor, bounded multi-descriptor waits, at-limit request and interrupt
+  sets, compile-time rejection of out-of-range wait-set index bounds,
+  lowest-index simultaneous readiness, partial-registration rollback, abort
+  cleanup, descriptor reuse, and timeout behavior;
 - native/lightweight local DNS resolution with source/question validation, OS
   entropy and deterministic test injection, positive/negative cache TTLs,
   ordered split-DNS identity, retry and TCP failover, AAAA-to-A deadline
@@ -3764,6 +3782,11 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   completion. Token cancellation and Ada task abort request backend
   cancellation, but deliberately keep the task suspended when the kernel says
   the operation is already completing, unsupported, or not cancelable.
+- `Flyology.IO.Wait_Request_Array` and `Flyology.IO.Interrupt_Set` constrain
+  caller index positions, not element counts. Every bound must lie inside
+  `Wait_Index` or `Interrupt_Index`, so a short array or slice declared at high
+  index positions is rejected. An interrupt set reaches 31 positions rather
+  than 32 because the primary descriptor occupies the first request position.
 - `Flyology.IO.Connections` provides scheduler-driven cancellation and
   generation-safe concurrent close without periodic readiness timeouts. Its
   intentionally exclusive operation gate means a single connection does not

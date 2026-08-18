@@ -98,8 +98,7 @@ package Flyology.IO.File_Watches is
       Result     : out File_Event;
       Outcome    : out Wait_Outcome;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-   with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Release all registrations and the platform queue. Repeated calls are
    --  harmless. The watcher is invalidated even if a close reports failure.

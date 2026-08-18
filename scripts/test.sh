@@ -888,6 +888,37 @@ then
   exit 1
 fi
 
+#  Wait_Index and Interrupt_Index constrain caller index positions rather than
+#  element counts, and an interrupt set reserves position one for the primary
+#  descriptor. Compile both out-of-range fixtures and fail if the compiler
+#  accepts either; the guarantee is a compile-time diagnostic, so no
+#  behavioral program can observe it.
+wait_index_rejection_project="$project_root/tests/fixtures/wait_index/\
+wait_index_rejection.gpr"
+wait_index_rejection_log="$project_root/build/tests/wait-index-rejection.log"
+expect_wait_index_rejection () {
+  fixture_main=$1
+  rejecting_subtype=$2
+  if run_gprbuild \
+    --RTS="$project_root/build/rts" \
+    -f -c -p \
+    -P "$wait_index_rejection_project" "$fixture_main" \
+    >"$wait_index_rejection_log" 2>&1
+  then
+    printf '%s\n' "out-of-range wait set was accepted: $fixture_main" >&2
+    exit 1
+  fi
+  if ! grep -Fq "out of range of type \"$rejecting_subtype\"" \
+    "$wait_index_rejection_log"
+  then
+    printf '%s\n' "$fixture_main was rejected for another reason" >&2
+    cat "$wait_index_rejection_log" >&2
+    exit 1
+  fi
+}
+expect_wait_index_rejection oversized_wait_request_set.adb Wait_Index
+expect_wait_index_rejection full_interrupt_set.adb Interrupt_Index
+
 #  Prove that a separate Alire workspace can locate the crate, prepare its own
 #  runtime outside the dependency checkout, and build against only public GPR
 #  and Ada interfaces.

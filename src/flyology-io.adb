@@ -118,8 +118,6 @@ package body Flyology.IO is
    begin
       if Requests'Length = 0 then
          return 0;
-      elsif Requests'Length > Max_Wait_Requests then
-         raise Device_Error with "too many readiness descriptors";
       end if;
 
       declare
@@ -296,11 +294,11 @@ package body Flyology.IO is
    begin
       if FD < 0 then
          raise Device_Error with "invalid descriptor";
-      elsif Interrupts'Length >= Max_Wait_Requests then
-         raise Device_Error with "too many interrupt descriptors";
       end if;
 
       declare
+         --  Position 1 carries the primary descriptor. Interrupt_Index stops
+         --  one position below Wait_Index, so this set always fits.
          Requests : Wait_Request_Array (1 .. Interrupts'Length + 1);
          Result   : Natural;
       begin

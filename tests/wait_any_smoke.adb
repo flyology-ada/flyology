@@ -61,8 +61,9 @@ procedure Wait_Any_Smoke is
       end;
 
       --  Interrupt sets are not tied to the three ownership sources used by
-      --  structured connections. Raw callers can compose any bounded number
-      --  of wake descriptors, and caller index bounds need not start at one.
+      --  structured connections. Raw callers can compose any wake descriptors
+      --  that Interrupt_Index admits, and caller index bounds need not start
+      --  at one.
       declare
          Interrupts : constant Flyology.IO.Interrupt_Set (5 .. 8) :=
            [others => Flyology.IO.Sockets.Native_Descriptor (Left_2)];
@@ -109,6 +110,21 @@ procedure Wait_Any_Smoke is
               (Flyology.IO.Sockets.Native_Descriptor (Left_2),
                Flyology.IO.For_Read)];
          Passed := Passed and then Flyology.IO.Wait_Any (Requests, 0.0) = 1;
+      end;
+
+      --  Wait_Interruptibly spends request position 1 on its primary
+      --  descriptor, so a complete interrupt set holds one member fewer than
+      --  a complete request set and still fills the internal request array.
+      declare
+         Interrupts : constant Flyology.IO.Interrupt_Set
+           (1 .. Flyology.IO.Max_Wait_Requests - 1) :=
+             [others => Flyology.IO.Sockets.Native_Descriptor (Left_2)];
+      begin
+         Passed := Passed and then Flyology.IO.Wait_Interruptibly
+           (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+            Flyology.IO.For_Read,
+            1.0,
+            Interrupts) = Flyology.IO.Interrupted;
       end;
 
       declare

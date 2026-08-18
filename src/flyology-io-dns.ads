@@ -65,8 +65,7 @@ package Flyology.IO.DNS is
       Timeout     : Duration := 5.0;
       Interrupts  : Interrupt_Set := No_Interrupts;
       Configuration_Path : String := "/etc/resolv.conf")
-      return Address_Array
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      return Address_Array;
 
    --  Resolve through explicit numeric DNS endpoints without search-domain
    --  expansion. Timeout is one deadline across family queries, Attempts, and
@@ -98,8 +97,7 @@ package Flyology.IO.DNS is
       Attempts     : Positive := 2;
       Retry_Interval : Duration := 1.0;
       Interrupts     : Interrupt_Set := No_Interrupts)
-      return Address_Array
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      return Address_Array;
 
    --  Atomically remove all process-local positive and negative cache entries.
    --  The cache owns no descriptors or background tasks and is safe to use

@@ -22,10 +22,20 @@ package Flyology.IO with Preelaborate is
    subtype Descriptor is Interfaces.C.int;
    --  Sentinel denoting no descriptor.
    Invalid_Descriptor : constant Descriptor := Interfaces.C.int (-1);
+   --  Maximum number of descriptors in one allocation-free Wait_Any call.
+   Max_Wait_Requests : constant := 32;
+   --  Caller index positions in one Wait_Any request set. The subtype bounds
+   --  each element position rather than the element count, so every array
+   --  and slice must lie inside 1 .. Max_Wait_Requests.
+   subtype Wait_Index is Positive range 1 .. Max_Wait_Requests;
+   --  Caller index positions in one interrupt set. An interruptible wait
+   --  spends request position 1 on its primary descriptor, so an interrupt
+   --  set admits one position fewer than a complete request set.
+   subtype Interrupt_Index is Positive range 1 .. Max_Wait_Requests - 1;
    --  Readable wake descriptors composed into an interruptible wait. The
    --  wait observes but never reads or closes them; their owners must outlive
-   --  the call.
-   type Interrupt_Set is array (Positive range <>) of Descriptor;
+   --  the call. Interrupt_Index constrains the position of every member.
+   type Interrupt_Set is array (Interrupt_Index range <>) of Descriptor;
    --  Empty interrupt set used when no wake source is present.
    No_Interrupts : constant Interrupt_Set (1 .. 0) :=
      (others => Invalid_Descriptor);
@@ -46,11 +56,9 @@ package Flyology.IO with Preelaborate is
       FD        : Descriptor;
       Condition : Wait_Kind;
    end record;
-   --  Caller-indexed set passed to Wait_Any.
-   type Wait_Request_Array is array (Positive range <>) of Wait_Request;
-
-   --  Maximum number of descriptors in one allocation-free Wait_Any call.
-   Max_Wait_Requests : constant := 32;
+   --  Caller-indexed set passed to Wait_Any. Wait_Index constrains the
+   --  position of every member.
+   type Wait_Request_Array is array (Wait_Index range <>) of Wait_Request;
 
    --  Report whether the calling Ada task uses a Flyology event loop.
    --  @return True for a lightweight task; False for a native task
@@ -76,14 +84,13 @@ package Flyology.IO with Preelaborate is
    --  descriptors and read/write pairs are supported; the lowest caller index
    --  wins simultaneous readiness. No descriptor is consumed. Lightweight
    --  tasks suspend; native tasks block their thread.
-   --  @param Requests At most Max_Wait_Requests readiness requests
+   --  @param Requests Readiness requests positioned within Wait_Index
    --  @param Timeout Deadline interval in seconds
    --  @return Exact Requests index ready, or 0 on timeout or empty input
    --  @exception Device_Error A descriptor is invalid or polling fails
    function Wait_Any
      (Requests : Wait_Request_Array;
-      Timeout  : Duration := Infinite) return Natural
-     with Pre => Requests'Length <= Max_Wait_Requests;
+      Timeout  : Duration := Infinite) return Natural;
 
    --  Wait for FD or any readable interrupt source. Interrupt
    --  descriptors are neither read nor closed. Timeout and lane behavior
@@ -91,15 +98,14 @@ package Flyology.IO with Preelaborate is
    --  @param FD Primary valid descriptor
    --  @param Condition Primary readiness condition
    --  @param Timeout Deadline interval in seconds
-   --  @param Interrupts At most Max_Wait_Requests - 1 readable wake
-   --     descriptors
+   --  @param Interrupts Readable wake descriptors positioned within
+   --     Interrupt_Index
    --  @return Ready, Timed_Out, or Interrupted
    --  @exception Device_Error FD is invalid or the poller fails
    function Wait_Interruptibly
      (FD          : Descriptor;
       Condition   : Wait_Kind;
       Timeout     : Duration := Infinite;
-      Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome;
 
 end Flyology.IO;

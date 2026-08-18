@@ -503,8 +503,7 @@ package Flyology.IO.Sockets is
       Item       : out Ada.Streams.Stream_Element_Array;
       Last       : out Ada.Streams.Stream_Element_Offset;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Receive one UDP datagram with task-aware readiness and one deadline.
    --  Source and local destination endpoints are returned atomically with the
@@ -530,8 +529,7 @@ package Flyology.IO.Sockets is
       Last       : out Ada.Streams.Stream_Element_Offset;
       Metadata   : out Datagram_Metadata;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Receive directly into an acquired unique buffer and replace its readable
    --  length. The buffer remains solely owned by the caller while the kernel
@@ -551,8 +549,7 @@ package Flyology.IO.Sockets is
       Received   : out Natural;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Flyology.Buffers.Has_Buffer (Item)
-       and then Interrupts'Length < Max_Wait_Requests,
+     with Pre => Flyology.Buffers.Has_Buffer (Item),
           Post => Flyology.Buffers.Length (Item) = Received;
 
    --  Fill Item or raise. One Timeout deadline spans every partial receive.
@@ -568,8 +565,7 @@ package Flyology.IO.Sockets is
      (Socket     : Socket_Type;
       Item       : out Ada.Streams.Stream_Element_Array;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Send one available chunk with task-aware readiness and one deadline.
    --  @param Socket Open connected socket
@@ -586,8 +582,7 @@ package Flyology.IO.Sockets is
       Item       : Ada.Streams.Stream_Element_Array;
       Last       : out Ada.Streams.Stream_Element_Offset;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Send one UDP datagram to Destination with task-aware readiness and one
    --  deadline. The kernel selects the local source address. Empty Item sends
@@ -608,8 +603,7 @@ package Flyology.IO.Sockets is
       Last        : out Ada.Streams.Stream_Element_Offset;
       Destination : Endpoint;
       Timeout     : Duration := Infinite;
-      Interrupts  : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts  : Interrupt_Set := No_Interrupts);
 
    --  Send one UDP datagram while selecting its local source endpoint. Source
    --  normally comes from received Metadata.Destination. Its address and IPv6
@@ -636,9 +630,7 @@ package Flyology.IO.Sockets is
       Source      : Endpoint;
       Timeout     : Duration := Infinite;
       Interrupts  : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       Source.Family = Destination.Family
-         and then Interrupts'Length < Max_Wait_Requests;
+     with Pre => Source.Family = Destination.Family;
 
    --  Send one available chunk directly from a unique buffer. No Flyology
    --  payload copy is made and Item remains owned by the caller.
@@ -657,8 +649,7 @@ package Flyology.IO.Sockets is
       Sent       : out Natural;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Flyology.Buffers.Has_Buffer (Item)
-       and then Interrupts'Length < Max_Wait_Requests;
+     with Pre => Flyology.Buffers.Has_Buffer (Item);
 
    --  Send all of Item or raise. One Timeout deadline spans every partial
    --  send.
@@ -674,8 +665,7 @@ package Flyology.IO.Sockets is
      (Socket     : Socket_Type;
       Item       : Ada.Streams.Stream_Element_Array;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Send a unique buffer's complete readable payload without a Flyology
    --  payload copy. Item remains owned until the synchronous call returns.
@@ -692,8 +682,7 @@ package Flyology.IO.Sockets is
       Item       : Flyology.Buffers.Unique_Buffer;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Flyology.Buffers.Has_Buffer (Item)
-       and then Interrupts'Length < Max_Wait_Requests;
+     with Pre => Flyology.Buffers.Has_Buffer (Item);
 
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
@@ -714,10 +703,8 @@ package Flyology.IO.Sockets is
       Address    : out Endpoint;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       not Is_Open (Socket) and then
-       Interrupts'Length < Max_Wait_Requests,
-       Post => Is_Open (Socket);
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
 
    --  Accept one pathname Unix-stream connection and configure it for
    --  Flyology I/O. No peer pathname is returned because connected pathname
@@ -738,10 +725,8 @@ package Flyology.IO.Sockets is
       Socket     : in out Socket_Type;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       not Is_Open (Socket) and then
-       Interrupts'Length < Max_Wait_Requests,
-       Post => Is_Open (Socket);
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
 
    --  Connect Socket to Server with task-aware readiness and one deadline. An
    --  attempt that the kernel is still establishing, including one reported as
@@ -758,8 +743,7 @@ package Flyology.IO.Sockets is
      (Socket     : Socket_Type;
       Server     : Endpoint;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
    --  Connect Socket to a pathname Unix-stream server with task-aware
    --  readiness and one deadline. The pathname names a filesystem entry, not
@@ -776,8 +760,7 @@ package Flyology.IO.Sockets is
      (Socket     : Socket_Type;
       Server     : Unix_Path;
       Timeout    : Duration := Infinite;
-      Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts : Interrupt_Set := No_Interrupts);
 
 private
    Unix_Path_Storage_Capacity : constant := 108;
