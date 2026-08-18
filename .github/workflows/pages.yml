@@ -3,6 +3,7 @@ name: Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,12 +12,12 @@ permissions:
   id-token: write
 
 concurrency:
-  group: flyology-pages
-  cancel-in-progress: false
+  group: flyology-pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
-    name: Build site and API reference
+    name: Build and check site
     runs-on: ubuntu-latest
     steps:
       - name: Check out sources
@@ -40,12 +41,14 @@ jobs:
       - name: Install GNATdoc
         run: alr install gnatdoc_bin
       - name: Configure Pages
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Build site
         run: ./scripts/build-site.sh
       - name: Check site links
         run: node ./vendor/website-kit/scripts/check-site.mjs build/site
       - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: build/site
@@ -53,6 +56,7 @@ jobs:
   deploy:
     name: Publish site
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
