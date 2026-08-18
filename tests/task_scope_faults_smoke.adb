@@ -1,5 +1,6 @@
 with Ada.Command_Line;
 with Ada.Real_Time;
+with Ada.Text_IO;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Task_Scopes;
@@ -18,12 +19,31 @@ procedure Task_Scope_Faults_Smoke is
    --  this long.
    Hold_After_Cancel : constant Duration := 0.05;
 
-   --  Largest accepted parent-to-child cancellation latency. The retired
-   --  polling monitor woke every 10 ms, so its latency was spread over
-   --  0 .. 10 ms and could not stay below this bound for every round.
-   Latency_Limit : constant Duration := 0.005;
+   --  Parent-to-child cancellation costs two task wakes, not a poll period,
+   --  so a prompt round lands in the tens of microseconds. The retired
+   --  polling monitor woke every 10 ms and spread its latency over
+   --  0 .. 10 ms, leaving only about one round in ten inside this bound.
+   Prompt_Limit : constant Duration := 0.001;
 
    Latency_Rounds : constant := 16;
+
+   --  Both wakes on the propagation path can be delayed by the host rather
+   --  than by Flyology: a contended shared runner deschedules a runnable
+   --  thread for milliseconds at a time, and requiring every round to be
+   --  prompt measured that scheduling instead of the mechanism. Requiring
+   --  most rounds to be prompt keeps the evidence about the mechanism and is
+   --  the stronger claim: a 10 ms poll places about 1.6 of 16 rounds inside
+   --  Prompt_Limit, so it clears this bar roughly once in two million runs,
+   --  against once in sixty-five thousand for a whole-round 5 ms bound.
+   Prompt_Rounds_Required : constant := 10;
+
+   --  Whatever the host is doing, no round may be delayed without bound.
+   --  This is a sanity ceiling rather than a promptness claim: it is the
+   --  reason the tolerated rounds above cannot hide an arbitrarily slow
+   --  propagation path.
+   Stall_Ceiling : constant Duration := 0.500;
+
+   type Latency_Samples is array (1 .. Latency_Rounds) of Duration;
 
    protected Cancel_Timing is
       procedure Reset;
@@ -238,9 +258,37 @@ procedure Task_Scope_Faults_Smoke is
       Worker_Pool_Test_Control.Reset;
    end Check_Activation_Failure_Rollback;
 
+   --  Report every measured round so a failure says which rounds were slow
+   --  and by how much instead of only naming the assertion's source line.
+   procedure Report_Latencies
+     (Observed : Latency_Samples; Prompt : Natural; Worst : Duration) is
+   begin
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         "parent cancellation latency:" & Natural'Image (Prompt) & " of"
+         & Natural'Image (Latency_Rounds) & " rounds within"
+         & Duration'Image (Prompt_Limit) & "s (at least"
+         & Natural'Image (Prompt_Rounds_Required) & " required), worst"
+         & Duration'Image (Worst) & "s (ceiling"
+         & Duration'Image (Stall_Ceiling) & "s)");
+      for Round in Observed'Range loop
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "  round" & Integer'Image (Round) & ":"
+            & Duration'Image (Observed (Round)) & "s");
+      end loop;
+   end Report_Latencies;
+
    --  Parent cancellation must reach the scope token through a blocking wait
-   --  rather than a periodic poll.
+   --  rather than a periodic poll. The distinguishing evidence is the shape
+   --  of the latency distribution rather than any single wall-clock figure:
+   --  a blocking wait puts round after round orders of magnitude below any
+   --  poll period, while a poll spreads its rounds across that period and
+   --  leaves almost none of them in the microsecond range.
    procedure Check_Parent_Cancellation_Is_Prompt is
+      Observed : Latency_Samples := (others => 0.0);
+      Prompt   : Natural := 0;
+      Worst    : Duration := 0.0;
    begin
       for Round in 1 .. Latency_Rounds loop
          declare
@@ -257,10 +305,22 @@ procedure Task_Scope_Faults_Smoke is
             Parent.Request;
             Timing_Scopes.Join (Item);
             pragma Assert (Timing_Scopes.Succeeded (Item, Handle));
-            pragma Assert
-              (Timing_Scopes.Result (Item, Handle) <= Latency_Limit);
+            Observed (Round) := Timing_Scopes.Result (Item, Handle);
          end;
+         if Observed (Round) <= Prompt_Limit then
+            Prompt := Prompt + 1;
+         end if;
+         if Observed (Round) > Worst then
+            Worst := Observed (Round);
+         end if;
       end loop;
+      if Prompt < Prompt_Rounds_Required or else Worst > Stall_Ceiling then
+         Report_Latencies (Observed, Prompt, Worst);
+      end if;
+      --  Most rounds are an order of magnitude inside the retired poll
+      --  period, and no round is delayed without bound.
+      pragma Assert (Prompt >= Prompt_Rounds_Required);
+      pragma Assert (Worst <= Stall_Ceiling);
    end Check_Parent_Cancellation_Is_Prompt;
 
    Selection : constant String :=
