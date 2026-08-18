@@ -62,6 +62,7 @@
         <nav class="toc" aria-label="On this page">
           <p class="toc-title">On this page</p>
           <ol>
+            <li><a href="#what">What a memory node is</a></li>
             <li><a href="#add">Add the crate</a></li>
             <li><a href="#read">Read the node structure</a></li>
             <li><a href="#permitted">Use the permitted nodes</a></li>
@@ -74,10 +75,45 @@
         </nav>
 
         <article class="prose">
-          <aside class="callout callout-teal">
-            <span class="callout-symbol" aria-hidden="true">i</span>
-            <p>A memory node is a part of the machine's memory with its own distance to each processor. A machine with several processor packages usually attaches memory to each one. A thread reaches memory on its own node faster than memory on another node.</p>
-          </aside>
+          <section id="what">
+            <h2>Understand what a memory node is.</h2>
+            <p>A machine with one processor package has one pool of memory. Every processor reaches that memory at the same cost, and where an object lives does not matter.</p>
+            <p>A machine with several packages usually attaches memory to each one. A package and the memory attached to it form a memory node. A thread reaches memory on its own node faster than memory on another node, because the second request crosses the link between packages.</p>
+            <figure class="architecture-figure">
+              <svg role="img" aria-labelledby="numa-nodes-title numa-nodes-desc" viewBox="0 0 760 320">
+                <title id="numa-nodes-title">Local and remote memory on a two-node machine</title>
+                <desc id="numa-nodes-desc">Two memory nodes side by side. Each holds a group of processors and the memory attached to them. A short arrow inside node 0 marks a local access at distance 10. A longer arrow leaves node 0, runs below both nodes, and enters the memory of node 1 to mark a remote access at distance 21.</desc>
+                <defs>
+                  <marker id="numa-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="30" y="44" width="316" height="176" rx="16"/>
+                <text x="188" y="72" text-anchor="middle" font-size="15" font-weight="600">Node 0</text>
+                <rect class="diagram-violet" x="52" y="92" width="108" height="64" rx="12"/>
+                <text x="106" y="118" text-anchor="middle" font-size="13" font-weight="600">Processors</text>
+                <text class="diagram-muted" x="106" y="138" text-anchor="middle" font-size="12">0 to 3</text>
+                <rect class="diagram-teal" x="224" y="92" width="94" height="64" rx="12"/>
+                <text x="271" y="128" text-anchor="middle" font-size="13" font-weight="600">Memory</text>
+                <path class="diagram-line" d="M160 124h56" marker-end="url(#numa-arrow)"/>
+                <text class="diagram-muted" x="192" y="110" text-anchor="middle" font-size="12">local &#183; 10</text>
+
+                <rect class="diagram-box" x="414" y="44" width="316" height="176" rx="16"/>
+                <text x="572" y="72" text-anchor="middle" font-size="15" font-weight="600">Node 1</text>
+                <rect class="diagram-violet" x="436" y="92" width="108" height="64" rx="12"/>
+                <text x="490" y="118" text-anchor="middle" font-size="13" font-weight="600">Processors</text>
+                <text class="diagram-muted" x="490" y="138" text-anchor="middle" font-size="12">4 to 7</text>
+                <rect class="diagram-teal" x="608" y="92" width="94" height="64" rx="12"/>
+                <text x="655" y="128" text-anchor="middle" font-size="13" font-weight="600">Memory</text>
+
+                <path class="diagram-line" d="M106 156V268H655V164" marker-end="url(#numa-arrow)"/>
+                <text class="diagram-muted" x="380" y="290" text-anchor="middle" font-size="12">remote &#183; 21</text>
+              </svg>
+              <figcaption>A thread on node 0 reaches its own memory at the shorter distance and the memory of node 1 at the longer one.</figcaption>
+            </figure>
+            <p>The host firmware declares a distance for each pair of nodes. Ten names a node's distance to itself. A larger value orders one pair against another. It is not a latency, and firmware often declares it poorly.</p>
+            <p>Placement is worth doing when a program's working set is large enough for this difference to show in its running time. A program that fits in cache, or one that allocates little, does not gain from it.</p>
+            <p>This crate answers three separate questions. The root package reports which nodes the host has. One child package places memory on a chosen node. Another supplies a storage pool that allocates from one.</p>
+          </section>
 
           <section id="add">
             <span class="step-label">NUMA 01</span>
