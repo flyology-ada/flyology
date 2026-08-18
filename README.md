@@ -54,6 +54,7 @@ based on the surviving correspondence.
   - [Shared-memory segments](#shared-memory-segments)
   - [Ownership-transfer buffers](#ownership-transfer-buffers)
 - [Cache-line-aware storage](#cache-line-aware-storage)
+- [Memory nodes](#memory-nodes)
 - [Task-aware I/O](#task-aware-io)
   - [Sockets and descriptors](#sockets-and-descriptors)
   - [File watching](#file-watching)
@@ -1330,6 +1331,38 @@ The crate is currently available on Linux and macOS. Windows support is not
 part of this adoption. See the [cachelines guide](https://flyology.org/guide/cachelines/)
 and the crate's [README](flyology_cachelines/README.md) for selection rules and
 examples.
+
+## Memory nodes
+
+This repository also contains the standalone [`flyology_numa`](flyology_numa)
+Alire crate. Its Ada root package is `Flyology_NUMA`; it has no dependency on
+the Flyology runtime and can be used by ordinary Ada programs and related
+Flyology packages.
+
+A machine with several processor packages usually attaches memory to each one,
+and a thread reaches memory on its own node faster than memory on another node.
+`Flyology_NUMA` reports which memory nodes the host has, the processors
+attached to each, the distances its firmware declares, and which nodes the
+running process may use. That last set matters on its own: a container sees the
+whole machine's node list while a control group restricts what it may allocate
+on, so the host description alone does not establish permission.
+
+`Flyology_NUMA.Placement` acts on that report, and `Flyology_NUMA.Pools`
+supplies a storage pool whose subpools are memory nodes, so an allocation names
+the node it draws from. Placement reports whether the host provides the
+facility, refuses it to this process, or lacks it, because a container refusing
+these calls is not the same as a machine without memory nodes.
+
+Node and processor numbers are the host's own and are sparse: a host with three
+nodes can number them 0, 2, and 5. A host with no memory-node structure reports
+one node holding every processor, which is the accurate description of a
+machine with one memory domain.
+
+The crate is currently available on Linux and macOS. macOS describes no
+memory-node structure and places nothing. Windows support is not part of this
+adoption. See the [numa guide](https://flyology.org/guide/numa/) and the
+crate's [README](flyology_numa/README.md) for the placement policies and the
+recorded host descriptions used in its tests.
 
 ## Task-aware I/O
 
@@ -2758,6 +2791,8 @@ rather than hidden behind a claim of universal portability.
   provider bridge.
 - [`flyology_cachelines`](flyology_cachelines): standalone cache-line-aware
   storage and host cache-query crate, with its own tests and benchmarks.
+- [`flyology_numa`](flyology_numa): standalone memory-node reporting,
+  placement, and node-bound storage pool crate, with its own tests.
 - [`flyology_http`](https://github.com/flyology-ada/flyology-http): the separate
   HTTP library, tests, documentation, maintained showcases, and comparison
   fixtures built on Flyology.
@@ -2804,6 +2839,14 @@ without preparing a Flyology RTS:
 
 ```sh
 alr with flyology_cachelines
+alr build
+```
+
+Applications that need only memory-node reporting or placement can add that
+crate the same way:
+
+```sh
+alr with flyology_numa
 alr build
 ```
 
@@ -2925,10 +2968,11 @@ Generate the public API reference with:
 
 The [documentation script](scripts/docs.sh) runs GNATdoc with
 undocumented-entity warnings enabled for Flyology Runtime and the standalone
-`flyology_debug`, `flyology_bench`, and `flyology_cachelines` crates. It writes
-the ignored HTML output to `docs/api/index.html`,
-`docs/api/flyology_debug/index.html`, `docs/api/flyology_bench/index.html`, and
-`docs/api/flyology_cachelines/index.html`. It also builds client-side name
+`flyology_debug`, `flyology_bench`, `flyology_cachelines`, and `flyology_numa`
+crates. It writes the ignored HTML output to `docs/api/index.html`,
+`docs/api/flyology_debug/index.html`, `docs/api/flyology_bench/index.html`,
+`docs/api/flyology_cachelines/index.html`, and
+`docs/api/flyology_numa/index.html`. It also builds client-side name
 indexes for the published API references, covering compilation units,
 declarations, enumeration literals, record fields, formal parameters,
 parameters, and exceptions. Search is case-insensitive and tolerates nearby
@@ -2994,9 +3038,15 @@ Run the complete verification suite with:
 TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 ```
 
-The root test runner includes the standalone `flyology_cachelines` suite. Its
-focused test and documentation runners remain available under
-`flyology_cachelines/scripts/` for iteration on that crate alone.
+The root test runner includes the standalone `flyology_cachelines` and
+`flyology_numa` suites. Their focused test and documentation runners remain
+available under `flyology_cachelines/scripts/` and `flyology_numa/scripts/` for
+iteration on one crate alone.
+
+`flyology_numa/scripts/multinode-check.sh` is an optional non-gating check. It
+boots guests with several memory nodes and runs the crate's host suite inside
+them, which reaches the parts that choose between nodes. It needs a Linux host,
+a kernel image, and qemu, so the root runner does not include it.
 
 Run the bounded, reproducible concurrency and fault campaign with:
 
