@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Use flyology_numa to report the host's memory nodes, place memory on a chosen node, and allocate from a node-bound storage pool on Linux and macOS.">
+    <meta name="theme-color" content="#17213d">
+    <title>Memory nodes · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/guide/numa/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/" aria-current="page">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../libraries/">Libraries</a></li><li aria-current="page">Memory nodes</li></ol>
+          <h1>Use memory nodes.</h1>
+        </div>
+        <p class="doc-hero-copy"><a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html"><code>Flyology_NUMA</code></a> reports which memory nodes the host has. Two child packages act on that report. The standalone crate does not use the Flyology runtime.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#add">Add the crate</a></li>
+            <li><a href="#read">Read the node structure</a></li>
+            <li><a href="#permitted">Use the permitted nodes</a></li>
+            <li><a href="#uniform">Handle one memory domain</a></li>
+            <li><a href="#place">Place memory on a node</a></li>
+            <li><a href="#pools">Allocate from a node</a></li>
+            <li><a href="#interpret">Interpret distances and packages</a></li>
+            <li><a href="#verify">Test the crate</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p>A memory node is a part of the machine's memory with its own distance to each processor. A machine with several processor packages usually attaches memory to each one. A thread reaches memory on its own node faster than memory on another node.</p>
+          </aside>
+
+          <section id="add">
+            <span class="step-label">NUMA 01</span>
+            <h2>Add the standalone crate.</h2>
+            <p>Add the Flyology organization index before the community index. Then add <code>flyology_numa</code> as a normal Alire dependency.</p>
+            <figure class="code-panel">
+              <figcaption>Add flyology_numa</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology_numa
+alr build</code></pre>
+            </figure>
+            <p>The crate accepts GNAT 13 through 16. Its Alire manifest makes it available only on Linux and macOS.</p>
+            <p>The dependency does not prepare a custom runtime. It also does not depend on the <code>flyology</code> crate.</p>
+          </section>
+
+          <section id="read">
+            <span class="step-label">NUMA 02</span>
+            <h2>Read the node structure.</h2>
+            <p>The crate reads the host description once, while the package elaborates. Later queries return that result. The crate does not observe a node that appears or disappears afterwards.</p>
+            <p><a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#47c263ba75dd33c03a20afb61f248f8dab11c76bbd52608e0d3ba1735c9f71da"><code>Online_Nodes</code></a> reports the nodes the host has. <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#9c18bfa76e9478d68936e1ca9d82e30d7720a7459e5656b1663bb75b4f75e7ba"><code>Processors_Of</code></a> reports the processors attached to one node, and <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#68556e13af5ba91ecb144a2650738441a7f8c2aca2ee0958e9cfca1cd57ceb8a"><code>Node_Of</code></a> reports the node a processor belongs to.</p>
+            <figure class="code-panel">
+              <figcaption>Report each node and its processors</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Ada.Text_IO;
+with Flyology_NUMA;
+
+procedure Show_Nodes is
+   package NUMA renames Flyology_NUMA;
+begin
+   for Node of NUMA.Online_Nodes loop
+      Ada.Text_IO.Put_Line
+        ("node"   &amp; NUMA.Node_Id'Image (Node)
+         &amp; " has" &amp; Natural'Image (NUMA.Count (NUMA.Processors_Of (Node)))
+         &amp; " processors");
+   end loop;
+end Show_Nodes;</code></pre>
+            </figure>
+            <p>A <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#c1bbb26103254ce7ecf7247f8d3c188bb0c44be87d0425a3118a7c6853a4d732"><code>Node_Id</code></a> is the host's own node number. It matches the number in a sysfs path and in <code>numactl</code> output.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Node numbers are sparse. A host with three nodes can number them 0, 2, and 5. Iterate a reported set. Do not iterate a numeric range up to the node count.</p>
+            </aside>
+          </section>
+
+          <section id="permitted">
+            <span class="step-label">NUMA 03</span>
+            <h2>Use the permitted nodes.</h2>
+            <p>A process can be permitted fewer nodes than the host has. A container shows the whole machine's node list, and a control group restricts which of those nodes the process may allocate on. The host description alone therefore does not establish permission.</p>
+            <p><a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#8a566b7e1f8cc23ccb7368033736a036ac10d27b151774e9349b4a1cafa0a5cb"><code>Allowed_Nodes</code></a> reports the nodes this process may use. Use that set to choose a node. <code>Online_Nodes</code> answers what the machine has, which is a different question.</p>
+            <p><a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#488b85513bd9ead11ff8dbe638a021792ee42d875fdee19de0038044b33661e9"><code>Support</code></a> returns a <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#45a40903caba93733ce116cbd42ccf299ab2ad15bcc740322aa4673464e141d9"><code>Support_Report</code></a>. Its <code>Restricted</code> component is true when the two sets differ. Its <code>Complete</code> component is false when the crate could not read or represent part of the description.</p>
+          </section>
+
+          <section id="uniform">
+            <span class="step-label">NUMA 04</span>
+            <h2>Handle one memory domain.</h2>
+            <p>Every query answers on every supported host. A host without memory-node structure reports one node that holds every processor. That report is accurate, because such a host has one memory domain.</p>
+            <p>The <code>Source</code> component of <code>Support_Report</code> is a <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#c293e8f2e430d3a0d7f157e7e94bd795a66afd3177b5148a543bc2b8bcad5a63"><code>Discovery_Source</code></a>. It separates a description read from the host from that single-node report.</p>
+            <p>macOS is always the single-node case. It describes no memory-node structure. Its performance and efficiency processor clusters are not memory nodes, because those clusters share one memory domain. The crate does not report them.</p>
+          </section>
+
+          <section id="place">
+            <span class="step-label">NUMA 05</span>
+            <h2>Place memory on a node.</h2>
+            <p><a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html"><code>Flyology_NUMA.Placement</code></a> acts on the reported structure. Reading a description always succeeds, and acting on one often does not, so the two are separate packages.</p>
+            <p>Check <a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#dca55a94e5269e7aefe2589b49f79b87baf7161140e4d8ea2e472b3b6c507053"><code>Support</code></a> before you place anything. It returns a <a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#c969acab9150dc105c81ea901b75784fa6e12b0e8b514831aa403ffc1399ae81"><code>Support_Level</code></a> with three values.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Supported</code></dt><dd>The host provides placement and this process may use it.</dd></div>
+                <div class="decision-row"><dt><code>Unsupported_Host</code></dt><dd>The host has no memory-placement interface.</dd></div>
+                <div class="decision-row"><dt><code>Denied</code></dt><dd>The host provides placement and refuses it to this process.</dd></div>
+              </dl>
+            </div>
+            <p>Keep <code>Denied</code> separate from <code>Unsupported_Host</code>. A container sandbox commonly refuses these calls while the machine underneath has memory nodes that other processes use. Reporting that refusal as a missing facility would be wrong.</p>
+            <p><a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#c5ea6f81110bca3fea8ad1f3a8860cfe086f19c7dafe7517d05fc2e2c94117d6"><code>Apply_To</code></a> places one address range. Placement acts on whole pages, so the range must begin on a <a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#9e3dd6843e3470a01d049a5ccabbad3eebe6a0ca490e689e4fd46078108e7ffc"><code>Page_Size</code></a> boundary.</p>
+            <figure class="code-panel">
+              <figcaption>Interleave a range over the permitted nodes</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Flyology_NUMA.Placement.Apply_To
+  (Base   =&gt; Region_Base,
+   Length =&gt; Region_Length,
+   Policy =&gt; Flyology_NUMA.Placement.Interleaved,
+   Nodes  =&gt; Flyology_NUMA.Allowed_Nodes,
+   Result =&gt; Outcome);</code></pre>
+            </figure>
+            <p>The <a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#7e40cd45b9579919acf5145e027deb4e0348d0d9a316426d17fd2449b52ac0aa"><code>Policy_Kind</code></a> value selects how pages are drawn. <code>Bound</code> draws only from the named nodes and fails instead of drawing elsewhere. <code>Interleaved</code> draws from the nodes in rotation, which trades a near node's latency for the combined transfer rate of several. <code>Preferred</code> draws from elsewhere instead of failing, and the host uses only the lowest-numbered node in the set.</p>
+            <p>Every operation returns a <a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#d98d46550e15c5ab719526a59f9dcf1efcd5d1558764d2a3b5ff9c57540b7d5c"><code>Placement_Outcome</code></a>. No operation in this package raises an exception.</p>
+            <p><a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#179c4e3d3d46b9310ab01a114871d47a69e57e5517e9407e141a74918fe8d3fc"><code>Apply_To_Thread</code></a> places the memory the calling thread acquires from then on. <a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#e15c26c9eb3c35aef4e3965fb84c30e5e250d6d9ef9d2460af14d4ab61590d44"><code>Permitted_Nodes</code></a> asks the host again, which matters after the process moves between control groups.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><a href="../../api/flyology_numa/85aab2676a07914d42f9b94582cf3727ae72579e4357cfdacf2cb8126c52549b.html#6625cfc27aed9e98bdef8c16ffb55a5a747f472fb67936c8b05ab25a566224d9"><code>Node_Of_Address</code></a> reports which node holds a page. Asking about a page the process has not written to causes the host to acquire it, because the host answers by placing it. Ask only about memory already written to.</p>
+            </aside>
+          </section>
+
+          <section id="pools">
+            <span class="step-label">NUMA 06</span>
+            <h2>Allocate from a node.</h2>
+            <p>Ada already names where an object's memory comes from: the storage pool of its access type. <a href="../../api/flyology_numa/c74eb2a34253cd949dd66b59c5fec0907a96819445bc912f3ae3c213d88735a0.html"><code>Flyology_NUMA.Pools</code></a> supplies a pool whose subpools are memory nodes.</p>
+            <p>A pool alone would fix the node when the access type is declared. A subpool is chosen for each allocation, so the node is named where the object is created.</p>
+            <figure class="code-panel">
+              <figcaption>Allocate an object on a chosen node</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology_NUMA.Placement;
+with Flyology_NUMA.Pools;
+
+procedure Allocate_Near is
+   package NUMA renames Flyology_NUMA;
+
+   Arena : NUMA.Pools.Node_Pool
+     (Policy =&gt; NUMA.Placement.Bound,
+      Extent =&gt; 1024 * 1024);
+
+   type Sample_Access is access Sample with Storage_Pool =&gt; Arena;
+
+   Item : constant Sample_Access :=
+     new (NUMA.Pools.On_Node (Arena, Near)) Sample'(...);
+begin
+   null;
+end Allocate_Near;</code></pre>
+            </figure>
+            <p><a href="../../api/flyology_numa/c74eb2a34253cd949dd66b59c5fec0907a96819445bc912f3ae3c213d88735a0.html#40d5ba6ddf8f759140db480a1dfc4e2bafda8de37db309f033f4c052ade291f8"><code>On_Node</code></a> returns the subpool that draws from one node. The <a href="../../api/flyology_numa/c74eb2a34253cd949dd66b59c5fec0907a96819445bc912f3ae3c213d88735a0.html#38f69f6c75ea81ce38e8ccf34932e44e3c8070ef590d5d50dcb640c3fdb7a554"><code>Node_Pool</code></a> discriminants set the policy and how much memory the pool obtains at a time. Its policy must be a <a href="../../api/flyology_numa/c74eb2a34253cd949dd66b59c5fec0907a96819445bc912f3ae3c213d88735a0.html#ea0241e66d030e100dbc1539df753852285c03b20fdb7bbe6f8680c21cfaaffb"><code>Binding_Policy</code></a>, because the two policies that name no node would place nothing on the node a subpool stands for.</p>
+            <p>The pool obtains whole pages from the host and places them before it hands out any storage. Memory from the ordinary heap cannot serve this. Such memory can begin partway into a page whose remainder belongs to something else, and placing that page would move memory the crate does not own.</p>
+            <p>Allocation advances through pages the pool already holds. Freeing one object does nothing. Memory returns to the host when the subpool is deallocated or the pool is finalized. This suits memory that an application builds up and discards together.</p>
+            <p><a href="../../api/flyology_numa/c74eb2a34253cd949dd66b59c5fec0907a96819445bc912f3ae3c213d88735a0.html#31d58232d734ec9bbe3d925ae1c8b864b16106b7c516ff03eb022d5ecd3d1d35"><code>Placement_Reached</code></a> reports whether the host accepted the placement of every page. It is false on a host that cannot place memory, and allocation still succeeds there. <a href="../../api/flyology_numa/c74eb2a34253cd949dd66b59c5fec0907a96819445bc912f3ae3c213d88735a0.html#a8009d38f830aeb9ebd2a870448b0347b77926eb523c306c24dea0d1766b94f9"><code>Reserved_Bytes</code></a> reports how much memory the pool holds for one node.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>A pool is not task safe. Two tasks that allocate from one subpool at the same time can receive the same address. Give each task its own pool, or synchronize the allocations.</p>
+            </aside>
+          </section>
+
+          <section id="interpret">
+            <span class="step-label">NUMA 07</span>
+            <h2>Interpret distances and packages.</h2>
+            <p><a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#8564dbbd1ded57f4b7286a38ebadbc07c2382f43146f0f0852536d7729887eb3"><code>Node_Distance</code></a> reports the distance the host firmware declares between two nodes. Ten names a node's distance to itself. The values order node pairs. They are not latencies, and firmware often declares them poorly.</p>
+            <p>A host can divide one processor package into several memory nodes. It then declares a small non-local distance, such as 11, between two nodes of one package. A value above ten therefore does not mean a different package. Compare <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#c7c264fef1f51e4c8dce33d0ab6e82125aa36a399cf2bcba182de8257b434f9e"><code>Package_Of</code></a> when package identity is what matters.</p>
+            <p>A node can carry memory and have no processor attached. A memory expander produces this, and so does a high-bandwidth memory tier. <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#87742c657388654aacfbe29fc1258ba32c65ad6acade50c769a3adb0a3e9ae6e"><code>Has_Processors</code></a> reports false for such a node. The node is a legal target for memory, and it is never local to any thread.</p>
+            <p><a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#e18e3cb24e45643e663791279fc8330e30f9cfad90da70c61e34d8334663633d"><code>Memory_Bytes</code></a> reports the memory one node carries. It returns a <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#2cd3908d05f6bf902f64c97724a79c2731186eeefc29a56b072555033abd3cdb"><code>Byte_Query</code></a>. Check <code>Available</code> before you read <code>Bytes</code>. The <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html">Value_Or</a> functions return a caller's own fallback for an unanswered query. A fallback does not become a detected result.</p>
+            <p>Ada numbers processors from one, and a host numbers them from zero. <a href="../../api/flyology_numa/3ca4e013b965fbf14469ed75865ad9a27d759a5ad5ed96fba187dca1ecdd3a2b.html#79d610dd0c7425adc85d1c174586e266a8d6079691822e323f0cd2d9506c1b7e"><code>To_CPU</code></a> applies that mapping. It reports <code>Not_A_Specific_CPU</code> when the host's processor numbering has a gap, because the arithmetic would then name a processor the caller did not intend.</p>
+          </section>
+
+          <section id="verify">
+            <span class="step-label">NUMA 08</span>
+            <h2>Test the crate.</h2>
+            <p>The crate test script checks the description reported for the host that runs it. It also reads recorded host descriptions, which cover node numbering, distance rows, control-group restriction, and the descriptions the reader must refuse.</p>
+            <figure class="code-panel">
+              <figcaption>Run numa verification</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./flyology_numa/scripts/test.sh
+./flyology_numa/scripts/docs.sh</code></pre>
+            </figure>
+            <p>Recorded descriptions cover reading. They cannot cover placing, which needs a kernel that has several nodes. A separate script boots guests with two and four memory nodes and runs the host suite inside them.</p>
+            <figure class="code-panel">
+              <figcaption>Run the multi-node guests</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./flyology_numa/scripts/multinode-check.sh</code></pre>
+            </figure>
+            <p>That script needs a Linux host, a kernel image, and qemu. It is separate from the crate test script for that reason.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Windows is outside the current support boundary. The Alire manifest excludes it, and this repository does not claim a Windows implementation.</p>
+            </aside>
+            <p>Use the <a href="../../api/flyology_numa/">generated numa API reference</a> for exact declarations. The crate's <a href="https://github.com/flyology-ada/flyology/tree/main/flyology_numa">README and source</a> contain the recorded descriptions and the guest topologies.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology NUMA is experimental. Test the intended host and placement policy.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../libraries/">Libraries</a><a href="../../api/flyology_numa/">NUMA API</a><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_numa">Source</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

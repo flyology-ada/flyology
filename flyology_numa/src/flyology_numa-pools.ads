@@ -38,9 +38,10 @@ with Flyology_NUMA.Placement;
 --  the allocations, or use this only where one task allocates.
 package Flyology_NUMA.Pools is
 
-   package Subpools renames System.Storage_Pools.Subpools;
-
-   subtype Subpool_Handle is Subpools.Subpool_Handle;
+   --  A reference to one of a pool's subpools, which for this pool is one
+   --  of its memory nodes.
+   subtype Subpool_Handle is
+     System.Storage_Pools.Subpools.Subpool_Handle;
 
    --  The placement policies that draw memory from a named set of nodes.
    --
@@ -58,16 +59,17 @@ package Flyology_NUMA.Pools is
    --  a body of memory built up and then discarded together, which is what
    --  a node-bound arena usually is.
    --
+   --  Policy says how pages are drawn from the node a subpool stands for.
+   --  Extent says how much memory to obtain at a time; a request larger than
+   --  that obtains what it needs instead.
+   --
    --  Allocation raises Storage_Error when the host will give the pool no
    --  more memory, and Program_Error when an allocation names no subpool.
-   --
-   --  @field Policy How pages should be drawn from the subpool's node.
-   --  @field Extent How much memory to obtain at a time. A request larger
-   --     than this obtains what it needs instead.
    type Node_Pool
      (Policy : Binding_Policy;
       Extent : Byte_Count)
-   is new Subpools.Root_Storage_Pool_With_Subpools with private;
+   is new System.Storage_Pools.Subpools.Root_Storage_Pool_With_Subpools
+     with private;
 
    --  Return the subpool of Pool that draws memory from Node.
    --
@@ -104,6 +106,8 @@ package Flyology_NUMA.Pools is
      (Pool : Node_Pool; Node : Node_Id) return Byte_Count;
 
 private
+
+   package Subpools renames System.Storage_Pools.Subpools;
 
    use type System.Storage_Elements.Storage_Count;
 
@@ -142,6 +146,14 @@ private
       Present : Presence_Table := (others => False);
    end record;
 
+   --  Hand out storage from the node a subpool stands for. The runtime
+   --  calls this for an allocation that names a subpool.
+   --  @param Pool The pool the subpool belongs to.
+   --  @param Storage_Address The address handed out.
+   --  @param Size_In_Storage_Elements How much storage to hand out.
+   --  @param Alignment The alignment the storage must begin on.
+   --  @param Subpool The subpool to draw from.
+   --  @exclude
    overriding procedure Allocate_From_Subpool
      (Pool                     : in out Node_Pool;
       Storage_Address          : out System.Address;
@@ -149,9 +161,19 @@ private
       Alignment                : System.Storage_Elements.Storage_Count;
       Subpool                  : not null Subpool_Handle);
 
+   --  Make a subpool without naming a node, which draws from the lowest
+   --  node this process may use. On_Node names one.
+   --  @param Pool The pool to make the subpool in.
+   --  @return The subpool for that node.
+   --  @exclude
    overriding function Create_Subpool
      (Pool : in out Node_Pool) return not null Subpool_Handle;
 
+   --  Return a subpool's pages to the host. The runtime calls this from
+   --  Ada.Unchecked_Deallocate_Subpool and when the pool is finalized.
+   --  @param Pool The pool the subpool belongs to.
+   --  @param Subpool The subpool whose pages to return.
+   --  @exclude
    overriding procedure Deallocate_Subpool
      (Pool    : in out Node_Pool;
       Subpool : in out Subpool_Handle);
