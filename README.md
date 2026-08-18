@@ -1477,6 +1477,17 @@ entries are ready together the lowest index wins. The fixed limit of 32 keeps
 per-fiber scheduler storage predictable and is intended for protocol engines,
 not as a replacement for ownership-aware connection APIs.
 
+`Flyology.IO.Fits` states that limit once per wait-set type, and every public
+declaration accepting a wait set carries it as `Pre => Fits (...)`. An
+interrupt set stops one member short of `Max_Wait_Requests` because
+`Wait_Interruptibly` spends request position 1 on its primary descriptor, so a
+complete interrupt set holds 31 members rather than 32. Both array types stay
+indexed by `Positive`, so a caller may pass a slice at any index base and read
+the returned index in its own index space. Flyology compiles its own library
+units with assertions disabled, so those preconditions state the contract for
+callers and analysis tools rather than execute; the wait bodies enforce the
+limit with `Device_Error` on every build.
+
 Created and accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are
 exposed to the caller; Linux sends use `MSG_NOSIGNAL`. The nonblocking hot path
 returns ordinary would-block and interrupted results to Ada instead of raising
@@ -1810,8 +1821,10 @@ signal wakes all operations registered with that source.
 The raw I/O boundary represents these independent wake descriptors as an
 `Interrupt_Set` rather than fixed close/shutdown/token parameters. This keeps
 owner-specific policy in `Connections`, TLS, and other structured layers while
-allowing low-level callers to compose a bounded set of lifecycle sources. Raw
-waits observe set members for readability but never consume or close them.
+allowing low-level callers to compose a bounded set of lifecycle sources. That
+set holds at most 31 members because the primary descriptor occupies the first
+slot of the request array built inside the wait. Raw waits observe set members
+for readability but never consume or close them.
 
 A raw wait borrows its descriptor rather than owning it, so another task may
 close that descriptor while a poller interest is still armed. The kernel then
@@ -3233,9 +3246,10 @@ Current smoke coverage includes:
   declared and allocator-created tasks, timeoutable native and lightweight
   waiters, concurrent wakeup, and abortable waits;
 - lightweight/native socket-pair transfer, simultaneous read/write watches on one
-  descriptor, bounded multi-descriptor waits, lowest-index simultaneous
-  readiness, partial-registration rollback, abort cleanup, descriptor reuse,
-  and timeout behavior;
+  descriptor, bounded multi-descriptor waits, at-limit request and interrupt
+  sets, Device_Error rejection of over-limit sets in both lanes, lowest-index
+  simultaneous readiness, partial-registration rollback, abort cleanup,
+  descriptor reuse, and timeout behavior;
 - native/lightweight local DNS resolution with source/question validation, OS
   entropy and deterministic test injection, positive/negative cache TTLs,
   ordered split-DNS identity, retry and TCP failover, AAAA-to-A deadline

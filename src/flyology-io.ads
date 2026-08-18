@@ -52,6 +52,21 @@ package Flyology.IO with Preelaborate is
    --  Maximum number of descriptors in one allocation-free Wait_Any call.
    Max_Wait_Requests : constant := 32;
 
+   --  Report whether a readiness request set fits one allocation-free wait.
+   --  @param Requests Readiness requests to measure
+   --  @return True when the set holds at most Max_Wait_Requests members
+   function Fits (Requests : Wait_Request_Array) return Boolean is
+     (Requests'Length <= Max_Wait_Requests);
+
+   --  Report whether an interrupt set fits one interruptible wait. Such a
+   --  wait spends one request position on its primary descriptor, so a
+   --  complete interrupt set holds one member fewer than a complete request
+   --  set.
+   --  @param Interrupts Wake descriptors to measure
+   --  @return True when the set holds fewer than Max_Wait_Requests members
+   function Fits (Interrupts : Interrupt_Set) return Boolean is
+     (Interrupts'Length < Max_Wait_Requests);
+
    --  Report whether the calling Ada task uses a Flyology event loop.
    --  @return True for a lightweight task; False for a native task
    function Is_Lightweight_Task return Boolean;
@@ -79,11 +94,12 @@ package Flyology.IO with Preelaborate is
    --  @param Requests At most Max_Wait_Requests readiness requests
    --  @param Timeout Deadline interval in seconds
    --  @return Exact Requests index ready, or 0 on timeout or empty input
-   --  @exception Device_Error A descriptor is invalid or polling fails
+   --  @exception Device_Error A descriptor is invalid, Requests exceeds
+   --     Max_Wait_Requests, or polling fails
    function Wait_Any
      (Requests : Wait_Request_Array;
       Timeout  : Duration := Infinite) return Natural
-     with Pre => Requests'Length <= Max_Wait_Requests;
+     with Pre => Fits (Requests);
 
    --  Wait for FD or any readable interrupt source. Interrupt
    --  descriptors are neither read nor closed. Timeout and lane behavior
@@ -92,14 +108,16 @@ package Flyology.IO with Preelaborate is
    --  @param Condition Primary readiness condition
    --  @param Timeout Deadline interval in seconds
    --  @param Interrupts At most Max_Wait_Requests - 1 readable wake
-   --     descriptors
+   --     descriptors; the primary descriptor occupies the first request
+   --     position
    --  @return Ready, Timed_Out, or Interrupted
-   --  @exception Device_Error FD is invalid or the poller fails
+   --  @exception Device_Error FD is invalid, Interrupts reaches
+   --     Max_Wait_Requests, or the poller fails
    function Wait_Interruptibly
      (FD          : Descriptor;
       Condition   : Wait_Kind;
       Timeout     : Duration := Infinite;
       Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+     with Pre => Fits (Interrupts);
 
 end Flyology.IO;

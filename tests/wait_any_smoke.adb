@@ -111,6 +111,74 @@ procedure Wait_Any_Smoke is
          Passed := Passed and then Flyology.IO.Wait_Any (Requests, 0.0) = 1;
       end;
 
+      --  Wait_Interruptibly spends request position 1 on its primary
+      --  descriptor, so a complete interrupt set holds one member fewer
+      --  than a complete request set and still fills the internal request
+      --  array.
+      declare
+         Interrupts : constant Flyology.IO.Interrupt_Set
+           (1 .. Flyology.IO.Max_Wait_Requests - 1) :=
+             [others => Flyology.IO.Sockets.Native_Descriptor (Left_2)];
+      begin
+         Passed := Passed and then Flyology.IO.Wait_Interruptibly
+           (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+            Flyology.IO.For_Read,
+            1.0,
+            Interrupts) = Flyology.IO.Interrupted;
+      end;
+
+      --  The limit is enforced in the body, not only by a precondition: no
+      --  supported build compiles the library with -gnata, so an over-limit
+      --  request set must still raise Device_Error rather than pass through.
+      declare
+         Requests : Flyology.IO.Wait_Request_Array
+           (1 .. Flyology.IO.Max_Wait_Requests + 1);
+         Rejected : Boolean := False;
+      begin
+         Requests :=
+           [others =>
+              (Flyology.IO.Sockets.Native_Descriptor (Left_2),
+               Flyology.IO.For_Read)];
+         begin
+            declare
+               Ignored : constant Natural :=
+                 Flyology.IO.Wait_Any (Requests, 0.0);
+               pragma Unreferenced (Ignored);
+            begin
+               null;
+            end;
+         exception
+            when Flyology.IO.Device_Error => Rejected := True;
+         end;
+         Passed := Passed and Rejected;
+      end;
+
+      --  An interrupt set that would leave no room for the primary
+      --  descriptor is rejected for the same reason.
+      declare
+         Interrupts : constant Flyology.IO.Interrupt_Set
+           (1 .. Flyology.IO.Max_Wait_Requests) :=
+             [others => Flyology.IO.Sockets.Native_Descriptor (Left_2)];
+         Rejected   : Boolean := False;
+      begin
+         begin
+            declare
+               Ignored : constant Flyology.IO.Wait_Outcome :=
+                 Flyology.IO.Wait_Interruptibly
+                   (Flyology.IO.Sockets.Native_Descriptor (Left_1),
+                    Flyology.IO.For_Read,
+                    0.0,
+                    Interrupts);
+               pragma Unreferenced (Ignored);
+            begin
+               null;
+            end;
+         exception
+            when Flyology.IO.Device_Error => Rejected := True;
+         end;
+         Passed := Passed and Rejected;
+      end;
+
       declare
          Empty : Flyology.IO.Wait_Request_Array (2 .. 1);
       begin
