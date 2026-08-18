@@ -175,6 +175,9 @@ fi
 FLYOLOGY_CACHELINES_DOCS_OUTPUT="$project_root/docs/api/flyology_cachelines" \
   "$project_root/flyology_cachelines/scripts/docs.sh"
 
+FLYOLOGY_NUMA_DOCS_OUTPUT="$project_root/docs/api/flyology_numa" \
+  "$project_root/flyology_numa/scripts/docs.sh"
+
 mkdir -p docs/api/fonts
 cp "$website_kit/assets/fonts/geologica-latin-variable.woff2" docs/api/fonts/
 cp assets/brand/flyology-mark-transparent.svg docs/api/flyology-mark.svg
@@ -207,3 +210,5 @@ test -f docs/api/flyology_bench/index.html
 test -f docs/api/flyology_bench/search-index.js
 test -f docs/api/flyology_cachelines/index.html
 test -f docs/api/flyology_cachelines/search-index.js
+test -f docs/api/flyology_numa/index.html
+test -f docs/api/flyology_numa/search-index.js
