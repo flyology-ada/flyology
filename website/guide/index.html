@@ -499,10 +499,10 @@ end loop;</code></pre>
               </dl>
             </div>
             <h3 id="utilization">Measure how busy an event loop is</h3>
-            <p>A group's event loop waits in its poller only when no task in that group can run. The runtime times that wait, so a snapshot reports the loop's elapsed time and the part of it the loop spent idle. Subtract one from the other to get the time the loop spent dispatching tasks, polling with work ready, or running task code.</p>
-            <p>The runtime never reports more idle time than elapsed time, and it includes a poller wait that is still in progress. The subtraction is therefore always valid, even while the loop is blocked.</p>
+            <p>A group's event loop blocks in its poller only when no task in that group can run. The runtime times that wait, so a snapshot reports the loop's elapsed time and the part of it the loop spent idle. Subtract one from the other to get the time the loop spent running task code and its own scheduler work.</p>
+            <p>A snapshot never reports more idle time than elapsed time, and it includes a poller wait that is still in progress. The subtraction is therefore always valid, even while the loop is blocked.</p>
             <figure class="code-panel">
-              <figcaption>read one group's utilization</figcaption>
+              <figcaption>read one group's utilization with <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#84a28befe7fbaa8cb206c40d1e9c968a88cc10f26953ac3afd7e41f9208fb907"><code>Snapshot</code></a> into a <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Group_Snapshot</code></a></figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">declare
    use type Flyology.Observability.Counter;
@@ -519,11 +519,11 @@ begin
    end if;
 end;</code></pre>
             </figure>
-            <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#8b0158f0676b2348742fb68c615c4f6e426f1d6844a3da836182f0fc265096e9"><code>Counter</code></a> is a modular subtype, so the subtraction needs a <code>use type</code> clause.</p>
+            <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#8b0158f0676b2348742fb68c615c4f6e426f1d6844a3da836182f0fc265096e9"><code>Counter</code></a> is declared in another package, so its operators need a <code>use type</code> clause before the subtraction.</p>
             <p>Both values cover the loop's whole lifetime, so one sample reports an average and not current load. Take two samples and subtract each field to measure one interval.</p>
-            <p>The measure describes the event loop, not the tasks on it. Two situations produce a similar reading:</p>
+            <p>The measure describes the event loop, not the tasks on it. Two situations look alike:</p>
             <ul>
-              <li>A group whose tasks all wait on readiness or a deadline reports a high idle fraction, and so does a group with nothing to do. Read <code>Waiting</code> and <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Members</code></a> to separate them.</li>
+              <li>A group whose tasks all wait on readiness or a deadline reports mostly idle time, and so does a group with nothing to do. Read <code>Waiting</code> and <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Members</code></a> to separate them.</li>
               <li>A task that runs CPU code without reaching a suspension point keeps its loop out of the poller. That group reports as fully busy with one task running, which <a href="#checkpoints">cooperative checkpoints</a> address.</li>
             </ul>
             <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Idle_Waits</code></a> counts the blocking poller waits behind those totals. Divide it by the elapsed time to get the rate at which the loop ran out of runnable work.</p>

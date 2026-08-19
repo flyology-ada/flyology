@@ -143,10 +143,10 @@ package Flyology.Observability with Preelaborate is
    --  @field Idle_Nanoseconds Nanoseconds of Uptime_Nanoseconds in which
    --     Group had no runnable task and was blocked in its event poller.
    --     This never exceeds Uptime_Nanoseconds, so the difference is the
-   --     time the loop spent dispatching, polling with work ready, or
-   --     running task code. Tasks suspended on readiness or a deadline make
-   --     their group idle by this measure; use Waiting and Descriptor_Waits
-   --     to distinguish an unloaded group from a blocked one
+   --     time the loop spent running task code and its own scheduler work.
+   --     Tasks suspended on readiness or a deadline make their group idle by
+   --     this measure; use Waiting and Descriptor_Waits to distinguish an
+   --     unloaded group from a blocked one
    --  @field Idle_Waits Cumulative blocking event-poller waits
    type Group_Snapshot is record
       Group                    : Group_Id;
