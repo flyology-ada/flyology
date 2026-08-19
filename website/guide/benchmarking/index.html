@@ -176,6 +176,7 @@
             <li><a href="#axes">Select measurement axes</a></li>
             <li><a href="#budget">Bound collection time</a></li>
             <li><a href="#quiescence">Wait for a quiet CPU</a></li>
+            <li><a href="#interference">Keep the host quiet</a></li>
             <li><a href="#telemetry">Use telemetry</a></li>
             <li><a href="#recording">Record externally driven work</a></li>
             <li><a href="#automation">Emit CSV or JSON</a></li>
@@ -412,8 +413,45 @@ Config.Samples := 75;</code></pre>
             <p>The maintained example enables the preflight with <code>FLYOLOGY_BENCH_QUIESCENCE=1</code>. It remains disabled by default so unattended runs do not acquire a new wait or failure condition.</p>
           </section>
 
-          <section id="telemetry">
+          <section id="interference">
             <span class="step-label">BENCH 08</span>
+            <h2>Watch for load that arrives after the gate passes.</h2>
+            <p>The preflight proves the host was quiet before warmup and nothing more. <code>Interference</code> keeps watching during collection, estimating foreign load between timed samples and never inside them.</p>
+            <figure class="code-panel">
+              <figcaption>collect a contaminated window again instead of keeping it</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config.Interference :=
+  (Enabled                     =&gt; True,
+   Response                    =&gt; Flyology_Bench.Retake,
+   Maximum_Foreign_CPU_Percent =&gt; 10.0,
+   Window                      =&gt; 0.050,
+   Maximum_Retakes             =&gt; 25,
+   Settle_Time                 =&gt; 0.250,
+   Maximum_Pause_Time          =&gt; 30.0,
+   Rewarm_Time                 =&gt; 0.050);</code></pre>
+            </figure>
+            <p>Foreign load is host busy time minus this process's own CPU time. The preflight can compare raw host utilization against a limit because the harness is idle at that point; during collection the benchmark thread saturates a core, so an unsubtracted limit would trip on every sample. Load generated inside the benchmark process is this process's own CPU time and is correctly not foreign.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Observe</dt><dd>Records what it saw and keeps every sample. The raw distribution stays exactly as collected.</dd></div>
+                <div class="decision-row"><dt>Retake</dt><dd>Discards the contaminated window and collects it again, bounded by <code>Maximum_Retakes</code>. Suits brief bursts of load.</dd></div>
+                <div class="decision-row"><dt>Pause</dt><dd>Waits for the host to settle, re-warms, then collects the window again. Suits sustained load. The re-warm is required: a resumed run is cold, and its first sample would be the outlier the pause was meant to avoid.</dd></div>
+                <div class="decision-row"><dt>Window</dt><dd>Host CPU counters are tick-based, so a window that does not reach this duration is recorded but never acted on. Below roughly one tick the estimate is mostly quantization.</dd></div>
+              </dl>
+            </div>
+            <p>A window spans whole collection units: one sample, one comparison pair, or one balanced multi-way round. A response therefore never splits the two halves of a pair, and never lands mid-round where it would spread interference unevenly across the cases a round exists to compare fairly. When a retake or pause budget runs out, collection continues under <code>Observe</code> and the report sets <code>Budget_Exhausted</code>; paused time is excluded from <code>Maximum_Sampling_Time</code>.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Observed load is never applied as a correction.</strong> A skew factor derived from foreign CPU share would be invented data: the cost of interference depends on whether the contention is an SMT sibling, a shared cache, memory bandwidth, or another socket, and the same foreign share can mean no slowdown or a large one. Runs are annotated or repaired, never adjusted. For a measurement less sensitive to being descheduled, request thread CPU time and involuntary context switches instead.</p>
+            </aside>
+            <p><code>Placement</code> pins the benchmark thread, which also sharpens attribution: with a strict binding every other CPU's busy time is foreign outright. Keep <code>Include_Siblings</code> enabled, because a process saturating the SMT sibling of the placed CPU slows the measurement while leaving the placed CPU's own busy share clean. Linux applies strict affinity; Darwin's affinity API is an advisory tag, and Apple Silicon implements none at all, so attribution stays host-wide there unless <code>Require_Strict</code> turns that into an error.</p>
+            <p>Only the calling thread is bound, so another thread of the same process may occupy a watched CPU, where its time cannot be told apart from foreign load. Each window reads process CPU alongside thread CPU, and when the difference exceeds the configured foreign limit the run drops to host-wide observation and reports <code>Attribution_Diluted</code>. A scheduler benchmark run under placement therefore reports a correct host-wide number instead of discarding samples over load it created itself.</p>
+            <p><code>Host_Lock</code> claims host CPU capacity for the whole run, coordinating with any tool that follows the <a href="https://github.com/flyology-ada/flyology/blob/main/docs/host-cpu-lock.md">host CPU lock convention</a> — load generators and profilers included, since both sides of the problem want the same claim. This matters most for <code>Pause</code>: two harnesses that both pause on interference are symmetric controllers observing each other, and would otherwise oscillate indefinitely. A claim is not proof of exclusivity; a privately mounted path, which <code>systemd PrivateTmp=</code> produces routinely, silently reduces it to one mount namespace and is reported as such.</p>
+            <p><code>Environment (Result)</code> returns everything observed, and the console, CSV, and JSON reporters all carry it. A run that had to repair itself says so, otherwise a heavily repaired result reads as a quieter machine than the one it ran on. The maintained example enables the watch with <code>FLYOLOGY_BENCH_INTERFERENCE=1</code>.</p>
+          </section>
+
+          <section id="telemetry">
+            <span class="step-label">BENCH 09</span>
             <h2>Monitor the process outside timed intervals.</h2>
             <p><a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#ba29fc9e6397621399ce9b061b096a2ff2426433e1fb9794afa94910f02019d2"><code>Terminal_Mode</code></a> enables process telemetry and names every live progress line. During multi-way collection, a fixed-width field identifies the implementation that produced each sample. Its fixed width prevents the progress display from moving. The line also reports CPU percentage, occupied cores, current RSS, RSS growth, and elapsed wall time. Final reports retain CPU and RSS sparklines.</p>
             <div class="decision-list">
@@ -498,7 +536,7 @@ FLYOLOGY_BENCH_RECORDING_OUTPUT=json ./examples/bin/recording_service</code></pr
           </section>
 
           <section id="automation">
-            <span class="step-label">BENCH 09</span>
+            <span class="step-label">BENCH 10</span>
             <h2>Emit CSV or JSON without terminal output.</h2>
             <p>CSV and newline-delimited JSON reporters omit progress and ANSI sequences. The maintained example selects the reporter through one environment variable.</p>
             <figure class="code-panel">
@@ -514,7 +552,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
           </section>
 
           <section id="correctness">
-            <span class="step-label">BENCH 10</span>
+            <span class="step-label">BENCH 11</span>
             <h2>Treat fractional nanoseconds as amortized throughput.</h2>
             <p>A result such as <code>0.878 ns/op</code> does not mean the clock directly resolved one operation in 878 picoseconds. The harness timed a batch lasting milliseconds and divided that duration by the logical operation count. This is useful throughput evidence when the batch performs exactly that many comparable operations.</p>
             <div class="decision-list">
@@ -532,7 +570,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
           </section>
 
           <section id="platforms">
-            <span class="step-label">BENCH 11</span>
+            <span class="step-label">BENCH 12</span>
             <h2>Repeat on the host you intend to describe.</h2>
             <p>The crate is maintained on Darwin and Linux, including native Linux/AArch64 Docker validation. Its default fingerprint records operating system, architecture, and GNAT version. Add compiler switches, revision, CPU placement and power policy, and other conditions that could change the result.</p>
             <figure class="code-panel">

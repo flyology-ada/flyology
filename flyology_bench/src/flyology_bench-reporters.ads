@@ -39,8 +39,10 @@ package Flyology_Bench.Reporters is
    --  @param Name Benchmark name.
    --  @param Result Completed measurement.
    --  @param File Destination text file.
-   --  @param Include_Telemetry Whether to append process-wide telemetry from
-   --  the most recent terminal-mode run.
+   --  @param Include_Telemetry Whether to append host context to the card:
+   --  the interference, placement, and claim observations retained with the
+   --  measurement, plus process-wide telemetry from the most recent
+   --  terminal-mode run.
    --  @param Style ANSI styling policy.
    procedure Put_Console
      (Name   : String;

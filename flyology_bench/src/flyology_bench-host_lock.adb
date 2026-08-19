@@ -282,6 +282,13 @@ package body Flyology_Bench.Host_Lock is
       Best_Length : Natural := 0;
       Found       : Boolean := False;
    begin
+      --  Mount points are absolute, so a relative claim path cannot be
+      --  resolved against them. Answering from the root mount instead would
+      --  describe the wrong filesystem, and Require_Machine_Scope would then
+      --  accept a claim whose scope was never established.
+      if Path'Length = 0 or else Path (Path'First) /= '/' then
+         return Isolation_Unknown;
+      end if;
       --  Darwin has no mount namespaces, so the path is not privately bound.
       --  That is still not proof that it is machine-wide.
       if Flyology_Bench.Metadata.Operating_System = "darwin" then

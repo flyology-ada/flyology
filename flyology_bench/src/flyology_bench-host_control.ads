@@ -10,7 +10,10 @@ package Flyology_Bench.Host_Control is
    type Placement_Strength is (Advisory, Strict);
 
    --  Pin or affinity-tag the calling native thread. Linux applies strict CPU
-   --  affinity; Darwin applies a scheduler affinity tag and is advisory.
+   --  affinity. Darwin applies a scheduler affinity tag, which is advisory and
+   --  groups threads by cache affinity rather than naming a CPU; Apple Silicon
+   --  implements no thread affinity at all and rejects every request, so
+   --  placement there is unavailable rather than weak.
    --  Call this from the thread that will execute the benchmark.
    --  @param CPU Zero-based logical CPU or Darwin affinity tag index.
    --  @return Strength of the applied platform policy.

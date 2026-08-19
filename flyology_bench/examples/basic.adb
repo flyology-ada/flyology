@@ -237,6 +237,9 @@ procedure Basic is
    Wait_For_Quiet_CPU : constant Boolean :=
      Ada.Environment_Variables.Value
        ("FLYOLOGY_BENCH_QUIESCENCE", Default => "0") = "1";
+   Watch_Interference : constant Boolean :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_BENCH_INTERFERENCE", Default => "0") = "1";
    Selected_Metrics : constant Flyology_Bench.Metric_Set :=
      Metrics_From_Arguments;
    Require_Perf : constant Perf_Requirement := Requirement_From_Arguments;
@@ -261,6 +264,12 @@ procedure Basic is
          Stable_Time                 => 0.500,
          Poll_Interval               => 0.100,
          Timeout                     => 10.0),
+      Interference                 =>
+        (Enabled  => Watch_Interference,
+         Response => Flyology_Bench.Retake,
+         others   => <>),
+      Placement                    => (others => <>),
+      Host_Lock                    => (others => <>),
       Collect_Process_Telemetry    => False,
       Progress                     => null,
       Progress_Name                => <>);

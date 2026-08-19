@@ -33,6 +33,11 @@ The initial API provides:
   Linux hardware-counter, and Flyology scheduler axes sampled around the same
   retained batches;
 - an optional sustained low-host-CPU gate before warmup;
+- an optional watch for foreign CPU load arriving after that gate, which can
+  annotate, collect a contaminated window again, or pause and re-warm, and
+  which never adjusts a reported statistic;
+- an optional host CPU claim that coordinates with any other tool following
+  the same convention;
 - ANSI console result cards, in-place terminal progress, CSV, and
   newline-delimited JSON reporters; and
 - explicit optimization and memory barriers.
@@ -458,6 +463,161 @@ work. Process telemetry during collection remains relevant. The maintained
 example enables this gate only when `FLYOLOGY_BENCH_QUIESCENCE=1`, so ordinary
 example and CI runs do not acquire a new wait or failure condition.
 
+## Interference during collection
+
+The preflight gate proves the host was quiet before warmup. It says nothing
+about what happens next, and a machine that goes busy halfway through a run
+produces a result that looks clean. `Interference` watches for that:
+
+```ada
+Config.Interference :=
+  (Enabled                     => True,
+   Response                    => Flyology_Bench.Retake,
+   Maximum_Foreign_CPU_Percent => 10.0,
+   Window                      => 0.050,
+   Maximum_Retakes             => 25,
+   Settle_Time                 => 0.250,
+   Maximum_Pause_Time          => 30.0,
+   Rewarm_Time                 => 0.050);
+```
+
+Foreign load is host busy time minus this process's own CPU time. That
+subtraction matters: the preflight gate can compare raw host utilization
+against a limit because the harness is idle at that point, but during
+collection the benchmark thread saturates a core, so an unsubtracted limit
+would trip on every sample. Load generated inside the benchmark process is
+this process's own CPU time and is correctly not foreign.
+
+Three responses form a ladder. `Observe` records what it saw and keeps every
+sample. `Retake` discards the contaminated window and collects it again.
+`Pause` waits for the host to settle, re-warms, and then collects it again.
+The re-warm is not optional politeness: a resumed run has cold caches,
+predictors, and frequency state, so without it the first sample after a pause
+is the outlier the pause was meant to avoid.
+
+Nothing here adjusts a reported statistic. A skew factor derived from observed
+load would be invented data — the cost of interference depends on whether the
+contention is an SMT sibling, a shared cache, memory bandwidth, or another
+socket entirely, and the same foreign share can mean no slowdown or a large
+one. Runs are annotated or repaired, never corrected. For a measurement that
+is inherently less sensitive to being descheduled, request `Thread_CPU_Time`
+and `Involuntary_Context_Switches` rather than reinterpreting wall time.
+
+Observation happens between timed samples, never inside them, over windows of
+whole collection units. A unit is one sample, one comparison pair, or one
+balanced multi-way round, so a response never splits the two halves of a pair
+or lands mid-round where it would spread interference unevenly across the
+cases a round exists to compare fairly. Host CPU counters are tick-based on
+both platforms, so a window that does not reach `Window` is recorded but never
+acted on: below roughly one tick the estimate is mostly quantization, and
+discarding samples over it would be noise dressed as hygiene.
+
+Budgets degrade rather than abort. When retakes or the pause budget run out,
+collection continues under `Observe` and the report sets `Budget_Exhausted`.
+Paused time is excluded from `Maximum_Sampling_Time`, because waiting for the
+host is not collection.
+
+`Environment (Result)` returns everything observed, and the console, CSV, and
+JSON reporters all carry it. That visibility is the point: a run that had to
+repair itself must say so, or a heavily repaired result reads as a quieter
+machine than the one it actually ran on.
+
+## Placement
+
+`Placement` lets the harness pin its own benchmark thread, which also sharpens
+interference attribution. With a strict binding the harness knows which
+logical CPUs are its own, so every other CPU's busy time is foreign outright,
+and the placed CPU's own foreign share is its busy time minus the placed
+thread's CPU time. Attribution then reports `Core_Scoped`.
+
+```ada
+Config.Placement :=
+  (Enabled => True, CPU => 3, Include_Siblings => True, Require_Strict => True);
+```
+
+`Include_Siblings` is on by default and should stay on. A process saturating
+the SMT sibling of the placed CPU slows the measurement badly while leaving
+the placed CPU's own busy share clean, so core-scoped observation that ignores
+siblings is worse than host-wide observation: it is confidently wrong. Shared
+cache and memory bandwidth remain invisible to any per-core busy metric.
+
+Placement is Linux-only in practice. Linux applies strict affinity through
+`pthread_setaffinity_np`. Darwin's affinity API is an advisory tag that groups
+threads by cache affinity rather than naming a CPU, and Apple Silicon
+implements no thread affinity at all and rejects every request. Anything short
+of a strict binding leaves attribution host-wide; `Require_Strict` turns that
+degradation into `Placement_Unavailable` instead.
+
+Placement is never neutral. It fixes frequency and thermal behavior and
+removes load balancing a deployed workload would get, and it binds only the
+calling thread, so a benchmark whose work runs on event loops or a native
+executor pool stays partly unplaced. Use it for single-threaded
+microbenchmarks, not for scheduler measurements. Because a pinned run and an
+unpinned run are not the same environment, placement belongs in the recorded
+baseline fingerprint.
+
+That last point is enforced rather than left to the reader. Because only the
+calling thread is bound, another thread of the same process is free to occupy
+a watched CPU, where its time is indistinguishable from foreign load. Each
+window therefore reads process CPU as well as thread CPU; their difference
+bounds how much of the watched capacity this process's other threads could
+account for. Once that bound exceeds `Maximum_Foreign_CPU_Percent`, the
+core-scoped answer can no longer address the question the limit asks, so the
+run drops to host-wide observation for the rest of its samples and reports
+`Attribution_Diluted`. Without it, a scheduler benchmark with placement
+enabled would spend its retake budget discarding samples over load it created
+itself.
+
+The fallback direction is deliberate. Core-scoped attribution subtracts only
+the placed thread, which over-reports interference when other threads share
+the watched CPUs; subtracting the whole process instead would deduct time our
+threads spent on CPUs outside the watched set, under-report foreign load, and
+let contaminated data pass as clean. Over-reporting is visible in the retake
+and contamination counts; under-reporting is not.
+
+## Host CPU claim
+
+`Host_Lock` claims host CPU capacity for the duration of a run, coordinating
+with any other tool that follows the same convention:
+
+```ada
+Config.Host_Lock :=
+  (Enabled               => True,
+   Path                  => Ada.Strings.Unbounded.Null_Unbounded_String,
+   Timeout               => 30.0,
+   Poll_Interval         => 0.250,
+   Require_Machine_Scope => False);
+```
+
+The claim is taken before the preflight gate, because waiting for a quiet host
+first and then blocking on the claim would leave the quiet verdict stale by
+the time collection began. A waiting run is idle, so it does not become the
+load it is waiting out.
+
+This matters most for `Pause`. Two harnesses that both pause on interference
+are symmetric controllers observing each other: each pauses because the other
+is loading the machine, both then observe quiet, both resume together, and
+both immediately pause again. Serializing them removes the oscillation.
+
+`Flyology_Bench.Host_Lock` also exposes the claim directly, including
+disjoint per-CPU claims that let core-scoped runs on non-overlapping CPUs
+proceed concurrently while a machine-wide claim excludes them all. The file
+naming, protocol, and content grammar are specified in
+[`docs/host-cpu-lock.md`](../docs/host-cpu-lock.md) so that other tools can
+interoperate; it is a proposal rather than an established standard.
+
+A successful claim is not proof of exclusivity. It coordinates only with
+processes that reach the same file, and a privately mounted claim path — which
+`systemd PrivateTmp=` produces routinely — silently reduces the claim to one
+mount namespace. That case is detected on Linux and reported as
+`Lock_Namespace_Scoped`; separate containers are not detectable from inside
+and need an explicit shared path. `Require_Machine_Scope` refuses to run
+rather than proceeding unserialized, because in CI a silently unserialized run
+is worse than a failed one.
+
+The maintained example enables the interference watch only when
+`FLYOLOGY_BENCH_INTERFERENCE=1`, mirroring how it gates the preflight.
+
 Wall-clock timing is the default for Flyology waits and cross-task work.
 `Flyology_Bench.Baselines` persists raw samples and refuses a regression
 comparison when the clock backend or environment fingerprint differs. Its
@@ -466,10 +626,10 @@ add CPU policy, compiler switches, revision, and other locally relevant state.
 Direct paired `Compare` is preferable whenever both implementations can run in
 one process.
 
-`Flyology_Bench.Host_Control.Pin_Current_Thread` applies strict Linux CPU
-affinity or a Darwin advisory affinity tag. Placement cannot by itself control
-frequency scaling, thermal state, interrupts, or competing system load, so
-those conditions still belong in the recorded fingerprint and run policy.
+`Flyology_Bench.Host_Control.Pin_Current_Thread` is the low-level primitive
+under `Config.Placement`. Placement cannot by itself control frequency
+scaling, thermal state, interrupts, or competing system load, so those
+conditions still belong in the recorded fingerprint and run policy.
 
 Allocation counts still require allocator instrumentation and are not inferred
 from RSS. CPU time, Linux hardware counters, and the resource axes above are

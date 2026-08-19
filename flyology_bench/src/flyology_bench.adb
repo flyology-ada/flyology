@@ -3,7 +3,12 @@
 
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Characters.Handling;
+with Ada.Strings.Fixed;
+with Ada.Strings.Maps;
+with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
+with Flyology_Bench.Host_Control;
+with Flyology_Bench.Host_Lock;
 with Flyology_Bench_Internal_Probes;
 with Interfaces.C;
 with System;
@@ -239,11 +244,17 @@ package body Flyology_Bench is
    function Sampling_Limit_Reached
      (Config    : Configuration;
       Started   : Interfaces.Unsigned_64;
-      Completed : Natural) return Boolean is
+      Completed : Natural;
+      Excluded  : Interfaces.Unsigned_64 := 0) return Boolean
+   is
+      Elapsed : constant Interfaces.Unsigned_64 := Clock_Now - Started;
    begin
+      --  Time spent suspended waiting for the host is not collection time,
+      --  so it must not silently truncate the sample count.
       return Config.Maximum_Sampling_Time > 0.0
         and then Completed >= Natural (Sample_Count'First)
-        and then Clock_Now - Started
+        and then Elapsed >= Excluded
+        and then Elapsed - Excluded
           >= Duration_Nanoseconds (Config.Maximum_Sampling_Time);
    end Sampling_Limit_Reached;
 
@@ -604,6 +615,704 @@ package body Flyology_Bench is
       end if;
    end Host_CPU_Utilization;
 
+   Maximum_Watched_CPUs : constant := 128;
+   type Watched_CPU_Array is
+     array (1 .. Maximum_Watched_CPUs) of Natural;
+
+   --  Rolling state for the mid-run interference watch. One window spans a
+   --  whole number of collection units and is judged only after it closes,
+   --  so a response never lands between the two halves of a paired sample or
+   --  inside a balanced multi-way round.
+   type Interference_Watch is record
+      Active         : Boolean := False;
+      Watched        : Watched_CPU_Array := (others => 0);
+      Watched_Total  : Natural := 0;
+      Open           : Boolean := False;
+      Busy           : Host_CPU_Counters := (others => 0);
+      Total          : Host_CPU_Counters := (others => 0);
+      CPU_Count      : Natural := 0;
+      Own_Process    : Interfaces.Unsigned_64 := 0;
+      Own_Thread     : Interfaces.Unsigned_64 := 0;
+      Own_Valid      : Boolean := False;
+      Wall           : Interfaces.Unsigned_64 := 0;
+      Retakes        : Natural := 0;
+      Paused_Total   : Interfaces.Unsigned_64 := 0;
+      Foreign_Sum    : Long_Float := 0.0;
+      Report         : Environment_Report;
+      Foreign        : Sample_Array (Sample_Index'Range) := (others => 0.0);
+   end record;
+
+   --  What the caller must do with the window that just closed.
+   --  @enum Accept_Window Keep the collected units and continue.
+   --  @enum Retake_Window Discard them and collect the same units again.
+   --  @enum Settle_And_Retake Wait for the host, re-warm, then collect again.
+   type Window_Action is (Accept_Window, Retake_Window, Settle_And_Retake);
+
+   --  Per-sample telemetry is written by index and survives a retake intact,
+   --  but the summary fields are running sums and a running maximum. A
+   --  discarded window has to give its contribution back, or the reported CPU
+   --  share and elapsed time describe samples that were thrown away.
+   type Telemetry_Snapshot is record
+      Available        : Boolean := False;
+      CPU_Total        : Long_Float := 0.0;
+      Wall_Total       : Long_Float := 0.0;
+      RSS_Start        : Long_Float := 0.0;
+      RSS_Final        : Long_Float := 0.0;
+      RSS_Peak         : Long_Float := 0.0;
+      RSS_Change_Total : Long_Float := 0.0;
+      RSS_Change_Peak  : Long_Float := 0.0;
+   end record;
+
+   function Save_Telemetry (Result : Measurement) return Telemetry_Snapshot is
+     (Available        => Result.Telemetry_Available,
+      CPU_Total        => Result.Telemetry_CPU_Total,
+      Wall_Total       => Result.Telemetry_Wall_Total,
+      RSS_Start        => Result.Telemetry_RSS_Start,
+      RSS_Final        => Result.Telemetry_RSS_Final,
+      RSS_Peak         => Result.Telemetry_RSS_Peak,
+      RSS_Change_Total => Result.Telemetry_RSS_Change_Total,
+      RSS_Change_Peak  => Result.Telemetry_RSS_Change_Peak);
+
+   procedure Restore_Telemetry
+     (Result : in out Measurement;
+      Saved  : Telemetry_Snapshot) is
+   begin
+      Result.Telemetry_Available := Saved.Available;
+      Result.Telemetry_CPU_Total := Saved.CPU_Total;
+      Result.Telemetry_Wall_Total := Saved.Wall_Total;
+      Result.Telemetry_RSS_Start := Saved.RSS_Start;
+      Result.Telemetry_RSS_Final := Saved.RSS_Final;
+      Result.Telemetry_RSS_Peak := Saved.RSS_Peak;
+      Result.Telemetry_RSS_Change_Total := Saved.RSS_Change_Total;
+      Result.Telemetry_RSS_Change_Peak := Saved.RSS_Change_Peak;
+   end Restore_Telemetry;
+
+   --  Our own CPU time over the window, read once as both totals.
+   --
+   --  Host-wide attribution subtracts the whole process, because every thread
+   --  of it contributes to the host counters. Core-scoped attribution
+   --  subtracts only the placed thread, because only that thread is bound to
+   --  the watched CPUs. Subtracting the whole process there would deduct time
+   --  our threads spent on CPUs outside the watched set and under-report
+   --  foreign load, which fails silently; subtracting only the placed thread
+   --  over-reports instead, which is visible. The difference between the two
+   --  is what the dilution check measures.
+   procedure Read_Own_CPU
+     (Process_CPU : out Interfaces.Unsigned_64;
+      Thread_CPU  : out Interfaces.Unsigned_64;
+      Valid       : out Boolean)
+   is
+      Values    : Native_Resource_Values := (others => 0);
+      Mask      : Interfaces.Unsigned_64 := 0;
+      Available : Boolean := False;
+   begin
+      Read_Resource_Snapshot (Values, Mask, Available);
+      Valid := Available
+        and then Mask_Has (Mask, 0)
+        and then Mask_Has (Mask, 1);
+      if not Valid then
+         Process_CPU := 0;
+         Thread_CPU := 0;
+         return;
+      end if;
+      Process_CPU := Values (0);
+      Thread_CPU := Values (1);
+   end Read_Own_CPU;
+
+   --  Foreign share of the watched CPUs' capacity, in percent. The host busy
+   --  ratio is scaled by wall time rather than converted from ticks, so the
+   --  platform tick length never enters the arithmetic.
+   procedure Foreign_Utilization
+     (Watch          : Interference_Watch;
+      Current_Busy   : Host_CPU_Counters;
+      Current_Total  : Host_CPU_Counters;
+      Own_Delta      : Long_Float;
+      Other_Delta    : Long_Float;
+      Wall_Delta     : Long_Float;
+      Foreign        : out Long_Float;
+      Dilution       : out Long_Float;
+      Available      : out Boolean)
+   is
+      Busy_Sum  : Long_Float := 0.0;
+      Total_Sum : Long_Float := 0.0;
+      Counted   : Natural := 0;
+      Capacity  : Long_Float;
+      Busy_Time : Long_Float;
+
+      procedure Accumulate (CPU : Natural) is
+      begin
+         if Current_Busy (CPU) < Watch.Busy (CPU)
+           or else Current_Total (CPU) < Watch.Total (CPU)
+         then
+            return;
+         end if;
+         declare
+            Busy_Delta : constant Interfaces.Unsigned_64 :=
+              Current_Busy (CPU) - Watch.Busy (CPU);
+            Total_Delta : constant Interfaces.Unsigned_64 :=
+              Current_Total (CPU) - Watch.Total (CPU);
+         begin
+            if Busy_Delta > Total_Delta or else Total_Delta = 0 then
+               return;
+            end if;
+            Busy_Sum := Busy_Sum + Long_Float (Busy_Delta);
+            Total_Sum := Total_Sum + Long_Float (Total_Delta);
+            Counted := Counted + 1;
+         end;
+      end Accumulate;
+   begin
+      Foreign := 0.0;
+      Dilution := 0.0;
+      Available := False;
+      if Watch.Report.Attribution = Core_Scoped then
+         for Index in 1 .. Watch.Watched_Total loop
+            if Watch.Watched (Index) < Watch.CPU_Count then
+               Accumulate (Watch.Watched (Index));
+            end if;
+         end loop;
+      else
+         for CPU in 0 .. Watch.CPU_Count - 1 loop
+            Accumulate (CPU);
+         end loop;
+      end if;
+      if Counted = 0 or else Total_Sum <= 0.0 or else Wall_Delta <= 0.0 then
+         return;
+      end if;
+      Capacity := Long_Float (Counted) * Wall_Delta;
+      Busy_Time := (Busy_Sum / Total_Sum) * Capacity;
+      Foreign := 100.0 * Long_Float'Max (0.0, Busy_Time - Own_Delta)
+        / Capacity;
+      --  The share of the watched capacity that this process's other threads
+      --  could account for. It is an upper bound: they may have run entirely
+      --  on CPUs outside the watched set.
+      Dilution := 100.0 * Long_Float'Max (0.0, Other_Delta) / Capacity;
+      Available := True;
+   end Foreign_Utilization;
+
+   procedure Open_Interference_Window (Watch : in out Interference_Watch) is
+   begin
+      if not Watch.Active then
+         return;
+      end if;
+      Read_Host_CPU (Watch.Busy, Watch.Total, Watch.CPU_Count);
+      Read_Own_CPU (Watch.Own_Process, Watch.Own_Thread, Watch.Own_Valid);
+      Watch.Wall := Clock_Now;
+      Watch.Open := True;
+   end Open_Interference_Window;
+
+   --  Close the open window, record what it saw, and decide what happens to
+   --  the units it covered.
+   procedure Judge_Window
+     (Config : Configuration;
+      Watch  : in out Interference_Watch;
+      First  : Sample_Index;
+      Last   : Sample_Index;
+      Action : out Window_Action)
+   is
+      Current_Busy  : Host_CPU_Counters := (others => 0);
+      Current_Total : Host_CPU_Counters := (others => 0);
+      Current_Count : Natural := 0;
+      Process_After : Interfaces.Unsigned_64;
+      Thread_After  : Interfaces.Unsigned_64;
+      Own_Valid     : Boolean;
+      Finished      : Interfaces.Unsigned_64;
+      Foreign       : Long_Float := 0.0;
+      Dilution      : Long_Float := 0.0;
+      Available     : Boolean := False;
+      Wall_Delta    : Long_Float := 0.0;
+      Units         : constant Natural := Natural (Last) - Natural (First) + 1;
+   begin
+      Action := Accept_Window;
+      if not Watch.Active or else not Watch.Open then
+         return;
+      end if;
+      Watch.Open := False;
+      Read_Host_CPU (Current_Busy, Current_Total, Current_Count);
+      Read_Own_CPU (Process_After, Thread_After, Own_Valid);
+      Finished := Clock_Now;
+
+      if Current_Count = Watch.CPU_Count
+        and then Finished > Watch.Wall
+        and then Own_Valid
+        and then Watch.Own_Valid
+        and then Process_After >= Watch.Own_Process
+        and then Thread_After >= Watch.Own_Thread
+      then
+         Wall_Delta := Long_Float (Finished - Watch.Wall);
+         declare
+            Process_Delta : constant Long_Float :=
+              Long_Float (Process_After - Watch.Own_Process);
+            Thread_Delta : constant Long_Float :=
+              Long_Float (Thread_After - Watch.Own_Thread);
+         begin
+            Foreign_Utilization
+              (Watch, Current_Busy, Current_Total,
+               (if Watch.Report.Attribution = Core_Scoped
+                then Thread_Delta else Process_Delta),
+               Process_Delta - Thread_Delta,
+               Wall_Delta, Foreign, Dilution, Available);
+         end;
+      end if;
+
+      if not Available then
+         return;
+      end if;
+
+      --  Placement binds only the calling thread, so another thread of this
+      --  process can occupy a watched CPU, where its time is
+      --  indistinguishable from foreign load. Once those threads can account
+      --  for more of the watched capacity than the configured limit, the
+      --  core-scoped answer cannot address the question the limit asks. The
+      --  run drops to host-wide, which is well defined for a multi-threaded
+      --  process, rather than reporting its own runtime as interference. The
+      --  window that revealed it is not recorded, because its value was
+      --  computed under the attribution being abandoned.
+      if Watch.Report.Attribution = Core_Scoped
+        and then Dilution > Config.Interference.Maximum_Foreign_CPU_Percent
+      then
+         Watch.Report.Attribution := Host_Wide;
+         Watch.Report.Attribution_Diluted := True;
+         Watch.Report.Watched_CPUs := 0;
+         Watch.Watched_Total := 0;
+         return;
+      end if;
+
+      for Index in First .. Last loop
+         Watch.Foreign (Index) := Foreign;
+      end loop;
+      Watch.Report.Watched := True;
+      Watch.Report.Windows := Watch.Report.Windows + 1;
+      Watch.Report.Peak_Foreign_CPU_Percent := Long_Float'Max
+        (Watch.Report.Peak_Foreign_CPU_Percent, Foreign);
+      Watch.Foreign_Sum := Watch.Foreign_Sum + Foreign;
+
+      if Foreign <= Config.Interference.Maximum_Foreign_CPU_Percent then
+         Watch.Report.Observed_Samples :=
+           Watch.Report.Observed_Samples + Units;
+         return;
+      end if;
+
+      --  A window shorter than the configured minimum is recorded but never
+      --  acted on: below one counter tick the estimate is mostly
+      --  quantization, and discarding samples over it would be noise
+      --  masquerading as hygiene.
+      if Wall_Delta < Long_Float (Duration_Nanoseconds
+        (Config.Interference.Window))
+      then
+         Watch.Report.Contaminated_Samples :=
+           Watch.Report.Contaminated_Samples + Units;
+         Watch.Report.Observed_Samples :=
+           Watch.Report.Observed_Samples + Units;
+         return;
+      end if;
+
+      if Config.Interference.Response = Observe
+        or else Watch.Retakes + Units > Config.Interference.Maximum_Retakes
+      then
+         if Config.Interference.Response /= Observe then
+            Watch.Report.Budget_Exhausted := True;
+         end if;
+         Watch.Report.Contaminated_Samples :=
+           Watch.Report.Contaminated_Samples + Units;
+         Watch.Report.Observed_Samples :=
+           Watch.Report.Observed_Samples + Units;
+         return;
+      end if;
+
+      Watch.Retakes := Watch.Retakes + Units;
+      Watch.Report.Retaken_Samples := Watch.Report.Retaken_Samples + Units;
+      Action :=
+        (if Config.Interference.Response = Pause
+         then Settle_And_Retake
+         else Retake_Window);
+   end Judge_Window;
+
+   --  Suspend collection until foreign load stays within its limit for
+   --  Settle_Time, bounded by whatever remains of the pause budget.
+   procedure Await_Foreign_Settle
+     (Config : Configuration;
+      Watch  : in out Interference_Watch)
+   is
+      Budget    : constant Interfaces.Unsigned_64 :=
+        Duration_Nanoseconds (Config.Interference.Maximum_Pause_Time);
+      Required  : constant Interfaces.Unsigned_64 :=
+        Duration_Nanoseconds (Config.Interference.Settle_Time);
+      Started   : constant Interfaces.Unsigned_64 := Clock_Now;
+      Stable    : Interfaces.Unsigned_64 := 0;
+      Foreign   : Long_Float;
+      Available : Boolean;
+      Current_Busy  : Host_CPU_Counters := (others => 0);
+      Current_Total : Host_CPU_Counters := (others => 0);
+      Current_Count : Natural := 0;
+      Process_After : Interfaces.Unsigned_64;
+      Thread_After  : Interfaces.Unsigned_64;
+      Own_Valid : Boolean;
+      Finished  : Interfaces.Unsigned_64;
+      Completed : Natural;
+      Dilution  : Long_Float;
+   begin
+      if Watch.Paused_Total >= Budget then
+         Watch.Report.Budget_Exhausted := True;
+         return;
+      end if;
+      Watch.Report.Pauses := Watch.Report.Pauses + 1;
+      Notify (Config, Waiting_For_CPU_Quiescence, 0, 100);
+      loop
+         Open_Interference_Window (Watch);
+         delay Config.Interference.Window;
+         Read_Host_CPU (Current_Busy, Current_Total, Current_Count);
+         Read_Own_CPU (Process_After, Thread_After, Own_Valid);
+         Finished := Clock_Now;
+         Available := False;
+         Foreign := 0.0;
+         if Current_Count = Watch.CPU_Count
+           and then Finished > Watch.Wall
+           and then Own_Valid
+           and then Watch.Own_Valid
+           and then Process_After >= Watch.Own_Process
+           and then Thread_After >= Watch.Own_Thread
+         then
+            declare
+               Process_Delta : constant Long_Float :=
+                 Long_Float (Process_After - Watch.Own_Process);
+               Thread_Delta : constant Long_Float :=
+                 Long_Float (Thread_After - Watch.Own_Thread);
+            begin
+               Foreign_Utilization
+                 (Watch, Current_Busy, Current_Total,
+                  (if Watch.Report.Attribution = Core_Scoped
+                   then Thread_Delta else Process_Delta),
+                  Process_Delta - Thread_Delta,
+                  Long_Float (Finished - Watch.Wall),
+                  Foreign, Dilution, Available);
+            end;
+         end if;
+         Watch.Open := False;
+
+         if Available
+           and then Foreign
+             <= Config.Interference.Maximum_Foreign_CPU_Percent
+         then
+            Stable := Stable + (Finished - Watch.Wall);
+         else
+            Stable := 0;
+         end if;
+         Completed := Natural'Min
+           (100,
+            Natural (Long_Float'Floor
+              (100.0 * Long_Float (Stable)
+               / Long_Float'Max (1.0, Long_Float (Required)))));
+         Notify (Config, Waiting_For_CPU_Quiescence, Completed, 100);
+         exit when Stable >= Required;
+         --  Exhausting the budget degrades the run to Observe rather than
+         --  discarding everything collected so far.
+         if Clock_Now - Started >= Budget - Watch.Paused_Total then
+            Watch.Report.Budget_Exhausted := True;
+            exit;
+         end if;
+      end loop;
+      declare
+         Spent : constant Interfaces.Unsigned_64 := Clock_Now - Started;
+      begin
+         Watch.Paused_Total := Watch.Paused_Total + Spent;
+         Watch.Report.Paused_Nanoseconds :=
+           Watch.Report.Paused_Nanoseconds + Long_Float (Spent);
+      end;
+   end Await_Foreign_Settle;
+
+   --  Number of collection units judged together. Interference watching is
+   --  the only reason to group units at all; without it every unit is judged
+   --  alone and the collection loop keeps its original shape.
+   function Units_Per_Window
+     (Config           : Configuration;
+      Unit_Nanoseconds : Long_Float;
+      Total_Units      : Positive) return Positive
+   is
+      Required : Long_Float;
+      Units    : Long_Float;
+   begin
+      if not Config.Interference.Enabled or else Unit_Nanoseconds <= 0.0 then
+         return 1;
+      end if;
+      Required :=
+        Long_Float (Duration_Nanoseconds (Config.Interference.Window));
+      --  Batch duration varies from sample to sample, so a window sized to
+      --  only just reach the minimum would regularly fall short of it and
+      --  silently degrade to observation. The margin buys that back.
+      Units := Long_Float'Max
+        (1.0, Long_Float'Ceiling (1.25 * Required / Unit_Nanoseconds));
+      if Units >= Long_Float (Total_Units) then
+         return Total_Units;
+      end if;
+      return Positive (Units);
+   end Units_Per_Window;
+
+   procedure Apply_Environment
+     (Watch           : Interference_Watch;
+      Result          : in out Measurement;
+      Include_Samples : Boolean := True) is
+   begin
+      Result.Environment_Data := Watch.Report;
+      if Include_Samples then
+         Result.Foreign_CPU := Watch.Foreign;
+      end if;
+      if Watch.Report.Windows > 0 then
+         Result.Environment_Data.Mean_Foreign_CPU_Percent :=
+           Watch.Foreign_Sum / Long_Float (Watch.Report.Windows);
+      end if;
+   end Apply_Environment;
+
+   procedure Add_Watched_CPU
+     (Watch : in out Interference_Watch;
+      CPU   : Natural) is
+   begin
+      for Index in 1 .. Watch.Watched_Total loop
+         if Watch.Watched (Index) = CPU then
+            return;
+         end if;
+      end loop;
+      if Watch.Watched_Total < Maximum_Watched_CPUs then
+         Watch.Watched_Total := Watch.Watched_Total + 1;
+         Watch.Watched (Watch.Watched_Total) := CPU;
+      end if;
+   end Add_Watched_CPU;
+
+   --  First line of a Linux pseudo-file, or the empty string when it cannot
+   --  be read. Placement inspection is Linux-only, so an absent file is an
+   --  ordinary answer rather than an error.
+   function Read_First_Line (Path : String) return String is
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
+      declare
+         Line : constant String := Ada.Text_IO.Get_Line (File);
+      begin
+         Ada.Text_IO.Close (File);
+         return Line;
+      end;
+   exception
+      when others =>
+         if Ada.Text_IO.Is_Open (File) then
+            Ada.Text_IO.Close (File);
+         end if;
+         return "";
+   end Read_First_Line;
+
+   --  /proc pads its fields with tabs, which Ada.Strings.Fixed.Trim does not
+   --  remove by default. A retained tab makes Natural'Value raise, and the
+   --  CPU list then parses as empty.
+   Blanks : constant Ada.Strings.Maps.Character_Set :=
+     Ada.Strings.Maps.To_Set (' ' & ASCII.HT & ASCII.CR & ASCII.LF);
+
+   function Unpadded (Value : String) return String is
+     (Ada.Strings.Fixed.Trim (Value, Blanks, Blanks));
+
+   --  Value of one /proc/self/status field, without its name or padding.
+   function Status_Field (Name : String) return String is
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/self/status");
+      while not Ada.Text_IO.End_Of_File (File) loop
+         declare
+            Line : constant String := Ada.Text_IO.Get_Line (File);
+         begin
+            if Line'Length > Name'Length + 1
+              and then Line (Line'First .. Line'First + Name'Length)
+                = Name & ":"
+            then
+               declare
+                  Value : constant String := Unpadded
+                    (Line (Line'First + Name'Length + 1 .. Line'Last));
+               begin
+                  Ada.Text_IO.Close (File);
+                  return Value;
+               end;
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Close (File);
+      return "";
+   exception
+      when others =>
+         if Ada.Text_IO.Is_Open (File) then
+            Ada.Text_IO.Close (File);
+         end if;
+         return "";
+   end Status_Field;
+
+   --  Add every CPU named by a Linux list such as "0-3,8,10-11".
+   procedure Add_CPU_List
+     (Watch : in out Interference_Watch;
+      Text  : String)
+   is
+      First : Natural := Text'First;
+   begin
+      while First <= Text'Last loop
+         declare
+            Last  : Natural := Text'Last;
+            Dash  : Natural := 0;
+            Low   : Natural;
+            High  : Natural;
+         begin
+            for Index in First .. Text'Last loop
+               if Text (Index) = ',' then
+                  Last := Index - 1;
+                  exit;
+               end if;
+            end loop;
+            for Index in First .. Last loop
+               if Text (Index) = '-' then
+                  Dash := Index;
+                  exit;
+               end if;
+            end loop;
+            begin
+               if Dash > 0 then
+                  Low := Natural'Value (Unpadded (Text (First .. Dash - 1)));
+                  High := Natural'Value (Unpadded (Text (Dash + 1 .. Last)));
+               else
+                  Low := Natural'Value (Unpadded (Text (First .. Last)));
+                  High := Low;
+               end if;
+               for CPU in Low .. High loop
+                  Add_Watched_CPU (Watch, CPU);
+               end loop;
+            exception
+               when Constraint_Error =>
+                  null;
+            end;
+            First := Last + 2;
+         end;
+      end loop;
+   end Add_CPU_List;
+
+   --  Build the set of logical CPUs whose busy time is entirely foreign. SMT
+   --  siblings belong in it: a sibling saturated by another process slows the
+   --  measurement while leaving the placed CPU's own busy share clean.
+   procedure Collect_Watched_CPUs
+     (Config : Configuration;
+      Watch  : in out Interference_Watch)
+   is
+      Allowed : constant String := Status_Field ("Cpus_allowed_list");
+      Placed  : Natural;
+   begin
+      if Allowed = "" then
+         return;
+      end if;
+      Add_CPU_List (Watch, Allowed);
+      if not Config.Placement.Include_Siblings then
+         return;
+      end if;
+      Placed := Watch.Watched_Total;
+      for Index in 1 .. Placed loop
+         Add_CPU_List
+           (Watch,
+            Read_First_Line
+              ("/sys/devices/system/cpu/cpu"
+               & Ada.Strings.Fixed.Trim
+                   (Natural'Image (Watch.Watched (Index)), Ada.Strings.Both)
+               & "/topology/thread_siblings_list"));
+      end loop;
+   end Collect_Watched_CPUs;
+
+   --  Claim host CPU capacity, place the benchmark thread, and decide how
+   --  foreign load will be attributed. Runs before the preflight gate: a
+   --  quiet verdict obtained before blocking on the claim would be stale by
+   --  the time collection started.
+   procedure Prepare_Environment
+     (Config : Configuration;
+      Watch  : in out Interference_Watch;
+      Lock   : in out Host_Lock.Claim)
+   is
+      use type Host_Lock.Acquisition;
+      use type Host_Lock.Path_Isolation;
+      use type Host_Control.Placement_Strength;
+   begin
+      if Config.Host_Lock.Enabled then
+         declare
+            Path : constant String :=
+              Ada.Strings.Unbounded.To_String (Config.Host_Lock.Path);
+            Step : constant Duration :=
+              Duration'Max (0.001, Config.Host_Lock.Poll_Interval);
+            Waited  : Duration := 0.0;
+            Outcome : Host_Lock.Acquisition;
+         begin
+            Notify (Config, Waiting_For_CPU_Quiescence, 0, 100);
+            loop
+               Host_Lock.Try_Acquire (Lock, Outcome, Path => Path);
+               exit when Outcome /= Host_Lock.Busy;
+               exit when Waited >= Config.Host_Lock.Timeout;
+               --  Waiting idle rather than spinning: a busy waiter would be
+               --  the very foreign load the holder is trying to avoid.
+               delay Step;
+               Waited := Waited + Step;
+               Notify
+                 (Config, Waiting_For_CPU_Quiescence,
+                  (if Config.Host_Lock.Timeout > 0.0
+                   then Natural'Min
+                     (100,
+                      Natural (Long_Float'Floor
+                        (100.0 * Long_Float (Waited)
+                         / Long_Float (Config.Host_Lock.Timeout))))
+                   else 100),
+                  100);
+            end loop;
+            case Outcome is
+               when Host_Lock.Acquired =>
+                  Watch.Report.Host_Lock :=
+                    (if Host_Lock.Isolation (Lock)
+                       = Host_Lock.Private_Namespace
+                     then Lock_Namespace_Scoped
+                     else Lock_Held);
+               when Host_Lock.Busy =>
+                  Watch.Report.Host_Lock := Lock_Busy;
+               when Host_Lock.Path_Unusable =>
+                  Watch.Report.Host_Lock := Lock_Path_Unusable;
+            end case;
+         end;
+         if Config.Host_Lock.Require_Machine_Scope
+           and then Watch.Report.Host_Lock /= Lock_Held
+         then
+            raise Host_Lock_Unavailable with
+              "host CPU claim is not machine-wide ("
+              & Host_Lock_Outcome'Image (Watch.Report.Host_Lock) & ")";
+         end if;
+      end if;
+
+      if Config.Placement.Enabled then
+         begin
+            Watch.Report.Placement :=
+              (if Host_Control.Pin_Current_Thread (Config.Placement.CPU)
+                 = Host_Control.Strict
+               then Placement_Strict
+               else Placement_Advisory);
+         exception
+            when Program_Error =>
+               Watch.Report.Placement := Placement_Rejected;
+         end;
+         if Config.Placement.Require_Strict
+           and then Watch.Report.Placement /= Placement_Strict
+         then
+            raise Placement_Unavailable with
+              "strict benchmark thread placement is unavailable on this host";
+         end if;
+         --  Only a strict binding tells us which CPUs are ours. A Darwin
+         --  affinity tag is a scheduler hint whose value is not a CPU index,
+         --  so attribution there stays host-wide.
+         if Watch.Report.Placement = Placement_Strict then
+            Collect_Watched_CPUs (Config, Watch);
+         end if;
+      end if;
+
+      if Watch.Watched_Total > 0 then
+         Watch.Report.Attribution := Core_Scoped;
+         Watch.Report.Watched_CPUs := Watch.Watched_Total;
+      else
+         Watch.Report.Attribution := Host_Wide;
+      end if;
+      Watch.Active := Config.Interference.Enabled;
+   end Prepare_Environment;
+
    procedure Await_CPU_Quiescence (Config : Configuration) is
       Previous_Busy  : Host_CPU_Counters := (others => 0);
       Previous_Total : Host_CPU_Counters := (others => 0);
@@ -809,6 +1518,46 @@ package body Flyology_Bench is
       then
          raise Constraint_Error with
            "CPU quiescence poll interval must not exceed the timeout";
+      elsif Config.Interference.Enabled
+        and then (Config.Interference.Maximum_Foreign_CPU_Percent < 0.0
+                  or else Config.Interference.Maximum_Foreign_CPU_Percent
+                    > 100.0)
+      then
+         raise Constraint_Error with
+           "interference foreign CPU limit must be a percentage";
+      elsif Config.Interference.Enabled
+        and then Config.Interference.Window <= 0.0
+      then
+         raise Constraint_Error with
+           "interference observation window must be positive";
+      elsif Config.Interference.Enabled
+        and then Config.Interference.Response = Pause
+        and then Config.Interference.Settle_Time <= 0.0
+      then
+         raise Constraint_Error with
+           "interference settle time must be positive";
+      elsif Config.Interference.Enabled
+        and then Config.Interference.Response = Pause
+        and then Config.Interference.Maximum_Pause_Time
+          < Config.Interference.Settle_Time
+      then
+         raise Constraint_Error with
+           "interference pause budget must cover one settle interval";
+      elsif Config.Interference.Enabled
+        and then Config.Interference.Rewarm_Time < 0.0
+      then
+         raise Constraint_Error with
+           "interference re-warm time must not be negative";
+      elsif Config.Host_Lock.Enabled
+        and then Config.Host_Lock.Timeout < 0.0
+      then
+         raise Constraint_Error with
+           "host CPU claim timeout must not be negative";
+      elsif Config.Host_Lock.Enabled
+        and then Config.Host_Lock.Poll_Interval <= 0.0
+      then
+         raise Constraint_Error with
+           "host CPU claim poll interval must be positive";
       end if;
    end Validate;
 
@@ -1357,6 +2106,8 @@ package body Flyology_Bench is
       Clock_Cost       : Long_Float;
       Calibration_Hits : Natural := 0;
       Perf             : Perf_Handle;
+      Watch            : Interference_Watch;
+      Lock             : Host_Lock.Claim;
 
       function Time_Batch (Iterations : Iteration_Count) return Long_Float is
          Started  : Interfaces.Unsigned_64;
@@ -1444,6 +2195,7 @@ package body Flyology_Bench is
       Result.Random_Seed_Value := Config.Random_Seed;
       Initialize_Metrics (Config, Result);
       Notify (Config, Starting);
+      Prepare_Environment (Config, Watch, Lock);
       Await_CPU_Quiescence (Config);
       Characterize_Clock
         (Backend             => Result.Clock_Backend_Id,
@@ -1510,27 +2262,79 @@ package body Flyology_Bench is
       declare
          Sampling_Started : constant Interfaces.Unsigned_64 := Clock_Now;
          Completed : Natural := 0;
+         Total_Samples : constant Positive := Natural (Config.Samples);
+         Group : constant Positive :=
+           Units_Per_Window (Config, Target_NS, Total_Samples);
+         Window_First : Positive := 1;
+         Window_Last  : Positive;
+         Action : Window_Action;
+
+         --  A resumed run has cold caches, predictors, and frequency state.
+         --  Without this the first sample after a pause is exactly the
+         --  outlier the pause was meant to avoid.
+         procedure Rewarm is
+            Deadline : Interfaces.Unsigned_64;
+            Elapsed  : Long_Float;
+         begin
+            if Config.Interference.Rewarm_Time <= 0.0 then
+               return;
+            end if;
+            Deadline := Clock_Now
+              + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+            Notify (Config, Warming, 0, 100);
+            loop
+               Elapsed := Time_Batch (Batch_Iterations);
+               Escape (Elapsed'Address);
+               exit when Clock_Now >= Deadline;
+            end loop;
+            Notify (Config, Warming, 100, 100);
+         end Rewarm;
       begin
          Notify (Config, Sampling, 0, Natural (Config.Samples));
-         for Index in Sample_Index range 1 .. Sample_Index (Config.Samples) loop
-            declare
-               Elapsed : Long_Float;
-            begin
-               Elapsed := Time_Sampled_Batch (Index);
-               if Config.Subtract_Timer_Cost and then Elapsed > Clock_Cost then
-                  Elapsed := Elapsed - Clock_Cost;
+         while Window_First <= Total_Samples loop
+            Window_Last :=
+              Positive'Min (Window_First + Group - 1, Total_Samples);
+            loop
+               declare
+                  Saved : constant Telemetry_Snapshot :=
+                    Save_Telemetry (Result);
+               begin
+               Open_Interference_Window (Watch);
+               for Index in Window_First .. Window_Last loop
+                  declare
+                     Elapsed : Long_Float;
+                  begin
+                     Elapsed := Time_Sampled_Batch (Sample_Index (Index));
+                     if Config.Subtract_Timer_Cost
+                       and then Elapsed > Clock_Cost
+                     then
+                        Elapsed := Elapsed - Clock_Cost;
+                     end if;
+                     Result.Values (Sample_Index (Index)) :=
+                       Elapsed / Long_Float (Batch_Iterations);
+                  end;
+                  Completed := Natural'Max (Completed, Index);
+                  Notify
+                    (Config, Sampling, Completed, Natural (Config.Samples));
+               end loop;
+               Judge_Window
+                 (Config, Watch, Sample_Index (Window_First),
+                  Sample_Index (Window_Last), Action);
+               exit when Action = Accept_Window;
+               Restore_Telemetry (Result, Saved);
+               if Action = Settle_And_Retake then
+                  Await_Foreign_Settle (Config, Watch);
+                  Rewarm;
                end if;
-               Result.Values (Index) :=
-                 Elapsed / Long_Float (Batch_Iterations);
-            end;
-            Completed := Natural (Index);
-            Notify
-              (Config, Sampling, Completed, Natural (Config.Samples));
+               end;
+            end loop;
             exit when Sampling_Limit_Reached
-              (Config, Sampling_Started, Completed);
+              (Config, Sampling_Started, Completed, Watch.Paused_Total);
+            Window_First := Window_Last + 1;
          end loop;
          Result.Sample_Total := Sample_Count (Completed);
       end;
+      Apply_Environment (Watch, Result);
       Notify (Config, Analyzing);
       Analyze (Result);
       Analyze_Metrics (Result);
@@ -1560,6 +2364,8 @@ package body Flyology_Bench is
       Calibration_Hits : Natural := 0;
       Slow_Limit_Hits  : Natural := 0;
       Perf             : Perf_Handle;
+      Watch            : Interference_Watch;
+      Lock             : Host_Lock.Claim;
       Warmup_State     : Interfaces.Unsigned_64 :=
         16#A076_1D64_78BD_642F# xor
         Interfaces.Unsigned_64 (Config.Random_Seed);
@@ -1689,6 +2495,7 @@ package body Flyology_Bench is
       Validate (Config);
       Result := (others => <>);
       Notify (Config, Starting);
+      Prepare_Environment (Config, Watch, Lock);
       Await_CPU_Quiescence (Config);
       Result.Reference_Data.Sample_Total := Config.Samples;
       Result.Contender_Data.Sample_Total := Config.Samples;
@@ -1859,10 +2666,16 @@ package body Flyology_Bench is
          declare
             Sampling_Started : constant Interfaces.Unsigned_64 := Clock_Now;
             Completed : Natural := 0;
-         begin
-         Notify (Config, Sampling, 0, Natural (Config.Samples));
-         for Index in Orders'Range loop
-            declare
+            Total_Samples : constant Positive := Orders'Length;
+            --  One unit is a complete pair, so a window never splits the two
+            --  halves that make the comparison paired.
+            Group : constant Positive := Units_Per_Window
+              (Config, 2.0 * Target_NS, Total_Samples);
+            Window_First : Positive := 1;
+            Window_Last  : Positive;
+            Action : Window_Action;
+
+            procedure Collect_Pair (Index : Positive) is
                Reference_Time : Long_Float;
                Contender_Time : Long_Float;
                Reference_Probe : Sample_Probe_State;
@@ -1904,17 +2717,80 @@ package body Flyology_Bench is
                else
                   Result.Contender_First := Result.Contender_First + 1;
                end if;
-            end;
-            Completed := Index;
-            Notify
-              (Config, Sampling, Completed, Natural (Config.Samples));
+            end Collect_Pair;
+
+            procedure Rewarm is
+               Deadline : Interfaces.Unsigned_64;
+               Reference_Time : Long_Float;
+               Contender_Time : Long_Float;
+            begin
+               if Config.Interference.Rewarm_Time <= 0.0 then
+                  return;
+               end if;
+               Deadline := Clock_Now
+                 + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+               Notify (Config, Warming, 0, 100);
+               loop
+                  Time_Pair
+                    (Reference_First => True,
+                     Reference_Time  => Reference_Time,
+                     Contender_Time  => Contender_Time);
+                  Escape (Reference_Time'Address);
+                  Escape (Contender_Time'Address);
+                  exit when Clock_Now >= Deadline;
+               end loop;
+               Notify (Config, Warming, 100, 100);
+            end Rewarm;
+         begin
+         Notify (Config, Sampling, 0, Natural (Config.Samples));
+         while Window_First <= Total_Samples loop
+            Window_Last :=
+              Positive'Min (Window_First + Group - 1, Total_Samples);
+            loop
+               declare
+                  Saved_Reference : constant Telemetry_Snapshot :=
+                    Save_Telemetry (Result.Reference_Data);
+                  Saved_Contender : constant Telemetry_Snapshot :=
+                    Save_Telemetry (Result.Contender_Data);
+               begin
+               Open_Interference_Window (Watch);
+               for Index in Window_First .. Window_Last loop
+                  Collect_Pair (Index);
+                  Completed := Natural'Max (Completed, Index);
+                  Notify
+                    (Config, Sampling, Completed, Natural (Config.Samples));
+               end loop;
+               Judge_Window
+                 (Config, Watch, Sample_Index (Window_First),
+                  Sample_Index (Window_Last), Action);
+               exit when Action = Accept_Window;
+               --  Undo this pass's position tally and telemetry before
+               --  collecting the same pairs again.
+               for Index in Window_First .. Window_Last loop
+                  if Orders (Index) then
+                     Result.Reference_First := Result.Reference_First - 1;
+                  else
+                     Result.Contender_First := Result.Contender_First - 1;
+                  end if;
+               end loop;
+               Restore_Telemetry (Result.Reference_Data, Saved_Reference);
+               Restore_Telemetry (Result.Contender_Data, Saved_Contender);
+               if Action = Settle_And_Retake then
+                  Await_Foreign_Settle (Config, Watch);
+                  Rewarm;
+               end if;
+               end;
+            end loop;
             exit when Sampling_Limit_Reached
-              (Config, Sampling_Started, Completed);
+              (Config, Sampling_Started, Completed, Watch.Paused_Total);
+            Window_First := Window_Last + 1;
          end loop;
          Result.Reference_Data.Sample_Total := Sample_Count (Completed);
          Result.Contender_Data.Sample_Total := Sample_Count (Completed);
          end;
       end;
+      Apply_Environment (Watch, Result.Reference_Data);
+      Apply_Environment (Watch, Result.Contender_Data);
 
       Notify (Config, Analyzing);
       Analyze (Result.Reference_Data);
@@ -2041,6 +2917,9 @@ package body Flyology_Bench is
       type Case_Iteration_Array is
         array (Comparison_Case_Index) of Iteration_Count;
       type Case_Time_Array is array (Comparison_Case_Index) of Long_Float;
+
+      Watch : Interference_Watch;
+      Lock  : Host_Lock.Claim;
 
       Batch_Iterations : Iteration_Count := 1;
       Case_Iterations : Case_Iteration_Array := (others => 1);
@@ -2217,6 +3096,7 @@ package body Flyology_Bench is
       Result.Schedule_Policy := Config.Shootout_Scheduling;
       Result.Batch_Policy := Config.Comparison_Batching;
       Notify (Config, Starting);
+      Prepare_Environment (Config, Watch, Lock);
       Await_CPU_Quiescence (Config);
       for Index in 1 .. Count loop
          Result.Data (Comparison_Case_Index (Index)).Sample_Total :=
@@ -2379,11 +3259,15 @@ package body Flyology_Bench is
 
          function Sequential_Limit_Reached
            (Started   : Interfaces.Unsigned_64;
-            Completed : Natural) return Boolean is
+            Completed : Natural;
+            Excluded  : Interfaces.Unsigned_64 := 0) return Boolean
+         is
+            Elapsed : constant Interfaces.Unsigned_64 := Clock_Now - Started;
          begin
             return Config.Maximum_Sampling_Time > 0.0
               and then Completed >= Natural (Sample_Count'First)
-              and then Clock_Now - Started
+              and then Elapsed >= Excluded
+              and then Elapsed - Excluded
                 >= Duration_Nanoseconds
                     (Config.Maximum_Sampling_Time / Count);
          end Sequential_Limit_Reached;
@@ -2406,36 +3290,175 @@ package body Flyology_Bench is
             end loop;
 
             Sampling_Started := Clock_Now;
-            for Sample in 1 .. Natural (Config.Samples) loop
-               for Position in 1 .. Count loop
-                  declare
-                     Base_Position : constant Positive :=
-                       ((Position - 1 + Sample - 1) mod Count) + 1;
-                     Case_Number : constant Positive :=
-                       Base_Order (Base_Position);
-                  begin
-                     Collect_One (Case_Number, Sample, Position);
-                  end;
+            declare
+               Total_Rounds : constant Positive := Natural (Config.Samples);
+               --  One unit is a complete balanced round. Interference that
+               --  arrives mid-round would otherwise be spread unevenly across
+               --  the cases the round is meant to compare fairly.
+               Group : constant Positive :=
+                 Units_Per_Window (Config, Target_NS, Total_Rounds);
+               Window_First : Positive := 1;
+               Window_Last  : Positive;
+               Action : Window_Action;
+
+               procedure Collect_Round (Sample : Positive) is
+               begin
+                  for Position in 1 .. Count loop
+                     declare
+                        Base_Position : constant Positive :=
+                          ((Position - 1 + Sample - 1) mod Count) + 1;
+                        Case_Number : constant Positive :=
+                          Base_Order (Base_Position);
+                     begin
+                        Collect_One (Case_Number, Sample, Position);
+                     end;
+                  end loop;
+                  for Case_Number in 2 .. Count loop
+                     Reference_First_Schedule
+                       (Comparison_Case_Index (Case_Number),
+                        Sample_Index (Sample)) :=
+                          Positions (1) < Positions (Case_Number);
+                  end loop;
+               end Collect_Round;
+
+               procedure Rewarm is
+                  Deadline : Interfaces.Unsigned_64;
+                  Fastest  : Long_Float;
+                  Spent    : Long_Float;
+                  Times    : Case_Time_Array;
+               begin
+                  if Config.Interference.Rewarm_Time <= 0.0 then
+                     return;
+                  end if;
+                  Deadline := Clock_Now
+                    + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+                  Notify (Config, Warming, 0, 100);
+                  loop
+                     Time_Round (Fastest, Spent, Times);
+                     Escape (Fastest'Address);
+                     Escape (Spent'Address);
+                     Escape (Times'Address);
+                     exit when Clock_Now >= Deadline;
+                  end loop;
+                  Notify (Config, Warming, 100, 100);
+               end Rewarm;
+            begin
+               while Window_First <= Total_Rounds loop
+                  Window_Last :=
+                    Positive'Min (Window_First + Group - 1, Total_Rounds);
+                  loop
+                     declare
+                        type Snapshot_Array is
+                          array (Comparison_Case_Index) of Telemetry_Snapshot;
+                        Saved : Snapshot_Array;
+                     begin
+                     for Index in 1 .. Count loop
+                        Saved (Comparison_Case_Index (Index)) := Save_Telemetry
+                          (Result.Data (Comparison_Case_Index (Index)));
+                     end loop;
+                     Open_Interference_Window (Watch);
+                     for Sample in Window_First .. Window_Last loop
+                        Collect_Round (Sample);
+                        Collected_Samples :=
+                          Natural'Max (Collected_Samples, Sample);
+                     end loop;
+                     Judge_Window
+                       (Config, Watch, Sample_Index (Window_First),
+                        Sample_Index (Window_Last), Action);
+                     exit when Action = Accept_Window;
+                     --  Progress counts collected case batches, so a
+                     --  discarded window must give its units back, and so
+                     --  must every case's telemetry totals.
+                     Completed := Completed
+                       - Count * (Window_Last - Window_First + 1);
+                     for Index in 1 .. Count loop
+                        Restore_Telemetry
+                          (Result.Data (Comparison_Case_Index (Index)),
+                           Saved (Comparison_Case_Index (Index)));
+                     end loop;
+                     if Action = Settle_And_Retake then
+                        Await_Foreign_Settle (Config, Watch);
+                        Rewarm;
+                     end if;
+                     end;
+                  end loop;
+                  exit when Sampling_Limit_Reached
+                    (Config, Sampling_Started, Collected_Samples,
+                     Watch.Paused_Total);
+                  Window_First := Window_Last + 1;
                end loop;
-               for Case_Number in 2 .. Count loop
-                  Reference_First_Schedule
-                    (Comparison_Case_Index (Case_Number), Sample_Index (Sample)) :=
-                      Positions (1) < Positions (Case_Number);
-               end loop;
-               Collected_Samples := Sample;
-               exit when Sampling_Limit_Reached
-                 (Config, Sampling_Started, Collected_Samples);
-            end loop;
+            end;
          else
             for Case_Number in 1 .. Count loop
                declare
                   Case_Started : constant Interfaces.Unsigned_64 := Clock_Now;
+                  Case_Index : constant Comparison_Case_Index :=
+                    Comparison_Case_Index (Case_Number);
+                  Total_Samples : constant Positive :=
+                    Natural (Config.Samples);
+                  Group : constant Positive := Units_Per_Window
+                    (Config, Case_Target_NS, Total_Samples);
+                  Window_First : Positive := 1;
+                  Window_Last  : Positive;
+                  Action : Window_Action;
+                  Paused_At_Case_Start : constant Interfaces.Unsigned_64 :=
+                    Watch.Paused_Total;
+                  Reached : Boolean := False;
+
+                  procedure Rewarm is
+                     Deadline : Interfaces.Unsigned_64;
+                     Elapsed  : Long_Float;
+                  begin
+                     if Config.Interference.Rewarm_Time <= 0.0 then
+                        return;
+                     end if;
+                     Deadline := Clock_Now + Duration_Nanoseconds
+                       (Config.Interference.Rewarm_Time);
+                     Notify (Config, Warming, 0, 100);
+                     loop
+                        Elapsed := Time_One
+                          (Case_Id'Val (Case_Number - 1),
+                           Iterations_For (Case_Index));
+                        Escape (Elapsed'Address);
+                        exit when Clock_Now >= Deadline;
+                     end loop;
+                     Notify (Config, Warming, 100, 100);
+                  end Rewarm;
                begin
-                  for Sample in 1 .. Natural (Config.Samples) loop
-                     Collect_One (Case_Number, Sample, Case_Number);
-                     exit when Sequential_Limit_Reached
-                       (Case_Started, Sample);
+                  while Window_First <= Total_Samples and then not Reached loop
+                     Window_Last := Positive'Min
+                       (Window_First + Group - 1, Total_Samples);
+                     loop
+                        declare
+                           Saved : constant Telemetry_Snapshot :=
+                             Save_Telemetry (Result.Data (Case_Index));
+                        begin
+                        Open_Interference_Window (Watch);
+                        for Sample in Window_First .. Window_Last loop
+                           Collect_One (Case_Number, Sample, Case_Number);
+                        end loop;
+                        Judge_Window
+                          (Config, Watch, Sample_Index (Window_First),
+                           Sample_Index (Window_Last), Action);
+                        exit when Action = Accept_Window;
+                        Completed := Completed
+                          - (Window_Last - Window_First + 1);
+                        Restore_Telemetry (Result.Data (Case_Index), Saved);
+                        if Action = Settle_And_Retake then
+                           Await_Foreign_Settle (Config, Watch);
+                           Rewarm;
+                        end if;
+                        end;
+                     end loop;
+                     Reached := Sequential_Limit_Reached
+                       (Case_Started, Window_Last,
+                        Watch.Paused_Total - Paused_At_Case_Start);
+                     Window_First := Window_Last + 1;
                   end loop;
+                  --  This case's windows are its own, so it keeps its own
+                  --  per-sample values rather than the last case's.
+                  Result.Data (Case_Index).Foreign_CPU := Watch.Foreign;
+                  Watch.Foreign := (others => 0.0);
                end;
             end loop;
             Collected_Samples := Natural (Config.Samples);
@@ -2463,6 +3486,10 @@ package body Flyology_Bench is
             Result.Data (Case_Index).Sample_Total :=
               Sample_Count (Collected_Samples);
             Result.Data (Case_Index).Iterations := Iterations_For (Case_Index);
+            Apply_Environment
+              (Watch, Result.Data (Case_Index),
+               Include_Samples =>
+                 Config.Shootout_Scheduling = Balanced_Rounds);
             Analyze (Result.Data (Case_Index));
             Analyze_Metrics (Result.Data (Case_Index));
             Result.Data (Case_Index).Median_Batch :=
@@ -2566,6 +3593,20 @@ package body Flyology_Bench is
 
    function Sample_Lag_One_Correlation
      (Result : Measurement) return Long_Float is (Result.Lag_One);
+
+   function Environment (Result : Measurement) return Environment_Report is
+     (Result.Environment_Data);
+
+   function Sample_Foreign_CPU_Percent
+     (Result : Measurement;
+      Index  : Sample_Index) return Long_Float is
+   begin
+      if Index > Sample_Index (Result.Sample_Total) then
+         raise Constraint_Error with
+           "sample index exceeds the collected sample count";
+      end if;
+      return Result.Foreign_CPU (Index);
+   end Sample_Foreign_CPU_Percent;
 
    function Outliers (Result : Measurement) return Outlier_Counts is
      (Result.Outlier_Total);
