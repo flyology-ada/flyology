@@ -43,6 +43,7 @@ project Showcases is
       "many_lightweight_tasks.adb",
       "priority_scheduling.adb",
       "runtime_observability.adb",
+      "sharded_service.adb",
       "shared_image_index.adb",
       "shared_image_index_worker.adb",
       "stall_watchdog.adb",
