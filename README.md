@@ -44,6 +44,7 @@ based on the surviving correspondence.
 - [Programming model](#programming-model)
   - [Execution groups and live migration](#execution-groups-and-live-migration)
   - [Thread-per-core and ownership sharding](#thread-per-core-and-ownership-sharding)
+  - [Sharded services](#sharded-services)
 - [Priority and real-time contract](#priority-and-real-time-contract)
 - [Architecture](#architecture)
   - [GNARL integration boundary](#gnarl-integration-boundary)
@@ -453,6 +454,119 @@ In a lightweight task, these calls suspend only the current Ada task. In a nativ
 task, they may block only that task's pthread. Values, `out` parameters, local
 variables, exception propagation, and call stacks behave like normal
 synchronous Ada code in both cases.
+
+### Sharded services
+
+`Flyology.Sharding.Services` keeps one application instance per shard and runs
+typed operations on the instance's owning event loop. It is generic over the
+instance type and its constructor:
+
+```ada
+type Counter is limited record
+   Shard : Flyology.Sharding.Shard_Id := 0;
+   Total : Natural := 0;
+end record;
+
+function Make (Shard : Flyology.Sharding.Shard_Id) return Counter is
+  ((Shard => Shard, Total => 0));
+
+package Counters is new Flyology.Sharding.Services
+  (Service_Type => Counter, Create => Make);
+```
+
+`Serve` is the ownership boundary. It grows the automatic pool to the requested
+width, starts one resident lightweight agent per shard, builds each instance on
+its own group, and returns only after shutdown has joined every agent:
+
+```ada
+Counters.Serve (Table, Shards => 4, Result => Outcome);
+```
+
+An operation is a type extension carrying that call's inputs and outputs. It is
+declared and kept by the caller, so nothing is marshalled:
+
+```ada
+type Bump is limited new Counters.Operation with record
+   Amount : Natural := 1;
+   Total  : Natural := 0;
+end record;
+
+overriding procedure Execute
+  (Op : in out Bump; Instance : in out Counter;
+   Shard : Flyology.Sharding.Shard_Id) is
+begin
+   Instance.Total := Instance.Total + Op.Amount;
+   Op.Total := Instance.Total;
+end Execute;
+
+declare
+   Change : Bump;
+begin
+   Change.Amount := 2;
+   Counters.Invoke_On (Table, Counters.Shard_For (Table, Key), Change);
+end;
+```
+
+`Invoke_On` is an ordinary Ada rendezvous with the target shard's agent, so it
+behaves like a direct call: `out` values are returned, an exception raised
+inside `Execute` propagates to the caller unchanged, and the shard keeps
+serving afterwards. It works identically from a native and a lightweight
+caller; there is no separate cross-lane API. A lightweight caller stays on its
+own group while it waits, and its event loop remains available to other tasks.
+
+A task that already owns a shard reaches that shard's instance directly:
+
+```ada
+declare
+   Ref : constant Counters.Local_Reference := Counters.Borrow_Local (Table);
+begin
+   Counters.Instance (Ref).Total := Counters.Instance (Ref).Total + 1;
+end;
+```
+
+`Borrow_Local` resolves only the caller's own shard, so the API never yields a
+reference to another group's instance. The borrow holds a `Thread_Pin`, so the
+borrower cannot migrate while it is live, and it keeps the service from
+completing shutdown. The instance is protected by shard ownership, not by a
+lock: complete each mutation sequence without a suspension point, or use
+`Invoke_On`, whose operations are serialized per shard by default.
+
+`Concurrency` selects how many operations may be in progress on one shard. The
+default of one serializes them completely, even across suspension points. A
+larger value creates that many agents per shard, which may then interleave with
+each other exactly as Seastar's continuations do. It adds no parallelism within
+a shard, because every agent of a shard runs on one cooperatively scheduled
+event loop.
+
+`Invoke_On_All` and `Invoke_On_Others` visit shards one at a time in ascending
+order and reuse one operation object, so it can accumulate across shards. An
+exception stops the sweep and leaves the preceding shards already updated.
+`Map_Reduce` runs a producer on every owning shard and folds the results on the
+caller.
+
+The runnable showcase reports what each path costs:
+
+```sh
+./showcases/run_sharded_service.sh 4 5000
+```
+
+On one quiet Apple-silicon host with four shards it reported 1.8 ns for a
+mutation under a held borrow, 303 ns when the borrow is reacquired per
+mutation, 734 ns for `Invoke_On` to an agent on the caller's own group, and
+7.3 us to another group, where the cost is the cross-thread wake rather than
+the rendezvous. Sequential `Invoke_On_All` took 46 us against 616 us for a
+prototype that gives each shard its own helper task; when the operation
+suspends for 10 ms on its shard the ordering reverses, at 43.8 ms sequential
+against 11.3 ms concurrent. Broadcast is therefore sequential: it is faster for
+the operations that broadcasts usually carry, and an operation that suspends on
+every shard is the case that would justify a concurrent variant. Absolute times
+move with machine load; compare the rows within one run.
+
+A sharded service owns its own start and stop rather than being built on
+`Flyology.Supervision`. `Serve` has the same shape as a supervisor `Run` call —
+a synchronous scope that owns its tasks — so it can be the body of a supervised
+generation, and its `On_Ready` callback publishes readiness through
+`Supervision.Generation_Control`.
 
 ## Priority and real-time contract
 
