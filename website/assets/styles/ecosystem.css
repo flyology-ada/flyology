@@ -234,15 +234,6 @@
   box-shadow: 0 1.7rem 4rem oklch(10% 0.04 270 / 0.2);
 }
 
-.project-map figcaption {
-  margin-bottom: 1.5rem;
-  color: oklch(72% 0.03 270);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .project-map-origin {
   position: relative;
   display: flex;
@@ -345,12 +336,24 @@
 }
 
 .project-map-path li {
+  display: flex;
+}
+
+.project-map-path li a {
   padding: 0.28rem 0.48rem;
   border: 1px solid oklch(46% 0.055 270);
   border-radius: 999px;
   color: oklch(86% 0.025 270);
   font-family: var(--font-mono);
   font-size: 0.6rem;
+  text-decoration: none;
+  transition: background-color 180ms var(--ease-out),
+    border-color 180ms var(--ease-out);
+}
+
+.project-map-path li a:hover {
+  border-color: oklch(66% 0.06 270);
+  background: oklch(100% 0 0 / 0.07);
 }
 
 .project-map-runtime {
