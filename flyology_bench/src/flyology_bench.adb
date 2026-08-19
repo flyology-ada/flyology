@@ -1428,103 +1428,6 @@ package body Flyology_Bench is
       end if;
    end Characterize_Clock;
 
-   procedure Validate (Config : Configuration) is
-   begin
-      if Config.Warmup_Time < 0.0 then
-         raise Constraint_Error with "warmup time must not be negative";
-      elsif Config.Measurement_Time <= 0.0 then
-         raise Constraint_Error with "measurement time must be positive";
-      elsif Config.Maximum_Sampling_Time < 0.0 then
-         raise Constraint_Error with
-           "maximum sampling time must not be negative";
-      elsif Config.Minimum_Sample_Time <= 0.0 then
-         raise Constraint_Error with "minimum sample time must be positive";
-      elsif Config.Maximum_Iterations = 0 then
-         raise Constraint_Error with "maximum iterations must be positive";
-      elsif Config.Practical_Threshold_Percent < 0.0
-        or else Config.Practical_Threshold_Percent >= 100.0
-      then
-         raise Constraint_Error with
-           "practical threshold must be in the range 0 .. 100 percent";
-      elsif Config.CPU_Quiescence.Enabled
-        and then
-          (Config.CPU_Quiescence.Maximum_Average_CPU_Percent < 0.0
-           or else Config.CPU_Quiescence.Maximum_Average_CPU_Percent > 100.0)
-      then
-         raise Constraint_Error with
-           "maximum average host CPU must be in the range 0 .. 100 percent";
-      elsif Config.CPU_Quiescence.Enabled
-        and then
-          (Config.CPU_Quiescence.Maximum_Core_CPU_Percent < 0.0
-           or else Config.CPU_Quiescence.Maximum_Core_CPU_Percent > 100.0)
-      then
-         raise Constraint_Error with
-           "maximum per-core CPU must be in the range 0 .. 100 percent";
-      elsif Config.CPU_Quiescence.Enabled
-        and then Config.CPU_Quiescence.Stable_Time <= 0.0
-      then
-         raise Constraint_Error with
-           "CPU quiescence stable time must be positive";
-      elsif Config.CPU_Quiescence.Enabled
-        and then Config.CPU_Quiescence.Poll_Interval <= 0.0
-      then
-         raise Constraint_Error with
-           "CPU quiescence poll interval must be positive";
-      elsif Config.CPU_Quiescence.Enabled
-        and then Config.CPU_Quiescence.Timeout
-          < Config.CPU_Quiescence.Stable_Time
-      then
-         raise Constraint_Error with
-           "CPU quiescence timeout must cover the stable interval";
-      elsif Config.CPU_Quiescence.Enabled
-        and then Config.CPU_Quiescence.Poll_Interval
-          > Config.CPU_Quiescence.Timeout
-      then
-         raise Constraint_Error with
-           "CPU quiescence poll interval must not exceed the timeout";
-      elsif Config.Interference.Enabled
-        and then (Config.Interference.Maximum_Foreign_CPU_Percent < 0.0
-                  or else Config.Interference.Maximum_Foreign_CPU_Percent
-                    > 100.0)
-      then
-         raise Constraint_Error with
-           "interference foreign CPU limit must be a percentage";
-      elsif Config.Interference.Enabled
-        and then Config.Interference.Window <= 0.0
-      then
-         raise Constraint_Error with
-           "interference observation window must be positive";
-      elsif Config.Interference.Enabled
-        and then Config.Interference.Response = Pause
-        and then Config.Interference.Settle_Time <= 0.0
-      then
-         raise Constraint_Error with
-           "interference settle time must be positive";
-      elsif Config.Interference.Enabled
-        and then Config.Interference.Response = Pause
-        and then Config.Interference.Maximum_Pause_Time
-          < Config.Interference.Settle_Time
-      then
-         raise Constraint_Error with
-           "interference pause budget must cover one settle interval";
-      elsif Config.Interference.Enabled
-        and then Config.Interference.Rewarm_Time < 0.0
-      then
-         raise Constraint_Error with
-           "interference re-warm time must not be negative";
-      elsif Config.Host_Lock.Enabled
-        and then Config.Host_Lock.Timeout < 0.0
-      then
-         raise Constraint_Error with
-           "host CPU claim timeout must not be negative";
-      elsif Config.Host_Lock.Enabled
-        and then Config.Host_Lock.Poll_Interval <= 0.0
-      then
-         raise Constraint_Error with
-           "host CPU claim poll interval must be positive";
-      end if;
-   end Validate;
-
    function Next_Random
      (State : in out Interfaces.Unsigned_64) return Interfaces.Unsigned_64 is
    begin
@@ -2153,7 +2056,6 @@ package body Flyology_Bench is
       end Increase_Batch;
 
    begin
-      Validate (Config);
       Result := (others => <>);
       Result.Sample_Total := Config.Samples;
       Result.Random_Seed_Value := Config.Random_Seed;
@@ -2456,7 +2358,6 @@ package body Flyology_Bench is
       end Adjust_Timer_Cost;
 
    begin
-      Validate (Config);
       Result := (others => <>);
       Notify (Config, Starting);
       Prepare_Environment (Config, Watch, Lock);
@@ -3049,7 +2950,6 @@ package body Flyology_Bench is
          Target.Clock_Backend_Id := Source.Clock_Backend_Id;
       end Copy_Clock_Metadata;
    begin
-      Validate (Config);
       if Count < Comparison_Case_Count'First
         or else Count > Comparison_Case_Count'Last
       then

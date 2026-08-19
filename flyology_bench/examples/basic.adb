@@ -243,6 +243,30 @@ procedure Basic is
    Selected_Metrics : constant Flyology_Bench.Metric_Set :=
      Metrics_From_Arguments;
    Require_Perf : constant Perf_Requirement := Requirement_From_Arguments;
+   --  A policy's settings exist only while it is enabled, so a run-time
+   --  switch selects between two aggregates rather than filling one in.
+   --
+   --  These belong inline in Single_Base_Config below, written as
+   --  CPU_Quiescence => (if Wait_For_Quiet_CPU then (...) else (...)). That
+   --  spelling aborts GNAT 15 and 16: a boxed aggregate inside a conditional
+   --  expression inside an enclosing aggregate, for a type with a checked
+   --  predicate. Hoisting them out moves the conditional out of the
+   --  enclosing aggregate and compiles. See issue #55.
+   Quiescence_Gate : constant Flyology_Bench.CPU_Quiescence_Policy :=
+     (if Wait_For_Quiet_CPU
+      then (Enabled                     => True,
+            Maximum_Average_CPU_Percent => 20.0,
+            Maximum_Core_CPU_Percent    => 50.0,
+            Stable_Time                 => 0.500,
+            Poll_Interval               => 0.100,
+            Timeout                     => 10.0)
+      else (Enabled => False));
+   Interference_Watch : constant Flyology_Bench.Interference_Policy :=
+     (if Watch_Interference
+      then (Enabled  => True,
+            Response => Flyology_Bench.Retake,
+            others   => <>)
+      else (Enabled => False, Response => Flyology_Bench.Observe));
    Single_Base_Config : constant Flyology_Bench.Configuration :=
      (Warmup_Time                  => 0.200,
       Measurement_Time             => 1.000,
@@ -257,17 +281,8 @@ procedure Basic is
       Random_Seed                  => 42,
       Metrics                      => Selected_Metrics,
       Scheduler_Probe              => null,
-      CPU_Quiescence               =>
-        (Enabled                     => Wait_For_Quiet_CPU,
-         Maximum_Average_CPU_Percent => 20.0,
-         Maximum_Core_CPU_Percent    => 50.0,
-         Stable_Time                 => 0.500,
-         Poll_Interval               => 0.100,
-         Timeout                     => 10.0),
-      Interference                 =>
-        (Enabled  => Watch_Interference,
-         Response => Flyology_Bench.Retake,
-         others   => <>),
+      CPU_Quiescence               => Quiescence_Gate,
+      Interference                 => Interference_Watch,
       Placement                    => (others => <>),
       Host_Lock                    => (others => <>),
       Collect_Process_Telemetry    => False,

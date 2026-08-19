@@ -853,8 +853,7 @@ begin
               Response                    => Flyology_Bench.Retake,
               Maximum_Foreign_CPU_Percent => 0.0,
               Window                      => 0.002,
-              Maximum_Retakes             => 4,
-              others                      => <>)),
+              Maximum_Retakes             => 4)),
          Retaken);
       Report := Flyology_Bench.Environment (Retaken);
       Check (Report.Retaken_Samples > 0, "Retake discarded nothing");
