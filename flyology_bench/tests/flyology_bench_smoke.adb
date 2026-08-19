@@ -6,10 +6,13 @@ with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Real_Time;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with Flyology_Bench;
 with Flyology_Bench.Baselines;
+with Flyology_Bench.Host_Lock;
 with Flyology_Bench.Metadata;
 with Flyology_Bench.Reporters;
+with GNAT.OS_Lib;
 with Interfaces;
 
 procedure Flyology_Bench_Smoke is
@@ -20,6 +23,10 @@ procedure Flyology_Bench_Smoke is
    use type Flyology_Bench.Metric_Set;
    use type Flyology_Bench.Metric_Availability;
    use type Flyology_Bench.Metric_Scope;
+   use type Flyology_Bench.Interference_Source;
+   use type Flyology_Bench.Placement_Outcome;
+   use type Flyology_Bench.Host_Lock_Outcome;
+   use type Flyology_Bench.Host_Lock.Acquisition;
 
    Counter : Natural := 0 with Volatile;
 
@@ -247,6 +254,9 @@ procedure Flyology_Bench_Smoke is
           Flyology_Bench.Flyology_Scheduler_Metrics,
       Scheduler_Probe     => Scheduler_Probe'Unrestricted_Access,
       CPU_Quiescence      => (others => <>),
+      Interference        => (others => <>),
+      Placement           => (others => <>),
+      Host_Lock           => (others => <>),
       Collect_Process_Telemetry => False,
       Progress            => null,
       Progress_Name       => <>);
@@ -287,6 +297,80 @@ procedure Flyology_Bench_Smoke is
          raise Program_Error with Message;
       end if;
    end Check;
+
+   --  Foreign load has to come from another process. A burner task inside
+   --  this process would be counted as our own CPU time and subtracted out,
+   --  which is exactly what the attribution is supposed to do. The loop is
+   --  finite so a crashed test cannot leave the machine spinning.
+   function Spawn_Foreign_Load return GNAT.OS_Lib.Process_Id is
+      Arguments : constant GNAT.OS_Lib.Argument_List :=
+        (1 => new String'("-c"),
+         2 => new String'
+           ("i=0; while [ $i -lt 200000000 ]; do i=$((i+1)); done"));
+      Burner : constant GNAT.OS_Lib.Process_Id :=
+        GNAT.OS_Lib.Non_Blocking_Spawn ("/bin/sh", Arguments);
+   begin
+      --  Let the shell reach its loop, so the very first observation window
+      --  already sees load rather than process startup.
+      delay 0.050;
+      return Burner;
+   end Spawn_Foreign_Load;
+
+   --  Whether Linux reports more than one thread sibling for a CPU. A list
+   --  such as "0,8" or "0-1" names several; a bare "0" names one.
+   function Sibling_List_Names_Several (CPU : Natural) return Boolean is
+      Path : constant String :=
+        "/sys/devices/system/cpu/cpu"
+        & Ada.Strings.Fixed.Trim (Natural'Image (CPU), Ada.Strings.Both)
+        & "/topology/thread_siblings_list";
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
+      declare
+         Line : constant String := Ada.Text_IO.Get_Line (File);
+      begin
+         Ada.Text_IO.Close (File);
+         for Item of Line loop
+            if Item = ',' or else Item = '-' then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end;
+   exception
+      when others =>
+         if Ada.Text_IO.Is_Open (File) then
+            Ada.Text_IO.Close (File);
+         end if;
+         return False;
+   end Sibling_List_Names_Several;
+
+   --  A CPU-consuming thread of this very process. Placement binds only the
+   --  calling thread, so this one is free to occupy a watched CPU, where its
+   --  time cannot be told apart from foreign load.
+   Stop_Sibling_Load : Boolean := False with Volatile;
+
+   task type Sibling_Load;
+
+   task body Sibling_Load is
+      Spin : Natural := 0 with Volatile;
+   begin
+      while not Stop_Sibling_Load loop
+         if Spin = Natural'Last then
+            Spin := 0;
+         else
+            Spin := Spin + 1;
+         end if;
+      end loop;
+   end Sibling_Load;
+
+   procedure Stop_Foreign_Load (Burner : GNAT.OS_Lib.Process_Id) is
+      use type GNAT.OS_Lib.Process_Id;
+   begin
+      if Burner /= GNAT.OS_Lib.Invalid_Pid then
+         GNAT.OS_Lib.Kill (Burner, Hard_Kill => True);
+      end if;
+   end Stop_Foreign_Load;
 begin
    Operation_Benchmark
      ((Config with delta
@@ -627,6 +711,403 @@ begin
          "baseline accepted an incompatible fingerprint");
    end;
    Ada.Directories.Delete_File (Baseline_Path);
+
+   --  The host CPU claim convention. flock is per open file description, so
+   --  two claims inside one process conflict exactly as two processes would.
+   declare
+      use Ada.Strings.Unbounded;
+
+      Lock_Path : constant String := ".flyology_bench_test_host_cpu.lock";
+      Machine_Claim : Flyology_Bench.Host_Lock.Claim;
+      Rival_Claim   : Flyology_Bench.Host_Lock.Claim;
+      Outcome  : Flyology_Bench.Host_Lock.Acquisition;
+      Identity : Flyology_Bench.Host_Lock.Holder;
+   begin
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Machine_Claim, Outcome, Path => Lock_Path, Tool => "smoke tool");
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Acquired,
+         "host CPU claim was not taken on a free path");
+      Check
+        (Flyology_Bench.Host_Lock.Held (Machine_Claim),
+         "host CPU claim does not report itself held");
+
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Rival_Claim, Outcome, Path => Lock_Path);
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Busy,
+         "a second machine-wide claim did not conflict");
+
+      Identity := Flyology_Bench.Host_Lock.Read_Holder (Lock_Path);
+      Check (Identity.Available, "claim file carried no readable content");
+      Check
+        (To_String (Identity.Convention_Id)
+           = Flyology_Bench.Host_Lock.Convention,
+         "claim file lost its convention identifier");
+      Check
+        (To_String (Identity.Tool) = "smoke tool",
+         "claim file lost the holding tool identity");
+      Check
+        (To_String (Identity.Claim) = "all",
+         "a machine-wide claim did not record itself as all");
+      Check
+        (Length (Identity.Working_Directory) > 0,
+         "claim file recorded no working directory");
+      Check
+        (Length (Identity.Process_Id) > 0,
+         "claim file recorded no process identifier");
+
+      Flyology_Bench.Host_Lock.Release (Machine_Claim);
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Rival_Claim, Outcome, Path => Lock_Path);
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Acquired,
+         "released claim did not become available");
+      Flyology_Bench.Host_Lock.Release (Rival_Claim);
+      Ada.Directories.Delete_File (Lock_Path);
+   end;
+
+   --  Disjoint CPU claims run concurrently; overlapping ones do not, and a
+   --  machine-wide claim excludes both.
+   declare
+      Lock_Path : constant String := ".flyology_bench_test_cores.lock";
+      Pair    : Flyology_Bench.Host_Lock.Claim;
+      Single  : Flyology_Bench.Host_Lock.Claim;
+      Overlap : Flyology_Bench.Host_Lock.Claim;
+      Machine : Flyology_Bench.Host_Lock.Claim;
+      Outcome : Flyology_Bench.Host_Lock.Acquisition;
+   begin
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Pair, Outcome, CPUs => (0, 1), Path => Lock_Path);
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Acquired,
+         "a CPU claim was not taken on a free path");
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Single, Outcome, CPUs => (1 => 2), Path => Lock_Path);
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Acquired,
+         "a disjoint CPU claim was refused");
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Overlap, Outcome, CPUs => (1 => 1), Path => Lock_Path);
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Busy,
+         "an overlapping CPU claim was allowed");
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Machine, Outcome, Path => Lock_Path);
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Busy,
+         "a machine-wide claim ignored held CPU claims");
+      Flyology_Bench.Host_Lock.Release (Pair);
+      Flyology_Bench.Host_Lock.Release (Single);
+      Ada.Directories.Delete_File (Lock_Path);
+      Ada.Directories.Delete_File (".flyology_bench_test_cores.0.lock");
+      Ada.Directories.Delete_File (".flyology_bench_test_cores.1.lock");
+      Ada.Directories.Delete_File (".flyology_bench_test_cores.2.lock");
+   end;
+
+   --  Observing interference must never change what is collected.
+   declare
+      Observed : Flyology_Bench.Measurement;
+      Report   : Flyology_Bench.Environment_Report;
+   begin
+      Operation_Benchmark
+        ((Config with delta
+           Interference =>
+             (Enabled                     => True,
+              Response                    => Flyology_Bench.Observe,
+              Maximum_Foreign_CPU_Percent => 100.0,
+              Window                      => 0.002,
+              others                      => <>)),
+         Observed);
+      Report := Flyology_Bench.Environment (Observed);
+      Check (Report.Watched, "interference watch produced no usable window");
+      Check (Report.Windows > 0, "interference watch closed no window");
+      Check
+        (Report.Attribution = Flyology_Bench.Host_Wide,
+         "unplaced run claimed core-scoped attribution");
+      Check
+        (Report.Contaminated_Samples = 0,
+         "a 100 percent foreign limit still reported contamination");
+      Check
+        (Report.Retaken_Samples = 0 and then Report.Pauses = 0,
+         "Observe discarded or suspended collection");
+      Check
+        (Flyology_Bench.Samples (Observed) = Config.Samples,
+         "observing interference changed the sample count");
+      Check
+        (Flyology_Bench.Sample_Foreign_CPU_Percent (Observed, 1) >= 0.0,
+         "per-sample foreign share was not retained");
+   end;
+
+   --  A limit of zero plus real foreign load makes every window contaminated,
+   --  which exercises the retake path and its budget.
+   declare
+      Retaken : Flyology_Bench.Measurement;
+      Report  : Flyology_Bench.Environment_Report;
+      Burner  : constant GNAT.OS_Lib.Process_Id := Spawn_Foreign_Load;
+   begin
+      Operation_Benchmark
+        ((Config with delta
+           Interference =>
+             (Enabled                     => True,
+              Response                    => Flyology_Bench.Retake,
+              Maximum_Foreign_CPU_Percent => 0.0,
+              Window                      => 0.002,
+              Maximum_Retakes             => 4,
+              others                      => <>)),
+         Retaken);
+      Report := Flyology_Bench.Environment (Retaken);
+      Check (Report.Retaken_Samples > 0, "Retake discarded nothing");
+      Check
+        (Report.Retaken_Samples <= 4,
+         "Retake exceeded its configured budget");
+      Check
+        (Flyology_Bench.Samples (Retaken) = Config.Samples,
+         "retaking samples changed the sample count");
+      Check
+        (not Report.Budget_Exhausted
+         or else Report.Contaminated_Samples > 0,
+         "samples kept after budget exhaustion were not marked");
+      Check
+        (Report.Contaminated_Samples <= Report.Observed_Samples,
+         "more samples were contaminated than were observed");
+      Stop_Foreign_Load (Burner);
+   end;
+
+   --  Pausing must wait, re-warm, and still finish the run.
+   declare
+      Paused : Flyology_Bench.Measurement;
+      Report : Flyology_Bench.Environment_Report;
+      Burner : constant GNAT.OS_Lib.Process_Id := Spawn_Foreign_Load;
+   begin
+      Operation_Benchmark
+        ((Config with delta
+           Interference =>
+             (Enabled                     => True,
+              Response                    => Flyology_Bench.Pause,
+              Maximum_Foreign_CPU_Percent => 0.0,
+              Window                      => 0.002,
+              Maximum_Retakes             => 2,
+              Settle_Time                 => 0.010,
+              Maximum_Pause_Time          => 0.060,
+              Rewarm_Time                 => 0.002)),
+         Paused);
+      Report := Flyology_Bench.Environment (Paused);
+      Check (Report.Pauses > 0, "Pause never suspended collection");
+      Check
+        (Report.Paused_Nanoseconds > 0.0,
+         "a pause recorded no elapsed time");
+      Check
+        (Report.Retaken_Samples > 0,
+         "a pause did not collect its window again");
+      Check
+        (Flyology_Bench.Samples (Paused) = Config.Samples,
+         "pausing changed the sample count");
+      Stop_Foreign_Load (Burner);
+   end;
+
+   --  Placement is advisory on Darwin and strict on Linux. Only a strict
+   --  binding may upgrade attribution to the placed CPUs.
+   declare
+      Placed : Flyology_Bench.Measurement;
+      Report : Flyology_Bench.Environment_Report;
+   begin
+      Operation_Benchmark
+        ((Config with delta
+           Placement =>
+             (Enabled          => True,
+              CPU              => 0,
+              Include_Siblings => True,
+              Require_Strict   => False),
+           Interference =>
+             (Enabled                     => True,
+              Response                    => Flyology_Bench.Observe,
+              Maximum_Foreign_CPU_Percent => 100.0,
+              Window                      => 0.002,
+              others                      => <>)),
+         Placed);
+      Report := Flyology_Bench.Environment (Placed);
+      --  Apple Silicon implements no thread affinity at all, so a rejected
+      --  request is an ordinary outcome rather than a test failure.
+      Check
+        (Report.Placement /= Flyology_Bench.Placement_Not_Requested,
+         "an enabled placement policy was not attempted");
+      if Report.Placement = Flyology_Bench.Placement_Strict then
+         Check
+           (Report.Attribution = Flyology_Bench.Core_Scoped,
+            "strict placement did not scope attribution to its CPUs");
+         Check
+           (Report.Watched_CPUs >= 1,
+            "core-scoped attribution watched no CPU");
+         --  Attribution, placement, and the watched set are all decided
+         --  before sampling starts, so they say nothing about whether the
+         --  estimator works. Core-scoped windows subtract thread CPU time
+         --  rather than process CPU time, and that probe has no other
+         --  assertion covering it.
+         Check
+           (Report.Watched and then Report.Windows > 0,
+            "core-scoped attribution closed no observation window");
+         --  The watched set must grow to cover the placed CPU's SMT
+         --  siblings. Deriving the expectation from the host's own topology
+         --  keeps this meaningful on an SMT machine and vacuous elsewhere,
+         --  instead of asserting a count this particular host happens to
+         --  have.
+         if Sibling_List_Names_Several (0) then
+            Check
+              (Report.Watched_CPUs >= 2,
+               "SMT siblings of the placed CPU were not watched");
+         end if;
+      else
+         Check
+           (Report.Attribution = Flyology_Bench.Host_Wide,
+            "attribution was scoped to CPUs that were never claimed");
+      end if;
+   end;
+
+   --  Core-scoped attribution holds only while this process runs one
+   --  CPU-consuming thread. When another of its threads shares the watched
+   --  CPUs, the run must drop to host-wide rather than report its own runtime
+   --  as interference.
+   declare
+      Diluted : Flyology_Bench.Measurement;
+      Report  : Flyology_Bench.Environment_Report;
+      Worker  : Sibling_Load;
+      pragma Unreferenced (Worker);
+   begin
+      begin
+         Operation_Benchmark
+           ((Config with delta
+              Placement =>
+                (Enabled          => True,
+                 CPU              => 0,
+                 Include_Siblings => True,
+                 Require_Strict   => False),
+              Interference =>
+                (Enabled                     => True,
+                 Response                    => Flyology_Bench.Observe,
+                 Maximum_Foreign_CPU_Percent => 10.0,
+                 Window                      => 0.002,
+                 others                      => <>)),
+            Diluted);
+      exception
+         when others =>
+            Stop_Sibling_Load := True;
+            raise;
+      end;
+      Stop_Sibling_Load := True;
+      Report := Flyology_Bench.Environment (Diluted);
+      if Report.Placement = Flyology_Bench.Placement_Strict then
+         Check
+           (Report.Attribution_Diluted,
+            "a sibling thread on the watched CPUs was not detected");
+         Check
+           (Report.Attribution = Flyology_Bench.Host_Wide,
+            "diluted attribution did not fall back to host-wide");
+         Check
+           (Report.Watched_CPUs = 0,
+            "host-wide attribution still reports watched CPUs");
+      else
+         Check
+           (not Report.Attribution_Diluted,
+            "attribution was diluted without ever being core-scoped");
+      end if;
+   end;
+
+   --  Require_Strict turns a platform that cannot bind a thread into an
+   --  error instead of a silent downgrade to host-wide observation.
+   declare
+      Discarded : Flyology_Bench.Measurement;
+      Strict    : Flyology_Bench.Measurement;
+      Refused   : Boolean := False;
+   begin
+      begin
+         Operation_Benchmark
+           ((Config with delta
+              Placement =>
+                (Enabled          => True,
+                 CPU              => 0,
+                 Include_Siblings => True,
+                 Require_Strict   => True)),
+            Discarded);
+         Strict := Discarded;
+      exception
+         when Flyology_Bench.Placement_Unavailable =>
+            Refused := True;
+      end;
+      Check
+        (Refused
+         or else Flyology_Bench.Environment (Strict).Placement
+           = Flyology_Bench.Placement_Strict,
+         "Require_Strict neither bound the thread nor refused the run");
+   end;
+
+   --  A run holds its claim for its whole duration, and a claim it cannot
+   --  take is reported rather than silently ignored.
+   declare
+      Lock_Path : constant String := ".flyology_bench_test_run.lock";
+      Claimed   : Flyology_Bench.Measurement;
+      Blocked   : Flyology_Bench.Measurement;
+      Rival     : Flyology_Bench.Host_Lock.Claim;
+      Outcome   : Flyology_Bench.Host_Lock.Acquisition;
+      Refused   : Boolean := False;
+   begin
+      Operation_Benchmark
+        ((Config with delta
+           Host_Lock =>
+             (Enabled               => True,
+              Path                  =>
+                Ada.Strings.Unbounded.To_Unbounded_String (Lock_Path),
+              Timeout               => 1.0,
+              Poll_Interval         => 0.010,
+              Require_Machine_Scope => False)),
+         Claimed);
+      Check
+        (Flyology_Bench.Environment (Claimed).Host_Lock
+           in Flyology_Bench.Lock_Held
+             .. Flyology_Bench.Lock_Namespace_Scoped,
+         "a run on a free path did not take its host CPU claim");
+
+      Flyology_Bench.Host_Lock.Try_Acquire
+        (Rival, Outcome, Path => Lock_Path, Tool => "rival");
+      Check
+        (Outcome = Flyology_Bench.Host_Lock.Acquired,
+         "the run did not release its claim when it finished");
+      Operation_Benchmark
+        ((Config with delta
+           Host_Lock =>
+             (Enabled               => True,
+              Path                  =>
+                Ada.Strings.Unbounded.To_Unbounded_String (Lock_Path),
+              Timeout               => 0.050,
+              Poll_Interval         => 0.010,
+              Require_Machine_Scope => False)),
+         Blocked);
+      Check
+        (Flyology_Bench.Environment (Blocked).Host_Lock
+           = Flyology_Bench.Lock_Busy,
+         "a contended claim was not reported as busy");
+
+      begin
+         Operation_Benchmark
+           ((Config with delta
+              Host_Lock =>
+                (Enabled               => True,
+                 Path                  =>
+                   Ada.Strings.Unbounded.To_Unbounded_String (Lock_Path),
+                 Timeout               => 0.050,
+                 Poll_Interval         => 0.010,
+                 Require_Machine_Scope => True)),
+            Blocked);
+      exception
+         when Flyology_Bench.Host_Lock_Unavailable =>
+            Refused := True;
+      end;
+      Check
+        (Refused,
+         "a required machine-wide claim proceeded without one");
+      Flyology_Bench.Host_Lock.Release (Rival);
+      Ada.Directories.Delete_File (Lock_Path);
+   end;
 
    Flyology_Bench.Reporters.Put_Console ("volatile_increment", First);
    Flyology_Bench.Reporters.Put_Comparison_Console

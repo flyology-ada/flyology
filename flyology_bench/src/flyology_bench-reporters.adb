@@ -495,6 +495,105 @@ package body Flyology_Bench.Reporters is
       return Buffer;
    end Sample_Sparkline;
 
+   function Attribution_Name (Value : Interference_Source) return String is
+   begin
+      case Value is
+         when Host_Wide   => return "host-wide";
+         when Core_Scoped => return "core-scoped";
+      end case;
+   end Attribution_Name;
+
+   function Placement_Name (Value : Placement_Outcome) return String is
+   begin
+      case Value is
+         when Placement_Not_Requested => return "none";
+         when Placement_Strict        => return "strict";
+         when Placement_Advisory      => return "advisory";
+         when Placement_Rejected      => return "rejected";
+      end case;
+   end Placement_Name;
+
+   function Host_Lock_Name (Value : Host_Lock_Outcome) return String is
+   begin
+      case Value is
+         when Lock_Not_Requested    => return "none";
+         when Lock_Held             => return "held";
+         when Lock_Namespace_Scoped => return "namespace-scoped";
+         when Lock_Busy             => return "busy";
+         when Lock_Path_Unusable    => return "path-unusable";
+      end case;
+   end Host_Lock_Name;
+
+   --  Interference observations are reported, never applied. A run that had
+   --  to repair itself must say so, otherwise a heavily repaired result reads
+   --  as a quieter machine than the one it actually ran on.
+   procedure Put_Result_Environment
+     (File   : Ada.Text_IO.File_Type;
+      Result : Measurement;
+      Style  : Console_Style)
+   is
+      Report : constant Environment_Report := Environment (Result);
+      Color  : constant Boolean := Styled (Style);
+      Count  : constant Positive := Positive (Result.Sample_Total);
+      Alert  : constant Boolean :=
+        Report.Contaminated_Samples > 0
+        or else Report.Budget_Exhausted
+        or else Report.Host_Lock in Lock_Namespace_Scoped .. Lock_Path_Unusable
+        or else Report.Placement = Placement_Rejected;
+      Label  : constant String :=
+        (if not Color then ""
+         elsif Alert then Yellow
+         else Green);
+   begin
+      if Report.Watched then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Label & Pad ("host", 10)
+            & (if Color then Reset else "") & " | foreign CPU mean "
+            & Image (Report.Mean_Foreign_CPU_Percent, 1) & "%  peak "
+            & Image (Report.Peak_Foreign_CPU_Percent, 1) & "%  ("
+            & Attribution_Name (Report.Attribution)
+            & (if Report.Attribution = Core_Scoped
+               then "," & Natural'Image (Report.Watched_CPUs) & " cpus"
+               else "")
+            & "," & Natural'Image (Report.Windows) & " windows)");
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Pad ("", 10) & " | "
+            & (if Color then Magenta else "")
+            & Sample_Sparkline (Result.Foreign_CPU, Count)
+            & (if Color then Reset else ""));
+      end if;
+      if Report.Watched
+        or else Report.Placement /= Placement_Not_Requested
+        or else Report.Host_Lock /= Lock_Not_Requested
+      then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Pad ("", 10) & " | contaminated"
+            & Natural'Image (Report.Contaminated_Samples) & " of"
+            & Natural'Image (Report.Observed_Samples)
+            & " observed samples  retaken"
+            & Natural'Image (Report.Retaken_Samples) & "  paused "
+            & Image (Report.Paused_Nanoseconds / 1_000_000_000.0, 3) & "s in"
+            & Natural'Image (Report.Pauses)
+            & (if Report.Budget_Exhausted
+               then "  budget exhausted" else ""));
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Pad ("", 10) & " | placement "
+            & Placement_Name (Report.Placement)
+            & "    host claim " & Host_Lock_Name (Report.Host_Lock));
+         if Report.Attribution_Diluted then
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Pad ("", 10)
+               & " | core-scoped attribution abandoned: this process's own"
+               & " threads shared the watched CPUs");
+         end if;
+      end if;
+   end Put_Result_Environment;
+
    procedure Put_Result_Telemetry
      (File   : Ada.Text_IO.File_Type;
       Result : Measurement;
@@ -873,6 +972,9 @@ package body Flyology_Bench.Reporters is
          & "/op"
          & End_Style);
       Put_Metric_Summaries (File, Result, Style);
+      if Include_Telemetry then
+         Put_Result_Environment (File, Result, Style);
+      end if;
       if Result.Telemetry_Available then
          Put_Result_Telemetry (File, Result, Style);
       elsif Include_Telemetry then
@@ -890,7 +992,13 @@ package body Flyology_Bench.Reporters is
          & "stddev_ns,mad_ns,cv_percent,low_severe,low_mild,high_mild,"
          & "high_severe,clock_backend,clock_resolution_ns,"
          & "observed_clock_resolution_ns,median_timer_cost_ns,median_batch_ns,"
-         & "quantization_floor_ns,lag_one_correlation");
+         & "quantization_floor_ns,lag_one_correlation,"
+         & "interference_watched,foreign_cpu_attribution,"
+         & "foreign_cpu_mean_percent,foreign_cpu_peak_percent,"
+         & "observed_samples,contaminated_samples,retaken_samples,"
+         & "interference_pauses,"
+         & "interference_paused_ns,interference_budget_exhausted,"
+         & "placement,attribution_diluted,host_lock");
    end Put_CSV_Header;
 
    procedure Put_CSV
@@ -928,7 +1036,24 @@ package body Flyology_Bench.Reporters is
          & "," & JSON_Number (Median_Timer_Cost_Nanoseconds (Result))
          & "," & JSON_Number (Median_Batch_Nanoseconds (Result))
          & "," & JSON_Number (Quantization_Floor_Nanoseconds (Result))
-         & "," & JSON_Number (Sample_Lag_One_Correlation (Result)));
+         & "," & JSON_Number (Sample_Lag_One_Correlation (Result))
+         & "," & (if Environment (Result).Watched then "true" else "false")
+         & "," & Attribution_Name (Environment (Result).Attribution)
+         & "," & JSON_Number
+             (Environment (Result).Mean_Foreign_CPU_Percent)
+         & "," & JSON_Number
+             (Environment (Result).Peak_Foreign_CPU_Percent)
+         & "," & Environment (Result).Observed_Samples'Image
+         & "," & Environment (Result).Contaminated_Samples'Image
+         & "," & Environment (Result).Retaken_Samples'Image
+         & "," & Environment (Result).Pauses'Image
+         & "," & JSON_Number (Environment (Result).Paused_Nanoseconds)
+         & "," & (if Environment (Result).Budget_Exhausted
+                  then "true" else "false")
+         & "," & Placement_Name (Environment (Result).Placement)
+         & "," & (if Environment (Result).Attribution_Diluted
+                  then "true" else "false")
+         & "," & Host_Lock_Name (Environment (Result).Host_Lock));
    end Put_CSV;
 
    procedure Put_Metrics_CSV_Header
@@ -1135,7 +1260,38 @@ package body Flyology_Bench.Reporters is
          & ",""low_mild"":" & Counts.Low_Mild'Image
          & ",""high_mild"":" & Counts.High_Mild'Image
          & ",""high_severe"":" & Counts.High_Severe'Image
-         & "},""metrics"":");
+         & "}"
+         & ",""environment"":{""watched"":"
+         & (if Environment (Result).Watched then "true" else "false")
+         & ",""attribution"":"
+         & JSON_String (Attribution_Name (Environment (Result).Attribution))
+         & ",""watched_cpus"":"
+         & Environment (Result).Watched_CPUs'Image
+         & ",""windows"":" & Environment (Result).Windows'Image
+         & ",""observed_samples"":"
+         & Environment (Result).Observed_Samples'Image
+         & ",""foreign_cpu_mean_percent"":"
+         & JSON_Number (Environment (Result).Mean_Foreign_CPU_Percent)
+         & ",""foreign_cpu_peak_percent"":"
+         & JSON_Number (Environment (Result).Peak_Foreign_CPU_Percent)
+         & ",""contaminated_samples"":"
+         & Environment (Result).Contaminated_Samples'Image
+         & ",""retaken_samples"":"
+         & Environment (Result).Retaken_Samples'Image
+         & ",""pauses"":" & Environment (Result).Pauses'Image
+         & ",""paused_ns"":"
+         & JSON_Number (Environment (Result).Paused_Nanoseconds)
+         & ",""budget_exhausted"":"
+         & (if Environment (Result).Budget_Exhausted then "true" else "false")
+         & ",""placement"":"
+         & JSON_String (Placement_Name (Environment (Result).Placement))
+         & ",""attribution_diluted"":"
+         & (if Environment (Result).Attribution_Diluted
+            then "true" else "false")
+         & ",""host_lock"":"
+         & JSON_String (Host_Lock_Name (Environment (Result).Host_Lock))
+         & "}"
+         & ",""metrics"":");
       Put_Metrics_JSON (File, Result);
       Ada.Text_IO.Put_Line (File, "}");
    end Put_JSON;
@@ -1213,6 +1369,10 @@ package body Flyology_Bench.Reporters is
       end if;
       Put_Metric_Comparison_Table
         (File, Reference_Name, Contender_Name, Result, Style);
+      --  Both sides share one observation window schedule, so the host
+      --  environment is reported once for the pair.
+      Put_Result_Environment
+        (File, Reference_Measurement (Result), Style);
       Put_Telemetry_Summary (File, Style);
    end Put_Comparison_Console;
 
@@ -1485,6 +1645,7 @@ package body Flyology_Bench.Reporters is
                Include_Telemetry => False);
          end loop;
       end if;
+      Put_Result_Environment (File, Case_Measurement (Result, 1), Style);
       Put_Telemetry_Summary
         (File, Style,
          "shootout total / " & Schedule_Name (Shootout_Schedule (Result)));

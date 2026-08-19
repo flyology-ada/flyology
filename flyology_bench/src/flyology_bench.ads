@@ -341,6 +341,183 @@ package Flyology_Bench is
    --  Raised when enabled CPU quiescence is not observed before its timeout.
    CPU_Quiescence_Timeout : exception;
 
+   --  Response applied when foreign CPU work is observed during collection.
+   --  The preflight gate only proves the host was quiet before warmup; this
+   --  policy decides what happens when it stops being quiet afterwards.
+   --  @enum Observe Retain every sample and report what was seen. Nothing is
+   --  discarded, so the raw distribution stays exactly as collected.
+   --  @enum Retake Discard the contaminated window and collect it again,
+   --  bounded by Maximum_Retakes.
+   --  @enum Pause Wait for foreign load to settle, re-warm the workload, and
+   --  resume, bounded by Maximum_Pause_Time.
+   type Interference_Response is (Observe, Retake, Pause);
+
+   --  How foreign CPU load was attributed.
+   --  @enum Host_Wide Foreign load is the host's busy time minus this
+   --  process's own CPU time. Available on every supported platform.
+   --  @enum Core_Scoped Foreign load is measured on the claimed logical CPUs
+   --  and their SMT siblings. Requires strict placement, so Linux only, and
+   --  holds only while this process runs one CPU-consuming thread; see
+   --  Environment_Report.Attribution_Diluted.
+   type Interference_Source is (Host_Wide, Core_Scoped);
+
+   --  Controls the optional mid-run host interference watch. Foreign CPU load
+   --  is estimated between timed samples, never inside them, over windows of
+   --  at least Window wall time. Windows are whole numbers of samples, pairs,
+   --  or balanced rounds, so a response never splits a comparison's pairing.
+   --
+   --  Host CPU counters are tick-based on both platforms, so a window shorter
+   --  than one tick cannot produce a trustworthy estimate. A closed window
+   --  that did not reach Window is recorded but never triggers a response.
+   --
+   --  This detects competing CPU work. It does not detect contention for
+   --  shared cache or memory bandwidth, which perturb a measurement without
+   --  moving any CPU busy counter.
+   --  @field Enabled Whether to watch for foreign load during collection.
+   --  @field Response What to do when a window exceeds the limit.
+   --  @field Maximum_Foreign_CPU_Percent Largest accepted foreign share of
+   --  the machine's total CPU capacity.
+   --  @field Window Smallest wall interval an estimate is trusted over.
+   --  @field Maximum_Retakes Total sample retakes allowed for one run.
+   --  @field Settle_Time Continuous accepted interval required before a
+   --  paused run resumes.
+   --  @field Maximum_Pause_Time Total wall time one run may spend paused.
+   --  Paused time is excluded from Maximum_Sampling_Time.
+   --  @field Rewarm_Time Untimed warmup executed after a pause, before timed
+   --  collection resumes. A resumed run is otherwise cold and its first
+   --  samples would be the outliers the pause was meant to avoid.
+   type Interference_Policy is record
+      Enabled                     : Boolean := False;
+      Response                    : Interference_Response := Observe;
+      Maximum_Foreign_CPU_Percent : Long_Float := 10.0;
+      Window                      : Duration := 0.050;
+      Maximum_Retakes             : Natural := 25;
+      Settle_Time                 : Duration := 0.250;
+      Maximum_Pause_Time          : Duration := 30.0;
+      Rewarm_Time                 : Duration := 0.050;
+   end record;
+
+   --  Controls optional harness-applied placement of the benchmark thread.
+   --  Placement is never neutral: it fixes frequency and thermal behavior and
+   --  removes the load balancing a deployed workload would receive. It also
+   --  binds only the calling thread, so a benchmark whose work runs on event
+   --  loops or a native executor pool stays partly unplaced. Use it for
+   --  single-threaded microbenchmarks, not for scheduler measurements.
+   --  @field Enabled Whether the harness pins its own benchmark thread.
+   --  @field CPU Zero-based logical CPU, or Darwin affinity tag index.
+   --  @field Include_Siblings Whether SMT siblings of the placed CPU join the
+   --  watched set. A sibling saturated by another process perturbs the
+   --  measurement while leaving the placed CPU's own busy share clean, so
+   --  disabling this makes core-scoped observation confidently wrong.
+   --  @field Require_Strict Whether an advisory-only platform is an error
+   --  rather than a documented degradation.
+   type Placement_Policy is record
+      Enabled          : Boolean := False;
+      CPU              : Natural := 0;
+      Include_Siblings : Boolean := True;
+      Require_Strict   : Boolean := False;
+   end record;
+
+   --  Raised when Require_Strict placement is not available.
+   Placement_Unavailable : exception;
+
+   --  Controls the optional host CPU claim held for the duration of a run.
+   --  The claim coordinates with other tools that follow the same convention,
+   --  including load generators and profilers, not with arbitrary CPU work.
+   --  Two harnesses that both pause on interference would otherwise oscillate
+   --  against each other indefinitely, each being the other's foreign load.
+   --  @field Enabled Whether to claim host CPU capacity for the run.
+   --  @field Path Claim path, or empty for the convention default.
+   --  @field Timeout Longest wait for a conflicting holder to finish.
+   --  @field Poll_Interval Delay between claim attempts while waiting.
+   --  @field Require_Machine_Scope Whether an unusable path, an exhausted
+   --  timeout, or a privately mounted path is an error rather than a recorded
+   --  degradation. A silently unserialized run is worse than a failed one.
+   type Host_Lock_Policy is record
+      Enabled               : Boolean := False;
+      Path                  : Ada.Strings.Unbounded.Unbounded_String :=
+        Ada.Strings.Unbounded.Null_Unbounded_String;
+      Timeout               : Duration := 30.0;
+      Poll_Interval         : Duration := 0.250;
+      Require_Machine_Scope : Boolean := False;
+   end record;
+
+   --  Raised when a required host CPU claim could not be established.
+   Host_Lock_Unavailable : exception;
+
+   --  Outcome of optional harness-applied placement.
+   --  @enum Placement_Not_Requested The policy was disabled.
+   --  @enum Placement_Strict The benchmark thread is bound to one logical CPU.
+   --  @enum Placement_Advisory The platform accepted only a scheduler hint,
+   --  so the executing CPU is unknown and observation stays host-wide.
+   --  @enum Placement_Rejected The platform refused the request.
+   type Placement_Outcome is
+     (Placement_Not_Requested, Placement_Strict, Placement_Advisory,
+      Placement_Rejected);
+
+   --  Outcome of the optional host CPU claim.
+   --  @enum Lock_Not_Requested The policy was disabled.
+   --  @enum Lock_Held The claim was taken and covers the machine as far as
+   --  can be determined from inside it.
+   --  @enum Lock_Namespace_Scoped The claim was taken, but the path resolves
+   --  inside a private mount namespace, so it excludes only processes sharing
+   --  that namespace.
+   --  @enum Lock_Busy A conflicting holder was still present at the timeout.
+   --  @enum Lock_Path_Unusable The claim path could not be opened.
+   type Host_Lock_Outcome is
+     (Lock_Not_Requested, Lock_Held, Lock_Namespace_Scoped, Lock_Busy,
+      Lock_Path_Unusable);
+
+   --  What the harness observed about its host while collecting one
+   --  measurement. Every field is a record of conditions, never a correction:
+   --  no reported statistic is adjusted by any of it.
+   --  @field Watched Whether the watch produced at least one usable window.
+   --  @field Attribution How foreign load was attributed.
+   --  @field Windows Number of closed observation windows.
+   --  @field Observed_Samples Retained samples covered by a closed window.
+   --  For a multi-way shootout this counts every case, so it exceeds any one
+   --  case's sample count.
+   --  @field Mean_Foreign_CPU_Percent Mean foreign share across those
+   --  windows, including windows whose samples were discarded and collected
+   --  again: it describes the host during the run, not only the data kept.
+   --  @field Peak_Foreign_CPU_Percent Largest foreign share in any window.
+   --  @field Contaminated_Samples Retained samples collected during a window
+   --  that exceeded the configured limit, out of Observed_Samples.
+   --  @field Retaken_Samples Samples discarded and collected again.
+   --  @field Pauses Number of times collection was suspended.
+   --  @field Paused_Nanoseconds Total wall time spent suspended.
+   --  @field Budget_Exhausted Whether a retake or pause budget ran out, after
+   --  which the run continued under Observe.
+   --  @field Placement Placement outcome for the benchmark thread.
+   --  @field Watched_CPUs Logical CPUs in the observed set, zero when the
+   --  attribution is host-wide.
+   --  @field Attribution_Diluted Whether core-scoped attribution was
+   --  abandoned mid-run. Placement binds only the calling thread, so another
+   --  thread of this process can run on a watched CPU, where its time is
+   --  indistinguishable from foreign load. When those threads consume more of
+   --  the watched capacity than the configured foreign limit, the core-scoped
+   --  answer can no longer address the question the limit asks, and the run
+   --  continues host-wide instead of reporting its own runtime as
+   --  interference.
+   --  @field Host_Lock Host CPU claim outcome.
+   type Environment_Report is record
+      Watched                  : Boolean := False;
+      Attribution              : Interference_Source := Host_Wide;
+      Windows                  : Natural := 0;
+      Observed_Samples         : Natural := 0;
+      Mean_Foreign_CPU_Percent : Long_Float := 0.0;
+      Peak_Foreign_CPU_Percent : Long_Float := 0.0;
+      Contaminated_Samples     : Natural := 0;
+      Retaken_Samples          : Natural := 0;
+      Pauses                   : Natural := 0;
+      Paused_Nanoseconds       : Long_Float := 0.0;
+      Budget_Exhausted         : Boolean := False;
+      Placement                : Placement_Outcome := Placement_Not_Requested;
+      Watched_CPUs             : Natural := 0;
+      Attribution_Diluted      : Boolean := False;
+      Host_Lock                : Host_Lock_Outcome := Lock_Not_Requested;
+   end record;
+
    --  Controls warmup, calibration, and timed sampling.
    --  @field Warmup_Time Untimed wall time used to warm code and data.
    --  @field Measurement_Time Target wall time across all timed samples.
@@ -364,6 +541,12 @@ package Flyology_Bench is
    --  counters. The callback runs only outside timed regions.
    --  @field CPU_Quiescence Optional sustained low-host-CPU gate performed
    --  before clock characterization and workload warmup.
+   --  @field Interference Optional watch for foreign CPU load arriving after
+   --  the preflight gate has already passed.
+   --  @field Placement Optional harness-applied placement of the benchmark
+   --  thread, which also sharpens interference attribution.
+   --  @field Host_Lock Optional host CPU claim coordinating this run with
+   --  other tools that follow the same convention.
    --  @field Collect_Process_Telemetry Capture process CPU and RSS around each
    --  timed sample using untimed native probes. Terminal_Mode enables this.
    --  @field Progress Optional callback invoked outside timed regions.
@@ -384,6 +567,9 @@ package Flyology_Bench is
       Metrics              : Metric_Set := Time_Metrics;
       Scheduler_Probe      : Flyology_Scheduler_Probe := null;
       CPU_Quiescence       : CPU_Quiescence_Policy := (others => <>);
+      Interference         : Interference_Policy := (others => <>);
+      Placement            : Placement_Policy := (others => <>);
+      Host_Lock            : Host_Lock_Policy := (others => <>);
       Collect_Process_Telemetry : Boolean := False;
       Progress             : Progress_Handler := null;
       Progress_Name        : Ada.Strings.Unbounded.Unbounded_String :=
@@ -629,6 +815,24 @@ package Flyology_Bench is
    --  @return Lag-one sample correlation, or zero when undefined.
    function Sample_Lag_One_Correlation
      (Result : Measurement) return Long_Float;
+
+   --  Return what the harness observed about its host during collection.
+   --  Nothing in this report has been applied to any reported statistic: the
+   --  harness records the conditions and leaves the samples alone.
+   --  @param Result Completed measurement.
+   --  @return Environment observations retained for the run.
+   function Environment (Result : Measurement) return Environment_Report;
+
+   --  Return the foreign CPU share observed over the window containing one
+   --  sample. Samples collected before the first window closed, and every
+   --  sample of an unwatched run, report zero.
+   --  @param Result Completed measurement.
+   --  @param Index One-based index into its collected raw samples.
+   --  @return Foreign share of total CPU capacity, in percent.
+   --  @exception Constraint_Error If Index exceeds the collected sample count.
+   function Sample_Foreign_CPU_Percent
+     (Result : Measurement;
+      Index  : Sample_Index) return Long_Float;
 
    --  Return diagnostic Tukey-fence classifications without removing samples.
    --  @param Result Completed measurement.
@@ -949,6 +1153,9 @@ private
       Telemetry_RSS_Peak  : Long_Float := 0.0;
       Telemetry_RSS_Change_Total : Long_Float := 0.0;
       Telemetry_RSS_Change_Peak : Long_Float := 0.0;
+      Environment_Data    : Environment_Report;
+      Foreign_CPU         : Sample_Array (Sample_Index'Range) :=
+        (others => 0.0);
       Metric_Data         : Metric_Store_Handle;
    end record;
 

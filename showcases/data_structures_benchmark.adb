@@ -2108,6 +2108,9 @@ procedure Data_Structures_Benchmark is
       Metrics                      => Bench.Time_Metrics,
       Scheduler_Probe              => null,
       CPU_Quiescence               => (others => <>),
+      Interference                 => (others => <>),
+      Placement                    => (others => <>),
+      Host_Lock                    => (others => <>),
       Progress                     => null,
       Progress_Name                => <>);
 
