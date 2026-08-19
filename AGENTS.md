@@ -562,6 +562,15 @@ required by the changed boundary.
 - A dependency declared in a crate manifest must resolve from the index. When a
   nested crate here is a dependency of another crate here, publish it and
   depend on the published version rather than on its path.
+- Constrain every dependency to a version. `"*"` accepts every future release,
+  which is harmless only while a pin supplies the code and the version cannot
+  matter. With the pin gone `alr publish` propagates the wildcard into the
+  index manifest, and the crate resolves against versions it has never been
+  built against. Depend on a crate in this repository or this organization
+  with `~<version>`, naming the version the index carries, as
+  `flyology_allocators = "~0.1.0-dev"` does here. The wildcards that remain are
+  in `proof`, `showcases`, and the nested test and benchmark crates, none of
+  which are indexed and all of which keep their pins.
 - Indexed crates in this repository are `flyology`, `flyology_bench`,
   `flyology_allocators`, `flyology_cachelines`, `flyology_debug`, and
   `flyology_numa`. Tag each released crate independently, even when several
