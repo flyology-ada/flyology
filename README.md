@@ -555,24 +555,24 @@ Linux aarch64 (Ubuntu 24.04, GNAT 16.1.0) in the repository's Docker image:
 
 | | Darwin arm64 | Linux aarch64 |
 | --- | --- | --- |
-| mutation under a held borrow | 1.8 ns | 2.9 ns |
-| mutation per reacquired borrow | 0.30 us | 0.30 us |
-| `Invoke_On`, caller's own group | 0.84 us | 1.2 us |
+| mutation under a held borrow | 1.8 ns | 2.0 ns |
+| mutation per reacquired borrow | 0.30 us | 0.21 us |
+| `Invoke_On`, caller's own group | 0.74 us | 1.1 us |
 | `Invoke_On`, another group | see below | see below |
-| broadcast, operation returns immediately | 102 us | 120 us |
-| the same broadcast, one helper task per shard | 1.94 ms | 2.14 ms |
-| broadcast, operation suspends 10 ms per shard | 51.1 ms | 46.5 ms |
-| the same broadcast, one helper task per shard | 16.4 ms | 14.2 ms |
+| broadcast, operation returns immediately | 24 us | 53 us |
+| the same broadcast, one helper task per shard | 111 us | 208 us |
+| broadcast, operation suspends 10 ms per shard | 44.4 ms | 47.1 ms |
+| the same broadcast, one helper task per shard | 11.3 ms | 11.9 ms |
 
 Hoist a borrow out of a loop rather than reacquiring it: the borrow, not the
 access, is what costs.
 
 Broadcast is sequential because both separations above reproduced in every run
-on both platforms. Running shards one at a time wins by an order of magnitude
-for an operation that returns immediately, which is what a broadcast usually
-carries, and loses by roughly the shard count only when the operation suspends
-on every shard. That second case is the one that would justify a concurrent
-variant.
+on both platforms. Running shards one at a time wins by about four times for an
+operation that returns immediately, which is what a broadcast usually carries,
+because creating a helper task per shard costs more than the calls do. It loses
+by roughly the shard count when the operation suspends on every shard, which is
+the case that would justify a concurrent variant.
 
 Cross-group cost is a cross-thread wake rather than a rendezvous, and it is the
 one row that does not reproduce. With unchanged code on the same hardware it

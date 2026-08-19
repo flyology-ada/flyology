@@ -138,35 +138,37 @@ procedure Sharded_Service is
 
    --  One helper per shard, used only to show what a concurrent broadcast
    --  would cost against the sequential Invoke_On_All the library provides.
-   Fan_Out_Nap : Duration := 0.0;
-
-   task type Fan_Out (Shard : Shards.Shard_Id) is
+   --  The workers are declared, not allocated, so leaving the block is an
+   --  exact join. Polling for termination would have measured the poll
+   --  interval instead: at four shards a 500 us tick is larger than the
+   --  whole sequential arm it is being compared against.
+   task type Fan_Out is
       pragma Task_Info (Flyology.Lightweight_Task);
+      entry Start (Shard : Shards.Shard_Id; Nap : Duration);
    end Fan_Out;
 
    task body Fan_Out is
-      Op : Bump;
+      Mine : Shards.Shard_Id := 0;
+      Rest : Duration := 0.0;
+      Op   : Bump;
    begin
+      accept Start (Shard : Shards.Shard_Id; Nap : Duration) do
+         Mine := Shard;
+         Rest := Nap;
+      end Start;
       Op.Amount := 0;
-      Op.Nap := Fan_Out_Nap;
-      Counters.Invoke_On (Table, Shard, Op);
+      Op.Nap := Rest;
+      Counters.Invoke_On (Table, Mine, Op);
    end Fan_Out;
 
-   type Fan_Out_Access is access Fan_Out;
-   type Fan_Out_Array is array (Shards.Shard_Id range <>) of Fan_Out_Access;
+   type Fan_Out_Array is array (Shards.Shard_Id range <>) of Fan_Out;
 
    procedure Fan_Out_All (Nap : Duration) is
       Workers : Fan_Out_Array
         (0 .. Shards.Shard_Id (Natural (Width) - 1));
    begin
-      Fan_Out_Nap := Nap;
       for Shard in Workers'Range loop
-         Workers (Shard) := new Fan_Out (Shard);
-      end loop;
-      for Shard in Workers'Range loop
-         while not Workers (Shard)'Terminated loop
-            delay 0.000_5;
-         end loop;
+         Workers (Shard).Start (Shard, Nap);
       end loop;
    end Fan_Out_All;
 
