@@ -459,7 +459,7 @@ HTTP.Serve
             <p><a href="../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#c3cee1844eef030ab2ffa44083c3f8d691dbd37db73c29ba022075ece5b63cfc"><code>Receive_Exactly</code></a> and <a href="../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#76beff4fc687f191ded93f9375c44f9251c99bbf0ead593723d7ec5388a591f2"><code>Send_All</code></a> apply one timeout to the complete multi-step operation. Partial transfers do not restart the timeout. DNS resolution also applies one timeout to family queries, retry rounds, and transport fallback.</p>
             <p>Prefer finite deadlines at service boundaries. If the scope does not have an explicit shutdown and cancellation path, do not use <a href="../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#07bae758725b3ef17c925e949e4d0dd924e667dc9ee2d11c2f53c8bff79a7fb9"><code>Infinite</code></a>.</p>
 
-            <h3>Add checkpoints to bounded units of CPU work</h3>
+            <h3 id="checkpoints">Add checkpoints to bounded units of CPU work</h3>
             <p>A CPU-bound lightweight task can occupy its group until it suspends, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities select among ready fibers in a group, but they do not preempt arbitrary lightweight instructions.</p>
             <p>A new <a href="../api/abc652020cc71fd692562fe1fa41e61837df980e9a65feb3b869b4466e67d0d8.html#b5279be1a014e7db47e811bbd83d15f752a1f868d72947b52da03cd659bee6e7"><code>Yield_Budget</code></a> uses a 2 ms quantum. Configure a different quantum when the service requires a different cooperative interval.</p>
             <figure class="code-panel">
@@ -490,6 +490,7 @@ end loop;</code></pre>
               <dl>
                 <div class="decision-row"><dt>Healthy waiting</dt><dd>A high <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Waiting</code></a> count with timer, descriptor, interrupt, or file waits usually means tasks are using the intended kernel-backed wait path.</dd></div>
                 <div class="decision-row"><dt>Runnable pressure</dt><dd>A persistently high <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Ready</code></a> count means runnable work is sharing the group. Compare dispatch progress, CPU use, checkpoint placement, and the result of adding a group.</dd></div>
+                <div class="decision-row"><dt>Loop utilization</dt><dd><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Idle_Nanoseconds</code></a> is the part of <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Uptime_Nanoseconds</code></a> in which the group had no runnable task. The difference is the time the loop worked. Read it together with <code>Ready</code> before adding a group.</dd></div>
                 <div class="decision-row"><dt>Possible stall</dt><dd>Ready or running work without dispatch or polling progress indicates possible loop lag. <a href="../api/f6d9a75080afdebcbf9664f2d01c008022931f9310d17c250ae7d2588d88ba6d.html"><code>Stall_Watchdogs</code></a> can sample this condition from a native monitor task. The watchdog diagnoses the condition but does not preempt a task.</dd></div>
                 <div class="decision-row"><dt>File pressure</dt><dd><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Pending_File_Submissions</code></a> shows file operations waiting behind the bounded kernel completion queue. It is backpressure, not a hidden worker-thread queue.</dd></div>
                 <div class="decision-row"><dt>Stack pressure</dt><dd>Track live stacks, effective usable bytes, guarded virtual reservation, process RSS, and task-creation failures together. None of those values alone is a complete memory limit.</dd></div>
@@ -497,6 +498,36 @@ end loop;</code></pre>
                 <div class="decision-row"><dt>Region growth</dt><dd>Read consumed and reserved region storage before release. Reserved minus consumed shows current chunk slack, not leaked memory.</dd></div>
               </dl>
             </div>
+            <h3 id="utilization">Measure how busy an event loop is</h3>
+            <p>A group's event loop waits in its poller only when no task in that group can run. The runtime times that wait, so a snapshot reports the loop's elapsed time and the part of it the loop spent idle. Subtract one from the other to get the time the loop spent dispatching tasks, polling with work ready, or running task code.</p>
+            <p>The runtime never reports more idle time than elapsed time, and it includes a poller wait that is still in progress. The subtraction is therefore always valid, even while the loop is blocked.</p>
+            <figure class="code-panel">
+              <figcaption>read one group's utilization</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   use type Flyology.Observability.Counter;
+   Sample : Flyology.Observability.Group_Snapshot;
+begin
+   if Flyology.Observability.Snapshot (0, Sample) then
+      Ada.Text_IO.Put_Line
+        ("uptime ns=" &amp; Sample.Uptime_Nanoseconds'Image
+         &amp; " idle ns=" &amp; Sample.Idle_Nanoseconds'Image
+         &amp; " busy ns="
+         &amp; Flyology.Observability.Counter'Image
+             (Sample.Uptime_Nanoseconds - Sample.Idle_Nanoseconds)
+         &amp; " poller waits=" &amp; Sample.Idle_Waits'Image);
+   end if;
+end;</code></pre>
+            </figure>
+            <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#8b0158f0676b2348742fb68c615c4f6e426f1d6844a3da836182f0fc265096e9"><code>Counter</code></a> is a modular subtype, so the subtraction needs a <code>use type</code> clause.</p>
+            <p>Both values cover the loop's whole lifetime, so one sample reports an average and not current load. Take two samples and subtract each field to measure one interval.</p>
+            <p>The measure describes the event loop, not the tasks on it. Two situations produce a similar reading:</p>
+            <ul>
+              <li>A group whose tasks all wait on readiness or a deadline reports a high idle fraction, and so does a group with nothing to do. Read <code>Waiting</code> and <a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Members</code></a> to separate them.</li>
+              <li>A task that runs CPU code without reaching a suspension point keeps its loop out of the poller. That group reports as fully busy with one task running, which <a href="#checkpoints">cooperative checkpoints</a> address.</li>
+            </ul>
+            <p><a href="../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Idle_Waits</code></a> counts the blocking poller waits behind those totals. Divide it by the elapsed time to get the rate at which the loop ran out of runnable work.</p>
+            <p>The runtime reads the monotonic clock twice for each blocking poller wait and never during a dispatch. This cost follows how often a loop runs out of work, not how much work it does. On the checked macOS/AArch64 host, one reading costs about 20 ns. A loop that only exchanges socket messages reaches about 32,000 to 38,000 waits per second. Run <code>scripts/bench-runtime.sh</code> to measure both values on the target host.</p>
             <figure class="code-panel">
               <figcaption>repeatable sizing and pool comparisons</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
