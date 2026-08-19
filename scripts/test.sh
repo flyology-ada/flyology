@@ -367,6 +367,7 @@ flyology-supervision_policy-smoke
 flyology-wall_clock_native_policy-smoke
 flyology-wall_clock_policy-smoke
 flyology-wall_clock_waits-smoke
+guide_utilization_example
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke
