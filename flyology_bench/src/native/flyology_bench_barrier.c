@@ -11,6 +11,7 @@
 #endif
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -18,7 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1162,3 +1165,22 @@ void flyology_bench_clobber_memory(void)
 {
     __asm__ __volatile__("" : : : "memory");
 }
+
+/* ------------------------------------------------------------------------
+ * Host CPU lock convention (docs/host-cpu-lock.md).
+ *
+ * Only the C macros live here. The protocol, the file grammar, the /proc and
+ * /sys readers, and the calls themselves are Ada: GNAT's C_Variadic_<n>
+ * convention calls open() correctly even on ABIs that pass variadic
+ * arguments differently from fixed ones.
+ * ------------------------------------------------------------------------ */
+
+const int flyology_bench_o_rdwr = O_RDWR;
+const int flyology_bench_o_creat = O_CREAT;
+const int flyology_bench_o_cloexec = O_CLOEXEC;
+const int flyology_bench_o_nofollow = O_NOFOLLOW;
+
+const int flyology_bench_lock_shared = LOCK_SH;
+const int flyology_bench_lock_exclusive = LOCK_EX;
+const int flyology_bench_lock_nonblocking = LOCK_NB;
+const int flyology_bench_lock_unlock = LOCK_UN;
