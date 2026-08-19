@@ -8,7 +8,7 @@ Flyology is the umbrella project. Flyology Runtime is its core GNAT runtime exte
 
 - **Core component:** Flyology Runtime provides native and lightweight task execution, task-aware I/O, and bounded systems building blocks.
 - **Requires Flyology Runtime:** Flyology HTTP, Flyology Postgres, and Flyology QUIC.
-- **Standalone:** Flyology Bench, Flyology Cachelines, Flyology Debug, Flyology IRI, Flyology SIMD, and Flyology TUI.
+- **Standalone:** Flyology Allocators, Flyology Bench, Flyology Cachelines, Flyology Debug, Flyology IRI, Flyology NUMA, Flyology RDF, Flyology SIMD, and Flyology TUI.
 
 The dependency categories describe adoption, not importance. Use each component's linked documentation for its compiler, platform, maturity, verification, and licensing boundaries.
 
@@ -70,6 +70,7 @@ This adds the `flyology` crate and its runtime preparation. Standalone component
 - **Flyology Debug:** [API](https://flyology.org/api/flyology_debug/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_debug). Bounded in-memory tracing, producer shards, retained batches, and persistent gauges.
 - **Flyology IRI:** [Guide](https://http.flyology.org/guide/iri/), [API](https://http.flyology.org/iri-api/), [Source](https://github.com/flyology-ada/flyology-http/tree/main/flyology_iri). Allocation-conscious URI, IRI, and WHATWG URL parsing.
 - **Flyology NUMA:** [Guide](https://flyology.org/guide/numa/), [API](https://flyology.org/api/flyology_numa/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_numa). Memory-node reporting, memory placement on a chosen node, and node-bound storage pools.
+- **Flyology RDF:** [Website](https://rdf.flyology.org/), [Guide](https://rdf.flyology.org/guide/), [API](https://rdf.flyology.org/api/), [Notation3 API](https://rdf.flyology.org/n3-api/), [SPARQL API](https://rdf.flyology.org/sparql-api/), [Source](https://github.com/flyology-ada/flyology-rdf). RDF 1.2 terms, streaming Turtle, TriG, N-Triples and N-Quads parsing, RDFC-1.0 dataset canonicalization, Notation3, and SPARQL 1.1 query syntax.
 - **Flyology SIMD:** [Website](https://simd.flyology.org/), [Guide](https://simd.flyology.org/guide/), [API](https://simd.flyology.org/api/), [Source](https://github.com/flyology-ada/flyology-simd). Portable, strongly typed SIMD foundations for Ada.
 - **Flyology TUI:** [Website](https://tui.flyology.org/), [Guide](https://tui.flyology.org/guide/), [API](https://tui.flyology.org/api/), [Source](https://github.com/flyology-ada/flyology-tui). Typed, declarative terminal user-interface toolkit for Ada.
 
