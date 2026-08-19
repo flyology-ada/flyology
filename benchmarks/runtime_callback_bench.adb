@@ -3,6 +3,7 @@
 
 with Ada.Command_Line;
 with Ada.Text_IO;
+with Interfaces.C;
 with Flyology;
 with Flyology.Debug_Producer_Selection;
 with Flyology.Fairness;
@@ -22,6 +23,11 @@ with Flyology_Bench.Reporters;
 --                                  keep the compiler's per-thread behaviour
 --    fiber_dispatch                a lightweight task yielding to its event
 --                                  loop and back, the scheduler's hottest loop
+--    poller_idle_cycle             a lightweight task suspending until its
+--                                  event loop has nothing ready, so the loop
+--                                  runs its whole idle path once per iteration
+--    monotonic_clock_read          one platform monotonic reading, the unit of
+--                                  work the loop's idle accounting adds
 --    debug_selector_lightweight    automatic trace-shard selection on a
 --                                  lightweight task
 --    debug_selector_native         automatic trace-shard selection on a
@@ -33,6 +39,20 @@ procedure Runtime_Callback_Bench is
    package Bench renames Flyology_Bench;
 
    type Callback_Access is access procedure;
+
+   --  The loop's idle accounting is expressed in readings of this clock, so
+   --  measuring the runtime's own primitive states the added cost directly
+   --  rather than through a standard-library clock with a different
+   --  platform implementation.
+   type Timespec is record
+      Seconds     : Interfaces.C.long;
+      Nanoseconds : Interfaces.C.long;
+   end record
+   with Convention => C;
+
+   function Monotonic_Clock
+     (Value : access Timespec) return Interfaces.C.int;
+   pragma Import (C, Monotonic_Clock, "flyology_monotonic_clock");
 
    --  Volatile so the escaping callback cannot be optimized away, which would
    --  remove the trampoline the benchmark exists to measure.
@@ -63,6 +83,23 @@ procedure Runtime_Callback_Bench is
       Flyology.Fairness.Yield_Now;
    end Fiber_Dispatch;
 
+   --  A positive delay leaves the event loop with nothing ready, so the loop
+   --  takes its idle path: it stamps the wait, polls, and closes the wait.
+   --  Yield_Now keeps the task runnable instead and never reaches that path.
+   procedure Poller_Idle_Cycle is
+   begin
+      delay 0.000_000_001;
+   end Poller_Idle_Cycle;
+
+   Clock_Reading : aliased Timespec := (0, 0);
+   Clock_Status  : Interfaces.C.int := 0;
+   pragma Volatile (Clock_Status);
+
+   procedure Monotonic_Clock_Read is
+   begin
+      Clock_Status := Monotonic_Clock (Clock_Reading'Access);
+   end Monotonic_Clock_Read;
+
    procedure Select_Debug_Producer is
    begin
       Selected_Producer :=
@@ -71,6 +108,8 @@ procedure Runtime_Callback_Bench is
 
    procedure Measure_Trampoline is new Bench.Measure (Trampoline_Cycle);
    procedure Measure_Dispatch is new Bench.Measure (Fiber_Dispatch);
+   procedure Measure_Idle_Cycle is new Bench.Measure (Poller_Idle_Cycle);
+   procedure Measure_Clock_Read is new Bench.Measure (Monotonic_Clock_Read);
    procedure Measure_Selection is new Bench.Measure (Select_Debug_Producer);
 
    Config : constant Bench.Configuration :=
@@ -81,6 +120,8 @@ procedure Runtime_Callback_Bench is
 
    Lightweight_Trampoline : Bench.Measurement;
    Lightweight_Dispatch   : Bench.Measurement;
+   Lightweight_Idle_Cycle : Bench.Measurement;
+   Clock_Read             : Bench.Measurement;
    Lightweight_Selection  : Bench.Measurement;
    Native_Trampoline      : Bench.Measurement;
    Native_Selection       : Bench.Measurement;
@@ -95,6 +136,7 @@ procedure Runtime_Callback_Bench is
    begin
       Measure_Trampoline (Config => Config, Result => Lightweight_Trampoline);
       Measure_Dispatch (Config => Config, Result => Lightweight_Dispatch);
+      Measure_Idle_Cycle (Config => Config, Result => Lightweight_Idle_Cycle);
       Measure_Selection (Config => Config, Result => Lightweight_Selection);
       if Selected_Producer /= 2 then
          raise Program_Error with
@@ -106,6 +148,8 @@ procedure Runtime_Callback_Bench is
      (Trampoline_Cycle_Lightweight,
       Trampoline_Cycle_Native,
       Fiber_Dispatch_Case,
+      Poller_Idle_Cycle_Case,
+      Monotonic_Clock_Read_Case,
       Debug_Selector_Lightweight,
       Debug_Selector_Native);
 
@@ -114,6 +158,8 @@ procedure Runtime_Callback_Bench is
          when Trampoline_Cycle_Lightweight => "trampoline_cycle_lightweight",
          when Trampoline_Cycle_Native      => "trampoline_cycle_native",
          when Fiber_Dispatch_Case          => "fiber_dispatch",
+         when Poller_Idle_Cycle_Case       => "poller_idle_cycle",
+         when Monotonic_Clock_Read_Case    => "monotonic_clock_read",
          when Debug_Selector_Lightweight   => "debug_selector_lightweight",
          when Debug_Selector_Native        => "debug_selector_native");
 
@@ -122,6 +168,8 @@ procedure Runtime_Callback_Bench is
          when Trampoline_Cycle_Lightweight => Lightweight_Trampoline,
          when Trampoline_Cycle_Native      => Native_Trampoline,
          when Fiber_Dispatch_Case          => Lightweight_Dispatch,
+         when Poller_Idle_Cycle_Case       => Lightweight_Idle_Cycle,
+         when Monotonic_Clock_Read_Case    => Clock_Read,
          when Debug_Selector_Lightweight   => Lightweight_Selection,
          when Debug_Selector_Native        => Native_Selection);
 
@@ -142,6 +190,10 @@ begin
    end loop;
    Measure_Trampoline (Config => Config, Result => Native_Trampoline);
    Measure_Selection (Config => Config, Result => Native_Selection);
+   Measure_Clock_Read (Config => Config, Result => Clock_Read);
+   if Interfaces.C."/=" (Clock_Status, 0) then
+      raise Program_Error with "monotonic clock read failed";
+   end if;
 
    for Item in Case_Name loop
       Flyology_Bench.Reporters.Put_Console (Label (Item), Result_Of (Item));

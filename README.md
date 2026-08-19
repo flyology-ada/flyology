@@ -2428,7 +2428,8 @@ migrating, and finished states;
 active timer, descriptor, interrupt-enabled, and file waits; file submissions queued behind kernel
 backpressure; timer-only dormancy candidates and their usable stack bytes; and
 lifetime cold-stack state and advice outcomes; dispatch, poll-batch,
-delivered-event, GNARL-wakeup, and migration-in/out counters. A dormancy
+delivered-event, GNARL-wakeup, and migration-in/out counters; and the loop's
+elapsed and idle nanoseconds with its count of blocking poller waits. A dormancy
 candidate is waiting only on a timer, so its scheduler metadata and any
 kernel-owned buffer are outside its stack. Wait categories overlap: for
 example, a
@@ -2436,6 +2437,36 @@ descriptor wait with a deadline contributes to both `Descriptor_Waits` and
 `Timer_Waits`; a connection wait also contributes to `Interrupt_Waits` when it
 has a cancellation or shutdown wake source. `Pending_File_Submissions` is the subset of `File_Waits` not yet
 accepted by the bounded kernel queue.
+
+`Uptime_Nanoseconds` and `Idle_Nanoseconds` describe the group's event loop
+rather than its tasks. A loop enters its poller only when no task of its own is
+runnable, so its idle time is exactly the time it spends in that wait, and a
+snapshot includes a wait still in progress. `Idle_Nanoseconds` never exceeds
+`Uptime_Nanoseconds`, so the difference is the time the loop spent dispatching,
+polling with work ready, or running task code:
+
+```ada
+Busy_Nanoseconds := Sample.Uptime_Nanoseconds - Sample.Idle_Nanoseconds;
+```
+
+A task suspended on readiness or a deadline leaves its loop idle by this
+measure, so a fully blocked group and an unloaded one both report a high idle
+fraction; `Waiting` and `Descriptor_Waits` distinguish them. A task that loops
+in CPU code without reaching a suspension point keeps its loop out of the
+poller entirely and so reports as fully busy, which is the monopolization case
+`Flyology.Fairness` exists to address.
+
+This accounting adds two monotonic-clock readings per blocking poller wait and
+none per dispatch, so its cost scales with how often a loop runs out of
+runnable work rather than with how much work it does.
+`benchmarks/idle_wait_rate` reports the wait rate a loop reaches, and
+`runtime_callback_bench` reports `monotonic_clock_read`, so the share is
+measured rather than assumed. On the checked macOS/AArch64 host, one reading
+costs about 20 ns, a socket ping-pong between two groups reaches roughly 32,000
+to 38,000 blocking waits per second per loop, and a loop doing nothing but
+entering and leaving its poller reaches roughly 120,000 to 160,000. Those rates
+put the accounting under 0.2% of a working loop's time and under 0.7% in the
+degenerate case.
 
 Topology and queue values are coherent at one instant: the runtime holds the
 short topology lock and the selected group's scheduler lock while walking its
@@ -2457,7 +2488,8 @@ lock or lock order.
 `Made_Progress` compares two samples. A group with runnable or running work but
 no dispatch or poll progress over the sampling interval is a useful loop-lag
 signal; an empty waiting group with no progress is merely idle. This sampled
-design avoids adding a monotonic-clock read to every dispatch. A policy-driven
+design avoids adding a monotonic-clock read to every dispatch; the utilization
+counters above are read on the loop's idle path only, for the same reason. A policy-driven
 stall watchdog is provided as an opt-in layer on these observations and is
 deliberately not a runtime scheduling policy.
 

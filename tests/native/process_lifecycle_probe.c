@@ -43,6 +43,9 @@ struct runtime_group_snapshot {
     unsigned long long wakeups;
     unsigned long long migrations_in;
     unsigned long long migrations_out;
+    unsigned long long uptime_nanoseconds;
+    unsigned long long idle_nanoseconds;
+    unsigned long long idle_waits;
 };
 extern int flyology_runtime_observe_group(
     int group, struct runtime_group_snapshot *snapshot, size_t size);
@@ -167,7 +170,7 @@ int flyology_test_fork_exec(const char *program) {
             if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
                 flyology_runtime_observe_group(
                     0, &snapshot, sizeof(snapshot)) != 1 ||
-                snapshot.version != 5) {
+                snapshot.version != 6) {
                 return -1;
             }
             return 0;
