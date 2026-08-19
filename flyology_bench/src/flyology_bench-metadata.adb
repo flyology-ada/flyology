@@ -1,34 +1,27 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
+with Flyology_Bench.Internal_Probes;
 with GNAT.Compiler_Version;
-with Interfaces.C;
 
 package body Flyology_Bench.Metadata is
    package Compiler_Info is new GNAT.Compiler_Version;
 
-   function Native_OS return Interfaces.C.int;
-   pragma Import (C, Native_OS, "flyology_bench_platform_os");
-
-   function Native_Architecture return Interfaces.C.int;
-   pragma Import
-     (C, Native_Architecture, "flyology_bench_platform_architecture");
-
    function Operating_System return String is
    begin
-      case Native_OS is
-         when 1 => return "darwin";
-         when 2 => return "linux";
-         when others => return "unknown";
+      case Internal_Probes.Operating_System is
+         when Internal_Probes.Darwin => return "darwin";
+         when Internal_Probes.Linux => return "linux";
+         when Internal_Probes.Unknown_System => return "unknown";
       end case;
    end Operating_System;
 
    function Architecture return String is
    begin
-      case Native_Architecture is
-         when 1 => return "aarch64";
-         when 2 => return "x86_64";
-         when others => return "unknown";
+      case Internal_Probes.Architecture is
+         when Internal_Probes.AArch64 => return "aarch64";
+         when Internal_Probes.X86_64 => return "x86_64";
+         when Internal_Probes.Unknown_Architecture => return "unknown";
       end case;
    end Architecture;
 

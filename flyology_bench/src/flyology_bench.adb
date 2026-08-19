@@ -9,39 +9,16 @@ with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Flyology_Bench.Host_Control;
 with Flyology_Bench.Host_Lock;
-with Flyology_Bench_Internal_Probes;
-with Interfaces.C;
-with System;
+with Flyology_Bench.Internal_Probes.Counters;
 
 package body Flyology_Bench is
    package Math renames Ada.Numerics.Long_Elementary_Functions;
-   use Flyology_Bench_Internal_Probes;
+   package Counters renames Flyology_Bench.Internal_Probes.Counters;
+   use Flyology_Bench.Internal_Probes;
 
    use type Interfaces.Unsigned_64;
-   use type Interfaces.C.int;
-   use type Interfaces.C.size_t;
 
    Bootstrap_Resamples : constant := 2_000;
-
-   procedure Escape (Value : System.Address);
-   pragma Import (C, Escape, "flyology_bench_escape");
-
-   procedure Memory_Barrier;
-   pragma Import (C, Memory_Barrier, "flyology_bench_clobber_memory");
-
-   function Native_Host_CPU_Snapshot
-     (Busy_Ticks  : System.Address;
-      Total_Ticks : System.Address;
-      Capacity    : Interfaces.C.size_t;
-      CPU_Count   : access Interfaces.C.size_t) return Interfaces.C.int;
-   pragma Import
-     (C, Native_Host_CPU_Snapshot, "flyology_bench_host_cpu_snapshot");
-
-   Maximum_Host_CPUs : constant := 1_024;
-   type Host_CPU_Counters is
-     array (Natural range 0 .. Maximum_Host_CPUs - 1)
-       of aliased Interfaces.Unsigned_64
-     with Convention => C;
 
    type Float_Array is array (Positive range <>) of Long_Float;
 
@@ -68,7 +45,7 @@ package body Flyology_Bench is
    end Finalize;
 
    type Sample_Probe_State is record
-      Resource_Before      : Native_Resource_Values := [others => 0];
+      Resource_Before      : Resource_Values := [others => 0];
       Resource_Before_Mask : Interfaces.Unsigned_64 := 0;
       Scheduler_Before     : Flyology_Scheduler_Snapshot;
    end record;
@@ -107,19 +84,9 @@ package body Flyology_Bench is
    end Scheduler_Metrics_Requested;
 
    function Perf_Status
-     (Perf  : Perf_Handle;
-      Index : Natural) return Metric_Availability
-   is
-      Value : constant Interfaces.C.int := Perf.State.Statuses (Index);
-   begin
-      if Value < 0
-        or else Value > Interfaces.C.int (Metric_Availability'Pos
-          (Metric_Availability'Last))
-      then
-         return Probe_Failed;
-      end if;
-      return Metric_Availability'Val (Natural (Value));
-   end Perf_Status;
+     (Perf  : Counters.Handle;
+      Index : Counters.Counter_Index) return Metric_Availability is
+     (Counters.Status (Perf.Counters, Index));
 
    procedure Initialize_Metrics
      (Config : Configuration;
@@ -151,7 +118,7 @@ package body Flyology_Bench is
 
    procedure Initialize_Perf
      (Config : Configuration;
-      Perf   : in out Perf_Handle)
+      Perf   : in out Counters.Handle)
    is
       Requested : Interfaces.Unsigned_64 := 0;
    begin
@@ -176,16 +143,14 @@ package body Flyology_Bench is
          Requested := Requested or 3;
       end if;
       if Requested /= 0 then
-         if Native_Perf_Initialize (Perf.State'Access, Requested) /= 0 then
-            raise Program_Error with "Linux perf initialization failed";
-         end if;
+         Counters.Open (Perf.Counters, Requested);
          Perf.Initialized := True;
       end if;
    end Initialize_Perf;
 
    procedure Start_Sample
      (Config : Configuration;
-      Perf   : in out Perf_Handle;
+      Perf   : in out Counters.Handle;
       State  : out Sample_Probe_State)
    is
       Ignored : Boolean;
@@ -200,9 +165,8 @@ package body Flyology_Bench is
       then
          Config.Scheduler_Probe.all (State.Scheduler_Before);
       end if;
-      if Perf.Initialized and then Native_Perf_Start (Perf.State'Access) /= 0
-      then
-         raise Program_Error with "Linux perf counter start failed";
+      if Perf.Initialized then
+         Counters.Start (Perf.Counters);
       end if;
    end Start_Sample;
 
@@ -299,18 +263,18 @@ package body Flyology_Bench is
 
    procedure Finish_Sample
      (Config      : Configuration;
-      Perf        : in out Perf_Handle;
+      Perf        : in out Counters.Handle;
       State       : Sample_Probe_State;
       Result      : in out Measurement;
       Index       : Sample_Index;
       Iterations  : Iteration_Count;
       Raw_Elapsed : Long_Float)
    is
-      Resource_After      : Native_Resource_Values := [others => 0];
+      Resource_After      : Resource_Values := [others => 0];
       Resource_After_Mask : Interfaces.Unsigned_64 := 0;
       Resource_OK         : Boolean := False;
-      Perf_Values         : Native_Perf_Values := [others => 0];
-      Perf_Mask           : aliased Interfaces.Unsigned_64 := 0;
+      Perf_Sample         : Perf_Values := [others => 0];
+      Perf_Mask           : Interfaces.Unsigned_64 := 0;
       Scheduler_After     : Flyology_Scheduler_Snapshot;
       Per_Operation       : constant Long_Float := Long_Float (Iterations);
       Reported_Elapsed    : Long_Float := Raw_Elapsed;
@@ -369,14 +333,8 @@ package body Flyology_Bench is
          return Long_Float (After - Before) / Per_Operation;
       end Scheduler_Delta;
    begin
-      if Perf.Initialized
-        and then Native_Perf_Finish
-          (Perf.State'Access,
-           Perf_Values (Perf_Values'First)'Address,
-           Interfaces.C.size_t (Perf_Values'Length),
-           Perf_Mask'Access) /= 0
-      then
-         raise Program_Error with "Linux perf counter read failed";
+      if Perf.Initialized then
+         Counters.Finish (Perf.Counters, Perf_Sample, Perf_Mask);
       end if;
       if Scheduler_Metrics_Requested (Config)
         and then Config.Scheduler_Probe /= null
@@ -391,13 +349,18 @@ package body Flyology_Bench is
       if Config.Collect_Process_Telemetry then
          Record_Process_Telemetry
            (Result, Index, Raw_Elapsed,
-            State.Resource_Before (0), Resource_After (0),
-            State.Resource_Before (2), Resource_After (2),
+            State.Resource_Before (Process_CPU_Index),
+            Resource_After (Process_CPU_Index),
+            State.Resource_Before (Resident_Bytes_Index),
+            Resource_After (Resident_Bytes_Index),
             Resource_OK
-              and then Mask_Has (State.Resource_Before_Mask, 0)
-              and then Mask_Has (Resource_After_Mask, 0)
-              and then Mask_Has (State.Resource_Before_Mask, 2)
-              and then Mask_Has (Resource_After_Mask, 2));
+              and then Mask_Has
+                (State.Resource_Before_Mask, Process_CPU_Index)
+              and then Mask_Has (Resource_After_Mask, Process_CPU_Index)
+              and then Mask_Has
+                (State.Resource_Before_Mask, Resident_Bytes_Index)
+              and then Mask_Has
+                (Resource_After_Mask, Resident_Bytes_Index));
       end if;
 
       if Result.Metric_Data.Data = null then
@@ -411,91 +374,99 @@ package body Flyology_Bench is
       Store (Wall_Time, Reported_Elapsed / Per_Operation);
 
       if Result.Metric_Data.Data.Requested (Process_CPU_Time) then
-         Store_Resource_Delta (Process_CPU_Time, 0);
+         Store_Resource_Delta (Process_CPU_Time, Process_CPU_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Thread_CPU_Time) then
-         Store_Resource_Delta (Thread_CPU_Time, 1);
+         Store_Resource_Delta (Thread_CPU_Time, Thread_CPU_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Process_RSS) then
-         if Resource_OK and then Mask_Has (Resource_After_Mask, 2) then
-            Store (Process_RSS, Long_Float (Resource_After (2)));
+         if Resource_OK
+           and then Mask_Has (Resource_After_Mask, Resident_Bytes_Index)
+         then
+            Store
+              (Process_RSS,
+               Long_Float (Resource_After (Resident_Bytes_Index)));
          else
             Unavailable (Process_RSS);
          end if;
       end if;
       if Result.Metric_Data.Data.Requested (Process_RSS_Change) then
          if Resource_OK
-           and then Mask_Has (State.Resource_Before_Mask, 2)
-           and then Mask_Has (Resource_After_Mask, 2)
+           and then Mask_Has
+             (State.Resource_Before_Mask, Resident_Bytes_Index)
+           and then Mask_Has (Resource_After_Mask, Resident_Bytes_Index)
          then
             Store
               (Process_RSS_Change,
-               (Long_Float (Resource_After (2))
-                - Long_Float (State.Resource_Before (2))) / Per_Operation);
+               (Long_Float (Resource_After (Resident_Bytes_Index))
+                - Long_Float
+                    (State.Resource_Before (Resident_Bytes_Index)))
+               / Per_Operation);
          else
             Unavailable (Process_RSS_Change);
          end if;
       end if;
       if Result.Metric_Data.Data.Requested (Minor_Page_Faults) then
-         Store_Resource_Delta (Minor_Page_Faults, 3);
+         Store_Resource_Delta (Minor_Page_Faults, Minor_Faults_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Major_Page_Faults) then
-         Store_Resource_Delta (Major_Page_Faults, 4);
+         Store_Resource_Delta (Major_Page_Faults, Major_Faults_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Voluntary_Context_Switches) then
-         Store_Resource_Delta (Voluntary_Context_Switches, 5);
+         Store_Resource_Delta (Voluntary_Context_Switches, Voluntary_Switches_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Involuntary_Context_Switches) then
-         Store_Resource_Delta (Involuntary_Context_Switches, 6);
+         Store_Resource_Delta (Involuntary_Context_Switches, Involuntary_Switches_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Disk_Read_Bytes) then
-         Store_Resource_Delta (Disk_Read_Bytes, 7);
+         Store_Resource_Delta (Disk_Read_Bytes, Disk_Read_Bytes_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Disk_Written_Bytes) then
-         Store_Resource_Delta (Disk_Written_Bytes, 8);
+         Store_Resource_Delta (Disk_Written_Bytes, Disk_Written_Bytes_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Filesystem_Input_Operations) then
-         Store_Resource_Delta (Filesystem_Input_Operations, 9);
+         Store_Resource_Delta (Filesystem_Input_Operations, Input_Operations_Index);
       end if;
       if Result.Metric_Data.Data.Requested (Filesystem_Output_Operations) then
-         Store_Resource_Delta (Filesystem_Output_Operations, 10);
+         Store_Resource_Delta (Filesystem_Output_Operations, Output_Operations_Index);
       end if;
 
       for Axis in CPU_Cycles .. Branch_Misses loop
          if Result.Metric_Data.Data.Requested (Axis) then
             if Axis = Instructions_Per_Cycle then
-               if Mask_Has (Perf_Mask, 0)
-                 and then Mask_Has (Perf_Mask, 1)
-                 and then Perf_Values (0) > 0
+               if Mask_Has (Perf_Mask, Counters.Cycles_Index)
+                 and then Mask_Has (Perf_Mask, Counters.Instructions_Index)
+                 and then Perf_Sample (Counters.Cycles_Index) > 0
                then
                   Store
                     (Axis,
-                     Long_Float (Perf_Values (1))
-                       / Long_Float (Perf_Values (0)));
+                     Long_Float (Perf_Sample (Counters.Instructions_Index))
+                       / Long_Float (Perf_Sample (Counters.Cycles_Index)));
                else
                   Unavailable
                     (Axis,
-                     (if not Mask_Has (Perf_Mask, 0)
-                      then Perf_Status (Perf, 0)
-                      elsif not Mask_Has (Perf_Mask, 1)
-                      then Perf_Status (Perf, 1)
+                     (if not Mask_Has (Perf_Mask, Counters.Cycles_Index)
+                      then Perf_Status (Perf, Counters.Cycles_Index)
+                      elsif not Mask_Has
+                        (Perf_Mask, Counters.Instructions_Index)
+                      then Perf_Status (Perf, Counters.Instructions_Index)
                       else Probe_Failed));
                end if;
             else
                declare
-                  Perf_Index : constant Natural :=
+                  Perf_Index : constant Counters.Counter_Index :=
                     (case Axis is
-                       when CPU_Cycles    => 0,
-                       when Instructions  => 1,
-                       when Cache_Misses  => 2,
-                       when Branches      => 3,
-                       when Branch_Misses => 4,
-                       when others        => 0);
+                       when CPU_Cycles    => Counters.Cycles_Index,
+                       when Instructions  => Counters.Instructions_Index,
+                       when Cache_Misses  => Counters.Cache_Misses_Index,
+                       when Branches      => Counters.Branches_Index,
+                       when Branch_Misses => Counters.Branch_Misses_Index,
+                       when others        => Counters.Cycles_Index);
                begin
                   if Mask_Has (Perf_Mask, Perf_Index) then
                      Store
                        (Axis,
-                        Long_Float (Perf_Values (Perf_Index))
+                        Long_Float (Perf_Sample (Perf_Index))
                           / Per_Operation);
                   else
                      Unavailable
@@ -552,21 +523,12 @@ package body Flyology_Bench is
       Total     : out Host_CPU_Counters;
       CPU_Count : out Natural)
    is
-      Count : aliased Interfaces.C.size_t := 0;
+      Available : Boolean;
    begin
-      Busy := [others => 0];
-      Total := [others => 0];
-      if Native_Host_CPU_Snapshot
-          (Busy (Busy'First)'Address,
-           Total (Total'First)'Address,
-           Interfaces.C.size_t (Maximum_Host_CPUs),
-           Count'Access) /= 0
-        or else Count = 0
-        or else Count > Interfaces.C.size_t (Maximum_Host_CPUs)
-      then
+      Internal_Probes.Read_Host_CPU (Busy, Total, CPU_Count, Available);
+      if not Available then
          raise Program_Error with "host CPU utilization query failed";
       end if;
-      CPU_Count := Natural (Count);
    end Read_Host_CPU;
 
    procedure Host_CPU_Utilization
@@ -702,21 +664,21 @@ package body Flyology_Bench is
       Thread_CPU  : out Interfaces.Unsigned_64;
       Valid       : out Boolean)
    is
-      Values    : Native_Resource_Values := (others => 0);
+      Values    : Resource_Values := (others => 0);
       Mask      : Interfaces.Unsigned_64 := 0;
       Available : Boolean := False;
    begin
       Read_Resource_Snapshot (Values, Mask, Available);
       Valid := Available
-        and then Mask_Has (Mask, 0)
-        and then Mask_Has (Mask, 1);
+        and then Mask_Has (Mask, Process_CPU_Index)
+        and then Mask_Has (Mask, Thread_CPU_Index);
       if not Valid then
          Process_CPU := 0;
          Thread_CPU := 0;
          return;
       end if;
-      Process_CPU := Values (0);
-      Thread_CPU := Values (1);
+      Process_CPU := Values (Process_CPU_Index);
+      Thread_CPU := Values (Thread_CPU_Index);
    end Read_Own_CPU;
 
    --  Foreign share of the watched CPUs' capacity, in percent. The host busy
@@ -1428,14 +1390,16 @@ package body Flyology_Bench is
       Median_Cost         : out Long_Float)
    is
       Count      : constant := 512;
-      Resolution : aliased Interfaces.Unsigned_64;
+      Resolution : Interfaces.Unsigned_64;
+      Available  : Boolean;
       Values     : Float_Array (1 .. Count);
       Previous   : Interfaces.Unsigned_64 := Clock_Now;
    begin
-      if Native_Clock_Resolution (Resolution'Access) /= 0 then
+      Read_Clock_Resolution (Resolution, Available);
+      if not Available then
          raise Program_Error with "platform clock resolution query failed";
       end if;
-      Backend := Natural (Native_Clock_Backend);
+      Backend := Clock_Backend;
       Nominal_Resolution := Long_Float (Resolution);
       Observed_Resolution := Long_Float'Last;
       Minimum_Cost := Long_Float'Last;
@@ -2105,7 +2069,7 @@ package body Flyology_Bench is
       Target_NS        : Long_Float;
       Clock_Cost       : Long_Float;
       Calibration_Hits : Natural := 0;
-      Perf             : Perf_Handle;
+      Perf             : Counters.Handle;
       Watch            : Interference_Watch;
       Lock             : Host_Lock.Claim;
 
@@ -2114,19 +2078,19 @@ package body Flyology_Bench is
          Finished : Interfaces.Unsigned_64;
       begin
          Prepare_Batch;
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          Started := Clock_Now;
          begin
             Run_Batch (Iterations);
          exception
             when others =>
                Finished := Clock_Now;
-               Memory_Barrier;
+               Internal_Probes.Clobber_Memory;
                Finish_Batch;
                raise;
          end;
          Finished := Clock_Now;
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          Finish_Batch;
          return Elapsed_Nanoseconds (Started, Finished);
       end Time_Batch;
@@ -2140,18 +2104,18 @@ package body Flyology_Bench is
          Prepare_Batch;
          begin
             Start_Sample (Config, Perf, Probe);
-            Memory_Barrier;
+            Internal_Probes.Clobber_Memory;
             Started := Clock_Now;
             Run_Batch (Batch_Iterations);
             Finished := Clock_Now;
-            Memory_Barrier;
+            Internal_Probes.Clobber_Memory;
             Elapsed := Elapsed_Nanoseconds (Started, Finished);
             Finish_Sample
               (Config, Perf, Probe, Result, Index,
                Batch_Iterations, Elapsed);
          exception
             when others =>
-               Memory_Barrier;
+               Internal_Probes.Clobber_Memory;
                Finish_Batch;
                raise;
          end;
@@ -2284,7 +2248,7 @@ package body Flyology_Bench is
             Notify (Config, Warming, 0, 100);
             loop
                Elapsed := Time_Batch (Batch_Iterations);
-               Escape (Elapsed'Address);
+               Internal_Probes.Escape (Elapsed'Address);
                exit when Clock_Now >= Deadline;
             end loop;
             Notify (Config, Warming, 100, 100);
@@ -2363,7 +2327,7 @@ package body Flyology_Bench is
       Clock_Cost       : Long_Float;
       Calibration_Hits : Natural := 0;
       Slow_Limit_Hits  : Natural := 0;
-      Perf             : Perf_Handle;
+      Perf             : Counters.Handle;
       Watch            : Interference_Watch;
       Lock             : Host_Lock.Claim;
       Warmup_State     : Interfaces.Unsigned_64 :=
@@ -2384,11 +2348,11 @@ package body Flyology_Bench is
          Started  : Interfaces.Unsigned_64;
          Finished : Interfaces.Unsigned_64;
       begin
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          Started := Clock_Now;
          Run_Reference_Batch (Iterations);
          Finished := Clock_Now;
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          return Elapsed_Nanoseconds (Started, Finished);
       end Time_Reference;
 
@@ -2398,11 +2362,11 @@ package body Flyology_Bench is
          Started  : Interfaces.Unsigned_64;
          Finished : Interfaces.Unsigned_64;
       begin
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          Started := Clock_Now;
          Run_Contender_Batch (Iterations);
          Finished := Clock_Now;
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          return Elapsed_Nanoseconds (Started, Finished);
       end Time_Contender;
 
@@ -2735,8 +2699,8 @@ package body Flyology_Bench is
                     (Reference_First => True,
                      Reference_Time  => Reference_Time,
                      Contender_Time  => Contender_Time);
-                  Escape (Reference_Time'Address);
-                  Escape (Contender_Time'Address);
+                  Internal_Probes.Escape (Reference_Time'Address);
+                  Internal_Probes.Escape (Contender_Time'Address);
                   exit when Clock_Now >= Deadline;
                end loop;
                Notify (Config, Warming, 100, 100);
@@ -2864,7 +2828,7 @@ package body Flyology_Bench is
 
       procedure Observe is
       begin
-         Escape (Latest'Address);
+         Internal_Probes.Escape (Latest'Address);
       end Observe;
 
       procedure Run is new Measure_Core (Run_Batch, Nothing, Observe);
@@ -2934,7 +2898,7 @@ package body Flyology_Bench is
       Collected_Samples : Natural := 0;
       Reference_First_Schedule : Schedule_Array :=
         [others => [others => False]];
-      Perf : Perf_Handle;
+      Perf : Counters.Handle;
 
       function Iterations_For
         (Index : Comparison_Case_Index) return Iteration_Count is
@@ -2979,11 +2943,11 @@ package body Flyology_Bench is
          Started : Interfaces.Unsigned_64;
          Finished : Interfaces.Unsigned_64;
       begin
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          Started := Clock_Now;
          Batch (Which, Iterations);
          Finished := Clock_Now;
-         Memory_Barrier;
+         Internal_Probes.Clobber_Memory;
          return Elapsed_Nanoseconds (Started, Finished);
       end Time_One;
 
@@ -3336,9 +3300,9 @@ package body Flyology_Bench is
                   Notify (Config, Warming, 0, 100);
                   loop
                      Time_Round (Fastest, Spent, Times);
-                     Escape (Fastest'Address);
-                     Escape (Spent'Address);
-                     Escape (Times'Address);
+                     Internal_Probes.Escape (Fastest'Address);
+                     Internal_Probes.Escape (Spent'Address);
+                     Internal_Probes.Escape (Times'Address);
                      exit when Clock_Now >= Deadline;
                   end loop;
                   Notify (Config, Warming, 100, 100);
@@ -3420,7 +3384,7 @@ package body Flyology_Bench is
                         Elapsed := Time_One
                           (Case_Id'Val (Case_Number - 1),
                            Iterations_For (Case_Index));
-                        Escape (Elapsed'Address);
+                        Internal_Probes.Escape (Elapsed'Address);
                         exit when Clock_Now >= Deadline;
                      end loop;
                      Notify (Config, Warming, 100, 100);
@@ -3885,11 +3849,11 @@ package body Flyology_Bench is
 
    procedure Do_Not_Optimize (Value : in out Element) is
    begin
-      Escape (Value'Address);
+      Internal_Probes.Escape (Value'Address);
    end Do_Not_Optimize;
 
    procedure Clobber_Memory is
    begin
-      Memory_Barrier;
+      Internal_Probes.Clobber_Memory;
    end Clobber_Memory;
 end Flyology_Bench;
