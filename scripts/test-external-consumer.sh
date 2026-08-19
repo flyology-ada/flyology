@@ -81,22 +81,41 @@ fi
 #  Launch the dependency's exact pre-build command through two clean consumer
 #  environments against the same cold path pin. Alire's build and recursive
 #  action dispatch both update shared pin metadata before Flyology starts, so
-#  they cannot isolate this critical section. The test probe makes overlapping
-#  entry into Flyology's section fail.
+#  they cannot isolate this critical section. Resolving a workspace is itself
+#  such an update: every `alr` invocation rewrites the pinned dependency's own
+#  `alire/` and `config/` trees through rename-into-place, so two overlapping
+#  resolutions race inside Alire rather than inside Flyology. Resolve each
+#  consumer environment on its own, then enter Flyology's section together
+#  through the resolved environments. The test probe makes overlapping entry
+#  into Flyology's section fail.
 probe_dir="$consumer_root/preparation-critical-section"
 first_log="$consumer_root/first-consumer.log"
 second_log="$consumer_root/second-consumer.log"
+first_environment="$consumer_root/first-consumer.env"
+second_environment="$consumer_root/second-consumer.env"
+#  Alire recommends a second quiet printenv for machine parsing; the first
+#  call absorbs the synchronization notes of a freshly copied consumer.
 (
   cd "$consumer_root"
-  "$alr" exec -- env \
-    FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR="$probe_dir" \
+  "$alr" --non-interactive printenv --unix >/dev/null
+  "$alr" --non-interactive -q printenv --unix
+) >"$first_environment"
+(
+  cd "$concurrent_root"
+  "$alr" --non-interactive printenv --unix >/dev/null
+  "$alr" --non-interactive -q printenv --unix
+) >"$second_environment"
+(
+  cd "$consumer_root"
+  . "$first_environment"
+  FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR="$probe_dir" \
     "$pin_root/scripts/prepare-alire-rts.sh"
 ) >"$first_log" 2>&1 &
 first_pid=$!
 (
   cd "$concurrent_root"
-  "$alr" exec -- env \
-    FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR="$probe_dir" \
+  . "$second_environment"
+  FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR="$probe_dir" \
     "$pin_root/scripts/prepare-alire-rts.sh"
 ) >"$second_log" 2>&1 &
 second_pid=$!
