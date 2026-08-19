@@ -59,22 +59,30 @@ begin
          null;
    end;
 
+   --  The two distributions must differ by work the workers actually
+   --  perform. A sub-millisecond delay is quantised to the host timer tick,
+   --  which on some Linux kernels is coarse enough to round both requests up
+   --  to the same wakeup and leave the medians ordered by noise alone.
    declare
+      Fast_Rounds : constant := 20_000;
+      Slow_Rounds : constant := 20 * Fast_Rounds;
       task type Worker (Identity : Positive);
       task body Worker is
+         Which  : constant Recording.Benchmark :=
+           (if Identity mod 2 = 0 then Fast else Slow);
+         Rounds : constant Positive :=
+           (if Identity mod 2 = 0 then Fast_Rounds else Slow_Rounds);
+         Accumulator : Interfaces.Unsigned_64 := 1 with Volatile;
       begin
          for Index in 1 .. 20 loop
             declare
                Sample : Recording.Span;
-               Which  : constant Recording.Benchmark :=
-                 (if Identity mod 2 = 0 then Fast else Slow);
             begin
                Recording.Begin_Sample (Recorder, Which, Sample);
-               if Identity mod 2 = 0 then
-                  delay 0.000_2;
-               else
-                  delay 0.000_8;
-               end if;
+               for Round in 1 .. Rounds loop
+                  Accumulator := Interfaces.Rotate_Left
+                    (Accumulator xor Interfaces.Unsigned_64 (Round), 3);
+               end loop;
                Recording.Finish
                  (Sample,
                   (if Index = 20 then Recording.Failure
@@ -147,12 +155,20 @@ begin
            (Fast_Result, Flyology_Bench.Instructions) > 0,
          "recorder persistent instructions are unavailable");
    end if;
-   Check
-     (Recording.Metric_Statistics
-        (Slow_Result, Flyology_Bench.Wall_Time).Median
-      > Recording.Metric_Statistics
-        (Fast_Result, Flyology_Bench.Wall_Time).Median,
-      "recorded distributions are not distinct");
+   declare
+      Fast_Median : constant Long_Float :=
+        Recording.Metric_Statistics
+          (Fast_Result, Flyology_Bench.Wall_Time).Median;
+      Slow_Median : constant Long_Float :=
+        Recording.Metric_Statistics
+          (Slow_Result, Flyology_Bench.Wall_Time).Median;
+   begin
+      Check
+        (Slow_Median > Fast_Median,
+         "recorded distributions are not distinct: fast median"
+         & Long_Float'Image (Fast_Median) & " ns, slow median"
+         & Long_Float'Image (Slow_Median) & " ns");
+   end;
 
    Recording.Compare_Independent (Fast_Result, Slow_Result, Compared);
    Check
