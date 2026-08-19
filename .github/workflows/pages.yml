@@ -15,16 +15,22 @@ concurrency:
   group: flyology-pages-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Timeouts follow the convention in ci.yml: every job, and every step that
+# reaches the network, is bounded generously against observed healthy runs so a
+# stall fails in minutes rather than hanging until GitHub's six-hour default.
 jobs:
   build:
     name: Build and check site
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out sources
+        timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
       - name: Install Alire
+        timeout-minutes: 15
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           version: 2.1.1
@@ -33,19 +39,23 @@ jobs:
             gprbuild=26.0.1
           cache: true
       - name: Select toolchain
+        timeout-minutes: 10
         run: |
           alr --non-interactive toolchain --select \
             gnat_native=16.1.0 \
             gprbuild=26.0.1
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Configure Flyology index
+        timeout-minutes: 10
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Install GNATdoc
+        timeout-minutes: 10
         run: alr install gnatdoc_bin
       - name: Configure Pages
         if: github.event_name != 'pull_request'
+        timeout-minutes: 10
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Build site
         run: ./scripts/build-site.sh
@@ -53,6 +63,7 @@ jobs:
         run: node ./vendor/website-kit/scripts/check-site.mjs build/site
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
+        timeout-minutes: 10
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: build/site
@@ -62,10 +73,12 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
+        timeout-minutes: 10
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

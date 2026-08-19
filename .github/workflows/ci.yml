@@ -11,10 +11,15 @@ concurrency:
   group: flyology-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job, and every step that reaches the network, carries a timeout. The
+# bounds are generous multiples of observed healthy runs: they exist so a
+# stalled mirror or download fails in minutes instead of hanging until GitHub's
+# six-hour job default, not to police how long healthy work may take.
 jobs:
   test:
     name: Test / ${{ matrix.os }} / GNAT ${{ matrix.toolchain.gnat }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -23,8 +28,10 @@ jobs:
           - { gnat: 16.1.0, gprbuild: 26.0.1 }
     steps:
       - name: Check out sources
+        timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Alire
+        timeout-minutes: 15
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           version: 2.1.1
@@ -33,24 +40,46 @@ jobs:
             gprbuild=${{ matrix.toolchain.gprbuild }}
           cache: true
       - name: Select toolchain
+        timeout-minutes: 10
         run: |
           alr --non-interactive toolchain --select \
             gnat_native=${{ matrix.toolchain.gnat }} \
             gprbuild=${{ matrix.toolchain.gprbuild }}
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Configure Flyology index
+        timeout-minutes: 10
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Install OpenSSL 3 on macOS
         if: runner.os == 'macOS'
+        timeout-minutes: 10
         run: |
           brew install openssl@3 pkg-config
           printf 'FLYOLOGY_TEST_OPENSSL_DIR=%s/lib\n' \
             "$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      # apt-get update is the command that stalls: an unresponsive mirror leaves
+      # it waiting rather than failing, so it needs its own bound before the
+      # step bound can mean anything. Each attempt is capped, a stall or a
+      # transient failure is retried twice, and the worst case still lands
+      # inside timeout-minutes so the message below is what the log ends on.
       - name: Install OpenSSL 3 on Linux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            if sudo timeout --kill-after=10s 120s apt-get update; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error title=apt-get update did not complete::Three bounded attempts to refresh the apt indexes stalled or failed. This is usually a transient mirror problem; re-run the job."
+              exit 1
+            fi
+            printf 'apt-get update attempt %s did not complete; retrying.\n' \
+              "$attempt" >&2
+            sleep "$((attempt * 15))"
+          done
+          sudo timeout --kill-after=10s 180s apt-get install -y libssl-dev pkg-config
       - name: Require the Linux io_uring file backend
         if: runner.os == 'Linux'
         run: printf '%s\n' 'FLYOLOGY_EXPECT_FILE_BACKEND=io-uring' >> "$GITHUB_ENV"
@@ -77,22 +106,27 @@ jobs:
   proof:
     name: SPARK proof / ubuntu-latest / GNAT 16.1.0
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out sources
+        timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Alire
+        timeout-minutes: 15
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           version: 2.1.1
           toolchain: gnat_native=16.1.0 gprbuild=26.0.1
           cache: true
       - name: Select toolchain
+        timeout-minutes: 10
         run: |
           alr --non-interactive toolchain --select \
             gnat_native=16.1.0 \
             gprbuild=26.0.1
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Configure Flyology index
+        timeout-minutes: 10
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
@@ -106,35 +140,43 @@ jobs:
   tla:
     name: TLA+ models / ubuntu-latest / TLC 2.19
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out sources
+        timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Alire
+        timeout-minutes: 15
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           version: 2.1.1
           toolchain: gnat_native=16.1.0 gprbuild=26.0.1
           cache: true
       - name: Select toolchain
+        timeout-minutes: 10
         run: |
           alr --non-interactive toolchain --select \
             gnat_native=16.1.0 \
             gprbuild=26.0.1
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Configure Flyology index
+        timeout-minutes: 10
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Install Java
+        timeout-minutes: 10
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '21'
       - name: Install TLA+ CLI 1.7.4
         shell: bash
+        timeout-minutes: 10
         run: |
           tla_jar="$RUNNER_TEMP/tla2tools-1.7.4.jar"
           curl --fail --location --retry 3 \
+            --connect-timeout 30 --max-time 120 \
             https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar \
             --output "$tla_jar"
           printf '%s  %s\n' \
