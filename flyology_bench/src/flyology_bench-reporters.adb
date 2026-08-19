@@ -6,6 +6,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Environment_Variables;
 with Ada.Characters.Handling;
+with Flyology_Bench.Internal_Probes;
 with Flyology_Bench.Metadata;
 with Interfaces.C;
 
@@ -26,15 +27,6 @@ package body Flyology_Bench.Reporters is
 
    function Isatty (Descriptor : Interfaces.C.int) return Interfaces.C.int;
    pragma Import (C, Isatty, "isatty");
-
-   function Native_Clock_Now
-     (Value : access Interfaces.Unsigned_64) return Interfaces.C.int;
-   pragma Import (C, Native_Clock_Now, "flyology_bench_clock_now");
-
-   function Native_Process_Usage
-     (CPU_Nanoseconds : access Interfaces.Unsigned_64;
-      Resident_Bytes  : access Interfaces.Unsigned_64) return Interfaces.C.int;
-   pragma Import (C, Native_Process_Usage, "flyology_bench_process_usage");
 
    function Image
      (Value : Long_Float;
@@ -138,9 +130,9 @@ package body Flyology_Bench.Reporters is
       Width  : constant Positive := 24;
       Filled : Natural := 0;
       Percent : Natural := 0;
-      CPU_Time : aliased Interfaces.Unsigned_64 := 0;
-      RSS : aliased Interfaces.Unsigned_64 := 0;
-      Wall_Time : aliased Interfaces.Unsigned_64 := 0;
+      CPU_Time : Interfaces.Unsigned_64 := 0;
+      RSS : Interfaces.Unsigned_64 := 0;
+      Wall_Time : Interfaces.Unsigned_64 := 0;
       CPU_Percent : Long_Float := 0.0;
       Usage_Available : Boolean := False;
       Name_Separator : constant Natural :=
@@ -155,9 +147,10 @@ package body Flyology_Bench.Reporters is
             return;
          end if;
       end if;
-      Usage_Available :=
-        Native_Process_Usage (CPU_Time'Access, RSS'Access) = 0
-        and then Native_Clock_Now (Wall_Time'Access) = 0;
+      Internal_Probes.Read_Process_Usage (CPU_Time, RSS, Usage_Available);
+      if Usage_Available then
+         Internal_Probes.Read_Clock (Wall_Time, Usage_Available);
+      end if;
       if Usage_Available then
          if Phase = Starting or else Previous_Wall_Time = 0 then
             Progress_Start_RSS := RSS;

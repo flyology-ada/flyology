@@ -1,21 +1,15 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
-with Interfaces.C;
+with Flyology_Bench.Internal_Probes;
 
 package body Flyology_Bench.Host_Control is
-   function Native_Pin
-     (CPU : Interfaces.C.unsigned) return Interfaces.C.int;
-   pragma Import (C, Native_Pin, "flyology_bench_pin_current_thread");
-
    function Pin_Current_Thread (CPU : Natural) return Placement_Strength is
-      Status : constant Interfaces.C.int :=
-        Native_Pin (Interfaces.C.unsigned (CPU));
    begin
-      case Status is
-         when 1 => return Advisory;
-         when 2 => return Strict;
-         when others =>
+      case Internal_Probes.Place_Current_Thread (CPU) is
+         when Internal_Probes.Advisory_Placement => return Advisory;
+         when Internal_Probes.Strict_Placement => return Strict;
+         when Internal_Probes.Placement_Refused =>
             raise Program_Error with "host rejected benchmark thread placement";
       end case;
    end Pin_Current_Thread;

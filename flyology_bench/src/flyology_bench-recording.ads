@@ -3,7 +3,6 @@
 
 with Ada.Finalization;
 with Interfaces;
-with Interfaces.C;
 
 --  Records benchmark boundaries supplied by an application instead of
 --  invoking the measured operation itself. Recording is intended for servers,
@@ -411,19 +410,6 @@ private
       Identifier : Natural := 0;
       Label      : Fixed_Name;
    end record;
-
-   Resource_Value_Count : constant := 11;
-   type Resource_Values is
-     array (Natural range 0 .. Resource_Value_Count - 1)
-       of Interfaces.Unsigned_64;
-   Perf_Value_Count : constant := 5;
-   type Perf_Values is
-     array (Natural range 0 .. Perf_Value_Count - 1)
-       of Interfaces.Unsigned_64
-     with Convention => C;
-   type Perf_Status_Values is
-     array (Natural range 0 .. Perf_Value_Count - 1) of Interfaces.C.int
-     with Convention => C;
 
    type Span is new Ada.Finalization.Limited_Controlled with record
       Owner                : Recorder_Backend_Access := null;

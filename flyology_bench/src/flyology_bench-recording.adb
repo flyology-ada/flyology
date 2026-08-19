@@ -6,12 +6,14 @@ with Ada.Containers.Generic_Array_Sort;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
-with Flyology_Bench_Internal_Probes;
+with Flyology_Bench.Internal_Probes.Counters;
+with Flyology_Bench.Internal_Probes.Sessions;
 
 package body Flyology_Bench.Recording is
-   use Flyology_Bench_Internal_Probes;
+   package Counters renames Flyology_Bench.Internal_Probes.Counters;
+   package Sessions renames Flyology_Bench.Internal_Probes.Sessions;
+   use Flyology_Bench.Internal_Probes;
    use type Interfaces.Unsigned_64;
-   use type Interfaces.C.int;
 
    Bootstrap_Resamples : constant := 2_000;
 
@@ -36,14 +38,9 @@ package body Flyology_Bench.Recording is
    procedure Read_Resources
      (Values : out Resource_Values;
       Mask   : out Interfaces.Unsigned_64;
-      OK     : out Boolean)
-   is
-      Native : Native_Resource_Values := [others => 0];
+      OK     : out Boolean) is
    begin
-      Read_Resource_Snapshot (Native, Mask, OK);
-      for Index in Values'Range loop
-         Values (Index) := Native (Index);
-      end loop;
+      Read_Resource_Snapshot (Values, Mask, OK);
    end Read_Resources;
 
    function Resource_Metrics_Requested (Set : Metric_Set) return Boolean is
@@ -454,7 +451,7 @@ package body Flyology_Bench.Recording is
       Stores  : Store_Array (1 .. Maximum) := [others => null];
       Names   : Name_Array (1 .. Maximum);
       Config  : Configuration := Default_Configuration;
-      Perf_Session : aliased Interfaces.Unsigned_64 := 0;
+      Perf_Session : Sessions.Identifier := Sessions.No_Session;
    end record;
    type Concrete_Backend_Access is access all Concrete_Backend;
 
@@ -466,7 +463,7 @@ package body Flyology_Bench.Recording is
    begin
       Data.Control.Claim_Perf_Close (Claimed);
       if Claimed and then Data.Perf_Session /= 0 then
-         Native_Recording_Perf_Stop (Data.Perf_Session);
+         Sessions.Stop (Data.Perf_Session);
          Data.Perf_Session := 0;
       end if;
    end Close_Perf_When_Quiescent;
@@ -547,7 +544,7 @@ package body Flyology_Bench.Recording is
       Data.Control.Stop (Clock_Now);
       Close_Perf_When_Quiescent (Data);
       if Data.Perf_Session /= 0 then
-         Native_Recording_Perf_Stop (Data.Perf_Session);
+         Sessions.Stop (Data.Perf_Session);
          Data.Perf_Session := 0;
       end if;
       for Index in 1 .. Data.Count loop
@@ -603,18 +600,13 @@ package body Flyology_Bench.Recording is
             Requested : constant Interfaces.Unsigned_64 :=
               Hardware_Mask (Config.Metrics);
          begin
-            if Requested /= 0
-              and then Native_Recording_Perf_Start
-                (Requested, Data.Perf_Session'Access) /= 0
-            then
-               Data.Perf_Session := 0;
-            end if;
+            Data.Perf_Session := Sessions.Start (Requested);
          end;
          Data.Control.Commit_Start (Clock_Now);
       exception
          when others =>
             if Data.Perf_Session /= 0 then
-               Native_Recording_Perf_Stop (Data.Perf_Session);
+               Sessions.Stop (Data.Perf_Session);
                Data.Perf_Session := 0;
             end if;
             Data.Control.Cancel_Start;
@@ -638,8 +630,9 @@ package body Flyology_Bench.Recording is
       Allowed    : Boolean := False;
       Overlapped : Boolean;
       Resource_OK : Boolean;
-      Perf_Status : Perf_Status_Values := [others => 0];
-      Perf_Mask   : aliased Interfaces.Unsigned_64 := 0;
+      Perf_Status : Perf_Status_Values := [others => Metric_Not_Requested];
+      Perf_Mask   : Interfaces.Unsigned_64 := 0;
+      Perf_Available : Boolean := False;
    begin
       if Value.Active then
          raise Span_Already_Active;
@@ -672,20 +665,15 @@ package body Flyology_Bench.Recording is
          Data.Config.Scheduler_Probe.all (Value.Scheduler_Before);
       end if;
       if Data.Perf_Session /= 0 then
-         if Native_Recording_Perf_Snapshot
+         Sessions.Snapshot
            (Data.Perf_Session,
-            Value.Perf_Before (Value.Perf_Before'First)'Address,
-            Value.Perf_Enabled_Before
-              (Value.Perf_Enabled_Before'First)'Address,
-            Value.Perf_Running_Before
-              (Value.Perf_Running_Before'First)'Address,
-            Perf_Status (Perf_Status'First)'Address,
-            Interfaces.C.size_t (Perf_Value_Count), Perf_Mask'Access) = 0
-         then
-            Value.Perf_Before_Mask := Perf_Mask;
-         else
-            Value.Perf_Before_Mask := 0;
-         end if;
+            Value.Perf_Before,
+            Value.Perf_Enabled_Before,
+            Value.Perf_Running_Before,
+            Perf_Status,
+            Perf_Mask,
+            Perf_Available);
+         Value.Perf_Before_Mask := (if Perf_Available then Perf_Mask else 0);
       end if;
       Value.Started_At := Clock_Now;
       Value.Active := True;
@@ -712,8 +700,9 @@ package body Flyology_Bench.Recording is
       Perf_After       : Perf_Values := [others => 0];
       Perf_Enabled_After : Perf_Values := [others => 0];
       Perf_Running_After : Perf_Values := [others => 0];
-      Perf_Status      : Perf_Status_Values := [others => 0];
-      Perf_Mask        : aliased Interfaces.Unsigned_64 := 0;
+      Perf_Status      : Perf_Status_Values :=
+        [others => Metric_Not_Requested];
+      Perf_Mask        : Interfaces.Unsigned_64 := 0;
       Perf_OK          : Boolean := False;
       Data          : Concrete_Backend_Access;
       Sample        : Raw_Sample;
@@ -750,24 +739,12 @@ package body Flyology_Bench.Recording is
          end if;
       end Set_Scheduler;
 
-      function Status_At (Index : Natural) return Metric_Availability is
-         Code : constant Interfaces.C.int := Perf_Status (Index);
-      begin
-         if Code < 0
-           or else Code > Interfaces.C.int
-             (Metric_Availability'Pos (Metric_Availability'Last))
-         then
-            return Probe_Failed;
-         end if;
-         return Metric_Availability'Val (Natural (Code));
-      end Status_At;
-
       procedure Set_Perf (Axis : Metric_Axis; Index : Natural) is
          Counted_Delta : Interfaces.Unsigned_64;
          Enabled_Delta : Interfaces.Unsigned_64;
          Running_Delta : Interfaces.Unsigned_64;
       begin
-         Sample.Status (Axis) := Status_At (Index);
+         Sample.Status (Axis) := Perf_Status (Index);
          if not Perf_OK
            or else not Mask_Has (Value.Perf_Before_Mask, Index)
            or else not Mask_Has (Perf_Mask, Index)
@@ -807,13 +784,14 @@ package body Flyology_Bench.Recording is
       Finished_Thread := Native_Thread_Id;
       Data := Concrete_Backend_Access (Value.Owner);
       if Data.Perf_Session /= 0 then
-         Perf_OK := Native_Recording_Perf_Snapshot
+         Sessions.Snapshot
            (Data.Perf_Session,
-            Perf_After (Perf_After'First)'Address,
-            Perf_Enabled_After (Perf_Enabled_After'First)'Address,
-            Perf_Running_After (Perf_Running_After'First)'Address,
-            Perf_Status (Perf_Status'First)'Address,
-            Interfaces.C.size_t (Perf_Value_Count), Perf_Mask'Access) = 0;
+            Perf_After,
+            Perf_Enabled_After,
+            Perf_Running_After,
+            Perf_Status,
+            Perf_Mask,
+            Perf_OK);
       end if;
       if Resource_Metrics_Requested (Data.Config.Metrics) then
          Read_Resources (After, After_Mask, Resource_OK);
@@ -844,57 +822,59 @@ package body Flyology_Bench.Recording is
       end if;
 
       if Data.Config.Metrics (Process_CPU_Time) then
-         Set_Delta (Process_CPU_Time, 0);
+         Set_Delta (Process_CPU_Time, Process_CPU_Index);
       end if;
       if Data.Config.Metrics (Thread_CPU_Time) then
          if Finished_Thread /= 0
            and then Finished_Thread = Value.Native_Thread
          then
-            Set_Delta (Thread_CPU_Time, 1);
+            Set_Delta (Thread_CPU_Time, Thread_CPU_Index);
          else
             Sample.Scope_Changed (Thread_CPU_Time) := True;
          end if;
       end if;
       if Data.Config.Metrics (Process_RSS) then
-         if Mask_Has (After_Mask, 2) then
+         if Mask_Has (After_Mask, Resident_Bytes_Index) then
             Sample.Valid (Process_RSS) := True;
             Sample.Status (Process_RSS) := Metric_Collected;
-            Sample.Values (Process_RSS) := Long_Float (After (2));
+            Sample.Values (Process_RSS) :=
+              Long_Float (After (Resident_Bytes_Index));
          end if;
       end if;
       if Data.Config.Metrics (Process_RSS_Change) then
-         if Mask_Has (Value.Resource_Before_Mask, 2)
-           and then Mask_Has (After_Mask, 2)
+         if Mask_Has (Value.Resource_Before_Mask, Resident_Bytes_Index)
+           and then Mask_Has (After_Mask, Resident_Bytes_Index)
          then
             Sample.Valid (Process_RSS_Change) := True;
             Sample.Status (Process_RSS_Change) := Metric_Collected;
             Sample.Values (Process_RSS_Change) :=
-              Long_Float (After (2)) - Long_Float (Value.Resource_Before (2));
+              Long_Float (After (Resident_Bytes_Index))
+              - Long_Float (Value.Resource_Before (Resident_Bytes_Index));
          end if;
       end if;
       if Data.Config.Metrics (Minor_Page_Faults) then
-         Set_Delta (Minor_Page_Faults, 3);
+         Set_Delta (Minor_Page_Faults, Minor_Faults_Index);
       end if;
       if Data.Config.Metrics (Major_Page_Faults) then
-         Set_Delta (Major_Page_Faults, 4);
+         Set_Delta (Major_Page_Faults, Major_Faults_Index);
       end if;
       if Data.Config.Metrics (Voluntary_Context_Switches) then
-         Set_Delta (Voluntary_Context_Switches, 5);
+         Set_Delta (Voluntary_Context_Switches, Voluntary_Switches_Index);
       end if;
       if Data.Config.Metrics (Involuntary_Context_Switches) then
-         Set_Delta (Involuntary_Context_Switches, 6);
+         Set_Delta (Involuntary_Context_Switches, Involuntary_Switches_Index);
       end if;
       if Data.Config.Metrics (Disk_Read_Bytes) then
-         Set_Delta (Disk_Read_Bytes, 7);
+         Set_Delta (Disk_Read_Bytes, Disk_Read_Bytes_Index);
       end if;
       if Data.Config.Metrics (Disk_Written_Bytes) then
-         Set_Delta (Disk_Written_Bytes, 8);
+         Set_Delta (Disk_Written_Bytes, Disk_Written_Bytes_Index);
       end if;
       if Data.Config.Metrics (Filesystem_Input_Operations) then
-         Set_Delta (Filesystem_Input_Operations, 9);
+         Set_Delta (Filesystem_Input_Operations, Input_Operations_Index);
       end if;
       if Data.Config.Metrics (Filesystem_Output_Operations) then
-         Set_Delta (Filesystem_Output_Operations, 10);
+         Set_Delta (Filesystem_Output_Operations, Output_Operations_Index);
       end if;
 
       if Hardware_Mask (Data.Config.Metrics) /= 0 then
@@ -916,21 +896,21 @@ package body Flyology_Bench.Recording is
             if Data.Config.Metrics (CPU_Cycles)
               or else Data.Config.Metrics (Instructions_Per_Cycle)
             then
-               Set_Perf (CPU_Cycles, 0);
+               Set_Perf (CPU_Cycles, Counters.Cycles_Index);
             end if;
             if Data.Config.Metrics (Instructions)
               or else Data.Config.Metrics (Instructions_Per_Cycle)
             then
-               Set_Perf (Instructions, 1);
+               Set_Perf (Instructions, Counters.Instructions_Index);
             end if;
             if Data.Config.Metrics (Cache_Misses) then
-               Set_Perf (Cache_Misses, 2);
+               Set_Perf (Cache_Misses, Counters.Cache_Misses_Index);
             end if;
             if Data.Config.Metrics (Branches) then
-               Set_Perf (Branches, 3);
+               Set_Perf (Branches, Counters.Branches_Index);
             end if;
             if Data.Config.Metrics (Branch_Misses) then
-               Set_Perf (Branch_Misses, 4);
+               Set_Perf (Branch_Misses, Counters.Branch_Misses_Index);
             end if;
             if Data.Config.Metrics (Instructions_Per_Cycle) then
                Sample.Status (Instructions_Per_Cycle) :=
@@ -1530,8 +1510,9 @@ package body Flyology_Bench.Recording is
               (Natural'Image (Previous), Ada.Strings.Both) & "A");
       end if;
       Read_Resources (Resources, Resource_Mask, Resource_OK);
-      if Resource_OK and then Mask_Has (Resource_Mask, 0) then
-         Current_CPU := Resources (0);
+      if Resource_OK and then Mask_Has (Resource_Mask, Process_CPU_Index)
+      then
+         Current_CPU := Resources (Process_CPU_Index);
          if Previous_Wall > 0 and then Current_Wall > Previous_Wall
            and then Current_CPU >= Previous_CPU
          then
@@ -1541,8 +1522,10 @@ package body Flyology_Bench.Recording is
          Previous_CPU := Current_CPU;
          Previous_Wall := Current_Wall;
       end if;
-      if Resource_OK and then Mask_Has (Resource_Mask, 2) then
-         RSS := Long_Float (Resources (2));
+      if Resource_OK
+        and then Mask_Has (Resource_Mask, Resident_Bytes_Index)
+      then
+         RSS := Long_Float (Resources (Resident_Bytes_Index));
       end if;
       if Use_ANSI then
          Ada.Text_IO.Put (Escape & "[2K" & Escape & "[1;36m");

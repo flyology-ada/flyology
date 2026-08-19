@@ -1085,6 +1085,21 @@ package Flyology_Bench is
    procedure Clobber_Memory;
 
 private
+   --  Shapes of one native probe reading. The runner, the recorder, and the
+   --  probe layer all store readings in these, so a measurement boundary
+   --  never converts between two spellings of the same snapshot.
+   Resource_Value_Count : constant := 11;
+   type Resource_Values is
+     array (Natural range 0 .. Resource_Value_Count - 1)
+       of Interfaces.Unsigned_64;
+
+   Perf_Value_Count : constant := 5;
+   type Perf_Values is
+     array (Natural range 0 .. Perf_Value_Count - 1)
+       of Interfaces.Unsigned_64;
+   type Perf_Status_Values is
+     array (Natural range 0 .. Perf_Value_Count - 1) of Metric_Availability;
+
    type Sample_Array is array (Sample_Index range <>) of Long_Float;
    type Boolean_Sample_Array is array (Sample_Index range <>) of Boolean;
    type Metric_Sample_Matrix is
