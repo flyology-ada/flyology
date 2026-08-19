@@ -31,6 +31,7 @@ procedure Sharded_Service is
       then 5_000
       else Positive'Value (Ada.Command_Line.Argument (2)));
 
+   Warm_Up         : constant Positive := 200;
    Broadcasts      : constant Positive := 100;
    Slow_Broadcasts : constant Positive := 20;
    Shard_Nap       : constant Duration := 0.010;
@@ -229,6 +230,27 @@ begin
          begin
             Topology.Cross_To_Shard (0);
 
+            --  Discarded. The first borrow and the first call into a loop
+            --  that has never been woken cost far more than the steady
+            --  state, and would otherwise land in whichever row runs first.
+            for Round in 1 .. Warm_Up loop
+               declare
+                  Ref : constant Counters.Local_Reference :=
+                    Counters.Borrow_Local (Table);
+                  Op  : Bump;
+               begin
+                  Counters.Instance (Ref).Total :=
+                    Counters.Instance (Ref).Total + 1;
+                  Counters.Invoke_On (Table, 0, Op);
+               end;
+               declare
+                  Op : Bump;
+               begin
+                  Counters.Invoke_On
+                    (Table, Shards.Shard_Id (Natural (Width) - 1), Op);
+               end;
+            end loop;
+
             Start := Clock;
             for Round in 1 .. Calls loop
                declare
@@ -279,8 +301,17 @@ begin
       end;
 
       declare
-         Start : constant Time := Clock;
+         Start : Time;
       begin
+         for Round in 1 .. Warm_Up loop
+            declare
+               Op : Bump;
+            begin
+               Counters.Invoke_On
+                 (Table, Shards.Shard_Id (Natural (Width) - 1), Op);
+            end;
+         end loop;
+         Start := Clock;
          for Round in 1 .. Calls loop
             declare
                Op : Bump;
@@ -308,8 +339,19 @@ begin
       --  Broadcast: the library runs shards one at a time and reuses one
       --  operation object. A concurrent fan-out needs one task per shard.
       declare
-         Start : Time := Clock;
+         Start : Time;
       begin
+         for Round in 1 .. 5 loop
+            declare
+               Op : Bump;
+            begin
+               Op.Amount := 0;
+               Counters.Invoke_On_All (Table, Op);
+            end;
+            Fan_Out_All (0.0);
+         end loop;
+
+         Start := Clock;
          for Round in 1 .. Broadcasts loop
             declare
                Op : Bump;

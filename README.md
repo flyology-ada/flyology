@@ -550,27 +550,38 @@ The runnable showcase reports what each path costs:
 ./showcases/run_sharded_service.sh 4 5000
 ```
 
-Five runs on one quiet Apple-silicon host with four shards gave these medians:
-1.8 ns for a mutation under a held borrow, 0.31 us when the borrow is
-reacquired for each mutation, 0.73 us for `Invoke_On` to an agent on the
-caller's own group, and 5.6 us to another group. Hoist a borrow out of a loop
-rather than reacquiring it: the borrow, not the access, is what costs.
+Medians over five runs with four shards, on one Apple-silicon host and on
+Linux aarch64 (Ubuntu 24.04, GNAT 16.1.0) in the repository's Docker image:
+
+| | Darwin arm64 | Linux aarch64 |
+| --- | --- | --- |
+| mutation under a held borrow | 1.8 ns | 2.9 ns |
+| mutation per reacquired borrow | 0.30 us | 0.30 us |
+| `Invoke_On`, caller's own group | 0.84 us | 1.2 us |
+| `Invoke_On`, another group | see below | see below |
+| broadcast, operation returns immediately | 102 us | 120 us |
+| the same broadcast, one helper task per shard | 1.94 ms | 2.14 ms |
+| broadcast, operation suspends 10 ms per shard | 51.1 ms | 46.5 ms |
+| the same broadcast, one helper task per shard | 16.4 ms | 14.2 ms |
+
+Hoist a borrow out of a loop rather than reacquiring it: the borrow, not the
+access, is what costs.
+
+Broadcast is sequential because both separations above reproduced in every run
+on both platforms. Running shards one at a time wins by an order of magnitude
+for an operation that returns immediately, which is what a broadcast usually
+carries, and loses by roughly the shard count only when the operation suspends
+on every shard. That second case is the one that would justify a concurrent
+variant.
 
 Cross-group cost is a cross-thread wake rather than a rendezvous, and it is the
-one row that does not reproduce. It held within 11 percent across those five
-runs, but the same unchanged benchmark has ranged from about 5 us to about
-20 us across sessions on the same machine. Treat it as an order of magnitude,
-not a figure. The rows below a microsecond were stable in every session.
-
-Broadcast was 27 us sequential against 649 us for a prototype that gives each
-shard its own helper task; when the operation suspends for 10 ms on its shard
-the ordering reverses, at 44.0 ms sequential against 11.3 ms concurrent. Both
-separations reproduced in every run. Broadcast is therefore sequential: it is
-faster for the operations that broadcasts usually carry, and an operation that
-suspends on every shard is the case that would justify a concurrent variant.
-
-These are single-host macOS numbers. Nothing here has been measured on Linux,
-where the wake path is `eventfd` rather than `EVFILT_USER`.
+one row that does not reproduce. With unchanged code on the same hardware it
+has ranged from about 5 us to about 80 us depending on how busy the host was,
+including within a single five-run session. Treat it as tens of microseconds,
+not as a figure, and do not compare the two platforms on it: the Linux runs
+were inside a virtual machine on the same host, and the Darwin re-runs above
+were taken while that virtual machine was resident. Every row at or below a
+microsecond was stable throughout.
 
 A sharded service owns its own start and stop rather than being built on
 `Flyology.Supervision`. `Serve` has the same shape as a supervisor `Run` call —
