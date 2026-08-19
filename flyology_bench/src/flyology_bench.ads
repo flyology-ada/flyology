@@ -7,9 +7,34 @@ with Interfaces;
 
 --  Measures adaptive batches and paired comparisons of Ada operations.
 package Flyology_Bench is
+   --  Configuration bounds are carried by the subtypes and record predicates
+   --  below rather than by a validation pass. Predicates are assertions, and
+   --  this crate builds without -gnata, so they are enabled explicitly.
+   pragma Assertion_Policy (Dynamic_Predicate => Check);
+
    --  Number of logical benchmark operations. Zero is useful for caller-owned
    --  counters; a measured batch always contains at least one iteration.
    type Iteration_Count is range 0 .. Long_Long_Integer'Last;
+
+   --  Batch size for one timed sample, which is never empty.
+   subtype Positive_Iteration_Count is
+     Iteration_Count range 1 .. Iteration_Count'Last;
+
+   --  Wall-time budget that may legitimately be zero, either because a stage
+   --  is skipped or because a limit is disabled.
+   subtype Nonnegative_Duration is Duration range 0.0 .. Duration'Last;
+
+   --  Wall-time interval that must actually elapse. Duration'Small is one
+   --  nanosecond, so this covers all of Duration above zero.
+   subtype Positive_Duration is Duration range Duration'Small .. Duration'Last;
+
+   --  Share of an observed capacity, in percent.
+   subtype Percentage is Long_Float range 0.0 .. 100.0;
+
+   --  Percentage excluding the whole. 'Pred is a static attribute, so this
+   --  stays an ordinary range constraint rather than a predicate.
+   subtype Threshold_Percentage is
+     Percentage range 0.0 .. Long_Float'Pred (100.0);
 
    --  Number of independently timed samples collected for one measurement.
    subtype Sample_Count is Positive range 10 .. 1_000;
@@ -321,22 +346,40 @@ package Flyology_Bench is
    --  the host-wide average and busiest logical CPU remain at or below their
    --  limits for Stable_Time. This detects competing CPU work; it does not
    --  establish I/O, thermal, frequency, or interrupt quiescence.
+   --  The gate's settings exist only while it is enabled, so a disabled
+   --  policy carries no tuning to keep coherent.
    --  @field Enabled Whether to wait before clock characterization and warmup.
    --  @field Maximum_Average_CPU_Percent Largest accepted host-wide busy share.
    --  @field Maximum_Core_CPU_Percent Largest accepted busy share on any one
    --  logical CPU.
    --  @field Stable_Time Continuous accepted interval required before starting.
-   --  @field Poll_Interval Delay between host CPU counter snapshots.
+   --  @field Poll_Interval Delay between host CPU counter snapshots. A poll
+   --  slower than the timeout would let the gate expire unsampled.
    --  @field Timeout Maximum wall time spent waiting before raising
-   --  CPU_Quiescence_Timeout.
-   type CPU_Quiescence_Policy is record
-      Enabled                       : Boolean := False;
-      Maximum_Average_CPU_Percent   : Long_Float := 20.0;
-      Maximum_Core_CPU_Percent      : Long_Float := 50.0;
-      Stable_Time                   : Duration := 1.0;
-      Poll_Interval                 : Duration := 0.100;
-      Timeout                       : Duration := 15.0;
-   end record;
+   --  CPU_Quiescence_Timeout. A timeout shorter than Stable_Time could never
+   --  be satisfied.
+   type CPU_Quiescence_Policy (Enabled : Boolean := False) is record
+      case Enabled is
+         when True =>
+            Maximum_Average_CPU_Percent : Percentage := 20.0;
+            Maximum_Core_CPU_Percent    : Percentage := 50.0;
+            Stable_Time                 : Positive_Duration := 1.0;
+            Poll_Interval               : Positive_Duration := 0.100;
+            Timeout                     : Positive_Duration := 15.0;
+         when False =>
+            null;
+      end case;
+   end record
+     with Dynamic_Predicate =>
+       (if CPU_Quiescence_Policy.Enabled
+        then CPU_Quiescence_Policy.Timeout
+               >= CPU_Quiescence_Policy.Stable_Time
+             and then CPU_Quiescence_Policy.Poll_Interval
+                        <= CPU_Quiescence_Policy.Timeout),
+     Predicate_Failure =>
+       raise Constraint_Error with
+         "CPU quiescence timeout must cover the stable interval, and its "
+         & "poll interval must not exceed the timeout";
 
    --  Raised when enabled CPU quiescence is not observed before its timeout.
    CPU_Quiescence_Timeout : exception;
@@ -373,6 +416,9 @@ package Flyology_Bench is
    --  This detects competing CPU work. It does not detect contention for
    --  shared cache or memory bandwidth, which perturb a measurement without
    --  moving any CPU busy counter.
+   --  The watch's settings exist only while it is enabled, and the three
+   --  pause settings exist only under Pause. Observe and Retake both share
+   --  the retake budget, which bounds how many windows one run may redo.
    --  @field Enabled Whether to watch for foreign load during collection.
    --  @field Response What to do when a window exceeds the limit.
    --  @field Maximum_Foreign_CPU_Percent Largest accepted foreign share of
@@ -382,20 +428,40 @@ package Flyology_Bench is
    --  @field Settle_Time Continuous accepted interval required before a
    --  paused run resumes.
    --  @field Maximum_Pause_Time Total wall time one run may spend paused.
-   --  Paused time is excluded from Maximum_Sampling_Time.
+   --  Paused time is excluded from Maximum_Sampling_Time. A budget smaller
+   --  than one settle interval could never resume a run.
    --  @field Rewarm_Time Untimed warmup executed after a pause, before timed
    --  collection resumes. A resumed run is otherwise cold and its first
    --  samples would be the outliers the pause was meant to avoid.
-   type Interference_Policy is record
-      Enabled                     : Boolean := False;
-      Response                    : Interference_Response := Observe;
-      Maximum_Foreign_CPU_Percent : Long_Float := 10.0;
-      Window                      : Duration := 0.050;
-      Maximum_Retakes             : Natural := 25;
-      Settle_Time                 : Duration := 0.250;
-      Maximum_Pause_Time          : Duration := 30.0;
-      Rewarm_Time                 : Duration := 0.050;
-   end record;
+   type Interference_Policy
+     (Enabled  : Boolean := False;
+      Response : Interference_Response := Observe) is
+   record
+      case Enabled is
+         when True =>
+            Maximum_Foreign_CPU_Percent : Percentage := 10.0;
+            Window                      : Positive_Duration := 0.050;
+            Maximum_Retakes             : Natural := 25;
+            case Response is
+               when Observe | Retake =>
+                  null;
+               when Pause =>
+                  Settle_Time        : Positive_Duration := 0.250;
+                  Maximum_Pause_Time : Positive_Duration := 30.0;
+                  Rewarm_Time        : Nonnegative_Duration := 0.050;
+            end case;
+         when False =>
+            null;
+      end case;
+   end record
+     with Dynamic_Predicate =>
+       (if Interference_Policy.Enabled
+          and then Interference_Policy.Response = Pause
+        then Interference_Policy.Maximum_Pause_Time
+               >= Interference_Policy.Settle_Time),
+     Predicate_Failure =>
+       raise Constraint_Error with
+         "interference pause budget must cover one settle interval";
 
    --  Controls optional harness-applied placement of the benchmark thread.
    --  Placement is never neutral: it fixes frequency and thermal behavior and
@@ -411,11 +477,15 @@ package Flyology_Bench is
    --  disabling this makes core-scoped observation confidently wrong.
    --  @field Require_Strict Whether an advisory-only platform is an error
    --  rather than a documented degradation.
-   type Placement_Policy is record
-      Enabled          : Boolean := False;
-      CPU              : Natural := 0;
-      Include_Siblings : Boolean := True;
-      Require_Strict   : Boolean := False;
+   type Placement_Policy (Enabled : Boolean := False) is record
+      case Enabled is
+         when True =>
+            CPU              : Natural := 0;
+            Include_Siblings : Boolean := True;
+            Require_Strict   : Boolean := False;
+         when False =>
+            null;
+      end case;
    end record;
 
    --  Raised when Require_Strict placement is not available.
@@ -433,13 +503,17 @@ package Flyology_Bench is
    --  @field Require_Machine_Scope Whether an unusable path, an exhausted
    --  timeout, or a privately mounted path is an error rather than a recorded
    --  degradation. A silently unserialized run is worse than a failed one.
-   type Host_Lock_Policy is record
-      Enabled               : Boolean := False;
-      Path                  : Ada.Strings.Unbounded.Unbounded_String :=
-        Ada.Strings.Unbounded.Null_Unbounded_String;
-      Timeout               : Duration := 30.0;
-      Poll_Interval         : Duration := 0.250;
-      Require_Machine_Scope : Boolean := False;
+   type Host_Lock_Policy (Enabled : Boolean := False) is record
+      case Enabled is
+         when True =>
+            Path                  : Ada.Strings.Unbounded.Unbounded_String :=
+              Ada.Strings.Unbounded.Null_Unbounded_String;
+            Timeout               : Nonnegative_Duration := 30.0;
+            Poll_Interval         : Positive_Duration := 0.250;
+            Require_Machine_Scope : Boolean := False;
+         when False =>
+            null;
+      end case;
    end record;
 
    --  Raised when a required host CPU claim could not be established.
@@ -553,16 +627,17 @@ package Flyology_Bench is
    --  @field Progress_Name Human-readable identity passed to Progress. During
    --  Compare_Many sampling, the current case name follows this identity.
    type Configuration is record
-      Warmup_Time          : Duration := 0.100;
-      Measurement_Time     : Duration := 0.500;
-      Maximum_Sampling_Time : Duration := 0.0;
+      Warmup_Time          : Nonnegative_Duration := 0.100;
+      Measurement_Time     : Positive_Duration := 0.500;
+      Maximum_Sampling_Time : Nonnegative_Duration := 0.0;
       Samples              : Sample_Count := 50;
-      Minimum_Sample_Time  : Duration := 0.000_100;
-      Maximum_Iterations   : Iteration_Count := Iteration_Count'Last;
+      Minimum_Sample_Time  : Positive_Duration := 0.000_100;
+      Maximum_Iterations   : Positive_Iteration_Count :=
+        Positive_Iteration_Count'Last;
       Comparison_Batching  : Comparison_Batch_Policy := Equal_Time;
       Shootout_Scheduling  : Shootout_Schedule_Policy := Balanced_Rounds;
       Subtract_Timer_Cost  : Boolean := False;
-      Practical_Threshold_Percent : Long_Float := 1.0;
+      Practical_Threshold_Percent : Threshold_Percentage := 1.0;
       Random_Seed          : Long_Long_Integer := 1;
       Metrics              : Metric_Set := Time_Metrics;
       Scheduler_Probe      : Flyology_Scheduler_Probe := null;
@@ -574,7 +649,15 @@ package Flyology_Bench is
       Progress             : Progress_Handler := null;
       Progress_Name        : Ada.Strings.Unbounded.Unbounded_String :=
         Ada.Strings.Unbounded.Null_Unbounded_String;
-   end record;
+   end record
+     --  A policy assembled field by field is never checked as a whole, so
+     --  the enclosing configuration re-asserts each policy's own rule. This
+     --  is the check a benchmark call makes on the way in.
+     with Dynamic_Predicate =>
+       Configuration.CPU_Quiescence in CPU_Quiescence_Policy
+       and then Configuration.Interference in Interference_Policy,
+     Predicate_Failure =>
+       raise Constraint_Error with "incoherent benchmark configuration";
 
    --  Default configuration for interactive microbenchmark runs.
    Default_Configuration : constant Configuration := (others => <>);

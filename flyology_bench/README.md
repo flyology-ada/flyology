@@ -433,6 +433,35 @@ Outliers remain in every statistic and in the raw samples. The outlier counts
 are diagnostics for investigating host noise, input mixtures, or workload
 phase changes; they are not permission to discard inconvenient runs.
 
+## Configuration rules
+
+`Configuration` carries its own rules rather than checking them on entry to a
+run. Fields whose meaning excludes a value use a subtype that excludes it:
+`Nonnegative_Duration`, `Positive_Duration`, `Percentage`, and
+`Threshold_Percentage`, which excludes 100 percent. A literal outside a bound
+is a compile-time diagnostic; a computed one raises `Constraint_Error` at the
+assignment or aggregate that produced it, naming the offending line.
+
+Each optional policy takes its `Enabled` flag, and `Interference` also its
+`Response`, as a discriminant, so a policy's settings exist only while they
+apply. Naming `Settle_Time` under `Observe`, or `CPU` on a disabled
+`Placement`, does not compile. Setting a policy from a run-time flag therefore
+selects between two aggregates:
+
+```ada
+Gate : constant Flyology_Bench.CPU_Quiescence_Policy :=
+  (if Wait_For_Quiet_CPU
+   then (Enabled => True, Stable_Time => 0.500, others => <>)
+   else (Enabled => False));
+```
+
+The three rules that relate two fields — a quiescence timeout that covers its
+stable interval, a poll interval within that timeout, and a pause budget that
+covers one settle interval — are record predicates, checked when a policy
+value is built or assigned. A policy modified one field at a time is not
+checked at that moment, so `Configuration` re-asserts each policy's rule and a
+benchmark call rejects an incoherent one on the way in.
+
 ## CPU quiescence preflight
 
 An opt-in preflight can wait for sustained low host CPU utilization before
@@ -473,6 +502,19 @@ produces a result that looks clean. `Interference` watches for that:
 Config.Interference :=
   (Enabled                     => True,
    Response                    => Flyology_Bench.Retake,
+   Maximum_Foreign_CPU_Percent => 10.0,
+   Window                      => 0.050,
+   Maximum_Retakes             => 25);
+```
+
+`Response` is a discriminant, so the settings that only a paused run uses
+exist only under `Pause` and naming them under any other response is a
+compile error:
+
+```ada
+Config.Interference :=
+  (Enabled                     => True,
+   Response                    => Flyology_Bench.Pause,
    Maximum_Foreign_CPU_Percent => 10.0,
    Window                      => 0.050,
    Maximum_Retakes             => 25,
