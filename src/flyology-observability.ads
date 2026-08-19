@@ -138,6 +138,16 @@ package Flyology.Observability with Preelaborate is
    --  @field Wakeups Cumulative task wake requests
    --  @field Migrations_In Cumulative migrations entering Group
    --  @field Migrations_Out Cumulative migrations leaving Group
+   --  @field Uptime_Nanoseconds Elapsed nanoseconds since Group's scheduler
+   --     thread entered its dispatch loop, or zero before it started
+   --  @field Idle_Nanoseconds Nanoseconds of Uptime_Nanoseconds in which
+   --     Group had no runnable task and was blocked in its event poller.
+   --     This never exceeds Uptime_Nanoseconds, so the difference is the
+   --     time the loop spent dispatching, polling with work ready, or
+   --     running task code. Tasks suspended on readiness or a deadline make
+   --     their group idle by this measure; use Waiting and Descriptor_Waits
+   --     to distinguish an unloaded group from a blocked one
+   --  @field Idle_Waits Cumulative blocking event-poller waits
    type Group_Snapshot is record
       Group                    : Group_Id;
       Thread_State             : Event_Thread_State;
@@ -171,6 +181,9 @@ package Flyology.Observability with Preelaborate is
       Wakeups                  : Counter;
       Migrations_In            : Counter;
       Migrations_Out           : Counter;
+      Uptime_Nanoseconds       : Counter;
+      Idle_Nanoseconds         : Counter;
+      Idle_Waits               : Counter;
    end record;
 
    --  Process-wide lightweight stack allocator state and cumulative counters.

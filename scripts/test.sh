@@ -376,6 +376,7 @@ loop_thread_placement_smoke
 memory_regions_smoke
 observability_native_smoke
 observability_smoke
+observability_utilization_smoke
 poller_policy_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke

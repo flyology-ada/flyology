@@ -89,6 +89,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Ready queues are per-priority FIFO buckets, deadlines are per-group indexed
   min-heaps, and task/descriptor wake lookups are direct. Avoid reintroducing
   linear all-fiber scans or sorted ready-list insertion on hot paths.
+- Per-group loop utilization is measured only on the idle path: a loop times
+  the poller wait it takes when nothing is ready, and a snapshot adds a wait
+  still in progress instead of charging it as busy time. Do not add a clock
+  read to dispatch, context switch, or any other path a busy loop repeats.
 - Topology changes—group allocation, dedicated reservations, migration, and
   destruction—may briefly use the global topology/registry lock. Ordinary
   scheduling and I/O remain per-group.

@@ -61,6 +61,11 @@ case "$mode" in
   check)  "$bench_bin/runtime_callback_bench" check "$baseline_dir" ;;
 esac
 
+#  The idle-path rate is what the loop's utilization accounting is charged for,
+#  so report it next to the cost of one clock reading above.
+printf '%s\n' "bench: idle path"
+"$bench_bin/idle_wait_rate" "${FLYOLOGY_BENCH_IDLE_WINDOW:-2.0}"
+
 #  Memory is reported as the difference between fibers that hold a callback and
 #  fibers that do not, which isolates the trampoline page from the fiber stack.
 printf '%s\n' "bench: memory"

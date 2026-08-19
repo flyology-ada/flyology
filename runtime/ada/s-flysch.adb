@@ -44,6 +44,12 @@ package body System.Flyology.Scheduler is
    Timer_Check_Interval : constant := 64;
    Poll_Event_Budget    : constant := 64;
    No_Deadline          : constant Duration := Scheduling.No_Deadline;
+   --  One nanosecond as a Duration. Rendering accumulated loop time for the
+   --  observability ABI divides by this, matching Flyology.Time_Math.
+   Nanosecond           : constant Duration := 0.000_000_001;
+   --  Absent monotonic timestamp. The platform monotonic clock never returns
+   --  a negative reading, so this cannot collide with a real one.
+   No_Timestamp         : constant Duration := -1.0;
 
    Dedicated_First_Id  : constant C.int := Scheduling.First_Dedicated_Group;
    Maximum_Group_Id    : constant C.int := Scheduling.Last_Group;
@@ -196,6 +202,9 @@ package body System.Flyology.Scheduler is
       Wakeups                  : C.unsigned_long_long;
       Migrations_In            : C.unsigned_long_long;
       Migrations_Out           : C.unsigned_long_long;
+      Uptime_Nanoseconds       : C.unsigned_long_long;
+      Idle_Nanoseconds         : C.unsigned_long_long;
+      Idle_Waits               : C.unsigned_long_long;
    end record;
    pragma Convention (C, Runtime_Group_Snapshot);
    type Runtime_Group_Snapshot_Access is access all Runtime_Group_Snapshot;
@@ -355,6 +364,16 @@ package body System.Flyology.Scheduler is
       Pageout_Advice_Attempts : C.unsigned_long_long := 0;
       Pageout_Advice_Accepted : C.unsigned_long_long := 0;
       Pageout_Advice_Failures : C.unsigned_long_long := 0;
+      --  Loop utilization accounting. The event thread stamps Started_At once
+      --  before its first dispatch and accumulates only the intervals it
+      --  spends blocked in the poller with no ready fiber to run. A wait that
+      --  has not returned yet stays in Idle_Since so an observer can add it
+      --  instead of reporting a long block as busy time. The event thread
+      --  writes all four under this group's lock, where observers read them.
+      Started_At        : Duration := No_Timestamp;
+      Idle_Time         : Duration := 0.0;
+      Idle_Since        : Duration := No_Timestamp;
+      Idle_Waits        : C.unsigned_long_long := 0;
       --  Signal stacks belong to OS threads, not fibers. Keeping one with
       --  each permanent loop prevents Task_Wrapper from reserving and
       --  installing 32 KiB inside every lightweight task stack.
@@ -623,6 +642,13 @@ package body System.Flyology.Scheduler is
      (Item   : not null Fiber_Access;
       Source : not null Loop_Group_Access);
    function Clock return Duration;
+   function To_Nanoseconds (Value : Duration) return C.unsigned_long_long;
+   procedure Begin_Idle_Wait_Locked (Group : not null Loop_Group_Access);
+   procedure End_Idle_Wait_Locked (Group : not null Loop_Group_Access);
+   procedure Read_Utilization_Locked
+     (Group  : not null Loop_Group_Access;
+      Uptime : out Duration;
+      Idle   : out Duration);
    procedure Consider_Dormant_Stack
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access);
@@ -1961,6 +1987,72 @@ package body System.Flyology.Scheduler is
       return Time_ABI.To_Duration (Now);
    end Clock;
 
+   function To_Nanoseconds (Value : Duration) return C.unsigned_long_long is
+   begin
+      if Value <= 0.0 then
+         return 0;
+      end if;
+      return C.unsigned_long_long (Value / Nanosecond);
+   end To_Nanoseconds;
+
+   --  Open an idle interval just before the event thread releases this
+   --  group's lock and blocks in its poller. Only the group's own event
+   --  thread calls this, and only with no ready fiber left to dispatch, so
+   --  the interval measures exactly the time the loop had nothing to run.
+   procedure Begin_Idle_Wait_Locked (Group : not null Loop_Group_Access) is
+   begin
+      Group.Idle_Since := Clock;
+      Group.Idle_Waits := Group.Idle_Waits + 1;
+   end Begin_Idle_Wait_Locked;
+
+   --  Close the interval opened above once the poller has returned and the
+   --  lock is held again. A clock that did not advance leaves the total
+   --  unchanged rather than subtracting from it.
+   procedure End_Idle_Wait_Locked (Group : not null Loop_Group_Access) is
+      Now : Duration;
+   begin
+      if Group.Idle_Since = No_Timestamp then
+         return;
+      end if;
+      Now := Clock;
+      if Now > Group.Idle_Since then
+         Group.Idle_Time := Group.Idle_Time + (Now - Group.Idle_Since);
+      end if;
+      Group.Idle_Since := No_Timestamp;
+   end End_Idle_Wait_Locked;
+
+   --  Report Group's elapsed and idle time at one instant, including a poller
+   --  wait that has not returned yet. Both results come from a single clock
+   --  reading, and Idle is clamped so a caller can always divide by Uptime.
+   --  The caller holds Group's lock.
+   procedure Read_Utilization_Locked
+     (Group  : not null Loop_Group_Access;
+      Uptime : out Duration;
+      Idle   : out Duration)
+   is
+      Now : Duration;
+   begin
+      Uptime := 0.0;
+      Idle := Group.Idle_Time;
+      if Group.Started_At = No_Timestamp then
+         Idle := 0.0;
+         return;
+      end if;
+
+      Now := Clock;
+      if Now > Group.Started_At then
+         Uptime := Now - Group.Started_At;
+      end if;
+      if Group.Idle_Since /= No_Timestamp
+        and then Now > Group.Idle_Since
+      then
+         Idle := Idle + (Now - Group.Idle_Since);
+      end if;
+      if Idle > Uptime then
+         Idle := Uptime;
+      end if;
+   end Read_Utilization_Locked;
+
    procedure Consider_Dormant_Stack
      (Group : not null Loop_Group_Access;
       Item  : not null Fiber_Access)
@@ -3142,6 +3234,8 @@ package body System.Flyology.Scheduler is
       Target : Loop_Group_Access;
       Item   : Fiber_Access;
       Output : Runtime_Group_Snapshot_Access;
+      Uptime : Duration := 0.0;
+      Idle   : Duration := 0.0;
    begin
       if Snapshot = System.Null_Address
         or else Snapshot_Size /= Runtime_Group_Snapshot'Size / 8
@@ -3160,9 +3254,10 @@ package body System.Flyology.Scheduler is
       end if;
 
       Lock_Group (Target);
+      Read_Utilization_Locked (Target, Uptime, Idle);
       Output := To_Runtime_Group_Snapshot (Snapshot);
       Output.all :=
-        (ABI_Version              => 5,
+        (ABI_Version              => 6,
          Thread_State             =>
            (if Target.Start_Failed then 3
             elsif Target.Started then 2
@@ -3199,7 +3294,10 @@ package body System.Flyology.Scheduler is
          Poll_Events              => Target.Poll_Events,
          Wakeups                  => Target.Wakeups,
          Migrations_In            => Target.Migrations_In,
-         Migrations_Out           => Target.Migrations_Out);
+         Migrations_Out           => Target.Migrations_Out,
+         Uptime_Nanoseconds       => To_Nanoseconds (Uptime),
+         Idle_Nanoseconds         => To_Nanoseconds (Idle),
+         Idle_Waits               => Target.Idle_Waits);
 
       Item := Target.Fibers;
       while Item /= null loop
@@ -4251,6 +4349,10 @@ package body System.Flyology.Scheduler is
       Events  : Pollers.Poll_Event_Array (1 .. Poll_Event_Budget);
       Count   : Natural;
    begin
+      --  Group_Thread holds this group's lock across the call, and this is
+      --  the loop's first act, so the utilization window starts before any
+      --  fiber can be dispatched here.
+      Group.Started_At := Clock;
       loop
          if Group.Stop_Requested then
             if not Group_Quiescent_Locked (Group) then
@@ -4334,10 +4436,15 @@ package body System.Flyology.Scheduler is
             end if;
          else
             Group.Current_Fiber := null;
+            --  Reached only when no fiber is ready, so this is the loop's
+            --  whole idle path. Poll_Ready_Events polls with a zero timeout
+            --  while work remains ready and is deliberately not counted.
+            Begin_Idle_Wait_Locked (Group);
             Unlock_Group (Group);
             Waited := Pollers.Wait_Batch
               (Group.Scheduler_Poller, Timeout, Events, Count);
             Lock_Group (Group);
+            End_Idle_Wait_Locked (Group);
             if not Waited then
                Fatal (Poller_Failure);
             end if;

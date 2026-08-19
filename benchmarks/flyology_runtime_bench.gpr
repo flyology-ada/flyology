@@ -13,7 +13,8 @@ project Flyology_Runtime_Bench is
    for Exec_Dir use "bin";
    for Main use
      ("runtime_callback_bench.adb",
-      "fiber_trampoline_memory.adb");
+      "fiber_trampoline_memory.adb",
+      "idle_wait_rate.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

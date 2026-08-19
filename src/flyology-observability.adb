@@ -8,7 +8,7 @@ package body Flyology.Observability is
    use type C.unsigned;
    use type C.unsigned_long_long;
 
-   ABI_Version : constant C.unsigned := 5;
+   ABI_Version : constant C.unsigned := 6;
 
    type Runtime_Group_Snapshot is record
       Version                  : C.unsigned;
@@ -43,6 +43,9 @@ package body Flyology.Observability is
       Wakeups                  : C.unsigned_long_long;
       Migrations_In            : C.unsigned_long_long;
       Migrations_Out           : C.unsigned_long_long;
+      Uptime_Nanoseconds       : C.unsigned_long_long;
+      Idle_Nanoseconds         : C.unsigned_long_long;
+      Idle_Waits               : C.unsigned_long_long;
    end record;
    pragma Convention (C, Runtime_Group_Snapshot);
 
@@ -152,7 +155,10 @@ package body Flyology.Observability is
          Poll_Events              => Counter (Raw.Poll_Events),
          Wakeups                  => Counter (Raw.Wakeups),
          Migrations_In            => Counter (Raw.Migrations_In),
-         Migrations_Out           => Counter (Raw.Migrations_Out));
+         Migrations_Out           => Counter (Raw.Migrations_Out),
+         Uptime_Nanoseconds       => Counter (Raw.Uptime_Nanoseconds),
+         Idle_Nanoseconds         => Counter (Raw.Idle_Nanoseconds),
+         Idle_Waits               => Counter (Raw.Idle_Waits));
       return True;
    end Snapshot;
 
