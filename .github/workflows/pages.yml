@@ -38,6 +38,10 @@ jobs:
             gnat_native=16.1.0 \
             gprbuild=26.0.1
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
+      - name: Configure Flyology index
+        run: |
+          alr index --reset-community
+          alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Install GNATdoc
         run: alr install gnatdoc_bin
       - name: Configure Pages

@@ -543,6 +543,25 @@ required by the changed boundary.
   `-dev` dependency constraints with stable constraints, and run the crate's
   required validation plus `alr show`. The manifest name and version must
   exactly match the tag's crate and version.
+- Never commit a `[[pins]]` entry to a crate manifest here. Alire honours pins
+  only in the manifest of the root crate being built, so a committed pin
+  reaches this repository's own workspace and no consumer. When a crate pins a
+  dependency that its project file imports, the dependency resolves here and is
+  absent from every consumer's solution. That failure surfaces at gprbuild as
+  `imported project file "<name>.gpr" not found`, not at resolution, so nothing
+  in this repository reports it.
+- To build against an unpublished change in a sibling crate, pin it in the
+  consuming workspace instead:
+
+  ```sh
+  alr pin <crate> --use=../<crate-directory>
+  ```
+
+  A workspace pin does not travel to consumers. Remove it once the dependency
+  is published.
+- A dependency declared in a crate manifest must resolve from the index. When a
+  nested crate here is a dependency of another crate here, publish it and
+  depend on the published version rather than on its path.
 - Indexed crates in this repository are `flyology`, `flyology_bench`,
   `flyology_allocators`, `flyology_cachelines`, `flyology_debug`, and
   `flyology_numa`. Tag each released crate independently, even when several
