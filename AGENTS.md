@@ -513,6 +513,18 @@ required by the changed boundary.
   15-character tag limit.
 - CI in `.github/workflows/ci.yml` is the hosted reference. Do not add
   `continue-on-error` to conceal a backend failure.
+- Every CI job and every step that reaches the network carries a
+  `timeout-minutes`. Size a new one as a generous multiple of the observed
+  healthy duration, read from a recent successful run rather than guessed. The
+  bound exists so a stalled mirror or download fails in minutes instead of
+  hanging until GitHub's six-hour job default; it is not a performance budget,
+  so never tighten one to speed a job up.
+- A command that can stall rather than fail needs its own bound inside the
+  step, because `timeout-minutes` alone only converts a hang into a late
+  failure. `apt-get update` is the known case: cap each attempt with
+  `timeout`, retry a stall or transient failure, and keep the worst-case
+  budget inside the step bound. Retry only fetches that are safe to repeat;
+  let a genuine resolution or install failure surface on the first try.
 
 ## Ada, documentation, and test style
 
