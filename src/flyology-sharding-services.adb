@@ -272,15 +272,23 @@ package body Flyology.Sharding.Services is
       Home  : Registry_Access := null;
       Phase : Service_Outcome := Startup_Failed;
    begin
-      accept Assign
-        (Shard : Shard_Id;
-         Lane  : Lane_Index;
-         Owner : Registry_Access)
-      do
-         Mine := Shard;
-         Slot := Lane;
-         Home := Owner;
-      end Assign;
+      --  The terminate alternative matters when a sibling agent fails to
+      --  activate: Serve never reaches its Assign loop, and without it the
+      --  agents that did activate would park here while the enclosing
+      --  block waited for them.
+      select
+         accept Assign
+           (Shard : Shard_Id;
+            Lane  : Lane_Index;
+            Owner : Registry_Access)
+         do
+            Mine := Shard;
+            Slot := Lane;
+            Home := Owner;
+         end Assign;
+      or
+         terminate;
+      end select;
 
       Topology.Cross_To_Shard (Mine);
 
@@ -385,11 +393,46 @@ package body Flyology.Sharding.Services is
          return;
       end if;
 
-      Groups.Grow_Configured_Pool (Shards);
+      --  Growth failure must still release readiness waiters, whose
+      --  barrier only opens on admission, failure, or shutdown.
+      begin
+         Groups.Grow_Configured_Pool (Shards);
+      exception
+         when Occurrence : others =>
+            Item.State.Publish_Failure
+              (Failure_Result (Shard_Id'First, Startup_Failed, Occurrence));
+            raise;
+      end;
 
       declare
          Agents : Agent_Array (Shard_Id'First .. Last);
          Ready  : Boolean;
+
+         --  Close admission, wait for every borrow and invocation to
+         --  leave, and release each lane. Helper lanes borrow the owning
+         --  lane's frame, so they leave first. A lane that already
+         --  terminated reports Tasking_Error.
+         procedure Stop_Agents is
+         begin
+            Item.State.Request_Shutdown;
+            if Concurrency > 1 then
+               for Shard in Agents'Range loop
+                  Item.Dispatchers (Integer (Shard)).Close;
+               end loop;
+            end if;
+            Item.State.Await_Quiescent;
+            for Shard in Agents'Range loop
+               for Lane in reverse Lane_Index loop
+                  begin
+                     Agents (Shard) (Lane).Leave;
+                  exception
+                     when Tasking_Error =>
+                        null;
+                  end;
+               end loop;
+            end loop;
+         end Stop_Agents;
+
       begin
          for Shard in Agents'Range loop
             for Lane in Lane_Index loop
@@ -416,26 +459,16 @@ package body Flyology.Sharding.Services is
             Item.State.Await_Stop_Request;
          end if;
 
-         Item.State.Request_Shutdown;
-         if Concurrency > 1 then
-            for Shard in Agents'Range loop
-               Item.Dispatchers (Integer (Shard)).Close;
-            end loop;
-         end if;
-         Item.State.Await_Quiescent;
-
-         --  Helper lanes borrow the owning lane's frame, so they leave
-         --  first. A lane that already terminated reports Tasking_Error.
-         for Shard in Agents'Range loop
-            for Lane in reverse Lane_Index loop
-               begin
-                  Agents (Shard) (Lane).Leave;
-               exception
-                  when Tasking_Error =>
-                     null;
-               end;
-            end loop;
-         end loop;
+         Stop_Agents;
+      exception
+         --  Leaving this block without stopping the agents would wait on
+         --  tasks that never received Leave. An exception from On_Ready is
+         --  the reachable case; record it so readiness waiters wake too.
+         when Occurrence : others =>
+            Item.State.Publish_Failure
+              (Failure_Result (Shard_Id'First, Startup_Failed, Occurrence));
+            Stop_Agents;
+            raise;
       end;
 
       Result := Item.State.Result;

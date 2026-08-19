@@ -98,7 +98,9 @@ package Flyology.Sharding.Services is
    --  Execution_Groups.Topology.Shard_For_Hash for the whole process; use
    --  Shard_For to keep this service's routing independent of that.
    --  A stuck operation prevents return, exactly as a stuck supervised
-   --  child does.
+   --  child does. Every exit path stops the agents, so an exception from
+   --  On_Ready propagates rather than stranding them; it also marks the
+   --  service failed, which releases callers waiting in Await_Ready.
    --  @param Item One-shot service owner kept alive for the whole call
    --  @param Shards Number of shards, mapped to groups 0 .. Shards - 1
    --  @param Result Terminal result after every agent joins

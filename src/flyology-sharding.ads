@@ -51,7 +51,10 @@ package Flyology.Sharding with Preelaborate is
    --  empty unless Outcome is Startup_Failed or Shard_Failed, and reuse the
    --  fixed capacities already defined by Flyology.Task_Results.
    --  @field Outcome Terminal classification
-   --  @field Shard Shard that caused a non-shutdown outcome
+   --  @field Shard Shard that caused a non-shutdown outcome. It is
+   --     meaningful only in a result Serve returned normally; when Serve
+   --     propagates an exception it records a Startup_Failed result whose
+   --     shard names no particular shard
    --  @field Exception_Name Bounded fully qualified exception identity
    --  @field Exception_Message Bounded copied exception message
    type Service_Result is record

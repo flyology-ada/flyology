@@ -754,7 +754,60 @@ procedure Sharding_Smoke is
    end Check_Serialization;
 
    --  --------------------------------------------------------------
-   --  Phase 4: a shard that cannot be constructed
+   --  Phase 4: a readiness callback that fails
+   --  --------------------------------------------------------------
+
+   Ready_Result : Shards.Service_Result;
+   Ready_Raised : Boolean := False;
+
+   procedure Failing_Ready;
+
+   procedure Failing_Ready is
+   begin
+      raise Probe_Error with "readiness callback failed";
+   end Failing_Ready;
+
+   task type Ready_Server (Target : access Counters.Service) is
+      pragma Task_Info (Flyology.Native_Task);
+   end Ready_Server;
+
+   task body Ready_Server is
+   begin
+      Counters.Serve
+        (Target.all, Shard_Total, Ready_Result, Failing_Ready'Access);
+   exception
+      when Probe_Error =>
+         Ready_Raised := True;
+   end Ready_Server;
+
+   --  Serve must stop every agent on this path too. Leaving its block
+   --  without doing so would wait on tasks that never received Leave, so a
+   --  regression here hangs rather than fails.
+   procedure Check_Ready_Callback_Failure is
+      Table : aliased Counters.Service;
+   begin
+      declare
+         Server : Ready_Server (Table'Access);
+         pragma Unreferenced (Server);
+      begin
+         if Counters.Await_Ready (Table, 30.0) then
+            raise Program_Error
+              with "a service whose readiness callback failed became ready";
+         end if;
+      end;
+
+      if not Ready_Raised then
+         raise Program_Error
+           with "a failing readiness callback did not propagate from Serve";
+      end if;
+      if Counters.Running (Table) then
+         raise Program_Error
+           with "a service whose readiness callback failed still runs";
+      end if;
+   end Check_Ready_Callback_Failure;
+
+   --  --------------------------------------------------------------
+   --  Phase 5: a shard that cannot be constructed
    --  --------------------------------------------------------------
 
    Broken_Result : Shards.Service_Result;
@@ -818,5 +871,6 @@ begin
    Check_Running_Service;
    Check_Concurrency;
    Check_Serialization;
+   Check_Ready_Callback_Failure;
    Check_Startup_Failure;
 end Sharding_Smoke;
