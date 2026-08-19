@@ -269,9 +269,13 @@ project Flyology is
    end Linker;
 
    package Documentation is
+      --  flyology_allocators is a resolved dependency, so its project lives
+      --  in the Alire build tree rather than under this repository. Ask the
+      --  imported project where it is instead of naming a path that only
+      --  existed while the crate was pinned.
       for Excluded_Project_Files use
         ("config/flyology_config.gpr",
-         "flyology_allocators/flyology_allocators.gpr");
+         Flyology_Allocators'Project_Dir & "flyology_allocators.gpr");
       for Resources_Dir ("html") use "docs/gnatdoc/html";
    end Documentation;
 
