@@ -2442,8 +2442,8 @@ accepted by the bounded kernel queue.
 rather than its tasks. A loop enters its poller only when no task of its own is
 runnable, so its idle time is exactly the time it spends in that wait, and a
 snapshot includes a wait still in progress. `Idle_Nanoseconds` never exceeds
-`Uptime_Nanoseconds`, so the difference is the time the loop spent dispatching,
-polling with work ready, or running task code:
+`Uptime_Nanoseconds`, so the difference is the time the loop spent running task
+code and its own scheduler work:
 
 ```ada
 Busy_Nanoseconds := Sample.Uptime_Nanoseconds - Sample.Idle_Nanoseconds;
