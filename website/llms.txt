@@ -64,6 +64,7 @@ This adds the `flyology` crate and its runtime preparation. Standalone component
 
 ## Standalone libraries
 
+- **Flyology Allocators:** [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_allocators). Caller-owned buddy, best-fit, TLSF, and slab/span allocation algorithms with no hosted operating-system dependency.
 - **Flyology Bench:** [Guide](https://flyology.org/guide/benchmarking/), [API](https://flyology.org/api/flyology_bench/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_bench). Adaptive microbenchmarking, balanced comparisons, diagnostics, baselines, and machine-readable reports.
 - **Flyology Cachelines:** [Guide](https://flyology.org/guide/cachelines/), [API](https://flyology.org/api/flyology_cachelines/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines). Cache-line-aware storage, ownership-aware groups, grouped arrays, and host cache queries.
 - **Flyology Debug:** [API](https://flyology.org/api/flyology_debug/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_debug). Bounded in-memory tracing, producer shards, retained batches, and persistent gauges.
