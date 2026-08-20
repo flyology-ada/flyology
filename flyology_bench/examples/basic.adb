@@ -250,8 +250,11 @@ procedure Basic is
    --  CPU_Quiescence => (if Wait_For_Quiet_CPU then (...) else (...)). That
    --  spelling aborts GNAT 15 and 16: a boxed aggregate inside a conditional
    --  expression inside an enclosing aggregate, for a type with a checked
-   --  predicate. Hoisting them out moves the conditional out of the
-   --  enclosing aggregate and compiles. See issue #55.
+   --  predicate. Removing any one of those four compiles, so hoisting the
+   --  conditional out of the enclosing aggregate is one of three ways out;
+   --  naming every component instead of using a box, and qualifying the
+   --  conditional as CPU_Quiescence_Policy'(if ...), are the others. Hoisting
+   --  is used here because it also reads better than either. See issue #55.
    Quiescence_Gate : constant Flyology_Bench.CPU_Quiescence_Policy :=
      (if Wait_For_Quiet_CPU
       then (Enabled                     => True,
