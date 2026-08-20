@@ -71,7 +71,15 @@
           <section>
             <h2>Records stay with their component.</h2>
             <p>Expect implementation decisions, measurements, proof results, and corrections. Each entry names its source revision and environment, then states the evidence and its limits.</p>
-            <p>No runtime entries have been published yet. Current library records remain in the <a href="https://http.flyology.org/journal/">HTTP journal</a> and <a href="https://postgres.flyology.org/journal/">Postgres journal</a>.</p>
+            <p>Library records remain in the <a href="https://http.flyology.org/journal/">HTTP journal</a> and <a href="https://postgres.flyology.org/journal/">Postgres journal</a>. Runtime and standalone-crate entries appear below.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row">
+                  <dt><a href="2026-08-benchmark-harness-comparison/">Most benchmarks compare by subtraction. That is the bug.</a><br><time datetime="2026-08-19">2026-08-19</time></dt>
+                  <dd>Almost every harness answers "is B faster than A" by timing them separately and dividing, which folds the machine's mood into the speedup. <code>flyology_bench</code> makes the paired comparison the measurement itself, and carries resource axes, hardware counters, mid-run host observation, and live-service recording on that same schedule.</dd>
+                </div>
+              </dl>
+            </div>
           </section>
         </article>
       </div>

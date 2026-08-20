@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Almost every benchmark harness compares by timing A and B separately and dividing. flyology_bench makes the paired comparison the measurement itself, and carries resource and hardware axes, host interference watching, and live-service recording on the same schedule.">
+    <meta name="theme-color" content="#17213d">
+    <title>Most benchmarks compare by subtraction · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/journal/2026-08-benchmark-harness-comparison/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <link rel="stylesheet" href="../../assets/styles/termcast.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+    <script src="../../assets/scripts/termcast.js" defer></script>
+    <style>
+      .benchmark-terminal {
+        margin-block: 1.75rem;
+        margin-inline: 0;
+        overflow: hidden;
+        border: 1px solid oklch(84% 0.025 270);
+        border-radius: var(--radius-md);
+        background: oklch(99.2% 0.004 270);
+        box-shadow: 0 1.2rem 3rem oklch(23% 0.045 270 / 0.08);
+      }
+
+      .benchmark-terminal figcaption {
+        display: flex;
+        min-height: 2.6rem;
+        align-items: center;
+        justify-content: space-between;
+        padding-inline: 1rem;
+        border-bottom: 1px solid oklch(88% 0.02 270);
+        color: oklch(42% 0.035 270);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+      }
+
+      .benchmark-terminal figcaption::after {
+        color: oklch(56% 0.11 185);
+        content: "terminal · light";
+      }
+
+      .terminal-scroll {
+        overflow-x: auto;
+      }
+
+      .benchmark-terminal pre {
+        min-width: 62rem;
+        margin: 0;
+        padding: 1.15rem 1.3rem 1.35rem;
+        color: oklch(27% 0.052 270);
+        font-size: 0.72rem;
+        line-height: 1.7;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .term-heading { color: oklch(54% 0.17 285); font-weight: 700; }
+      .term-good { color: oklch(49% 0.12 152); font-weight: 700; }
+      .term-cpu { color: oklch(58% 0.19 300); }
+      .term-memory { color: oklch(61% 0.16 250); }
+      .term-muted { color: oklch(53% 0.025 270); }
+
+      .comparison-table .faster,
+      .comparison-table .less {
+        color: oklch(49% 0.12 152);
+        font-weight: 650;
+      }
+
+      .comparison-table .slower,
+      .comparison-table .more {
+        color: oklch(52% 0.15 28);
+        font-weight: 650;
+      }
+
+      .comparison-table .uncertain {
+        color: var(--ink-soft);
+        font-weight: 650;
+      }
+
+      @media print {
+        .benchmark-terminal { box-shadow: none; }
+        .benchmark-terminal pre { min-width: 0; white-space: pre-wrap; }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/" aria-current="page">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="article-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Journal</a></li><li aria-current="page">Benchmark harnesses</li></ol>
+          <h1>Most benchmarks compare by subtraction. That is the bug.</h1>
+        </div>
+        <div>
+          <p class="article-summary">Almost every benchmark harness answers "is B faster than A" by timing them separately and dividing, which quietly folds the machine's mood into your speedup. <code>flyology_bench</code> makes the comparison itself the measurement — and six capabilities fall out of that decision that a subtractive harness cannot offer at all.</p>
+          <dl class="article-meta">
+            <div><dt>Published</dt><dd><time datetime="2026-08-19">2026-08-19</time></dd></div>
+            <div><dt>Source</dt><dd><a href="https://github.com/flyology-ada/flyology/tree/db2db9dc72236c3c0f3a30601d26455598f149f3">db2db9d</a></dd></div>
+            <div><dt>Environment</dt><dd>flyology_bench 0.1.1-dev, GNAT 13.2.2 to 16.1.0, macOS/arm64 and Ubuntu 24.04/aarch64</dd></div>
+            <div><dt>Status</dt><dd>Design record</dd></div>
+          </dl>
+        </div>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#subtraction">The benchmark changes its mind</a></li>
+            <li><a href="#pairs">Stop subtracting</a></li>
+            <li><a href="#axes">Every axis, one schedule</a></li>
+            <li><a href="#shootout">Sixteen implementations</a></li>
+            <li><a href="#host">Watching the machine</a></li>
+            <li><a href="#lock">A claim convention</a></li>
+            <li><a href="#provenance">Numbers with provenance</a></li>
+            <li><a href="#recording">Into production</a></li>
+            <li><a href="#sum">What it adds up to</a></li>
+            <li><a href="#boundary">Boundaries</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <div class="snapshot-boundary">
+            <strong>Dated record</strong>
+            <p>This entry describes <code>flyology_bench</code> at <code>db2db9d</code>, version <code>0.1.1-dev</code>. Statements about other benchmark harnesses describe their documented behavior in August 2026. Terminal output below is observed example output, not a portable performance claim.</p>
+          </div>
+
+          <section id="subtraction">
+            <span class="step-label">THE PROBLEM</span>
+            <h2>The benchmark that changes its mind.</h2>
+            <p>You have a change you believe is faster. You run the benchmark: old path for a few seconds, new path for a few seconds, divide. Eight percent better. You merge it. A week later, same revision, same benchmark, and now the new path is slower.</p>
+            <p>Everyone who has optimized anything has had this week. The usual response is to reach for a better statistical test, and the usual result is a more confident wrong answer. The defect is not in the analysis. It is one line above the analysis, in a step so ordinary that almost nobody writes it down:</p>
+            <figure class="code-panel">
+              <figcaption>the assumption inside every subtractive comparison</figcaption>
+              <pre><code>t_a = time(A)      # seconds 0 through 3
+t_b = time(B)      # seconds 3 through 6
+speedup = t_a / t_b</code></pre>
+            </figure>
+            <p>That division is only meaningful if the machine at second 0 and the machine at second 3 are the same machine. On a laptop that decided to index your mail, or a CI runner sharing a socket with somebody else's link step, they are not. The ratio you computed contains the difference between your two implementations <em>and</em> the difference between two moments, and nothing in the output tells you which one you are looking at.</p>
+            <p>This is not an exotic failure. It is the default failure of the entire category. Criterion.rs compares your run against a baseline saved to disk, possibly days ago. Go's <code>benchstat</code> compares two files. Google Benchmark's <code>compare.py</code> compares two JSON documents. JMH forks a separate JVM per benchmark and compares the results afterwards. Every one of those is a subtraction across time, and every one inherits the same hole.</p>
+            <p><code>flyology_bench</code> starts from the position that a comparison is not an arithmetic operation you perform on two measurements. It is a measurement, with its own design, its own schedule, and its own statistics — and once you build it that way, six other things become possible that a subtractive harness cannot offer at all.</p>
+          </section>
+
+          <section id="pairs">
+            <span class="step-label">01</span>
+            <h2>Stop subtracting. Start pairing.</h2>
+            <p>In <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html"><code>Flyology_Bench</code></a> you do not measure twice and divide. You instantiate <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#cab1b3cb5028fe401b4c33aa356fd29ae796e5e2f8a675878a4ff65a208cedca"><code>Compare</code></a> over both operations, and the harness collects the comparison as a single measurement.</p>
+            <figure class="code-panel">
+              <figcaption>bench_compare.adb</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">procedure Compare_Paths is new Flyology_Bench.Compare
+  (Reference_Operation =&gt; Existing,
+   Contender_Operation =&gt; Rewrite);
+
+Result : Flyology_Bench.Comparison;
+
+Compare_Paths (Result =&gt; Result);
+Flyology_Bench.Reporters.Put_Comparison_Console
+  ("existing", "rewrite", Result);</code></pre>
+            </figure>
+            <p>The reference and the contender now run <em>adjacently, inside every sample pair</em>. Fifty pairs, alternating, over the same second of wall-clock time. Drift that moves the machine moves both halves of a pair together, so it cancels inside the ratio instead of accumulating into it. Every one of the fifty ratios is local in time, and the estimate is built from ratios rather than from two distant averages.</p>
+            <p>Adjacency alone would still be biased, because whichever side runs first pays for the other side's cache and frequency state. So the harness deterministically shuffles which side leads and holds the two order counts equal, or within one sample when the count is odd. It then <em>reports the residual</em>: <code>Order_Effect_Percent</code> is the gap between the reference-first and contender-first ratio groups. If your two implementations interact through the cache in a way that balancing cannot remove, that number is where it shows up, rather than quietly living inside your speedup.</p>
+            <p>The second default is the one people are surprised by. Each side calibrates its <em>own</em> iteration count toward the same timed slice, so a contender that is twice as fast performs twice as many logical operations rather than finishing early and collecting half the data. An equal-iteration schedule does the opposite: it systematically gives the faster implementation less measurement time, which is precisely backwards. <code>Shared_Iterations</code> is available when one logical operation count is genuinely the point.</p>
+            <p>Then the pairing survives into the statistics, which is the step most tools skip even when they interleave. Confidence bounds come from deterministic circular-block resampling of the paired log-ratios, so both pair membership and short-range sample order are preserved through the bootstrap. Lag-one correlation of the paired samples is reported next to the interval. You are not asked to trust that the schedule was fair; you are handed the diagnostics that would show it was not.</p>
+            <p>Finally, the harness commits to a verdict, and refuses to when it should:</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>Contender_Faster</code></dt><dd>The <em>entire</em> confidence interval clears <code>Practical_Threshold_Percent</code>, one percent by default. You may act on this.</dd></div>
+                <div class="decision-row"><dt><code>Practically_Equivalent</code></dt><dd>The entire interval fits inside the threshold. You have evidence of <em>no</em> meaningful difference, which is a distinct and useful result.</dd></div>
+                <div class="decision-row"><dt><code>Inconclusive</code></dt><dd>Neither holds. The run does not support a decision, and says so instead of picking a winner from its own noise floor.</dd></div>
+              </dl>
+            </div>
+            <p>Google Benchmark deserves credit as the closest thing to prior art: <code>--benchmark_enable_random_interleaving</code> interleaves repetitions across benchmarks and its documentation reports about 40 percent lower run-to-run variance. It is opt-in, it randomizes positions rather than balancing them, and its comparison tooling still treats the two sides as independent samples afterwards. The interleaving improves the inputs; it never reaches the statistic. Here, pairing is the default and the pairing is what the interval is computed from.</p>
+          </section>
+
+          <section id="axes">
+            <span class="step-label">02</span>
+            <h2>Every axis rides the same schedule.</h2>
+            <p>Now the part that a subtractive harness structurally cannot give you. Once a comparison is one scheduled measurement rather than two, anything you sample around those same batches inherits the same pairing — and therefore gets its own paired verdict.</p>
+            <figure class="code-panel">
+              <figcaption>ask for more than time</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">use type Flyology_Bench.Metric_Set;
+
+Config.Metrics :=
+  Flyology_Bench.Process_Resource_Metrics
+  or Flyology_Bench.Linux_Hardware_Metrics;</code></pre>
+            </figure>
+            <p>A <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#32722f085f336d6e1fddabe4cb7288fbe7ebdf5306fe4ab02078f77451cf5892"><code>Metric_Set</code></a> selects the axes retained around those same timed batches. The portable set covers process and thread CPU time, resident memory and its change, minor and major faults, voluntary and involuntary context switches, storage bytes, and filesystem operations. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#59e9a9f35135ffe97c67002ab7a017ec5c95e9341003b5614272366f04453ccf"><code>Linux_Hardware_Metrics</code></a> adds CPU cycles, retired instructions, instructions per cycle, cache misses, branches, and branch misses through <code>perf_event_open</code>. Wall time remains the calibration and budget clock throughout.</p>
+            <p>The result is that the annoying outcome stops being annoying. "Same wall time" is normally where a benchmarking session dies. Here it is the start of the diagnosis: same wall time, instructions per cycle up eleven percent, cache misses down by a third, involuntary context switches unchanged — you did not fail, you became memory-bound somewhere else. Each of those statements arrives with a paired confidence interval from the same fifty pairs, not from a second run you would then have to defend.</p>
+            <figure class="termcast" data-cast="../../assets/casts/flyology-bench-basic.cast" data-title="examples/bin/basic · recorded on macOS/arm64, GNAT 16.1.0"></figure>
+            <p>That recording is the maintained example running end to end, captured on a pty by <code>scripts/record-bench-cast.sh</code> so the in-place progress line behaves as it does for a person. Watch the axis tables scroll past: on this Apple Silicon host every hardware row reads <code>unavailable: unsupported platform</code> rather than zero, which is the behavior described below and the reason the recording was worth keeping rather than staging.</p>
+            <p>The arithmetic is careful in ways that matter. Positive-only axes are compared as relative ratios; signed or zero-containing axes use paired absolute differences, because a ratio through zero is nonsense. Every delta is divided by the logical operation count, except absolute resident memory and the dimensionless IPC value. Axes with no general optimization direction get a <code>Diagnostic</code> verdict rather than a fabricated better-or-worse.</p>
+            <p>Hardware counters themselves are well-trodden ground and we will not pretend otherwise: Google Benchmark reads them through libpfm, nanobench prints them per operation, and JMH's <code>-prof perfnorm</code> normalizes them to iterations. What none of them will do is hand you a paired, order-balanced, bootstrapped verdict on cache misses collected inside the same schedule that produced the timing verdict. That is what falls out of treating the comparison as the primitive.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>A detail you inherit for free: <code>PERF_EVENT_IOC_RESET</code> is deliberately never used. It clears an event's own count but not the count inherited from exited child tasks, so a reset-and-read-absolute scheme reports per-operation totals that visibly grow the moment your workload spawns workers. Each sample here is the difference between two reads taken around one enable, and the multiplexing correction uses the enabled and running deltas from that same pair of reads.</p>
+            </aside>
+          </section>
+
+          <section id="shootout">
+            <span class="step-label">03</span>
+            <h2>Sixteen implementations, one schedule.</h2>
+            <p>The pairing generalizes. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#e544e2abb7c6a25b990e07a767621dcecf82c1d76a7ea0feba634551852d1c7b"><code>Compare_Many</code></a> takes an enumeration of two to sixteen implementations, calibrates each toward an equal share of the timed budget, and then places every case once in each execution position over shuffled cyclic rounds.</p>
+            <figure class="code-panel">
+              <figcaption>a four-way shootout</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">type Candidate is (Existing, Rewrite, SIMD, Tasked);
+
+procedure Batch
+  (Which : Candidate; Iterations : Flyology_Bench.Iteration_Count);
+
+procedure Compare_All is new Flyology_Bench.Compare_Many
+  (Case_Id =&gt; Candidate, Batch =&gt; Batch);
+procedure Put_All is new
+  Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Candidate);
+
+Result : Flyology_Bench.Multi_Comparison;
+
+Compare_All (Result =&gt; Result);
+Put_All (Result, Show_Individual_Details =&gt; True);</code></pre>
+            </figure>
+            <p>Position balancing is the point. Run four implementations as four consecutive blocks and the last one competes against a warmer, hotter, more thermally throttled machine than the first; the ordering of your results is then partly the ordering of your source file. Rotating every case through every position removes that, and <code>Sequential_Cases</code> remains available when you want per-case telemetry blocks and accept the exposure.</p>
+            <div class="benchmark-table-wrap" tabindex="0" aria-label="Scrollable example multi-way comparison">
+              <table class="benchmark-table comparison-table">
+                <thead><tr><th>Implementation</th><th>Median</th><th>Speedup</th><th>Elapsed time</th><th>95% CI</th><th>Verdict</th></tr></thead>
+                <tbody>
+                  <tr><th>one mix</th><td>1.792 ns</td><td>1.000x</td><td>reference</td><td>reference</td><td>reference</td></tr>
+                  <tr><th>two mixes</th><td>3.358 ns</td><td class="slower">0.537x</td><td class="more">86.24% more</td><td>[0.519, 0.558]</td><td class="slower">reference faster</td></tr>
+                  <tr><th>noisy one mix</th><td>1.776 ns</td><td>0.977x</td><td>2.37% more</td><td>[0.886, 1.072]</td><td class="uncertain">inconclusive</td></tr>
+                  <tr><th>parallel CPU burn</th><td>0.878 ns</td><td class="faster">1.984x</td><td class="less">49.59% less</td><td>[1.850, 2.154]</td><td class="faster">contender faster</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>Look at row three. Its median is <em>lower</em> than the reference, and the harness still refuses to call it a win, because the interval straddles parity. A tool that ranked by median would have handed you a 2.3 percent improvement to put in a pull request description. This one tells you that you measured nothing, which is the more valuable sentence.</p>
+          </section>
+
+          <section id="host">
+            <span class="step-label">04</span>
+            <h2>The machine does not stay quiet, so we watch it.</h2>
+            <p>Pairing removes drift between the two sides. It does not remove a compile job that lands in the middle of your run and inflates both sides at once. Most harnesses respond to this by printing a warning at startup and producing a number anyway. Two go further, and it is worth naming them: pyperf will actually quiet the machine for you with <code>pyperf system tune</code>, given root and a box you may mutate; Google Benchmark warns when CPU scaling is on. Neither watches while it measures.</p>
+            <p>The first line here is a preflight. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>CPU_Quiescence</code></a> waits for both the host-wide average and the busiest single logical CPU to stay under their limits for a continuous interval before clock characterization and warmup begin, and raises <code>CPU_Quiescence_Timeout</code> rather than collecting under load it already knows about. Two limits, not one, because a single saturated core hides easily behind fifteen idle ones.</p>
+            <p>The gate has a hole, and it is the interesting one: it describes the past. So the harness keeps looking.</p>
+            <figure class="code-panel">
+              <figcaption>watch during collection, and choose a response</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config.Interference :=
+  (Enabled                     =&gt; True,
+   Response                    =&gt; Flyology_Bench.Retake,
+   Maximum_Foreign_CPU_Percent =&gt; 10.0,
+   Window                      =&gt; 0.050,
+   Maximum_Retakes             =&gt; 25,
+   Settle_Time                 =&gt; 0.250,
+   Maximum_Pause_Time          =&gt; 30.0,
+   Rewarm_Time                 =&gt; 0.050);</code></pre>
+            </figure>
+            <p>The obvious implementation does not work, which is probably why nobody ships it. Host utilization cannot be compared against a limit during collection the way the preflight does it, because by then your benchmark thread is saturating a core and every window trips. Foreign load has to be defined as host busy time minus this process's own CPU time, so the load your benchmark creates is correctly not counted against it. Measured against <code>top</code> on a deliberately loaded machine, the two estimates agree to within 0.1 percent.</p>
+            <p>With a workable definition, three responses form a ladder. <code>Observe</code> keeps every sample and records what it saw. <code>Retake</code> discards the contaminated window and collects it again. <code>Pause</code> waits for the host to settle, re-warms, and resumes. The re-warm is not politeness: a resumed run has cold caches, cold predictors, and a different frequency state, so without it your first sample after a pause is exactly the outlier the pause existed to prevent.</p>
+            <p>Windows cover whole collection units — one sample, one comparison pair, or one balanced multi-way round — so a response can never split the two halves of a pair or land mid-round, where it would spread interference unevenly across the cases the round exists to compare fairly. Discarding a window rolls back what that window changed, including the position tallies and telemetry sums, because otherwise a run with eighteen retained samples and twenty-four retakes would report an elapsed time covering forty-two samples, most of them thrown away. Budgets degrade rather than abort: an exhausted retake budget continues under <code>Observe</code> and says so.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Nothing here adjusts a reported statistic.</strong> A skew factor derived from observed load would be invented data. The cost of interference depends on whether the contention is an SMT sibling, a shared cache, memory bandwidth, or another socket entirely, so the same foreign share can mean no slowdown or a large one. Runs are annotated or repaired, never corrected.</p>
+            </aside>
+            <p>What you get out of this is auditable CI. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#9894c4c34ccc88cf6caf5063f7f9a67c342bb7d0b131233cdc5587dc1cf6d733"><code>Environment</code></a> carries the contaminated sample count, retakes, pauses, and the mean and peak foreign share into the console card, the CSV, and the JSON. A merge-blocking benchmark can require that its result had zero contaminated windows. A flaky one can be diagnosed as a statement about your runner rather than about your code. A run that had to repair itself says so, because otherwise a heavily repaired result reads as a quieter machine than the one it actually ran on.</p>
+          </section>
+
+          <section id="lock">
+            <span class="step-label">05</span>
+            <h2>A convention for machines that host more than one job.</h2>
+            <p>Watching the host creates a new failure, and it is a good one. Two harnesses that both pause on interference are symmetric controllers observing each other: each pauses because the other is loading the machine, both then observe quiet, both resume together, and both immediately pause again. Solving that required a protocol, and there was not one to adopt.</p>
+            <p><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Host_Lock</code></a> claims host CPU capacity for the duration of a run, taken before the preflight gate — waiting for a quiet host and only then blocking on a claim would leave the quiet verdict stale by the time collection started. The convention is deliberately named for the resource rather than for benchmarking, so the tools that <em>create</em> load — a load generator, a soak test, a profiler — take the same claim as the tools that need its absence. The file naming, protocol, and content grammar are published so your own tooling can participate.</p>
+            <p>Conflict detection is <code>flock</code> and nothing else, which is what makes it safe to adopt. Liveness is the lock itself, so a job the CI system kills releases with no cleanup path, no stale registry, and no pid-reuse hazard. A machine-wide claim takes an exclusive lock on the claim file. A per-CPU claim takes a shared lock there plus an exclusive lock on one file per CPU, acquired in ascending order, because a total order is what stops two callers with overlapping sets from deadlocking on each other's partial claims. Disjoint core-scoped claims therefore proceed concurrently while a machine-wide claim excludes them all, with no arbiter anywhere.</p>
+            <p>Even the path is a decision rather than a convenience. It is a single deterministic default, not a writability-probing fallback chain, because a chain reintroduces exactly the failure it was meant to prevent: <code>/run/lock</code> is mode 1777 on Debian and root-owned 0755 on Red Hat derivatives, so a root process and an unprivileged process on one machine would probe differently, land on different files, and each conclude it holds the machine. File content is diagnostic and parseable but never consulted to decide a conflict, and readers open it without locking, since a shared lock would block behind the very holder they are trying to name.</p>
+            <p>And the claim knows what it is not. <code>systemd PrivateTmp=</code> bind-mounts a per-service directory over <code>/tmp</code>, so two services share every CPU and cannot see each other's claim files; that case is detected from <code>/proc/self/mountinfo</code> and reported as namespace-scoped. A path can be proven private but never proven machine-wide. <code>Require_Machine_Scope</code> exists so a merge-blocking job can refuse to run rather than proceed unserialized.</p>
+          </section>
+
+          <section id="provenance">
+            <span class="step-label">06</span>
+            <h2>Every number carries its own provenance.</h2>
+            <p>Collecting a value and being entitled to attribute it are different questions, and almost every telemetry-carrying benchmark conflates them. A process-wide resident-memory figure can be collected perfectly and still not be your operation's memory. So each axis here carries four independent facts: a status, a scope, an attribution quality, and an optimization direction.</p>
+            <p>That structure buys specific refusals. Thread CPU is accepted only when both boundaries execute on the same native thread; a migrated span drops its thread and counter values rather than attaching them to the destination thread. Process-scoped axes are labeled as covering the whole process, so nobody quotes them as per-operation. And when a counter is unavailable, the harness never substitutes zero — because you would read that zero as "no cache misses" and nothing downstream would ever correct you.</p>
+            <p>The failure classification is unusually specific for the same reason. <code>Metric_Status</code> distinguishes an unsupported platform, a permission denial, an event the host's monitoring unit does not implement, unavailable counter resources, and a failed probe. <code>perf_event_open</code> reports <code>EINVAL</code> both for a generic event the host cannot map and for an attribute combination the kernel rejects, so that case is re-probed with only the permission-relevant attributes before being classified — the difference between "your kernel will not let you" and "this chip has no such counter" is the difference between a fixable CI config and a wasted afternoon.</p>
+            <p>The same discipline governs the words in the report, which is where microbenchmarking most often misleads people who did nothing wrong:</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Fractional nanoseconds</dt><dd>A sub-nanosecond figure is an amortized throughput estimate. The harness timed a much longer batch and divided. It is not evidence that any such interval was ever timestamped, and the clock card shows you the nominal resolution, the observed step, the adjacent-read cost, and the quantization floor so you can check.</dd></div>
+                <div class="decision-row"><dt><code>p95</code> and <code>p99</code></dt><dd>From the runner these are percentiles of per-operation batch averages, not tail latencies of individual operations. The reporters label them as sample means, so the distinction survives into the screenshot somebody pastes into a review.</dd></div>
+                <div class="decision-row"><dt>Outliers</dt><dd>Tukey mild and severe counts are reported and every sample stays in every statistic. The counts prompt you to investigate host noise or a phase change in the workload. They are not permission to discard a run you did not like.</dd></div>
+              </dl>
+            </div>
+            <figure class="benchmark-terminal">
+              <figcaption>integer_mix · observed example output</figcaption>
+              <div class="terminal-scroll" tabindex="0" aria-label="Scrollable terminal output">
+                <pre><span class="term-heading">-- integer_mix -----------------------------------------</span>
+   latency    | <span class="term-good">median 1.498 ns/op</span>  mean 1.633 ns
+   tails      | p95 2.225 ns  p99 2.784 ns  range 1.454 ns .. 2.839 ns
+   sampling   | 16777216 iter/sample x 55 samples  median batch 25.13 ms
+   quality    | CV 18.60%  outliers 7  lag-1 correlation 0.47
+   clock      | mach_absolute_time
+   resolution | nominal 42.000 ns  observed 41.000 ns  median read 41.000 ns  floor 0.003 ps/op
+   <span class="term-cpu">cpu</span>        | <span class="term-cpu">▇▇▇▇▇▇▇▇▁▇▇▇▇▇▇▇▇▇▇▇▇▇▁▇▇▇▇▇▇▇▇▇▇▇▇▇▁▇▇▇▇▇▇▇▇▆▃▄</span>
+              | average 96.8%  (1.0 cores)    peak 100.0%  (1.0 cores)
+   <span class="term-memory">memory</span>     | <span class="term-memory">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</span>
+              | RSS change across own batches +0.0 KiB    largest batch +0.0 KiB
+   elapsed    | 00:00:01.5 timed samples <span class="term-muted">(hh:mm:ss)</span></pre>
+              </div>
+            </figure>
+            <p>Note what that card refuses to hide. A CV of 18.6 percent and a lag-one correlation of 0.47 are printed at the same size as the median. The clock characterization sits directly beneath the tails, so a reader can see that the estimate rests on a 42 ns timer amortized across sixteen million iterations. Nothing here is buried in a verbose flag.</p>
+            <p>Machine-readable output preserves all of it. Set <code>FLYOLOGY_BENCH_OUTPUT=csv</code> or <code>json</code> for clean stdout with no progress or ANSI sequences; the long-form reporters emit one row per axis including availability status and failure reason, and the crate's test suite checks that every CSV row carries exactly the columns its header declares and that <code>available</code> agrees with <code>status</code>.</p>
+          </section>
+
+          <section id="recording">
+            <span class="step-label">07</span>
+            <h2>The same tool follows you into production.</h2>
+            <p>Everything so far assumes the harness is the caller. For a server that assumption is false: the request arrives when it arrives, and the code you want to measure is already running. This is normally where you abandon your benchmarking library and start assembling timers, a histogram crate, and a metrics exporter — three new dependencies with three different opinions about what a percentile is.</p>
+            <p><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html"><code>Flyology_Bench.Recording</code></a> inverts the control and keeps the axes, the status vocabulary, and the reporters.</p>
+            <figure class="code-panel">
+              <figcaption>instrument the work you already have</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Recorder : Recording.Recorder
+  (Maximum_Benchmarks =&gt; 8, Retained_Samples =&gt; 10_000);
+Request : Recording.Benchmark;
+
+Recording.Register (Recorder, "request", Request);
+Recording.Start (Recorder);
+
+declare
+   Sample : Recording.Span;
+begin
+   Recording.Begin_Sample (Recorder, Request, Sample);
+   Handle_Request;
+   Recording.Finish (Sample, Recording.Success);
+end;</code></pre>
+            </figure>
+            <p>Registration and bounded-store allocation happen before <code>Start</code>, so the boundary path performs no Ada heap allocation. <code>Finish</code> reads the ending timestamp <em>before</em> entering the protected sample store, which keeps retention and analysis out of the value you are measuring. Retention is bounded and the policy is named — <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>Reservoir</code></a> for a long run, with <code>First_N</code> and <code>Latest_N</code> available — and omitted samples are counted rather than silently dropped.</p>
+            <p>Because the recorder times individual spans rather than batches, this is also where real per-invocation percentiles live. Each retained row keeps its observation number and outcome next to the status and value of every requested axis, so the raw CSV and the JSON <code>samples</code> array preserve the relationship between latency, CPU, memory, and outcome even when a thread migration makes one axis unavailable for that row alone. Filtering to successful spans keeps every other column aligned, which is the query you always end up needing at 2am.</p>
+            <p>On Linux each recorder session owns PMU groups that stay enabled per native worker, and worker exit closes that worker's groups so later pthread reuse cannot inherit stale descriptors. Concurrent recorders use separate sessions. This is production-shaped machinery, not a demo.</p>
+            <figure class="termcast" data-cast="../../assets/casts/flyology-bench-recording.cast" data-title="examples/bin/recording_service · recorded on macOS/arm64, GNAT 16.1.0"></figure>
+            <p>The live display is the part a screenshot cannot carry: fixed rows, refreshed in place, with completed and active span counts, errors, and rolling median and p95 moving as the four service workers run. A still frame of the same display looks like this:</p>
+            <figure class="benchmark-terminal">
+              <figcaption>recording_service · live display</figcaption>
+              <div class="terminal-scroll" tabindex="0" aria-label="Scrollable recorder terminal output">
+                <pre><span class="term-heading">fly recorder  elapsed 01.31 s      cpu  38.4% / 0.4 cores   rss 31.2 MiB</span>
+benchmark                    done  live  errors   median      p95
+quick request                  66     0       2   42.0 ns     250.0 ns
+cpu-heavy request              68     1       1    3.21 ms      4.08 ms
+memory-burst request           70     0       2  140.3 us     358.2 us
+wait-bound request             64     1       2   19.01 ms     64.03 ms</pre>
+              </div>
+            </figure>
+            <p>And the recorder refuses to borrow the runner's statistics, which is what keeps the whole thing coherent. Recorded percentiles describe individual spans, and the output marks that contract as <code>sample_semantics=individual_span</code>. <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#5ba052e7e20ef2b82786892f0c697cf67542df68ec5230cc0475e794bd5fc3be"><code>Compare_Independent</code></a> resamples independently and is marked <code>comparison_design=independent</code>, because two separately observed distributions are not a paired design, and reusing the paired bootstrap on them would hand you a category error with a confidence interval attached.</p>
+          </section>
+
+          <section id="sum">
+            <span class="step-label">THE ARGUMENT</span>
+            <h2>What it adds up to.</h2>
+            <p>Take the pieces together and the shape is clear. One instantiation gives you a paired, order-balanced, equal-time comparison whose confidence interval is computed from the pairing itself; the same fifty pairs also yield paired verdicts on cycles, instructions per cycle, cache misses, faults, context switches, resident memory, and storage traffic, each carrying its own status, scope, and attribution; the host is gated before the run and watched throughout it, with contaminated windows repaired or annotated and never silently corrected; runs coordinate with other tools through a published claim convention; and when the workload stops being callable, the same axes and the same reporters follow it into a live service.</p>
+            <p>We did not invent most of the individual ideas and the debts are deliberate. <code>Do_Not_Optimize</code> and <code>Clobber_Memory</code> carry Google Benchmark's names on purpose, so anyone arriving from C++ knows what they do before reading a line of documentation. The four-bucket Tukey classification and the clock characterization pass came through nonius to Catch2 and to both criterions. The adaptive batch is Go's <code>b.N</code> with a different calibration target. Paired designs are ordinary statistics, and the literature has argued for randomized interleaving for years.</p>
+            <p>What we could not find anywhere, and the reason this crate exists, is a general-purpose harness that does all three of these at once:</p>
+            <ol>
+              <li>Makes paired, order-balanced comparison the <em>default</em> primitive and carries the pairing through to the confidence interval, rather than comparing two runs collected at different times.</li>
+              <li>Retains resource and hardware axes on that same sample schedule, each with its own status, scope, and attribution, and never substitutes zero for an absence.</li>
+              <li>Watches the host during collection and repairs or annotates a contaminated window while refusing to adjust any reported statistic.</li>
+            </ol>
+            <p>If you know of one, we would rather use it than maintain this. Until then, this is the harness we would reach for on a machine we do not control, chasing a difference small enough that the machine could swallow it, for a result that has to survive review.</p>
+            <figure class="code-panel">
+              <figcaption>add the development index and crate</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-shell">alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology_bench</code></pre>
+            </figure>
+            <p>The <a href="../../guide/benchmarking/">benchmarking guide</a> walks through a first measurement, and the <a href="../../api/flyology_bench/">generated API reference</a> documents every contract named here.</p>
+          </section>
+
+          <section id="boundary">
+            <span class="step-label">BOUNDARY</span>
+            <h2>What this record does not establish.</h2>
+            <p>This is a design record, not a measurement. It reports no throughput result and supports no comparison between Ada and any other language. <code>flyology_bench</code> is version <code>0.1.1-dev</code>, distributed through a development index, and carries no stability promise.</p>
+            <p>Platform coverage is uneven. Hardware counters and strict thread placement are Linux features; Darwin's affinity interface is an advisory grouping hint rather than a CPU name, and Apple Silicon implements no thread affinity at all and rejects every request, so <code>Require_Strict</code> turns that into a refusal instead of a silent downgrade. A Linux guest with no exposed monitoring unit reports the specific unavailable status rather than a pass.</p>
+            <p>The host model is a CPU model. It detects competing CPU work. It does not detect storage traffic, thermal state, frequency transitions, interrupt load, or contention for shared cache and memory bandwidth — and that last one perturbs your measurement without moving any CPU busy counter. A host claim coordinates only with processes that reach the same file. Enabling several probe families can perturb another family at the boundary, so when a small resource difference matters, repeat the comparison with only that family selected and confirm the conclusion survives.</p>
+            <p>Some things are deliberately out of scope and other tools do them better: allocation counts per operation belong to Divan and Go's <code>-benchmem</code>; near-deterministic instruction counts in noisy CI belong to iai-callgrind; tracking a benchmark across a commit range belongs to airspeed velocity, where we have only fingerprinted <a href="../../api/flyology_bench/824910ac59ceb8fae65b3b9e981bf121c47de3294e68865c509cb3665fa0c62d.html"><code>Flyology_Bench.Baselines</code></a>; JVM benchmarking belongs to JMH. This is not a profiler either: it tells you a difference exists and how confident it is, not where it came from.</p>
+            <p>What it will not do is turn a busy laptop into a quiet server. What it does instead is put the noise in the report rather than in the number — which is the difference between a result you can argue with and one you can only believe.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. This article describes a dated record and its stated boundaries.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../">Journal</a><a href="../../guide/">Guide</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
