@@ -418,6 +418,13 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   actions, so concurrent full `alr build` processes must not share one local
   path pin. Use a separate Flyology checkout per build or externally serialize
   the builds.
+- Alire redeploys an indexed release into the invoking user's single release
+  cache on every command, so two consumers that run at once corrupt each
+  other's copy of a shared dependency before any Flyology code runs. A test
+  that runs consumers concurrently must sandbox each one with a per-workspace
+  `dependencies.shared = false`, which leaves the shared toolchain and index
+  folders in place, rather than with `alr -s/--settings=DIR`, which also
+  relocates them.
 - Treat the Alire RTS input stamp as a transaction commit marker: invalidate it
   before rebuilding, assemble and publish a clean replacement tree, atomically
   publish generated configuration and policy, and publish the replacement
