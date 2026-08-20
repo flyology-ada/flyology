@@ -74,6 +74,22 @@ if [ "$(sed -n '1p' "$unrelated_target/sentinel")" != "$sentinel_value" ]; then
   exit 1
 fi
 
+#  Alire redeploys the indexed `flyology_allocators` release on every command,
+#  and both consumers resolve it to one monorepo directory in the invoking
+#  user's release cache. Sandbox each consumer's dependency deployment inside
+#  its own workspace and stop either from refreshing the shared index
+#  checkouts, so that the concurrency probe below observes Flyology's lock
+#  instead of Alire racing with itself. These are disposable per-workspace
+#  settings; the user's own Alire settings are untouched. Flyology's
+#  preparation lock lives in the shared path pin, so the contention the probe
+#  exists to force is unaffected.
+isolate_alire_state () {
+  "$alr" --non-interactive settings --set dependencies.shared false
+  "$alr" --non-interactive settings --set index.auto_update 0
+}
+isolate_alire_state
+(cd "$concurrent_root" && isolate_alire_state)
+
 "$alr" --non-interactive with flyology --use="$pin_root"
 (cd "$concurrent_root" &&
   "$alr" --non-interactive with flyology --use="$pin_root")
