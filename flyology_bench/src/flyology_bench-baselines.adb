@@ -22,7 +22,9 @@ package body Flyology_Bench.Baselines is
    Magic : constant String := "flyology_bench baseline";
    Footer : constant String := "flyology_bench baseline v2";
    Legacy_Magic : constant String := "flyology_bench baseline v1";
-   Bootstrap_Resamples : constant := 2_000;
+   Bootstrap_Method_Text : constant String := "circular_block_mean_ratio";
+   Default_Confidence_Level_Percent : constant Long_Float := 95.0;
+   Default_Bootstrap_Resamples : constant Positive := 2_000;
    FNV_Offset : constant Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
    FNV_Prime  : constant Interfaces.Unsigned_64 := 16#0000_0100_0000_01B3#;
 
@@ -284,7 +286,7 @@ package body Flyology_Bench.Baselines is
       Append_Field ("clock_backend", Clock_Backend (Result));
       Append_Field ("sample_unit", "nanoseconds_per_operation");
       Append_Field ("comparison_design", "independent_runs");
-      Append_Field ("bootstrap_method", "circular_block_mean_ratio");
+      Append_Field ("bootstrap_method", Bootstrap_Method_Text);
       Append_Field ("sample_count", Sample_Count'Image (Samples (Result)));
       for Index in Sample_Index range 1 .. Sample_Index (Samples (Result)) loop
          declare
@@ -385,6 +387,37 @@ package body Flyology_Bench.Baselines is
               "baseline sample" & Sample_Index'Image (Index)
               & " is malformed, nonpositive, or out of range";
       end Parse_Sample;
+
+      procedure Parse_Legacy is
+      begin
+         Store
+           (Required_Line ("legacy benchmark name"),
+            Result.Name_Data, Result.Name_Length,
+            "legacy baseline benchmark_name", Allow_Empty => True);
+         Store
+           (Required_Line ("legacy fingerprint"),
+            Result.Fingerprint_Data, Result.Fingerprint_Length,
+            "legacy baseline fingerprint", Allow_Empty => True);
+         Store
+           (Required_Line ("legacy clock backend"),
+            Result.Backend_Id, Result.Backend_Id_Length,
+            "legacy baseline clock_backend");
+         Result.Sample_Total :=
+           Parse_Count (Required_Line ("legacy sample_count"));
+         for Index in Sample_Index range
+           1 .. Sample_Index (Result.Sample_Total)
+         loop
+            Result.Values (Index) :=
+              Parse_Sample
+                (Required_Line
+                   ("legacy sample" & Sample_Index'Image (Index)),
+                 Index);
+         end loop;
+         if not Ada.Text_IO.End_Of_File (File) then
+            raise Baseline_Format_Error with
+              "legacy baseline contains unexpected trailing data";
+         end if;
+      end Parse_Legacy;
    begin
       Validate_Text (Path, "baseline path", Allow_Empty => False);
       Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
@@ -392,8 +425,9 @@ package body Flyology_Bench.Baselines is
          First : constant String := Required_Line ("format header");
       begin
          if First = Legacy_Magic then
-            raise Baseline_Format_Error with
-              "unsupported benchmark baseline schema version 1";
+            Parse_Legacy;
+            Ada.Text_IO.Close (File);
+            return Result;
          elsif First /= Magic then
             raise Baseline_Format_Error with
               "unsupported benchmark baseline format";
@@ -454,7 +488,7 @@ package body Flyology_Bench.Baselines is
                   end if;
                elsif Key = "bootstrap_method" then
                   Duplicate ("bootstrap_method", Seen_Method);
-                  if Value /= "circular_block_mean_ratio" then
+                  if Value /= Bootstrap_Method_Text then
                      raise Baseline_Format_Error with
                        "unsupported baseline bootstrap_method " & Value;
                   end if;
@@ -573,7 +607,7 @@ package body Flyology_Bench.Baselines is
       Saved_Count : constant Positive := Positive (Saved.Sample_Total);
       Saved_Sum : Long_Float := 0.0;
       Current_Sum : Long_Float := 0.0;
-      Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+      Bootstrap : Float_Array (1 .. Default_Bootstrap_Resamples);
       State : Interfaces.Unsigned_64 :=
         16#94D0_49BB_1331_11EB# xor Interfaces.Unsigned_64 (Random_Seed);
       Effective_Fingerprint : constant String :=
@@ -668,8 +702,13 @@ package body Flyology_Bench.Baselines is
            / (Current_Sum / Long_Float (Current_Count));
       end loop;
       Sort (Bootstrap);
-      Result.CI_Low := Percentile (Bootstrap, 0.025);
-      Result.CI_High := Percentile (Bootstrap, 0.975);
+      declare
+         Tail : constant Long_Float :=
+           (100.0 - Default_Confidence_Level_Percent) / 200.0;
+      begin
+         Result.CI_Low := Percentile (Bootstrap, Tail);
+         Result.CI_High := Percentile (Bootstrap, 1.0 - Tail);
+      end;
       declare
          Change_Low : constant Long_Float :=
            100.0 * (1.0 / Result.CI_High - 1.0);
@@ -712,6 +751,14 @@ package body Flyology_Bench.Baselines is
 
    function Time_Change_Percent (Result : Regression) return Long_Float is
      (100.0 * (1.0 / Result.Speedup_Value - 1.0));
+
+   function Time_Change_Confidence_Low
+     (Result : Regression) return Long_Float is
+     (100.0 * (1.0 / Result.CI_High - 1.0));
+
+   function Time_Change_Confidence_High
+     (Result : Regression) return Long_Float is
+     (100.0 * (1.0 / Result.CI_Low - 1.0));
 
    function Verdict (Result : Regression) return Comparison_Verdict is
      (Result.Verdict_Value);
@@ -759,6 +806,10 @@ package body Flyology_Bench.Baselines is
       Result.Path_Data := Unbounded.To_Unbounded_String (Path);
       Result.Current_Name_Data := Unbounded.To_Unbounded_String (Current_Name);
       Result.Threshold_Value := Policy.Practical_Threshold_Percent;
+      Result.Bootstrap_Method_Value := Circular_Block_Mean_Ratio;
+      Result.Confidence_Level_Value := Default_Confidence_Level_Percent;
+      Result.Bootstrap_Resample_Total := Default_Bootstrap_Resamples;
+      Result.Random_Seed_Value := Random_Seed;
 
       if not Ada.Directories.Exists (Path) then
          Set_Result
@@ -901,6 +952,24 @@ package body Flyology_Bench.Baselines is
      (Result : Gate_Result) return Long_Float is
      (Result.Threshold_Value);
 
+   function Bootstrap_Method (Result : Gate_Result) return String is
+   begin
+      case Result.Bootstrap_Method_Value is
+         when Circular_Block_Mean_Ratio =>
+            return Bootstrap_Method_Text;
+      end case;
+   end Bootstrap_Method;
+
+   function Confidence_Level_Percent
+     (Result : Gate_Result) return Long_Float is
+     (Result.Confidence_Level_Value);
+
+   function Bootstrap_Resamples (Result : Gate_Result) return Positive is
+     (Result.Bootstrap_Resample_Total);
+
+   function Random_Seed (Result : Gate_Result) return Long_Long_Integer is
+     (Result.Random_Seed_Value);
+
    procedure Require_Statistics (Result : Gate_Result) is
    begin
       if not Result.Statistics_Ready then
@@ -931,4 +1000,18 @@ package body Flyology_Bench.Baselines is
       Require_Statistics (Result);
       return Time_Change_Percent (Result.Regression_Data);
    end Time_Change_Percent;
+
+   function Time_Change_Confidence_Low
+     (Result : Gate_Result) return Long_Float is
+   begin
+      Require_Statistics (Result);
+      return Time_Change_Confidence_Low (Result.Regression_Data);
+   end Time_Change_Confidence_Low;
+
+   function Time_Change_Confidence_High
+     (Result : Gate_Result) return Long_Float is
+   begin
+      Require_Statistics (Result);
+      return Time_Change_Confidence_High (Result.Regression_Data);
+   end Time_Change_Confidence_High;
 end Flyology_Bench.Baselines;

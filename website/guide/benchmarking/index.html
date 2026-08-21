@@ -560,21 +560,22 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
             <figure class="code-panel">
               <figcaption>record and check one durable baseline</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
-              <pre><code>./examples/bin/baseline_gate record build/integer_mix.baseline
-./examples/bin/baseline_gate check  build/integer_mix.baseline
+              <pre><code>identity='cpu=ci-runner-1;policy=cpu-2;switches=-O3;benchmark=v1'
+./examples/bin/baseline_gate record build/integer_mix.baseline "$identity"
+./examples/bin/baseline_gate check  build/integer_mix.baseline "$identity"
 
 FLYOLOGY_BENCH_OUTPUT=csv \
-  ./examples/bin/baseline_gate check build/integer_mix.baseline
+  ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"
 FLYOLOGY_BENCH_OUTPUT=json \
-  ./examples/bin/baseline_gate check build/integer_mix.baseline</code></pre>
+  ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"</code></pre>
             </figure>
-            <p>Record mode is explicit. Check mode never updates its reference, including after rejection. The writer flushes a unique same-directory temporary file before an atomic POSIX rename. A failure before publication leaves the earlier artifact intact. The artifact has a version, exact benchmark and environment identities, the clock backend, raw time samples, a checksum, and a commit footer.</p>
+            <p>Record mode is explicit. Check mode never updates its reference, including after rejection. The writer flushes a unique same-directory temporary file before an atomic POSIX rename. A failure before publication leaves the earlier artifact intact. The version 2 artifact has exact benchmark and environment identities, the clock backend, raw time samples, a checksum, and a commit footer. The reader also accepts the earlier public version 1 format without silently upgrading it; version 1 has no checksum or commit footer. The example combines its required caller identity with the default OS, architecture, and GNAT fingerprint. Include the stable CPU or runner class, placement policy, compiler switches, and benchmark contract rather than a changing contender revision.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Regression</dt><dd>The gate rejects only when the complete 95% confidence interval establishes a slowdown beyond the practical threshold. It does not reject a noisy point estimate.</dd></div>
                 <div class="decision-row"><dt>Other verdicts</dt><dd>Improvement, practical equivalence, and inconclusive remain distinct. Policy decides whether an inconclusive result rejects the run.</dd></div>
                 <div class="decision-row"><dt>Artifact policy</dt><dd>Interactive policy can report a missing, invalid, or incompatible artifact. CI can reject those states. The implementation never compares different benchmark names, fingerprints, or clock backends.</dd></div>
-                <div class="decision-row"><dt>Output</dt><dd>Console, CSV, and newline-delimited JSON retain status, rejection, compatibility, interval, threshold, and reason. A suite can count each status and use the rejection field for its final process status.</dd></div>
+                <div class="decision-row"><dt>Output</dt><dd>Console, CSV, and newline-delimited JSON retain status, rejection, compatibility, speedup and time-change intervals, threshold, bootstrap method, confidence level, resample count, seed, and reason. Confidence-neutral machine field names prevent a configured interval from being mislabeled. A suite can count each status and use the rejection field for its final process status.</dd></div>
               </dl>
             </div>
             <p>Use a direct paired comparison when both implementations can run in one process. Pairing retains the balanced collection schedule. The saved-baseline gate uses the existing independent-run bootstrap because its runs occurred at different times. One artifact represents one named reference. Longer histories, dashboards, commit-range analysis, and change-point detection remain separate work.</p>

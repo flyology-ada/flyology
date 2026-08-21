@@ -62,16 +62,40 @@ then
 fi
 
 gate_baseline="$work_dir/example.baseline"
+gate_identity='cpu=test-runner;policy=unplaced;switches=-O3;benchmark=v1'
+if "$crate_root/examples/bin/baseline_gate" record "$gate_baseline" \
+  >"$work_dir/gate-missing-identity.out" 2>&1
+then
+  printf '%s\n' "baseline example accepted a missing environment identity" >&2
+  exit 1
+fi
 "$crate_root/examples/bin/baseline_gate" record "$gate_baseline" \
+  "$gate_identity" \
   >"$work_dir/gate-record.out"
+if "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  'cpu=other-runner;policy=unplaced;switches=-O3;benchmark=v1' \
+  >"$work_dir/gate-incompatible.out" 2>&1
+then
+  printf '%s\n' "baseline example accepted an incompatible environment" >&2
+  exit 1
+fi
+if ! grep -q 'status     | incompatible_baseline (rejected)' \
+  "$work_dir/gate-incompatible.out"
+then
+  printf '%s\n' "baseline example did not report environment mismatch" >&2
+  exit 1
+fi
 FLYOLOGY_BENCH_OUTPUT=json \
   "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  "$gate_identity" \
   >"$work_dir/gate.jsonl"
 FLYOLOGY_BENCH_OUTPUT=csv \
   "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  "$gate_identity" \
   >"$work_dir/gate.csv"
 if FLYOLOGY_BENCH_GATE_REGRESSION=1 \
   "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  "$gate_identity" \
   >"$work_dir/gate-regression.out" 2>&1
 then
   printf '%s\n' "baseline example accepted an established regression" >&2
@@ -238,7 +262,7 @@ awk '
     next
   }
   NR == 2 {
-    if (NF != expected || $1 != "baseline_gate" || $2 != "1") {
+    if (NF != expected || $1 != "baseline_gate" || $2 != "2") {
       failures += 1
     }
     next
@@ -409,12 +433,18 @@ if command -v jq >/dev/null 2>&1; then
     || { printf '%s\n' "multi-comparison JSON failed validation" >&2; exit 1; }
   jq -e '
     .type == "baseline_gate"
-    and .schema_version == 1
+    and .schema_version == 2
     and (.status | type) == "string"
     and (.rejected | type) == "boolean"
     and (.compatible | type) == "boolean"
-    and has("speedup_ci95_low")
-    and has("speedup_ci95_high")
+    and .bootstrap_method == "circular_block_mean_ratio"
+    and .confidence_level_percent == 95
+    and .bootstrap_resamples == 2000
+    and .random_seed == 97
+    and has("speedup_ci_low")
+    and has("speedup_ci_high")
+    and has("time_change_ci_low")
+    and has("time_change_ci_high")
     and (.reason | type) == "string"
   ' "$work_dir/gate.jsonl" >/dev/null \
     || { printf '%s\n' "baseline gate JSON failed validation" >&2; exit 1; }
@@ -423,6 +453,9 @@ if command -v jq >/dev/null 2>&1; then
     and .current_name == "gate,\"case"
     and .status == "practical_equivalence"
     and .rejected == false
+    and .random_seed == 103
+    and (.time_change_ci_low | type) == "number"
+    and (.time_change_ci_high | type) == "number"
   ' "$work_dir/gate-smoke.jsonl" >/dev/null \
     || { printf '%s\n' "escaped baseline gate JSON failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'

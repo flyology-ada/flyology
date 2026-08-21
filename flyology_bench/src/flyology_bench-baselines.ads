@@ -41,9 +41,10 @@ package Flyology_Bench.Baselines is
       Result      : Measurement;
       Fingerprint : String := "");
 
-   --  Load and validate a baseline written by Save. Validation includes the
-   --  schema version, required and duplicate fields, ranges, completeness,
-   --  footer, and checksum.
+   --  Load and validate a baseline written by Save. Version 2 validation
+   --  includes required and duplicate fields, ranges, completeness, footer,
+   --  and checksum. The earlier version 1 format remains readable so existing
+   --  durable references can be checked, but new records always use version 2.
    --  @param Path Existing baseline path.
    --  @return Parsed baseline and raw samples.
    --  @exception Baseline_Format_Error The artifact is malformed, partial,
@@ -112,6 +113,18 @@ package Flyology_Bench.Baselines is
    --  @param Result Compatible regression result.
    --  @return Relative arithmetic-mean time change in percent.
    function Time_Change_Percent (Result : Regression) return Long_Float;
+
+   --  Return the lower endpoint of the current-time change interval.
+   --  @param Result Compatible regression result.
+   --  @return Lower time-change bound in percent; negative is faster.
+   function Time_Change_Confidence_Low
+     (Result : Regression) return Long_Float;
+
+   --  Return the upper endpoint of the current-time change interval.
+   --  @param Result Compatible regression result.
+   --  @return Upper time-change bound in percent; negative is faster.
+   function Time_Change_Confidence_High
+     (Result : Regression) return Long_Float;
 
    --  Return the practical/statistical regression verdict. A regression is
    --  established only when the complete change interval is above the
@@ -266,6 +279,27 @@ package Flyology_Bench.Baselines is
    function Practical_Threshold_Percent
      (Result : Gate_Result) return Long_Float;
 
+   --  Return the stable name of the independent bootstrap method.
+   --  @param Result Completed gate evaluation.
+   --  @return Method name recorded for reproduction and machine output.
+   function Bootstrap_Method (Result : Gate_Result) return String;
+
+   --  Return the confidence level used by the independent bootstrap.
+   --  @param Result Completed gate evaluation.
+   --  @return Confidence level in percent.
+   function Confidence_Level_Percent
+     (Result : Gate_Result) return Long_Float;
+
+   --  Return the number of bootstrap resamples used by the gate.
+   --  @param Result Completed gate evaluation.
+   --  @return Positive resample count.
+   function Bootstrap_Resamples (Result : Gate_Result) return Positive;
+
+   --  Return the deterministic bootstrap seed supplied to Evaluate_Gate.
+   --  @param Result Completed gate evaluation.
+   --  @return Exact signed seed.
+   function Random_Seed (Result : Gate_Result) return Long_Long_Integer;
+
    --  Return baseline-time/current-time ratio.
    --  @param Result Gate result with statistics.
    --  @return Arithmetic-mean speedup.
@@ -289,6 +323,20 @@ package Flyology_Bench.Baselines is
    --  @return Percent change; negative is faster.
    --  @exception Program_Error Has_Statistics is False.
    function Time_Change_Percent (Result : Gate_Result) return Long_Float;
+
+   --  Return the lower endpoint of the current-time change interval.
+   --  @param Result Gate result with statistics.
+   --  @return Lower time-change bound in percent; negative is faster.
+   --  @exception Program_Error Has_Statistics is False.
+   function Time_Change_Confidence_Low
+     (Result : Gate_Result) return Long_Float;
+
+   --  Return the upper endpoint of the current-time change interval.
+   --  @param Result Gate result with statistics.
+   --  @return Upper time-change bound in percent; negative is faster.
+   --  @exception Program_Error Has_Statistics is False.
+   function Time_Change_Confidence_High
+     (Result : Gate_Result) return Long_Float;
 
 private
    package Strings renames Ada.Strings.Unbounded;
@@ -314,6 +362,8 @@ private
       Verdict_Value : Comparison_Verdict := Inconclusive;
    end record;
 
+   type Bootstrap_Method_Id is (Circular_Block_Mean_Ratio);
+
    type Gate_Result is record
       Status_Value       : Gate_Status := Baseline_Error;
       Rejected_Value     : Boolean := False;
@@ -325,6 +375,11 @@ private
       Path_Data          : Strings.Unbounded_String;
       Reason_Data        : Strings.Unbounded_String;
       Threshold_Value    : Long_Float := 1.0;
+      Bootstrap_Method_Value : Bootstrap_Method_Id :=
+        Circular_Block_Mean_Ratio;
+      Confidence_Level_Value : Long_Float := 95.0;
+      Bootstrap_Resample_Total : Positive := 2_000;
+      Random_Seed_Value  : Long_Long_Integer := 1;
       Regression_Data    : Regression;
    end record;
 end Flyology_Bench.Baselines;

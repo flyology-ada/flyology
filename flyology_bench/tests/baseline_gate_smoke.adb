@@ -22,6 +22,7 @@ procedure Baseline_Gate_Smoke is
 
    Root : constant String := ".flyology_bench_gate_test";
    Baseline_Path : constant String := Root & ".baseline";
+   Legacy_Path : constant String := Root & ".v1.baseline";
    Slow_Path : constant String := Root & ".slow.baseline";
    Clock_Path : constant String := Root & ".clock.baseline";
    Output_Path : constant String := Root & ".output";
@@ -94,6 +95,32 @@ procedure Baseline_Gate_Smoke is
       Ada.Text_IO.Put (File, Text);
       Ada.Text_IO.Close (File);
    end Write_Text;
+
+   procedure Write_Legacy_Baseline
+     (Path        : String;
+      Name        : String;
+      Result      : Flyology_Bench.Measurement;
+      Fingerprint : String)
+   is
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Put_Line (File, "flyology_bench baseline v1");
+      Ada.Text_IO.Put_Line (File, Name);
+      Ada.Text_IO.Put_Line (File, Fingerprint);
+      Ada.Text_IO.Put_Line (File, Flyology_Bench.Clock_Backend (Result));
+      Ada.Text_IO.Put_Line
+        (File,
+         Flyology_Bench.Sample_Count'Image (Flyology_Bench.Samples (Result)));
+      for Index in Flyology_Bench.Sample_Index range
+        1 .. Flyology_Bench.Sample_Index (Flyology_Bench.Samples (Result))
+      loop
+         Ada.Text_IO.Put_Line
+           (File, Long_Float'Image
+              (Flyology_Bench.Sample_Nanoseconds (Result, Index)));
+      end loop;
+      Ada.Text_IO.Close (File);
+   end Write_Legacy_Baseline;
 
    FNV_Offset : constant Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
    FNV_Prime  : constant Interfaces.Unsigned_64 := 16#0000_0100_0000_01B3#;
@@ -179,6 +206,7 @@ procedure Baseline_Gate_Smoke is
 
 begin
    Delete_If_Present (Baseline_Path);
+   Delete_If_Present (Legacy_Path);
    Delete_If_Present (Slow_Path);
    Delete_If_Present (Clock_Path);
    Delete_If_Present (Output_Path);
@@ -204,7 +232,47 @@ begin
          "baseline clock backend did not round trip exactly");
    end;
 
+   Write_Legacy_Baseline
+     (Legacy_Path, "gate,""case", Fast, "host=exact;switches=-O2");
    declare
+      Before : constant String := Read_All (Legacy_Path);
+      Saved : constant Baselines.Baseline := Baselines.Load (Legacy_Path);
+      Regression : constant Baselines.Regression :=
+        Baselines.Compare
+          (Saved, Fast,
+           Fingerprint => "host=exact;switches=-O2",
+           Random_Seed => 99);
+      Gate : constant Baselines.Gate_Result :=
+        Baselines.Evaluate_Gate
+          (Legacy_Path, "gate,""case", Fast,
+           Fingerprint => "host=exact;switches=-O2",
+           Policy =>
+             (Baselines.Fail_Closed_Gate_Policy with delta
+                Practical_Threshold_Percent => 20.0),
+           Random_Seed => 99);
+   begin
+      Check
+        (Baselines.Name (Saved) = "gate,""case"
+         and then Baselines.Fingerprint (Saved) = "host=exact;switches=-O2"
+         and then Baselines.Clock_Backend (Saved)
+           = Flyology_Bench.Clock_Backend (Fast),
+         "legacy baseline identity did not round trip exactly");
+      Check
+        (Baselines.Compatible (Regression)
+         and then abs (Baselines.Speedup (Regression) - 1.0) < 1.0E-12,
+         "legacy baseline raw samples did not remain comparable");
+      Check
+        (Baselines.Compatible (Gate)
+         and then Baselines.Has_Statistics (Gate)
+         and then not Baselines.Rejected (Gate),
+         "legacy baseline did not pass through the gate workflow");
+      Check
+        (Read_All (Legacy_Path) = Before,
+         "checking a legacy baseline upgraded it implicitly");
+   end;
+
+   declare
+      Before : constant String := Read_All (Baseline_Path);
       Regressed : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
           (Baseline_Path, "gate,""case", Slow,
@@ -213,7 +281,6 @@ begin
              (Baselines.Fail_Closed_Gate_Policy with delta
                 Practical_Threshold_Percent => 5.0),
            Random_Seed => 101);
-      Before : constant String := Read_All (Baseline_Path);
    begin
       Check
         (Baselines.Status (Regressed) = Baselines.Regressed
@@ -377,8 +444,9 @@ begin
 
    Expect_Format_Error
      (Output_Path,
-      "flyology_bench baseline v1" & ASCII.LF,
-      "schema version 1");
+      "flyology_bench baseline v1" & ASCII.LF
+      & "legacy-name" & ASCII.LF,
+      "legacy fingerprint");
    Expect_Format_Error
      (Output_Path,
       "flyology_bench baseline" & ASCII.LF
@@ -470,9 +538,21 @@ begin
          Check
            (Ada.Strings.Fixed.Index
               (Text, "status     | practical_equivalence (accepted)") > 0
-            and then Ada.Strings.Fixed.Index (Text, "baseline_gate,1,") > 0
+            and then Ada.Strings.Fixed.Index (Text, "baseline_gate,2,") > 0
             and then Ada.Strings.Fixed.Index
               (Text, """status"":""practical_equivalence""") > 0
+            and then Ada.Strings.Fixed.Index
+              (Text, """bootstrap_method"":""circular_block_mean_ratio""") > 0
+            and then Ada.Strings.Fixed.Index
+              (Text, """confidence_level_percent"":95.000000000") > 0
+            and then Ada.Strings.Fixed.Index
+              (Text, """bootstrap_resamples"":2000") > 0
+            and then Ada.Strings.Fixed.Index
+              (Text, """random_seed"":103") > 0
+            and then Ada.Strings.Fixed.Index
+              (Text, """time_change_ci_low"":") > 0
+            and then Ada.Strings.Fixed.Index
+              (Text, """time_change_ci_high"":") > 0
             and then Ada.Strings.Fixed.Index (Text, """gate,""""case""") > 0,
             "gate CSV/JSON schemas or escaping are incorrect");
       end;
@@ -484,6 +564,7 @@ begin
    end;
 
    Delete_If_Present (Baseline_Path);
+   Delete_If_Present (Legacy_Path);
    Delete_If_Present (Slow_Path);
    Delete_If_Present (Clock_Path);
    Delete_If_Present (Output_Path);
@@ -492,6 +573,7 @@ begin
 exception
    when others =>
       Delete_If_Present (Baseline_Path);
+      Delete_If_Present (Legacy_Path);
       Delete_If_Present (Slow_Path);
       Delete_If_Present (Clock_Path);
       Delete_If_Present (Output_Path);

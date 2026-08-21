@@ -784,6 +784,12 @@ fields, duplicate fields and samples, unsupported versions, malformed or
 out-of-range values, incomplete samples, trailing data, and checksum failures
 with a specific `Baseline_Format_Error` message.
 
+`Load` also retains read compatibility with the earlier version 1 format that
+the public `Save` procedure emitted. Its fixed field order, sample count, sample
+ranges, and trailing data are validated, but that legacy format has no checksum
+or commit footer. Recording is the explicit way to publish a version 2
+replacement; checking a version 1 artifact never upgrades it in place.
+
 `Save` writes a unique temporary artifact in the destination directory. It
 flushes the complete file before an atomic POSIX `rename` publishes it. A
 process failure before publication cannot truncate the earlier baseline. A
@@ -832,18 +838,28 @@ The maintained example separates recording from checking and maps rejection to
 `Ada.Command_Line.Failure`:
 
 ```sh
-./examples/bin/baseline_gate record build/integer_mix.baseline
-./examples/bin/baseline_gate check  build/integer_mix.baseline
-FLYOLOGY_BENCH_OUTPUT=csv  ./examples/bin/baseline_gate check build/integer_mix.baseline
-FLYOLOGY_BENCH_OUTPUT=json ./examples/bin/baseline_gate check build/integer_mix.baseline
+identity='cpu=ci-runner-1;policy=cpu-2;switches=-O3;benchmark=v1'
+./examples/bin/baseline_gate record build/integer_mix.baseline "$identity"
+./examples/bin/baseline_gate check  build/integer_mix.baseline "$identity"
+FLYOLOGY_BENCH_OUTPUT=csv  ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"
+FLYOLOGY_BENCH_OUTPUT=json ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"
 ```
 
+The example combines that required caller identity with the default OS,
+architecture, and GNAT fingerprint. Use a stable description of the actual CPU
+or runner class, placement policy, compiler switches, and benchmark contract;
+do not use a changing build number or the contender revision being measured.
+
 The console, CSV, and newline-delimited JSON gate reporters retain the status,
-policy decision, compatibility issue, confidence interval, threshold, and
-reason. Aggregation across a suite can use `Rejected` for the final process
-status while counting each `Gate_Status` separately. A baseline gate compares
-one named reference with one current run. Longer histories, dashboards,
-commit-range runners, and change-point detection are separate facilities.
+policy decision, compatibility issue, speedup and time-change intervals,
+threshold, bootstrap method, confidence level, resample count, seed, and
+reason. The machine schema uses confidence-neutral interval field names plus an
+explicit confidence level so later statistical-policy configuration does not
+mislabel an interval. Aggregation across a suite can use `Rejected` for the
+final process status while counting each `Gate_Status` separately. A baseline
+gate compares one named reference with one current run. Longer histories,
+dashboards, commit-range runners, and change-point detection are separate
+facilities.
 
 `Flyology_Bench.Host_Control.Pin_Current_Thread` is the low-level primitive
 under `Config.Placement`. Placement cannot by itself control frequency

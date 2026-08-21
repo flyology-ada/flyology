@@ -216,8 +216,9 @@ package Flyology_Bench.Reporters is
    procedure Put_Gate_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
-   --  Print one saved-baseline gate decision as a CSV row. Statistical fields
-   --  are empty when no compatible comparison ran.
+   --  Print one saved-baseline gate decision as a CSV row. The bootstrap
+   --  method, confidence level, resample count, and seed are always present;
+   --  interval fields are empty when no compatible comparison ran.
    --  @param Result Completed gate evaluation.
    --  @param File Destination text file.
    procedure Put_Gate_CSV
@@ -225,7 +226,8 @@ package Flyology_Bench.Reporters is
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    --  Print one saved-baseline gate decision as a newline-delimited JSON
-   --  object. Statistical fields are null when no compatible comparison ran.
+   --  object. The statistical contract is always present; interval fields are
+   --  null when no compatible comparison ran.
    --  @param Result Completed gate evaluation.
    --  @param File Destination text file.
    procedure Put_Gate_JSON
