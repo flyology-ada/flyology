@@ -136,6 +136,38 @@ check_suite_csv suite-dry "$work_dir/suite-example.csv" \
   || { printf '%s\n' "suite dry CSV failed validation" >&2; exit 1; }
 check_suite_csv suite-full "$work_dir/suite-full.csv" \
   || { printf '%s\n' "suite full CSV failed validation" >&2; exit 1; }
+
+# Exercise exact direct invocation with whitespace and shell metacharacters in
+# the executable path. The worker API receives this as one argv value; no shell
+# parses it. Resolve the working directory physically so Darwin's /tmp symlink
+# does not make the cwd assertion compare two spellings of one directory.
+worker_fixture="$work_dir/worker fixture;literal"
+cp "$crate_root/tests/bin/worker_fixture" "$worker_fixture"
+chmod u+x "$worker_fixture"
+physical_work_dir=$(CDPATH= cd -- "$work_dir" && pwd -P)
+FLYOLOGY_BENCH_WORKER_FIXTURE="$worker_fixture" \
+FLYOLOGY_BENCH_TEST_DIR="$physical_work_dir" \
+  "$crate_root/tests/bin/workers_smoke"
+
+cc_command=${CC:-cc}
+"$cc_command" -std=c11 -Wall -Wextra -Werror \
+  "$crate_root/tests/native/workers_abi_probe.c" \
+  "$crate_root/lib/libflyology_bench.a" -lpthread \
+  -o "$work_dir/workers_abi_probe"
+"$work_dir/workers_abi_probe"
+for symbol in \
+  flyology_bench_worker_spawn \
+  flyology_bench_worker_observe_exit \
+  flyology_bench_worker_status_exited
+do
+  nm -g "$crate_root/lib/libflyology_bench.a" | grep -q "$symbol" || {
+    printf '%s\n' "worker ABI symbol is missing: $symbol" >&2
+    exit 1
+  }
+done
+
+"$crate_root/examples/bin/fresh_process" >"$work_dir/fresh-process.out"
+cat "$work_dir/fresh-process.out"
 "$crate_root/examples/bin/recording_service" \
   >"$work_dir/recording-example.ansi"
 escape=$(printf '\033')

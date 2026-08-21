@@ -474,7 +474,7 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - `flyology_debug/`: independent bounded in-memory tracing and gauge crate,
   smoke tests, producer-cost benchmark, and example.
 - `flyology_bench/`: independent adaptive and paired-comparison benchmark
-  crate, reporters, smoke tests, and examples.
+  crate, reporters, fresh-process worker protocol, smoke tests, and examples.
   Parameter sweeps retain explicit ordered exact points and exact work per
   logical operation. Throughput is derived only from the same per-operation
   wall samples, paired sweeps invoke the adjacent order-balanced comparison at
@@ -486,6 +486,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   integer policy decision. Sweep NDJSON keeps numeric fields for convenience
   and exact decimal-string companions for unsigned 64-bit identities, work,
   and scaling ranges.
+  Fresh workers use `posix_spawn`, execute one exact registered case per
+  process, and retain process repetitions separately from within-worker
+  samples. Host controls and metric sessions belong in the measuring worker;
+  parent spawn/setup time never enters per-operation samples.
 - `proof/`: SPARK-only development crate plus runtime, debug, and benchmark
   policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and
@@ -612,7 +616,8 @@ required by the changed boundary.
   native-clock, shared-store, and sharded concurrent tracing. Re-run it before
   making a tracer hot-path performance claim.
 - `cd flyology_bench && alr test`: build and run the standalone benchmark
-  crate's smoke tests and example, and check the published CSV/JSON schemas.
+  crate's smoke tests, fresh-process containment fixtures, ABI probe, and
+  examples, and check the published CSV/JSON schemas.
   Set `FLYOLOGY_BENCH_REQUIRE_PERF=1` to also require Linux hardware counters
   and the inherited worker-task attribution check.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.
