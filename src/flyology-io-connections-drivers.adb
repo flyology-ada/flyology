@@ -2,6 +2,7 @@ with Ada.Exceptions;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
 with Flyology.IO.TLS_Driver;
+with Flyology.Operations.Drivers;
 
 package body Flyology.IO.Connections.Drivers is
    package Sockets renames Flyology.IO.Sockets;
@@ -11,6 +12,196 @@ package body Flyology.IO.Connections.Drivers is
    use type Sockets.Error_Type;
    use type TLS.Session_Access;
    use type TLS.Step_Status;
+
+   procedure Reset (Item : in out Capability) is
+   begin
+      Item.Item := null;
+      Item.Token := null;
+      Item.FD := Invalid_Descriptor;
+      Item.Lease_Source := Invalid_Descriptor;
+      Item.Initial_Close_Source := Invalid_Descriptor;
+      Item.Close_Source := Invalid_Descriptor;
+      Item.Owner := null;
+      Item.Transport := No_Transport;
+      Item.Deadline := Infinite;
+   end Reset;
+
+   procedure Release (IO : in out Capability) is
+   begin
+      Release_Operation (IO.Guard);
+      Reset (IO);
+   exception
+      when others =>
+         if IO.Guard.State = Unregistered then
+            Reset (IO);
+         end if;
+         raise;
+   end Release;
+
+   overriding procedure Finalize (IO : in out Capability) is
+   begin
+      Release (IO);
+   end Finalize;
+
+   function Is_Acquired (IO : Capability) return Boolean is
+     (IO.Guard.State = Acquired);
+
+   function Is_Engaged (IO : Capability) return Boolean is
+     (IO.Item /= null and then IO.Guard.State /= Unregistered);
+
+   procedure Poll_Acquisition
+     (IO     : in out Capability;
+      Result : out Acquisition_Result)
+   is
+      Lease : Lease_Result;
+      Interrupts : Interrupt_Set (1 .. 2);
+      Count : Natural;
+   begin
+      if IO.Item = null or else IO.Guard.State /= Registered then
+         raise Program_Error with
+           "connection capability is not awaiting acquisition";
+      end if;
+      Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Count);
+      IO.Item.Controller.Try_Acquire
+        (IO.Guard.Generation,
+         IO.Guard.State'Access,
+         Lease,
+         IO.FD,
+         IO.Close_Source,
+         IO.Guard.Socket,
+         IO.Owner,
+         IO.Transport);
+      case Lease is
+         when Lease_Busy =>
+            Result := Need_Acquire_Readiness;
+         when Lease_Cancelled =>
+            Reset (IO);
+            raise Operation_Cancelled with
+              "connection closed during capability acquisition";
+         when Lease_Acquired =>
+            if IO.Transport not in Plain_Transport | TLS_Transport then
+               Release (IO);
+               raise Program_Error with
+                 "connection capability transport is invalid";
+            end if;
+            begin
+               Sockets.Prepare (IO.Guard.Socket);
+            exception
+               when others =>
+                  Release (IO);
+                  raise;
+            end;
+            Result := Acquired;
+      end case;
+   end Poll_Acquisition;
+
+   procedure Start
+     (IO      : in out Capability;
+      Item    : not null access Connection'Class;
+      Result  : out Acquisition_Result;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null) is
+   begin
+      if IO.Item /= null or else IO.Guard.State /= Unregistered then
+         raise Program_Error with "connection capability is already active";
+      end if;
+      IO.Item := Item.all'Unchecked_Access;
+      IO.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      IO.Guard.Item := IO.Item;
+      IO.Started := Ada.Real_Time.Clock;
+      IO.Deadline := Timeout;
+      begin
+         IO.Item.Controller.Start_Operation
+           (IO.Guard.Generation'Access,
+            IO.Guard.State'Access,
+            IO.FD,
+            IO.Lease_Source,
+            IO.Initial_Close_Source,
+            IO.Owner);
+         Poll_Acquisition (IO, Result);
+      exception
+         when others =>
+            if IO.Guard.State /= Unregistered then
+               Release_Operation (IO.Guard);
+            end if;
+            if IO.Guard.State = Unregistered then
+               Reset (IO);
+            end if;
+            raise;
+      end;
+   end Start;
+
+   procedure Arm_Acquisition
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class)
+   is
+      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
+      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
+      Count : Natural := 2;
+   begin
+      if IO.Item = null or else IO.Guard.State /= Registered then
+         raise Program_Error with
+           "connection capability is not awaiting acquisition";
+      end if;
+      Sources (1) :=
+        (Descriptor => IO.Lease_Source, For_Write => False);
+      Sources (2) :=
+        (Descriptor => IO.Initial_Close_Source, For_Write => False);
+      Interrupt_Sources
+        (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+      for Index in 1 .. Interrupt_Count loop
+         Count := Count + 1;
+         Sources (Count) :=
+           (Descriptor => Interrupts (Index), For_Write => False);
+      end loop;
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Operation, Sources (1 .. Count));
+   end Arm_Acquisition;
+
+   procedure Arm_Transport
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Step_Result)
+   is
+      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
+      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
+      Count : Natural := 2;
+   begin
+      if IO.Item = null or else IO.Guard.State /= Acquired then
+         raise Program_Error with "connection capability is not acquired";
+      elsif Required not in Need_Read | Need_Write then
+         raise Program_Error with
+           "transport arming requires Need_Read or Need_Write";
+      end if;
+      Sources (1) :=
+        (Descriptor => IO.FD, For_Write => Required = Need_Write);
+      Sources (2) :=
+        (Descriptor => IO.Close_Source, For_Write => False);
+      Interrupt_Sources
+        (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+      for Index in 1 .. Interrupt_Count loop
+         Count := Count + 1;
+         Sources (Count) :=
+           (Descriptor => Interrupts (Index), For_Write => False);
+      end loop;
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Operation, Sources (1 .. Count));
+   end Arm_Transport;
+
+   procedure Arm_Deadline
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class) is
+   begin
+      if not Is_Engaged (IO) then
+         raise Program_Error with "connection capability is not engaged";
+      elsif IO.Deadline >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline
+           (Operation, Remaining (IO.Started, IO.Deadline));
+      end if;
+   end Arm_Deadline;
 
    protected body Wakeup_Controller is
       procedure Signal is
@@ -58,6 +249,9 @@ package body Flyology.IO.Connections.Drivers is
 
    procedure Check (Item : in out Capability) is
    begin
+      if Item.Item = null or else Item.Guard.State /= Acquired then
+         raise Program_Error with "connection capability is not acquired";
+      end if;
       Check_TLS_Operation
         (Item.Item.all, Item.Guard.Generation, Item.Owner, Item.Token);
       if Item.Deadline >= 0.0
@@ -253,20 +447,41 @@ package body Flyology.IO.Connections.Drivers is
       Token   : access Cancellation_Token := null)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      IO      : Capability (Item'Unchecked_Access, Token);
+      IO      : Capability;
+      Acquisition : Acquisition_Result;
+      Requests : Wait_Request_Array (1 .. 4);
+      Count : Natural;
+      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
+      Ready : Natural;
    begin
+      Start
+        (IO, Item'Unchecked_Access, Acquisition,
+         Timeout => Timeout, Token => Token);
       IO.Started := Started;
-      IO.Deadline := Timeout;
-      Acquire_Operation
-        (Item'Unchecked_Access, Started, Timeout, Token, IO.FD, IO.Guard,
-         IO.Close_Source, IO.Owner, IO.Transport);
-      if IO.Transport not in Plain_Transport | TLS_Transport then
-         raise Program_Error with "connection driver transport is invalid";
-      end if;
-      Sockets.Prepare (IO.Guard.Socket);
+      while Acquisition = Need_Acquire_Readiness loop
+         Count := 2;
+         Requests (1) := (FD => IO.Lease_Source, Condition => For_Read);
+         Requests (2) :=
+           (FD => IO.Initial_Close_Source, Condition => For_Read);
+         Interrupt_Sources
+           (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+         for Index in 1 .. Interrupt_Count loop
+            Count := Count + 1;
+            Requests (Count) :=
+              (FD => Interrupts (Index), Condition => For_Read);
+         end loop;
+         Ready := Wait_Any
+           (Requests (1 .. Count), Remaining (Started, Timeout));
+         if Ready = 0 then
+            raise Timeout_Error with "connection driver timed out";
+         end if;
+         Poll_Acquisition (IO, Acquisition);
+      end loop;
       Check (IO);
       Process.all (IO);
       Check (IO);
+      Release (IO);
    end Run;
 
 end Flyology.IO.Connections.Drivers;

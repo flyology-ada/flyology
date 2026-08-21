@@ -1665,6 +1665,19 @@ second stack, callback, or access to private I/O implementation state. The
 synthetic third-party-provider example is
 [`tests/operation_composition_smoke.adb`](tests/operation_composition_smoke.adb).
 
+That typed-child pattern is appropriate when the child operation type is known
+statically. A class-wide protocol transport cannot embed a runtime-selected
+socket, connection, or TLS child without allocation or type erasure.
+`Flyology.IO.Connections.Drivers.Capability` covers that case: a concrete
+transport adapter stores one definite, set-independent capability, while the
+higher-level HTTP- or database-operation owns the only set slot. Bounded
+`Start`/`Poll_Acquisition`, `Receive`/`Send`, and arm calls advance the outer
+operation directly; `Release` discharges the connection lease before the outer
+result becomes terminal. The capability exposes neither the descriptor nor TLS
+provider state and creates no child operation, helper task, or allocation. The
+synthetic class-wide regression is in
+[`tests/connection_operations_smoke.adb`](tests/connection_operations_smoke.adb).
+
 The executable provider-by-gate matrix is in
 [`tests/operations_smoke.adb`](tests/operations_smoke.adb); gate graph,
 lifecycle, generation, capacity, and threshold cases are in

@@ -4,21 +4,209 @@ with Ada.Text_IO;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.IO.Connections;
+with Flyology.IO.Connections.Drivers;
 with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.IO.TLS;
 with Flyology.Operations;
+with Flyology.Operations.Drivers;
 with TLS_Test_Provider;
 
 procedure Connection_Operations_Smoke is
    package Connections renames Flyology.IO.Connections;
+   package Connection_Drivers renames Flyology.IO.Connections.Drivers;
    package Connection_TLS renames Flyology.IO.Connections.TLS;
    package Sockets renames Flyology.IO.Sockets;
    package TLS renames Flyology.IO.TLS;
    package Provider renames TLS_Test_Provider;
 
    use Ada.Streams;
+   use type Connection_Drivers.Acquisition_Result;
+   use type Connection_Drivers.Step_Result;
+   use type Flyology.Operations.Driver_Event;
+   use type Flyology.Operations.Terminal_Outcome;
+
+   package Synthetic is
+
+   type Synthetic_Transport is limited interface;
+   procedure Start_Receive
+     (Item      : in out Synthetic_Transport;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Result    : out Connection_Drivers.Acquisition_Result) is abstract;
+   procedure Poll_Receive
+     (Item   : in out Synthetic_Transport;
+      Result : out Connection_Drivers.Acquisition_Result) is abstract;
+   procedure Arm_Acquire
+     (Item      : in out Synthetic_Transport;
+      Operation : in out Flyology.Operations.Operation'Class) is abstract;
+   procedure Receive_Step
+     (Item   : in out Synthetic_Transport;
+      Data   : out Stream_Element_Array;
+      Last   : out Stream_Element_Offset;
+      Result : out Connection_Drivers.Step_Result) is abstract;
+   procedure Arm_Step
+     (Item      : in out Synthetic_Transport;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Connection_Drivers.Step_Result) is abstract;
+   procedure Release (Item : in out Synthetic_Transport) is abstract;
+
+   type Connection_Transport
+     (Item : not null access Connections.Connection'Class) is
+     limited new Synthetic_Transport with record
+      IO : Connection_Drivers.Capability;
+   end record;
+
+   overriding procedure Start_Receive
+     (Item      : in out Connection_Transport;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Result    : out Connection_Drivers.Acquisition_Result);
+   overriding procedure Poll_Receive
+     (Item   : in out Connection_Transport;
+      Result : out Connection_Drivers.Acquisition_Result);
+   overriding procedure Arm_Acquire
+     (Item      : in out Connection_Transport;
+      Operation : in out Flyology.Operations.Operation'Class);
+   overriding procedure Receive_Step
+     (Item   : in out Connection_Transport;
+      Data   : out Stream_Element_Array;
+      Last   : out Stream_Element_Offset;
+      Result : out Connection_Drivers.Step_Result);
+   overriding procedure Arm_Step
+     (Item      : in out Connection_Transport;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Connection_Drivers.Step_Result);
+   overriding procedure Release (Item : in out Connection_Transport);
+
+   type Stream_Array_Access is access all Stream_Element_Array;
+   type Synthetic_Receive_Operation
+     (Set       : not null access Flyology.Operations.Completion_Set'Class;
+      Transport : not null access Synthetic_Transport'Class) is
+     new Flyology.Operations.Operation (Set) with record
+      Data      : Stream_Array_Access := null;
+      Last      : Stream_Element_Offset := 0;
+      Acquiring : Boolean := True;
+   end record;
+
+   overriding procedure Drive
+     (Item  : in out Synthetic_Receive_Operation;
+      Event : Flyology.Operations.Driver_Event);
+   overriding procedure Request_Cancellation
+     (Item : in out Synthetic_Receive_Operation);
+
+   end Synthetic;
+
+   package body Synthetic is
+
+   overriding procedure Start_Receive
+     (Item      : in out Connection_Transport;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Result    : out Connection_Drivers.Acquisition_Result) is
+   begin
+      Connection_Drivers.Start
+        (Item.IO, Item.Item, Result, Timeout => 1.0);
+      Connection_Drivers.Arm_Deadline (Item.IO, Operation);
+   end Start_Receive;
+
+   overriding procedure Poll_Receive
+     (Item   : in out Connection_Transport;
+      Result : out Connection_Drivers.Acquisition_Result) is
+   begin
+      Connection_Drivers.Poll_Acquisition (Item.IO, Result);
+   end Poll_Receive;
+
+   overriding procedure Arm_Acquire
+     (Item      : in out Connection_Transport;
+      Operation : in out Flyology.Operations.Operation'Class) is
+   begin
+      Connection_Drivers.Arm_Acquisition (Item.IO, Operation);
+   end Arm_Acquire;
+
+   overriding procedure Receive_Step
+     (Item   : in out Connection_Transport;
+      Data   : out Stream_Element_Array;
+      Last   : out Stream_Element_Offset;
+      Result : out Connection_Drivers.Step_Result) is
+   begin
+      Connection_Drivers.Receive (Item.IO, Data, Last, Result);
+   end Receive_Step;
+
+   overriding procedure Arm_Step
+     (Item      : in out Connection_Transport;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Connection_Drivers.Step_Result) is
+   begin
+      Connection_Drivers.Arm_Transport (Item.IO, Operation, Required);
+   end Arm_Step;
+
+   overriding procedure Release (Item : in out Connection_Transport) is
+   begin
+      Connection_Drivers.Release (Item.IO);
+   end Release;
+
+   overriding procedure Drive
+     (Item  : in out Synthetic_Receive_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Acquired : Connection_Drivers.Acquisition_Result;
+      Step     : Connection_Drivers.Step_Result;
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         Release (Item.Transport.all);
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+         return;
+      elsif Event = Flyology.Operations.Start_Operation then
+         Start_Receive (Item.Transport.all, Item, Acquired);
+      elsif Item.Acquiring then
+         Poll_Receive (Item.Transport.all, Acquired);
+      else
+         Acquired := Connection_Drivers.Acquired;
+      end if;
+
+      if Acquired = Connection_Drivers.Need_Acquire_Readiness then
+         Arm_Acquire (Item.Transport.all, Item);
+         return;
+      end if;
+      Item.Acquiring := False;
+      Receive_Step
+        (Item.Transport.all, Item.Data.all, Item.Last, Step);
+      case Step is
+         when Connection_Drivers.Made_Progress |
+              Connection_Drivers.Peer_Closed =>
+            Release (Item.Transport.all);
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+         when Connection_Drivers.Need_Read |
+              Connection_Drivers.Need_Write =>
+            Arm_Step (Item.Transport.all, Item, Step);
+      end case;
+   exception
+      when others =>
+         begin
+            Release (Item.Transport.all);
+         exception
+            when others => null;
+         end;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Synthetic_Receive_Operation) is
+   begin
+      Release (Item.Transport.all);
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   exception
+      when others =>
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+   end Request_Cancellation;
+
+   end Synthetic;
+
+   use Synthetic;
 
    function Ref
      (Item : Flyology.Operations.Operation'Class)
@@ -106,6 +294,113 @@ procedure Connection_Operations_Smoke is
                when Flyology.Operations.Operation_Cancelled => null;
             end;
          end;
+         Connections.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      --  A class-wide higher-level transport stores a definite Connection
+      --  capability without knowing its caller's Completion_Set. Its outer
+      --  operation owns the only slot and arms the capability's hidden lease,
+      --  lifecycle, and transport sources. Exercise plaintext and a TLS
+      --  receive whose provider asks for the opposite write direction.
+      for Use_TLS in Boolean loop
+         declare
+            Manager : aliased Connections.Server (Capacity => 1);
+            Item : aliased Connections.Connection (Manager'Access);
+            Socket, Peer : Sockets.Socket_Type;
+            Backend : Provider.Provider;
+            Data : aliased Stream_Element_Array := [1 => 0];
+            Channel : aliased Connection_Transport (Item'Access);
+         begin
+            Sockets.Create_Socket_Pair (Socket, Peer);
+            Connections.Take (Manager, Socket, Item);
+            if Use_TLS then
+               Provider.Set_Script
+                 (Backend, Provider.Handshake_Operation,
+                  [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+               Provider.Set_Script
+                 (Backend, Provider.Receive_Operation,
+                  [1 => (TLS.Want_Write, Provider.Preserve_Output, 0),
+                   2 => (TLS.Complete, Provider.Advance_Output, 1)]);
+               Connection_TLS.Upgrade
+                 (Item, Backend, TLS.Server, "", Timeout => 1.0);
+            else
+               Sockets.Send_All (Peer, [1 => 71]);
+            end if;
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Get : Synthetic_Receive_Operation
+                 (Set'Access, Channel'Access);
+            begin
+               Get.Data := Data'Unchecked_Access;
+               Flyology.Operations.Drivers.Start (Get);
+               Flyology.Operations.Drive
+                 (Flyology.Operations.Operation'Class (Get),
+                  Flyology.Operations.Start_Operation);
+               Flyology.Operations.Wait_All (Set);
+               Passed := Passed
+                 and then Flyology.Operations.Outcome (Get) =
+                   Flyology.Operations.Succeeded
+                 and then Data (1) = (if Use_TLS then 42 else 71)
+                 and then not Connection_Drivers.Is_Engaged (Channel.IO);
+               Flyology.Operations.Consume (Get);
+            end;
+            Connections.Close (Item);
+            Sockets.Close_Socket (Peer);
+         end;
+      end loop;
+
+      --  Lease acquisition is itself composable: a second outer transport
+      --  operation arms the connection lease source and resumes after the
+      --  first set-independent capability releases it. Finalization also
+      --  abandons a registered capability that never acquired the lease.
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Item : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Holder : Connection_Drivers.Capability;
+         Holder_Result : Connection_Drivers.Acquisition_Result;
+         Data : aliased Stream_Element_Array := [1 => 0];
+         Channel : aliased Connection_Transport (Item'Access);
+      begin
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         Connection_Drivers.Start
+           (Holder, Item'Access, Holder_Result, Timeout => 1.0);
+         Passed := Passed
+           and then Holder_Result = Connection_Drivers.Acquired;
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Get : Synthetic_Receive_Operation
+              (Set'Access, Channel'Access);
+         begin
+            Get.Data := Data'Unchecked_Access;
+            Flyology.Operations.Drivers.Start (Get);
+            Flyology.Operations.Drive
+              (Flyology.Operations.Operation'Class (Get),
+               Flyology.Operations.Start_Operation);
+            Connection_Drivers.Release (Holder);
+            Sockets.Send_All (Peer, [1 => 72]);
+            Flyology.Operations.Wait_All (Set);
+            Passed := Passed
+              and then Flyology.Operations.Outcome (Get) =
+                Flyology.Operations.Succeeded
+              and then Data (1) = 72;
+            Flyology.Operations.Consume (Get);
+         end;
+         Connection_Drivers.Start
+           (Holder, Item'Access, Holder_Result, Timeout => 1.0);
+         declare
+            Waiting : Connection_Drivers.Capability;
+            Result  : Connection_Drivers.Acquisition_Result;
+         begin
+            Connection_Drivers.Start
+              (Waiting, Item'Access, Result, Timeout => 1.0);
+            Passed := Passed
+              and then Result =
+                Connection_Drivers.Need_Acquire_Readiness;
+         end;
+         Connection_Drivers.Release (Holder);
          Connections.Close (Item);
          Sockets.Close_Socket (Peer);
       end;

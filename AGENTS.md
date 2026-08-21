@@ -147,6 +147,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   parent terminalizes. A driver must not nest a completion-set wait, call a
   blocking synchronous wrapper, invoke user code on the scheduler stack, or
   release a kernel-owned buffer before terminal completion.
+- A runtime-selected class-wide transport cannot store a concrete child
+  operation whose type and completion-set discriminant are unknown. Its
+  concrete adapter instead stores a definite, set-independent bounded driver
+  capability. The higher-level operation owns the sole set slot and passes
+  itself transiently when the capability arms readiness or its shared
+  deadline. The capability must retain no access to that operation or set.
 - Current scoped providers cover descriptor readiness, timers, raw stream and
   datagram socket arrays, Internet and Unix-stream connection attempts and
   accepts, unique-buffer stream operations, and lightweight positional file
