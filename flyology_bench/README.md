@@ -322,7 +322,8 @@ chosen boundary.
 ## Run an explicit suite
 
 `Flyology_Bench.Suites` is a generic bounded registry. Instantiate it at the
-same scope as wrapper procedures around existing `Measure` or `Compare`
+same scope as wrapper procedures around existing `Measure`, `Compare`, or
+`Compare_Many`
 instantiations. The wrapper call is indirect, but the timed `Operation` or
 `Batch` inside the existing generic remains statically bound:
 
@@ -341,6 +342,11 @@ Suite : Benchmarks.Suite;
 Benchmarks.Register
   (Suite, "mix", Run_Mix'Access,
    Group => "integer", Tags => "arithmetic,smoke");
+
+package Shootout is new Benchmarks.Multi_Way_Registration
+  (Case_Id => Candidate, Run => Run_All);
+Shootout.Register
+  (Suite, "shootout", Group => "integer", Tags => "multi,smoke");
 ```
 
 Names, groups, and tags are case-sensitive. Each segment starts with an ASCII
@@ -365,18 +371,24 @@ the supplied base configuration.
 The runner executes cases serially in one process. Global state, caches, and
 host conditions therefore carry between cases. `--fail-fast` stops after the
 first callback exception; the default continues and reports the stable full
-identity with each exception. A paired `Inconclusive` verdict is counted but
-does not fail the suite. `--require-metrics` makes an unavailable requested
+identity with each exception. An inconclusive paired or multi-way result is
+counted but does not fail the suite. `--require-metrics` makes an unavailable requested
 built-in axis fail the final status. `Run_Summary` reports discovered,
 selected, completed, skipped, failed, inconclusive, unavailable, and rejected
 counts. Map `not Successful (Summary)` to `Ada.Command_Line.Failure` in a main
 procedure.
 
-`--dry-run` applies the smallest valid collection policy to every selected
-callback. Its output is marked `dry_run`, contains no performance numbers, and
-must not be recorded as a baseline. An explicit `--output` file contains only
-plain human output, one-schema CSV, or newline-delimited JSON. Progress and
-ANSI sequences remain outside that file.
+`--dry-run` applies a bounded validation policy to every selected callback: ten
+time-only samples, a 10 ms collection cap, no host gate, placement, lock,
+interference watch, telemetry, scheduler probe, or progress callback. Its
+output is marked `dry_run`, contains no performance numbers, and must not be
+recorded as a baseline. Machine runs also suppress configured terminal
+progress. An explicit `--output` file contains only plain human output, typed
+CSV table sections, or newline-delimited JSON. Contextual CSV prefixes the
+existing latency and metric schemas with suite identity, full benchmark
+identity, result kind, outcome, dry marker, and row kind. Contextual JSON adds
+the same suite fields to the complete existing reporter object. Progress and
+ANSI sequences remain outside machine output.
 
 The maintained `suite_runner` example demonstrates discovery, selection,
 machine output, and dry validation:

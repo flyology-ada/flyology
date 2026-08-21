@@ -3,7 +3,6 @@
 
 with Ada.Strings;
 with Ada.Strings.Fixed;
-with Ada.Strings.Unbounded;
 with Ada.Environment_Variables;
 with Ada.Characters.Handling;
 with Flyology_Bench.Internal_Probes;
@@ -12,6 +11,7 @@ with Interfaces.C;
 
 package body Flyology_Bench.Reporters is
    package Float_IO is new Ada.Text_IO.Float_IO (Long_Float);
+   use Ada.Strings.Unbounded;
    use type Interfaces.C.int;
    use type Interfaces.Unsigned_64;
 
@@ -889,6 +889,44 @@ package body Flyology_Bench.Reporters is
       end;
    end CSV_String;
 
+   function Make_Machine_Context
+     (Suite_Name      : String;
+      Benchmark_Name  : String;
+      Result_Kind     : String;
+      Outcome         : String;
+      Dry_Run         : Boolean := False) return Machine_Context is
+     ((Suite_Name     => To_Unbounded_String (Suite_Name),
+       Benchmark_Name => To_Unbounded_String (Benchmark_Name),
+       Result_Kind    => To_Unbounded_String (Result_Kind),
+       Outcome        => To_Unbounded_String (Outcome),
+       Dry_Run        => Dry_Run,
+       Present        => True));
+
+   function CSV_Context_Header (Context : Machine_Context) return String is
+     (if not Context.Present then ""
+      else "suite,benchmark,result_kind,outcome,dry_run,row_kind,");
+
+   function CSV_Context_Prefix
+     (Context  : Machine_Context;
+      Row_Kind : String) return String is
+     (if not Context.Present then ""
+      else CSV_String (To_String (Context.Suite_Name)) & ","
+        & CSV_String (To_String (Context.Benchmark_Name)) & ","
+        & CSV_String (To_String (Context.Result_Kind)) & ","
+        & CSV_String (To_String (Context.Outcome)) & ","
+        & (if Context.Dry_Run then "true" else "false") & ","
+        & CSV_String (Row_Kind) & ",");
+
+   function JSON_Context_Prefix (Context : Machine_Context) return String is
+     (if not Context.Present then ""
+      else """suite"":" & JSON_String (To_String (Context.Suite_Name))
+        & ",""benchmark"":"
+        & JSON_String (To_String (Context.Benchmark_Name))
+        & ",""result_kind"":" & JSON_String (To_String (Context.Result_Kind))
+        & ",""outcome"":" & JSON_String (To_String (Context.Outcome))
+        & ",""dry_run"":" & (if Context.Dry_Run then "true" else "false")
+        & ",");
+
    procedure Put_Metric_Summaries
      (File   : Ada.Text_IO.File_Type;
       Result : Measurement;
@@ -1272,11 +1310,13 @@ package body Flyology_Bench.Reporters is
    end Put_Console;
 
    procedure Put_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context) is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "name,iterations,samples,confidence_level_percent,bootstrap_resamples,"
+         CSV_Context_Header (Context)
+         & "name,iterations,samples,confidence_level_percent,bootstrap_resamples,"
          & "timer_cost_ns,min_ns,median_ns,mean_ns,"
          & "mean_ci_low_ns,mean_ci_high_ns,p95_ns,p99_ns,max_ns,"
          & "stddev_ns,mad_ns,cv_percent,low_severe,low_mild,high_mild,"
@@ -1294,13 +1334,14 @@ package body Flyology_Bench.Reporters is
    procedure Put_CSV
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context)
    is
       Counts : constant Outlier_Counts := Outliers (Result);
    begin
       Ada.Text_IO.Put_Line
         (File,
-         CSV_String (Name)
+         CSV_Context_Prefix (Context, "measurement") & CSV_String (Name)
          & "," & Iterations_Per_Sample (Result)'Image
          & "," & Samples (Result)'Image
          & "," & JSON_Number (Confidence_Level_Percent (Result))
@@ -1349,11 +1390,13 @@ package body Flyology_Bench.Reporters is
    end Put_CSV;
 
    procedure Put_Metrics_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context) is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "name,confidence_level_percent,bootstrap_resamples,axis,scope,unit,"
+         CSV_Context_Header (Context)
+         & "name,confidence_level_percent,bootstrap_resamples,axis,scope,unit,"
          & "available,status,samples,min,median,mean,mean_ci_low,mean_ci_high,"
          & "p95,p99,max");
    end Put_Metrics_CSV_Header;
@@ -1361,13 +1404,15 @@ package body Flyology_Bench.Reporters is
    procedure Put_Metrics_CSV
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context) is
    begin
       for Axis in Metric_Axis loop
          if Metric_Requested (Result, Axis) then
             Ada.Text_IO.Put
               (File,
-               CSV_String (Name)
+               CSV_Context_Prefix (Context, "metric")
+               & CSV_String (Name)
                & "," & JSON_Number (Confidence_Level_Percent (Result))
                & "," & Bootstrap_Resamples (Result)'Image
                & "," & CSV_String (Metric_Name (Axis))
@@ -1687,13 +1732,15 @@ package body Flyology_Bench.Reporters is
    procedure Put_JSON
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context)
    is
       Counts : constant Outlier_Counts := Outliers (Result);
    begin
       Ada.Text_IO.Put
         (File,
-         "{""name"":" & JSON_String (Name)
+         "{" & JSON_Context_Prefix (Context)
+         & """name"":" & JSON_String (Name)
          & ",""context"":{""os"":"
          & JSON_String (Flyology_Bench.Metadata.Operating_System)
          & ",""architecture"":"
@@ -1904,11 +1951,13 @@ package body Flyology_Bench.Reporters is
    end Put_Comparison_Console;
 
    procedure Put_Comparison_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context) is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,reference_iterations,contender_iterations,"
+         CSV_Context_Header (Context)
+         & "reference,contender,reference_iterations,contender_iterations,"
          & "samples,confidence_level_percent,bootstrap_resamples,"
          & "reference_median_ns,"
          & "contender_median_ns,geometric_mean_speedup,median_speedup,"
@@ -1923,14 +1972,16 @@ package body Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context        : Machine_Context := No_Machine_Context)
    is
       Reference_Data : constant Measurement := Reference_Measurement (Result);
       Contender_Data : constant Measurement := Contender_Measurement (Result);
    begin
       Ada.Text_IO.Put_Line
         (File,
-         CSV_String (Reference_Name)
+         CSV_Context_Prefix (Context, "comparison")
+         & CSV_String (Reference_Name)
          & "," & CSV_String (Contender_Name)
          & "," & Iteration_Count'Image
              (Iterations_Per_Sample (Reference_Data))
@@ -1963,11 +2014,13 @@ package body Flyology_Bench.Reporters is
    end Put_Comparison_CSV;
 
    procedure Put_Comparison_Metrics_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context) is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,confidence_level_percent,bootstrap_resamples,"
+         CSV_Context_Header (Context)
+         & "reference,contender,confidence_level_percent,bootstrap_resamples,"
          & "axis,scope,unit,available,status,method,"
          & "reference_median,contender_median,change,ci_low,ci_high,"
          & "verdict");
@@ -1977,7 +2030,8 @@ package body Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context        : Machine_Context := No_Machine_Context)
    is
       Reference : constant Measurement := Reference_Measurement (Result);
    begin
@@ -1989,7 +2043,8 @@ package body Flyology_Bench.Reporters is
             begin
                Ada.Text_IO.Put
                  (File,
-                  CSV_String (Reference_Name) & ","
+                  CSV_Context_Prefix (Context, "comparison_metric")
+                  & CSV_String (Reference_Name) & ","
                   & CSV_String (Contender_Name) & ","
                   & JSON_Number (Confidence_Level_Percent (Reference)) & ","
                   & Bootstrap_Resamples (Reference)'Image & ","
@@ -2232,14 +2287,16 @@ package body Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context        : Machine_Context := No_Machine_Context)
    is
       Reference_Data : constant Measurement := Reference_Measurement (Result);
       Contender_Data : constant Measurement := Contender_Measurement (Result);
    begin
       Ada.Text_IO.Put
         (File,
-         "{""type"":""comparison"""
+         "{" & JSON_Context_Prefix (Context)
+         & """type"":""comparison"""
          & ",""context"":{""os"":"
          & JSON_String (Flyology_Bench.Metadata.Operating_System)
          & ",""architecture"":"
@@ -2601,11 +2658,13 @@ package body Flyology_Bench.Reporters is
    end Put_Multi_Comparison_Console;
 
    procedure Put_Multi_Comparison_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context) is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,reference_iterations,contender_iterations,"
+         CSV_Context_Header (Context)
+         & "reference,contender,reference_iterations,contender_iterations,"
          & "samples,schedule,batching,confidence_level_percent,"
          & "bootstrap_resamples,reference_median_ns,"
          & "contender_median_ns,reference_mean_ns,contender_mean_ns,"
@@ -2617,7 +2676,8 @@ package body Flyology_Bench.Reporters is
 
    procedure Put_Multi_Comparison_CSV
      (Result : Multi_Comparison;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context)
    is
       Count : constant Positive := Case_Id'Pos (Case_Id'Last) + 1;
       Reference : constant Measurement := Case_Measurement (Result, 1);
@@ -2637,7 +2697,8 @@ package body Flyology_Bench.Reporters is
          begin
             Ada.Text_IO.Put_Line
               (File,
-               CSV_String (Reference_Name) & ","
+               CSV_Context_Prefix (Context, "multi_comparison")
+               & CSV_String (Reference_Name) & ","
                & CSV_String
                    (Pretty_Name (Case_Id'Image (Case_Id'Val (Index - 1))))
                & "," & Iterations_Per_Sample (Reference)'Image
@@ -2668,7 +2729,8 @@ package body Flyology_Bench.Reporters is
 
    procedure Put_Multi_Comparison_Metrics_CSV
      (Result : Multi_Comparison;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context)
    is
       Count : constant Positive := Case_Id'Pos (Case_Id'Last) + 1;
       Reference_Name : constant String :=
@@ -2683,13 +2745,15 @@ package body Flyology_Bench.Reporters is
            (Reference_Name,
             Pretty_Name (Case_Id'Image (Case_Id'Val (Index - 1))),
             Versus_Reference (Result, Comparison_Case_Index (Index)),
-            File);
+            File,
+            Context);
       end loop;
    end Put_Multi_Comparison_Metrics_CSV;
 
    procedure Put_Multi_Comparison_JSON
      (Result : Multi_Comparison;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Context : Machine_Context := No_Machine_Context)
    is
       Count : constant Positive := Case_Id'Pos (Case_Id'Last) + 1;
       Reference : constant Measurement := Case_Measurement (Result, 1);
@@ -2700,7 +2764,8 @@ package body Flyology_Bench.Reporters is
       end if;
       Ada.Text_IO.Put
         (File,
-         "{""type"":""multi_comparison"",""context"":{""os"":"
+         "{" & JSON_Context_Prefix (Context)
+         & """type"":""multi_comparison"",""context"":{""os"":"
          & JSON_String (Flyology_Bench.Metadata.Operating_System)
          & ",""architecture"":"
          & JSON_String (Flyology_Bench.Metadata.Architecture)

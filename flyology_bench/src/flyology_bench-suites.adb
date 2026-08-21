@@ -6,7 +6,6 @@ with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Strings;
 with Ada.Strings.Fixed;
-with Flyology_Bench.Reporters;
 
 package body Flyology_Bench.Suites is
 
@@ -24,9 +23,6 @@ package body Flyology_Bench.Suites is
 
    function Image (Value : Natural) return String is
      (Ada.Strings.Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
-
-   function Image (Value : Long_Float) return String is
-     (Ada.Strings.Fixed.Trim (Long_Float'Image (Value), Ada.Strings.Both));
 
    function Valid_Segment (Value : String) return Boolean is
       function Initial (Item : Character) return Boolean is
@@ -149,6 +145,70 @@ package body Flyology_Bench.Suites is
          Comparison_Run => Run);
    end Register_Paired;
 
+   package body Multi_Way_Registration is
+      procedure Put_Console is new
+        Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Case_Id);
+      procedure Put_CSV is new
+        Flyology_Bench.Reporters.Put_Multi_Comparison_CSV (Case_Id);
+      procedure Put_Metrics_CSV is new
+        Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV (Case_Id);
+      procedure Put_JSON is new
+        Flyology_Bench.Reporters.Put_Multi_Comparison_JSON (Case_Id);
+
+      procedure Invoke
+        (Config : Configuration;
+         Result : out Multi_Comparison) is
+      begin
+         Run (Config, Result);
+      end Invoke;
+
+      procedure Report_Console
+        (Result : Multi_Comparison;
+         File   : Ada.Text_IO.File_Type) is
+      begin
+         Put_Console (Result, File, Flyology_Bench.Reporters.Plain);
+      end Report_Console;
+
+      procedure Report_CSV
+        (Result  : Multi_Comparison;
+         File    : Ada.Text_IO.File_Type;
+         Context : Flyology_Bench.Reporters.Machine_Context) is
+      begin
+         Put_CSV (Result, File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header
+           (File, Context);
+         Put_Metrics_CSV (Result, File, Context);
+      end Report_CSV;
+
+      procedure Report_JSON
+        (Result  : Multi_Comparison;
+         File    : Ada.Text_IO.File_Type;
+         Context : Flyology_Bench.Reporters.Machine_Context) is
+      begin
+         Put_JSON (Result, File, Context);
+      end Report_JSON;
+
+      procedure Register
+        (Target : in out Suite;
+         Name   : String;
+         Group  : String := "";
+         Tags   : String := "") is
+      begin
+         Check_Registration (Target, Name, Group, Tags);
+         Target.Count := Target.Count + 1;
+         Target.Cases (Target.Count) :=
+           (Result        => Multi_Way_Comparison,
+            Name          => To_Unbounded_String (Name),
+            Group         => To_Unbounded_String (Group),
+            Tags          => To_Unbounded_String (Tags),
+            Full          => To_Unbounded_String (Join_Name (Group, Name)),
+            Multi_Run     => Invoke'Access,
+            Multi_Console => Report_Console'Access,
+            Multi_CSV     => Report_CSV'Access,
+            Multi_JSON    => Report_JSON'Access);
+      end Register;
+   end Multi_Way_Registration;
+
    function Length (Target : Suite) return Natural is (Target.Count);
 
    procedure Check_Index (Target : Suite; Index : Case_Index) is
@@ -188,6 +248,9 @@ package body Flyology_Bench.Suites is
                   Result := (Result => Paired_Comparison, others => <>);
                   Target.Cases (Index).Comparison_Run
                     (Config, Result.Compared);
+               when Multi_Way_Comparison =>
+                  raise Constraint_Error with
+                    "multi-way registration requires Execute_One_Multi";
             end case;
             return;
          end if;
@@ -195,6 +258,26 @@ package body Flyology_Bench.Suites is
       raise Constraint_Error with
         "benchmark identity is not registered: " & Full_Name;
    end Execute_One;
+
+   procedure Execute_One_Multi
+     (Target    : Suite;
+      Full_Name : String;
+      Config    : Configuration;
+      Result    : out Multi_Comparison) is
+   begin
+      for Index in 1 .. Target.Count loop
+         if To_String (Target.Cases (Index).Full) = Full_Name then
+            if Target.Cases (Index).Result /= Multi_Way_Comparison then
+               raise Constraint_Error with
+                 "registered result is not a multi-way comparison";
+            end if;
+            Target.Cases (Index).Multi_Run (Config, Result);
+            return;
+         end if;
+      end loop;
+      raise Constraint_Error with
+        "benchmark identity is not registered: " & Full_Name;
+   end Execute_One_Multi;
 
    function Kind (Result : Registered_Result) return Result_Kind is
      (Result.Result);
@@ -878,9 +961,6 @@ package body Flyology_Bench.Suites is
          when Unavailable_Outcome  => "unavailable",
          when Failed_Outcome       => "failed");
 
-   function Verdict_Name (Value : Comparison_Verdict) return String is
-     (Lower (Comparison_Verdict'Image (Value)));
-
    procedure Put_Machine_Header (File : Ada.Text_IO.File_Type) is
    begin
       Ada.Text_IO.Put_Line
@@ -909,6 +989,7 @@ package body Flyology_Bench.Suites is
       Detail      : String := "") is
    begin
       if Style = CSV then
+         Put_Machine_Header (File);
          Ada.Text_IO.Put_Line
            (File,
             CSV_String (Suite_Name) & ',' & CSV_String (Case_Name) & ','
@@ -961,11 +1042,111 @@ package body Flyology_Bench.Suites is
      (Base with delta
         Warmup_Time => 0.0,
         Measurement_Time => 0.000_010,
-        Maximum_Sampling_Time => 0.0,
+        Maximum_Sampling_Time => 0.010,
         Samples => Sample_Count'First,
         Minimum_Sample_Time => 0.000_001,
+        Maximum_Iterations => 1_000,
+        Subtract_Timer_Cost => False,
+        Metrics => Time_Metrics,
+        Scheduler_Probe => null,
+        CPU_Quiescence => (Enabled => False),
+        Interference => (Enabled => False, Response => Observe),
+        Placement => (Enabled => False),
+        Host_Lock => (Enabled => False),
         Collect_Process_Telemetry => False,
         Progress => null);
+
+   function Execution_Configuration
+     (Options : Runner_Options) return Configuration is
+     (if Options.Dry then Dry_Configuration (Options.Config)
+      elsif Options.Output_Format /= Human then
+        (Options.Config with delta Progress => null)
+      else Options.Config);
+
+   function Multi_Inconclusive (Result : Multi_Comparison) return Boolean is
+   begin
+      for Index in Comparison_Case_Index range 2 .. Cases (Result) loop
+         if Verdict (Versus_Reference (Result, Index)) = Inconclusive then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Multi_Inconclusive;
+
+   function Multi_Has_Unavailable
+     (Result : Multi_Comparison;
+      Config : Configuration) return Boolean is
+   begin
+      for Index in Comparison_Case_Index range 1 .. Cases (Result) loop
+         if Has_Unavailable (Case_Measurement (Result, Index), Config) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Multi_Has_Unavailable;
+
+   function Machine_Context
+     (Suite_Name : String;
+      Case_Name  : String;
+      Kind       : Result_Kind;
+      Outcome    : Case_Outcome;
+      Dry         : Boolean := False)
+      return Flyology_Bench.Reporters.Machine_Context is
+     (Flyology_Bench.Reporters.Make_Machine_Context
+        (Suite_Name, Case_Name, Lower (Result_Kind'Image (Kind)),
+         Outcome_Name (Outcome), Dry));
+
+   procedure Put_Measurement_Machine
+     (File       : Ada.Text_IO.File_Type;
+      Style      : Output_Style;
+      Suite_Name : String;
+      Case_Name  : String;
+      Outcome    : Case_Outcome;
+      Result     : Measurement)
+   is
+      Context : constant Flyology_Bench.Reporters.Machine_Context :=
+        Machine_Context
+          (Suite_Name, Case_Name, Ordinary_Measurement, Outcome);
+   begin
+      if Style = CSV then
+         Flyology_Bench.Reporters.Put_CSV_Header (File, Context);
+         Flyology_Bench.Reporters.Put_CSV (Case_Name, Result, File, Context);
+         Flyology_Bench.Reporters.Put_Metrics_CSV_Header (File, Context);
+         Flyology_Bench.Reporters.Put_Metrics_CSV
+           (Case_Name, Result, File, Context);
+      else
+         Flyology_Bench.Reporters.Put_JSON
+           (Case_Name, Result, File, Context);
+      end if;
+   end Put_Measurement_Machine;
+
+   procedure Put_Comparison_Machine
+     (File           : Ada.Text_IO.File_Type;
+      Style          : Output_Style;
+      Suite_Name     : String;
+      Case_Name      : String;
+      Outcome        : Case_Outcome;
+      Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison)
+   is
+      Context : constant Flyology_Bench.Reporters.Machine_Context :=
+        Machine_Context
+          (Suite_Name, Case_Name, Paired_Comparison, Outcome);
+   begin
+      if Style = CSV then
+         Flyology_Bench.Reporters.Put_Comparison_CSV_Header (File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_CSV
+           (Reference_Name, Contender_Name, Result, File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header
+           (File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV
+           (Reference_Name, Contender_Name, Result, File, Context);
+      else
+         Flyology_Bench.Reporters.Put_Comparison_JSON
+           (Reference_Name, Contender_Name, Result, File, Context);
+      end if;
+   end Put_Comparison_Machine;
 
    procedure Put_Summary
      (File       : Ada.Text_IO.File_Type;
@@ -989,6 +1170,7 @@ package body Flyology_Bench.Suites is
             "suite " & Suite_Name & ": " & Detail & " status="
             & Lower (Final_Status'Image (Summary.Status)));
       elsif Style = CSV then
+         Put_Machine_Header (File);
          Ada.Text_IO.Put_Line
            (File,
             CSV_String (Suite_Name) & ",,summary,"
@@ -1028,10 +1210,31 @@ package body Flyology_Bench.Suites is
       Count  : Natural;
 
       procedure Run_To (File : Ada.Text_IO.File_Type) is
-         Config : constant Configuration :=
-           (if Options.Dry then Dry_Configuration (Options.Config)
-            else Options.Config);
+         Config : constant Configuration := Execution_Configuration (Options);
          Stop : Boolean := False;
+
+         procedure Report_Callback_Failure
+           (Name  : String;
+            Kind  : Result_Kind;
+            Error : Ada.Exceptions.Exception_Occurrence)
+         is
+            Detail : constant String :=
+              Ada.Exceptions.Exception_Name (Error) & ": "
+              & Ada.Exceptions.Exception_Message (Error);
+         begin
+            Summary.Failed := Summary.Failed + 1;
+            if Options.Output_Format = Human then
+               Ada.Text_IO.Put_Line
+                 (File, "case " & Name & ": failed: " & Detail);
+            else
+               Put_Machine
+                 (File, Options.Output_Format, Suite_Name, Name, Kind,
+                  Failed_Outcome, Options.Dry, Detail => Detail);
+            end if;
+            Ada.Text_IO.Put_Line
+              (Progress, "benchmark " & Name & " failed: " & Detail);
+            Stop := Options.Errors = Fail_Fast;
+         end Report_Callback_Failure;
       begin
          if Options.Requested_Action = Show_Help then
             Summary := (others => <>);
@@ -1039,6 +1242,10 @@ package body Flyology_Bench.Suites is
             return;
          elsif Options.Requested_Action = List_Selected then
             List (Target, Options, Summary, File);
+            if Summary.Selected = 0 and then not Options.Allow_Empty then
+               Ada.Text_IO.Put_Line
+                 (Progress, "no benchmark cases matched the selection");
+            end if;
             return;
          end if;
 
@@ -1049,8 +1256,6 @@ package body Flyology_Bench.Suites is
                "suite " & Suite_Name & ": selected " & Image (Count)
                & " of " & Image (Target.Count)
                & (if Options.Dry then " [DRY RUN]" else ""));
-         elsif Options.Output_Format = CSV then
-            Put_Machine_Header (File);
          end if;
 
          if Count = 0 then
@@ -1078,63 +1283,47 @@ package body Flyology_Bench.Suites is
                      declare
                         Result  : Measurement;
                         Outcome : Case_Outcome := Completed_Outcome;
+                        Returned : Boolean := False;
                      begin
-                        Item.Measurement_Run (Config, Result);
-                        Summary.Completed := Summary.Completed + 1;
-                        if Options.Dry then
-                           Outcome := Dry_Run_Outcome;
-                        elsif Options.Require_Metrics
-                          and then Has_Unavailable (Result, Config)
-                        then
-                           Outcome := Unavailable_Outcome;
-                           Summary.Unavailable := Summary.Unavailable + 1;
-                        end if;
-                        if Options.Output_Format = Human then
-                           Ada.Text_IO.Put_Line
-                             (File,
-                              "case " & Name & ": " & Outcome_Name (Outcome));
-                           if not Options.Dry then
-                              Flyology_Bench.Reporters.Put_Console
-                                (Name, Result, File,
-                                 Style => Flyology_Bench.Reporters.Plain);
+                        begin
+                           Item.Measurement_Run (Config, Result);
+                           Returned := True;
+                        exception
+                           when Error : others =>
+                              Report_Callback_Failure
+                                (Name, Item.Result, Error);
+                        end;
+                        if Returned then
+                           Summary.Completed := Summary.Completed + 1;
+                           if Options.Dry then
+                              Outcome := Dry_Run_Outcome;
+                           elsif Options.Require_Metrics
+                             and then Has_Unavailable (Result, Config)
+                           then
+                              Outcome := Unavailable_Outcome;
+                              Summary.Unavailable := Summary.Unavailable + 1;
                            end if;
-                        elsif Options.Dry then
-                           Put_Machine
-                             (File, Options.Output_Format, Suite_Name, Name,
-                              Item.Result, Outcome, True,
-                              Detail => "validation only; not performance data");
-                        else
-                           Put_Machine
-                             (File, Options.Output_Format, Suite_Name, Name,
-                              Item.Result, Outcome, False,
-                              Median => Image (Median_Nanoseconds (Result)),
-                              Mean => Image (Mean_Nanoseconds (Result)),
-                              Low => Image
-                                (Mean_Confidence_Low_Nanoseconds (Result)),
-                              High => Image
-                                (Mean_Confidence_High_Nanoseconds (Result)));
-                        end if;
-                     exception
-                        when Error : others =>
-                           Summary.Failed := Summary.Failed + 1;
-                           declare
-                              Detail : constant String :=
-                                Ada.Exceptions.Exception_Name (Error) & ": "
-                                & Ada.Exceptions.Exception_Message (Error);
-                           begin
-                              if Options.Output_Format = Human then
-                                 Ada.Text_IO.Put_Line
-                                   (File, "case " & Name & ": failed: " & Detail);
-                              else
-                                 Put_Machine
-                                   (File, Options.Output_Format, Suite_Name, Name,
-                                    Item.Result, Failed_Outcome, Options.Dry,
-                                    Detail => Detail);
-                              end if;
+                           if Options.Output_Format = Human then
                               Ada.Text_IO.Put_Line
-                                (Progress, "benchmark " & Name & " failed: " & Detail);
-                           end;
-                           Stop := Options.Errors = Fail_Fast;
+                                (File, "case " & Name & ": "
+                                 & Outcome_Name (Outcome));
+                              if not Options.Dry then
+                                 Flyology_Bench.Reporters.Put_Console
+                                   (Name, Result, File,
+                                    Style => Flyology_Bench.Reporters.Plain);
+                              end if;
+                           elsif Options.Dry then
+                              Put_Machine
+                                (File, Options.Output_Format, Suite_Name, Name,
+                                 Item.Result, Outcome, True,
+                                 Detail =>
+                                   "validation only; not performance data");
+                           else
+                              Put_Measurement_Machine
+                                (File, Options.Output_Format, Suite_Name, Name,
+                                 Outcome, Result);
+                           end if;
+                        end if;
                      end;
 
                   when Paired_Comparison =>
@@ -1143,80 +1332,125 @@ package body Flyology_Bench.Suites is
                         Outcome : Case_Outcome := Completed_Outcome;
                         Reference : Measurement;
                         Contender : Measurement;
+                        Returned : Boolean := False;
                      begin
-                        Item.Comparison_Run (Config, Result);
-                        Summary.Completed := Summary.Completed + 1;
-                        Reference := Reference_Measurement (Result);
-                        Contender := Contender_Measurement (Result);
-                        if Options.Dry then
-                           Outcome := Dry_Run_Outcome;
-                        else
-                           if Verdict (Result) = Inconclusive then
-                              Outcome := Inconclusive_Outcome;
-                              Summary.Inconclusive := Summary.Inconclusive + 1;
-                           end if;
-                           if Options.Require_Metrics
-                             and then (Has_Unavailable (Reference, Config)
-                                       or else Has_Unavailable (Contender, Config))
-                           then
-                              Outcome := Unavailable_Outcome;
-                              Summary.Unavailable := Summary.Unavailable + 1;
-                           end if;
-                        end if;
-                        if Options.Output_Format = Human then
-                           Ada.Text_IO.Put_Line
-                             (File,
-                              "case " & Name & ": " & Outcome_Name (Outcome));
-                           if not Options.Dry then
-                              Flyology_Bench.Reporters.Put_Comparison_Console
-                                (To_String (Item.Reference_Name),
-                                 To_String (Item.Contender_Name), Result, File,
-                                 Style => Flyology_Bench.Reporters.Plain);
-                           end if;
-                        elsif Options.Dry then
-                           Put_Machine
-                             (File, Options.Output_Format, Suite_Name, Name,
-                              Item.Result, Outcome, True,
-                              Detail => "validation only; not performance data");
-                        else
-                           Put_Machine
-                             (File, Options.Output_Format, Suite_Name, Name,
-                              Item.Result, Outcome, False,
-                              Median => Image (Median_Nanoseconds (Contender)),
-                              Mean => Image (Mean_Nanoseconds (Contender)),
-                              Low => Image
-                                (Mean_Confidence_Low_Nanoseconds (Contender)),
-                              High => Image
-                                (Mean_Confidence_High_Nanoseconds (Contender)),
-                              Change => Image
-                                (Relative_Time_Change_Percent (Result)),
-                              Change_Low => Image
-                                (Relative_Time_Change_Confidence_Low (Result)),
-                              Change_High => Image
-                                (Relative_Time_Change_Confidence_High (Result)),
-                              Verdict => Verdict_Name (Verdict (Result)));
-                        end if;
-                     exception
-                        when Error : others =>
-                           Summary.Failed := Summary.Failed + 1;
-                           declare
-                              Detail : constant String :=
-                                Ada.Exceptions.Exception_Name (Error) & ": "
-                                & Ada.Exceptions.Exception_Message (Error);
-                           begin
-                              if Options.Output_Format = Human then
-                                 Ada.Text_IO.Put_Line
-                                   (File, "case " & Name & ": failed: " & Detail);
-                              else
-                                 Put_Machine
-                                   (File, Options.Output_Format, Suite_Name, Name,
-                                    Item.Result, Failed_Outcome, Options.Dry,
-                                    Detail => Detail);
+                        begin
+                           Item.Comparison_Run (Config, Result);
+                           Returned := True;
+                        exception
+                           when Error : others =>
+                              Report_Callback_Failure
+                                (Name, Item.Result, Error);
+                        end;
+                        if Returned then
+                           Summary.Completed := Summary.Completed + 1;
+                           Reference := Reference_Measurement (Result);
+                           Contender := Contender_Measurement (Result);
+                           if Options.Dry then
+                              Outcome := Dry_Run_Outcome;
+                           else
+                              if Verdict (Result) = Inconclusive then
+                                 Outcome := Inconclusive_Outcome;
+                                 Summary.Inconclusive :=
+                                   Summary.Inconclusive + 1;
                               end if;
+                              if Options.Require_Metrics
+                                and then
+                                  (Has_Unavailable (Reference, Config)
+                                   or else Has_Unavailable (Contender, Config))
+                              then
+                                 Outcome := Unavailable_Outcome;
+                                 Summary.Unavailable := Summary.Unavailable + 1;
+                              end if;
+                           end if;
+                           if Options.Output_Format = Human then
                               Ada.Text_IO.Put_Line
-                                (Progress, "benchmark " & Name & " failed: " & Detail);
-                           end;
-                           Stop := Options.Errors = Fail_Fast;
+                                (File, "case " & Name & ": "
+                                 & Outcome_Name (Outcome));
+                              if not Options.Dry then
+                                 Flyology_Bench.Reporters.Put_Comparison_Console
+                                   (To_String (Item.Reference_Name),
+                                    To_String (Item.Contender_Name), Result,
+                                    File,
+                                    Style => Flyology_Bench.Reporters.Plain);
+                              end if;
+                           elsif Options.Dry then
+                              Put_Machine
+                                (File, Options.Output_Format, Suite_Name, Name,
+                                 Item.Result, Outcome, True,
+                                 Detail =>
+                                   "validation only; not performance data");
+                           else
+                              Put_Comparison_Machine
+                                (File, Options.Output_Format, Suite_Name, Name,
+                                 Outcome, To_String (Item.Reference_Name),
+                                 To_String (Item.Contender_Name), Result);
+                           end if;
+                        end if;
+                     end;
+
+                  when Multi_Way_Comparison =>
+                     declare
+                        Result   : Multi_Comparison;
+                        Outcome  : Case_Outcome := Completed_Outcome;
+                        Returned : Boolean := False;
+                     begin
+                        begin
+                           Item.Multi_Run (Config, Result);
+                           Returned := True;
+                        exception
+                           when Error : others =>
+                              Report_Callback_Failure
+                                (Name, Item.Result, Error);
+                        end;
+                        if Returned then
+                           Summary.Completed := Summary.Completed + 1;
+                           if Options.Dry then
+                              Outcome := Dry_Run_Outcome;
+                           else
+                              if Multi_Inconclusive (Result) then
+                                 Outcome := Inconclusive_Outcome;
+                                 Summary.Inconclusive :=
+                                   Summary.Inconclusive + 1;
+                              end if;
+                              if Options.Require_Metrics
+                                and then Multi_Has_Unavailable (Result, Config)
+                              then
+                                 Outcome := Unavailable_Outcome;
+                                 Summary.Unavailable := Summary.Unavailable + 1;
+                              end if;
+                           end if;
+                           if Options.Output_Format = Human then
+                              Ada.Text_IO.Put_Line
+                                (File, "case " & Name & ": "
+                                 & Outcome_Name (Outcome));
+                              if not Options.Dry then
+                                 Item.Multi_Console (Result, File);
+                              end if;
+                           elsif Options.Dry then
+                              Put_Machine
+                                (File, Options.Output_Format, Suite_Name, Name,
+                                 Item.Result, Outcome, True,
+                                 Detail =>
+                                   "validation only; not performance data");
+                           else
+                              declare
+                                 Context : constant
+                                   Flyology_Bench.Reporters.Machine_Context :=
+                                     Machine_Context
+                                       (Suite_Name, Name, Item.Result, Outcome);
+                              begin
+                                 if Options.Output_Format = CSV then
+                                    Flyology_Bench.Reporters
+                                      .Put_Multi_Comparison_CSV_Header
+                                        (File, Context);
+                                    Item.Multi_CSV (Result, File, Context);
+                                 else
+                                    Item.Multi_JSON (Result, File, Context);
+                                 end if;
+                              end;
+                           end if;
+                        end if;
                      end;
                end case;
             end;
