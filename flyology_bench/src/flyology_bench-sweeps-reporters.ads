@@ -9,7 +9,8 @@ with Flyology_Bench.Scaling;
 package Flyology_Bench.Sweeps.Reporters is
    --  Renders sweep and scaling data without altering legacy schemas.
 
-   --  Print an ordinary table with median time, mean interval, and rates.
+   --  Print an ordinary table with median time, mean interval, human-scaled
+   --  rates, and exact throughput availability.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Result Ordinary sweep results.
    --  @param File Destination text stream.
@@ -18,7 +19,8 @@ package Flyology_Bench.Sweeps.Reporters is
       Result    : Ordinary_Sweep_Result;
       File      : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
-   --  Print paired time, rate, confidence, and verdict rows.
+   --  Print paired time, human-scaled rate, confidence, per-side throughput
+   --  availability, and verdict rows.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Reference_Name Reference implementation display name.
    --  @param Contender_Name Contender implementation display name.
@@ -35,7 +37,8 @@ package Flyology_Bench.Sweeps.Reporters is
    --  @param File Destination text stream.
    procedure Put_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
-   --  Print one ordinary CSV row per attempted point.
+   --  Print one ordinary CSV row per attempted point, including exact
+   --  throughput availability and unscaled work rates.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Result Ordinary sweep results.
    --  @param File Destination text stream.
@@ -48,7 +51,8 @@ package Flyology_Bench.Sweeps.Reporters is
    --  @param File Destination text stream.
    procedure Put_Comparison_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
-   --  Print one paired CSV row per attempted point.
+   --  Print one paired CSV row per attempted point, including independent
+   --  per-side throughput availability and unscaled work rates.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Reference_Name Reference implementation display name.
    --  @param Contender_Name Contender implementation display name.
@@ -61,7 +65,8 @@ package Flyology_Bench.Sweeps.Reporters is
       Result         : Paired_Sweep_Result;
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
-   --  Emit exactly one JSON object per point.
+   --  Emit exactly one JSON object per point with exact throughput
+   --  availability and unscaled work rates.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Result Ordinary sweep results.
    --  @param File Destination text stream.
@@ -69,7 +74,8 @@ package Flyology_Bench.Sweeps.Reporters is
      (Case_Name : String;
       Result    : Ordinary_Sweep_Result;
       File      : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
-   --  Emit exactly one paired JSON object per point.
+   --  Emit exactly one paired JSON object per point with independent per-side
+   --  throughput availability and unscaled work rates.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Reference_Name Reference implementation display name.
    --  @param Contender_Name Contender implementation display name.

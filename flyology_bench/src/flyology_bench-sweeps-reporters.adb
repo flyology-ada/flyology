@@ -124,6 +124,60 @@ package body Flyology_Bench.Sweeps.Reporters is
      (if Available (Summary) then Number (Value)
       elsif JSON_Mode then "null" else "");
 
+   function Work_Base_Unit (Amount : Work_Amount) return String is
+     (case Unit_Kind (Amount) is
+         when Items        => "items",
+         when Bytes        => "B",
+         when Caller_Named => Unit_Name (Amount));
+
+   function Scale_Prefix
+     (Power   : Natural;
+      Scaling : Display_Scaling) return String is
+     (case Scaling is
+         when Decimal_Scaling =>
+           (case Power is
+               when 0 => "",
+               when 1 => "k",
+               when 2 => "M",
+               when 3 => "G",
+               when 4 => "T",
+               when 5 => "P",
+               when others => "E"),
+         when Binary_Scaling =>
+           (case Power is
+               when 0 => "",
+               when 1 => "Ki",
+               when 2 => "Mi",
+               when 3 => "Gi",
+               when 4 => "Ti",
+               when 5 => "Pi",
+               when others => "Ei"));
+
+   function Human_Work_Rate
+     (Summary : Throughput_Summary;
+      Amount  : Work_Amount) return String
+   is
+      Base : constant Long_Float :=
+        (if Display_Scale (Amount) = Decimal_Scaling then 1_000.0
+         else 1_024.0);
+      Scaled : Long_Float := Work_Units_Per_Second (Summary);
+      Power : Natural := 0;
+   begin
+      if not Available (Summary) then
+         return "unavailable";
+      end if;
+      while Power < 6 and then Scaled >= Base loop
+         Scaled := Scaled / Base;
+         Power := Power + 1;
+      end loop;
+      return Number (Scaled) & " "
+        & Scale_Prefix (Power, Display_Scale (Amount))
+        & Work_Base_Unit (Amount) & "/s";
+   end Human_Work_Rate;
+
+   function Human_Work_Amount (Amount : Work_Amount) return String is
+     (Number (Display_Value (Amount)) & " " & Display_Unit (Amount));
+
    function Median_Or_Empty
      (Summary : Throughput_Summary;
       Item  : Measurement;
@@ -158,6 +212,7 @@ package body Flyology_Bench.Sweeps.Reporters is
       Put_Line
         (File,
          "parameter  label  status  median ns/op  mean 95% CI ns/op"
+         & "  throughput availability"
          & "  operations/s [mean-time-derived CI]  work/s  work/op");
       Put_Line (File, "throughput direction: higher is better");
       for Index in 1 .. Length (Result) loop
@@ -174,14 +229,15 @@ package body Flyology_Bench.Sweeps.Reporters is
                & Median_Or_Empty (Rate, Measurement_Value) & "  ["
                & Low_Or_Empty (Rate, Measurement_Value) & ", "
                & High_Or_Empty (Rate, Measurement_Value) & "]  "
+               & Availability_Name (Availability (Rate)) & "  "
                & Maybe_Number (Rate, Operations_Per_Second (Rate)) & " ["
                & Maybe_Number (Rate, Operations_Confidence_Low (Rate)) & ", "
                & Maybe_Number (Rate, Operations_Confidence_High (Rate)) & "]  "
-               & Maybe_Number (Rate, Work_Units_Per_Second (Rate)) & " "
                & (if Work_Available (Item)
-                  then Unit_Name (Work_Per_Operation (Item)) & "/s  "
-                    & Number (Raw_Value (Work_Per_Operation (Item))) & " "
-                    & Unit_Name (Work_Per_Operation (Item))
+                  then Human_Work_Rate (Rate, Work_Per_Operation (Item))
+                  else "unavailable") & "  "
+               & (if Work_Available (Item)
+                  then Human_Work_Amount (Work_Per_Operation (Item))
                   else "unavailable"));
          end;
       end loop;
@@ -202,6 +258,7 @@ package body Flyology_Bench.Sweeps.Reporters is
         (File,
          "parameter  status  reference median [mean CI]  contender median"
          & " [mean CI]  reference op/s [rate CI]  contender op/s [rate CI]"
+         & "  reference rate availability  contender rate availability"
          & "  reference work/s"
          & "  contender work/s  work/op  paired verdict");
       Put_Line (File, "throughput direction: higher is better");
@@ -241,15 +298,18 @@ package body Flyology_Bench.Sweeps.Reporters is
                & ", " & Maybe_Number
                    (Contender_Rate,
                     Operations_Confidence_High (Contender_Rate)) & "]  "
-               & Maybe_Number
-                   (Reference_Rate, Work_Units_Per_Second (Reference_Rate))
-               & "  "
-               & Maybe_Number
-                   (Contender_Rate, Work_Units_Per_Second (Contender_Rate))
-               & "  "
+               & Availability_Name (Availability (Reference_Rate)) & "  "
+               & Availability_Name (Availability (Contender_Rate)) & "  "
                & (if Work_Available (Item)
-                  then Number (Raw_Value (Work_Per_Operation (Item))) & " "
-                    & Unit_Name (Work_Per_Operation (Item))
+                  then Human_Work_Rate
+                    (Reference_Rate, Work_Per_Operation (Item))
+                  else "unavailable") & "  "
+               & (if Work_Available (Item)
+                  then Human_Work_Rate
+                    (Contender_Rate, Work_Per_Operation (Item))
+                  else "unavailable") & "  "
+               & (if Work_Available (Item)
+                  then Human_Work_Amount (Work_Per_Operation (Item))
                   else "unavailable") & "  "
                & (if Collection_Available (Item)
                   then Verdict_Name (Verdict (Pair)) else ""));
@@ -265,6 +325,7 @@ package body Flyology_Bench.Sweeps.Reporters is
          & "result_kind,work_available,work_kind,work_unit,work_value,work_scaling,"
          & "sample_semantics,collection_available,available,status,failure,median_elapsed_ns,"
          & "mean_elapsed_ci_low_ns,mean_elapsed_ci_high_ns,"
+         & "throughput_availability,"
          & "operations_per_second,operations_ci_low,operations_ci_high,"
          & "work_units_per_second,work_ci_low,work_ci_high,direction");
    end Put_CSV_Header;
@@ -303,6 +364,7 @@ package body Flyology_Bench.Sweeps.Reporters is
                & ',' & Median_Or_Empty (Rate, Measurement_Value)
                & ',' & Low_Or_Empty (Rate, Measurement_Value)
                & ',' & High_Or_Empty (Rate, Measurement_Value)
+               & ',' & Availability_Name (Availability (Rate))
                & ',' & Maybe_Number (Rate, Operations_Per_Second (Rate))
                & ',' & Maybe_Number (Rate, Operations_Confidence_Low (Rate))
                & ',' & Maybe_Number (Rate, Operations_Confidence_High (Rate))
@@ -325,6 +387,8 @@ package body Flyology_Bench.Sweeps.Reporters is
          & "reference_median_elapsed_ns,reference_mean_ci_low_ns,"
          & "reference_mean_ci_high_ns,contender_median_elapsed_ns,"
          & "contender_mean_ci_low_ns,contender_mean_ci_high_ns,"
+         & "reference_throughput_availability,"
+         & "contender_throughput_availability,"
          & "reference_operations_per_second,contender_operations_per_second,"
          & "reference_operations_ci_low,reference_operations_ci_high,"
          & "contender_operations_ci_low,contender_operations_ci_high,"
@@ -380,6 +444,8 @@ package body Flyology_Bench.Sweeps.Reporters is
                & ',' & Median_Or_Empty (Contender_Rate, Contender)
                & ',' & Low_Or_Empty (Contender_Rate, Contender)
                & ',' & High_Or_Empty (Contender_Rate, Contender)
+               & ',' & Availability_Name (Availability (Reference_Rate))
+               & ',' & Availability_Name (Availability (Contender_Rate))
                & ',' & Maybe_Number
                  (Reference_Rate, Operations_Per_Second (Reference_Rate))
                & ',' & Maybe_Number
@@ -513,6 +579,8 @@ package body Flyology_Bench.Sweeps.Reporters is
                & Low_Or_Empty (Rate, Measurement_Value, True)
                & ",""mean_elapsed_ci_high_ns"":"
                & High_Or_Empty (Rate, Measurement_Value, True)
+               & ",""throughput_availability"":"""
+               & Availability_Name (Availability (Rate)) & """"
                & ",""operations_per_second"":"
                & Maybe_Number (Rate, Operations_Per_Second (Rate), True)
                & ",""operations_ci_low"":"
