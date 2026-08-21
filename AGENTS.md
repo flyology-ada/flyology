@@ -479,7 +479,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   logical operation. Throughput is derived only from the same per-operation
   wall samples, paired sweeps invoke the adjacent order-balanced comparison at
   every point, and post-collection model fitting is described as empirical
-  scaling over the observed range rather than as proof of big-O.
+  scaling over one coherent parameter kind and the observed range rather than
+  as proof of big-O. Work, collection, wall, and derived-rate availability
+  remain independent so failed setup cannot fabricate work and rate overflow
+  cannot erase valid collected data.
 - `proof/`: SPARK-only development crate plus runtime and debug policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and
   reviewed mappings back to production state transitions.

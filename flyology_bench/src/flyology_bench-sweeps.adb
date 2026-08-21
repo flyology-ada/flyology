@@ -307,6 +307,10 @@ package body Flyology_Bench.Sweeps is
    function Available (Summary : Throughput_Summary) return Boolean is
      (Summary.State = Throughput_Available);
 
+   function Wall_Time_Available
+     (Summary : Throughput_Summary) return Boolean is
+     (Summary.State in Throughput_Available | Throughput_Overflow);
+
    function Operations_Per_Second
      (Summary : Throughput_Summary) return Long_Float is
      (Summary.Operations);
@@ -360,9 +364,29 @@ package body Flyology_Bench.Sweeps is
    function Parameter (Result : Paired_Point_Result) return Parameter_Point is
      (Result.Point_Value);
    function Work_Per_Operation
-     (Result : Ordinary_Point_Result) return Work_Amount is (Result.Work_Value);
+     (Result : Ordinary_Point_Result) return Work_Amount is
+   begin
+      if not Result.Has_Work then
+         raise Constraint_Error with "work was not established for sweep point";
+      end if;
+      return Result.Work_Value;
+   end Work_Per_Operation;
    function Work_Per_Operation
-     (Result : Paired_Point_Result) return Work_Amount is (Result.Work_Value);
+     (Result : Paired_Point_Result) return Work_Amount is
+   begin
+      if not Result.Has_Work then
+         raise Constraint_Error with "work was not established for sweep point";
+      end if;
+      return Result.Work_Value;
+   end Work_Per_Operation;
+   function Work_Available
+     (Result : Ordinary_Point_Result) return Boolean is (Result.Has_Work);
+   function Work_Available
+     (Result : Paired_Point_Result) return Boolean is (Result.Has_Work);
+   function Collection_Available
+     (Result : Ordinary_Point_Result) return Boolean is (Result.Collected);
+   function Collection_Available
+     (Result : Paired_Point_Result) return Boolean is (Result.Collected);
    function Status (Result : Ordinary_Point_Result) return Point_Status is
      (Result.State);
    function Status (Result : Paired_Point_Result) return Point_Status is
@@ -451,6 +475,7 @@ package body Flyology_Bench.Sweeps is
 
             begin
                Item_Result.Work_Value := Work_For (Item);
+               Item_Result.Has_Work := True;
                Select_Point (Item);
             exception
                when Failure : others =>
@@ -481,6 +506,7 @@ package body Flyology_Bench.Sweeps is
                else
                   begin
                      Run_Point (Point_Config, Item_Result.Measurement_Value);
+                     Item_Result.Collected := True;
                      Item_Result.Rate := Derive_Throughput
                        (Item_Result.Work_Value, Item_Result.Measurement_Value);
                      Item_Result.State :=
@@ -559,6 +585,7 @@ package body Flyology_Bench.Sweeps is
 
             begin
                Item_Result.Work_Value := Work_For (Item);
+               Item_Result.Has_Work := True;
                Select_Point (Item);
             exception
                when Failure : others =>
@@ -589,6 +616,7 @@ package body Flyology_Bench.Sweeps is
                else
                   begin
                      Run_Point (Point_Config, Item_Result.Comparison_Value);
+                     Item_Result.Collected := True;
                      Item_Result.Reference_Rate := Derive_Throughput
                        (Item_Result.Work_Value,
                         Reference_Measurement (Item_Result.Comparison_Value));

@@ -5,6 +5,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 
 package body Flyology_Bench.Scaling is
    use type Sweeps.Exact_Value;
+   use type Sweeps.Parameter_Kind;
 
    Minimum_Point_Count : constant := 4;
    Minimum_Range_Ratio : constant Long_Float := 2.0;
@@ -22,6 +23,10 @@ package body Flyology_Bench.Scaling is
       Observation : Long_Float)
    is
    begin
+      if Set.Has_Kind and then Sweeps.Kind (Point) /= Set.Kind_Value then
+         raise Constraint_Error with
+           "empirical scaling cannot mix size and count parameters";
+      end if;
       for Index in 1 .. Set.Count loop
          if Sweeps.Value (Set.Data (Index).Point) = Sweeps.Value (Point) then
             raise Constraint_Error with
@@ -32,6 +37,10 @@ package body Flyology_Bench.Scaling is
       if Set.Count = Set.Maximum_Points then
          raise Constraint_Error with
            "empirical-scaling observation capacity exceeded";
+      end if;
+      if not Set.Has_Kind then
+         Set.Kind_Value := Sweeps.Kind (Point);
+         Set.Has_Kind := True;
       end if;
       Set.Count := Set.Count + 1;
       Set.Data (Set.Count) := (Point => Point, Value => Observation);
@@ -102,6 +111,22 @@ package body Flyology_Bench.Scaling is
       Available_Models : Natural := 0;
    begin
       Result.Point_Count := Set.Count;
+      Result.Has_Kind := Set.Has_Kind;
+      Result.Kind_Value := Set.Kind_Value;
+      if Set.Count > 0 then
+         for Index in 1 .. Set.Count loop
+            declare
+               Input : constant Sweeps.Exact_Value :=
+                 Sweeps.Value (Set.Data (Index).Point);
+            begin
+               Minimum := Sweeps.Exact_Value'Min (Minimum, Input);
+               Maximum := Sweeps.Exact_Value'Max (Maximum, Input);
+            end;
+         end loop;
+         Result.Has_Range := True;
+         Result.Minimum := Minimum;
+         Result.Maximum := Maximum;
+      end if;
       if Set.Count < Minimum_Point_Count then
          Result.State := Too_Few_Distinct_Points;
          return Result;
@@ -109,16 +134,12 @@ package body Flyology_Bench.Scaling is
 
       for Index in 1 .. Set.Count loop
          declare
-            Input : constant Sweeps.Exact_Value :=
-              Sweeps.Value (Set.Data (Index).Point);
             Observed : constant Long_Float := Set.Data (Index).Value;
          begin
             if not Finite (Observed) or else Observed <= 0.0 then
                Result.State := Invalid_Observation;
                return Result;
             end if;
-            Minimum := Sweeps.Exact_Value'Min (Minimum, Input);
-            Maximum := Sweeps.Exact_Value'Max (Maximum, Input);
             Sum_Log_Y := Sum_Log_Y
               + Ada.Numerics.Long_Elementary_Functions.Log (Observed);
          exception
@@ -128,8 +149,6 @@ package body Flyology_Bench.Scaling is
          end;
       end loop;
 
-      Result.Minimum := Minimum;
-      Result.Maximum := Maximum;
       if Long_Float (Maximum) / Long_Float (Minimum) < Minimum_Range_Ratio then
          Result.State := Degenerate_Input_Range;
          return Result;
@@ -272,12 +291,36 @@ package body Flyology_Bench.Scaling is
      (Result : Empirical_Scaling_Analysis;
       Model  : Scaling_Model) return Model_Diagnostic is
      (Result.Diagnostics (Model));
+   function Input_Kind_Available
+     (Result : Empirical_Scaling_Analysis) return Boolean is
+     (Result.Has_Kind);
+   function Input_Kind
+     (Result : Empirical_Scaling_Analysis) return Sweeps.Parameter_Kind is
+   begin
+      if not Result.Has_Kind then
+         raise Constraint_Error with "empirical scaling has no parameter kind";
+      end if;
+      return Result.Kind_Value;
+   end Input_Kind;
+   function Input_Range_Available
+     (Result : Empirical_Scaling_Analysis) return Boolean is
+     (Result.Has_Range);
    function Minimum_Input
      (Result : Empirical_Scaling_Analysis) return Sweeps.Exact_Value is
-     (Result.Minimum);
+   begin
+      if not Result.Has_Range then
+         raise Constraint_Error with "empirical scaling has no input range";
+      end if;
+      return Result.Minimum;
+   end Minimum_Input;
    function Maximum_Input
      (Result : Empirical_Scaling_Analysis) return Sweeps.Exact_Value is
-     (Result.Maximum);
+   begin
+      if not Result.Has_Range then
+         raise Constraint_Error with "empirical scaling has no input range";
+      end if;
+      return Result.Maximum;
+   end Maximum_Input;
    function Points_Analyzed
      (Result : Empirical_Scaling_Analysis) return Natural is
      (Result.Point_Count);

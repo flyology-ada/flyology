@@ -538,13 +538,16 @@ if command -v jq >/dev/null 2>&1; then
       and .benchmark == "group/case,\"escaped\""
       and .point == "count:1"
       and .parameter_value == 1
+      and .work.available == true
       and .work.raw_value == 1
       and .sample_semantics == "per_operation_batch_mean"
+      and .collection_available == true
       and .available == true
       and .throughput.direction == "higher_is_better")
     and any(.[];
       .type == "sweep_point"
       and .result_kind == "paired_comparison"
+      and .collection_available == true
       and (.paired_verdict | type) == "string"
       and .reference.operations_ci_low != null
       and .contender.work_ci_high != null)
@@ -552,11 +555,23 @@ if command -v jq >/dev/null 2>&1; then
       .type == "sweep_point"
       and .benchmark == "group/failure"
       and .point == "count:2"
+      and .work.available == true
+      and .collection_available == false
       and .available == false
       and .status == "point_setup_failed"
       and (.failure | contains("bad, \"point\""))
       and .median_elapsed_ns == null
       and .throughput.operations_per_second == null)
+    and any(.[];
+      .type == "sweep_point"
+      and .benchmark == "group/work_failure"
+      and .point == "count:2"
+      and .work.available == false
+      and .work.kind == null
+      and .work.unit == null
+      and .work.raw_value == null
+      and .work.display_scaling == null
+      and .collection_available == false)
     and any(.[];
       .type == "sweep_point"
       and .benchmark == "group/dry"
@@ -566,8 +581,18 @@ if command -v jq >/dev/null 2>&1; then
     and any(.[];
       .type == "empirical_scaling"
       and .status == "scaling_available"
+      and .parameter_kind == "size"
+      and .range_available == true
       and .selected_model == "linear"
       and (.models | length) == 6)
+    and any(.[];
+      .type == "empirical_scaling"
+      and .benchmark == "group/empty"
+      and .status == "too_few_distinct_points"
+      and .parameter_kind == null
+      and .range_available == false
+      and .minimum_input == null
+      and .maximum_input == null)
   ' "$work_dir/sweeps.jsonl" >/dev/null \
     || { printf '%s\n' "sweep JSON/schema integration failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'
