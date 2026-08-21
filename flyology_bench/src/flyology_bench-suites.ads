@@ -3,6 +3,7 @@
 
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
+with Flyology_Bench.Reporters;
 
 --  Builds and runs an explicitly registered benchmark suite.
 --
@@ -25,7 +26,9 @@ package Flyology_Bench.Suites is
    --  Kind of result produced by a registered callback.
    --  @enum Ordinary_Measurement One Measurement result.
    --  @enum Paired_Comparison One order-balanced Comparison result.
-   type Result_Kind is (Ordinary_Measurement, Paired_Comparison);
+   --  @enum Multi_Way_Comparison One comparison of two to sixteen cases.
+   type Result_Kind is
+     (Ordinary_Measurement, Paired_Comparison, Multi_Way_Comparison);
 
    --  Requested top-level runner action.
    --  @enum Run_Selected Execute the selected callbacks.
@@ -35,7 +38,7 @@ package Flyology_Bench.Suites is
 
    --  Output written by the suite runner.
    --  @enum Human Plain result cards and suite summary.
-   --  @enum CSV One common comma-separated suite schema.
+   --  @enum CSV Typed table sections using the existing reporter schemas.
    --  @enum JSON Newline-delimited JSON suite objects.
    type Output_Style is (Human, CSV, JSON);
 
@@ -49,7 +52,7 @@ package Flyology_Bench.Suites is
    --  @enum Fail_Fast Stop before the next selected case.
    type Error_Policy is (Continue_After_Error, Fail_Fast);
 
-   --  Final runner classification. Inconclusive paired comparisons do not
+   --  Final runner classification. Inconclusive paired or multi-way results do not
    --  fail a run. Regression_Rejected is reserved for the baseline gate
    --  adapter and remains zero until that adapter is installed.
    --  @enum Succeeded Every applicable success condition passed.
@@ -149,6 +152,27 @@ package Flyology_Bench.Suites is
       Group          : String := "";
       Tags           : String := "");
 
+   --  Bind one Compare_Many instantiation and its enumeration-specific
+   --  existing reporters to a suite registration. The helper's indirect
+   --  callbacks remain outside every timed operation.
+   generic
+      --  Same enumeration used by Compare_Many.
+      type Case_Id is (<>);
+      --  Wrapper around the existing Compare_Many instance.
+      with procedure Run
+        (Config : Configuration;
+         Result : out Multi_Comparison);
+   package Multi_Way_Registration is
+      --  Register the bound multi-way callback and reporters. Target is the
+      --  registry to extend; Name and optional Group form its identity; Tags
+      --  is the optional comma-separated selection set.
+      procedure Register
+        (Target : in out Suite;
+         Name   : String;
+         Group  : String := "";
+         Tags   : String := "");
+   end Multi_Way_Registration;
+
    --  Return the number of registrations.
    --  @param Target Registry to inspect.
    --  @return Registered case count.
@@ -163,7 +187,7 @@ package Flyology_Bench.Suites is
    --  Return one registered result kind.
    --  @param Target Registry to inspect.
    --  @param Index One-based registration index.
-   --  @return Ordinary or paired result kind.
+   --  @return Ordinary, paired, or multi-way result kind.
    function Kind (Target : Suite; Index : Case_Index) return Result_Kind;
 
    --  Result of one exact, non-reporting callback execution. This is the
@@ -177,12 +201,25 @@ package Flyology_Bench.Suites is
    --  @param Full_Name Exact stable identity.
    --  @param Config Collection policy passed without modification.
    --  @param Result Exact callback result.
-   --  @exception Constraint_Error If Full_Name is not registered.
+   --  @exception Constraint_Error If Full_Name is absent or multi-way.
    procedure Execute_One
      (Target    : Suite;
       Full_Name : String;
       Config    : Configuration;
       Result    : out Registered_Result);
+
+   --  Invoke exactly one multi-way registration without inflating every
+   --  ordinary/paired Registered_Result to Multi_Comparison's storage size.
+   --  @param Target Registry containing the callback.
+   --  @param Full_Name Exact stable identity.
+   --  @param Config Collection policy passed without modification.
+   --  @param Result Exact multi-way result.
+   --  @exception Constraint_Error If Full_Name is absent or not multi-way.
+   procedure Execute_One_Multi
+     (Target    : Suite;
+      Full_Name : String;
+      Config    : Configuration;
+      Result    : out Multi_Comparison);
 
    --  Return the kind stored in one exact execution result.
    --  @param Result Exact execution result.
@@ -285,8 +322,8 @@ package Flyology_Bench.Suites is
 
    --  Execute selected callbacks serially and stream their results. Human
    --  output delegates detailed measurements to Flyology_Bench.Reporters.
-   --  CSV and newline-delimited JSON use one suite schema carrying suite,
-   --  full identity, result kind, outcome, and the main result statistics.
+   --  CSV prefixes the existing typed result/metric schemas with suite context;
+   --  newline-delimited JSON extends each complete existing result object.
    --  Progress and exception diagnostics go to Progress, never to an explicit
    --  --output file. An explicit file is plain and contains no ANSI escapes.
    --  @param Target Registry to execute.
@@ -323,6 +360,21 @@ private
             Reference_Name : Unbounded_String;
             Contender_Name : Unbounded_String;
             Comparison_Run : Comparison_Callback;
+         when Multi_Way_Comparison =>
+            Multi_Run : access procedure
+              (Config : Configuration;
+               Result : out Multi_Comparison);
+            Multi_Console : access procedure
+              (Result : Multi_Comparison;
+               File   : Ada.Text_IO.File_Type);
+            Multi_CSV : access procedure
+              (Result  : Multi_Comparison;
+               File    : Ada.Text_IO.File_Type;
+               Context : Flyology_Bench.Reporters.Machine_Context);
+            Multi_JSON : access procedure
+              (Result  : Multi_Comparison;
+               File    : Ada.Text_IO.File_Type;
+               Context : Flyology_Bench.Reporters.Machine_Context);
       end case;
    end record;
 
@@ -342,6 +394,8 @@ private
             Measured : Measurement;
          when Paired_Comparison =>
             Compared : Comparison;
+         when Multi_Way_Comparison =>
+            null;
       end case;
    end record;
 
