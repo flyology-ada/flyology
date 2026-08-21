@@ -17,6 +17,16 @@ package body Flyology_Bench.Workers.Test_Support is
       Value.Metric_Data.Data.Requested (Wall_Time) := False;
    end Corrupt_Metric_Request;
 
+   procedure Corrupt_Iteration_Count (Value : in out Measurement) is
+   begin
+      Value.Iterations := Value.Iterations + 1;
+   end Corrupt_Iteration_Count;
+
+   procedure Corrupt_Sample_Count (Value : in out Measurement) is
+   begin
+      Value.Sample_Total := Value.Sample_Total - 1;
+   end Corrupt_Sample_Count;
+
    procedure Corrupt_Statistics (Value : in out Measurement) is
    begin
       Value.Median := Value.Maximum + 1.0;
