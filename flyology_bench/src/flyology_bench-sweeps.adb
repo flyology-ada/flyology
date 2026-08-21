@@ -286,15 +286,22 @@ package body Flyology_Bench.Sweeps is
      (Amount : Work_Amount;
       Result : Measurement) return Throughput_Summary
    is
+      Median : constant Long_Float := Median_Nanoseconds (Result);
+      Low : constant Long_Float :=
+        Mean_Confidence_Low_Nanoseconds (Result);
+      High : constant Long_Float :=
+        Mean_Confidence_High_Nanoseconds (Result);
    begin
-      if Iterations_Per_Sample (Result) = 0 then
+      if Iterations_Per_Sample (Result) = 0
+        or else (Median = 0.0 and then Low = 0.0 and then High = 0.0)
+      then
          return (State => Wall_Time_Unavailable, others => 0.0);
       end if;
       return Derive_Throughput
         (Amount,
-         Median_Nanoseconds (Result),
-         Mean_Confidence_Low_Nanoseconds (Result),
-         Mean_Confidence_High_Nanoseconds (Result));
+         Median,
+         Low,
+         High);
    exception
       when others =>
          return (State => Wall_Time_Unavailable, others => 0.0);
@@ -516,6 +523,9 @@ package body Flyology_Bench.Sweeps is
                            when others => Point_Wall_Time_Unavailable);
                   exception
                      when Failure : others =>
+                        Item_Result.Measurement_Value := (others => <>);
+                        Item_Result.Rate := (others => <>);
+                        Item_Result.Collected := False;
                         Item_Result.State := Point_Measurement_Failed;
                         Item_Result.Message := Error_Text
                           (Ada.Exceptions.Exception_Name (Failure) & ": "
@@ -638,6 +648,10 @@ package body Flyology_Bench.Sweeps is
                      end if;
                   exception
                      when Failure : others =>
+                        Item_Result.Comparison_Value := (others => <>);
+                        Item_Result.Reference_Rate := (others => <>);
+                        Item_Result.Contender_Rate := (others => <>);
+                        Item_Result.Collected := False;
                         Item_Result.State := Point_Measurement_Failed;
                         Item_Result.Message := Error_Text
                           (Ada.Exceptions.Exception_Name (Failure) & ": "

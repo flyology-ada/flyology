@@ -544,7 +544,8 @@ overflow remain explicit unavailable states. Work availability, completed
 collection, valid wall data, and derived-rate availability are separate:
 skipped or failed work is never rendered as a default amount, and a
 throughput-only overflow does not discard a valid elapsed result or paired
-verdict.
+verdict. If a runner raises after writing part of its `out` value, the sweep
+resets that storage before retaining the failed point.
 
 `Measure_Sweep` and `Compare_Sweep` return bounded inspectable results for
 every attempted point. The paired executor invokes one existing adjacent,
@@ -567,11 +568,14 @@ n, quadratic, and cubic models in log space. Mixing size and count observations
 is rejected. It reports the parameter kind, every model's coefficient, nominal
 exponent, R-squared, RMS and maximum log residual, selection state, and observed
 input range. Rejected nonempty data retains its factual range; empty data marks
-the kind and range unavailable instead of publishing sentinel values. At least
-four distinct positive points spanning a factor of two are required. Invalid
-observations, numeric overflow, poor fit, and poor identifiability produce
-explicit unavailable states. A selected model describes only the observed
-range; it is empirical scaling, not proof of big-O.
+the kind and range unavailable instead of publishing sentinel values. Rejected
+analyses leave every diagnostic's `Selected` field false; when fitting reached
+model comparison, `Selected_Model` still exposes the lowest-residual candidate
+for callers that first inspect the status. At least four distinct positive
+points spanning a factor of two are required. Invalid observations, numeric
+overflow, poor fit, and poor identifiability produce explicit unavailable
+states. A selected model describes only the observed range; it is empirical
+scaling, not proof of big-O.
 
 `Flyology_Bench.Sweeps.Reporters` defines new console, CSV, and newline-delimited
 JSON schemas rather than changing the existing measurement formats. Rows carry
