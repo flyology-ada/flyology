@@ -157,6 +157,13 @@ awk '/^-- custom machine output begin --$/ { inside = 1; next }
      /^-- custom machine output end --$/ { inside = 0; next }
      inside && /^\{/ { print }' "$work_dir/custom.out" \
   >"$work_dir/custom.jsonl"
+grep -q 'primary.*primary_time' "$work_dir/custom.out"
+grep -q 'source.*deterministic_fake_ticks.*calibration harness wall' \
+  "$work_dir/custom.out"
+grep -q 'failed_pair.*unavailable: reference counter reset; contender probe failed' \
+  "$work_dir/custom.out"
+grep -q 'failed_pair.*reference counter reset; contender probe failed' \
+  "$work_dir/custom.out"
 if command -v jq >/dev/null 2>&1; then
   jq -s -e '
     any(.[];
@@ -179,6 +186,12 @@ if command -v jq >/dev/null 2>&1; then
       and .available == false
       and .status == "probe failed"
       and (has("mean") | not))
+    and any(.[];
+      .schema == "flyology_bench.comparison_metrics.v2"
+      and .kind == "custom"
+      and .axis == "failed_pair"
+      and .available == false
+      and .status == "reference counter reset; contender probe failed")
   ' "$work_dir/custom.jsonl" >/dev/null
 else
   grep -q '"kind":"custom".*"timer_role":"primary_alternate"' \
