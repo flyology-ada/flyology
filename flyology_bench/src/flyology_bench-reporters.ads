@@ -2,6 +2,7 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Ada.Text_IO;
+with Flyology_Bench.Baselines;
 
 package Flyology_Bench.Reporters is
    --  Renders benchmark measurements and comparisons for people and tools.
@@ -200,6 +201,36 @@ package Flyology_Bench.Reporters is
       Contender_Name : String;
       Result         : Comparison;
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one human-readable saved-baseline gate decision.
+   --  @param Result Completed gate evaluation.
+   --  @param File Destination text file.
+   --  @param Style ANSI styling policy.
+   procedure Put_Gate_Console
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Style  : Console_Style := Auto);
+
+   --  Print the schema header expected by Put_Gate_CSV rows.
+   --  @param File Destination text file.
+   procedure Put_Gate_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one saved-baseline gate decision as a CSV row. Statistical fields
+   --  are empty when no compatible comparison ran.
+   --  @param Result Completed gate evaluation.
+   --  @param File Destination text file.
+   procedure Put_Gate_CSV
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one saved-baseline gate decision as a newline-delimited JSON
+   --  object. Statistical fields are null when no compatible comparison ran.
+   --  @param Result Completed gate evaluation.
+   --  @param File Destination text file.
+   procedure Put_Gate_JSON
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    generic
       --  Same enumeration used to instantiate Compare_Many.

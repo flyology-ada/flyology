@@ -273,6 +273,21 @@ package body Flyology_Bench.Reporters is
       end case;
    end Verdict_Name;
 
+   function Compatibility_Name
+     (Value : Flyology_Bench.Baselines.Compatibility_Issue) return String is
+   begin
+      case Value is
+         when Flyology_Bench.Baselines.No_Compatibility_Issue =>
+            return "none";
+         when Flyology_Bench.Baselines.Benchmark_Identity_Mismatch =>
+            return "benchmark_identity";
+         when Flyology_Bench.Baselines.Environment_Fingerprint_Mismatch =>
+            return "environment_fingerprint";
+         when Flyology_Bench.Baselines.Clock_Backend_Mismatch =>
+            return "clock_backend";
+      end case;
+   end Compatibility_Name;
+
    function Schedule_Name (Value : Shootout_Schedule_Policy) return String is
      (if Value = Balanced_Rounds then "balanced rounds" else "sequential cases");
 
@@ -794,7 +809,8 @@ package body Flyology_Bench.Reporters is
    end Put_Telemetry_Summary;
 
    function JSON_String (Value : String) return String is
-      Buffer : String (1 .. Value'Length * 2 + 2);
+      Hex    : constant String := "0123456789abcdef";
+      Buffer : String (1 .. Value'Length * 6 + 2);
       Last   : Natural := 1;
    begin
       Buffer (1) := '"';
@@ -802,12 +818,35 @@ package body Flyology_Bench.Reporters is
          if Character = '"' or else Character = '\' then
             Last := Last + 1;
             Buffer (Last) := '\';
+            Last := Last + 1;
+            Buffer (Last) := Character;
+         elsif Character = ASCII.BS
+           or else Character = ASCII.FF
+           or else Character = ASCII.LF
+           or else Character = ASCII.CR
+           or else Character = ASCII.HT
+         then
+            Last := Last + 1;
+            Buffer (Last) := '\';
+            Last := Last + 1;
+            Buffer (Last) :=
+              (case Character is
+                  when ASCII.BS => 'b',
+                  when ASCII.FF => 'f',
+                  when ASCII.LF => 'n',
+                  when ASCII.CR => 'r',
+                  when others   => 't');
          elsif Character < ' ' then
-            raise Constraint_Error with
-              "benchmark names must not contain control characters";
+            Buffer (Last + 1 .. Last + 4) := "\u00";
+            Buffer (Last + 5) :=
+              Hex (Standard.Character'Pos (Character) / 16 + Hex'First);
+            Buffer (Last + 6) :=
+              Hex (Standard.Character'Pos (Character) mod 16 + Hex'First);
+            Last := Last + 6;
+         else
+            Last := Last + 1;
+            Buffer (Last) := Character;
          end if;
-         Last := Last + 1;
-         Buffer (Last) := Character;
       end loop;
       Last := Last + 1;
       Buffer (Last) := '"';
@@ -824,7 +863,8 @@ package body Flyology_Bench.Reporters is
             Quote := True;
          else
             Count := Count + 1;
-            Quote := Quote or else Character = ',' or else Character = ASCII.LF;
+            Quote := Quote or else Character = ','
+              or else Character = ASCII.LF or else Character = ASCII.CR;
          end if;
       end loop;
       if not Quote then
@@ -2255,6 +2295,154 @@ package body Flyology_Bench.Reporters is
       Put_Comparison_Metrics_JSON (File, Result);
       Ada.Text_IO.Put_Line (File, "}");
    end Put_Comparison_JSON;
+
+   procedure Put_Gate_Console
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Style  : Console_Style := Auto)
+   is
+      package Baselines renames Flyology_Bench.Baselines;
+      use type Baselines.Gate_Status;
+      Color : constant Boolean := Styled (Style);
+      Status_Color : constant String :=
+        (if not Color then ""
+         elsif Baselines.Rejected (Result) then Red & Bold
+         elsif Baselines.Status (Result) = Baselines.Inconclusive then Yellow & Bold
+         else Green & Bold);
+      Muted : constant String := (if Color then Dim else "");
+      End_Style : constant String := (if Color then Reset else "");
+      Saved_Name : constant String :=
+        (if Baselines.Baseline_Name (Result)'Length = 0
+         then "(unavailable)"
+         else Baselines.Baseline_Name (Result));
+   begin
+      Ada.Text_IO.Put_Line
+        (File,
+         (if Color then Magenta & Bold else "")
+         & "-- baseline gate: " & Baselines.Current_Name (Result) & " "
+         & (1 ..
+              (if Baselines.Current_Name (Result)'Length < 48
+               then 48 - Baselines.Current_Name (Result)'Length
+               else 1) => '-')
+         & End_Style);
+      Ada.Text_IO.Put_Line
+        (File,
+         "   status     | " & Status_Color
+         & Baselines.Status_Name (Result)
+         & (if Baselines.Rejected (Result) then " (rejected)" else " (accepted)")
+         & End_Style);
+      Ada.Text_IO.Put_Line
+        (File, Muted & "   baseline   | " & Saved_Name & End_Style);
+      Ada.Text_IO.Put_Line
+        (File, Muted & "   artifact   | "
+         & Baselines.Baseline_Path (Result) & End_Style);
+      if Baselines.Has_Statistics (Result) then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   comparison | " & Image (Baselines.Speedup (Result)) & "x"
+            & "  95% CI ["
+            & Image (Baselines.Speedup_Confidence_Low (Result)) & ", "
+            & Image (Baselines.Speedup_Confidence_High (Result)) & "]"
+            & "  " & Time_Change_Image
+                (Baselines.Time_Change_Percent (Result)));
+      end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         "   threshold  | +/-"
+         & Image (Baselines.Practical_Threshold_Percent (Result), 2) & "%");
+      Ada.Text_IO.Put_Line
+        (File, "   reason     | " & Baselines.Reason (Result));
+   end Put_Gate_Console;
+
+   procedure Put_Gate_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Ada.Text_IO.Put_Line
+        (File,
+         "type,schema_version,baseline_path,baseline_name,current_name,status,"
+         & "rejected,compatible,compatibility_issue,speedup,speedup_ci95_low,"
+         & "speedup_ci95_high,time_change_percent,"
+         & "practical_threshold_percent,reason");
+   end Put_Gate_CSV_Header;
+
+   procedure Put_Gate_CSV
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      package Baselines renames Flyology_Bench.Baselines;
+   begin
+      Ada.Text_IO.Put
+        (File,
+         "baseline_gate,1,"
+         & CSV_String (Baselines.Baseline_Path (Result)) & ","
+         & CSV_String (Baselines.Baseline_Name (Result)) & ","
+         & CSV_String (Baselines.Current_Name (Result)) & ","
+         & CSV_String (Baselines.Status_Name (Result)) & ","
+         & (if Baselines.Rejected (Result) then "true" else "false") & ","
+         & (if Baselines.Compatible (Result) then "true" else "false") & ","
+         & CSV_String (Compatibility_Name (Baselines.Compatibility (Result)))
+         & ",");
+      if Baselines.Has_Statistics (Result) then
+         Ada.Text_IO.Put
+           (File,
+            JSON_Number (Baselines.Speedup (Result)) & ","
+            & JSON_Number (Baselines.Speedup_Confidence_Low (Result)) & ","
+            & JSON_Number (Baselines.Speedup_Confidence_High (Result)) & ","
+            & JSON_Number (Baselines.Time_Change_Percent (Result)) & ",");
+      else
+         Ada.Text_IO.Put (File, ",,,,");
+      end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         JSON_Number (Baselines.Practical_Threshold_Percent (Result)) & ","
+         & CSV_String (Baselines.Reason (Result)));
+   end Put_Gate_CSV;
+
+   procedure Put_Gate_JSON
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      package Baselines renames Flyology_Bench.Baselines;
+   begin
+      Ada.Text_IO.Put
+        (File,
+         "{""type"":""baseline_gate"",""schema_version"":1"
+         & ",""baseline_path"":" & JSON_String
+             (Baselines.Baseline_Path (Result))
+         & ",""baseline_name"":" & JSON_String
+             (Baselines.Baseline_Name (Result))
+         & ",""current_name"":" & JSON_String
+             (Baselines.Current_Name (Result))
+         & ",""status"":" & JSON_String (Baselines.Status_Name (Result))
+         & ",""rejected"":"
+         & (if Baselines.Rejected (Result) then "true" else "false")
+         & ",""compatible"":"
+         & (if Baselines.Compatible (Result) then "true" else "false")
+         & ",""compatibility_issue"":"
+         & JSON_String (Compatibility_Name (Baselines.Compatibility (Result)))
+         & ",""speedup"":");
+      if Baselines.Has_Statistics (Result) then
+         Ada.Text_IO.Put
+           (File,
+            JSON_Number (Baselines.Speedup (Result))
+            & ",""speedup_ci95_low"":"
+            & JSON_Number (Baselines.Speedup_Confidence_Low (Result))
+            & ",""speedup_ci95_high"":"
+            & JSON_Number (Baselines.Speedup_Confidence_High (Result))
+            & ",""time_change_percent"":"
+            & JSON_Number (Baselines.Time_Change_Percent (Result)));
+      else
+         Ada.Text_IO.Put
+           (File,
+            "null,""speedup_ci95_low"":null,""speedup_ci95_high"":null,"
+            & """time_change_percent"":null");
+      end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         ",""practical_threshold_percent"":"
+         & JSON_Number (Baselines.Practical_Threshold_Percent (Result))
+         & ",""reason"":" & JSON_String (Baselines.Reason (Result)) & "}");
+   end Put_Gate_JSON;
 
    procedure Put_Multi_Comparison_Console
      (Result : Multi_Comparison;

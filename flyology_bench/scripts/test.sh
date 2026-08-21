@@ -34,6 +34,8 @@ cat "$work_dir/recording.out"
 cat "$work_dir/custom.out"
 grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
   "$work_dir/custom.out"
+"$crate_root/tests/bin/baseline_gate_smoke" >"$work_dir/gate-smoke.out"
+cat "$work_dir/gate-smoke.out"
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
 "$crate_root/examples/bin/custom_metrics" >"$work_dir/custom-example.out"
@@ -46,6 +48,29 @@ if ! grep -Fq "${escape}[2K" "$work_dir/recording-example.ansi" \
   || ! grep -q 'fly recorder  elapsed ' "$work_dir/recording-example.ansi"
 then
   printf '%s\n' "recording example did not render an in-place ANSI dashboard" >&2
+  exit 1
+fi
+
+gate_baseline="$work_dir/example.baseline"
+"$crate_root/examples/bin/baseline_gate" record "$gate_baseline" \
+  >"$work_dir/gate-record.out"
+FLYOLOGY_BENCH_OUTPUT=json \
+  "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  >"$work_dir/gate.jsonl"
+FLYOLOGY_BENCH_OUTPUT=csv \
+  "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  >"$work_dir/gate.csv"
+if FLYOLOGY_BENCH_GATE_REGRESSION=1 \
+  "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
+  >"$work_dir/gate-regression.out" 2>&1
+then
+  printf '%s\n' "baseline example accepted an established regression" >&2
+  exit 1
+fi
+if ! grep -q 'status     | regression (rejected)' \
+  "$work_dir/gate-regression.out"
+then
+  printf '%s\n' "baseline example did not report its rejected regression" >&2
   exit 1
 fi
 
@@ -184,6 +209,38 @@ awk '/^-- recording machine output begin --$/ { inside = 1; next }
 grep '^{' "$work_dir/recording.machine" >"$work_dir/recording.jsonl"
 grep -v '^{' "$work_dir/recording.machine" >"$work_dir/recording.csv"
 check_csv recording "$work_dir/recording.csv"
+awk '/^-- baseline gate machine output begin --$/ { inside = 1; next }
+     /^-- baseline gate machine output end --$/ { inside = 0; next }
+     inside { print }' "$work_dir/gate-smoke.out" >"$work_dir/gate-smoke.machine"
+grep '^{' "$work_dir/gate-smoke.machine" >"$work_dir/gate-smoke.jsonl"
+grep -v '^{' "$work_dir/gate-smoke.machine" >"$work_dir/gate-smoke.csv"
+if ! grep -Fq '"gate,""case"' "$work_dir/gate-smoke.csv"
+then
+  printf '%s\n' "baseline gate CSV escaping failed validation" >&2
+  exit 1
+fi
+
+awk '
+  BEGIN { FS = ","; failures = 0 }
+  NR == 1 {
+    expected = NF
+    if ($1 != "type" || $2 != "schema_version") { failures += 1 }
+    next
+  }
+  NR == 2 {
+    if (NF != expected || $1 != "baseline_gate" || $2 != "1") {
+      failures += 1
+    }
+    next
+  }
+  END {
+    if (NR != 2 || failures > 0) {
+      print "baseline gate CSV schema failed validation" > "/dev/stderr"
+      exit 1
+    }
+    print "baseline gate CSV verified"
+  }
+' "$work_dir/gate.csv"
 
 awk '/^-- custom machine output begin --$/ { inside = 1; next }
      /^-- custom machine output end --$/ { inside = 0; next }
@@ -340,6 +397,24 @@ if command -v jq >/dev/null 2>&1; then
     || { printf '%s\n' "recording example JSON failed validation" >&2; exit 1; }
   check_json <"$work_dir/multi.json" \
     || { printf '%s\n' "multi-comparison JSON failed validation" >&2; exit 1; }
+  jq -e '
+    .type == "baseline_gate"
+    and .schema_version == 1
+    and (.status | type) == "string"
+    and (.rejected | type) == "boolean"
+    and (.compatible | type) == "boolean"
+    and has("speedup_ci95_low")
+    and has("speedup_ci95_high")
+    and (.reason | type) == "string"
+  ' "$work_dir/gate.jsonl" >/dev/null \
+    || { printf '%s\n' "baseline gate JSON failed validation" >&2; exit 1; }
+  jq -e '
+    .type == "baseline_gate"
+    and .current_name == "gate,\"case"
+    and .status == "practical_equivalence"
+    and .rejected == false
+  ' "$work_dir/gate-smoke.jsonl" >/dev/null \
+    || { printf '%s\n' "escaped baseline gate JSON failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'
 else
   awk '
@@ -374,5 +449,6 @@ else
         objects
     }
   ' "$work_dir/smoke.jsonl" "$work_dir/recording.jsonl" \
-    "$work_dir/recording-example.jsonl" "$work_dir/multi.json"
+    "$work_dir/recording-example.jsonl" "$work_dir/multi.json" \
+    "$work_dir/gate.jsonl" "$work_dir/gate-smoke.jsonl"
 fi

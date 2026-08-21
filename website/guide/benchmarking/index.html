@@ -556,7 +556,28 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
 ./examples/bin/basic --metrics=perf --require-perf
 ./examples/bin/basic --metrics=perf --require-perf=core</code></pre>
             </figure>
-            <p>The existing CSV tables keep their latency schemas. <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#b19a4d68647c7803ecd5581d1d1d976168b4b9a12bf7d7ab1829153992189c4e"><code>Put_Metrics_CSV</code></a>, <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#7ea8208f1eaae6d66aa4e8b177e8e5603a8c7c27578b24512b81c1c9b873ab92"><code>Put_Comparison_Metrics_CSV</code></a>, and the multi-way long-form reporter emit one row per requested axis with scope, unit, availability status, summaries, confidence bounds, and verdict. JSON measurement, comparison, and multi-way objects include the same status and metric arrays alongside clock and host/toolchain metadata. For regression history, <a href="../../api/flyology_bench/824910ac59ceb8fae65b3b9e981bf121c47de3294e68865c509cb3665fa0c62d.html"><code>Flyology_Bench.Baselines</code></a> stores raw time samples and rejects a comparison when the clock backend or environment fingerprint differs.</p>
+            <p>The existing CSV tables keep their latency schemas. <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#b19a4d68647c7803ecd5581d1d1d976168b4b9a12bf7d7ab1829153992189c4e"><code>Put_Metrics_CSV</code></a>, <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#7ea8208f1eaae6d66aa4e8b177e8e5603a8c7c27578b24512b81c1c9b873ab92"><code>Put_Comparison_Metrics_CSV</code></a>, and the multi-way long-form reporter emit one row per requested axis with scope, unit, availability status, summaries, confidence bounds, and verdict. JSON measurement, comparison, and multi-way objects include the same status and metric arrays alongside clock and host/toolchain metadata. <a href="../../api/flyology_bench/824910ac59ceb8fae65b3b9e981bf121c47de3294e68865c509cb3665fa0c62d.html"><code>Flyology_Bench.Baselines</code></a> records one named raw-sample artifact and gates a later compatible run.</p>
+            <figure class="code-panel">
+              <figcaption>record and check one durable baseline</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./examples/bin/baseline_gate record build/integer_mix.baseline
+./examples/bin/baseline_gate check  build/integer_mix.baseline
+
+FLYOLOGY_BENCH_OUTPUT=csv \
+  ./examples/bin/baseline_gate check build/integer_mix.baseline
+FLYOLOGY_BENCH_OUTPUT=json \
+  ./examples/bin/baseline_gate check build/integer_mix.baseline</code></pre>
+            </figure>
+            <p>Record mode is explicit. Check mode never updates its reference, including after rejection. The writer flushes a unique same-directory temporary file before an atomic POSIX rename. A failure before publication leaves the earlier artifact intact. The artifact has a version, exact benchmark and environment identities, the clock backend, raw time samples, a checksum, and a commit footer.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Regression</dt><dd>The gate rejects only when the complete 95% confidence interval establishes a slowdown beyond the practical threshold. It does not reject a noisy point estimate.</dd></div>
+                <div class="decision-row"><dt>Other verdicts</dt><dd>Improvement, practical equivalence, and inconclusive remain distinct. Policy decides whether an inconclusive result rejects the run.</dd></div>
+                <div class="decision-row"><dt>Artifact policy</dt><dd>Interactive policy can report a missing, invalid, or incompatible artifact. CI can reject those states. The implementation never compares different benchmark names, fingerprints, or clock backends.</dd></div>
+                <div class="decision-row"><dt>Output</dt><dd>Console, CSV, and newline-delimited JSON retain status, rejection, compatibility, interval, threshold, and reason. A suite can count each status and use the rejection field for its final process status.</dd></div>
+              </dl>
+            </div>
+            <p>Use a direct paired comparison when both implementations can run in one process. Pairing retains the balanced collection schedule. The saved-baseline gate uses the existing independent-run bootstrap because its runs occurred at different times. One artifact represents one named reference. Longer histories, dashboards, commit-range analysis, and change-point detection remain separate work.</p>
           </section>
 
           <section id="correctness">
