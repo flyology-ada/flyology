@@ -2,13 +2,13 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Ada.Numerics.Long_Elementary_Functions;
+with Flyology_Bench.Scaling_Policy;
 
 package body Flyology_Bench.Scaling is
    use type Sweeps.Exact_Value;
    use type Sweeps.Parameter_Kind;
 
    Minimum_Point_Count : constant := 4;
-   Minimum_Range_Ratio : constant Long_Float := 2.0;
    Minimum_R_Squared   : constant Long_Float := 0.90;
    Maximum_RMS_Log_Residual : constant Long_Float := 0.10;
    Identifiability_Margin : constant Long_Float := 0.000_1;
@@ -154,7 +154,7 @@ package body Flyology_Bench.Scaling is
          end;
       end loop;
 
-      if Long_Float (Maximum) / Long_Float (Minimum) < Minimum_Range_Ratio then
+      if Scaling_Policy.Range_Is_Degenerate (Minimum, Maximum) then
          Result.State := Degenerate_Input_Range;
          return Result;
       end if;

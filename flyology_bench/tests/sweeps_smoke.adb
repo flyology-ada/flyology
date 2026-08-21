@@ -55,6 +55,12 @@ procedure Sweeps_Smoke is
       Current_Size := Natural (Sweeps.Value (Item));
    end Choose_Point;
 
+   procedure Ignore_Point (Item : Sweeps.Parameter_Point) is
+      pragma Unreferenced (Item);
+   begin
+      null;
+   end Ignore_Point;
+
    procedure Operation_A is
    begin
       for Index in 1 .. Current_Size loop
@@ -72,6 +78,11 @@ procedure Sweeps_Smoke is
    function Point_Work (Item : Sweeps.Parameter_Point) return Sweeps.Work_Amount is
      (Sweeps.Work
         (Sweeps.Value (Item), Sweeps.Items, Scaling => Sweeps.Decimal_Scaling));
+
+   function Exact_Byte_Work
+     (Item : Sweeps.Parameter_Point) return Sweeps.Work_Amount is
+     (Sweeps.Work
+        (Sweeps.Value (Item), Sweeps.Bytes, Scaling => Sweeps.Binary_Scaling));
 
    function Display_Work
      (Item : Sweeps.Parameter_Point) return Sweeps.Work_Amount is
@@ -132,6 +143,11 @@ procedure Sweeps_Smoke is
       Work_For     => Display_Work,
       Run_Point    => Measure_A);
 
+   procedure Run_Maximum_Dry is new Sweeps.Measure_Sweep
+     (Select_Point => Ignore_Point,
+      Work_For     => Exact_Byte_Work,
+      Run_Point    => Measure_A);
+
    procedure Run_Output_Failing_Measurement is new Sweeps.Measure_Sweep
      (Select_Point => Choose_Point,
       Work_For     => Point_Work,
@@ -187,6 +203,7 @@ procedure Sweeps_Smoke is
    Ordinary : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Paired   : Sweeps.Paired_Sweep_Result (Maximum_Points => 3);
    Display_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
+   Maximum_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 1);
    Failure_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Work_Failure_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Dry_Result     : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
@@ -380,6 +397,9 @@ begin
            (Sweeps.Element (Measurement_Failure, 1)),
          "failed measurement became collected");
       Check
+        (not Sweeps.Stopped_Early (Measurement_Failure),
+         "final ordinary failure reported unattempted points");
+      Check
         (Flyology_Bench.Median_Nanoseconds
            (Sweeps.Data (Sweeps.Element (Measurement_Failure, 1))) = 0.0,
          "failed measurement retained partial output");
@@ -397,6 +417,9 @@ begin
         (not Sweeps.Collection_Available
            (Sweeps.Element (Comparison_Failure, 1)),
          "failed comparison became collected");
+      Check
+        (not Sweeps.Stopped_Early (Comparison_Failure),
+         "final paired failure reported unattempted points");
       declare
          Reset_Pair : constant Flyology_Bench.Comparison :=
            Sweeps.Data (Sweeps.Element (Comparison_Failure, 1));
@@ -408,6 +431,29 @@ begin
               (Flyology_Bench.Contender_Measurement (Reset_Pair)) = 0.0,
             "failed comparison retained partial output");
       end;
+   end;
+
+   declare
+      Maximum_Points : Sweeps.Point_Set (1);
+   begin
+      Maximum_Points.Append
+        (Sweeps.Point
+           (Sweeps.Size_Parameter, Sweeps.Exact_Value'Last, "maximum"));
+      Run_Maximum_Dry
+        ("limits/maximum",
+         Maximum_Points,
+         Config,
+         (Mode => Sweeps.Dry_Run, others => <>),
+         Maximum_Result);
+      Check
+        (Sweeps.Identity (Sweeps.Parameter (Sweeps.Element (Maximum_Result, 1)))
+         = "size:18446744073709551615",
+         "maximum point identity lost exactness");
+      Check
+        (Sweeps.Raw_Value
+           (Sweeps.Work_Per_Operation (Sweeps.Element (Maximum_Result, 1)))
+         = Sweeps.Exact_Value'Last,
+         "maximum work value lost exactness");
    end;
 
    Run_Ordinary
@@ -582,6 +628,9 @@ begin
       Too_Short      : Scaling.Observation_Set (3);
       Degenerate     : Scaling.Observation_Set (4);
       Invalid        : Scaling.Observation_Set (4);
+      Below_Twofold  : Scaling.Observation_Set (4);
+      Exact_Twofold  : Scaling.Observation_Set (4);
+      Upper_Degenerate : Scaling.Observation_Set (4);
       Empty          : Scaling.Observation_Set (1);
       Mixed          : Scaling.Observation_Set (2);
    begin
@@ -612,6 +661,40 @@ begin
               (Sweeps.Count_Parameter, Sweeps.Exact_Value (10 + Offset)),
             Long_Float (10 + Offset));
       end loop;
+      declare
+         Minimum : constant Sweeps.Exact_Value := 9_007_199_254_740_993;
+         Below_Maximum : constant Sweeps.Exact_Value :=
+           18_014_398_509_481_985;
+         Exact_Maximum : constant Sweeps.Exact_Value :=
+           18_014_398_509_481_986;
+         Below_Inputs : constant array (Positive range 1 .. 4) of
+           Sweeps.Exact_Value :=
+             [Minimum, Minimum + 1, Below_Maximum - 1, Below_Maximum];
+         Exact_Inputs : constant array (Positive range 1 .. 4) of
+           Sweeps.Exact_Value :=
+             [Minimum, Minimum + 1, Exact_Maximum - 1, Exact_Maximum];
+         Upper_Inputs : constant array (Positive range 1 .. 4) of
+           Sweeps.Exact_Value :=
+             [Sweeps.Exact_Value'Last - 3,
+              Sweeps.Exact_Value'Last - 2,
+              Sweeps.Exact_Value'Last - 1,
+              Sweeps.Exact_Value'Last];
+      begin
+         for Index in Below_Inputs'Range loop
+            Below_Twofold.Append
+              (Sweeps.Point (Sweeps.Size_Parameter, Below_Inputs (Index)),
+               Long_Float (Index));
+            Exact_Twofold.Append
+              (Sweeps.Point (Sweeps.Size_Parameter, Exact_Inputs (Index)),
+               Long_Float (Index));
+         end loop;
+         for Index in Upper_Inputs'Range loop
+            Upper_Degenerate.Append
+              (Sweeps.Point
+                 (Sweeps.Size_Parameter, Upper_Inputs (Index)),
+               Long_Float (Index));
+         end loop;
+      end;
       for Power in 1 .. 5 loop
          declare
             N : constant Sweeps.Exact_Value := 2 ** Power;
@@ -665,6 +748,13 @@ begin
            Scaling.Analyze (Bad_Data);
          Empty_Fit : constant Scaling.Empirical_Scaling_Analysis :=
            Scaling.Analyze (Empty);
+         Below_Twofold_Fit : constant Scaling.Empirical_Scaling_Analysis :=
+           Scaling.Analyze (Below_Twofold);
+         Exact_Twofold_Fit : constant Scaling.Empirical_Scaling_Analysis :=
+           Scaling.Analyze (Exact_Twofold);
+         Upper_Degenerate_Fit : constant
+           Scaling.Empirical_Scaling_Analysis :=
+             Scaling.Analyze (Upper_Degenerate);
       begin
          Check (Scaling.Available (Linear_Fit), "linear fit unavailable");
          Check
@@ -756,6 +846,18 @@ begin
             = Scaling.Degenerate_Input_Range,
             "degenerate scaling range accepted");
          Check
+           (Scaling.Status (Below_Twofold_Fit)
+            = Scaling.Degenerate_Input_Range,
+            "rounded sub-twofold scaling range accepted");
+         Check
+           (Scaling.Status (Exact_Twofold_Fit)
+            /= Scaling.Degenerate_Input_Range,
+            "exact twofold scaling range rejected");
+         Check
+           (Scaling.Status (Upper_Degenerate_Fit)
+            = Scaling.Degenerate_Input_Range,
+            "upper-bound scaling range overflowed or was accepted");
+         Check
            (Scaling.Status (Scaling.Analyze (Invalid))
             = Scaling.Invalid_Observation,
             "nonpositive scaling observation accepted");
@@ -767,21 +869,26 @@ begin
          Reporters.Put_CSV ("group/failure", Failure_Result);
          Reporters.Put_CSV ("group/work_failure", Work_Failure_Result);
          Reporters.Put_CSV ("group/dry", Dry_Result);
+         Reporters.Put_CSV ("group/maximum", Maximum_Result);
          Reporters.Put_Comparison_CSV_Header;
          Reporters.Put_Comparison_CSV
            ("group/case", "existing", "candidate", Paired);
          Reporters.Put_Scaling_CSV_Header;
          Reporters.Put_Scaling_CSV ("group/case", Linear_Fit);
          Reporters.Put_Scaling_CSV ("group/inadequate", Bad_Fit);
+         Reporters.Put_Scaling_CSV ("group/boundary", Below_Twofold_Fit);
          Reporters.Put_Scaling_CSV ("group/empty", Empty_Fit);
          Reporters.Put_NDJSON ("group/case,""escaped""", Ordinary);
          Reporters.Put_NDJSON ("group/failure", Failure_Result);
          Reporters.Put_NDJSON ("group/work_failure", Work_Failure_Result);
          Reporters.Put_NDJSON ("group/dry", Dry_Result);
+         Reporters.Put_NDJSON ("group/maximum", Maximum_Result);
          Reporters.Put_Comparison_NDJSON
            ("group/case", "existing", "candidate", Paired);
          Reporters.Put_Scaling_NDJSON ("group/case", Linear_Fit);
          Reporters.Put_Scaling_NDJSON ("group/inadequate", Bad_Fit);
+         Reporters.Put_Scaling_NDJSON
+           ("group/boundary", Below_Twofold_Fit);
          Reporters.Put_Scaling_NDJSON ("group/empty", Empty_Fit);
          Ada.Text_IO.Put_Line ("-- sweep machine output end --");
       end;

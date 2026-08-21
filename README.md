@@ -2678,6 +2678,12 @@ the infinite-timeout sentinel, non-expired timeout, expiration, remaining-time
 cases, rounding up to poll milliseconds, and saturation at the `poll(2)` integer
 limit.
 
+The standalone benchmark crate uses the same narrow boundary for its exact
+empirical-scaling range classifier. GNATprove establishes the overflow-free
+decision between a sub-twofold and at-least-twofold unsigned 64-bit input range;
+floating-point model fitting and benchmark collection remain outside SPARK and
+are covered by deterministic synthetic-data and behavioral tests.
+
 The public-library proof boundary also covers native `poll` and `accept` result
 classification, including `EINTR` retry and would-block handling. Socket policy
 proves the IPv4/IPv6 and stream/datagram ABI encodings, maps host-supplied errno

@@ -469,7 +469,7 @@ package body Flyology_Bench.Sweeps is
                   Item_Result.Message := Error_Text ("whole-sweep budget exhausted");
                   Result.Items (Result.Count) := Item_Result;
                   if Should_Stop (Item_Result.State) then
-                     Result.Stopped := True;
+                     Result.Stopped := Index < Points.Count;
                      exit;
                   else
                      goto Continue_Point;
@@ -535,7 +535,7 @@ package body Flyology_Bench.Sweeps is
             end if;
             Result.Items (Result.Count) := Item_Result;
             if Should_Stop (Item_Result.State) then
-               Result.Stopped := True;
+               Result.Stopped := Index < Points.Count;
                exit;
             end if;
             <<Continue_Point>>
@@ -582,7 +582,7 @@ package body Flyology_Bench.Sweeps is
                   Item_Result.Message := Error_Text ("whole-sweep budget exhausted");
                   Result.Items (Result.Count) := Item_Result;
                   if Should_Stop (Item_Result.State) then
-                     Result.Stopped := True;
+                     Result.Stopped := Index < Points.Count;
                      exit;
                   else
                      goto Continue_Point;
@@ -661,7 +661,7 @@ package body Flyology_Bench.Sweeps is
             end if;
             Result.Items (Result.Count) := Item_Result;
             if Should_Stop (Item_Result.State) then
-               Result.Stopped := True;
+               Result.Stopped := Index < Points.Count;
                exit;
             end if;
             <<Continue_Point>>

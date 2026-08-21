@@ -209,6 +209,12 @@ then
   printf '%s\n' "sweep CSV did not preserve escaped suite case identity" >&2
   exit 1
 fi
+if ! grep -q '^group/maximum,size:18446744073709551615,size,18446744073709551615,maximum,ordinary_measurement,true,bytes,bytes,18446744073709551615,' \
+  "$work_dir/sweeps.csv"
+then
+  printf '%s\n' "sweep CSV lost an exact maximum parameter or work value" >&2
+  exit 1
+fi
 if ! grep -q 'throughput_availability' "$work_dir/sweeps.csv" \
   || ! grep -q 'reference_throughput_availability' "$work_dir/sweeps.csv" \
   || ! grep -q 'contender_throughput_availability' "$work_dir/sweeps.csv"
@@ -300,8 +306,10 @@ if command -v jq >/dev/null 2>&1; then
       and .benchmark == "group/case,\"escaped\""
       and .point == "count:1"
       and .parameter_value == 1
+      and .parameter_value_exact == "1"
       and .work.available == true
       and .work.raw_value == 1
+      and .work.raw_value_exact == "1"
       and .sample_semantics == "per_operation_batch_mean"
       and .collection_available == true
       and .available == true
@@ -310,6 +318,8 @@ if command -v jq >/dev/null 2>&1; then
     and any(.[];
       .type == "sweep_point"
       and .result_kind == "paired_comparison"
+      and .parameter_value_exact == "1"
+      and .work.raw_value_exact == "1"
       and .collection_available == true
       and (.paired_verdict | type) == "string"
       and .reference.throughput_availability == "throughput_available"
@@ -336,6 +346,7 @@ if command -v jq >/dev/null 2>&1; then
       and .work.kind == null
       and .work.unit == null
       and .work.raw_value == null
+      and .work.raw_value_exact == null
       and .work.display_scaling == null
       and .collection_available == false)
     and any(.[];
@@ -344,6 +355,13 @@ if command -v jq >/dev/null 2>&1; then
       and .available == false
       and .status == "point_dry_run"
       and .median_elapsed_ns == null)
+    and any(.[];
+      .type == "sweep_point"
+      and .benchmark == "group/maximum"
+      and .point == "size:18446744073709551615"
+      and .parameter_value_exact == "18446744073709551615"
+      and .work.raw_value_exact == "18446744073709551615"
+      and .status == "point_dry_run")
     and any(.[];
       .type == "empirical_scaling"
       and .status == "scaling_available"
@@ -359,12 +377,20 @@ if command -v jq >/dev/null 2>&1; then
       and all(.models[]; .selected == false))
     and any(.[];
       .type == "empirical_scaling"
+      and .benchmark == "group/boundary"
+      and .status == "degenerate_input_range"
+      and .minimum_input_exact == "9007199254740993"
+      and .maximum_input_exact == "18014398509481985")
+    and any(.[];
+      .type == "empirical_scaling"
       and .benchmark == "group/empty"
       and .status == "too_few_distinct_points"
       and .parameter_kind == null
       and .range_available == false
       and .minimum_input == null
+      and .minimum_input_exact == null
       and .maximum_input == null
+      and .maximum_input_exact == null
       and any(.models[]; .model == "linear" and .nominal_exponent == 1)
       and any(.models[]; .model == "quadratic" and .nominal_exponent == 2)
       and any(.models[]; .model == "cubic" and .nominal_exponent == 3))
