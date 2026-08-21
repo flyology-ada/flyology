@@ -227,7 +227,10 @@ package body Flyology.IO.Files is
 
       Flyology.Operations.Drivers.Completion_Source
         (Item, Read_Descriptor, Signal_Descriptor);
-      if Timeout >= 0.0 then
+      --  A positional file operation has no would-block result to abandon.
+      --  As in the synchronous overload, zero requests the one operation
+      --  attempt itself and therefore carries no competing deadline.
+      if Timeout > 0.0 then
          Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
       end if;
       Status := Start_Async_File
@@ -354,7 +357,7 @@ package body Flyology.IO.Files is
          when Flyology.Operations.Succeeded =>
             null;
          when Flyology.Operations.Cancelled =>
-            raise Operation_Cancelled;
+            raise Flyology.Operations.Operation_Cancelled;
          when Flyology.Operations.Failed =>
             case Failure is
                when Deadline_Failure =>

@@ -922,12 +922,31 @@ procedure Operations_Smoke is
                  and then Read_Right = Right_Data;
             end;
 
+            --  Timeout => 0.0 retains the synchronous file contract: make one
+            --  immediate completion attempt before reporting a timeout.
+            declare
+               Immediate_Data : aliased Ada.Streams.Stream_Element_Array :=
+                 [0, 0, 0, 0];
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Immediate_Read : Flyology.IO.Files.Read_Operation :=
+                 Flyology.IO.Files.Read_At
+                   (Set'Access, File, 0, Immediate_Data'Access, 0.0);
+               Last_Immediate : Ada.Streams.Stream_Element_Offset;
+            begin
+               Flyology.Operations.Wait_All (Set);
+               Flyology.IO.Files.Finish (Immediate_Read, Last_Immediate);
+               Passed := Passed
+                 and then Last_Immediate = Immediate_Data'Last
+                 and then Immediate_Data = Left_Data;
+            end;
+
             declare
                Set : aliased Flyology.Operations.Completion_Set (1);
                Cancelled_Write : Flyology.IO.Files.Write_Operation :=
                  Flyology.IO.Files.Write_At
                    (Set'Access, File, 8, Left_Data'Access, 1.0);
                Last_Cancelled : Ada.Streams.Stream_Element_Offset;
+               Cancellation_Observed : Boolean := False;
             begin
                Flyology.Operations.Cancel (Cancelled_Write);
                Flyology.Operations.Wait_All (Set);
@@ -935,9 +954,10 @@ procedure Operations_Smoke is
                   Flyology.IO.Files.Finish
                     (Cancelled_Write, Last_Cancelled);
                exception
-                  when Flyology.IO.Files.Operation_Cancelled =>
-                     null;
+                  when Flyology.Operations.Operation_Cancelled =>
+                     Cancellation_Observed := True;
                end;
+               Passed := Passed and then Cancellation_Observed;
             end;
 
             declare

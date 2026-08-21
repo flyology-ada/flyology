@@ -58,7 +58,8 @@ package Flyology.IO.Files is
    --  @param File Open descriptor permitting reads
    --  @param Offset Starting byte position
    --  @param Item Aliased destination buffer
-   --  @param Timeout Relative operation deadline; negative means none
+   --  @param Timeout Relative operation deadline; zero makes one immediate
+   --     completion attempt and negative means none
    --  @return Started limited read operation
    function Read_At
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -75,7 +76,8 @@ package Flyology.IO.Files is
    --  @param File Open descriptor permitting writes
    --  @param Offset Starting byte position
    --  @param Item Aliased source buffer
-   --  @param Timeout Relative operation deadline; negative means none
+   --  @param Timeout Relative operation deadline; zero makes one immediate
+   --     completion attempt and negative means none
    --  @return Started limited write operation
    function Write_At
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
