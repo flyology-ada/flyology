@@ -2150,6 +2150,104 @@ package body Flyology.IO.Sockets is
          raise;
    end Start_Scoped;
 
+   procedure Copy_Endpoint
+     (Value   : Endpoint;
+      Family  : out Interfaces.C.unsigned_char;
+      Address : out IPv6_Octets;
+      Port    : out Interfaces.C.unsigned;
+      Scope   : out Interfaces.C.unsigned)
+   is
+   begin
+      Family := Interfaces.C.unsigned_char (Family_Code (Value.Family));
+      Address := (others => 0);
+      case Value.Family is
+         when IPv4 =>
+            for Index in Value.Address.V4'Range loop
+               Address (Index) := Value.Address.V4 (Index);
+            end loop;
+         when IPv6 =>
+            Address := Value.Address.V6;
+      end case;
+      Port := Interfaces.C.unsigned (Value.Port);
+      Scope := Interfaces.C.unsigned (Value.Scope);
+   end Copy_Endpoint;
+
+   procedure Start_Scoped_Datagram
+     (Item          : in out Datagram_Operation'Class;
+      Kind          : Scoped_IO_Kind;
+      Socket        : not null access Socket_Type;
+      Array_Item    : access Ada.Streams.Stream_Element_Array;
+      Datagram_Item : access constant Ada.Streams.Stream_Element_Array;
+      Destination   : Endpoint;
+      Source        : Endpoint;
+      Select_Source : Boolean;
+      Timeout       : Duration)
+   is
+   begin
+      Prepare (Socket.all);
+      Item.Kind := Kind;
+      Item.Socket := Socket.all'Unchecked_Access;
+      Item.Array_Item :=
+        (if Array_Item = null
+         then null
+         else Array_Item.all'Unchecked_Access);
+      Item.Datagram_Item :=
+        (if Datagram_Item = null
+         then null
+         else Datagram_Item.all'Unchecked_Access);
+      Item.Buffer_Item := null;
+      Item.Cursor :=
+        (if Array_Item /= null
+         then Array_Item.all'First
+         else Datagram_Item.all'First);
+      Item.Transferred := 0;
+      Item.Error_Code := 0;
+      Item.Failure := No_Failure;
+      Item.Source_Family := 0;
+      Item.Source_Address := (others => 0);
+      Item.Source_Port := 0;
+      Item.Source_Scope := 0;
+      Item.Destination_Family := 0;
+      Item.Destination_Address := (others => 0);
+      Item.Destination_Port := 0;
+      Item.Destination_Scope := 0;
+      Item.Datagram_ECN := -1;
+      Item.Datagram_Length := 0;
+      Item.Select_Source := Select_Source;
+      if Kind = Datagram_Send then
+         Copy_Endpoint
+           (Destination,
+            Item.Destination_Family,
+            Item.Destination_Address,
+            Item.Destination_Port,
+            Item.Destination_Scope);
+         if Select_Source then
+            Copy_Endpoint
+              (Source,
+               Item.Source_Family,
+               Item.Source_Address,
+               Item.Source_Port,
+               Item.Source_Scope);
+         end if;
+      end if;
+      Flyology.Operations.Drivers.Start (Item);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Item),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Item) then
+            Flyology.Operations.Cancel (Item);
+         end if;
+         if Flyology.Operations.Is_Terminal (Item) then
+            Flyology.Operations.Consume (Item);
+         end if;
+         raise;
+   end Start_Scoped_Datagram;
+
    overriding procedure Drive
      (Item  : in out Socket_Operation;
       Event : Flyology.Operations.Driver_Event)
@@ -2317,6 +2415,127 @@ package body Flyology.IO.Sockets is
       end if;
    end Drive;
 
+   overriding procedure Drive
+     (Item  : in out Datagram_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Sending : constant Boolean := Item.Kind = Datagram_Send;
+      Data_First : constant Ada.Streams.Stream_Element_Offset :=
+        (if Sending
+         then Item.Datagram_Item.all'First
+         else Item.Array_Item.all'First);
+      Data_Length : constant Natural :=
+        (if Sending
+         then Item.Datagram_Item.all'Length
+         else Item.Array_Item.all'Length);
+      Buffer : constant System.Address :=
+        (if Data_Length = 0
+         then System.Null_Address
+         elsif Sending
+         then Item.Datagram_Item.all (Data_First)'Address
+         else Item.Array_Item.all (Data_First)'Address);
+      Error : aliased Interfaces.C.int := 0;
+      Result : Interfaces.C.long;
+      Retry_Attempt : Natural := 0;
+
+      procedure Fail
+        (Reason : Scoped_Failure;
+         Code   : Interfaces.C.int := 0)
+      is
+      begin
+         Item.Failure := Reason;
+         Item.Error_Code := Code;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      end Fail;
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         Fail (Deadline_Failure);
+         return;
+      end if;
+
+      loop
+         if Sending then
+            Result := C_Send_Datagram
+              (Item.Socket.Value,
+               Buffer,
+               Interfaces.C.size_t (Data_Length),
+               Interfaces.C.int (Item.Destination_Family),
+               Item.Destination_Address
+                 (Item.Destination_Address'First)'Address,
+               Item.Destination_Port,
+               Item.Destination_Scope,
+               Boolean'Pos (Item.Select_Source),
+               Interfaces.C.int (Item.Source_Family),
+               Item.Source_Address (Item.Source_Address'First)'Address,
+               Item.Source_Port,
+               Item.Source_Scope,
+               Error'Access);
+         else
+            Result := C_Receive_Datagram
+              (Item.Socket.Value,
+               Buffer,
+               Interfaces.C.size_t (Data_Length),
+               Item.Source_Family'Access,
+               Item.Source_Address (Item.Source_Address'First)'Address,
+               Item.Source_Port'Access,
+               Item.Source_Scope'Access,
+               Item.Destination_Family'Access,
+               Item.Destination_Address
+                 (Item.Destination_Address'First)'Address,
+               Item.Destination_Port'Access,
+               Item.Destination_Scope'Access,
+               Item.Datagram_ECN'Access,
+               Error'Access);
+         end if;
+         exit when Result >= 0;
+         declare
+            Action : constant Flyology.Socket_Policy.IO_Error_Action :=
+              Flyology.Socket_Policy.Classify_IO_Error
+                (Policy_Error_Kind (Error));
+         begin
+            exit when Action /= Flyology.Socket_Policy.Retry_Operation;
+            Retry_Attempt := Retry_Attempt + 1;
+            if not Flyology.Socket_Policy.Retry_IO_Immediately
+              (Retry_Attempt)
+            then
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Item.Socket.Value, Sending);
+               return;
+            end if;
+         end;
+      end loop;
+
+      if Result < 0 then
+         case Flyology.Socket_Policy.Classify_IO_Error
+           (Policy_Error_Kind (Error))
+         is
+            when Flyology.Socket_Policy.Wait_For_Ready =>
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Item.Socket.Value, Sending);
+            when Flyology.Socket_Policy.Retry_Operation =>
+               raise Program_Error with
+                 "datagram driver retained an interrupted result";
+            when Flyology.Socket_Policy.Fail_Operation =>
+               Fail (Socket_Failure, Error);
+         end case;
+         return;
+      end if;
+
+      if Sending then
+         if Result /= Interfaces.C.long (Data_Length) then
+            Fail (Partial_Datagram_Failure);
+            return;
+         end if;
+         Item.Transferred := Natural (Result);
+      else
+         Item.Transferred := Natural'Min (Natural (Result), Data_Length);
+         Item.Datagram_Length := Natural (Result);
+      end if;
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Succeeded);
+   end Drive;
+
    overriding procedure Request_Cancellation
      (Item : in out Socket_Operation)
    is
@@ -2416,6 +2635,107 @@ package body Flyology.IO.Sockets is
       end return;
    end Send_All;
 
+   procedure Receive_Datagram
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Datagram_Operation)
+   is
+   begin
+      Start_Scoped_Datagram
+        (Operation,
+         Datagram_Receive,
+         Socket,
+         Item,
+         null,
+         No_Endpoint,
+         No_Endpoint,
+         False,
+         Timeout);
+   end Receive_Datagram;
+
+   function Receive_Datagram
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Datagram_Operation
+   is
+   begin
+      return Result : Receive_Datagram_Operation (Set) do
+         Receive_Datagram (Socket, Item, Timeout, Result);
+      end return;
+   end Receive_Datagram;
+
+   procedure Send_Datagram
+     (Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite;
+      Operation   : in out Send_Datagram_Operation)
+   is
+   begin
+      Start_Scoped_Datagram
+        (Operation,
+         Datagram_Send,
+         Socket,
+         null,
+         Item,
+         Destination,
+         Destination,
+         False,
+         Timeout);
+   end Send_Datagram;
+
+   function Send_Datagram
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite) return Send_Datagram_Operation
+   is
+   begin
+      return Result : Send_Datagram_Operation (Set) do
+         Send_Datagram
+           (Socket, Item, Destination, Timeout, Result);
+      end return;
+   end Send_Datagram;
+
+   procedure Send_Datagram
+     (Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite;
+      Operation   : in out Send_Datagram_Operation)
+   is
+   begin
+      Start_Scoped_Datagram
+        (Operation,
+         Datagram_Send,
+         Socket,
+         null,
+         Item,
+         Destination,
+         Source,
+         True,
+         Timeout);
+   end Send_Datagram;
+
+   function Send_Datagram
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite) return Send_Datagram_Operation
+   is
+   begin
+      return Result : Send_Datagram_Operation (Set) do
+         Send_Datagram
+           (Socket, Item, Destination, Source, Timeout, Result);
+      end return;
+   end Send_Datagram;
+
    procedure Receive
      (Socket    : not null access Socket_Type;
       Item      : not null access Flyology.Buffers.Unique_Buffer;
@@ -2494,7 +2814,7 @@ package body Flyology.IO.Sockets is
       Error   : constant Interfaces.C.int := Operation.Error_Code;
       Sending : constant Boolean :=
         Operation.Kind in Send_One | Send_Complete |
-          Buffer_Send_One | Buffer_Send_Complete;
+          Buffer_Send_One | Buffer_Send_Complete | Datagram_Send;
    begin
       Flyology.Operations.Consume (Operation);
       case Outcome is
@@ -2512,8 +2832,15 @@ package body Flyology.IO.Sockets is
                when No_Progress_Failure =>
                   raise Device_Error with
                     "socket closed while sending";
+               when Partial_Datagram_Failure =>
+                  raise Device_Error with "partial datagram send";
                when Socket_Failure =>
-                  Raise_Error ((if Sending then "send" else "recv"), Error);
+                  Raise_Error
+                    ((if Operation.Kind = Datagram_Send then "sendmsg"
+                      elsif Operation.Kind = Datagram_Receive then "recvmsg"
+                      elsif Sending then "send"
+                      else "recv"),
+                     Error);
                when No_Failure =>
                   raise Device_Error with "socket operation failed";
             end case;
@@ -2590,6 +2917,60 @@ package body Flyology.IO.Sockets is
 
    procedure Finish (Operation : in out Buffer_Send_All_Operation) is
    begin
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Receive_Datagram_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset;
+      Metadata  : out Datagram_Metadata)
+   is
+   begin
+      if Flyology.Operations.Outcome (Operation) =
+        Flyology.Operations.Succeeded
+      then
+         Last :=
+           (if Operation.Transferred = 0
+            then Operation.Array_Item.all'First - 1
+            else Operation.Array_Item.all'First
+              + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
+         Metadata :=
+           (Source =>
+              Make_Endpoint
+                (Operation.Source_Family,
+                 Operation.Source_Address,
+                 Operation.Source_Port,
+                 Operation.Source_Scope),
+            Destination =>
+              Make_Endpoint
+                (Operation.Destination_Family,
+                 Operation.Destination_Address,
+                 Operation.Destination_Port,
+                 Operation.Destination_Scope),
+            Original_Length => Operation.Datagram_Length,
+            Truncated =>
+              Operation.Datagram_Length > Operation.Array_Item.all'Length,
+            ECN =>
+              (case Operation.Datagram_ECN is
+                  when 0 => Not_ECT,
+                  when 1 => ECT_One,
+                  when 2 => ECT_Zero,
+                  when 3 => Congestion_Experienced,
+                  when others => ECN_Unavailable));
+      end if;
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Send_Datagram_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+   begin
+      Last :=
+        (if Operation.Transferred = 0
+         then Operation.Datagram_Item.all'First - 1
+         else Operation.Datagram_Item.all'First
+           + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
       Finish_Common (Operation);
    end Finish;
 

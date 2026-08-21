@@ -714,6 +714,12 @@ package Flyology.IO.Sockets is
    type Buffer_Send_Operation is new Socket_Operation with private;
    --  Scoped complete send from a uniquely owned buffer.
    type Buffer_Send_All_Operation is new Socket_Operation with private;
+   --  Common limited base for scoped datagram operations.
+   type Datagram_Operation is abstract new Socket_Operation with private;
+   --  Scoped receive of one complete datagram and its metadata.
+   type Receive_Datagram_Operation is new Datagram_Operation with private;
+   --  Scoped send of one complete datagram.
+   type Send_Datagram_Operation is new Datagram_Operation with private;
 
    --  Start one nonblocking receive operation. Socket and Item must outlive
    --  the returned operation. Item is exclusively borrowed until Finish.
@@ -890,6 +896,91 @@ package Flyology.IO.Sockets is
       Operation : in out Buffer_Send_All_Operation)
      with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
+   --  Start one datagram receive. A zero-length Item still consumes one
+   --  zero-length datagram. Socket and Item remain borrowed until Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited datagram receive operation
+   function Receive_Datagram
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Datagram_Operation;
+
+   --  Start or restart one datagram receive in an established operation.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed receive operation
+   procedure Receive_Datagram
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Datagram_Operation);
+
+   --  Start one datagram send using the kernel-selected local source.
+   --  Socket and Item remain borrowed until Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited datagram send operation
+   function Send_Datagram
+      (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite) return Send_Datagram_Operation;
+
+   --  Start or restart one destination-only datagram send.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed send operation
+   procedure Send_Datagram
+     (Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite;
+      Operation   : in out Send_Datagram_Operation);
+
+   --  Start one datagram send with an explicit local source selection.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Source Local source endpoint and interface selection
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited datagram send operation
+   function Send_Datagram
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite) return Send_Datagram_Operation
+     with Pre => Source.Family = Destination.Family;
+
+   --  Start or restart one source-selected datagram send.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Source Local source endpoint and interface selection
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed send operation
+   procedure Send_Datagram
+     (Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite;
+      Operation   : in out Send_Datagram_Operation)
+     with Pre => Source.Family = Destination.Family;
+
    --  Consume one terminal partial receive and publish its Last value.
    --  @param Operation Terminal receive operation
    --  @param Last Last received element, or Item'First - 1 on closure
@@ -929,6 +1020,23 @@ package Flyology.IO.Sockets is
    --  Consume one complete unique-buffer send.
    --  @param Operation Terminal complete unique-buffer send operation
    procedure Finish (Operation : in out Buffer_Send_All_Operation);
+
+   --  Consume a terminal datagram receive and publish its payload bounds and
+   --  addressing metadata.
+   --  @param Operation Terminal datagram receive operation
+   --  @param Last Last copied element, or Item'First - 1 when none was copied
+   --  @param Metadata Peer, local destination, length, truncation, and ECN
+   procedure Finish
+     (Operation : in out Receive_Datagram_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset;
+      Metadata  : out Datagram_Metadata);
+
+   --  Consume a terminal datagram send and publish its Last value.
+   --  @param Operation Terminal datagram send operation
+   --  @param Last Last sent element, or Item'First - 1 for an empty datagram
+   procedure Finish
+     (Operation : in out Send_Datagram_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
 
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
@@ -1034,10 +1142,13 @@ private
       Send_Complete,
       Buffer_Receive_One,
       Buffer_Send_One,
-      Buffer_Send_Complete);
+      Buffer_Send_Complete,
+      Datagram_Receive,
+      Datagram_Send);
    type Scoped_Failure is
      (No_Failure, Socket_Failure, Deadline_Failure,
-      Peer_Closed_Failure, No_Progress_Failure);
+      Peer_Closed_Failure, No_Progress_Failure,
+      Partial_Datagram_Failure);
 
    type Socket_Operation is
      abstract new Flyology.Operations.Operation with record
@@ -1063,6 +1174,29 @@ private
    overriding procedure Request_Cancellation
      (Item : in out Socket_Operation);
 
+   type Datagram_Operation is abstract new Socket_Operation with record
+      Datagram_Item       : access constant
+        Ada.Streams.Stream_Element_Array := null;
+      Source_Family       : aliased Interfaces.C.unsigned_char := 0;
+      Source_Address      : aliased IPv6_Octets := (others => 0);
+      Source_Port         : aliased Interfaces.C.unsigned := 0;
+      Source_Scope        : aliased Interfaces.C.unsigned := 0;
+      Destination_Family  : aliased Interfaces.C.unsigned_char := 0;
+      Destination_Address : aliased IPv6_Octets := (others => 0);
+      Destination_Port    : aliased Interfaces.C.unsigned := 0;
+      Destination_Scope   : aliased Interfaces.C.unsigned := 0;
+      Datagram_ECN        : aliased Interfaces.C.int := -1;
+      Datagram_Length     : Natural := 0;
+      Select_Source       : Boolean := False;
+   end record;
+
+   --  @exclude
+   --  @param Item Datagram operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Datagram_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
    type Receive_Operation is new Socket_Operation with null record;
    type Receive_Exactly_Operation is new Socket_Operation with null record;
    type Send_Operation is new Socket_Operation with null record;
@@ -1070,4 +1204,6 @@ private
    type Buffer_Receive_Operation is new Socket_Operation with null record;
    type Buffer_Send_Operation is new Socket_Operation with null record;
    type Buffer_Send_All_Operation is new Socket_Operation with null record;
+   type Receive_Datagram_Operation is new Datagram_Operation with null record;
+   type Send_Datagram_Operation is new Datagram_Operation with null record;
 end Flyology.IO.Sockets;

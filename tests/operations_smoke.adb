@@ -25,6 +25,8 @@ procedure Operations_Smoke is
    --  Sockets.Receive (Unique_Buffer)           All                     both
    --  Sockets.Send (Unique_Buffer)              All                     both
    --  Sockets.Send_All (Unique_Buffer)          All                     both
+   --  Sockets.Receive_Datagram (array)          Successes (2)           both
+   --  Sockets.Send_Datagram (array)             Successes (2)           both
    --  Files.Read_At (array)                     All                     lightweight
    --  Files.Write_At (array)                    Successes (2)           lightweight
    use type Ada.Streams.Stream_Element;
@@ -32,6 +34,7 @@ procedure Operations_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Real_Time.Time;
    use type Flyology.Execution_Model;
+   use type Flyology.IO.Sockets.Port;
    use type Flyology.Operations.Terminal_Outcome;
 
    protected Result is
@@ -864,6 +867,191 @@ procedure Operations_Smoke is
             raise;
       end;
       Check (Passed, "socket EOF gate semantics failed");
+
+      --  Datagram operations retain message boundaries and metadata while
+      --  composing through the same gates as stream, timer, and file members.
+      declare
+         Server, Client : aliased Flyology.IO.Sockets.Socket_Type;
+         Server_Bound, Client_Bound : Flyology.IO.Sockets.Endpoint;
+         Destination : Flyology.IO.Sockets.Endpoint;
+         Request : aliased Ada.Streams.Stream_Element_Array :=
+           [1 => 16#31#, 2 => 16#32#, 3 => 16#33#];
+         Response : aliased Ada.Streams.Stream_Element_Array :=
+           [1 => 16#41#, 2 => 16#42#];
+         Incoming_Request : aliased Ada.Streams.Stream_Element_Array :=
+           [1 .. 3 => 0];
+         Incoming_Response : aliased Ada.Streams.Stream_Element_Array :=
+           [1 .. 2 => 0];
+         Request_Metadata : Flyology.IO.Sockets.Datagram_Metadata;
+      begin
+         Flyology.IO.Sockets.Create_Socket
+           (Server,
+            Flyology.IO.Sockets.IPv4,
+            Flyology.IO.Sockets.Socket_Datagram);
+         Flyology.IO.Sockets.Bind_Socket
+           (Server,
+            Flyology.IO.Sockets.Network_Endpoint
+              (Flyology.IO.Sockets.Loopback_IPv4,
+               Flyology.IO.Sockets.Any_Port));
+         Server_Bound := Flyology.IO.Sockets.Get_Socket_Name (Server);
+         Destination := Flyology.IO.Sockets.Network_Endpoint
+           (Flyology.IO.Sockets.Loopback_IPv4, Server_Bound.Port);
+
+         Flyology.IO.Sockets.Create_Socket
+           (Client,
+            Flyology.IO.Sockets.IPv4,
+            Flyology.IO.Sockets.Socket_Datagram);
+         Flyology.IO.Sockets.Bind_Socket
+           (Client,
+            Flyology.IO.Sockets.Network_Endpoint
+              (Flyology.IO.Sockets.Loopback_IPv4,
+               Flyology.IO.Sockets.Any_Port));
+         Client_Bound := Flyology.IO.Sockets.Get_Socket_Name (Client);
+
+         --  Function-returning roots and destination-only send.
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (3);
+            Receive : aliased
+              Flyology.IO.Sockets.Receive_Datagram_Operation :=
+                Flyology.IO.Sockets.Receive_Datagram
+                  (Set'Access, Server'Access, Incoming_Request'Access, 1.0);
+            Send : aliased Flyology.IO.Sockets.Send_Datagram_Operation :=
+              Flyology.IO.Sockets.Send_Datagram
+                (Set'Access, Client'Access, Request'Access, Destination, 1.0);
+            Both : Flyology.Operations.Gate_Operation :=
+              Flyology.Operations.Wait_For_Successes
+                (Set'Access, [Ref (Receive), Ref (Send)], 2);
+            Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Sent_Last, Received_Last : Ada.Streams.Stream_Element_Offset;
+         begin
+            while not Flyology.Operations.Is_Terminal (Both) loop
+               Flyology.Operations.Wait_Some (Set, Batch);
+            end loop;
+            Flyology.Operations.Finish (Both, Matches);
+            Flyology.IO.Sockets.Finish (Send, Sent_Last);
+            Flyology.IO.Sockets.Finish
+              (Receive, Received_Last, Request_Metadata);
+            Passed := Passed
+              and then Matches.Count = 2
+              and then Sent_Last = Request'Last
+              and then Received_Last = Incoming_Request'Last
+              and then Incoming_Request = Request
+              and then Request_Metadata.Source.Port = Client_Bound.Port
+              and then Request_Metadata.Destination.Port = Server_Bound.Port
+              and then Request_Metadata.Original_Length = Request'Length
+              and then not Request_Metadata.Truncated;
+         end;
+
+         --  Start-into-existing roots and explicit source selection.
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (2);
+            Receive : Flyology.IO.Sockets.Receive_Datagram_Operation
+              (Set'Access);
+            Send : Flyology.IO.Sockets.Send_Datagram_Operation (Set'Access);
+            Sent_Last, Received_Last : Ada.Streams.Stream_Element_Offset;
+            Metadata : Flyology.IO.Sockets.Datagram_Metadata;
+         begin
+            Flyology.IO.Sockets.Receive_Datagram
+              (Client'Access, Incoming_Response'Access, 1.0, Receive);
+            Flyology.IO.Sockets.Send_Datagram
+              (Server'Access,
+               Response'Access,
+               Request_Metadata.Source,
+               Request_Metadata.Destination,
+               1.0,
+               Send);
+            Flyology.Operations.Wait_All (Set);
+            Flyology.IO.Sockets.Finish (Send, Sent_Last);
+            Flyology.IO.Sockets.Finish (Receive, Received_Last, Metadata);
+            Passed := Passed
+              and then Sent_Last = Response'Last
+              and then Received_Last = Incoming_Response'Last
+              and then Incoming_Response = Response
+              and then Metadata.Source.Port = Server_Bound.Port
+              and then Metadata.Destination.Port = Client_Bound.Port;
+         end;
+
+         --  Zero-length datagrams are real messages, not immediate no-ops.
+         declare
+            Empty_Output : aliased Ada.Streams.Stream_Element_Array :=
+              [1 .. 0 => 0];
+            Empty_Input : aliased Ada.Streams.Stream_Element_Array :=
+              [1 .. 0 => 0];
+            Set : aliased Flyology.Operations.Completion_Set (2);
+            Receive : Flyology.IO.Sockets.Receive_Datagram_Operation :=
+              Flyology.IO.Sockets.Receive_Datagram
+                (Set'Access, Server'Access, Empty_Input'Access, 1.0);
+            Send : Flyology.IO.Sockets.Send_Datagram_Operation :=
+              Flyology.IO.Sockets.Send_Datagram
+                (Set'Access,
+                 Client'Access,
+                 Empty_Output'Access,
+                 Destination,
+                 1.0);
+            Sent_Last, Received_Last : Ada.Streams.Stream_Element_Offset;
+            Metadata : Flyology.IO.Sockets.Datagram_Metadata;
+         begin
+            Flyology.Operations.Wait_All (Set);
+            Flyology.IO.Sockets.Finish (Send, Sent_Last);
+            Flyology.IO.Sockets.Finish (Receive, Received_Last, Metadata);
+            Passed := Passed
+              and then Sent_Last = Empty_Output'First - 1
+              and then Received_Last = Empty_Input'First - 1
+              and then Metadata.Original_Length = 0
+              and then not Metadata.Truncated;
+         end;
+
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Input : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Receive : Flyology.IO.Sockets.Receive_Datagram_Operation :=
+              Flyology.IO.Sockets.Receive_Datagram
+                (Set'Access, Server'Access, Input'Access, 0.01);
+            Last : Ada.Streams.Stream_Element_Offset;
+            Metadata : Flyology.IO.Sockets.Datagram_Metadata;
+            Timed_Out : Boolean := False;
+         begin
+            Flyology.Operations.Wait_All (Set);
+            begin
+               Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Timed_Out := True;
+            end;
+            Passed := Passed and then Timed_Out;
+         end;
+
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Input : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Receive : Flyology.IO.Sockets.Receive_Datagram_Operation :=
+              Flyology.IO.Sockets.Receive_Datagram
+                (Set'Access, Server'Access, Input'Access, 1.0);
+            Last : Ada.Streams.Stream_Element_Offset;
+            Metadata : Flyology.IO.Sockets.Datagram_Metadata;
+            Cancelled : Boolean := False;
+         begin
+            Flyology.Operations.Cancel (Receive);
+            Flyology.Operations.Wait_All (Set);
+            begin
+               Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+            exception
+               when Flyology.Operations.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Passed := Passed and then Cancelled;
+         end;
+
+         Flyology.IO.Sockets.Close_Socket (Server);
+         Flyology.IO.Sockets.Close_Socket (Client);
+      exception
+         when others =>
+            Flyology.IO.Sockets.Close_Socket (Server);
+            Flyology.IO.Sockets.Close_Socket (Client);
+            raise;
+      end;
+      Check (Passed, "datagram operation overload gates failed");
 
       if Model = Flyology.Lightweight_Task then
          declare

@@ -1546,8 +1546,8 @@ not as a replacement for ownership-aware connection APIs.
 `Flyology.Operations` adds a bounded scoped-operation layer without replacing
 the synchronous API. A caller declares one `Completion_Set` and limited
 operation objects that refer to it. Additive operation-producing overloads
-cover raw descriptor readiness, monotonic timers, raw stream-socket receive and
-send operations, buffer-owning socket operations, and completion-driven
+cover raw descriptor readiness, monotonic timers, raw stream and datagram
+socket operations, buffer-owning stream operations, and completion-driven
 positional file reads and writes. Initiation does not create a helper task,
 per-operation stack, callback thread, or steady-state heap allocation.
 
@@ -1645,10 +1645,13 @@ lifecycle, generation, capacity, and threshold cases are in
 | unique-buffer socket `Receive` | all | native and lightweight |
 | unique-buffer socket `Send` | all | native and lightweight |
 | unique-buffer socket `Send_All` | all | native and lightweight |
+| socket array `Receive_Datagram` | success quorum and all | native and lightweight |
+| socket array `Send_Datagram` | success quorum and all | native and lightweight |
 | positional file `Read_At` | all | lightweight; empty and rejection cases native |
 | positional file `Write_At` | success quorum | lightweight; empty and rejection cases native |
 
-The same programs cover cancellation, timeout, EOF, zero-length operations,
+The same programs cover cancellation, timeout, EOF, zero-length stream and
+datagram operations, datagram metadata and source selection,
 descriptor-direction fan-out, failed success thresholds, terminal-before-gate
 construction, nested and fanned-out gates, stale and cross-set references,
 slot reuse, implicit finalization, initiation rollback, ascending stable

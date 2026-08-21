@@ -147,9 +147,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   parent terminalizes. A driver must not nest a completion-set wait, call a
   blocking synchronous wrapper, invoke user code on the scheduler stack, or
   release a kernel-owned buffer before terminal completion.
-- Current scoped providers cover descriptor readiness, timers, raw stream
-  socket arrays, unique-buffer socket operations, and lightweight positional
-  file arrays. The file provider uses one caller-owned runtime node per
+- Current scoped providers cover descriptor readiness, timers, raw stream and
+  datagram socket arrays, unique-buffer stream operations, and lightweight
+  positional file arrays. A scoped datagram receive retains its addressing,
+  truncation, and ECN metadata until typed `Finish`; an empty array still
+  receives or sends one zero-length datagram. The file provider uses one
+  caller-owned runtime node per
   operation and one lazily created completion wake source per set. Transient
   kernel submission pressure queues those nodes without failing the operation;
   queued cancellation terminalizes without submitting the borrowed buffer.
