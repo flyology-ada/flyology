@@ -409,6 +409,10 @@ Image_Agent.Run (Context);</code></pre>
           <section id="example">
             <span class="step-label">EXAMPLE 08</span>
             <h2>Run the complete generation 17 to 18 upgrade.</h2>
+            <h3>What the demo server does.</h3>
+            <p>The program being upgraded is a one-byte loopback request/reply server. For each accepted connection, the handler reads one byte and replies with the artifact's version byte. Generation 17 runs an artifact that replies with <code>1</code>. Generation 18 runs a separate artifact that replies with <code>2</code>.</p>
+            <p>The coordinator sends <code>Q</code> as a probe after the upgrade decision. A promotion run must receive <code>2</code>, showing that a new connection reached the changed executable. A cancellation run must receive <code>1</code>, showing that generation 17 remained the serving generation.</p>
+            <p>The server behavior is deliberately small. The example focuses on listener escrow, handoff, readiness, canary admission, promotion or cancellation, structured drain, and final shutdown. Already accepted connections remain with the generation that accepted them.</p>
             <p>The application supplies a bound <code>Listener</code>, immutable commands, provisioning records, and its canary decision. The example uses <code>Coordinators</code> and <code>Generations</code> as package renames so each lifecycle call remains short.</p>
             <p><code>Start_Initial</code> and <code>Start_Upgrade</code> each return an exact <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#53056fb187d273b8bb504e828297096508e839aab159468a667d4c75e05bd0ab"><code>Upgrade_Handle</code></a> as transaction authority. Cancellation also reports a <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#397e9de02424624eccf54b1305dc144c102cabb489344ef62386ee8bd0db74be"><code>Compensation_Result</code></a>. The following five fragments implement the lifecycle shown in the earlier story.</p>
 
