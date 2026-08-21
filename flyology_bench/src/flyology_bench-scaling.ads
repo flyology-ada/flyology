@@ -44,9 +44,10 @@ package Flyology_Bench.Scaling is
    --  @field Maximum_Points Maximum observations stored by this value.
    type Observation_Set (Maximum_Points : Positive) is tagged private;
 
-   --  Append one observation in retained order. Duplicate point identities are
-   --  rejected. Observation validity is assessed by Analyze so invalid stored
-   --  or synthetic data produces an explicit unavailable analysis.
+   --  Append one observation in retained order. Duplicate point identities and
+   --  mixtures of size and count parameters are rejected. Observation validity
+   --  is assessed by Analyze so invalid stored or synthetic data produces an
+   --  explicit unavailable analysis.
    --  @param Set Destination bounded set.
    --  @param Point Exact positive input identity.
    --  @param Observation Positive measured or synthetic value.
@@ -114,14 +115,32 @@ package Flyology_Bench.Scaling is
    function Diagnostic
      (Result : Empirical_Scaling_Analysis;
       Model  : Scaling_Model) return Model_Diagnostic;
+   --  Test whether the analysis has a retained parameter kind.
+   --  @param Result Empirical analysis.
+   --  @return False only when no observation was supplied.
+   function Input_Kind_Available
+     (Result : Empirical_Scaling_Analysis) return Boolean;
+   --  Return the coherent parameter kind shared by all observations.
+   --  @param Result Empirical analysis.
+   --  @return Size or count parameter kind.
+   --  @exception Constraint_Error No observation supplied a parameter kind.
+   function Input_Kind
+     (Result : Empirical_Scaling_Analysis) return Sweeps.Parameter_Kind;
+   --  Test whether an observed input range exists.
+   --  @param Result Empirical analysis.
+   --  @return False only when no observation was supplied.
+   function Input_Range_Available
+     (Result : Empirical_Scaling_Analysis) return Boolean;
    --  Return the smallest observed input.
    --  @param Result Empirical analysis.
    --  @return Minimum exact input.
+   --  @exception Constraint_Error No observation supplied an input.
    function Minimum_Input
      (Result : Empirical_Scaling_Analysis) return Sweeps.Exact_Value;
    --  Return the largest observed input.
    --  @param Result Empirical analysis.
    --  @return Maximum exact input.
+   --  @exception Constraint_Error No observation supplied an input.
    function Maximum_Input
      (Result : Empirical_Scaling_Analysis) return Sweeps.Exact_Value;
    --  Return the number of supplied points.
@@ -138,8 +157,10 @@ private
    type Observation_Array is array (Positive range <>) of Observation;
 
    type Observation_Set (Maximum_Points : Positive) is tagged record
-      Count : Natural := 0;
-      Data  : Observation_Array (1 .. Maximum_Points);
+      Count      : Natural := 0;
+      Has_Kind   : Boolean := False;
+      Kind_Value : Sweeps.Parameter_Kind := Sweeps.Size_Parameter;
+      Data       : Observation_Array (1 .. Maximum_Points);
    end record;
 
    type Diagnostic_Array is array (Scaling_Model) of Model_Diagnostic;
@@ -147,6 +168,9 @@ private
    type Empirical_Scaling_Analysis is record
       State        : Scaling_Status := Too_Few_Distinct_Points;
       Selected     : Scaling_Model := Constant_Model;
+      Has_Kind     : Boolean := False;
+      Kind_Value   : Sweeps.Parameter_Kind := Sweeps.Size_Parameter;
+      Has_Range    : Boolean := False;
       Minimum      : Sweeps.Exact_Value := 1;
       Maximum      : Sweeps.Exact_Value := 1;
       Point_Count  : Natural := 0;

@@ -540,7 +540,11 @@ There is no second timing interval. Median rates invert median wall time. Rate
 confidence endpoints invert and reverse the existing mean-time confidence
 interval. Zero, negative, fractional, non-finite, unrepresentable, or
 incoherently named work amounts are rejected; unavailable wall data and rate
-overflow remain explicit unavailable states.
+overflow remain explicit unavailable states. Work availability, completed
+collection, valid wall data, and derived-rate availability are separate:
+skipped or failed work is never rendered as a default amount, and a
+throughput-only overflow does not discard a valid elapsed result or paired
+verdict.
 
 `Measure_Sweep` and `Compare_Sweep` return bounded inspectable results for
 every attempted point. The paired executor invokes one existing adjacent,
@@ -558,22 +562,25 @@ and later points are marked budget-exhausted. Zero remains unlimited.
 
 Collection and empirical scaling analysis are separate.
 `Flyology_Bench.Scaling` accepts stored or deterministic synthetic observations
-and fits constant, logarithmic, linear, n log n, quadratic, and cubic models in
-log space. It reports every model's coefficient, nominal exponent, R-squared,
-RMS and maximum log residual, selection state, and observed input range. At
-least four distinct positive points spanning a factor of two are required.
-Invalid observations, numeric overflow, poor fit, and poor identifiability
-produce explicit unavailable states. A selected model describes only the
-observed range; it is empirical scaling, not proof of big-O.
+with one coherent parameter kind and fits constant, logarithmic, linear, n log
+n, quadratic, and cubic models in log space. Mixing size and count observations
+is rejected. It reports the parameter kind, every model's coefficient, nominal
+exponent, R-squared, RMS and maximum log residual, selection state, and observed
+input range. Rejected nonempty data retains its factual range; empty data marks
+the kind and range unavailable instead of publishing sentinel values. At least
+four distinct positive points spanning a factor of two are required. Invalid
+observations, numeric overflow, poor fit, and poor identifiability produce
+explicit unavailable states. A selected model describes only the observed
+range; it is empirical scaling, not proof of big-O.
 
 `Flyology_Bench.Sweeps.Reporters` defines new console, CSV, and newline-delimited
 JSON schemas rather than changing the existing measurement formats. Rows carry
 the suite-compatible full `benchmark` name supplied as `Case_Name`, a separate
 canonical `point`, raw parameter and label, work identity/value/scaling, the
-`per_operation_batch_mean` sample semantics, availability/status, time,
-throughput, direction, and paired verdict. Suite registration and filtering
-remain case-level; a sweep is one registered case unless callers explicitly
-register its points as separate cases.
+`per_operation_batch_mean` sample semantics, separate work/collection/result
+availability, status, time, throughput, direction, and paired verdict. Suite
+registration and filtering remain case-level; a sweep is one registered case
+unless callers explicitly register its points as separate cases.
 
 The maintained example compares insertion sort and Shell sort over five sizes,
 prints elapsed and work-normalized throughput at every adjacent paired point,

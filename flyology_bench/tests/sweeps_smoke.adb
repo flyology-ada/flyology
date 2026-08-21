@@ -12,6 +12,7 @@ procedure Sweeps_Smoke is
    use type Flyology_Bench.Scaling.Scaling_Model;
    use type Flyology_Bench.Scaling.Scaling_Status;
    use type Flyology_Bench.Sweeps.Exact_Value;
+   use type Flyology_Bench.Sweeps.Parameter_Kind;
    use type Flyology_Bench.Sweeps.Point_Status;
    use type Flyology_Bench.Sweeps.Throughput_Availability;
    use type Flyology_Bench.Sweeps.Work_Unit_Kind;
@@ -72,6 +73,15 @@ procedure Sweeps_Smoke is
      (Sweeps.Work
         (Sweeps.Value (Item), Sweeps.Items, Scaling => Sweeps.Decimal_Scaling));
 
+   function Work_Maybe_Fail
+     (Item : Sweeps.Parameter_Point) return Sweeps.Work_Amount is
+   begin
+      if Sweeps.Value (Item) = 2 then
+         raise Program_Error with "work unavailable";
+      end if;
+      return Point_Work (Item);
+   end Work_Maybe_Fail;
+
    procedure Measure_A is new Flyology_Bench.Measure (Operation_A);
    procedure Compare_AB is new Flyology_Bench.Compare
      (Reference_Operation => Operation_A,
@@ -98,6 +108,11 @@ procedure Sweeps_Smoke is
    procedure Run_Failing is new Sweeps.Measure_Sweep
      (Select_Point => Select_Maybe_Fail,
       Work_For     => Point_Work,
+      Run_Point    => Measure_A);
+
+   procedure Run_Work_Failing is new Sweeps.Measure_Sweep
+     (Select_Point => Choose_Point,
+      Work_For     => Work_Maybe_Fail,
       Run_Point    => Measure_A);
 
    procedure Select_Slow_First (Item : Sweeps.Parameter_Point) is
@@ -127,6 +142,7 @@ procedure Sweeps_Smoke is
    Ordinary : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Paired   : Sweeps.Paired_Sweep_Result (Maximum_Points => 3);
    Failure_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
+   Work_Failure_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Dry_Result     : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
 
    procedure Expect_Constraint_Error
@@ -286,6 +302,12 @@ begin
       Check
         (Sweeps.Availability (Overflow) = Sweeps.Throughput_Overflow,
          "rate overflow became available");
+      Check
+        (not Sweeps.Wall_Time_Available (Missing),
+         "missing wall time became available");
+      Check
+        (Sweeps.Wall_Time_Available (Overflow),
+         "valid wall summary was lost when work-rate arithmetic overflowed");
    end;
 
    Run_Ordinary
@@ -304,6 +326,8 @@ begin
            Sweeps.Element (Ordinary, Index);
       begin
          Check (Sweeps.Status (Item) = Sweeps.Point_Measured, "ordinary point");
+         Check (Sweeps.Work_Available (Item), "ordinary work unavailable");
+         Check (Sweeps.Collection_Available (Item), "ordinary collection unavailable");
          Check (Sweeps.Available (Sweeps.Throughput (Item)), "ordinary rate");
          Check
            (Sweeps.Identity (Sweeps.Parameter (Item))
@@ -328,6 +352,8 @@ begin
            + Flyology_Bench.Contender_First_Samples (Pair);
       begin
          Check (Sweeps.Status (Item) = Sweeps.Point_Measured, "paired point");
+         Check (Sweeps.Work_Available (Item), "paired work unavailable");
+         Check (Sweeps.Collection_Available (Item), "paired collection unavailable");
          Check
            (Pair_Count
             = Natural
@@ -357,6 +383,12 @@ begin
          = Sweeps.Point_Setup_Failed,
          "setup failure status");
       Check
+        (Sweeps.Work_Available (Sweeps.Element (Failure_Result, 2)),
+         "selector failure lost established work");
+      Check
+        (not Sweeps.Collection_Available (Sweeps.Element (Failure_Result, 2)),
+         "selector failure became collected");
+      Check
         (Sweeps.Status (Sweeps.Element (Failure_Result, 3))
          = Sweeps.Point_Measured,
          "continue policy stopped");
@@ -369,6 +401,33 @@ begin
          Stop_Result);
       Check (Sweeps.Length (Stop_Result) = 2, "stop result length");
       Check (Sweeps.Stopped_Early (Stop_Result), "stop policy flag");
+
+      Run_Work_Failing
+        ("algorithms/work_failure",
+         Points,
+         Config,
+         (Failure => Sweeps.Continue_After_Point_Failure, others => <>),
+         Work_Failure_Result);
+      Check
+        (Sweeps.Status (Sweeps.Element (Work_Failure_Result, 2))
+         = Sweeps.Point_Setup_Failed,
+         "work failure status");
+      Check
+        (not Sweeps.Work_Available (Sweeps.Element (Work_Failure_Result, 2)),
+         "failed work acquired a fabricated identity");
+      declare
+         procedure Read_Unavailable_Work is
+            Ignored : constant Sweeps.Work_Amount :=
+              Sweeps.Work_Per_Operation
+                (Sweeps.Element (Work_Failure_Result, 2));
+            pragma Unreferenced (Ignored);
+         begin
+            null;
+         end Read_Unavailable_Work;
+      begin
+         Expect_Constraint_Error
+           (Read_Unavailable_Work'Access, "unavailable point work accessor");
+      end;
    end;
 
    declare
@@ -388,6 +447,9 @@ begin
         (Sweeps.Status (Sweeps.Element (Budget_Result, 2))
          = Sweeps.Point_Budget_Exhausted,
          "whole-sweep budget did not stop later point");
+      Check
+        (not Sweeps.Work_Available (Sweeps.Element (Budget_Result, 2)),
+         "budget-skipped point acquired fabricated work");
 
       Run_Ordinary
         ("algorithms/dry",
@@ -413,6 +475,8 @@ begin
       Too_Short      : Scaling.Observation_Set (3);
       Degenerate     : Scaling.Observation_Set (4);
       Invalid        : Scaling.Observation_Set (4);
+      Empty          : Scaling.Observation_Set (1);
+      Mixed          : Scaling.Observation_Set (2);
    begin
       for Power in 0 .. 4 loop
          declare
@@ -452,6 +516,16 @@ begin
                * Ada.Numerics.Long_Elementary_Functions.Log (Input));
          end;
       end loop;
+      Mixed.Append (Sweeps.Point (Sweeps.Size_Parameter, 8), 8.0);
+      declare
+         procedure Append_Mixed_Kind is
+         begin
+            Mixed.Append (Sweeps.Point (Sweeps.Count_Parameter, 16), 16.0);
+         end Append_Mixed_Kind;
+      begin
+         Expect_Constraint_Error
+           (Append_Mixed_Kind'Access, "mixed scaling parameter kinds");
+      end;
       declare
          Ambiguous_Inputs : constant array (Positive range 1 .. 4) of
            Sweeps.Exact_Value := [1_000, 1_200, 1_500, 2_000];
@@ -482,6 +556,8 @@ begin
            Scaling.Analyze (Ambiguous_Data);
          Bad_Fit : constant Scaling.Empirical_Scaling_Analysis :=
            Scaling.Analyze (Bad_Data);
+         Empty_Fit : constant Scaling.Empirical_Scaling_Analysis :=
+           Scaling.Analyze (Empty);
       begin
          Check (Scaling.Available (Linear_Fit), "linear fit unavailable");
          Check
@@ -517,6 +593,32 @@ begin
             = Scaling.Too_Few_Distinct_Points,
             "too few scaling points accepted");
          Check
+           (Scaling.Input_Kind_Available (Scaling.Analyze (Too_Short))
+            and then Scaling.Input_Kind (Scaling.Analyze (Too_Short))
+              = Sweeps.Size_Parameter,
+            "rejected scaling data lost its parameter kind");
+         Check
+           (Scaling.Input_Range_Available (Scaling.Analyze (Too_Short))
+            and then Scaling.Minimum_Input (Scaling.Analyze (Too_Short)) = 1
+            and then Scaling.Maximum_Input (Scaling.Analyze (Too_Short)) = 4,
+            "rejected scaling data reported a false input range");
+         Check
+           (not Scaling.Input_Kind_Available (Empty_Fit)
+            and then not Scaling.Input_Range_Available (Empty_Fit),
+            "empty scaling data acquired sentinel input metadata");
+         declare
+            procedure Read_Empty_Range is
+               Ignored : constant Sweeps.Exact_Value :=
+                 Scaling.Minimum_Input (Empty_Fit);
+               pragma Unreferenced (Ignored);
+            begin
+               null;
+            end Read_Empty_Range;
+         begin
+            Expect_Constraint_Error
+              (Read_Empty_Range'Access, "empty scaling range accessor");
+         end;
+         Check
            (Scaling.Status (Scaling.Analyze (Degenerate))
             = Scaling.Degenerate_Input_Range,
             "degenerate scaling range accepted");
@@ -529,18 +631,22 @@ begin
          Reporters.Put_CSV_Header;
          Reporters.Put_CSV ("group/case,""escaped""", Ordinary);
          Reporters.Put_CSV ("group/failure", Failure_Result);
+         Reporters.Put_CSV ("group/work_failure", Work_Failure_Result);
          Reporters.Put_CSV ("group/dry", Dry_Result);
          Reporters.Put_Comparison_CSV_Header;
          Reporters.Put_Comparison_CSV
            ("group/case", "existing", "candidate", Paired);
          Reporters.Put_Scaling_CSV_Header;
          Reporters.Put_Scaling_CSV ("group/case", Linear_Fit);
+         Reporters.Put_Scaling_CSV ("group/empty", Empty_Fit);
          Reporters.Put_NDJSON ("group/case,""escaped""", Ordinary);
          Reporters.Put_NDJSON ("group/failure", Failure_Result);
+         Reporters.Put_NDJSON ("group/work_failure", Work_Failure_Result);
          Reporters.Put_NDJSON ("group/dry", Dry_Result);
          Reporters.Put_Comparison_NDJSON
            ("group/case", "existing", "candidate", Paired);
          Reporters.Put_Scaling_NDJSON ("group/case", Linear_Fit);
+         Reporters.Put_Scaling_NDJSON ("group/empty", Empty_Fit);
          Ada.Text_IO.Put_Line ("-- sweep machine output end --");
       end;
    end;

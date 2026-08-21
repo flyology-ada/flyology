@@ -192,6 +192,12 @@ package Flyology_Bench.Sweeps is
    --  @param Summary Derived rate summary.
    --  @return True only for Throughput_Available.
    function Available (Summary : Throughput_Summary) return Boolean;
+   --  Test whether the source wall summary remains valid. This is true when
+   --  rate arithmetic overflowed after validating the collected wall values.
+   --  @param Summary Derived rate summary.
+   --  @return True for available rates or throughput-only overflow.
+   function Wall_Time_Available
+     (Summary : Throughput_Summary) return Boolean;
    --  Return median logical operations per second.
    --  @param Summary Derived rate summary.
    --  @return Median wall-rate inversion, or zero when unavailable.
@@ -324,13 +330,35 @@ package Flyology_Bench.Sweeps is
    --  Return ordinary work per logical operation.
    --  @param Result Point result.
    --  @return Exact work identity.
+   --  @exception Constraint_Error Work was not established.
    function Work_Per_Operation
      (Result : Ordinary_Point_Result) return Work_Amount;
    --  Return paired work per logical operation.
    --  @param Result Point result.
    --  @return Exact work identity shared by both sides.
+   --  @exception Constraint_Error Work was not established.
    function Work_Per_Operation
      (Result : Paired_Point_Result) return Work_Amount;
+   --  Test whether ordinary setup established exact work.
+   --  @param Result Point result.
+   --  @return False when work failed or the point was skipped before setup.
+   function Work_Available
+     (Result : Ordinary_Point_Result) return Boolean;
+   --  Test whether paired setup established exact work.
+   --  @param Result Point result.
+   --  @return False when work failed or the point was skipped before setup.
+   function Work_Available
+     (Result : Paired_Point_Result) return Boolean;
+   --  Test whether the ordinary runner returned a measurement.
+   --  @param Result Point result.
+   --  @return True even when only the later throughput derivation failed.
+   function Collection_Available
+     (Result : Ordinary_Point_Result) return Boolean;
+   --  Test whether the paired runner returned a comparison.
+   --  @param Result Point result.
+   --  @return True even when only the later throughput derivation failed.
+   function Collection_Available
+     (Result : Paired_Point_Result) return Boolean;
    --  Return an ordinary point's exact outcome.
    --  @param Result Point result.
    --  @return Point status.
@@ -349,11 +377,11 @@ package Flyology_Bench.Sweeps is
    function Failure_Message (Result : Paired_Point_Result) return String;
    --  Return ordinary measurement storage.
    --  @param Result Point result.
-   --  @return Completed or default measurement according to Status.
+   --  @return Completed or default measurement according to Collection_Available.
    function Data (Result : Ordinary_Point_Result) return Measurement;
    --  Return paired comparison storage.
    --  @param Result Point result.
-   --  @return Completed or default comparison according to Status.
+   --  @return Completed or default comparison according to Collection_Available.
    function Data (Result : Paired_Point_Result) return Comparison;
    --  Return ordinary wall-derived throughput.
    --  @param Result Point result.
@@ -454,6 +482,8 @@ private
    type Ordinary_Point_Result is record
       Point_Value : Parameter_Point;
       Work_Value  : Work_Amount;
+      Has_Work    : Boolean := False;
+      Collected   : Boolean := False;
       State       : Point_Status := Point_Not_Run;
       Message     : Errors.Bounded_String := Errors.Null_Bounded_String;
       Measurement_Value : Measurement;
@@ -463,6 +493,8 @@ private
    type Paired_Point_Result is record
       Point_Value : Parameter_Point;
       Work_Value  : Work_Amount;
+      Has_Work    : Boolean := False;
+      Collected   : Boolean := False;
       State       : Point_Status := Point_Not_Run;
       Message     : Errors.Bounded_String := Errors.Null_Bounded_String;
       Comparison_Value : Comparison;

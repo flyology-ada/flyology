@@ -125,25 +125,26 @@ package body Flyology_Bench.Sweeps.Reporters is
       elsif JSON_Mode then "null" else "");
 
    function Median_Or_Empty
-     (State : Point_Status;
+     (Summary : Throughput_Summary;
       Item  : Measurement;
       JSON_Mode : Boolean := False) return String is
-     (if State = Point_Measured then Number (Median_Nanoseconds (Item))
+     (if Wall_Time_Available (Summary)
+      then Number (Median_Nanoseconds (Item))
       elsif JSON_Mode then "null" else "");
 
    function Low_Or_Empty
-     (State : Point_Status;
+     (Summary : Throughput_Summary;
       Item  : Measurement;
       JSON_Mode : Boolean := False) return String is
-     (if State = Point_Measured
+     (if Wall_Time_Available (Summary)
       then Number (Mean_Confidence_Low_Nanoseconds (Item))
       elsif JSON_Mode then "null" else "");
 
    function High_Or_Empty
-     (State : Point_Status;
+     (Summary : Throughput_Summary;
       Item  : Measurement;
       JSON_Mode : Boolean := False) return String is
-     (if State = Point_Measured
+     (if Wall_Time_Available (Summary)
       then Number (Mean_Confidence_High_Nanoseconds (Item))
       elsif JSON_Mode then "null" else "");
 
@@ -170,16 +171,18 @@ package body Flyology_Bench.Sweeps.Reporters is
               (File,
                Identity (Point_Value) & "  " & Label (Point_Value) & "  "
                & Status_Name (Status (Item)) & "  "
-               & Median_Or_Empty (Status (Item), Measurement_Value) & "  ["
-               & Low_Or_Empty (Status (Item), Measurement_Value) & ", "
-               & High_Or_Empty (Status (Item), Measurement_Value) & "]  "
+               & Median_Or_Empty (Rate, Measurement_Value) & "  ["
+               & Low_Or_Empty (Rate, Measurement_Value) & ", "
+               & High_Or_Empty (Rate, Measurement_Value) & "]  "
                & Maybe_Number (Rate, Operations_Per_Second (Rate)) & " ["
                & Maybe_Number (Rate, Operations_Confidence_Low (Rate)) & ", "
                & Maybe_Number (Rate, Operations_Confidence_High (Rate)) & "]  "
                & Maybe_Number (Rate, Work_Units_Per_Second (Rate)) & " "
-               & Unit_Name (Work_Per_Operation (Item)) & "/s  "
-               & Number (Raw_Value (Work_Per_Operation (Item))) & " "
-               & Unit_Name (Work_Per_Operation (Item)));
+               & (if Work_Available (Item)
+                  then Unit_Name (Work_Per_Operation (Item)) & "/s  "
+                    & Number (Raw_Value (Work_Per_Operation (Item))) & " "
+                    & Unit_Name (Work_Per_Operation (Item))
+                  else "unavailable"));
          end;
       end loop;
    end Put_Console;
@@ -212,17 +215,16 @@ package body Flyology_Bench.Sweeps.Reporters is
               Reference_Throughput (Item);
             Contender_Rate : constant Throughput_Summary :=
               Contender_Throughput (Item);
-            Measured : constant Boolean := Status (Item) = Point_Measured;
          begin
             Put_Line
               (File,
                Identity (Parameter (Item)) & "  " & Status_Name (Status (Item))
-               & "  " & Median_Or_Empty (Status (Item), Reference) & " ["
-               & Low_Or_Empty (Status (Item), Reference) & ", "
-               & High_Or_Empty (Status (Item), Reference) & "]  "
-               & Median_Or_Empty (Status (Item), Contender) & " ["
-               & Low_Or_Empty (Status (Item), Contender) & ", "
-               & High_Or_Empty (Status (Item), Contender) & "]  "
+               & "  " & Median_Or_Empty (Reference_Rate, Reference) & " ["
+               & Low_Or_Empty (Reference_Rate, Reference) & ", "
+               & High_Or_Empty (Reference_Rate, Reference) & "]  "
+               & Median_Or_Empty (Contender_Rate, Contender) & " ["
+               & Low_Or_Empty (Contender_Rate, Contender) & ", "
+               & High_Or_Empty (Contender_Rate, Contender) & "]  "
                & Maybe_Number
                    (Reference_Rate, Operations_Per_Second (Reference_Rate))
                & " [" & Maybe_Number
@@ -245,9 +247,12 @@ package body Flyology_Bench.Sweeps.Reporters is
                & Maybe_Number
                    (Contender_Rate, Work_Units_Per_Second (Contender_Rate))
                & "  "
-               & Number (Raw_Value (Work_Per_Operation (Item))) & " "
-               & Unit_Name (Work_Per_Operation (Item)) & "  "
-               & (if Measured then Verdict_Name (Verdict (Pair)) else ""));
+               & (if Work_Available (Item)
+                  then Number (Raw_Value (Work_Per_Operation (Item))) & " "
+                    & Unit_Name (Work_Per_Operation (Item))
+                  else "unavailable") & "  "
+               & (if Collection_Available (Item)
+                  then Verdict_Name (Verdict (Pair)) else ""));
          end;
       end loop;
    end Put_Comparison_Console;
@@ -257,8 +262,8 @@ package body Flyology_Bench.Sweeps.Reporters is
       Put_Line
         (File,
          "benchmark,point,parameter_kind,parameter_value,parameter_label,"
-         & "result_kind,work_kind,work_unit,work_value,work_scaling,"
-         & "sample_semantics,available,status,failure,median_elapsed_ns,"
+         & "result_kind,work_available,work_kind,work_unit,work_value,work_scaling,"
+         & "sample_semantics,collection_available,available,status,failure,median_elapsed_ns,"
          & "mean_elapsed_ci_low_ns,mean_elapsed_ci_high_ns,"
          & "operations_per_second,operations_ci_low,operations_ci_high,"
          & "work_units_per_second,work_ci_low,work_ci_high,direction");
@@ -274,7 +279,10 @@ package body Flyology_Bench.Sweeps.Reporters is
          declare
             Item : constant Ordinary_Point_Result := Element (Result, Index);
             Point_Value : constant Parameter_Point := Parameter (Item);
-            Amount : constant Work_Amount := Work_Per_Operation (Item);
+            Has_Work : constant Boolean := Work_Available (Item);
+            Amount : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item)
+               else Work (1, Items));
             Rate : constant Throughput_Summary := Throughput (Item);
             Measurement_Value : constant Measurement := Data (Item);
          begin
@@ -283,15 +291,18 @@ package body Flyology_Bench.Sweeps.Reporters is
                CSV (Case_Name) & ',' & CSV (Identity (Point_Value)) & ','
                & Kind_Name (Kind (Point_Value)) & ','
                & Number (Value (Point_Value)) & ',' & CSV (Label (Point_Value))
-               & ",ordinary_measurement," & Work_Kind_Name (Unit_Kind (Amount))
-               & ',' & CSV (Unit_Name (Amount)) & ',' & Number (Raw_Value (Amount))
-               & ',' & Scaling_Name (Display_Scale (Amount))
+               & ",ordinary_measurement," & Boolean_Name (Has_Work) & ','
+               & (if Has_Work then Work_Kind_Name (Unit_Kind (Amount)) else "")
+               & ',' & (if Has_Work then CSV (Unit_Name (Amount)) else "")
+               & ',' & (if Has_Work then Number (Raw_Value (Amount)) else "")
+               & ',' & (if Has_Work then Scaling_Name (Display_Scale (Amount)) else "")
                & ",per_operation_batch_mean,"
+               & Boolean_Name (Collection_Available (Item)) & ','
                & Boolean_Name (Status (Item) = Point_Measured) & ','
                & Status_Name (Status (Item)) & ',' & CSV (Failure_Message (Item))
-               & ',' & Median_Or_Empty (Status (Item), Measurement_Value)
-               & ',' & Low_Or_Empty (Status (Item), Measurement_Value)
-               & ',' & High_Or_Empty (Status (Item), Measurement_Value)
+               & ',' & Median_Or_Empty (Rate, Measurement_Value)
+               & ',' & Low_Or_Empty (Rate, Measurement_Value)
+               & ',' & High_Or_Empty (Rate, Measurement_Value)
                & ',' & Maybe_Number (Rate, Operations_Per_Second (Rate))
                & ',' & Maybe_Number (Rate, Operations_Confidence_Low (Rate))
                & ',' & Maybe_Number (Rate, Operations_Confidence_High (Rate))
@@ -309,8 +320,8 @@ package body Flyology_Bench.Sweeps.Reporters is
       Put_Line
         (File,
          "benchmark,point,parameter_kind,parameter_value,parameter_label,"
-         & "result_kind,reference,contender,work_kind,work_unit,work_value,"
-         & "work_scaling,sample_semantics,available,status,failure,"
+         & "result_kind,reference,contender,work_available,work_kind,work_unit,work_value,"
+         & "work_scaling,sample_semantics,collection_available,available,status,failure,"
          & "reference_median_elapsed_ns,reference_mean_ci_low_ns,"
          & "reference_mean_ci_high_ns,contender_median_elapsed_ns,"
          & "contender_mean_ci_low_ns,contender_mean_ci_high_ns,"
@@ -335,7 +346,10 @@ package body Flyology_Bench.Sweeps.Reporters is
          declare
             Item : constant Paired_Point_Result := Element (Result, Index);
             Point_Value : constant Parameter_Point := Parameter (Item);
-            Amount : constant Work_Amount := Work_Per_Operation (Item);
+            Has_Work : constant Boolean := Work_Available (Item);
+            Amount : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item)
+               else Work (1, Items));
             Pair : constant Comparison := Data (Item);
             Reference : constant Measurement := Reference_Measurement (Pair);
             Contender : constant Measurement := Contender_Measurement (Pair);
@@ -351,18 +365,21 @@ package body Flyology_Bench.Sweeps.Reporters is
                & Kind_Name (Kind (Point_Value)) & ','
                & Number (Value (Point_Value)) & ',' & CSV (Label (Point_Value))
                & ",paired_comparison," & CSV (Reference_Name) & ','
-               & CSV (Contender_Name) & ','
-               & Work_Kind_Name (Unit_Kind (Amount)) & ','
-               & CSV (Unit_Name (Amount)) & ',' & Number (Raw_Value (Amount))
-               & ',' & Scaling_Name (Display_Scale (Amount))
-               & ",per_operation_batch_mean," & Boolean_Name (Measured) & ','
+               & CSV (Contender_Name) & ',' & Boolean_Name (Has_Work) & ','
+               & (if Has_Work then Work_Kind_Name (Unit_Kind (Amount)) else "")
+               & ',' & (if Has_Work then CSV (Unit_Name (Amount)) else "")
+               & ',' & (if Has_Work then Number (Raw_Value (Amount)) else "")
+               & ',' & (if Has_Work then Scaling_Name (Display_Scale (Amount)) else "")
+               & ",per_operation_batch_mean,"
+               & Boolean_Name (Collection_Available (Item)) & ','
+               & Boolean_Name (Measured) & ','
                & Status_Name (Status (Item)) & ',' & CSV (Failure_Message (Item))
-               & ',' & Median_Or_Empty (Status (Item), Reference)
-               & ',' & Low_Or_Empty (Status (Item), Reference)
-               & ',' & High_Or_Empty (Status (Item), Reference)
-               & ',' & Median_Or_Empty (Status (Item), Contender)
-               & ',' & Low_Or_Empty (Status (Item), Contender)
-               & ',' & High_Or_Empty (Status (Item), Contender)
+               & ',' & Median_Or_Empty (Reference_Rate, Reference)
+               & ',' & Low_Or_Empty (Reference_Rate, Reference)
+               & ',' & High_Or_Empty (Reference_Rate, Reference)
+               & ',' & Median_Or_Empty (Contender_Rate, Contender)
+               & ',' & Low_Or_Empty (Contender_Rate, Contender)
+               & ',' & High_Or_Empty (Contender_Rate, Contender)
                & ',' & Maybe_Number
                  (Reference_Rate, Operations_Per_Second (Reference_Rate))
                & ',' & Maybe_Number
@@ -388,7 +405,8 @@ package body Flyology_Bench.Sweeps.Reporters is
                & ',' & Maybe_Number
                  (Contender_Rate, Work_Confidence_High (Contender_Rate))
                & ",higher_is_better,"
-               & (if Measured then Verdict_Name (Verdict (Pair)) else ""));
+               & (if Collection_Available (Item)
+                  then Verdict_Name (Verdict (Pair)) else ""));
          end;
       end loop;
    end Put_Comparison_CSV;
@@ -403,7 +421,10 @@ package body Flyology_Bench.Sweeps.Reporters is
          declare
             Item : constant Ordinary_Point_Result := Element (Result, Index);
             Point_Value : constant Parameter_Point := Parameter (Item);
-            Amount : constant Work_Amount := Work_Per_Operation (Item);
+            Has_Work : constant Boolean := Work_Available (Item);
+            Amount : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item)
+               else Work (1, Items));
             Rate : constant Throughput_Summary := Throughput (Item);
             Measurement_Value : constant Measurement := Data (Item);
          begin
@@ -415,21 +436,29 @@ package body Flyology_Bench.Sweeps.Reporters is
                & Kind_Name (Kind (Point_Value)) & """,""parameter_value"":"
                & Number (Value (Point_Value)) & ",""parameter_label"":"""
                & JSON (Label (Point_Value))
-               & """,""result_kind"":""ordinary_measurement"",""work"":{""kind"":"""
-               & Work_Kind_Name (Unit_Kind (Amount)) & """,""unit"":"""
-               & JSON (Unit_Name (Amount)) & """,""raw_value"":"
-               & Number (Raw_Value (Amount)) & ",""display_scaling"":"""
-               & Scaling_Name (Display_Scale (Amount))
-               & """},""sample_semantics"":""per_operation_batch_mean"",""available"":"
+               & """,""result_kind"":""ordinary_measurement"",""work"":{""available"":"
+               & Boolean_Name (Has_Work) & ",""kind"":"
+               & (if Has_Work
+                  then '"' & Work_Kind_Name (Unit_Kind (Amount)) & '"'
+                  else "null") & ",""unit"":"
+               & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"'
+                  else "null") & ",""raw_value"":"
+               & (if Has_Work then Number (Raw_Value (Amount)) else "null")
+               & ",""display_scaling"":"
+               & (if Has_Work
+                  then '"' & Scaling_Name (Display_Scale (Amount)) & '"'
+                  else "null")
+               & "},""sample_semantics"":""per_operation_batch_mean"",""collection_available"":"
+               & Boolean_Name (Collection_Available (Item)) & ",""available"":"
                & Boolean_Name (Status (Item) = Point_Measured)
                & ",""status"":""" & Status_Name (Status (Item))
                & """,""failure"":""" & JSON (Failure_Message (Item))
                & """,""median_elapsed_ns"":"
-               & Median_Or_Empty (Status (Item), Measurement_Value, True)
+               & Median_Or_Empty (Rate, Measurement_Value, True)
                & ",""mean_elapsed_ci_low_ns"":"
-               & Low_Or_Empty (Status (Item), Measurement_Value, True)
+               & Low_Or_Empty (Rate, Measurement_Value, True)
                & ",""mean_elapsed_ci_high_ns"":"
-               & High_Or_Empty (Status (Item), Measurement_Value, True)
+               & High_Or_Empty (Rate, Measurement_Value, True)
                & ",""throughput"":{""availability"":"""
                & Availability_Name (Availability (Rate))
                & """,""direction"":""higher_is_better"",""operations_per_second"":"
@@ -461,7 +490,10 @@ package body Flyology_Bench.Sweeps.Reporters is
          declare
             Item : constant Paired_Point_Result := Element (Result, Index);
             Point_Value : constant Parameter_Point := Parameter (Item);
-            Amount : constant Work_Amount := Work_Per_Operation (Item);
+            Has_Work : constant Boolean := Work_Available (Item);
+            Amount : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item)
+               else Work (1, Items));
             Pair : constant Comparison := Data (Item);
             Reference : constant Measurement := Reference_Measurement (Pair);
             Contender : constant Measurement := Contender_Measurement (Pair);
@@ -475,12 +507,12 @@ package body Flyology_Bench.Sweeps.Reporters is
               (Name : String;
                Measurement_Value : Measurement;
                Rate : Throughput_Summary) return String is
-              ("{""name"":""" & JSON (Name) & """,""median_elapsed_ns"":"
-               & Median_Or_Empty (Status (Item), Measurement_Value, True)
+               ("{""name"":""" & JSON (Name) & """,""median_elapsed_ns"":"
+               & Median_Or_Empty (Rate, Measurement_Value, True)
                & ",""mean_elapsed_ci_low_ns"":"
-               & Low_Or_Empty (Status (Item), Measurement_Value, True)
+               & Low_Or_Empty (Rate, Measurement_Value, True)
                & ",""mean_elapsed_ci_high_ns"":"
-               & High_Or_Empty (Status (Item), Measurement_Value, True)
+               & High_Or_Empty (Rate, Measurement_Value, True)
                & ",""operations_per_second"":"
                & Maybe_Number (Rate, Operations_Per_Second (Rate), True)
                & ",""operations_ci_low"":"
@@ -503,20 +535,29 @@ package body Flyology_Bench.Sweeps.Reporters is
                & Kind_Name (Kind (Point_Value)) & """,""parameter_value"":"
                & Number (Value (Point_Value)) & ",""parameter_label"":"""
                & JSON (Label (Point_Value))
-               & """,""result_kind"":""paired_comparison"",""work"":{""kind"":"""
-               & Work_Kind_Name (Unit_Kind (Amount)) & """,""unit"":"""
-               & JSON (Unit_Name (Amount)) & """,""raw_value"":"
-               & Number (Raw_Value (Amount)) & ",""display_scaling"":"""
-               & Scaling_Name (Display_Scale (Amount))
-               & """},""sample_semantics"":""per_operation_batch_mean"",""available"":"
-               & Boolean_Name (Measured) & ",""status"":"""
+               & """,""result_kind"":""paired_comparison"",""work"":{""available"":"
+               & Boolean_Name (Has_Work) & ",""kind"":"
+               & (if Has_Work
+                  then '"' & Work_Kind_Name (Unit_Kind (Amount)) & '"'
+                  else "null") & ",""unit"":"
+               & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"'
+                  else "null") & ",""raw_value"":"
+               & (if Has_Work then Number (Raw_Value (Amount)) else "null")
+               & ",""display_scaling"":"
+               & (if Has_Work
+                  then '"' & Scaling_Name (Display_Scale (Amount)) & '"'
+                  else "null")
+               & "},""sample_semantics"":""per_operation_batch_mean"",""collection_available"":"
+               & Boolean_Name (Collection_Available (Item))
+               & ",""available"":" & Boolean_Name (Measured) & ",""status"":"""
                & Status_Name (Status (Item)) & """,""failure"":"""
                & JSON (Failure_Message (Item)) & """,""direction"":""higher_is_better"",""reference"":"
                & Side_JSON (Reference_Name, Reference, Reference_Rate)
                & ",""contender"":"
                & Side_JSON (Contender_Name, Contender, Contender_Rate)
                & ",""paired_verdict"":"
-               & (if Measured then '"' & Verdict_Name (Verdict (Pair)) & '"'
+               & (if Collection_Available (Item)
+                  then '"' & Verdict_Name (Verdict (Pair)) & '"'
                   else "null") & "}");
          end;
       end loop;
@@ -530,9 +571,14 @@ package body Flyology_Bench.Sweeps.Reporters is
    begin
       Put_Line
         (File, "empirical scaling " & Case_Name & ": "
-         & Scaling_Status_Name (Scaling.Status (Result)) & ", inputs "
-         & Number (Scaling.Minimum_Input (Result)) & " .. "
-         & Number (Scaling.Maximum_Input (Result)));
+         & Scaling_Status_Name (Scaling.Status (Result)) & ", "
+         & (if Scaling.Input_Kind_Available (Result)
+            then Kind_Name (Scaling.Input_Kind (Result)) & " inputs "
+            else "input kind unavailable, inputs ")
+         & (if Scaling.Input_Range_Available (Result)
+            then Number (Scaling.Minimum_Input (Result)) & " .. "
+              & Number (Scaling.Maximum_Input (Result))
+            else "unavailable"));
       Put_Line
         (File, "model  selected  coefficient  exponent  r_squared  rms_log_residual  max_log_residual");
       for Model in Scaling.Scaling_Model loop
@@ -559,7 +605,8 @@ package body Flyology_Bench.Sweeps.Reporters is
    begin
       Put_Line
         (File,
-         "benchmark,analysis,status,points,minimum_input,maximum_input,model,"
+         "benchmark,analysis,status,points,parameter_kind,range_available,"
+         & "minimum_input,maximum_input,model,"
          & "available,selected,coefficient,nominal_exponent,r_squared,"
          & "rms_log_residual,maximum_absolute_log_residual");
    end Put_Scaling_CSV_Header;
@@ -579,8 +626,14 @@ package body Flyology_Bench.Sweeps.Reporters is
               (File, CSV (Case_Name) & ",empirical_scaling,"
                & Scaling_Status_Name (Scaling.Status (Result)) & ','
                & Trimmed (Natural'Image (Scaling.Points_Analyzed (Result)))
-               & ',' & Number (Scaling.Minimum_Input (Result)) & ','
-               & Number (Scaling.Maximum_Input (Result)) & ','
+               & ',' & (if Scaling.Input_Kind_Available (Result)
+                         then Kind_Name (Scaling.Input_Kind (Result)) else "")
+               & ',' & Boolean_Name (Scaling.Input_Range_Available (Result))
+               & ',' & (if Scaling.Input_Range_Available (Result)
+                         then Number (Scaling.Minimum_Input (Result)) else "")
+               & ',' & (if Scaling.Input_Range_Available (Result)
+                         then Number (Scaling.Maximum_Input (Result)) else "")
+               & ','
                & Model_Name (Model) & ',' & Boolean_Name (Item.Available) & ','
                & Boolean_Name (Item.Selected) & ','
                & (if Item.Available then Number (Item.Coefficient) else "") & ','
@@ -639,8 +692,18 @@ package body Flyology_Bench.Sweeps.Reporters is
          & """,""available"":" & Boolean_Name (Scaling.Available (Result))
          & ",""points"":"
          & Trimmed (Natural'Image (Scaling.Points_Analyzed (Result)))
-         & ",""minimum_input"":" & Number (Scaling.Minimum_Input (Result))
-         & ",""maximum_input"":" & Number (Scaling.Maximum_Input (Result))
+         & ",""parameter_kind"":"
+         & (if Scaling.Input_Kind_Available (Result)
+            then '"' & Kind_Name (Scaling.Input_Kind (Result)) & '"'
+            else "null")
+         & ",""range_available"":"
+         & Boolean_Name (Scaling.Input_Range_Available (Result))
+         & ",""minimum_input"":"
+         & (if Scaling.Input_Range_Available (Result)
+            then Number (Scaling.Minimum_Input (Result)) else "null")
+         & ",""maximum_input"":"
+         & (if Scaling.Input_Range_Available (Result)
+            then Number (Scaling.Maximum_Input (Result)) else "null")
          & ",""selected_model"":"
          & (if Scaling.Available (Result)
             then '"' & Model_Name (Scaling.Selected_Model (Result)) & '"'
