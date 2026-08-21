@@ -208,6 +208,7 @@ package body Flyology.IO.Files is
       Item.Node.Error_Code := 0;
       Item.Node.Cancelled := 0;
       Item.Node.Cancel_Requested := 0;
+      Item.Node.Next := System.Null_Address;
       Item.Buffer_First := First;
       Item.Buffer_Length := Length;
       Item.Failure := No_Failure;

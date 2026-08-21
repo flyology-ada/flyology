@@ -139,11 +139,12 @@ package body System.Flyology.Scheduler is
    type Fiber;
    type Fiber_Access is access all Fiber;
 
-   Async_File_Node_Version : constant C.unsigned := 1;
+   Async_File_Node_Version : constant C.unsigned := 2;
    Async_File_Unused       : constant C.int := 0;
    Async_File_Submitted    : constant C.int := 1;
    Async_File_Cancelling   : constant C.int := 2;
    Async_File_Terminal     : constant C.int := 3;
+   Async_File_Queued       : constant C.int := 4;
 
    type Async_File_Node is record
       Version          : C.unsigned := Async_File_Node_Version;
@@ -159,6 +160,7 @@ package body System.Flyology.Scheduler is
       Error_Code       : C.int := 0;
       Cancelled        : C.int := 0;
       Cancel_Requested : C.int := 0;
+      Next             : System.Address := System.Null_Address;
    end record with Convention => C;
    type Async_File_Node_Access is access all Async_File_Node;
    function To_Async_File_Node is new Ada.Unchecked_Conversion
@@ -371,6 +373,9 @@ package body System.Flyology.Scheduler is
       IO_Waiters        : IO_Bucket_Array := (others => null);
       Pending_File_Head : Fiber_Access;
       Pending_File_Tail : Fiber_Access;
+      Pending_Async_File_Head : Async_File_Node_Access;
+      Pending_Async_File_Tail : Async_File_Node_Access;
+      Pending_Async_File_Count : Natural := 0;
       File_Cancel_Head  : Fiber_Access;
       File_Cancel_Tail  : Fiber_Access;
       Timers            : Timer_Heap_Access;
@@ -630,6 +635,8 @@ package body System.Flyology.Scheduler is
      (Group : not null Loop_Group_Access);
    procedure Submit_Pending_Files_Locked
      (Group : not null Loop_Group_Access);
+   procedure Submit_Pending_Async_Files_Locked
+     (Group : not null Loop_Group_Access);
    function Is_Event_Thread return Boolean;
    procedure Signal_Async_File (Node : not null Async_File_Node_Access);
    procedure Complete_Async_File_Locked
@@ -692,6 +699,7 @@ package body System.Flyology.Scheduler is
       Value.Error_Code := 0;
       Value.Cancelled := 0;
       Value.Cancel_Requested := 0;
+      Value.Next := System.Null_Address;
       Value.State := Async_File_Submitted;
       if not Pollers.Submit_File
         (Group.Scheduler_Poller,
@@ -703,13 +711,25 @@ package body System.Flyology.Scheduler is
          Async_File_Token (Node),
          Error)
       then
-         Value.Error_Code := Error;
-         Value.Descriptor := -1;
-         Value.Buffer := System.Null_Address;
-         Value.Length := 0;
-         Value.State := Async_File_Terminal;
-         Unlock_Group (Group);
-         return -1;
+         if Error = C.int (OSI.EAGAIN) then
+            Value.State := Async_File_Queued;
+            if Group.Pending_Async_File_Tail = null then
+               Group.Pending_Async_File_Head := Value;
+            else
+               Group.Pending_Async_File_Tail.Next := Node;
+            end if;
+            Group.Pending_Async_File_Tail := Value;
+            Group.Pending_Async_File_Count :=
+              Group.Pending_Async_File_Count + 1;
+         else
+            Value.Error_Code := Error;
+            Value.Descriptor := -1;
+            Value.Buffer := System.Null_Address;
+            Value.Length := 0;
+            Value.State := Async_File_Terminal;
+            Unlock_Group (Group);
+            return -1;
+         end if;
       end if;
       Item.Active_Async_Files := Item.Active_Async_Files + 1;
       Unlock_Group (Group);
@@ -746,7 +766,7 @@ package body System.Flyology.Scheduler is
          return 0;
       elsif Value.State = Async_File_Cancelling then
          return 0;
-      elsif Value.State /= Async_File_Submitted then
+      elsif Value.State not in Async_File_Submitted | Async_File_Queued then
          return -1;
       end if;
 
@@ -760,6 +780,37 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
       Value.Cancel_Requested := 1;
+      if Value.State = Async_File_Queued then
+         declare
+            Position : Async_File_Node_Access :=
+              Group.Pending_Async_File_Head;
+            Previous : Async_File_Node_Access := null;
+         begin
+            while Position /= null and then Position /= Value loop
+               Previous := Position;
+               Position := To_Async_File_Node (Position.Next);
+            end loop;
+            if Position = null
+              or else Group.Pending_Async_File_Count = 0
+            then
+               Fatal;
+            elsif Previous = null then
+               Group.Pending_Async_File_Head :=
+                 To_Async_File_Node (Value.Next);
+            else
+               Previous.Next := Value.Next;
+            end if;
+            if Group.Pending_Async_File_Tail = Value then
+               Group.Pending_Async_File_Tail := Previous;
+            end if;
+            Group.Pending_Async_File_Count :=
+              Group.Pending_Async_File_Count - 1;
+            Value.Next := System.Null_Address;
+         end;
+         Complete_Async_File_Locked (Group, Value, 0, 0, True);
+         Unlock_Group (Group);
+         return 0;
+      end if;
       Value.State := Async_File_Cancelling;
       Disposition := Pollers.Cancel_File
         (Group.Scheduler_Poller,
@@ -775,6 +826,7 @@ package body System.Flyology.Scheduler is
             Completion.Result,
             Completion.Error_Code,
             True);
+         Submit_Pending_Async_Files_Locked (Group);
       end if;
       Unlock_Group (Group);
       return 0;
@@ -918,6 +970,9 @@ package body System.Flyology.Scheduler is
       and then Group.Timer_Count = 0
       and then Group.Pending_File_Head = null
       and then Group.Pending_File_Tail = null
+      and then Group.Pending_Async_File_Head = null
+      and then Group.Pending_Async_File_Tail = null
+      and then Group.Pending_Async_File_Count = 0
       and then Group.File_Cancel_Head = null
       and then Group.File_Cancel_Tail = null
       and then Pollers.File_Quiescent (Group.Scheduler_Poller));
@@ -1627,7 +1682,7 @@ package body System.Flyology.Scheduler is
         or else Owner.Group /= Group
         or else Owner.Active_Async_Files = 0
         or else Node.State not in
-          Async_File_Submitted | Async_File_Cancelling
+          Async_File_Submitted | Async_File_Cancelling | Async_File_Queued
       then
          Fatal;
       end if;
@@ -1784,6 +1839,57 @@ package body System.Flyology.Scheduler is
          end if;
       end loop;
    end Submit_Pending_Files_Locked;
+
+   procedure Submit_Pending_Async_Files_Locked
+     (Group : not null Loop_Group_Access)
+   is
+      Node  : Async_File_Node_Access;
+      Error : C.int;
+   begin
+      while Group.Pending_Async_File_Head /= null loop
+         Node := Group.Pending_Async_File_Head;
+         if Node.State /= Async_File_Queued
+           or else Node.Owner = System.Null_Address
+           or else Node.Buffer = System.Null_Address
+           or else Group.Pending_Async_File_Count = 0
+         then
+            Fatal;
+         end if;
+
+         if Pollers.Submit_File
+           (Group.Scheduler_Poller,
+            Node.Descriptor,
+            Node.Buffer,
+            Node.Length,
+            Node.Offset,
+            Node.For_Write /= 0,
+            Async_File_Token (Node.all'Address),
+            Error)
+         then
+            Group.Pending_Async_File_Head :=
+              To_Async_File_Node (Node.Next);
+            if Group.Pending_Async_File_Head = null then
+               Group.Pending_Async_File_Tail := null;
+            end if;
+            Group.Pending_Async_File_Count :=
+              Group.Pending_Async_File_Count - 1;
+            Node.Next := System.Null_Address;
+            Node.State := Async_File_Submitted;
+         elsif Error = C.int (OSI.EAGAIN) then
+            return;
+         else
+            Group.Pending_Async_File_Head :=
+              To_Async_File_Node (Node.Next);
+            if Group.Pending_Async_File_Head = null then
+               Group.Pending_Async_File_Tail := null;
+            end if;
+            Group.Pending_Async_File_Count :=
+              Group.Pending_Async_File_Count - 1;
+            Node.Next := System.Null_Address;
+            Complete_Async_File_Locked (Group, Node, 0, Error, False);
+         end if;
+      end loop;
+   end Submit_Pending_Async_Files_Locked;
 
    function Ensure_Timer_Capacity
      (Group : not null Loop_Group_Access) return Boolean
@@ -3529,6 +3635,9 @@ package body System.Flyology.Scheduler is
          Idle_Nanoseconds         => To_Nanoseconds (Idle),
          Idle_Waits               => Target.Idle_Waits);
 
+      Output.Pending_File_Submissions :=
+        C.unsigned_long_long (Target.Pending_Async_File_Count);
+
       Item := Target.Fibers;
       while Item /= null loop
          case Item.State is
@@ -4489,6 +4598,7 @@ package body System.Flyology.Scheduler is
                   Event.Result,
                   Event.Error_Code,
                   Node.Cancel_Requested /= 0);
+               Submit_Pending_Async_Files_Locked (Group);
                Submit_Pending_Files_Locked (Group);
                return;
             end;
@@ -4631,7 +4741,9 @@ package body System.Flyology.Scheduler is
          end if;
 
          Submit_Pending_Files_Locked (Group);
-         if Group.Pending_File_Head /= null
+         Submit_Pending_Async_Files_Locked (Group);
+         if (Group.Pending_File_Head /= null
+             or else Group.Pending_Async_File_Head /= null)
            and then (Timeout < 0.0 or else Timeout > 0.001)
          then
             --  Darwin's AIO limit is process-wide, so a group may need to

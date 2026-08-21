@@ -12,6 +12,7 @@ with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Files;
 with Flyology.Observability;
+with Flyology.Operations;
 with Interfaces;
 with Interfaces.C;
 
@@ -29,6 +30,7 @@ procedure Fault_Injection_Smoke is
    package Connections renames Flyology.IO.Connections;
    package Files renames Flyology.IO.Files;
    package Observation renames Flyology.Observability;
+   package Operations renames Flyology.Operations;
 
    function Selected_Linux_Backend return Interfaces.C.int;
    pragma Import
@@ -375,6 +377,84 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_File_Saturation;
+
+   procedure Test_Scoped_File_Saturation is
+      Path : constant String := "/tmp/flyology-scoped-file-saturation.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Passed : Boolean := False with Atomic;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : aliased Ada.Streams.Stream_Element_Array := [1, 2, 3, 4];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Write : Files.Write_Operation :=
+              Files.Write_At (Set'Access, File, 0, Data'Access, 1.0);
+            Batch : Operations.Completion_Batch (Set.Capacity);
+         begin
+            Operations.Wait_For_Success (Set, Batch);
+            Files.Finish (Write, Last);
+            Passed := Last = Data'Last;
+         end;
+
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Write : Files.Write_Operation :=
+              Files.Write_At (Set'Access, File, 4, Data'Access, 1.0);
+            Cancelled : Boolean := False;
+         begin
+            Operations.Cancel (Write);
+            Operations.Wait_All (Set);
+            begin
+               Files.Finish (Write, Last);
+            exception
+               when Operations.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Passed := Passed and then Cancelled;
+         end;
+      exception
+         when others =>
+            Passed := False;
+      end Writer;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 8);
+      declare
+         Item : Writer;
+         pragma Unreferenced (Item);
+      begin
+         null;
+      end;
+      if not Passed then
+         raise Program_Error with
+           "scoped file operation did not survive submission pressure";
+      end if;
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Scoped_File_Saturation;
 
    procedure Test_File_Dormancy_Exclusion is
       Path : constant String := "/tmp/flyology-file-dormancy.data";
@@ -1627,6 +1707,8 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "scoped-file-saturation" then
+      Test_Scoped_File_Saturation;
    elsif Case_Name = "file-dormancy-exclusion" then
       Test_File_Dormancy_Exclusion;
    elsif Case_Name = "file-uring-cq-backpressure" then

@@ -434,7 +434,8 @@ connect_transient_smoke
 create_finalize_race_smoke
 pool_reduction_claim_smoke
 structured_server_reuse_smoke
-task_result_publication_smoke'
+task_result_publication_smoke
+fault_injection_smoke'
 
 connection_hook_mains='connection_admission_smoke
 connection_close_abort_smoke
@@ -475,7 +476,6 @@ loop_thread_project_placement_smoke
 $fault_mains"
 if [ "$(uname -s)" = Linux ]; then
   all_test_mains="$all_test_mains
-fault_injection_smoke
 linux_poller_fairness_smoke"
 fi
 
@@ -788,8 +788,7 @@ FLYOLOGY_TEST_FAULTS=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 if [ "$(uname -s)" = Linux ]; then
   fault_mains="$fault_mains
-linux_poller_fairness_smoke
-fault_injection_smoke"
+linux_poller_fairness_smoke"
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
 FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
@@ -815,6 +814,9 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
   "$test_bin/structured_server_reuse_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/task_result_publication_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/fault_injection_smoke" \
+  scoped-file-saturation
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$project_root/tests/bin/$structured_server_test_subdir/structured_server_abort_smoke"
 

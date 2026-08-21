@@ -2541,8 +2541,10 @@ descriptor wait with a deadline contributes to both `Descriptor_Waits` and
 `Timer_Waits`; a connection wait also contributes to `Interrupt_Waits` when it
 has a cancellation or shutdown wake source. `File_Waits` counts operations,
 including several scoped file operations owned by one task.
-`Pending_File_Submissions` is the subset of synchronous file waits not yet
-accepted by the bounded kernel queue.
+`Pending_File_Submissions` is the subset of synchronous and scoped file
+operations not yet accepted by the bounded kernel queue. Scoped operations
+remain pending in their caller-owned runtime nodes; cancellation can remove a
+queued node without ever lending its buffer to the kernel.
 
 `Uptime_Nanoseconds` and `Idle_Nanoseconds` describe the group's event loop
 rather than its tasks. A loop enters its poller only when no task of its own is

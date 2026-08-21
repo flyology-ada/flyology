@@ -267,11 +267,12 @@ private
    type File_Descriptor is new Interfaces.C.int;
    Invalid_File : constant File_Descriptor := -1;
 
-   Async_File_Node_Version : constant Interfaces.C.unsigned := 1;
+   Async_File_Node_Version : constant Interfaces.C.unsigned := 2;
    Async_File_Unused       : constant Interfaces.C.int := 0;
    Async_File_Submitted    : constant Interfaces.C.int := 1;
    Async_File_Cancelling   : constant Interfaces.C.int := 2;
    Async_File_Terminal     : constant Interfaces.C.int := 3;
+   Async_File_Queued       : constant Interfaces.C.int := 4;
 
    type Async_File_Node is record
       Version          : Interfaces.C.unsigned := Async_File_Node_Version;
@@ -287,6 +288,7 @@ private
       Error_Code       : Interfaces.C.int := 0;
       Cancelled        : Interfaces.C.int := 0;
       Cancel_Requested : Interfaces.C.int := 0;
+      Next             : System.Address := System.Null_Address;
    end record with Convention => C;
 
    type Scoped_File_Failure is

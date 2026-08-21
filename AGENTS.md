@@ -147,9 +147,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Current scoped providers cover descriptor readiness, timers, raw stream
   socket arrays, unique-buffer socket operations, and lightweight positional
   file arrays. The file provider uses one caller-owned runtime node per
-  operation and one lazily created completion wake source per set. Keep native
-  synchronous file calls direct; do not imply that the scoped file overload is
-  concurrent on a native task until a native completion engine exists.
+  operation and one lazily created completion wake source per set. Transient
+  kernel submission pressure queues those nodes without failing the operation;
+  queued cancellation terminalizes without submitting the borrowed buffer.
+  Keep native synchronous file calls direct; do not imply that the scoped file
+  overload is concurrent on a native task until a native completion engine
+  exists.
 - TLS provider choice is per connection through the provider-neutral SPI.
   OpenSSL is an optional dynamically loaded provider. Provider steps must never
   block: return `Want_Read` or `Want_Write` and let Flyology wait for readiness.
