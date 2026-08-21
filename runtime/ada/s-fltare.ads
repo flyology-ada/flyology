@@ -65,6 +65,12 @@ package System.Flyology.Task_Results is
    --  be reclaimed after a non-null result is returned. Return null when T is
    --  null or has no Flyology result sidecar. No user callback is invoked.
 
+   function Retain_Monitor (Storage : System.Address) return System.Address;
+   pragma Export
+     (C, Retain_Monitor, "flyology_runtime_task_result_monitor_retain");
+   --  Retain an already attached monitor's exact sidecar. The source monitor
+   --  must remain attached throughout this call. Return null on failure.
+
    procedure Release_Monitor (Storage : System.Address);
    pragma Export
      (C, Release_Monitor, "flyology_runtime_task_result_monitor_release");
@@ -88,4 +94,27 @@ package System.Flyology.Task_Results is
      (C, Wait_Monitor, "flyology_runtime_task_result_monitor_wait");
    --  Wait on retained monitor storage. Timeout and return-code semantics
    --  match Wait_Task, and abort remains visible to the caller.
+
+   function Subscribe_Monitor
+     (Storage           : System.Address;
+      Subscription_Node : System.Address;
+      Node_Size          : Interfaces.C.size_t;
+      Signal_Descriptor : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C, Subscribe_Monitor,
+      "flyology_runtime_task_result_monitor_subscribe");
+   --  Atomically observe-or-subscribe a caller-owned intrusive node. Return 1
+   --  when already terminal, 0 when subscribed, or a negative ABI/lifecycle
+   --  error. Publication signals the supplied nonblocking pipe descriptor and
+   --  detaches the node before returning.
+
+   function Unsubscribe_Monitor
+     (Storage           : System.Address;
+      Subscription_Node : System.Address;
+      Node_Size          : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export
+     (C, Unsubscribe_Monitor,
+      "flyology_runtime_task_result_monitor_unsubscribe");
+   --  Remove a subscribed node before its caller-owned storage or signal
+   --  descriptor can be reclaimed. This is idempotent after publication.
 end System.Flyology.Task_Results;

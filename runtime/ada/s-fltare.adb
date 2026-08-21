@@ -3,14 +3,17 @@ with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
 with System.Atomic_Primitives;
 with System.Flyology.Task_Result_Policy;
+with System.OS_Interface;
 with System.Tasking.Task_Attributes;
 
 package body System.Flyology.Task_Results is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type C.long;
    use type C.long_long;
    use type C.size_t;
+   use type C.unsigned;
    use type System.Atomic_Primitives.uint32;
    use type System.Flyology.Task_Result_Policy.Event;
    use type System.Flyology.Task_Result_Policy.Phase;
@@ -43,19 +46,143 @@ package body System.Flyology.Task_Results is
    package Policy renames System.Flyology.Task_Result_Policy;
    package Atomics renames System.Atomic_Primitives;
    package Task_Attributes renames System.Tasking.Task_Attributes;
+   package OSI renames System.OS_Interface;
+
+   type Subscription_Node is record
+      Version           : C.unsigned := ABI_Version;
+      Next              : System.Address := System.Null_Address;
+      Signal_Descriptor : C.int := -1;
+      Attached          : C.int := 0;
+   end record with Convention => C;
+
+   package Subscription_Addresses is new
+     System.Address_To_Access_Conversions (Subscription_Node);
+   subtype Subscription_Access is Subscription_Addresses.Object_Pointer;
+   use type Subscription_Access;
+
+   function C_Write
+     (FD     : C.int;
+      Buffer : System.Address;
+      Count  : C.size_t) return C.long;
+   pragma Import (C, C_Write, "write");
+
+   procedure Signal (Descriptor : C.int);
+
+   procedure Signal (Descriptor : C.int) is
+      Byte    : aliased C.unsigned_char := 1;
+      Written : C.long;
+   begin
+      loop
+         Written := C_Write (Descriptor, Byte'Address, 1);
+         exit when Written = 1
+           or else
+             (Written < 0 and then C.int (OSI.errno) = C.int (OSI.EAGAIN));
+         exit when Written >= 0
+           or else C.int (OSI.errno) /= C.int (OSI.EINTR);
+      end loop;
+   end Signal;
 
    protected type Completion_Gate is
       procedure Publish;
+      procedure Subscribe
+        (Node              : System.Address;
+         Node_Size         : C.size_t;
+         Signal_Descriptor : C.int;
+         Result            : out C.int);
+      procedure Unsubscribe
+        (Node   : System.Address;
+         Node_Size : C.size_t;
+         Result : out C.int);
       entry Wait;
    private
       Complete : Boolean := False;
+      Subscribers : System.Address := System.Null_Address;
    end Completion_Gate;
 
    protected body Completion_Gate is
       procedure Publish is
+         Cursor : Subscription_Access;
+         Next   : System.Address;
       begin
          Complete := True;
+         Cursor := Subscription_Addresses.To_Pointer (Subscribers);
+         Subscribers := System.Null_Address;
+         while Cursor /= null loop
+            Next := Cursor.Next;
+            Cursor.Next := System.Null_Address;
+            Cursor.Attached := 0;
+            Signal (Cursor.Signal_Descriptor);
+            Cursor := Subscription_Addresses.To_Pointer (Next);
+         end loop;
       end Publish;
+
+      procedure Subscribe
+        (Node              : System.Address;
+         Node_Size         : C.size_t;
+         Signal_Descriptor : C.int;
+         Result            : out C.int)
+      is
+         Value : constant Subscription_Access :=
+           Subscription_Addresses.To_Pointer (Node);
+      begin
+         if Value = null
+           or else Node_Size /= Subscription_Node'Size / 8
+           or else Value.Version /= ABI_Version
+           or else Signal_Descriptor < 0
+         then
+            Result := -1;
+         elsif Complete then
+            Result := 1;
+         elsif Value.Attached /= 0 then
+            Result := -1;
+         else
+            Value.Next := Subscribers;
+            Value.Signal_Descriptor := Signal_Descriptor;
+            Value.Attached := 1;
+            Subscribers := Node;
+            Result := 0;
+         end if;
+      end Subscribe;
+
+      procedure Unsubscribe
+        (Node   : System.Address;
+         Node_Size : C.size_t;
+         Result : out C.int)
+      is
+         Target   : constant Subscription_Access :=
+           Subscription_Addresses.To_Pointer (Node);
+         Previous : Subscription_Access := null;
+         Cursor   : Subscription_Access :=
+           Subscription_Addresses.To_Pointer (Subscribers);
+      begin
+         if Target = null
+           or else Node_Size /= Subscription_Node'Size / 8
+           or else Target.Version /= ABI_Version
+         then
+            Result := -1;
+            return;
+         elsif Target.Attached = 0 then
+            Result := 0;
+            return;
+         end if;
+
+         while Cursor /= null and then Cursor /= Target loop
+            Previous := Cursor;
+            Cursor := Subscription_Addresses.To_Pointer (Cursor.Next);
+         end loop;
+         if Cursor = null then
+            Result := -1;
+         else
+            if Previous = null then
+               Subscribers := Cursor.Next;
+            else
+               Previous.Next := Cursor.Next;
+            end if;
+            Cursor.Next := System.Null_Address;
+            Cursor.Attached := 0;
+            Result := 0;
+         end if;
+      end Unsubscribe;
 
       entry Wait when Complete is
       begin
@@ -395,6 +522,18 @@ package body System.Flyology.Task_Results is
          return System.Null_Address;
    end Attach_Monitor;
 
+   function Retain_Monitor (Storage : System.Address) return System.Address is
+      Value : constant Owned_Access := Owned_Addresses.To_Pointer (Storage);
+   begin
+      if not Retain (Value) then
+         return System.Null_Address;
+      end if;
+      return Value.all'Address;
+   exception
+      when others =>
+         return System.Null_Address;
+   end Retain_Monitor;
+
    procedure Release_Monitor (Storage : System.Address) is
       Value : Owned_Access := Owned_Addresses.To_Pointer (Storage);
    begin
@@ -426,5 +565,43 @@ package body System.Flyology.Task_Results is
       when others =>
          return Code (Policy.Runtime_Failure);
    end Wait_Monitor;
+
+   function Subscribe_Monitor
+     (Storage            : System.Address;
+      Subscription_Node : System.Address;
+      Node_Size          : C.size_t;
+      Signal_Descriptor : C.int) return C.int
+   is
+      Value  : constant Owned_Access := Owned_Addresses.To_Pointer (Storage);
+      Result : C.int;
+   begin
+      if Value = null then
+         return Code (Policy.Unknown_Task);
+      end if;
+      Value.Gate.Subscribe
+        (Subscription_Node, Node_Size, Signal_Descriptor, Result);
+      return Result;
+   exception
+      when others =>
+         return Code (Policy.Runtime_Failure);
+   end Subscribe_Monitor;
+
+   function Unsubscribe_Monitor
+     (Storage            : System.Address;
+      Subscription_Node : System.Address;
+      Node_Size          : C.size_t) return C.int
+   is
+      Value  : constant Owned_Access := Owned_Addresses.To_Pointer (Storage);
+      Result : C.int;
+   begin
+      if Value = null then
+         return Code (Policy.Unknown_Task);
+      end if;
+      Value.Gate.Unsubscribe (Subscription_Node, Node_Size, Result);
+      return Result;
+   exception
+      when others =>
+         return Code (Policy.Runtime_Failure);
+   end Unsubscribe_Monitor;
 
 end System.Flyology.Task_Results;

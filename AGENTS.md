@@ -151,7 +151,7 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   datagram socket arrays, Internet and Unix-stream connection attempts and
   accepts, unique-buffer stream operations, and lightweight positional file
   arrays and ownership-transferring unique buffers, plus nonrecursive file
-  watcher `Next`. A
+  watcher `Next` and retained task-result `Wait`. A
   successful scoped accept owns the accepted descriptor until typed `Finish`
   transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
@@ -165,6 +165,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   readiness descriptor; interruption composes as a separate readiness
   operation. Recursive watcher reconciliation remains caller-lane metadata
   work and is not yet an operation-producing overload.
+  Scoped task-result waits retain the target sidecar, subscribe a caller-owned
+  intrusive node to its persistent completion gate, and signal the completion
+  set's shared wake source on publication. They do not retain the task object
+  or source monitor after initiation and introduce no polling or helper task.
   Keep native synchronous file calls direct; do not imply that the scoped file
   overload is concurrent on a native task until a native completion engine
   exists.

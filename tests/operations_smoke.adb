@@ -11,6 +11,7 @@ with Flyology.IO.File_Watches;
 with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Operations;
+with Flyology.Task_Results;
 with Interfaces.C;
 
 procedure Operations_Smoke is
@@ -40,6 +41,7 @@ procedure Operations_Smoke is
    --  Files.Read_At (owned buffer)              Successes (2)           lightweight
    --  Files.Write_At (owned buffer)             Successes (2)           lightweight
    --  File_Watches.Next                         Success, All             both
+   --  Task_Results.Wait                         Success, All             both
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
@@ -51,6 +53,8 @@ procedure Operations_Smoke is
    use type Flyology.IO.File_Watches.Watch_Id;
    use type Flyology.IO.Wait_Outcome;
    use type Flyology.Operations.Terminal_Outcome;
+   use type Flyology.Task_Results.Exit_Cause;
+   use type Flyology.Task_Results.Observation_Status;
    use type Interfaces.C.int;
 
    protected Result is
@@ -110,6 +114,15 @@ procedure Operations_Smoke is
       Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
       Last : Ada.Streams.Stream_Element_Offset;
       Passed : Boolean := True;
+
+      task type Completion_Target (Lane : Flyology.Execution_Model) is
+         pragma Task_Info (Lane);
+      end Completion_Target;
+
+      task body Completion_Target is
+      begin
+         delay 0.01;
+      end Completion_Target;
    begin
       Flyology.IO.Sockets.Create_Socket_Pair (Left_1, Right_1);
       Flyology.IO.Sockets.Create_Socket_Pair (Left_2, Right_2);
@@ -1405,6 +1418,154 @@ procedure Operations_Smoke is
             raise;
       end;
       Check (Passed, "file watcher operation overload gates failed");
+
+      declare
+         package Results renames Flyology.Task_Results;
+         Target : Completion_Target (Model);
+         Set : aliased Flyology.Operations.Completion_Set (3);
+         Done : aliased Results.Wait_Operation :=
+           Results.Wait (Set'Access, Target'Identity, 1.0);
+         Alarm : Flyology.IO.Timers.Timer_Operation :=
+           Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
+         Successful : Flyology.Operations.Gate_Operation :=
+           Flyology.Operations.Wait_For_Success
+             (Set'Access, [Ref (Done)]);
+         Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+         Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+         Observation : Results.Task_Observation;
+      begin
+         while not Flyology.Operations.Is_Terminal (Successful) loop
+            Flyology.Operations.Wait_Some (Set, Batch);
+         end loop;
+         Flyology.Operations.Finish (Successful, Matches);
+         Results.Finish (Done, Observation);
+         Passed := Passed
+           and then Matches.Count = 1
+           and then Observation.Status = Results.Terminal
+           and then Observation.Result.Cause = Results.Normal_Completion;
+         Flyology.Operations.Cancel (Alarm);
+         begin
+            Flyology.IO.Timers.Finish (Alarm);
+         exception
+            when Flyology.Operations.Operation_Cancelled =>
+               null;
+         end;
+      end;
+
+      declare
+         package Results renames Flyology.Task_Results;
+         Target : Completion_Target (Model);
+         Monitor : Results.Monitor;
+         Set : aliased Flyology.Operations.Completion_Set (3);
+         Observation : Results.Task_Observation;
+      begin
+         Results.Attach (Monitor, Target'Identity);
+         declare
+            First : aliased Results.Wait_Operation :=
+              Results.Wait (Set'Access, Monitor, 1.0);
+            Second : aliased Results.Wait_Operation :=
+              Results.Wait (Set'Access, Monitor, 1.0);
+            Both : Flyology.Operations.Gate_Operation :=
+              Flyology.Operations.Wait_All
+                (Set'Access, [Ref (First), Ref (Second)]);
+            Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+         begin
+            Results.Detach (Monitor);
+            Flyology.Operations.Wait_All (Set);
+            Flyology.Operations.Finish (Both, Matches);
+            Results.Finish (First, Observation);
+            Passed := Passed and then Observation.Status = Results.Terminal;
+            Results.Finish (Second, Observation);
+            Passed := Passed
+              and then Matches.Count = 2
+              and then Observation.Status = Results.Terminal;
+         end;
+      end;
+
+      declare
+         package Results renames Flyology.Task_Results;
+         Target : Completion_Target (Model);
+         Set : aliased Flyology.Operations.Completion_Set (1);
+         Probe : Results.Wait_Operation (Set'Access);
+         Observation : Results.Task_Observation;
+         Cancelled : Boolean := False;
+      begin
+         Results.Wait (Target'Identity, 0.0, Probe);
+         Flyology.Operations.Wait_All (Set);
+         Results.Finish (Probe, Observation);
+         Passed := Passed and then Observation.Status = Results.Not_Terminal;
+
+         Results.Wait (Target'Identity, 1.0, Probe);
+         Flyology.Operations.Cancel (Probe);
+         Flyology.Operations.Wait_All (Set);
+         begin
+            Results.Finish (Probe, Observation);
+         exception
+            when Flyology.Operations.Operation_Cancelled =>
+               Cancelled := True;
+         end;
+         Passed := Passed and then Cancelled;
+
+         Results.Wait (Target'Identity, 1.0, Probe);
+         Flyology.Operations.Wait_All (Set);
+         Results.Finish (Probe, Observation);
+         Passed := Passed and then Observation.Status = Results.Terminal;
+      end;
+
+      --  Finalizing a pending task-result operation unlinks its intrusive
+      --  subscription before the same capacity-one set reuses the slot.
+      declare
+         package Results renames Flyology.Task_Results;
+         Target : Completion_Target (Model);
+         Set : aliased Flyology.Operations.Completion_Set (1);
+         Observation : Results.Task_Observation;
+      begin
+         declare
+            Abandoned : Results.Wait_Operation :=
+              Results.Wait (Set'Access, Target'Identity, 1.0);
+            pragma Unreferenced (Abandoned);
+         begin
+            null;
+         end;
+         declare
+            Replacement : Results.Wait_Operation :=
+              Results.Wait (Set'Access, Target'Identity, 1.0);
+         begin
+            Flyology.Operations.Wait_All (Set);
+            Results.Finish (Replacement, Observation);
+            Passed := Passed and then Observation.Status = Results.Terminal;
+         end;
+      end;
+
+      --  A detached monitor fails initiation without consuming set capacity.
+      declare
+         package Results renames Flyology.Task_Results;
+         Detached : Results.Monitor;
+         Set : aliased Flyology.Operations.Completion_Set (1);
+         Rejected : Boolean := False;
+      begin
+         begin
+            declare
+               Invalid : Results.Wait_Operation :=
+                 Results.Wait (Set'Access, Detached, 1.0);
+               pragma Unreferenced (Invalid);
+            begin
+               null;
+            end;
+         exception
+            when Program_Error =>
+               Rejected := True;
+         end;
+         declare
+            Replacement : Flyology.IO.Timers.Timer_Operation :=
+              Flyology.IO.Timers.Sleep_For (Set'Access, 0.0);
+         begin
+            Flyology.Operations.Wait_All (Set);
+            Flyology.IO.Timers.Finish (Replacement);
+         end;
+         Passed := Passed and then Rejected;
+      end;
+      Check (Passed, "task-result operation overload gates failed");
 
       if Model = Flyology.Lightweight_Task then
          declare

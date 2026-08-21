@@ -1550,7 +1550,7 @@ cover raw descriptor readiness, monotonic timers, raw stream and datagram
 socket operations, Internet and Unix-stream connection attempts and accepts,
 buffer-owning stream operations, and completion-driven positional file reads
 and writes over aliased arrays or ownership-transferred unique buffers, plus
-nonrecursive file-watcher `Next`.
+nonrecursive file-watcher `Next` and retained task-result `Wait`.
 Initiation does not create a helper task,
 per-operation stack, callback thread, or steady-state heap allocation.
 
@@ -1667,11 +1667,12 @@ lifecycle, generation, capacity, and threshold cases are in
 | owned-buffer file `Read_At` | success quorum | lightweight; ownership-return rejection native |
 | owned-buffer file `Write_At` | success quorum | lightweight; ownership-return rejection native |
 | file-watcher `Next` | success and all | native and lightweight |
+| task-result `Wait` | success and all | native and lightweight |
 
 The same programs cover cancellation, timeout, EOF, zero-length stream and
 datagram operations, datagram metadata and source selection, retained connect
 failure, accept timeout and cancellation, Unix queue-saturation retry,
-abandoned accepted-socket and watcher-wait cleanup,
+abandoned accepted-socket and watcher-wait cleanup, retained-monitor fan-out,
 descriptor-direction fan-out, failed success thresholds, terminal-before-gate
 construction, nested and fanned-out gates, stale and cross-set references,
 slot reuse, implicit finalization, initiation rollback, ascending stable
