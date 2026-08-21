@@ -381,6 +381,7 @@ observability_smoke
 observability_utilization_smoke
 operations_smoke
 operation_gates_smoke
+operation_composition_smoke
 poller_policy_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke

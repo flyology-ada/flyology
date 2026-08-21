@@ -139,11 +139,11 @@ procedure Operations_Smoke is
            and then Contains (Batch, Flyology.Operations.Id (Alarm));
          Flyology.IO.Timers.Finish (Alarm);
 
-         Flyology.IO.Rearm
+         Flyology.IO.Wait
            (Flyology.IO.Sockets.Native_Descriptor (Left_1),
             Flyology.IO.For_Read,
             Ready_1);
-         Flyology.IO.Timers.Rearm (0.0, Alarm);
+         Flyology.IO.Timers.Sleep_For (0.0, Alarm);
          Flyology.Operations.Cancel (Ready_1);
          Flyology.Operations.Wait_All (Set);
          Passed := Passed
@@ -161,15 +161,16 @@ procedure Operations_Smoke is
             Passed := Passed and Cancelled;
          end;
 
-         Flyology.IO.Rearm
+         Flyology.IO.Wait
            (Flyology.IO.Sockets.Native_Descriptor (Left_1),
             Flyology.IO.For_Read,
             Ready_1);
-         Flyology.IO.Rearm
+         Flyology.IO.Wait
            (Flyology.IO.Sockets.Native_Descriptor (Left_2),
             Flyology.IO.For_Read,
             Ready_2);
-         Flyology.IO.Timers.Rearm (1.0, Alarm);
+         Flyology.IO.Timers.Sleep_Until
+           (Ada.Real_Time.Clock + Ada.Real_Time.Seconds (1), Alarm);
          Flyology.Operations.Cancel (Alarm);
          Flyology.Operations.Wait_For_Successes (Set, 2, Batch);
          Passed := Passed
@@ -958,6 +959,34 @@ procedure Operations_Smoke is
                  and then Read_Right = Right_Data;
             end;
 
+            --  The start-into-existing overloads are the public composition
+            --  form. Exercise a heterogeneous file pair without constructing
+            --  temporary operation values.
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (2);
+               Procedure_Read : Flyology.IO.Files.Read_Operation (Set'Access);
+               Procedure_Write :
+                 Flyology.IO.Files.Write_Operation (Set'Access);
+               Procedure_Input : aliased
+                 Ada.Streams.Stream_Element_Array := [0, 0, 0, 0];
+               Procedure_Output : aliased
+                 Ada.Streams.Stream_Element_Array := [9, 10, 11, 12];
+               Last_Read, Last_Written :
+                 Ada.Streams.Stream_Element_Offset;
+            begin
+               Flyology.IO.Files.Read_At
+                 (File, 0, Procedure_Input'Access, 1.0, Procedure_Read);
+               Flyology.IO.Files.Write_At
+                 (File, 8, Procedure_Output'Access, 1.0, Procedure_Write);
+               Flyology.Operations.Wait_All (Set);
+               Flyology.IO.Files.Finish (Procedure_Read, Last_Read);
+               Flyology.IO.Files.Finish (Procedure_Write, Last_Written);
+               Passed := Passed
+                 and then Last_Read = Procedure_Input'Last
+                 and then Procedure_Input = Left_Data
+                 and then Last_Written = Procedure_Output'Last;
+            end;
+
             --  Timeout => 0.0 retains the synchronous file contract: make one
             --  immediate completion attempt before reporting a timeout.
             declare
@@ -1066,42 +1095,47 @@ procedure Operations_Smoke is
          begin
             declare
                Set : aliased Flyology.Operations.Completion_Set (3);
-               Read : aliased Flyology.IO.Files.Read_Operation :=
-                 Flyology.IO.Files.Read_At
-                   (Set'Access, File, 0, Input'Access, 1.0);
-               Write : aliased Flyology.IO.Files.Write_Operation :=
-                 Flyology.IO.Files.Write_At
-                   (Set'Access, File, 0, Output'Access, 1.0);
-               Both_Terminal : Flyology.Operations.Gate_Operation :=
-                 Flyology.Operations.Wait_All
-                   (Set'Access, [Ref (Read), Ref (Write)]);
+               Read : aliased
+                 Flyology.IO.Files.Read_Operation (Set'Access);
+               Write : aliased
+                 Flyology.IO.Files.Write_Operation (Set'Access);
                Matches :
                  Flyology.Operations.Completion_Batch (Set.Capacity);
                Last_Read, Last_Written :
                  Ada.Streams.Stream_Element_Offset;
                Read_Failed, Write_Failed : Boolean := False;
             begin
-               Passed := Passed
-                 and then Flyology.Operations.Is_Terminal (Both_Terminal)
-                 and then Flyology.Operations.Outcome (Both_Terminal) =
-                   Flyology.Operations.Succeeded;
-               Flyology.Operations.Finish (Both_Terminal, Matches);
+               Flyology.IO.Files.Read_At
+                 (File, 0, Input'Access, 1.0, Read);
+               Flyology.IO.Files.Write_At
+                 (File, 0, Output'Access, 1.0, Write);
+               declare
+                  Both_Terminal : Flyology.Operations.Gate_Operation :=
+                    Flyology.Operations.Wait_All
+                      (Set'Access, [Ref (Read), Ref (Write)]);
                begin
-                  Flyology.IO.Files.Finish (Read, Last_Read);
-               exception
-                  when Flyology.IO.Device_Error =>
-                     Read_Failed := True;
+                  Passed := Passed
+                    and then Flyology.Operations.Is_Terminal (Both_Terminal)
+                    and then Flyology.Operations.Outcome (Both_Terminal) =
+                      Flyology.Operations.Succeeded;
+                  Flyology.Operations.Finish (Both_Terminal, Matches);
+                  begin
+                     Flyology.IO.Files.Finish (Read, Last_Read);
+                  exception
+                     when Flyology.IO.Device_Error =>
+                        Read_Failed := True;
+                  end;
+                  begin
+                     Flyology.IO.Files.Finish (Write, Last_Written);
+                  exception
+                     when Flyology.IO.Device_Error =>
+                        Write_Failed := True;
+                  end;
+                  Passed := Passed
+                    and then Matches.Count = 2
+                    and then Read_Failed
+                    and then Write_Failed;
                end;
-               begin
-                  Flyology.IO.Files.Finish (Write, Last_Written);
-               exception
-                  when Flyology.IO.Device_Error =>
-                     Write_Failed := True;
-               end;
-               Passed := Passed
-                 and then Matches.Count = 2
-                 and then Read_Failed
-                 and then Write_Failed;
             end;
 
             declare

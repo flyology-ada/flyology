@@ -234,6 +234,12 @@ package body Flyology.IO.Files is
       if Timeout > 0.0 then
          Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
       end if;
+      --  Publish the completion source before submission. This leaves every
+      --  expected exception on the rollback-safe side of kernel ownership;
+      --  the wake source retains an early completion signal until the set
+      --  next waits.
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Item, Read_Descriptor, False);
       Status := Start_Async_File
         (Item.Node'Address,
          Async_File_Node_Size,
@@ -247,10 +253,15 @@ package body Flyology.IO.Files is
          Item.Failure := Submission_Failure;
          Flyology.Operations.Drivers.Complete
            (Item, Flyology.Operations.Failed);
-      else
-         Flyology.Operations.Drivers.Arm_Readiness
-           (Item, Read_Descriptor, False);
       end if;
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Item)
+           and then Item.Node.State = Async_File_Unused
+         then
+            Flyology.Operations.Drivers.Rollback_Start (Item);
+         end if;
+         raise;
    end Start_Scoped_File;
 
    overriding procedure Drive
@@ -297,6 +308,29 @@ package body Flyology.IO.Files is
       end if;
    end Request_Cancellation;
 
+   procedure Read_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Read_Operation)
+   is
+      Address : constant System.Address :=
+        (if Item.all'Length = 0
+         then System.Null_Address
+         else Item.all (Item.all'First)'Address);
+   begin
+      Start_Scoped_File
+        (Operation,
+         File,
+         Offset,
+         Address,
+         Item.all'First,
+         Item.all'Length,
+         False,
+         Timeout);
+   end Read_At;
+
    function Read_At
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       File    : File_Descriptor;
@@ -304,23 +338,34 @@ package body Flyology.IO.Files is
       Item    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Flyology.IO.Infinite) return Read_Operation
    is
+   begin
+      return Result : Read_Operation (Set) do
+         Read_At (File, Offset, Item, Timeout, Result);
+      end return;
+   end Read_At;
+
+   procedure Write_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Write_Operation)
+   is
       Address : constant System.Address :=
         (if Item.all'Length = 0
          then System.Null_Address
          else Item.all (Item.all'First)'Address);
    begin
-      return Result : Read_Operation (Set) do
-         Start_Scoped_File
-           (Result,
-            File,
-            Offset,
-            Address,
-            Item.all'First,
-            Item.all'Length,
-            False,
-            Timeout);
-      end return;
-   end Read_At;
+      Start_Scoped_File
+        (Operation,
+         File,
+         Offset,
+         Address,
+         Item.all'First,
+         Item.all'Length,
+         True,
+         Timeout);
+   end Write_At;
 
    function Write_At
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -329,21 +374,9 @@ package body Flyology.IO.Files is
       Item    : not null access constant Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Flyology.IO.Infinite) return Write_Operation
    is
-      Address : constant System.Address :=
-        (if Item.all'Length = 0
-         then System.Null_Address
-         else Item.all (Item.all'First)'Address);
    begin
       return Result : Write_Operation (Set) do
-         Start_Scoped_File
-           (Result,
-            File,
-            Offset,
-            Address,
-            Item.all'First,
-            Item.all'Length,
-            True,
-            Timeout);
+         Write_At (File, Offset, Item, Timeout, Result);
       end return;
    end Write_At;
 

@@ -259,11 +259,30 @@ package Flyology.Operations with Preelaborate is
    --  @param Item Operation to cancel
    procedure Cancel (Item : in out Operation'Class);
 
+   --  Suspend Parent on one Child operation in the same completion set. Child
+   --  becomes an internal implementation detail: waits drive its sources but
+   --  do not publish its identity in user completion batches. When Child is
+   --  terminal, Parent is driven with Dependency_Changed on the owner task's
+   --  stack. Parent must call Child's provider-specific Finish and Release
+   --  from that drive before continuing. If Child is already terminal, this
+   --  procedure may drive Parent before returning.
+   --  @param Parent Pending outer provider operation
+   --  @param Child Newly pending or terminal child with no other dependents
+   procedure Continue_After
+     (Parent : in out Operation'Class;
+      Child  : in out Operation'Class);
+
    --  Release one terminal result and make its bounded slot reusable by the
    --  same operation object.
    --  @param Item Terminal operation whose slot becomes reusable
    procedure Consume (Item : in out Operation'Class)
      with Pre => Is_Terminal (Item);
+
+   --  Release a consumed operation's slot for reuse by a different operation
+   --  object. Composite providers call this after the child's typed Finish;
+   --  ordinary reusable operations normally retain their idle slot instead.
+   --  @param Item Consumed, idle operation to detach from its set slot
+   procedure Release (Item : in out Operation'Class);
 
 private
    type Slot_State is (Vacant, Idle, Pending, Terminal);
@@ -282,6 +301,9 @@ private
       Owner       : access Operation'Class := null;
       Has_Deadline : Boolean := False;
       Dependents  : Interfaces.Unsigned_32 := 0;
+      Internal    : Boolean := False;
+      Child       : Natural range 0 .. Max_Operations := 0;
+      Child_Generation : Interfaces.Unsigned_64 := 0;
    end record;
 
    type Slot_Array is array (Operation_Id range <>) of Slot_Record;
@@ -290,9 +312,9 @@ private
      (Capacity : Operation_Capacity) is tagged limited record
       Slots : Slot_Array (1 .. Capacity);
       Wake  : Flyology.Wake_Sources.Source;
-      Dirty_Gates : Interfaces.Unsigned_32 := 0;
-      Gate_Batch_Depth : Natural := 0;
-      Stabilizing_Gates : Boolean := False;
+      Dirty_Dependents : Interfaces.Unsigned_32 := 0;
+      Propagation_Batch_Depth : Natural := 0;
+      Stabilizing_Dependents : Boolean := False;
    end record;
 
    type Operation
@@ -338,7 +360,7 @@ private
    --  @param Item Operation whose slot is reserved
    procedure Register (Item : in out Operation'Class);
 
-   --  Publish a terminal result and notify every dependent gate.
+   --  Publish a terminal result and notify every dependent operation.
    --  @param Item Operation becoming terminal
    --  @param Result Retained terminal outcome
    procedure Publish_Terminal

@@ -133,15 +133,18 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   and releases capacity. `Consume` is explicit result discard. Controlled
   finalization is only the cancel/drain/discard safety net. An `out` result from
   a `Finish` that raises is undefined under normal Ada copy-out rules.
-- Scoped provider drivers run only on the owner task stack. `Start` reserves a
-  root operation's set slot; each bounded `Drive` step must arm readiness or a
-  deadline, retain an external-completion source, or publish one terminal
-  outcome. Operation-producing overloads are eager roots, not the provider
-  composition ABI. A higher-level provider must not start a lower-level root
-  in the caller's set and then wait for it inside `Drive`. Factor each provider
-  into an embeddable state record with a bounded immediate `Step`; standalone
-  and higher-level operations both own and drive that record, while only the
-  outermost operation is registered in the set. A driver must not call a
+- Scoped provider drivers run only on the owner task stack. `Start` reserves an
+  operation's set slot; each bounded `Drive` step must arm readiness or a
+  deadline, retain an external-completion source, continue after one child, or
+  publish one terminal outcome. An operation-producing function is an eager
+  user-visible root. For provider composition, the parent owns typed child
+  operation objects as discriminant-constrained record components, starts one
+  through its public `in out` overload, and calls `Continue_After`. The set
+  drives the child but hides it from user batches and gates, then resumes the
+  parent with `Dependency_Changed`. The parent must call the child's typed
+  `Finish` and `Release` before starting another child or completing itself.
+  Cancellation must propagate through the active child and drain it before the
+  parent terminalizes. A driver must not nest a completion-set wait, call a
   blocking synchronous wrapper, invoke user code on the scheduler stack, or
   release a kernel-owned buffer before terminal completion.
 - Current scoped providers cover descriptor readiness, timers, raw stream

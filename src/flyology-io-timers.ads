@@ -90,6 +90,16 @@ package Flyology.IO.Timers is
      (Set      : not null access Flyology.Operations.Completion_Set'Class;
       Interval : Duration) return Timer_Operation;
 
+   --  Start or restart a relative timer in an established operation object.
+   --  @param Interval Relative delay in seconds
+   --  @param Operation Fresh, released, or consumed timer operation
+   procedure Sleep_For
+     (Interval  : Duration;
+      Operation : in out Timer_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
    --  Construct and start one absolute timer operation in place.
    --  @param Set Completion set that owns the operation slot
    --  @param Deadline Absolute Ada.Real_Time deadline
@@ -97,6 +107,16 @@ package Flyology.IO.Timers is
    function Sleep_Until
      (Set      : not null access Flyology.Operations.Completion_Set'Class;
       Deadline : Ada.Real_Time.Time) return Timer_Operation;
+
+   --  Start or restart an absolute timer in an established operation object.
+   --  @param Deadline Absolute Ada.Real_Time deadline
+   --  @param Operation Fresh, released, or consumed timer operation
+   procedure Sleep_Until
+     (Deadline  : Ada.Real_Time.Time;
+      Operation : in out Timer_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Restart a previously consumed timer operation.
    --  @param Interval Relative delay in seconds

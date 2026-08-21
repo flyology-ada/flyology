@@ -1591,15 +1591,16 @@ lightweight owner; the existing synchronous file procedures remain lane-neutral.
 The completion set creates one shared wake pipe lazily when its first external
 file completion is started, rather than one descriptor per operation.
 
-Fresh operations are limited build-in-place function results. `Rearm` takes an
-existing consumed readiness or timer operation as `in out`; it is separate so
-an initiating call never silently reads an `out` object's prior state. Array and
-socket actuals passed through explicit access parameters must outlive the
-operation and remain untouched while it is pending. The unique-buffer socket
-overloads retain the owning handle but enter its data callback only for an
-immediate nonblocking socket step, so a callback view never escapes. Scope exit
-requests cancellation and drains providers with kernel-owned buffers before
-releasing the operation slot.
+Fresh user roots are limited build-in-place function results. Every current
+provider also has a same-name procedure overload taking an established
+operation as `in out`; composite providers use that form for child record
+components. The older readiness and relative-timer `Rearm` names remain aliases
+for the same route. Array and socket actuals passed through explicit access
+parameters must outlive the operation and remain untouched while it is pending.
+The unique-buffer socket overloads retain the owning handle but enter its data
+callback only for an immediate nonblocking socket step, so a callback view never
+escapes. Scope exit requests cancellation and drains providers with kernel-owned
+buffers before releasing the operation slot.
 
 Provider libraries implement an owner-stack driver, not an `Arm` function in
 their user API. Their operation-producing overload constructs a typed root
@@ -1610,16 +1611,22 @@ outcome. `Drive` never calls a blocking synchronous API and never runs on the
 scheduler stack. `Request_Cancellation` removes observational waits immediately
 or starts a cancel-and-drain transition for retained kernel input.
 
-The eager operation-producing overloads are roots, not the provider composition
-ABI. Starting a socket operation in an HTTP operation's caller-owned set would
-create a second peer slot and report the socket completion independently. A
-provider therefore factors its implementation into an embeddable state record
-with a bounded immediate `Step`. The standalone socket operation owns that
-record, and an HTTP operation can instead own the same record beside its parser,
-framing state, and transfer cursors. Only the outermost operation registers a
-completion-set slot and rearms the source requested by the step. This flattens
-composition without a helper task, nested wait, second stack, or duplicate I/O
-policy.
+Higher-level providers compose the same public operation values rather than
+reaching into another provider's internal state. A composite operation owns
+typed child operation objects as record components constrained by the same set.
+It starts one child through that provider's public `in out` overload and calls
+`Continue_After (Parent, Child)`. The child consumes a bounded slot and is
+driven normally, but it is internal: user waits, batches, references, and gates
+see only the parent. When the child terminalizes, the set drives the parent with
+`Dependency_Changed` on the owner task's stack. The parent calls the child's
+typed `Finish`, calls `Release` so a child of another type can reuse the slot,
+and either starts its next child or completes. Parent cancellation propagates
+to the active child and does not terminalize the parent until the child is
+drained. Thus a sequential protocol such as request-send, response-receive can
+be one visible operation with two bounded slots and no helper task, nested wait,
+second stack, callback, or access to private I/O implementation state. The
+synthetic third-party-provider example is
+[`tests/operation_composition_smoke.adb`](tests/operation_composition_smoke.adb).
 
 The executable provider-by-gate matrix is in
 [`tests/operations_smoke.adb`](tests/operations_smoke.adb); gate graph,

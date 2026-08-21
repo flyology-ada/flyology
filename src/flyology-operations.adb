@@ -30,34 +30,39 @@ package body Flyology.Operations is
       return Count;
    end Population;
 
-   procedure Stabilize_Gates (Set : in out Completion_Set'Class);
+   procedure Stabilize_Dependents (Set : in out Completion_Set'Class);
 
    procedure Notify_Terminal
      (Set : in out Completion_Set'Class;
       Id  : Operation_Id)
    is
    begin
-      Set.Dirty_Gates := Set.Dirty_Gates or Set.Slots (Id).Dependents;
-      if Set.Gate_Batch_Depth = 0 and then not Set.Stabilizing_Gates then
-         Stabilize_Gates (Set);
+      Set.Dirty_Dependents :=
+        Set.Dirty_Dependents or Set.Slots (Id).Dependents;
+      if Set.Propagation_Batch_Depth = 0
+        and then not Set.Stabilizing_Dependents
+      then
+         Stabilize_Dependents (Set);
       end if;
    end Notify_Terminal;
 
-   procedure Begin_Gate_Batch (Set : in out Completion_Set) is
+   procedure Begin_Propagation_Batch (Set : in out Completion_Set) is
    begin
-      Set.Gate_Batch_Depth := Set.Gate_Batch_Depth + 1;
-   end Begin_Gate_Batch;
+      Set.Propagation_Batch_Depth := Set.Propagation_Batch_Depth + 1;
+   end Begin_Propagation_Batch;
 
-   procedure End_Gate_Batch (Set : in out Completion_Set) is
+   procedure End_Propagation_Batch (Set : in out Completion_Set) is
    begin
-      if Set.Gate_Batch_Depth = 0 then
-         raise Operation_Error with "unbalanced gate transition batch";
+      if Set.Propagation_Batch_Depth = 0 then
+         raise Operation_Error with "unbalanced propagation batch";
       end if;
-      Set.Gate_Batch_Depth := Set.Gate_Batch_Depth - 1;
-      if Set.Gate_Batch_Depth = 0 and then not Set.Stabilizing_Gates then
-         Stabilize_Gates (Set);
+      Set.Propagation_Batch_Depth := Set.Propagation_Batch_Depth - 1;
+      if Set.Propagation_Batch_Depth = 0
+        and then not Set.Stabilizing_Dependents
+      then
+         Stabilize_Dependents (Set);
       end if;
-   end End_Gate_Batch;
+   end End_Propagation_Batch;
 
    type Timespec is record
       Seconds     : C.long;
@@ -138,6 +143,9 @@ package body Flyology.Operations is
          Slot.Reported := False;
          Slot.Owner := Item'Unchecked_Access;
          Slot.Dependents := 0;
+         Slot.Internal := False;
+         Slot.Child := 0;
+         Slot.Child_Generation := 0;
       end;
    end Register;
 
@@ -158,6 +166,9 @@ package body Flyology.Operations is
            or else Slot.State /= Pending
          then
             raise Operation_Error with "operation is not pending";
+         elsif Slot.Child /= 0 then
+            raise Operation_Error with
+              "operation cannot complete while a child remains attached";
          end if;
          Slot.State := Terminal;
          Slot.Source := No_Source;
@@ -184,6 +195,9 @@ package body Flyology.Operations is
       if Slot.State not in Pending | Terminal then
          raise Operation_Error with
            "operation has no active or terminal outcome";
+      elsif Slot.Internal then
+         raise Operation_Error with
+           "internal child operations cannot be referenced";
       end if;
       return
         (Set_Address => Item.Set.all'Address,
@@ -204,7 +218,7 @@ package body Flyology.Operations is
       Count : Natural := 0;
    begin
       for Slot of Set.Slots loop
-         if Slot.State = Pending then
+         if Slot.State = Pending and then not Slot.Internal then
             Count := Count + 1;
          end if;
       end loop;
@@ -215,7 +229,7 @@ package body Flyology.Operations is
       Count : Natural := 0;
    begin
       for Slot of Set.Slots loop
-         if Slot.State = Terminal then
+         if Slot.State = Terminal and then not Slot.Internal then
             Count := Count + 1;
          end if;
       end loop;
@@ -319,21 +333,22 @@ package body Flyology.Operations is
       Publish_Terminal (Item, Cancelled);
    end Request_Cancellation;
 
-   procedure Stabilize_Gates (Set : in out Completion_Set'Class) is
+   procedure Stabilize_Dependents (Set : in out Completion_Set'Class) is
    begin
-      if Set.Stabilizing_Gates then
+      if Set.Stabilizing_Dependents then
          return;
       end if;
-      Set.Stabilizing_Gates := True;
+      Set.Stabilizing_Dependents := True;
       begin
-         while Set.Dirty_Gates /= 0 loop
+         while Set.Dirty_Dependents /= 0 loop
             for Id in Set.Slots'Range loop
-               if Contains (Set.Dirty_Gates, Id) then
-                  Set.Dirty_Gates := Set.Dirty_Gates and not Bit (Id);
+               if Contains (Set.Dirty_Dependents, Id) then
+                  Set.Dirty_Dependents :=
+                    Set.Dirty_Dependents and not Bit (Id);
                   if Set.Slots (Id).State = Pending then
                      if Set.Slots (Id).Owner = null then
                         raise Operation_Error with
-                          "dependent gate has no owner";
+                          "dependent operation has no owner";
                      end if;
                      Drive
                        (Set.Slots (Id).Owner.all, Dependency_Changed);
@@ -344,11 +359,11 @@ package body Flyology.Operations is
          end loop;
       exception
          when others =>
-            Set.Stabilizing_Gates := False;
+            Set.Stabilizing_Dependents := False;
             raise;
       end;
-      Set.Stabilizing_Gates := False;
-   end Stabilize_Gates;
+      Set.Stabilizing_Dependents := False;
+   end Stabilize_Dependents;
 
    procedure Configure_Gate
      (Item     : in out Gate_Operation;
@@ -505,6 +520,7 @@ package body Flyology.Operations is
       Completed.Ids := (others => Operation_Id'First);
       for Id in Set.Slots'Range loop
          if Set.Slots (Id).State = Terminal
+           and then not Set.Slots (Id).Internal
            and then not Set.Slots (Id).Reported
          then
             Completed.Count := Completed.Count + 1;
@@ -518,7 +534,10 @@ package body Flyology.Operations is
       Count : Natural := 0;
    begin
       for Slot of Set.Slots loop
-         if Slot.State = Terminal and then not Slot.Reported then
+         if Slot.State = Terminal
+           and then not Slot.Internal
+           and then not Slot.Reported
+         then
             Count := Count + 1;
          end if;
       end loop;
@@ -532,6 +551,7 @@ package body Flyology.Operations is
    begin
       for Slot of Set.Slots loop
          if Slot.State = Terminal
+           and then not Slot.Internal
            and then not Slot.Reported
            and then Slot.Result = Succeeded
          then
@@ -581,15 +601,15 @@ package body Flyology.Operations is
    is
    begin
       loop
-         Begin_Gate_Batch (Set);
+         Begin_Propagation_Batch (Set);
          begin
             Expire_Timers (Set);
          exception
             when others =>
-               End_Gate_Batch (Set);
+               End_Propagation_Batch (Set);
                raise;
          end;
-         End_Gate_Batch (Set);
+         End_Propagation_Batch (Set);
          if (case Gate is
                 when Terminal_Gate =>
                   Unreported_Count (Set) >= Required
@@ -673,7 +693,7 @@ package body Flyology.Operations is
                   end if;
                   Flyology.IO.Wait_Some
                     (Requests (1 .. Request_Count), Ready, Wait_For);
-                  Begin_Gate_Batch (Set);
+                  Begin_Propagation_Batch (Set);
                   begin
                      for Position in 1 .. Ready.Count loop
                         declare
@@ -722,10 +742,10 @@ package body Flyology.Operations is
                      end loop;
                   exception
                      when others =>
-                        End_Gate_Batch (Set);
+                        End_Propagation_Batch (Set);
                         raise;
                   end;
-                  End_Gate_Batch (Set);
+                  End_Propagation_Batch (Set);
                end;
             end if;
          end;
@@ -792,6 +812,74 @@ package body Flyology.Operations is
       end;
    end Cancel;
 
+   procedure Continue_After
+     (Parent : in out Operation'Class;
+      Child  : in out Operation'Class)
+   is
+      Parent_Id : Operation_Id;
+      Child_Id  : Operation_Id;
+   begin
+      if Parent.Set.all'Address /= Child.Set.all'Address then
+         raise Operation_Error with
+           "parent and child belong to different completion sets";
+      elsif Parent.Slot = 0 or else Child.Slot = 0 then
+         raise Operation_Error with
+           "parent and child must both be started";
+      elsif Parent.Slot = Child.Slot then
+         raise Operation_Error with "operation cannot await itself";
+      end if;
+
+      Parent_Id := Operation_Id (Parent.Slot);
+      Child_Id := Operation_Id (Child.Slot);
+      declare
+         Parent_Slot : Slot_Record renames Parent.Set.Slots (Parent_Id);
+         Child_Slot  : Slot_Record renames Parent.Set.Slots (Child_Id);
+         Cursor      : Natural := Natural (Child_Id);
+      begin
+         if Parent_Slot.Generation /= Parent.Generation
+           or else Parent_Slot.State /= Pending
+         then
+            raise Operation_Error with "parent operation is not pending";
+         elsif Parent_Slot.Child /= 0
+           or else Parent_Slot.Source /= No_Source
+         then
+            raise Operation_Error with
+              "parent operation already awaits a source or child";
+         elsif Child_Slot.Generation /= Child.Generation
+           or else Child_Slot.State not in Pending | Terminal
+         then
+            raise Operation_Error with
+              "child operation has no active outcome";
+         elsif Child_Slot.Internal
+           or else Child_Slot.Dependents /= 0
+           or else Child_Slot.Reported
+         then
+            raise Operation_Error with
+              "child operation is already observed";
+         end if;
+
+         --  Each operation has at most one child. Follow that chain before
+         --  linking so nested composite providers cannot create a cycle.
+         while Parent.Set.Slots (Operation_Id (Cursor)).Child /= 0 loop
+            Cursor :=
+              Parent.Set.Slots (Operation_Id (Cursor)).Child;
+            if Cursor = Natural (Parent_Id) then
+               raise Operation_Error with
+                 "operation continuation cycle";
+            end if;
+         end loop;
+
+         Child_Slot.Internal := True;
+         Child_Slot.Dependents := Bit (Parent_Id);
+         Parent_Slot.Child := Natural (Child_Id);
+         Parent_Slot.Child_Generation := Child.Generation;
+         Parent_Slot.Source := Dependency_Source;
+         if Child_Slot.State = Terminal then
+            Notify_Terminal (Parent.Set.all, Child_Id);
+         end if;
+      end;
+   end Continue_After;
+
    procedure Consume (Item : in out Operation'Class) is
    begin
       if Item.Slot = 0 then
@@ -806,8 +894,36 @@ package body Flyology.Operations is
          then
             raise Operation_Error with "operation is not terminal";
          elsif Slot.Dependents /= 0 then
-            raise Operation_Error with
-              "operation still has dependent gates";
+            if not Slot.Internal or else Population (Slot.Dependents) /= 1 then
+               raise Operation_Error with
+                 "operation still has dependent observers";
+            end if;
+            declare
+               Parent_Id : Operation_Id := Operation_Id'First;
+            begin
+               for Candidate in Operation_Id loop
+                  if Contains (Slot.Dependents, Candidate) then
+                     Parent_Id := Candidate;
+                     exit;
+                  end if;
+               end loop;
+               declare
+                  Parent_Slot : Slot_Record renames
+                    Item.Set.Slots (Parent_Id);
+               begin
+                  if Parent_Slot.State /= Pending
+                    or else Parent_Slot.Child /= Item.Slot
+                    or else Parent_Slot.Child_Generation /= Item.Generation
+                  then
+                     raise Operation_Error with
+                       "child continuation relation is stale";
+                  end if;
+                  Parent_Slot.Child := 0;
+                  Parent_Slot.Child_Generation := 0;
+                  Parent_Slot.Source := No_Source;
+                  Slot.Dependents := 0;
+               end;
+            end;
          end if;
          Slot.State := Idle;
          Slot.Source := No_Source;
@@ -818,6 +934,30 @@ package body Flyology.Operations is
          Slot.Dependents := 0;
       end;
    end Consume;
+
+   procedure Release (Item : in out Operation'Class) is
+   begin
+      if Item.Slot = 0 then
+         raise Operation_Error with "operation has no slot to release";
+      end if;
+      declare
+         Slot : Slot_Record renames
+           Item.Set.Slots (Operation_Id (Item.Slot));
+         Generation : constant Interfaces.Unsigned_64 := Slot.Generation;
+      begin
+         if Slot.Generation /= Item.Generation or else Slot.State /= Idle then
+            raise Operation_Error with
+              "only a consumed operation can release its slot";
+         elsif Slot.Dependents /= 0 or else Slot.Child /= 0 then
+            raise Operation_Error with
+              "operation still participates in composition";
+         end if;
+         Slot := (others => <>);
+         Slot.Generation := Generation;
+         Item.Slot := 0;
+         Item.Generation := 0;
+      end;
+   end Release;
 
    overriding procedure Finalize (Item : in out Operation) is
    begin

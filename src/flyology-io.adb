@@ -394,20 +394,7 @@ package body Flyology.IO is
       end;
    end Wait_Interruptibly;
 
-   function Wait
-     (Set       : not null access Flyology.Operations.Completion_Set'Class;
-      FD        : Descriptor;
-      Condition : Wait_Kind) return Readiness_Operation
-   is
-   begin
-      return Result : Readiness_Operation (Set) do
-         Flyology.Operations.Drivers.Start (Result);
-         Flyology.Operations.Drivers.Arm_Readiness
-           (Result, FD, Condition = For_Write);
-      end return;
-   end Wait;
-
-   procedure Rearm
+   procedure Wait
      (FD        : Descriptor;
       Condition : Wait_Kind;
       Operation : in out Readiness_Operation)
@@ -422,6 +409,26 @@ package body Flyology.IO is
             Flyology.Operations.Drivers.Rollback_Start (Operation);
          end if;
          raise;
+   end Wait;
+
+   function Wait
+     (Set       : not null access Flyology.Operations.Completion_Set'Class;
+      FD        : Descriptor;
+      Condition : Wait_Kind) return Readiness_Operation
+   is
+   begin
+      return Result : Readiness_Operation (Set) do
+         Wait (FD, Condition, Result);
+      end return;
+   end Wait;
+
+   procedure Rearm
+     (FD        : Descriptor;
+      Condition : Wait_Kind;
+      Operation : in out Readiness_Operation)
+   is
+   begin
+      Wait (FD, Condition, Operation);
    end Rearm;
 
    overriding procedure Drive

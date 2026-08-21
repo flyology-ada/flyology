@@ -150,6 +150,19 @@ package Flyology.IO with Preelaborate is
       FD        : Descriptor;
       Condition : Wait_Kind) return Readiness_Operation;
 
+   --  Start or restart readiness in an established operation object. This is
+   --  the composition form of the familiar Wait name.
+   --  @param FD Valid descriptor to observe
+   --  @param Condition Requested readiness condition
+   --  @param Operation Fresh, released, or consumed readiness operation
+   procedure Wait
+     (FD        : Descriptor;
+      Condition : Wait_Kind;
+      Operation : in out Readiness_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
    --  Restart a previously consumed readiness operation.
    --  @param FD Valid descriptor to observe
    --  @param Condition Requested readiness condition

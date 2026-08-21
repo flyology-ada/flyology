@@ -2139,6 +2139,15 @@ package body Flyology.IO.Sockets is
       Flyology.Operations.Drive
         (Flyology.Operations.Operation'Class (Item),
          Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Item) then
+            Flyology.Operations.Cancel (Item);
+         end if;
+         if Flyology.Operations.Is_Terminal (Item) then
+            Flyology.Operations.Consume (Item);
+         end if;
+         raise;
    end Start_Scoped;
 
    overriding procedure Drive
@@ -2316,6 +2325,17 @@ package body Flyology.IO.Sockets is
         (Item, Flyology.Operations.Cancelled);
    end Request_Cancellation;
 
+   procedure Receive
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Operation)
+   is
+   begin
+      Start_Scoped
+        (Operation, Receive_One, Socket, Item, null, Timeout);
+   end Receive;
+
    function Receive
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Socket  : not null access Socket_Type;
@@ -2324,10 +2344,20 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Receive_Operation (Set) do
-         Start_Scoped
-           (Result, Receive_One, Socket, Item, null, Timeout);
+         Receive (Socket, Item, Timeout, Result);
       end return;
    end Receive;
+
+   procedure Receive_Exactly
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Exactly_Operation)
+   is
+   begin
+      Start_Scoped
+        (Operation, Receive_Exact, Socket, Item, null, Timeout);
+   end Receive_Exactly;
 
    function Receive_Exactly
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -2337,10 +2367,19 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Receive_Exactly_Operation (Set) do
-         Start_Scoped
-           (Result, Receive_Exact, Socket, Item, null, Timeout);
+         Receive_Exactly (Socket, Item, Timeout, Result);
       end return;
    end Receive_Exactly;
+
+   procedure Send
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Send_Operation)
+   is
+   begin
+      Start_Scoped (Operation, Send_One, Socket, Item, null, Timeout);
+   end Send;
 
    function Send
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -2350,9 +2389,20 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Send_Operation (Set) do
-         Start_Scoped (Result, Send_One, Socket, Item, null, Timeout);
+         Send (Socket, Item, Timeout, Result);
       end return;
    end Send;
+
+   procedure Send_All
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Send_All_Operation)
+   is
+   begin
+      Start_Scoped
+        (Operation, Send_Complete, Socket, Item, null, Timeout);
+   end Send_All;
 
    function Send_All
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -2362,10 +2412,20 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Send_All_Operation (Set) do
-         Start_Scoped
-           (Result, Send_Complete, Socket, Item, null, Timeout);
+         Send_All (Socket, Item, Timeout, Result);
       end return;
    end Send_All;
+
+   procedure Receive
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Receive_Operation)
+   is
+   begin
+      Start_Scoped
+        (Operation, Buffer_Receive_One, Socket, null, Item, Timeout);
+   end Receive;
 
    function Receive
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -2375,10 +2435,20 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Buffer_Receive_Operation (Set) do
-         Start_Scoped
-           (Result, Buffer_Receive_One, Socket, null, Item, Timeout);
+         Receive (Socket, Item, Timeout, Result);
       end return;
    end Receive;
+
+   procedure Send
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Send_Operation)
+   is
+   begin
+      Start_Scoped
+        (Operation, Buffer_Send_One, Socket, null, Item, Timeout);
+   end Send;
 
    function Send
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -2388,10 +2458,20 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Buffer_Send_Operation (Set) do
-         Start_Scoped
-           (Result, Buffer_Send_One, Socket, null, Item, Timeout);
+         Send (Socket, Item, Timeout, Result);
       end return;
    end Send;
+
+   procedure Send_All
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Send_All_Operation)
+   is
+   begin
+      Start_Scoped
+        (Operation, Buffer_Send_Complete, Socket, null, Item, Timeout);
+   end Send_All;
 
    function Send_All
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
@@ -2401,8 +2481,7 @@ package body Flyology.IO.Sockets is
    is
    begin
       return Result : Buffer_Send_All_Operation (Set) do
-         Start_Scoped
-           (Result, Buffer_Send_Complete, Socket, null, Item, Timeout);
+         Send_All (Socket, Item, Timeout, Result);
       end return;
    end Send_All;
 

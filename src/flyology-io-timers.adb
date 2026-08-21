@@ -98,34 +98,7 @@ package body Flyology.IO.Timers is
       delay until Deadline;
    end Sleep_Until;
 
-   function Sleep_For
-     (Set      : not null access Flyology.Operations.Completion_Set'Class;
-      Interval : Duration) return Timer_Operation
-   is
-   begin
-      return Result : Timer_Operation (Set) do
-         Flyology.Operations.Drivers.Start (Result);
-         Flyology.Operations.Drivers.Arm_Deadline (Result, Interval);
-      end return;
-   end Sleep_For;
-
-   function Sleep_Until
-     (Set      : not null access Flyology.Operations.Completion_Set'Class;
-      Deadline : Ada.Real_Time.Time) return Timer_Operation
-   is
-      Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-   begin
-      return Result : Timer_Operation (Set) do
-         Flyology.Operations.Drivers.Start (Result);
-         Flyology.Operations.Drivers.Arm_Deadline
-           (Result,
-            (if Deadline <= Now
-             then 0.0
-             else Ada.Real_Time.To_Duration (Deadline - Now)));
-      end return;
-   end Sleep_Until;
-
-   procedure Rearm
+   procedure Sleep_For
      (Interval  : Duration;
       Operation : in out Timer_Operation)
    is
@@ -138,6 +111,47 @@ package body Flyology.IO.Timers is
             Flyology.Operations.Drivers.Rollback_Start (Operation);
          end if;
          raise;
+   end Sleep_For;
+
+   function Sleep_For
+     (Set      : not null access Flyology.Operations.Completion_Set'Class;
+      Interval : Duration) return Timer_Operation
+   is
+   begin
+      return Result : Timer_Operation (Set) do
+         Sleep_For (Interval, Result);
+      end return;
+   end Sleep_For;
+
+   procedure Sleep_Until
+     (Deadline  : Ada.Real_Time.Time;
+      Operation : in out Timer_Operation)
+   is
+      Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+   begin
+      Sleep_For
+        ((if Deadline <= Now
+          then 0.0
+          else Ada.Real_Time.To_Duration (Deadline - Now)),
+         Operation);
+   end Sleep_Until;
+
+   function Sleep_Until
+     (Set      : not null access Flyology.Operations.Completion_Set'Class;
+      Deadline : Ada.Real_Time.Time) return Timer_Operation
+   is
+   begin
+      return Result : Timer_Operation (Set) do
+         Sleep_Until (Deadline, Result);
+      end return;
+   end Sleep_Until;
+
+   procedure Rearm
+     (Interval  : Duration;
+      Operation : in out Timer_Operation)
+   is
+   begin
+      Sleep_For (Interval, Operation);
    end Rearm;
 
    overriding procedure Drive

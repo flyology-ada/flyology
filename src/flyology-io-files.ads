@@ -68,6 +68,22 @@ package Flyology.IO.Files is
       Item    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Flyology.IO.Infinite) return Read_Operation;
 
+   --  Start or restart a positional read in an established operation object.
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline
+   --  @param Operation Fresh, released, or consumed read operation
+   procedure Read_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Read_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
    --  Start one completion-driven positional write without parking the owner.
    --  A terminal cancellation does not roll back bytes already written.
    --  Set, File, and Item must outlive the returned operation, and Item must
@@ -85,6 +101,22 @@ package Flyology.IO.Files is
       Offset  : File_Offset;
       Item    : not null access constant Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Flyology.IO.Infinite) return Write_Operation;
+
+   --  Start or restart a positional write in an established operation object.
+   --  @param File Open descriptor permitting writes
+   --  @param Offset Starting byte position
+   --  @param Item Aliased source buffer
+   --  @param Timeout Relative operation deadline
+   --  @param Operation Fresh, released, or consumed write operation
+   procedure Write_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Write_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal positional read and publish its Last value.
    --  @param Operation Terminal read operation

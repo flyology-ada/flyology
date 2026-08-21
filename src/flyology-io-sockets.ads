@@ -728,6 +728,19 @@ package Flyology.IO.Sockets is
       Item    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite) return Receive_Operation;
 
+   --  Start or restart a receive in an established operation object. This
+   --  form lets a higher-level provider retain the child as a record component
+   --  and compose it with Operations.Continue_After.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed receive operation
+   procedure Receive
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Operation);
+
    --  Start a nonblocking operation that fills Item. The operation rearms
    --  read readiness after partial progress.
    --  @param Set Completion set that owns the operation slot
@@ -740,6 +753,17 @@ package Flyology.IO.Sockets is
       Socket  : not null access Socket_Type;
       Item    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite) return Receive_Exactly_Operation;
+
+   --  Start or restart an exact receive in an established operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer to fill
+   --  @param Timeout Shared relative deadline in seconds
+   --  @param Operation Fresh, released, or consumed exact-receive operation
+   procedure Receive_Exactly
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Exactly_Operation);
 
    --  Start one nonblocking partial send operation. Item is read-only while
    --  borrowed even though its access value designates a variable array.
@@ -754,6 +778,17 @@ package Flyology.IO.Sockets is
       Item    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite) return Send_Operation;
 
+   --  Start or restart a partial send in an established operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed send operation
+   procedure Send
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Send_Operation);
+
    --  Start a nonblocking operation that sends all of Item.
    --  @param Set Completion set that owns the operation slot
    --  @param Socket Aliased open connected socket
@@ -765,6 +800,17 @@ package Flyology.IO.Sockets is
       Socket  : not null access Socket_Type;
       Item    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite) return Send_All_Operation;
+
+   --  Start or restart a complete send in an established operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @param Operation Fresh, released, or consumed complete-send operation
+   procedure Send_All
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Send_All_Operation);
 
    --  Start one receive into an acquired unique buffer. The driver enters the
    --  buffer's writable callback only for each immediate socket step and does
@@ -781,6 +827,18 @@ package Flyology.IO.Sockets is
       Timeout : Duration := Infinite) return Buffer_Receive_Operation
      with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
+   --  Start or restart a unique-buffer receive in an established operation.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed buffer-receive operation
+   procedure Receive
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Receive_Operation)
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
    --  Start one partial send from an acquired unique buffer.
    --  @param Set Completion set that owns the operation slot
    --  @param Socket Aliased open connected socket
@@ -794,6 +852,18 @@ package Flyology.IO.Sockets is
       Timeout : Duration := Infinite) return Buffer_Send_Operation
      with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
+   --  Start or restart a unique-buffer send in an established operation.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed buffer-send operation
+   procedure Send
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Send_Operation)
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
    --  Start a complete send from an acquired unique buffer.
    --  @param Set Completion set that owns the operation slot
    --  @param Socket Aliased open connected socket
@@ -805,6 +875,19 @@ package Flyology.IO.Sockets is
       Socket  : not null access Socket_Type;
       Item    : not null access Flyology.Buffers.Unique_Buffer;
       Timeout : Duration := Infinite) return Buffer_Send_All_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start or restart a complete unique-buffer send in an established
+   --  operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @param Operation Fresh, released, or consumed buffer-send operation
+   procedure Send_All
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Send_All_Operation)
      with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Consume one terminal partial receive and publish its Last value.
