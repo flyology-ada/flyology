@@ -259,6 +259,10 @@ begin
             Config.Random_Seed := Config.Random_Seed + 1;
          end if;
          Measure_One (Config, Result);
+         if Ada.Strings.Unbounded.To_String (Name) = "wrong-metrics" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Metric_Request
+              (Result);
+         end if;
          Flyology_Bench.Workers.Return_Result (Request, Result);
          if Ada.Strings.Unbounded.To_String (Name) = "trailing" then
             Write_Raw ("x");

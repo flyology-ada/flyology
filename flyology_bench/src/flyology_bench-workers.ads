@@ -66,7 +66,8 @@ package Flyology_Bench.Workers is
    --  @enum Crashed_By_Signal Worker terminated because of a signal.
    --  @enum Nonzero_Exit Worker exited nonzero without another classification.
    --  @enum Malformed_Protocol Result envelope failed closed validation.
-   --  @enum Parent_IO_Failure Parent capture, observation, or cleanup failed.
+   --  @enum Parent_IO_Failure Parent capture, observation, cleanup, or
+   --  exclusive child-reaping ownership failed.
    --  @enum Spawn_Failure posix_spawn rejected the launch.
    type Worker_Outcome is
      (Normal_Result,
@@ -197,6 +198,9 @@ package Flyology_Bench.Workers is
    --  directory component; PATH is never searched.  Host lock, placement,
    --  quiescence, interference observation, and metric sessions therefore run
    --  only inside the measuring worker.
+   --  The caller must exclude process-wide SIGCHLD policies or other child
+   --  reapers that consume these workers. If ownership is nevertheless lost,
+   --  Run stops signaling the unanchored PID and reports Parent_IO_Failure.
    --  @param Executable Direct path to the same benchmark executable.
    --  @param Identity Exact stable registered case identity.
    --  @param Kind Expected ordinary or paired result shape.

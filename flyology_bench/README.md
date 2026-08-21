@@ -1159,12 +1159,18 @@ cases. The host `posix_spawn` call is synchronous and cannot be interrupted by
 this API. Its elapsed time is charged to both deadlines, so an overrun expires
 as soon as the call returns rather than extending the worker budget.
 
+The parent must retain exclusive reaping ownership for these worker children:
+do not install automatic `SIGCHLD` reaping or let another child manager consume
+them while `Run` is active. If ownership is lost despite that contract, the
+worker result is `Parent_IO_Failure`; the implementation disarms the PID guard
+and does not signal an identity the operating system may already have reused.
+
 Protocol field bounds are published as `Maximum_*` constants. `Run` rejects a
 configuration that cannot fit before spawning. Failure reasons are truncated
 to their published envelope limits. A worker that needs to retain the full text
 writes it to the separately bounded standard-error capture. The parent also
-rejects result seeds and sample-derived counts that disagree with the requested
-worker metadata.
+rejects result seeds, metric presence and availability, and sample-derived
+counts that disagree with the requested worker configuration and metadata.
 
 Host-lock acquisition, placement, quiescence, interference observation, and
 metric-session setup occur inside the worker that measures. Spawn and setup

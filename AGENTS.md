@@ -489,7 +489,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   Fresh workers use `posix_spawn`, execute one exact registered case per
   process, and retain process repetitions separately from within-worker
   samples. Host controls and metric sessions belong in the measuring worker;
-  parent spawn/setup time never enters per-operation samples.
+  parent spawn/setup time never enters per-operation samples. The parent must
+  retain exclusive child-reaping ownership; loss of that ownership disarms the
+  PID guard and fails without signaling a potentially reused identity.
 - `proof/`: SPARK-only development crate plus runtime, debug, and benchmark
   policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and

@@ -18,13 +18,16 @@ have a stable fixed Ada representation:
 - the opaque `siginfo_t` value used by `waitid(..., WNOWAIT)`.
 
 The C file creates close-on-exec pipes, constructs spawn actions, resets signal
-state, starts a new process group, exposes one-shot nonblocking setup, and
-reports wait-status observations. It has no child cleanup decision, timeout
-arithmetic, retry loop, environment policy, protocol parser, classification
-policy, or lifecycle state machine. Ada validates and builds `argv`/`envp` and
+state, starts a new process group, exposes one-shot nonblocking setup and
+header-defined errno values, and reports wait-status observations. It has no
+child cleanup decision, timeout arithmetic, retry loop, environment policy,
+protocol parser, classification policy, or lifecycle state machine. Ada
+validates and builds `argv`/`envp` and
 adopts the returned PID and descriptors inside an abort-deferred protected
 action. Ada then owns monotonic deadlines, bounded drain turns, process-group
 signals, retrying reap, result validation, and outcome classification.
+Loss of waitable-child ownership through an external reaper is an Ada policy
+failure: the guard is disarmed and no longer signals the reusable PID value.
 
 The protocol parser is not a useful SPARK boundary while it reconstructs the
 existing controlled `Measurement` metric store. Its length, enum, number,
@@ -33,8 +36,10 @@ proof effort can extract the byte cursor and scalar classifiers without moving
 process policy into C.
 
 `tests/workers_smoke.adb` exercises spawn, descriptor closure, continuous-output
-timeouts, parent-abort cleanup, signal, reaping, field bounds, semantic result
-validation, and protocol behavior. `tests/native/workers_abi_probe.c` links the
-fixed C symbols and verifies the platform constants. The crate test script runs
-both on the current Darwin or Linux host; cross-platform claims remain limited
-to whichever path CI actually executes.
+timeouts, parent-abort cleanup, external reaping, signal, field bounds,
+semantic result validation, and protocol behavior. Fixture-only C mechanisms
+live in `tests/worker_fixture_native.c` and are absent from the production
+archive. `tests/native/workers_abi_probe.c` links the fixed production symbols
+and verifies the platform constants. The crate test script runs both on the
+current Darwin or Linux host; cross-platform claims remain limited to whichever
+path CI actually executes.
