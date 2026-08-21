@@ -57,6 +57,11 @@ procedure Worker_Fixture is
    function Getpid return C.int;
    pragma Import (C, Getpid, "getpid");
 
+   function Spawn_Stubborn_Descendant return C.int;
+   pragma Import
+     (C, Spawn_Stubborn_Descendant,
+      "flyology_bench_worker_test_spawn_stubborn_descendant");
+
    function C_Write
      (Descriptor : C.int;
       Data       : System.Address;
@@ -149,7 +154,10 @@ begin
          Data : Ada.Strings.Unbounded.Unbounded_String;
       begin
          Ada.Strings.Unbounded.Append (Data, "FLYBWRK1");
-         Put_U32 (Data, 2);
+         Put_U32
+           (Data,
+            Interfaces.Unsigned_32
+              (Flyology_Bench.Workers.Protocol_Version + 1));
          Put_U32 (Data, 1);
          Put_U32 (Data, 0);
          Write_Raw (Ada.Strings.Unbounded.To_String (Data));
@@ -173,7 +181,7 @@ begin
          Put_String (Data, "different-case");
          Put_U64 (Data, 0);
          Put_U64 (Data, 1);
-         for Index in 1 .. 4 loop
+         for Index in 1 .. 5 loop
             Put_U64 (Data, 0);
          end loop;
          Put_U64 (Data, 16#C0DE_F17E_BA5E_0001#);
@@ -232,6 +240,25 @@ begin
       loop
          delay 1.0;
       end loop;
+   elsif Ada.Strings.Unbounded.To_String (Name) = "descendant-timeout" then
+      declare
+         Descendant : constant C.int := Spawn_Stubborn_Descendant;
+         File : Ada.Text_IO.File_Type;
+      begin
+         if Descendant <= 0 then
+            raise Program_Error with "cannot spawn descendant fixture";
+         elsif Ignore_Terminate /= 0 then
+            raise Program_Error with "cannot ignore SIGTERM";
+         end if;
+         Ada.Text_IO.Create
+           (File, Ada.Text_IO.Out_File,
+            Ada.Environment_Variables.Value ("DESCENDANT_PID_FILE"));
+         Ada.Text_IO.Put_Line (File, C.int'Image (Descendant));
+         Ada.Text_IO.Close (File);
+      end;
+      loop
+         delay 1.0;
+      end loop;
    elsif Ada.Strings.Unbounded.To_String (Name) = "environment" then
       Ada.Text_IO.Put_Line
         ("KEEP=" & Ada.Environment_Variables.Value ("KEEP", "<missing>"));
@@ -262,6 +289,13 @@ begin
          if Ada.Strings.Unbounded.To_String (Name) = "wrong-metrics" then
             Flyology_Bench.Workers.Test_Support.Corrupt_Metric_Request
               (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-statistics" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Statistics (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-environment-report"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Environment_Report
+              (Result);
          end if;
          Flyology_Bench.Workers.Return_Result (Request, Result);
          if Ada.Strings.Unbounded.To_String (Name) = "trailing" then
@@ -275,6 +309,11 @@ begin
          Compare_One (Config, Result);
          if Ada.Strings.Unbounded.To_String (Name) = "wrong-counts" then
             Flyology_Bench.Workers.Test_Support.Corrupt_Comparison_Counts
+              (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-comparison-statistics"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Comparison_Statistics
               (Result);
          end if;
          Flyology_Bench.Workers.Return_Result (Request, Result);

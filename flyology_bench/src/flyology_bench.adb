@@ -2511,6 +2511,90 @@ package body Flyology_Bench is
       Analyze_Custom_Comparisons (Result);
    end Analyze_Comparison;
 
+   function Measurement_Statistics_Consistent
+     (Value : Measurement) return Boolean
+   is
+      Expected : Measurement;
+   begin
+      Expected.Sample_Total := Value.Sample_Total;
+      Expected.Values := Value.Values;
+      Expected.Random_Seed_Value := Value.Random_Seed_Value;
+      Analyze (Expected);
+
+      if Value.Minimum /= Expected.Minimum
+        or else Value.Maximum /= Expected.Maximum
+        or else Value.Mean /= Expected.Mean
+        or else Value.Median /= Expected.Median
+        or else Value.Standard_Deviation /= Expected.Standard_Deviation
+        or else Value.MAD /= Expected.MAD
+        or else Value.P95 /= Expected.P95
+        or else Value.P99 /= Expected.P99
+        or else Value.Confidence_Low /= Expected.Confidence_Low
+        or else Value.Confidence_High /= Expected.Confidence_High
+        or else Value.CV_Percent /= Expected.CV_Percent
+        or else Value.Outlier_Total /= Expected.Outlier_Total
+        or else Value.Lag_One /= Expected.Lag_One
+        or else Value.Median_Batch
+          /= Value.Median * Long_Float (Value.Iterations)
+      then
+         return False;
+      end if;
+
+      if Value.Metric_Data.Data /= null then
+         Expected.Metric_Data.Data := new Metric_Store'
+           (References => 1,
+            Requested  => Value.Metric_Data.Data.Requested,
+            Available  => Value.Metric_Data.Data.Available,
+            Status     => Value.Metric_Data.Data.Status,
+            Values     => Value.Metric_Data.Data.Values,
+            Summaries  => [others => (others => <>)]);
+         Analyze_Metrics (Expected);
+         for Axis in Metric_Axis loop
+            if Value.Metric_Data.Data.Available (Axis)
+              and then Value.Metric_Data.Data.Summaries (Axis)
+                /= Expected.Metric_Data.Data.Summaries (Axis)
+            then
+               return False;
+            end if;
+         end loop;
+      end if;
+      return True;
+   exception
+      when others =>
+         return False;
+   end Measurement_Statistics_Consistent;
+
+   function Comparison_Statistics_Consistent
+     (Value : Comparison) return Boolean
+   is
+      Expected : Comparison;
+   begin
+      Expected.Reference_Data := Value.Reference_Data;
+      Expected.Contender_Data := Value.Contender_Data;
+      Expected.Reference_First_Order := Value.Reference_First_Order;
+      Expected.Reference_First := Value.Reference_First;
+      Expected.Contender_First := Value.Contender_First;
+      Expected.Practical_Threshold := Value.Practical_Threshold;
+      Expected.Random_Seed_Value := Value.Random_Seed_Value;
+      Analyze_Comparison (Expected);
+      return Value.Speedup_Values = Expected.Speedup_Values
+        and then Value.Geometric_Speedup = Expected.Geometric_Speedup
+        and then Value.Median_Speedup_Value = Expected.Median_Speedup_Value
+        and then Value.Speedup_CI_Low = Expected.Speedup_CI_Low
+        and then Value.Speedup_CI_High = Expected.Speedup_CI_High
+        and then Value.Mean_Time_Difference = Expected.Mean_Time_Difference
+        and then Value.Contender_Win_Total = Expected.Contender_Win_Total
+        and then Value.Reference_Win_Total = Expected.Reference_Win_Total
+        and then Value.Tie_Total = Expected.Tie_Total
+        and then Value.Order_Effect = Expected.Order_Effect
+        and then Value.Lag_One = Expected.Lag_One
+        and then Value.Verdict_Value = Expected.Verdict_Value
+        and then Value.Metric_Comparisons = Expected.Metric_Comparisons;
+   exception
+      when others =>
+         return False;
+   end Comparison_Statistics_Consistent;
+
    generic
       with procedure Run_Batch (Iterations : Iteration_Count);
       with procedure Prepare_Batch;

@@ -7,8 +7,24 @@ package body Flyology_Bench.Workers.Test_Support is
       Value.Tie_Total := Natural (Value.Reference_Data.Sample_Total) + 1;
    end Corrupt_Comparison_Counts;
 
+   procedure Corrupt_Comparison_Statistics (Value : in out Comparison) is
+   begin
+      Value.Geometric_Speedup := Value.Geometric_Speedup + 1.0;
+   end Corrupt_Comparison_Statistics;
+
    procedure Corrupt_Metric_Request (Value : in out Measurement) is
    begin
       Value.Metric_Data.Data.Requested (Wall_Time) := False;
    end Corrupt_Metric_Request;
+
+   procedure Corrupt_Statistics (Value : in out Measurement) is
+   begin
+      Value.Median := Value.Maximum + 1.0;
+   end Corrupt_Statistics;
+
+   procedure Corrupt_Environment_Report (Value : in out Measurement) is
+   begin
+      Value.Environment_Data.Contaminated_Samples := 1;
+      Value.Environment_Data.Observed_Samples := 0;
+   end Corrupt_Environment_Report;
 end Flyology_Bench.Workers.Test_Support;
