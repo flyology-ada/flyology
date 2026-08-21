@@ -66,7 +66,8 @@ package Flyology_Bench.Sweeps.Reporters is
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    --  Emit exactly one JSON object per point with exact throughput
-   --  availability and unscaled work rates.
+   --  availability and unscaled work rates. Parameter and work integers have
+   --  decimal-string companions so IEEE-754 JSON consumers retain all bits.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Result Ordinary sweep results.
    --  @param File Destination text stream.
@@ -75,7 +76,8 @@ package Flyology_Bench.Sweeps.Reporters is
       Result    : Ordinary_Sweep_Result;
       File      : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
    --  Emit exactly one paired JSON object per point with independent per-side
-   --  throughput availability and unscaled work rates.
+   --  throughput availability and unscaled work rates. Parameter and work
+   --  integers also have exact decimal-string companions.
    --  @param Case_Name Suite-compatible full benchmark identity.
    --  @param Reference_Name Reference implementation display name.
    --  @param Contender_Name Contender implementation display name.
@@ -108,7 +110,8 @@ package Flyology_Bench.Sweeps.Reporters is
      (Case_Name : String;
       Result    : Scaling.Empirical_Scaling_Analysis;
       File      : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
-   --  Emit one JSON object containing all scaling diagnostics.
+   --  Emit one JSON object containing all scaling diagnostics. Available
+   --  range endpoints have exact decimal-string companions.
    --  @param Case_Name Stable analyzed case identity.
    --  @param Result Empirical scaling analysis.
    --  @param File Destination text stream.

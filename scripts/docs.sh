@@ -144,12 +144,12 @@ rm -f "$runtime_documentation_warnings"
 
 if grep -E 'warning:' "$bench_gnatdoc_log" \
   | grep -E -v -q \
-    '^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$'
+    '^flyology_bench(-reporters|-sweeps)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$'
 then
    printf '%s\n' "unexpected warning in benchmark GNATdoc output" >&2
    grep -E 'warning:' "$bench_gnatdoc_log" \
      | grep -E -v \
-       '^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$' >&2
+       '^flyology_bench(-reporters|-sweeps)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$' >&2
    exit 1
 fi
 

@@ -482,8 +482,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   scaling over one coherent parameter kind and the observed range rather than
   as proof of big-O. Work, collection, wall, and derived-rate availability
   remain independent so failed setup cannot fabricate work and rate overflow
-  cannot erase valid collected data.
-- `proof/`: SPARK-only development crate plus runtime and debug policy proofs.
+  cannot erase valid collected data. Exact range qualification is a proved
+  integer policy decision. Sweep NDJSON keeps numeric fields for convenience
+  and exact decimal-string companions for unsigned 64-bit identities, work,
+  and scaling ranges.
+- `proof/`: SPARK-only development crate plus runtime, debug, and benchmark
+  policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and
   reviewed mappings back to production state transitions.
 - `scripts/`: all supported build, runtime preparation, test, docs, and proof

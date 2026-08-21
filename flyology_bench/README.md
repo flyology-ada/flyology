@@ -572,10 +572,11 @@ the kind and range unavailable instead of publishing sentinel values. Rejected
 analyses leave every diagnostic's `Selected` field false; when fitting reached
 model comparison, `Selected_Model` still exposes the lowest-residual candidate
 for callers that first inspect the status. At least four distinct positive
-points spanning a factor of two are required. Invalid observations, numeric
-overflow, poor fit, and poor identifiability produce explicit unavailable
-states. A selected model describes only the observed range; it is empirical
-scaling, not proof of big-O.
+points spanning a factor of two are required; the range threshold is classified
+with exact integer arithmetic before model fitting. Invalid observations,
+numeric overflow, poor fit, and poor identifiability produce explicit
+unavailable states. A selected model describes only the observed range; it is
+empirical scaling, not proof of big-O.
 
 `Flyology_Bench.Sweeps.Reporters` defines new console, CSV, and newline-delimited
 JSON schemas rather than changing the existing measurement formats. Rows carry
@@ -585,10 +586,13 @@ canonical `point`, raw parameter and label, work identity/value/scaling, the
 availability, exact throughput availability, status, time, throughput,
 direction, and paired verdict. Paired machine rows retain throughput
 availability independently for the reference and contender. Console work
-amounts and work rates use the requested decimal or binary prefix; CSV and
-newline-delimited JSON keep unscaled values. Suite registration and filtering
-remain case-level; a sweep is one registered case unless callers explicitly
-register its points as separate cases.
+amounts and work rates use the requested decimal or binary prefix. CSV keeps
+decimal integer text. Newline-delimited JSON retains numeric fields for
+convenience and adds decimal-string `parameter_value_exact`, `raw_value_exact`,
+`minimum_input_exact`, and `maximum_input_exact` companions so consumers backed
+by IEEE-754 numbers do not lose unsigned 64-bit values. Suite registration and
+filtering remain case-level; a sweep is one registered case unless callers
+explicitly register its points as separate cases.
 
 The maintained example compares insertion sort and Shell sort over five sizes,
 prints elapsed and work-normalized throughput at every adjacent paired point,
