@@ -576,6 +576,34 @@ begin
 
    Config := Base;
    Flyology_Bench.Register_Custom_Metric
+     (Config.Custom_Metrics, "missing_provider", "units/batch",
+      Flyology_Bench.Caller_Defined_Window,
+      Flyology_Bench.Unattributable, Flyology_Bench.Diagnostic,
+      Semantics => Flyology_Bench.Absolute_Sample,
+      Normalization => Flyology_Bench.Per_Batch,
+      Comparison => Flyology_Bench.Absolute);
+   Fake_Timer.Measure (Config, Measured);
+   Check
+     (Flyology_Bench.Custom_Metric_Status (Measured, 1)
+        = Flyology_Bench.Probe_Failed
+      and then Flyology_Bench.Custom_Metric_Status (Measured, 2)
+        = Flyology_Bench.Metric_Collected,
+      "manual timing relabeled a missing custom provider");
+   Config.Comparison_Batching := Flyology_Bench.Equal_Time;
+   Fake_Comparison.Compare (Config, Compared);
+   Item := Flyology_Bench.Compare_Custom_Metric (Compared, 1);
+   Check
+     (not Item.Available
+      and then Flyology_Bench.Custom_Metric_Status
+        (Flyology_Bench.Reference_Measurement (Compared), 1)
+          = Flyology_Bench.Probe_Failed
+      and then Flyology_Bench.Custom_Metric_Status
+        (Flyology_Bench.Contender_Measurement (Compared), 1)
+          = Flyology_Bench.Probe_Failed,
+      "paired manual timing relabeled a missing custom provider");
+
+   Config := Base;
+   Flyology_Bench.Register_Custom_Metric
      (Config.Custom_Metrics, "long_custom_metric_identity_over_32",
       "custom-units-per-batch", Flyology_Bench.Caller_Defined_Window,
       Flyology_Bench.Unattributable, Flyology_Bench.Diagnostic,

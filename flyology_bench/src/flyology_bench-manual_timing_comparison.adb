@@ -69,10 +69,7 @@ package body Flyology_Bench.Manual_Timing_Comparison is
 
       procedure Read (Snapshot : in out Custom_Snapshot) is
       begin
-         if Caller_Probe = null then
-            Snapshot :=
-              [others => (Status => Metric_Not_Requested, others => <>)];
-         else
+         if Caller_Probe /= null then
             begin
                Caller_Probe.all (Snapshot);
             exception
