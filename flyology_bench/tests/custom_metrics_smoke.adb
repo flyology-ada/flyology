@@ -2,6 +2,7 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Ada.Text_IO;
+with Ada.Task_Attributes;
 with Flyology_Bench;
 with Flyology_Bench.Manual_Timing;
 with Flyology_Bench.Manual_Timing_Comparison;
@@ -116,6 +117,16 @@ procedure Custom_Metrics_Smoke is
    begin
       raise Program_Error with "synthetic probe failure";
    end Raising_Probe;
+
+   procedure Composed_Probe
+     (Snapshot : in out Flyology_Bench.Custom_Snapshot) is
+   begin
+      Snapshot := [others => (Status => Flyology_Bench.Metric_Not_Requested,
+                              others => <>)];
+      Snapshot (1) :=
+        (Status => Flyology_Bench.Metric_Collected,
+         Counter_Value => 0, Sample_Value => 11.0);
+   end Composed_Probe;
 
    Signed_Value : Long_Float := 0.0;
    procedure Signed_Probe (Snapshot : in out Flyology_Bench.Custom_Snapshot) is
@@ -316,6 +327,14 @@ procedure Custom_Metrics_Smoke is
    Multi : Flyology_Bench.Multi_Comparison;
    Item : Flyology_Bench.Metric_Comparison_Result;
 begin
+   Check
+     (Flyology_Bench.Metric_Availability'Pos
+        (Flyology_Bench.Metric_Partially_Collected) = 7,
+      "custom statuses changed an established availability ordinal");
+   Check
+     (Flyology_Bench.Metric_Scope'Pos (Flyology_Bench.Flyology_Runtime) = 4,
+      "custom scopes changed an established scope ordinal");
+
    Config := Base;
    Flyology_Bench.Register_Custom_Metric
      (Config.Custom_Metrics, "domain_events", "events/op",
@@ -471,8 +490,13 @@ begin
    Fake_Timer.Measure (Base, Measured);
    Check (Flyology_Bench.Custom_Metric_Sample (Measured, 1, 1) = 3.5,
           "manual timer conversion or normalization is wrong");
-   Check (Flyology_Bench.Custom_Metric_Resolution (Measured, 1) = 1.0,
+   Check
+     (Flyology_Bench.Custom_Metric_Resolution (Measured, 1)
+        = 1.0
+          / Long_Float (Flyology_Bench.Iterations_Per_Sample (Measured)),
           "manual timer resolution was not normalized");
+   Check (Flyology_Bench.Primary_Timing_Axis (Measured) = 1,
+          "primary timing axis was not discoverable");
    Check (Flyology_Bench.Custom_Metric_Timing_Source (Measured, 1)
             = "deterministic_fake_ticks",
           "manual timing source identity was lost");
@@ -482,17 +506,111 @@ begin
      ("manual timer", Measured, Style => Flyology_Bench.Reporters.Plain,
       Include_Telemetry => False);
 
+   declare
+      package Timer_Values is new Ada.Task_Attributes (Long_Float, 0.0);
+      procedure Concurrent_Batch
+        (Iterations : Flyology_Bench.Iteration_Count;
+         Elapsed : out Long_Float;
+         Status : out Flyology_Bench.Metric_Availability) is
+      begin
+         Elapsed := Timer_Values.Value * Long_Float (Iterations);
+         Status := Flyology_Bench.Metric_Collected;
+      end Concurrent_Batch;
+      package Concurrent_Timer is new Flyology_Bench.Manual_Timing
+        (Source_Name => "task_local_fake_ticks", Unit => "ticks/op",
+         Resolution => 1.0, Scope => Flyology_Bench.Simulated_Clock,
+         Attribution => Flyology_Bench.Unattributable,
+         Batch => Concurrent_Batch);
+      type Outcome_Array is array (Positive range 1 .. 2) of Boolean;
+      protected Outcomes is
+         procedure Report (Id : Positive; Passed : Boolean);
+         entry Wait (Passed : out Boolean);
+      private
+         Values : Outcome_Array := [others => False];
+         Completed : Natural := 0;
+      end Outcomes;
+      protected body Outcomes is
+         procedure Report (Id : Positive; Passed : Boolean) is
+         begin
+            Values (Id) := Passed;
+            Completed := Completed + 1;
+         end Report;
+         entry Wait (Passed : out Boolean) when Completed = 2 is
+         begin
+            Passed := Values (1) and then Values (2);
+         end Wait;
+      end Outcomes;
+      task type Runner (Id : Positive);
+      task body Runner is
+         Local_Config : Flyology_Bench.Configuration := Base;
+         Local_Result : Flyology_Bench.Measurement;
+         Passed : Boolean := True;
+      begin
+         Local_Config.Samples := 50;
+         Timer_Values.Set_Value (Long_Float (Id));
+         Concurrent_Timer.Measure (Local_Config, Local_Result);
+         for Index in 1 .. Flyology_Bench.Samples (Local_Result) loop
+            if Flyology_Bench.Custom_Metric_Sample
+                 (Local_Result, 1, Index) /= Long_Float (Id)
+            then
+               Passed := False;
+            end if;
+         end loop;
+         Outcomes.Report (Id, Passed);
+      exception
+         when others => Outcomes.Report (Id, False);
+      end Runner;
+      First_Runner : Runner (1);
+      Second_Runner : Runner (2);
+      All_Passed : Boolean;
+   begin
+      Outcomes.Wait (All_Passed);
+      Check (All_Passed,
+             "one manual timing instance shared mutable state across invocations");
+   end;
+
    Invalid_Timer.Measure (Base, Measured);
    Check (Flyology_Bench.Custom_Metric_Status (Measured, 1)
             = Flyology_Bench.Invalid_Value,
           "negative manual elapsed value was accepted");
 
-   Fake_Timer.Measure (Base, Measured);
-
    Config := Base;
+   Flyology_Bench.Register_Custom_Metric
+     (Config.Custom_Metrics, "long_custom_metric_identity_over_32",
+      "custom-units-per-batch", Flyology_Bench.Caller_Defined_Window,
+      Flyology_Bench.Unattributable, Flyology_Bench.Diagnostic,
+      Semantics => Flyology_Bench.Absolute_Sample,
+      Normalization => Flyology_Bench.Per_Batch,
+      Comparison => Flyology_Bench.Absolute);
+   Flyology_Bench.Set_Custom_Probe
+     (Config.Custom_Metrics, Composed_Probe'Unrestricted_Access);
+   Fake_Timer.Measure (Config, Measured);
+   Check
+     (Flyology_Bench.Custom_Metric_Total (Measured) = 2
+      and then Flyology_Bench.Primary_Timing_Axis (Measured) = 2
+      and then Flyology_Bench.Custom_Metric_Sample (Measured, 1, 1) = 11.0
+      and then Flyology_Bench.Custom_Metric_Sample (Measured, 2, 1) = 3.5,
+      "manual timing did not compose with an existing custom provider");
+
    Config.Comparison_Batching := Flyology_Bench.Equal_Time;
    Fake_Comparison.Compare (Config, Compared);
-   Item := Flyology_Bench.Compare_Custom_Metric (Compared, 1);
+   Check
+     (Flyology_Bench.Primary_Timing_Axis
+        (Flyology_Bench.Reference_Measurement (Compared)) = 2,
+      "paired primary timing axis was not discoverable");
+   Check
+     (Flyology_Bench.Custom_Metric_Resolution
+        (Flyology_Bench.Reference_Measurement (Compared), 2)
+      = 1.0 / Long_Float
+          (Flyology_Bench.Iterations_Per_Sample
+             (Flyology_Bench.Reference_Measurement (Compared)))
+      and then Flyology_Bench.Custom_Metric_Resolution
+        (Flyology_Bench.Contender_Measurement (Compared), 2)
+      = 1.0 / Long_Float
+          (Flyology_Bench.Iterations_Per_Sample
+             (Flyology_Bench.Contender_Measurement (Compared))),
+      "paired manual timer resolutions do not match their denominators");
+   Item := Flyology_Bench.Compare_Custom_Metric (Compared, 2);
    Check (Item.Available and then Item.Change > 59.9 and then Item.Change < 60.1,
           "manual timing paired comparison is not iteration-normalized");
    Check (Item.Verdict = Flyology_Bench.Reference_Better,

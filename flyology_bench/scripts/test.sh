@@ -160,6 +160,10 @@ awk '/^-- custom machine output begin --$/ { inside = 1; next }
 grep -q 'primary.*primary_time' "$work_dir/custom.out"
 grep -q 'source.*deterministic_fake_ticks.*calibration harness wall' \
   "$work_dir/custom.out"
+grep -q 'long_custom_metric_identity_over_32.*custom-units-per-batch' \
+  "$work_dir/custom.out"
+grep -q 'reference_resolution,contender_resolution,calibration_clock' \
+  "$work_dir/custom.out"
 grep -q 'failed_pair.*unavailable: reference counter reset; contender probe failed' \
   "$work_dir/custom.out"
 grep -q 'failed_pair.*reference counter reset; contender probe failed' \
@@ -173,12 +177,16 @@ if command -v jq >/dev/null 2>&1; then
       and .timer_role == "primary_alternate"
       and .timing_source == "deterministic_fake_ticks"
       and .calibration_clock == "harness_wall"
-      and .resolution == 1)
+      and .resolution > 0
+      and .resolution < 1)
     and any(.[];
       .schema == "flyology_bench.comparison_metrics.v2"
       and .kind == "custom"
       and .method == "relative percent"
-      and .change == 60)
+      and .change == 60
+      and .reference_resolution > 0
+      and .contender_resolution > 0
+      and (has("resolution") | not))
     and any(.[];
       .schema == "flyology_bench.metrics.v2"
       and .name == "failed_custom"
