@@ -81,6 +81,29 @@ package Flyology_Bench.Reporters is
       Result : Measurement;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
+   --  Versioned long-form schema for built-in and custom axes. The original
+   --  Put_Metrics_CSV schema remains unchanged.
+   --  @param File Destination text file.
+   procedure Put_Extended_Metrics_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   --  Print versioned built-in and custom metric rows.
+   --  @param Name Benchmark identity.
+   --  @param Result Completed measurement.
+   --  @param File Destination text file.
+   procedure Put_Extended_Metrics_CSV
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Emit one self-contained JSON object per built-in or custom axis.
+   --  @param Name Benchmark identity.
+   --  @param Result Completed measurement.
+   --  @param File Destination text file.
+   procedure Put_Metrics_NDJSON
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
    --  Print one benchmark as a newline-delimited JSON object.
    --  @param Name Benchmark name.
    --  @param Result Completed measurement.
@@ -131,6 +154,31 @@ package Flyology_Bench.Reporters is
    --  @param Result Completed paired comparison.
    --  @param File Destination text file.
    procedure Put_Comparison_Metrics_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the versioned built-in/custom comparison schema.
+   --  @param File Destination text file.
+   procedure Put_Extended_Comparison_Metrics_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   --  Print versioned built-in and custom paired metric rows.
+   --  @param Reference_Name Reference benchmark identity.
+   --  @param Contender_Name Contender benchmark identity.
+   --  @param Result Completed paired comparison.
+   --  @param File Destination text file.
+   procedure Put_Extended_Comparison_Metrics_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   --  Emit one JSON object per built-in or custom paired axis.
+   --  @param Reference_Name Reference benchmark identity.
+   --  @param Contender_Name Contender benchmark identity.
+   --  @param Result Completed paired comparison.
+   --  @param File Destination text file.
+   procedure Put_Comparison_Metrics_NDJSON
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;

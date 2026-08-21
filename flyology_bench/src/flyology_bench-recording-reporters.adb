@@ -84,6 +84,9 @@ package body Flyology_Bench.Recording.Reporters is
          when Counter_Resources_Unavailable =>
             return "counter_resources_unavailable";
          when Probe_Failed => return "probe_failed";
+         when Counter_Reset => return "counter_reset";
+         when Invalid_Value => return "invalid_value";
+         when Conversion_Overflow => return "conversion_overflow";
          when Metric_Partially_Collected => return "partially_collected";
       end case;
    end Metric_Status_Name;
