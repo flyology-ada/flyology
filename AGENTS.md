@@ -475,6 +475,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   smoke tests, producer-cost benchmark, and example.
 - `flyology_bench/`: independent adaptive and paired-comparison benchmark
   crate, reporters, smoke tests, and examples.
+  Parameter sweeps retain explicit ordered exact points and exact work per
+  logical operation. Throughput is derived only from the same per-operation
+  wall samples, paired sweeps invoke the adjacent order-balanced comparison at
+  every point, and post-collection model fitting is described as empirical
+  scaling over the observed range rather than as proof of big-O.
 - `proof/`: SPARK-only development crate plus runtime and debug policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and
   reviewed mappings back to production state transitions.

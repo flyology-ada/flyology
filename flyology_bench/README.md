@@ -510,6 +510,83 @@ status model are the integration seam for a future recording-specific design;
 until then, record domain observations separately rather than labeling them as
 Flyology_Bench recording axes.
 
+## Parameter sweeps, work, and empirical scaling
+
+`Flyology_Bench.Sweeps` runs an explicit ordered set of exact positive
+`size:` or `count:` points. A point may also carry a stable display label. The
+canonical identity is the parameter kind and full unsigned decimal value; a
+duplicate numeric identity is rejected even when its label differs. Labels use
+the bounded portable grammar `[A-Za-z0-9][A-Za-z0-9_.-]*`.
+
+The sweep executor is generic over three statically bound operations:
+`Select_Point`, `Work_For`, and an already-instantiated `Measure`, `Compare`, or
+`Compare_Batched` procedure. Selection and the one call through the sweep layer
+occur outside timed batches. The logical operation inside the measurement
+generic remains statically bound; there is no access-to-subprogram dispatch per
+operation.
+
+Every point states exact integral work per logical operation as items, bytes,
+or a bounded caller-named unit. Decimal and binary display scaling affect only
+human rendering: raw machine output always retains the exact value, unit, and
+scaling choice. Throughput is derived from the same wall-time per-operation
+batch means already retained by `Measurement`:
+
+```text
+operations/s = 1_000_000_000 / nanoseconds-per-operation
+work/s       = operations/s * work-per-operation
+```
+
+There is no second timing interval. Median rates invert median wall time. Rate
+confidence endpoints invert and reverse the existing mean-time confidence
+interval. Zero, negative, fractional, non-finite, unrepresentable, or
+incoherently named work amounts are rejected; unavailable wall data and rate
+overflow remain explicit unavailable states.
+
+`Measure_Sweep` and `Compare_Sweep` return bounded inspectable results for
+every attempted point. The paired executor invokes one existing adjacent,
+order-balanced comparison at each point; it never assembles a verdict from
+separately collected blocks. Point setup, measurement, wall availability,
+throughput overflow, dry-run, and whole-budget exhaustion are distinct
+statuses. Stop-on-failure and continue-after-failure are explicit policies.
+
+With `Per_Point_Budget`, `Configuration.Maximum_Sampling_Time` applies
+independently to each point under the normal runner rules. With
+`Whole_Sweep_Budget`, the same value is an outer elapsed-time limit including
+selection, warmup, calibration, and collection. Each point receives the
+remaining value as its collection limit; a point already in flight completes,
+and later points are marked budget-exhausted. Zero remains unlimited.
+
+Collection and empirical scaling analysis are separate.
+`Flyology_Bench.Scaling` accepts stored or deterministic synthetic observations
+and fits constant, logarithmic, linear, n log n, quadratic, and cubic models in
+log space. It reports every model's coefficient, nominal exponent, R-squared,
+RMS and maximum log residual, selection state, and observed input range. At
+least four distinct positive points spanning a factor of two are required.
+Invalid observations, numeric overflow, poor fit, and poor identifiability
+produce explicit unavailable states. A selected model describes only the
+observed range; it is empirical scaling, not proof of big-O.
+
+`Flyology_Bench.Sweeps.Reporters` defines new console, CSV, and newline-delimited
+JSON schemas rather than changing the existing measurement formats. Rows carry
+the suite-compatible full `benchmark` name supplied as `Case_Name`, a separate
+canonical `point`, raw parameter and label, work identity/value/scaling, the
+`per_operation_batch_mean` sample semantics, availability/status, time,
+throughput, direction, and paired verdict. Suite registration and filtering
+remain case-level; a sweep is one registered case unless callers explicitly
+register its points as separate cases.
+
+The maintained example compares insertion sort and Shell sort over five sizes,
+prints elapsed and work-normalized throughput at every adjacent paired point,
+and then analyzes each stored result independently:
+
+```sh
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+examples/bin/sweep_comparison
+```
+
+Its output is a factual report of that invocation and publishes no host
+performance claim.
+
 ## Measurement model
 
 The harness characterizes its platform clock, warms the operation, and

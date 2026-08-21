@@ -4,7 +4,7 @@ project Flyology_Bench_Examples is
    for Source_Dirs use (".");
    for Main use
      ("basic.adb", "recording_service.adb", "custom_metrics.adb",
-      "baseline_gate.adb");
+      "baseline_gate.adb", "sweep_comparison.adb");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";
