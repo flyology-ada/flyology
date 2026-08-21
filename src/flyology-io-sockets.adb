@@ -1,4 +1,3 @@
-with Ada.Real_Time;
 with Ada.Strings;
 with Ada.Strings.Fixed;
 with Flyology.Socket_Policy;
@@ -1367,6 +1366,18 @@ package body Flyology.IO.Sockets is
       end if;
    end Close_Socket;
 
+   overriding procedure Finalize (Item : in out Socket_Owner) is
+   begin
+      if Is_Open (Item.Socket) then
+         begin
+            Close_Socket (Item.Socket);
+         exception
+            when others =>
+               null;
+         end;
+      end if;
+   end Finalize;
+
    procedure Prepare (Socket : Socket_Type) is
       Error  : aliased Interfaces.C.int;
       Result : Interfaces.C.int;
@@ -2282,6 +2293,49 @@ package body Flyology.IO.Sockets is
          raise;
    end Start_Scoped_Connect;
 
+   procedure Start_Scoped_Accept
+     (Item    : in out Accept_Operation;
+      Server  : not null access Socket_Type;
+      Timeout : Duration)
+   is
+   begin
+      Prepare (Server.all);
+      if Is_Open (Item.Accepted.Socket) then
+         raise Program_Error with "accept operation still owns a socket";
+      end if;
+      Item.Kind := Accept_Internet;
+      Item.Socket := Server.all'Unchecked_Access;
+      Item.Array_Item := null;
+      Item.Buffer_Item := null;
+      Item.Transferred := 0;
+      Item.Error_Code := 0;
+      Item.Failure := No_Failure;
+      Item.Started := Ada.Real_Time.Clock;
+      Item.Timeout := Timeout;
+      Item.Pressure_Backoff := 0.001;
+      Item.Retry_Due := False;
+      Item.Peer_Family := 0;
+      Item.Peer_Address := (others => 0);
+      Item.Peer_Port := 0;
+      Item.Peer_Scope := 0;
+      Flyology.Operations.Drivers.Start (Item);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Item),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Item) then
+            Flyology.Operations.Cancel (Item);
+         end if;
+         if Flyology.Operations.Is_Terminal (Item) then
+            Flyology.Operations.Consume (Item);
+         end if;
+         raise;
+   end Start_Scoped_Accept;
+
    overriding procedure Drive
      (Item  : in out Socket_Operation;
       Event : Flyology.Operations.Driver_Event)
@@ -2508,6 +2562,115 @@ package body Flyology.IO.Sockets is
          Flyology.Operations.Drivers.Complete
            (Item, Flyology.Operations.Succeeded);
       end if;
+   end Drive;
+
+   overriding procedure Drive
+     (Item  : in out Accept_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Bridge : Accept_Return_Bridge;
+
+      procedure Fail
+        (Reason : Scoped_Failure;
+         Code   : Interfaces.C.int := 0)
+      is
+      begin
+         Item.Failure := Reason;
+         Item.Error_Code := Code;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      end Fail;
+
+      function Time_Left return Duration is
+        (Remaining (Item.Started, Item.Timeout));
+
+      procedure Arm_Overall_Deadline is
+         Left : Duration;
+      begin
+         if Item.Timeout >= 0.0 then
+            Left := Time_Left;
+            if Left <= 0.0 then
+               Fail (Deadline_Failure);
+            else
+               Flyology.Operations.Drivers.Arm_Deadline (Item, Left);
+            end if;
+         end if;
+      end Arm_Overall_Deadline;
+
+      procedure Retry_After (Requested : Duration) is
+         Pause : Duration := Requested;
+         Left  : Duration;
+      begin
+         if Item.Timeout >= 0.0 then
+            Left := Time_Left;
+            if Left <= 0.0 then
+               Fail (Deadline_Failure);
+               return;
+            end if;
+            Pause := Duration'Min (Pause, Left);
+         end if;
+         Item.Retry_Due := True;
+         Flyology.Operations.Drivers.Arm_Deadline (Item, Pause);
+      end Retry_After;
+
+      procedure Attempt is
+         Error  : aliased Interfaces.C.int := 0;
+         Result : Interfaces.C.int;
+      begin
+         Bridge.Invoke
+           (Item.Socket.Value,
+            1,
+            Item.Peer_Family'Access,
+            Item.Peer_Address (Item.Peer_Address'First)'Address,
+            Item.Peer_Port'Access,
+            Item.Peer_Scope'Access,
+            Error'Access,
+            Item.Accepted.Socket,
+            Result);
+         if Result = Accept_Discarded then
+            Retry_After (0.0);
+         elsif Result < 0 then
+            case Wait_Policy.Classify_Accept_Error
+              (Error,
+               Would_Block_Error,
+               Interrupted_Error,
+               Connection_Aborted_Error,
+               Protocol_Error,
+               Process_File_Limit_Error,
+               System_File_Limit_Error)
+            is
+               when Wait_Policy.Wait_For_Connection =>
+                  Flyology.Operations.Drivers.Arm_Readiness
+                    (Item, Item.Socket.Value, For_Write => False);
+                  Arm_Overall_Deadline;
+               when Wait_Policy.Retry_Accept |
+                    Wait_Policy.Retry_Transient =>
+                  Retry_After (0.0);
+               when Wait_Policy.Backoff_Descriptor_Pressure =>
+                  Retry_After (Item.Pressure_Backoff);
+                  Item.Pressure_Backoff :=
+                    Duration'Min (Item.Pressure_Backoff * 2, 0.050);
+               when Wait_Policy.Fail_Accept =>
+                  Fail (Socket_Failure, Error);
+            end case;
+         else
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+         end if;
+      end Attempt;
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         if not Item.Retry_Due then
+            Fail (Deadline_Failure);
+            return;
+         end if;
+         Item.Retry_Due := False;
+         if Item.Timeout >= 0.0 and then Time_Left <= 0.0 then
+            Fail (Deadline_Failure);
+            return;
+         end if;
+      end if;
+      Attempt;
    end Drive;
 
    overriding procedure Drive
@@ -2853,6 +3016,26 @@ package body Flyology.IO.Sockets is
       end return;
    end Connect;
 
+   procedure Accept_Connection
+     (Server    : not null access Socket_Type;
+      Timeout   : Duration := Infinite;
+      Operation : in out Accept_Operation)
+   is
+   begin
+      Start_Scoped_Accept (Operation, Server, Timeout);
+   end Accept_Connection;
+
+   function Accept_Connection
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Server  : not null access Socket_Type;
+      Timeout : Duration := Infinite) return Accept_Operation
+   is
+   begin
+      return Result : Accept_Operation (Set) do
+         Accept_Connection (Server, Timeout, Result);
+      end return;
+   end Accept_Connection;
+
    procedure Receive
      (Socket    : not null access Socket_Type;
       Item      : not null access Flyology.Buffers.Unique_Buffer;
@@ -2956,6 +3139,7 @@ package body Flyology.IO.Sockets is
                     ((if Operation.Kind = Datagram_Send then "sendmsg"
                       elsif Operation.Kind = Datagram_Receive then "recvmsg"
                       elsif Operation.Kind = Connect_Internet then "connect"
+                      elsif Operation.Kind = Accept_Internet then "accept"
                       elsif Sending then "send"
                       else "recv"),
                      Error);
@@ -3095,6 +3279,31 @@ package body Flyology.IO.Sockets is
    procedure Finish (Operation : in out Connect_Operation) is
    begin
       Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Accept_Operation;
+      Socket    : in out Socket_Type;
+      Address   : out Endpoint)
+   is
+      Accepted_Address : Endpoint;
+   begin
+      if Is_Open (Socket) then
+         raise Program_Error with "accept target is open";
+      end if;
+      if Flyology.Operations.Outcome (Operation) =
+        Flyology.Operations.Succeeded
+      then
+         Accepted_Address :=
+           Make_Endpoint
+             (Operation.Peer_Family,
+              Operation.Peer_Address,
+              Operation.Peer_Port,
+              Operation.Peer_Scope);
+      end if;
+      Finish_Common (Operation);
+      Move (Operation.Accepted.Socket, Socket);
+      Address := Accepted_Address;
    end Finish;
 
    procedure Accept_Internal

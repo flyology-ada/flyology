@@ -148,8 +148,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   blocking synchronous wrapper, invoke user code on the scheduler stack, or
   release a kernel-owned buffer before terminal completion.
 - Current scoped providers cover descriptor readiness, timers, raw stream and
-  datagram socket arrays, Internet-stream connection attempts, unique-buffer
-  stream operations, and lightweight positional file arrays. A scoped
+  datagram socket arrays, Internet-stream connection attempts and accepts,
+  unique-buffer stream operations, and lightweight positional file arrays. A
+  successful scoped accept owns the accepted descriptor until typed `Finish`
+  transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
   truncation, and ECN metadata until typed `Finish`; an empty array still
   receives or sends one zero-length datagram. The file provider uses one

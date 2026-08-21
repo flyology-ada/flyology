@@ -1,4 +1,6 @@
 with Ada.Exceptions;
+with Ada.Finalization;
+with Ada.Real_Time;
 with Ada.Streams;
 with Flyology.Buffers;
 with Flyology.Operations;
@@ -722,6 +724,9 @@ package Flyology.IO.Sockets is
    type Send_Datagram_Operation is new Datagram_Operation with private;
    --  Scoped Internet-stream connection attempt.
    type Connect_Operation is new Socket_Operation with private;
+   --  Scoped acceptance of one Internet-stream connection. A successful
+   --  operation owns the accepted socket until typed Finish transfers it.
+   type Accept_Operation is new Socket_Operation with private;
 
    --  Start one nonblocking receive operation. Socket and Item must outlive
    --  the returned operation. Item is exclusively borrowed until Finish.
@@ -1008,6 +1013,26 @@ package Flyology.IO.Sockets is
       Timeout   : Duration := Infinite;
       Operation : in out Connect_Operation);
 
+   --  Start one Internet-stream accept. Server remains borrowed until Finish;
+   --  the accepted socket and peer endpoint are retained by the operation.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Server Aliased open Internet-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited accept operation
+   function Accept_Connection
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Server  : not null access Socket_Type;
+      Timeout : Duration := Infinite) return Accept_Operation;
+
+   --  Start or restart one Internet-stream accept in an established object.
+   --  @param Server Aliased open Internet-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed accept operation
+   procedure Accept_Connection
+     (Server    : not null access Socket_Type;
+      Timeout   : Duration := Infinite;
+      Operation : in out Accept_Operation);
+
    --  Consume one terminal partial receive and publish its Last value.
    --  @param Operation Terminal receive operation
    --  @param Last Last received element, or Item'First - 1 on closure
@@ -1068,6 +1093,18 @@ package Flyology.IO.Sockets is
    --  Consume one terminal Internet-stream connection attempt.
    --  @param Operation Terminal connect operation
    procedure Finish (Operation : in out Connect_Operation);
+
+   --  Consume one successful Internet-stream accept and transfer ownership.
+   --  Socket must be closed. Provider failure is retained until this call.
+   --  @param Operation Terminal accept operation
+   --  @param Socket Closed target that receives the accepted socket
+   --  @param Address Accepted peer endpoint
+   procedure Finish
+     (Operation : in out Accept_Operation;
+      Socket    : in out Socket_Type;
+      Address   : out Endpoint)
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
 
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
@@ -1176,7 +1213,8 @@ private
       Buffer_Send_Complete,
       Datagram_Receive,
       Datagram_Send,
-      Connect_Internet);
+      Connect_Internet,
+      Accept_Internet);
    type Scoped_Failure is
      (No_Failure, Socket_Failure, Deadline_Failure,
       Peer_Closed_Failure, No_Progress_Failure,
@@ -1238,6 +1276,33 @@ private
    --  @param Event Driver event to process
    overriding procedure Drive
      (Item  : in out Connect_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Socket_Owner is new Ada.Finalization.Limited_Controlled with record
+      Socket : Socket_Type;
+   end record;
+
+   --  @exclude
+   --  @param Item Accepted-socket owner to close during finalization
+   overriding procedure Finalize (Item : in out Socket_Owner);
+
+   type Accept_Operation is new Socket_Operation with record
+      Accepted         : Socket_Owner;
+      Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Timeout          : Duration := Infinite;
+      Pressure_Backoff : Duration := 0.001;
+      Retry_Due        : Boolean := False;
+      Peer_Family      : aliased Interfaces.C.unsigned_char := 0;
+      Peer_Address     : aliased IPv6_Octets := (others => 0);
+      Peer_Port        : aliased Interfaces.C.unsigned := 0;
+      Peer_Scope       : aliased Interfaces.C.unsigned := 0;
+   end record;
+
+   --  @exclude
+   --  @param Item Accept operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Accept_Operation;
       Event : Flyology.Operations.Driver_Event);
 
    type Receive_Operation is new Socket_Operation with null record;

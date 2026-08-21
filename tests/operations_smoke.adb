@@ -9,8 +9,12 @@ with Flyology.IO.Files;
 with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Operations;
+with Interfaces.C;
 
 procedure Operations_Smoke is
+   function Open_FD_Count return Interfaces.C.int;
+   pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
+
    --  Executable overload matrix. Each row is exercised through the named
    --  first-class gate and its provider-specific Finish operation.
    --
@@ -28,6 +32,7 @@ procedure Operations_Smoke is
    --  Sockets.Receive_Datagram (array)          Successes (2)           both
    --  Sockets.Send_Datagram (array)             Successes (2)           both
    --  Sockets.Connect (Internet stream)         Successes (2), All      both
+   --  Sockets.Accept_Connection (Internet)      Successes (4), All      both
    --  Files.Read_At (array)                     All                     lightweight
    --  Files.Write_At (array)                    Successes (2)           lightweight
    use type Ada.Streams.Stream_Element;
@@ -35,8 +40,10 @@ procedure Operations_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Real_Time.Time;
    use type Flyology.Execution_Model;
+   use type Flyology.IO.Sockets.Address_Family;
    use type Flyology.IO.Sockets.Port;
    use type Flyology.Operations.Terminal_Outcome;
+   use type Interfaces.C.int;
 
    protected Result is
       procedure Set (Passed : Boolean);
@@ -1082,7 +1089,15 @@ procedure Operations_Smoke is
          Flyology.IO.Sockets.Create_Socket (First_Client);
          Flyology.IO.Sockets.Create_Socket (Second_Client);
          declare
-            Set : aliased Flyology.Operations.Completion_Set (3);
+            Set : aliased Flyology.Operations.Completion_Set (5);
+            First_Accept : aliased
+              Flyology.IO.Sockets.Accept_Operation :=
+                Flyology.IO.Sockets.Accept_Connection
+                  (Set'Access, Listener'Access, 1.0);
+            Second_Accept : aliased
+              Flyology.IO.Sockets.Accept_Operation :=
+                Flyology.IO.Sockets.Accept_Connection
+                  (Set'Access, Listener'Access, 1.0);
             First : aliased Flyology.IO.Sockets.Connect_Operation :=
               Flyology.IO.Sockets.Connect
                 (Set'Access, First_Client'Access, Destination, 1.0);
@@ -1091,22 +1106,28 @@ procedure Operations_Smoke is
                 (Set'Access, Second_Client'Access, Destination, 1.0);
             Both : Flyology.Operations.Gate_Operation :=
               Flyology.Operations.Wait_For_Successes
-                (Set'Access, [Ref (First), Ref (Second)], 2);
+                (Set'Access,
+                 [Ref (First), Ref (Second),
+                  Ref (First_Accept), Ref (Second_Accept)],
+                 4);
             Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
             Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+            First_Address, Second_Address : Flyology.IO.Sockets.Endpoint;
          begin
-            Flyology.IO.Sockets.Accept_Connection
-              (Listener, First_Peer, Timeout => 1.0);
-            Flyology.IO.Sockets.Accept_Connection
-              (Listener, Second_Peer, Timeout => 1.0);
             while not Flyology.Operations.Is_Terminal (Both) loop
                Flyology.Operations.Wait_Some (Set, Batch);
             end loop;
             Flyology.Operations.Finish (Both, Matches);
             Flyology.IO.Sockets.Finish (First);
             Flyology.IO.Sockets.Finish (Second);
+            Flyology.IO.Sockets.Finish
+              (First_Accept, First_Peer, First_Address);
+            Flyology.IO.Sockets.Finish
+              (Second_Accept, Second_Peer, Second_Address);
             Passed := Passed
-              and then Matches.Count = 2
+              and then Matches.Count = 4
+              and then First_Address.Family = Flyology.IO.Sockets.IPv4
+              and then Second_Address.Family = Flyology.IO.Sockets.IPv4
               and then Flyology.IO.Sockets.Get_Peer_Name (First_Client).Port =
                 Destination.Port
               and then Flyology.IO.Sockets.Get_Peer_Name (Second_Client).Port =
@@ -1115,15 +1136,21 @@ procedure Operations_Smoke is
 
          Flyology.IO.Sockets.Create_Socket (Third_Client);
          declare
-            Set : aliased Flyology.Operations.Completion_Set (1);
+            Set : aliased Flyology.Operations.Completion_Set (2);
             Connection : Flyology.IO.Sockets.Connect_Operation (Set'Access);
+            Acceptance : Flyology.IO.Sockets.Accept_Operation (Set'Access);
+            Address : Flyology.IO.Sockets.Endpoint;
          begin
             Flyology.IO.Sockets.Connect
               (Third_Client'Access, Destination, 1.0, Connection);
             Flyology.IO.Sockets.Accept_Connection
-              (Listener, Third_Peer, Timeout => 1.0);
+              (Listener'Access, 1.0, Acceptance);
             Flyology.Operations.Wait_All (Set);
             Flyology.IO.Sockets.Finish (Connection);
+            Flyology.IO.Sockets.Finish
+              (Acceptance, Third_Peer, Address);
+            Passed := Passed
+              and then Address.Family = Flyology.IO.Sockets.IPv4;
          end;
 
          Flyology.IO.Sockets.Close_Socket (First_Peer);
@@ -1132,6 +1159,64 @@ procedure Operations_Smoke is
          Flyology.IO.Sockets.Close_Socket (First_Client);
          Flyology.IO.Sockets.Close_Socket (Second_Client);
          Flyology.IO.Sockets.Close_Socket (Third_Client);
+
+         --  A terminal accept owns its descriptor until Finish. Abandoning
+         --  that value closes the accepted socket during controlled cleanup.
+         declare
+            Client : Flyology.IO.Sockets.Socket_Type;
+            Before : Interfaces.C.int;
+         begin
+            Flyology.IO.Sockets.Create_Socket (Client);
+            Flyology.IO.Sockets.Connect (Client, Destination, Timeout => 1.0);
+            Before := Open_FD_Count;
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Acceptance : constant Flyology.IO.Sockets.Accept_Operation :=
+                 Flyology.IO.Sockets.Accept_Connection
+                   (Set'Access, Listener'Access, 1.0);
+            begin
+               Flyology.Operations.Wait_All (Set);
+               Passed := Passed
+                 and then Flyology.Operations.Outcome (Acceptance) =
+                   Flyology.Operations.Succeeded
+                 and then Open_FD_Count = Before + 1;
+            end;
+            Passed := Passed and then Open_FD_Count = Before;
+            Flyology.IO.Sockets.Close_Socket (Client);
+         end;
+
+         --  Timeout and cancellation are terminal member outcomes; waits do
+         --  not raise either provider exception.
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (2);
+            Timed : Flyology.IO.Sockets.Accept_Operation :=
+              Flyology.IO.Sockets.Accept_Connection
+                (Set'Access, Listener'Access, 0.001);
+            Cancelled : Flyology.IO.Sockets.Accept_Operation :=
+              Flyology.IO.Sockets.Accept_Connection
+                (Set'Access, Listener'Access);
+            Target : Flyology.IO.Sockets.Socket_Type;
+            Address : Flyology.IO.Sockets.Endpoint;
+            Saw_Timeout, Saw_Cancel : Boolean := False;
+         begin
+            Flyology.Operations.Cancel (Cancelled);
+            Flyology.Operations.Wait_All (Set);
+            begin
+               Flyology.IO.Sockets.Finish (Timed, Target, Address);
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Saw_Timeout := True;
+            end;
+            begin
+               Flyology.IO.Sockets.Finish (Cancelled, Target, Address);
+            exception
+               when Flyology.Operations.Operation_Cancelled =>
+                  Saw_Cancel := True;
+            end;
+            Passed := Passed and then Saw_Timeout and then Saw_Cancel
+              and then not Flyology.IO.Sockets.Is_Open (Target);
+         end;
+
          Flyology.IO.Sockets.Close_Socket (Listener);
 
          --  Provider failure is a terminal member outcome; only typed Finish
