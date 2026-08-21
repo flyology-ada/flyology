@@ -73,6 +73,20 @@ procedure Sweeps_Smoke is
      (Sweeps.Work
         (Sweeps.Value (Item), Sweeps.Items, Scaling => Sweeps.Decimal_Scaling));
 
+   function Display_Work
+     (Item : Sweeps.Parameter_Point) return Sweeps.Work_Amount is
+     (case Sweeps.Value (Item) is
+         when 1 =>
+           Sweeps.Work
+             (1_024.0, Sweeps.Bytes, Scaling => Sweeps.Binary_Scaling),
+         when 2 =>
+           Sweeps.Work
+             (1_000.0, Sweeps.Items, Scaling => Sweeps.Decimal_Scaling),
+         when others =>
+           Sweeps.Work
+             (1_000_000.0, Sweeps.Caller_Named, "records",
+              Sweeps.Decimal_Scaling));
+
    function Work_Maybe_Fail
      (Item : Sweeps.Parameter_Point) return Sweeps.Work_Amount is
    begin
@@ -96,6 +110,11 @@ procedure Sweeps_Smoke is
      (Select_Point => Choose_Point,
       Work_For     => Point_Work,
       Run_Point    => Compare_AB);
+
+   procedure Run_Display is new Sweeps.Measure_Sweep
+     (Select_Point => Choose_Point,
+      Work_For     => Display_Work,
+      Run_Point    => Measure_A);
 
    procedure Select_Maybe_Fail (Item : Sweeps.Parameter_Point) is
    begin
@@ -141,6 +160,7 @@ procedure Sweeps_Smoke is
 
    Ordinary : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Paired   : Sweeps.Paired_Sweep_Result (Maximum_Points => 3);
+   Display_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Failure_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Work_Failure_Result : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
    Dry_Result     : Sweeps.Ordinary_Sweep_Result (Maximum_Points => 3);
@@ -335,6 +355,13 @@ begin
             "ordinary point identity");
       end;
    end loop;
+
+   Run_Display
+     (Case_Name => "units/display",
+      Points    => Points,
+      Config    => Config,
+      Result    => Display_Result);
+   Reporters.Put_Console ("units/display", Display_Result);
 
    Run_Paired
      (Case_Name => "algorithms/mix",
@@ -606,6 +633,20 @@ begin
            (not Scaling.Input_Kind_Available (Empty_Fit)
             and then not Scaling.Input_Range_Available (Empty_Fit),
             "empty scaling data acquired sentinel input metadata");
+         Check
+           (Scaling.Diagnostic
+              (Empty_Fit, Scaling.Constant_Model).Nominal_Exponent = 0.0
+            and then Scaling.Diagnostic
+              (Empty_Fit, Scaling.Logarithmic_Model).Nominal_Exponent = 0.0
+            and then Scaling.Diagnostic
+              (Empty_Fit, Scaling.Linear_Model).Nominal_Exponent = 1.0
+            and then Scaling.Diagnostic
+              (Empty_Fit, Scaling.N_Log_N_Model).Nominal_Exponent = 1.0
+            and then Scaling.Diagnostic
+              (Empty_Fit, Scaling.Quadratic_Model).Nominal_Exponent = 2.0
+            and then Scaling.Diagnostic
+              (Empty_Fit, Scaling.Cubic_Model).Nominal_Exponent = 3.0,
+            "rejected scaling data lost invariant model exponents");
          declare
             procedure Read_Empty_Range is
                Ignored : constant Sweeps.Exact_Value :=
@@ -627,6 +668,7 @@ begin
             = Scaling.Invalid_Observation,
             "nonpositive scaling observation accepted");
 
+         Reporters.Put_Console ("failures/console", Failure_Result);
          Ada.Text_IO.Put_Line ("-- sweep machine output begin --");
          Reporters.Put_CSV_Header;
          Reporters.Put_CSV ("group/case,""escaped""", Ordinary);

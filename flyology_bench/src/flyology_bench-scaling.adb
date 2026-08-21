@@ -110,6 +110,11 @@ package body Flyology_Bench.Scaling is
       Best : Scaling_Model := Constant_Model;
       Available_Models : Natural := 0;
    begin
+      for Model in Scaling_Model loop
+         Result.Diagnostics (Model).Model := Model;
+         Result.Diagnostics (Model).Nominal_Exponent :=
+           Nominal_Exponent (Model);
+      end loop;
       Result.Point_Count := Set.Count;
       Result.Has_Kind := Set.Has_Kind;
       Result.Kind_Value := Set.Kind_Value;

@@ -578,9 +578,13 @@ JSON schemas rather than changing the existing measurement formats. Rows carry
 the suite-compatible full `benchmark` name supplied as `Case_Name`, a separate
 canonical `point`, raw parameter and label, work identity/value/scaling, the
 `per_operation_batch_mean` sample semantics, separate work/collection/result
-availability, status, time, throughput, direction, and paired verdict. Suite
-registration and filtering remain case-level; a sweep is one registered case
-unless callers explicitly register its points as separate cases.
+availability, exact throughput availability, status, time, throughput,
+direction, and paired verdict. Paired machine rows retain throughput
+availability independently for the reference and contender. Console work
+amounts and work rates use the requested decimal or binary prefix; CSV and
+newline-delimited JSON keep unscaled values. Suite registration and filtering
+remain case-level; a sweep is one registered case unless callers explicitly
+register its points as separate cases.
 
 The maintained example compares insertion sort and Shell sort over five sizes,
 prints elapsed and work-normalized throughput at every adjacent paired point,
