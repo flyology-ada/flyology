@@ -73,38 +73,80 @@ grep -v '^{' "$work_dir/smoke.machine" >"$work_dir/smoke.csv"
 # long-form metric schemas must agree between "available" and "status".
 check_csv() {
   awk -v source="$1" '
-    BEGIN { FS = ","; failures = 0; headers = 0; rows = 0 }
-    $1 == "name" || $1 == "reference" {
-      headers += 1
-      expected = NF
-      available_column = 0
-      status_column = 0
-      for (column = 1; column <= NF; column += 1) {
-        if ($column == "available") { available_column = column }
-        if ($column == "status") { status_column = column }
+    function parse_csv(line, values,    character, current, position, quoted,
+                       total) {
+      for (position in values) { delete values[position] }
+      current = ""
+      quoted = 0
+      total = 1
+      for (position = 1; position <= length(line); position += 1) {
+        character = substr(line, position, 1)
+        if (quoted) {
+          if (character == "\"") {
+            if (substr(line, position + 1, 1) == "\"") {
+              current = current "\""
+              position += 1
+            } else {
+              quoted = 0
+            }
+          } else {
+            current = current character
+          }
+        } else if (character == ",") {
+          values[total] = current
+          total += 1
+          current = ""
+        } else if (character == "\"" && current == "") {
+          quoted = 1
+        } else {
+          current = current character
+        }
       }
-      next
+      if (quoted) { return -1 }
+      values[total] = current
+      return total
     }
-    NF > 1 {
+
+    BEGIN { failures = 0; headers = 0; rows = 0 }
+    {
+      fields = parse_csv($0, value)
+      if (fields < 0) {
+        printf "%s: unterminated quoted field: %s\n", source, $0 > "/dev/stderr"
+        failures += 1
+        next
+      }
+      if (value[1] == "name" || value[1] == "reference" ||
+          value[1] == "schema") {
+        headers += 1
+        expected = fields
+        available_column = 0
+        status_column = 0
+        for (column = 1; column <= fields; column += 1) {
+          if (value[column] == "available") { available_column = column }
+          if (value[column] == "status") { status_column = column }
+        }
+        next
+      }
+      if (fields <= 1) { next }
       rows += 1
       if (expected == 0) {
         printf "%s: row before any header: %s\n", source, $0 > "/dev/stderr"
         failures += 1
         next
       }
-      if (NF != expected) {
+      if (fields != expected) {
         printf "%s: %d columns, header declares %d: %s\n",
-          source, NF, expected, $0 > "/dev/stderr"
+          source, fields, expected, $0 > "/dev/stderr"
         failures += 1
       }
       if (status_column > 0) {
-        status = $status_column
+        status = value[status_column]
         if (status == "") {
           printf "%s: empty status: %s\n", source, $0 > "/dev/stderr"
           failures += 1
         }
         if (available_column > 0) {
-          available = $available_column
+          available = value[available_column]
           if (available == "true" && status != "collected") {
             printf "%s: available metric reports status %s\n",
               source, status > "/dev/stderr"
@@ -147,6 +189,11 @@ awk '/^-- custom machine output begin --$/ { inside = 1; next }
      /^-- custom machine output end --$/ { inside = 0; next }
      inside && /^\{/ { print }' "$work_dir/custom.out" \
   >"$work_dir/custom.jsonl"
+awk '/^-- custom machine output begin --$/ { inside = 1; next }
+     /^-- custom machine output end --$/ { inside = 0; next }
+     inside && !/^\{/ { print }' "$work_dir/custom.out" \
+  >"$work_dir/custom.csv"
+check_csv custom-metrics "$work_dir/custom.csv"
 grep -q 'primary.*primary_time' "$work_dir/custom.out"
 grep -q 'source.*deterministic_fake_ticks.*calibration harness wall' \
   "$work_dir/custom.out"
