@@ -1230,6 +1230,176 @@ package body Flyology_Bench.Workers is
          end if;
          Classified := Classified + Amount;
       end Add_Classified;
+
+      function Telemetry_Samples_Are_Zero return Boolean is
+      begin
+         for Index in Sample_Index range 1 .. Value.Sample_Total loop
+            if Value.Telemetry_CPU (Index) /= 0.0
+              or else Value.Telemetry_RSS (Index) /= 0.0
+              or else Value.Telemetry_RSS_Delta (Index) /= 0.0
+            then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Telemetry_Samples_Are_Zero;
+
+      function Foreign_Samples_Are_Zero return Boolean is
+      begin
+         for Index in Sample_Index range 1 .. Value.Sample_Total loop
+            if Value.Foreign_CPU (Index) /= 0.0 then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Foreign_Samples_Are_Zero;
+
+      function Summary_Is_Empty (Summary : Metric_Summary) return Boolean is
+        (not Summary.Available
+         and then Summary.Samples = 0
+         and then Summary.Minimum = 0.0
+         and then Summary.Maximum = 0.0
+         and then Summary.Mean = 0.0
+         and then Summary.Median = 0.0
+         and then Summary.P95 = 0.0
+         and then Summary.P99 = 0.0
+         and then Summary.Confidence_Low = 0.0
+         and then Summary.Confidence_High = 0.0);
+
+      function Metric_Samples_Are_Zero
+        (Store : Metric_Store;
+         Axis  : Metric_Axis) return Boolean
+      is
+      begin
+         for Index in Sample_Index range 1 .. Value.Sample_Total loop
+            if Store.Values (Axis, Index) /= 0.0 then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Metric_Samples_Are_Zero;
+
+      procedure Validate_Telemetry is
+      begin
+         if not Expected_Config.Collect_Process_Telemetry then
+            if Value.Telemetry_Available
+              or else Value.Telemetry_CPU_Total /= 0.0
+              or else Value.Telemetry_Wall_Total /= 0.0
+              or else Value.Telemetry_RSS_Start /= 0.0
+              or else Value.Telemetry_RSS_Final /= 0.0
+              or else Value.Telemetry_RSS_Peak /= 0.0
+              or else Value.Telemetry_RSS_Change_Total /= 0.0
+              or else Value.Telemetry_RSS_Change_Peak /= 0.0
+              or else not Telemetry_Samples_Are_Zero
+            then
+               raise Protocol_Error with
+                 "worker process telemetry differs from its configuration";
+            end if;
+         elsif not Value.Telemetry_Available then
+            if Value.Telemetry_CPU_Total /= 0.0
+              or else Value.Telemetry_Wall_Total /= 0.0
+              or else Value.Telemetry_RSS_Start /= 0.0
+              or else Value.Telemetry_RSS_Final /= 0.0
+              or else Value.Telemetry_RSS_Peak /= 0.0
+              or else Value.Telemetry_RSS_Change_Total /= 0.0
+              or else Value.Telemetry_RSS_Change_Peak /= 0.0
+            then
+               raise Protocol_Error with
+                 "unavailable worker process telemetry carries totals";
+            end if;
+         elsif Value.Telemetry_Available
+           and then
+             (Value.Telemetry_CPU_Total < 0.0
+              or else Value.Telemetry_Wall_Total <= 0.0
+              or else Value.Telemetry_RSS_Start < 0.0
+              or else Value.Telemetry_RSS_Final < 0.0
+              or else Value.Telemetry_RSS_Peak < Value.Telemetry_RSS_Final
+              or else Value.Telemetry_RSS_Change_Peak < 0.0)
+         then
+            raise Protocol_Error with
+              "worker process telemetry is internally inconsistent";
+         elsif Value.Telemetry_Available then
+            for Index in Sample_Index range 1 .. Value.Sample_Total loop
+               if Value.Telemetry_CPU (Index) < 0.0
+                 or else Value.Telemetry_RSS (Index) < 0.0
+               then
+                  raise Protocol_Error with
+                    "worker process telemetry is internally inconsistent";
+               end if;
+            end loop;
+         end if;
+      end Validate_Telemetry;
+
+      procedure Validate_Environment_Metadata is
+      begin
+         if Expected_Config.Placement.Enabled
+           /= (Report.Placement /= Placement_Not_Requested)
+           or else Expected_Config.Host_Lock.Enabled
+             /= (Report.Host_Lock /= Lock_Not_Requested)
+         then
+            raise Protocol_Error with
+              "worker environment control metadata differs from its "
+              & "configuration";
+         elsif Report.Watched /= (Report.Windows > 0)
+           or else
+             (Report.Windows = 0
+              and then
+                (Report.Mean_Foreign_CPU_Percent /= 0.0
+                 or else Report.Peak_Foreign_CPU_Percent /= 0.0))
+         then
+            raise Protocol_Error with
+              "worker environment report is internally inconsistent";
+         elsif Report.Attribution = Core_Scoped
+           and then
+             (Report.Placement /= Placement_Strict
+              or else Report.Watched_CPUs = 0
+              or else Report.Attribution_Diluted)
+         then
+            raise Protocol_Error with
+              "worker environment attribution is internally inconsistent";
+         elsif Report.Attribution = Host_Wide
+           and then Report.Watched_CPUs /= 0
+         then
+            raise Protocol_Error with
+              "worker environment attribution is internally inconsistent";
+         elsif Report.Attribution_Diluted
+           and then Report.Attribution /= Host_Wide
+         then
+            raise Protocol_Error with
+              "worker environment attribution is internally inconsistent";
+         end if;
+
+         if not Expected_Config.Interference.Enabled then
+            if Report.Watched
+              or else Report.Windows /= 0
+              or else Report.Observed_Samples /= 0
+              or else Report.Mean_Foreign_CPU_Percent /= 0.0
+              or else Report.Peak_Foreign_CPU_Percent /= 0.0
+              or else Report.Contaminated_Samples /= 0
+              or else Report.Retaken_Samples /= 0
+              or else Report.Pauses /= 0
+              or else Report.Paused_Nanoseconds /= 0.0
+              or else Report.Budget_Exhausted
+              or else Report.Attribution_Diluted
+              or else not Foreign_Samples_Are_Zero
+            then
+               raise Protocol_Error with
+                 "worker interference report differs from its configuration";
+            end if;
+         elsif Expected_Config.Interference.Response = Observe
+           and then
+             (Report.Retaken_Samples /= 0 or else Report.Budget_Exhausted)
+         then
+            raise Protocol_Error with
+              "worker interference report differs from its configuration";
+         elsif Expected_Config.Interference.Response /= Pause
+           and then
+             (Report.Pauses /= 0 or else Report.Paused_Nanoseconds /= 0.0)
+         then
+            raise Protocol_Error with
+              "worker interference report differs from its configuration";
+         end if;
+      end Validate_Environment_Metadata;
    begin
       if Value.Sample_Total > Expected_Config.Samples
         or else
@@ -1259,6 +1429,8 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with
            "worker environment report is internally inconsistent";
       end if;
+      Validate_Telemetry;
+      Validate_Environment_Metadata;
       Add_Classified (Value.Outlier_Total.Low_Severe);
       Add_Classified (Value.Outlier_Total.Low_Mild);
       Add_Classified (Value.Outlier_Total.High_Mild);
@@ -1283,8 +1455,8 @@ package body Flyology_Bench.Workers is
                elsif not Store.Requested (Axis) then
                   if Store.Available (Axis)
                     or else Store.Status (Axis) /= Metric_Not_Requested
-                    or else Summary.Available
-                    or else Summary.Samples /= 0
+                    or else not Summary_Is_Empty (Summary)
+                    or else not Metric_Samples_Are_Zero (Store, Axis)
                   then
                      raise Protocol_Error with
                        "worker unrequested metric carries result data";
@@ -1299,8 +1471,7 @@ package body Flyology_Bench.Workers is
                   end if;
                elsif Store.Status (Axis) in
                  Metric_Not_Requested | Metric_Collected
-                 or else Summary.Available
-                 or else Summary.Samples /= 0
+                 or else not Summary_Is_Empty (Summary)
                then
                   raise Protocol_Error with
                     "worker unavailable metric metadata is inconsistent";

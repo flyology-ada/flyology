@@ -1176,9 +1176,11 @@ Protocol field bounds are published as `Maximum_*` constants. `Run` rejects a
 configuration that cannot fit before spawning. Failure reasons are truncated
 to their published envelope limits. A worker that needs to retain the full text
 writes it to the separately bounded standard-error capture. The parent also
-rejects result seeds, sample and iteration counts, metric presence and
-availability, and sample-derived statistics that disagree with the requested
-worker configuration and metadata.
+rejects result seeds, sample and iteration counts, telemetry, host-control and
+interference metadata, metric presence and availability, and sample-derived
+statistics that disagree with the requested worker configuration and metadata.
+Inactive and unavailable result sections must retain their canonical empty
+representation.
 
 Host-lock acquisition, placement, quiescence, interference observation, and
 metric-session setup occur inside the worker that measures. Spawn and setup

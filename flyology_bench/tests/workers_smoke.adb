@@ -114,6 +114,27 @@ begin
       Results : W.Worker_Result_Array (1 .. 1);
       Env : constant W.Environment := W.Create_Environment;
       Config : constant Flyology_Bench.Configuration :=
+        (Base with delta Collect_Process_Telemetry => True);
+   begin
+      W.Run
+        (Fixture, "ordinary", W.Ordinary_Measurement, Config,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Normal_Result,
+             "valid worker telemetry was rejected: " & W.Reason (Results (1)));
+      W.Run
+        (Fixture, "wrong-unavailable-telemetry", W.Ordinary_Measurement,
+         Config, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index
+           (W.Reason (Results (1)), "telemetry") /= 0,
+         "unavailable telemetry totals were accepted");
+   end;
+
+   declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Env : constant W.Environment := W.Create_Environment;
+      Config : constant Flyology_Bench.Configuration :=
         (Base with delta
            Metrics => Flyology_Bench.Time_Metrics
              or Flyology_Bench.Flyology_Scheduler_Metrics);
@@ -140,6 +161,14 @@ begin
                "worker changed an unavailable metric status");
          end loop;
       end;
+      W.Run
+        (Fixture, "wrong-unavailable-metric", W.Ordinary_Measurement, Config,
+         Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index
+           (W.Reason (Results (1)), "unavailable metric") /= 0,
+         "unavailable metric summary data was accepted");
    end;
 
    declare
@@ -251,6 +280,10 @@ begin
          Default_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
              "inconsistent environment report was accepted");
+      Expect_Malformed ("wrong-telemetry", "telemetry");
+      Expect_Malformed ("wrong-controls", "control metadata");
+      Expect_Malformed ("wrong-interference", "interference report");
+      Expect_Malformed ("wrong-unrequested-metric", "unrequested metric");
       W.Run
         (Fixture, "wrong-sample-count", W.Ordinary_Measurement,
          Exact_Samples, Default_Launch, Env, Results);

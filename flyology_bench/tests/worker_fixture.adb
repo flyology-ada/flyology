@@ -309,6 +309,31 @@ begin
          then
             Flyology_Bench.Workers.Test_Support.Corrupt_Environment_Report
               (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-telemetry" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Telemetry (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-unavailable-telemetry"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Unavailable_Telemetry
+              (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-controls" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Control_Metadata
+              (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-interference"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Interference_Metadata
+              (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-unrequested-metric"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Unrequested_Metric
+              (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-unavailable-metric"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Unavailable_Metric
+              (Result);
          end if;
          Flyology_Bench.Workers.Return_Result (Request, Result);
          if Ada.Strings.Unbounded.To_String (Name) = "trailing" then
