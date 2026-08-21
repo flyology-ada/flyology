@@ -1144,7 +1144,9 @@ The working directory is inherited under `Inherit_Directory` or resolved and
 validated before spawn under `Use_Directory`. The child inherits only standard
 output, standard error, and the dedicated result endpoint. Standard streams are
 drained without waiting for the child to exit, retained to a caller-selected
-bound, and report exact omitted byte counts.
+bound, and report exact omitted byte counts. Each drain turn is finite, so a
+worker that writes continuously cannot postpone deadline or process-state
+checks.
 
 `Startup_Timeout` covers spawn through the ready marker. `Total_Timeout` starts
 before spawn and covers the complete worker. On timeout, the parent sends
@@ -1156,6 +1158,13 @@ and parent I/O failure. A suite decides whether one such result stops later
 cases. The host `posix_spawn` call is synchronous and cannot be interrupted by
 this API. Its elapsed time is charged to both deadlines, so an overrun expires
 as soon as the call returns rather than extending the worker budget.
+
+Protocol field bounds are published as `Maximum_*` constants. `Run` rejects a
+configuration that cannot fit before spawning. Failure reasons are truncated
+to their published envelope limits. A worker that needs to retain the full text
+writes it to the separately bounded standard-error capture. The parent also
+rejects result seeds and sample-derived counts that disagree with the requested
+worker metadata.
 
 Host-lock acquisition, placement, quiescence, interference observation, and
 metric-session setup occur inside the worker that measures. Spawn and setup
