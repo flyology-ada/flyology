@@ -3,6 +3,7 @@
 
 with Ada.Text_IO;
 with Ada.Numerics.Long_Elementary_Functions;
+with Flyology_Bench.Internal_Statistics;
 with Flyology_Bench.Metadata;
 with Interfaces;
 
@@ -11,11 +12,19 @@ package body Flyology_Bench.Baselines is
    use type Interfaces.Unsigned_64;
 
    Magic : constant String := "flyology_bench baseline v1";
-   type Float_Array is array (Positive range <>) of Long_Float;
+   subtype Float_Array is Internal_Statistics.Float_Array;
 
    function Lower_Tail
-     (Confidence : Confidence_Percentage) return Long_Float is
-     ((100.0 - Long_Float (Confidence)) / 200.0);
+     (Confidence : Confidence_Percentage) return Long_Float
+     renames Internal_Statistics.Lower_Tail;
+
+   procedure Sort (Values : in out Float_Array)
+     renames Internal_Statistics.Sort;
+
+   function Percentile
+     (Ordered : Float_Array;
+      Fraction : Long_Float) return Long_Float
+     renames Internal_Statistics.Percentile;
 
    procedure Reject_Newline (Value : String; Field : String) is
    begin
@@ -25,38 +34,6 @@ package body Flyology_Bench.Baselines is
          end if;
       end loop;
    end Reject_Newline;
-
-   procedure Sort (Values : in out Float_Array) is
-   begin
-      for Index in Values'First + 1 .. Values'Last loop
-         declare
-            Value : constant Long_Float := Values (Index);
-            Position : Positive := Index;
-         begin
-            while Position > Values'First
-              and then Values (Position - 1) > Value
-            loop
-               Values (Position) := Values (Position - 1);
-               Position := Position - 1;
-            end loop;
-            Values (Position) := Value;
-         end;
-      end loop;
-   end Sort;
-
-   function Percentile
-     (Ordered : Float_Array;
-      Fraction : Long_Float) return Long_Float
-   is
-      Position : constant Long_Float :=
-        Long_Float (Ordered'First)
-        + Fraction * Long_Float (Ordered'Length - 1);
-      Lower : constant Positive := Positive (Long_Float'Floor (Position));
-      Upper : constant Positive := Positive (Long_Float'Ceiling (Position));
-      Weight : constant Long_Float := Position - Long_Float (Lower);
-   begin
-      return Ordered (Lower) * (1.0 - Weight) + Ordered (Upper) * Weight;
-   end Percentile;
 
    function Next_Random
      (State : in out Interfaces.Unsigned_64) return Interfaces.Unsigned_64 is
@@ -171,6 +148,7 @@ package body Flyology_Bench.Baselines is
       Saved_Sum : Long_Float := 0.0;
       Current_Sum : Long_Float := 0.0;
       Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+      Work : Internal_Statistics.Bootstrap_Work_Count := 0;
       State : Interfaces.Unsigned_64 :=
         16#94D0_49BB_1331_11EB# xor Interfaces.Unsigned_64 (Random_Seed);
       Effective_Fingerprint : constant String :=
@@ -200,6 +178,12 @@ package body Flyology_Bench.Baselines is
       if not Result.Is_Compatible then
          return Result;
       end if;
+      Internal_Statistics.Add_Bootstrap_Work
+        (Total     => Work,
+         Samples   => Saved_Count + Current_Count,
+         Resamples => Bootstrap_Resamples,
+         Intervals => 1,
+         Context   => "saved baseline comparison");
       for Index in 1 .. Saved_Count loop
          Saved_Sum := Saved_Sum + Saved.Values (Sample_Index (Index));
       end loop;

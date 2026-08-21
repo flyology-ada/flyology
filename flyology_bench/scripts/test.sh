@@ -39,6 +39,7 @@ printf '%s\n' "Running $crate_root/tests/bin/recording_smoke"
   exit "$status"
 }
 cat "$work_dir/recording.out"
+"$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
 "$crate_root/examples/bin/recording_service" \
@@ -174,7 +175,7 @@ if command -v jq >/dev/null 2>&1; then
         (.statistics.confidence_level_percent >= 50.0)
         and (.statistics.confidence_level_percent <= 99.9)
         and (.statistics.bootstrap_resamples >= 100)
-        and (.statistics.bootstrap_resamples <= 100000);
+        and (.statistics.bootstrap_resamples <= 10000);
       statistics_ok
       and
       if .type == "multi_comparison" then
@@ -194,6 +195,10 @@ if command -v jq >/dev/null 2>&1; then
     printf '%s\n' "$line" | check_json \
       || { printf '%s\n' "smoke JSON object failed validation" >&2; exit 1; }
   done <"$work_dir/smoke.jsonl"
+  jq -s -e '
+    any(.[]; .statistics.bootstrap_resamples == 10000)
+  ' "$work_dir/smoke.jsonl" >/dev/null \
+    || { printf '%s\n' "maximum resample setting was not reported" >&2; exit 1; }
   while IFS= read -r line; do
     printf '%s\n' "$line" | jq -e . >/dev/null \
       || { printf '%s\n' "recording JSON object failed validation" >&2; exit 1; }
