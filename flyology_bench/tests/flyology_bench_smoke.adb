@@ -255,6 +255,7 @@ procedure Flyology_Bench_Smoke is
           Flyology_Bench.Linux_Hardware_Metrics or
           Flyology_Bench.Flyology_Scheduler_Metrics,
       Scheduler_Probe     => Scheduler_Probe'Unrestricted_Access,
+      Custom_Metrics      => <>,
       CPU_Quiescence      => (others => <>),
       Interference        => (others => <>),
       Placement           => (others => <>),

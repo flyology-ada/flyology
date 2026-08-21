@@ -286,6 +286,7 @@ procedure Basic is
       Random_Seed                  => 42,
       Metrics                      => Selected_Metrics,
       Scheduler_Probe              => null,
+      Custom_Metrics               => <>,
       CPU_Quiescence               => Quiescence_Gate,
       Interference                 => Interference_Watch,
       Placement                    => (others => <>),

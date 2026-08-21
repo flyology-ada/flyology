@@ -35,6 +35,8 @@ package body Flyology_Bench is
 
    procedure Free_Metric_Store is new Ada.Unchecked_Deallocation
      (Metric_Store, Metric_Store_Access);
+   procedure Free_Custom_Store is new Ada.Unchecked_Deallocation
+     (Custom_Store, Custom_Store_Access);
 
    overriding procedure Adjust (Object : in out Metric_Store_Handle) is
    begin
@@ -55,10 +57,189 @@ package body Flyology_Bench is
       end if;
    end Finalize;
 
+   overriding procedure Adjust (Object : in out Custom_Store_Handle) is
+   begin
+      if Object.Data /= null then
+         Object.Data.References := Object.Data.References + 1;
+      end if;
+   end Adjust;
+
+   overriding procedure Finalize (Object : in out Custom_Store_Handle) is
+   begin
+      if Object.Data = null then
+         return;
+      elsif Object.Data.References = 1 then
+         Free_Custom_Store (Object.Data);
+      else
+         Object.Data.References := Object.Data.References - 1;
+         Object.Data := null;
+      end if;
+   end Finalize;
+
+   function Descriptor_Name (Item : Custom_Metric_Descriptor) return String is
+     (if Item.Name_Length = 0 then ""
+      else String (Item.Name_Data (1 .. Item.Name_Length)));
+
+   function Descriptor_Unit (Item : Custom_Metric_Descriptor) return String is
+     (if Item.Unit_Length = 0 then ""
+      else String (Item.Unit_Data (1 .. Item.Unit_Length)));
+
+   function Descriptor_Timing_Source
+     (Item : Custom_Metric_Descriptor) return String is
+     (if Item.Timing_Length = 0 then ""
+      else String (Item.Timing_Data (1 .. Item.Timing_Length)));
+
+   function Valid_Name (Value : String) return Boolean is
+   begin
+      if Value'Length = 0
+        or else Value'Length > Max_Custom_Metric_Name_Length
+        or else Value (Value'First) not in 'a' .. 'z'
+      then
+         return False;
+      end if;
+      for C of Value loop
+         if C not in 'a' .. 'z'
+           and then C not in '0' .. '9'
+           and then C /= '.' and then C /= '_' and then C /= '-'
+         then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Valid_Name;
+
+   function Valid_Label (Value : String; Maximum : Positive) return Boolean is
+   begin
+      if Value'Length = 0 or else Value'Length > Maximum then
+         return False;
+      end if;
+      for C of Value loop
+         if Character'Pos (C) < 32 or else Character'Pos (C) > 126
+           or else C = ',' or else C = '"' or else C = '\'
+         then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Valid_Label;
+
+   function Canonical_Builtin_Name (Axis : Metric_Axis) return String is
+      Source : constant String := Metric_Name (Axis);
+      Result : String (Source'Range);
+   begin
+      for Index in Source'Range loop
+         Result (Index) :=
+           (if Source (Index) in 'A' .. 'Z'
+            then Character'Val
+              (Character'Pos (Source (Index))
+               + Character'Pos ('a') - Character'Pos ('A'))
+            elsif Source (Index) = ' ' then '_'
+            else Source (Index));
+      end loop;
+      return Result;
+   end Canonical_Builtin_Name;
+
+   procedure Register_Custom_Metric
+     (Registry        : in out Custom_Metric_Registry;
+      Name            : String;
+      Unit            : String;
+      Scope           : Metric_Scope;
+      Attribution     : Metric_Attribution;
+      Direction       : Metric_Direction;
+      Semantics       : Custom_Sample_Semantics := Cumulative_Delta;
+      Normalization   : Custom_Normalization := Per_Operation;
+      Comparison      : Custom_Comparison_Semantics := Relative_Positive;
+      Primary_Timing  : Boolean := False;
+      Timing_Source   : String := "";
+      Resolution      : Long_Float := 0.0)
+   is
+      Item : Custom_Metric_Descriptor;
+   begin
+      if not Valid_Name (Name) then
+         raise Constraint_Error with "invalid custom metric name";
+      elsif not Valid_Label (Unit, Max_Custom_Metric_Unit_Length) then
+         raise Constraint_Error with "invalid custom metric unit";
+      elsif Primary_Timing
+        and then not Valid_Label
+          (Timing_Source, Max_Timing_Source_Name_Length)
+      then
+         raise Constraint_Error with "invalid timing source name";
+      elsif not Primary_Timing and then Timing_Source'Length /= 0 then
+         raise Constraint_Error with
+           "a timing source requires Primary_Timing";
+      elsif Primary_Timing and then Resolution <= 0.0 then
+         raise Constraint_Error with
+           "a primary timing axis requires positive resolution";
+      elsif not Primary_Timing and then Resolution /= 0.0 then
+         raise Constraint_Error with
+           "resolution metadata requires a primary timing axis";
+      elsif Resolution /= Resolution or else Resolution < 0.0
+        or else Resolution > Long_Float'Last
+      then
+         raise Constraint_Error with "invalid custom metric resolution";
+      elsif Primary_Timing and then Semantics /= Completed_Elapsed then
+         raise Constraint_Error with
+           "a primary timing axis requires completed elapsed semantics";
+      end if;
+      for Axis in Metric_Axis loop
+         if Name = Canonical_Builtin_Name (Axis) then
+            raise Constraint_Error with "custom metric collides with built-in";
+         end if;
+      end loop;
+      for Index in 1 .. Registry.Count loop
+         if Name = Descriptor_Name (Registry.Descriptors (Index)) then
+            raise Constraint_Error with "duplicate custom metric name";
+         elsif Primary_Timing
+           and then Registry.Descriptors (Index).Primary_Timing_Value
+         then
+            raise Constraint_Error with "only one primary timing axis is allowed";
+         end if;
+      end loop;
+      if Registry.Count = Max_Custom_Metrics then
+         raise Capacity_Error with "custom metric registry is full";
+      end if;
+      Item.Name_Length := Name'Length;
+      for Offset in 0 .. Name'Length - 1 loop
+         Item.Name_Data (Offset + 1) := Name (Name'First + Offset);
+      end loop;
+      Item.Unit_Length := Unit'Length;
+      for Offset in 0 .. Unit'Length - 1 loop
+         Item.Unit_Data (Offset + 1) := Unit (Unit'First + Offset);
+      end loop;
+      Item.Scope_Value := Scope;
+      Item.Attribution_Value := Attribution;
+      Item.Direction_Value := Direction;
+      Item.Semantics_Value := Semantics;
+      Item.Normalization_Value := Normalization;
+      Item.Comparison_Value := Comparison;
+      Item.Primary_Timing_Value := Primary_Timing;
+      Item.Resolution_Value := Resolution;
+      if Timing_Source'Length > 0 then
+         Item.Timing_Length := Timing_Source'Length;
+         for Offset in 0 .. Timing_Source'Length - 1 loop
+            Item.Timing_Data (Offset + 1) :=
+              Timing_Source (Timing_Source'First + Offset);
+         end loop;
+      end if;
+      Registry.Count := Registry.Count + 1;
+      Registry.Descriptors (Registry.Count) := Item;
+   end Register_Custom_Metric;
+
+   procedure Set_Custom_Probe
+     (Registry : in out Custom_Metric_Registry;
+      Probe    : Custom_Probe) is
+   begin
+      Registry.Provider := Probe;
+   end Set_Custom_Probe;
+
+   function Custom_Metrics (Registry : Custom_Metric_Registry)
+     return Custom_Metric_Count is (Registry.Count);
+
    type Sample_Probe_State is record
       Resource_Before      : Resource_Values := [others => 0];
       Resource_Before_Mask : Interfaces.Unsigned_64 := 0;
       Scheduler_Before     : Flyology_Scheduler_Snapshot;
+      Custom_Before        : Custom_Snapshot := [others => (others => <>)];
    end record;
 
    function Has_Any (Set : Metric_Set) return Boolean is
@@ -129,7 +310,7 @@ package body Flyology_Bench is
      (Config : Configuration;
       Result : in out Measurement) is
    begin
-      if Has_Any (Config.Metrics) then
+      if Has_Any (Config.Metrics) or else Config.Custom_Metrics.Count > 0 then
          Result.Metric_Data.Data := new Metric_Store'
            (References => 1,
             Requested  => Config.Metrics,
@@ -150,6 +331,15 @@ package body Flyology_Bench is
                Result.Metric_Data.Data.Status (Axis) := Probe_Failed;
             end loop;
          end if;
+      end if;
+      if Config.Custom_Metrics.Count > 0 then
+         Result.Custom_Data.Data := new Custom_Store'
+           (References  => 1,
+            Count       => Config.Custom_Metrics.Count,
+            Descriptors => Config.Custom_Metrics.Descriptors,
+            Status      => [others => [others => Metric_Not_Requested]],
+            Values      => [others => [others => 0.0]],
+            Summaries   => [others => (others => <>) ]);
       end if;
    end Initialize_Metrics;
 
@@ -204,6 +394,19 @@ package body Flyology_Bench is
       end if;
       if Perf.Initialized then
          Counters.Start (Perf.Counters);
+      end if;
+      if Config.Custom_Metrics.Count > 0 then
+         State.Custom_Before := [others => (Status => Probe_Failed,
+                                            others => <>)];
+         if Config.Custom_Metrics.Provider /= null then
+            begin
+               Config.Custom_Metrics.Provider.all (State.Custom_Before);
+            exception
+               when others =>
+                  State.Custom_Before :=
+                    [others => (Status => Probe_Failed, others => <>)];
+            end;
+         end if;
       end if;
    end Start_Sample;
 
@@ -313,6 +516,8 @@ package body Flyology_Bench is
       Perf_Sample         : Perf_Values := [others => 0];
       Perf_Mask           : Interfaces.Unsigned_64 := 0;
       Scheduler_After     : Flyology_Scheduler_Snapshot;
+      Custom_After        : Custom_Snapshot :=
+        [others => (Status => Probe_Failed, others => <>)];
       Per_Operation       : constant Long_Float := Long_Float (Iterations);
       Reported_Elapsed    : Long_Float := Raw_Elapsed;
 
@@ -370,6 +575,20 @@ package body Flyology_Bench is
          return Long_Float (After - Before) / Per_Operation;
       end Scheduler_Delta;
    begin
+      --  Probe ordering is fixed: built-in begin snapshots, custom begin,
+      --  wall start, batch, wall finish, custom end, built-in end snapshots.
+      --  The ending custom callback is therefore outside harness wall time.
+      if Config.Custom_Metrics.Count > 0
+        and then Config.Custom_Metrics.Provider /= null
+      then
+         begin
+            Config.Custom_Metrics.Provider.all (Custom_After);
+         exception
+            when others =>
+               Custom_After :=
+                 [others => (Status => Probe_Failed, others => <>)];
+         end;
+      end if;
       if Perf.Initialized then
          Counters.Finish (Perf.Counters, Perf_Sample, Perf_Mask);
       end if;
@@ -552,6 +771,61 @@ package body Flyology_Bench is
                  (State.Scheduler_Before.Migrations_Out,
                   Scheduler_After.Migrations_Out));
          end if;
+      end if;
+
+      if Result.Custom_Data.Data /= null then
+         for Axis in 1 .. Result.Custom_Data.Data.Count loop
+            declare
+               Descriptor : constant Custom_Metric_Descriptor :=
+                 Result.Custom_Data.Data.Descriptors (Axis);
+               Before : constant Custom_Value := State.Custom_Before (Axis);
+               After  : constant Custom_Value := Custom_After (Axis);
+               Status : Metric_Availability := Metric_Collected;
+               Value  : Long_Float := 0.0;
+               Difference : Long_Long_Integer := 0;
+            begin
+               if Before.Status /= Metric_Collected
+                 and then Descriptor.Semantics_Value = Cumulative_Delta
+               then
+                  Status := Before.Status;
+               elsif After.Status /= Metric_Collected then
+                  Status := After.Status;
+               elsif Descriptor.Semantics_Value = Cumulative_Delta then
+                  if After.Counter_Value < Before.Counter_Value then
+                     Status := Counter_Reset;
+                  elsif Before.Counter_Value < 0
+                    and then After.Counter_Value
+                      > Long_Long_Integer'Last + Before.Counter_Value
+                  then
+                     Status := Conversion_Overflow;
+                  else
+                     Difference := After.Counter_Value - Before.Counter_Value;
+                     Value := Long_Float (Difference);
+                  end if;
+               else
+                  Value := After.Sample_Value;
+                  if Value /= Value or else abs Value > Long_Float'Last
+                    or else
+                      (Descriptor.Semantics_Value = Completed_Elapsed
+                       and then Value < 0.0)
+                  then
+                     Status := Invalid_Value;
+                  end if;
+               end if;
+               if Status = Metric_Collected
+                 and then Descriptor.Normalization_Value = Flyology_Bench.Per_Operation
+               then
+                  Value := Value / Per_Operation;
+                  if Value /= Value or else abs Value > Long_Float'Last then
+                     Status := Conversion_Overflow;
+                  end if;
+               end if;
+               Result.Custom_Data.Data.Status (Axis, Index) := Status;
+               if Status = Metric_Collected then
+                  Result.Custom_Data.Data.Values (Axis, Index) := Value;
+               end if;
+            end;
+         end loop;
       end if;
    end Finish_Sample;
 
@@ -1654,6 +1928,234 @@ package body Flyology_Bench is
       end loop;
    end Analyze_Metrics;
 
+   procedure Analyze_Custom_Metrics (Result : in out Measurement) is
+   begin
+      if Result.Custom_Data.Data = null then
+         return;
+      end if;
+      for Axis in 1 .. Result.Custom_Data.Data.Count loop
+         declare
+            Available_Count : Natural := 0;
+         begin
+            for Sample in 1 .. Result.Sample_Total loop
+               if Result.Custom_Data.Data.Status (Axis, Sample)
+                 = Metric_Collected
+               then
+                  Available_Count := Available_Count + 1;
+               end if;
+            end loop;
+            if Available_Count > 0 then
+               declare
+                  Ordered : Float_Array (1 .. Available_Count);
+                  Means   : Float_Array (1 .. Bootstrap_Resamples);
+                  Sum     : Long_Float := 0.0;
+                  Next    : Natural := 0;
+                  State   : Interfaces.Unsigned_64 :=
+                    16#9E37_79B9_7F4A_7C15# xor
+                    Interfaces.Unsigned_64 (Result.Random_Seed_Value)
+                    xor Interfaces.Unsigned_64 (Axis);
+                  Block_Length : constant Positive :=
+                    Positive'Max
+                      (2, Positive
+                        (Long_Float'Ceiling
+                           (Math.Sqrt (Long_Float (Available_Count)))));
+                  Summary : Metric_Summary;
+               begin
+                  for Sample in 1 .. Result.Sample_Total loop
+                     if Result.Custom_Data.Data.Status (Axis, Sample)
+                       = Metric_Collected
+                     then
+                        Next := Next + 1;
+                        Ordered (Next) :=
+                          Result.Custom_Data.Data.Values (Axis, Sample);
+                        Sum := Sum + Ordered (Next);
+                     end if;
+                  end loop;
+                  Sort (Ordered);
+                  Summary.Available := True;
+                  Summary.Samples := Available_Count;
+                  Summary.Minimum := Ordered (1);
+                  Summary.Maximum := Ordered (Available_Count);
+                  Summary.Mean := Sum / Long_Float (Available_Count);
+                  Summary.Median := Percentile (Ordered, 0.5);
+                  Summary.P95 := Percentile (Ordered, 0.95);
+                  Summary.P99 := Percentile (Ordered, 0.99);
+                  for Resample in Means'Range loop
+                     Sum := 0.0;
+                     declare
+                        Drawn : Natural := 0;
+                     begin
+                        while Drawn < Available_Count loop
+                           declare
+                              Start : constant Positive := Positive
+                                (Natural
+                                  (Next_Random (State)
+                                   mod Interfaces.Unsigned_64 (Available_Count))
+                                 + 1);
+                           begin
+                              for Offset in 0 .. Block_Length - 1 loop
+                                 exit when Drawn = Available_Count;
+                                 Sum := Sum + Ordered
+                                   (((Start - 1 + Offset)
+                                     mod Available_Count) + 1);
+                                 Drawn := Drawn + 1;
+                              end loop;
+                           end;
+                        end loop;
+                     end;
+                     Means (Resample) := Sum / Long_Float (Available_Count);
+                  end loop;
+                  Sort (Means);
+                  Summary.Confidence_Low := Percentile (Means, 0.025);
+                  Summary.Confidence_High := Percentile (Means, 0.975);
+                  Result.Custom_Data.Data.Summaries (Axis) := Summary;
+               end;
+            end if;
+         end;
+      end loop;
+   end Analyze_Custom_Metrics;
+
+   procedure Analyze_Custom_Comparisons (Result : in out Comparison) is
+      Count : constant Positive := Positive (Result.Reference_Data.Sample_Total);
+   begin
+      if Result.Reference_Data.Custom_Data.Data = null
+        or else Result.Contender_Data.Custom_Data.Data = null
+      then
+         return;
+      end if;
+      for Axis in 1 .. Custom_Metric_Count'Min
+        (Result.Reference_Data.Custom_Data.Data.Count,
+         Result.Contender_Data.Custom_Data.Data.Count)
+      loop
+         declare
+            Descriptor : constant Custom_Metric_Descriptor :=
+              Result.Reference_Data.Custom_Data.Data.Descriptors (Axis);
+            Complete : Boolean := True;
+         begin
+            for Sample in 1 .. Count loop
+               Complete := Complete
+                 and then Result.Reference_Data.Custom_Data.Data.Status
+                   (Axis, Sample) = Metric_Collected
+                 and then Result.Contender_Data.Custom_Data.Data.Status
+                   (Axis, Sample) = Metric_Collected;
+            end loop;
+            if Complete then
+               declare
+                  Samples   : Float_Array (1 .. Count);
+                  Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+                  State : Interfaces.Unsigned_64 :=
+                    16#D1B5_4A32_D192_ED03# xor
+                    Interfaces.Unsigned_64 (Result.Random_Seed_Value)
+                    xor Interfaces.Unsigned_64 (Axis);
+                  Block_Length : constant Positive :=
+                    Positive'Max
+                      (2, Positive
+                        (Long_Float'Ceiling (Math.Sqrt (Long_Float (Count)))));
+                  Sum  : Long_Float := 0.0;
+                  Item : Metric_Comparison_Result;
+               begin
+                  Item.Available := True;
+                  Item.Reference_Median :=
+                    Result.Reference_Data.Custom_Data.Data.Summaries (Axis).Median;
+                  Item.Contender_Median :=
+                    Result.Contender_Data.Custom_Data.Data.Summaries (Axis).Median;
+                  Item.Method :=
+                    (if Descriptor.Comparison_Value = Relative_Positive
+                     then Relative_Ratio else Absolute_Difference);
+                  for Sample in Samples'Range loop
+                     declare
+                        Reference_Value : constant Long_Float :=
+                          Result.Reference_Data.Custom_Data.Data.Values
+                            (Axis, Sample_Index (Sample));
+                        Contender_Value : constant Long_Float :=
+                          Result.Contender_Data.Custom_Data.Data.Values
+                            (Axis, Sample_Index (Sample));
+                     begin
+                        if Item.Method = Relative_Ratio then
+                           if Reference_Value <= 0.0 or else Contender_Value <= 0.0
+                           then
+                              Complete := False;
+                              exit;
+                           end if;
+                           Samples (Sample) :=
+                             Math.Log (Contender_Value / Reference_Value);
+                        else
+                           Samples (Sample) := Contender_Value - Reference_Value;
+                        end if;
+                        Sum := Sum + Samples (Sample);
+                     end;
+                  end loop;
+                  if Complete then
+                     Item.Change :=
+                       (if Item.Method = Relative_Ratio
+                        then 100.0 * (Math.Exp (Sum / Long_Float (Count)) - 1.0)
+                        else Sum / Long_Float (Count));
+                     for Resample in Bootstrap'Range loop
+                        Sum := 0.0;
+                        declare
+                           Drawn : Natural := 0;
+                        begin
+                           while Drawn < Count loop
+                              declare
+                                 Start : constant Positive := Positive
+                                   (Natural
+                                     (Next_Random (State)
+                                      mod Interfaces.Unsigned_64 (Count)) + 1);
+                              begin
+                                 for Offset in 0 .. Block_Length - 1 loop
+                                    exit when Drawn = Count;
+                                    Sum := Sum + Samples
+                                      (((Start - 1 + Offset) mod Count) + 1);
+                                    Drawn := Drawn + 1;
+                                 end loop;
+                              end;
+                           end loop;
+                        end;
+                        Bootstrap (Resample) :=
+                          (if Item.Method = Relative_Ratio
+                           then 100.0
+                             * (Math.Exp (Sum / Long_Float (Count)) - 1.0)
+                           else Sum / Long_Float (Count));
+                     end loop;
+                     Sort (Bootstrap);
+                     Item.Confidence_Low := Percentile (Bootstrap, 0.025);
+                     Item.Confidence_High := Percentile (Bootstrap, 0.975);
+                     if Descriptor.Direction_Value = Diagnostic then
+                        Item.Verdict := Metric_Diagnostic;
+                     elsif Item.Method = Relative_Ratio
+                       and then Item.Confidence_Low >= -Result.Practical_Threshold
+                       and then Item.Confidence_High <= Result.Practical_Threshold
+                     then
+                        Item.Verdict := Metric_Practically_Equivalent;
+                     elsif Item.Confidence_Low = 0.0
+                       and then Item.Confidence_High = 0.0
+                     then
+                        Item.Verdict := Metric_Practically_Equivalent;
+                     elsif Descriptor.Direction_Value = Lower_Is_Better
+                       and then Item.Confidence_High < 0.0
+                     then
+                        Item.Verdict := Contender_Better;
+                     elsif Descriptor.Direction_Value = Lower_Is_Better
+                       and then Item.Confidence_Low > 0.0
+                     then
+                        Item.Verdict := Reference_Better;
+                     elsif Descriptor.Direction_Value = Higher_Is_Better
+                       and then Item.Confidence_Low > 0.0
+                     then
+                        Item.Verdict := Contender_Better;
+                     elsif Descriptor.Direction_Value = Higher_Is_Better
+                       and then Item.Confidence_High < 0.0
+                     then
+                        Item.Verdict := Reference_Better;
+                     end if;
+                     Result.Custom_Comparisons (Axis) := Item;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+   end Analyze_Custom_Comparisons;
+
    procedure Analyze_Metric_Comparisons (Result : in out Comparison) is
       Count : constant Positive :=
         Positive (Result.Reference_Data.Sample_Total);
@@ -1982,6 +2484,7 @@ package body Flyology_Bench is
          end if;
       end;
       Analyze_Metric_Comparisons (Result);
+      Analyze_Custom_Comparisons (Result);
    end Analyze_Comparison;
 
    generic
@@ -2235,6 +2738,7 @@ package body Flyology_Bench is
       Notify (Config, Analyzing);
       Analyze (Result);
       Analyze_Metrics (Result);
+      Analyze_Custom_Metrics (Result);
       Result.Median_Batch :=
         Result.Median * Long_Float (Result.Iterations);
       Notify (Config, Finished, 1, 1);
@@ -2702,6 +3206,8 @@ package body Flyology_Bench is
       Analyze (Result.Contender_Data);
       Analyze_Metrics (Result.Reference_Data);
       Analyze_Metrics (Result.Contender_Data);
+      Analyze_Custom_Metrics (Result.Reference_Data);
+      Analyze_Custom_Metrics (Result.Contender_Data);
       Result.Reference_Data.Median_Batch :=
         Result.Reference_Data.Median * Long_Float (Reference_Count);
       Result.Contender_Data.Median_Batch :=
@@ -3403,6 +3909,7 @@ package body Flyology_Bench is
                  Config.Shootout_Scheduling = Balanced_Rounds);
             Analyze (Result.Data (Case_Index));
             Analyze_Metrics (Result.Data (Case_Index));
+            Analyze_Custom_Metrics (Result.Data (Case_Index));
             Result.Data (Case_Index).Median_Batch :=
               Result.Data (Case_Index).Median
                 * Long_Float (Iterations_For (Case_Index));
@@ -3690,6 +4197,156 @@ package body Flyology_Bench is
       return Result.Metric_Data.Data.Summaries (Axis);
    end Metric_Statistics;
 
+   procedure Require_Custom_Axis
+     (Result : Measurement; Axis : Custom_Metric_Index) is
+   begin
+      if Result.Custom_Data.Data = null
+        or else Axis > Result.Custom_Data.Data.Count
+      then
+         raise Constraint_Error with "custom metric axis is not registered";
+      end if;
+   end Require_Custom_Axis;
+
+   function Custom_Metric_Total
+     (Result : Measurement) return Custom_Metric_Count is
+     (if Result.Custom_Data.Data = null then 0 else Result.Custom_Data.Data.Count);
+
+   function Custom_Metric_Name
+     (Result : Measurement; Axis : Custom_Metric_Index) return String is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Descriptor_Name (Result.Custom_Data.Data.Descriptors (Axis));
+   end Custom_Metric_Name;
+
+   function Custom_Metric_Unit
+     (Result : Measurement; Axis : Custom_Metric_Index) return String is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Descriptor_Unit (Result.Custom_Data.Data.Descriptors (Axis));
+   end Custom_Metric_Unit;
+
+   function Custom_Metric_Scope
+     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Scope is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Scope_Value;
+   end Custom_Metric_Scope;
+
+   function Custom_Metric_Attribution
+     (Result : Measurement; Axis : Custom_Metric_Index)
+      return Metric_Attribution is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Attribution_Value;
+   end Custom_Metric_Attribution;
+
+   function Custom_Metric_Direction
+     (Result : Measurement; Axis : Custom_Metric_Index)
+      return Metric_Direction is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Direction_Value;
+   end Custom_Metric_Direction;
+
+   function Custom_Metric_Semantics
+     (Result : Measurement; Axis : Custom_Metric_Index)
+      return Custom_Sample_Semantics is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Semantics_Value;
+   end Custom_Metric_Semantics;
+
+   function Custom_Metric_Normalization
+     (Result : Measurement; Axis : Custom_Metric_Index)
+      return Custom_Normalization is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Normalization_Value;
+   end Custom_Metric_Normalization;
+
+   function Custom_Metric_Comparison
+     (Result : Measurement; Axis : Custom_Metric_Index)
+      return Custom_Comparison_Semantics is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Comparison_Value;
+   end Custom_Metric_Comparison;
+
+   function Custom_Metric_Is_Primary_Timing
+     (Result : Measurement; Axis : Custom_Metric_Index) return Boolean is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Primary_Timing_Value;
+   end Custom_Metric_Is_Primary_Timing;
+
+   function Custom_Metric_Timing_Source
+     (Result : Measurement; Axis : Custom_Metric_Index) return String is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Descriptor_Timing_Source (Result.Custom_Data.Data.Descriptors (Axis));
+   end Custom_Metric_Timing_Source;
+
+   function Custom_Metric_Resolution
+     (Result : Measurement; Axis : Custom_Metric_Index) return Long_Float is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Descriptors (Axis).Resolution_Value;
+   end Custom_Metric_Resolution;
+
+   function Custom_Metric_Status
+     (Result : Measurement; Axis : Custom_Metric_Index)
+      return Metric_Availability is
+      Collected : Natural := 0;
+      First_Failure : Metric_Availability := Metric_Not_Requested;
+   begin
+      Require_Custom_Axis (Result, Axis);
+      for Sample in 1 .. Result.Sample_Total loop
+         if Result.Custom_Data.Data.Status (Axis, Sample) = Metric_Collected then
+            Collected := Collected + 1;
+         elsif First_Failure = Metric_Not_Requested then
+            First_Failure := Result.Custom_Data.Data.Status (Axis, Sample);
+         end if;
+      end loop;
+      if Collected = Natural (Result.Sample_Total) then
+         return Metric_Collected;
+      elsif Collected > 0 then
+         return Metric_Partially_Collected;
+      else
+         return First_Failure;
+      end if;
+   end Custom_Metric_Status;
+
+   function Custom_Metric_Sample
+     (Result : Measurement; Axis : Custom_Metric_Index;
+      Index : Sample_Index) return Long_Float is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      if Index > Result.Sample_Total then
+         raise Constraint_Error with "sample index exceeds collected samples";
+      elsif Result.Custom_Data.Data.Status (Axis, Index) /= Metric_Collected then
+         raise Constraint_Error with "custom metric sample is unavailable";
+      end if;
+      return Result.Custom_Data.Data.Values (Axis, Index);
+   end Custom_Metric_Sample;
+
+   function Custom_Metric_Sample_Status
+     (Result : Measurement; Axis : Custom_Metric_Index;
+      Index : Sample_Index) return Metric_Availability is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      if Index > Result.Sample_Total then
+         raise Constraint_Error with "sample index exceeds collected samples";
+      end if;
+      return Result.Custom_Data.Data.Status (Axis, Index);
+   end Custom_Metric_Sample_Status;
+
+   function Custom_Metric_Statistics
+     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Summary is
+   begin
+      Require_Custom_Axis (Result, Axis);
+      return Result.Custom_Data.Data.Summaries (Axis);
+   end Custom_Metric_Statistics;
+
    function Reference_Measurement (Result : Comparison) return Measurement is
      (Result.Reference_Data);
 
@@ -3755,6 +4412,15 @@ package body Flyology_Bench is
      (Result : Comparison;
       Axis   : Metric_Axis) return Metric_Comparison_Result is
      (Result.Metric_Comparisons (Axis));
+
+   function Compare_Custom_Metric
+     (Result : Comparison;
+      Axis   : Custom_Metric_Index) return Metric_Comparison_Result is
+   begin
+      Require_Custom_Axis (Result.Reference_Data, Axis);
+      Require_Custom_Axis (Result.Contender_Data, Axis);
+      return Result.Custom_Comparisons (Axis);
+   end Compare_Custom_Metric;
 
    function Reference_First_Samples (Result : Comparison) return Natural is
      (Result.Reference_First);
